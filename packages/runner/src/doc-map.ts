@@ -8,6 +8,7 @@ import {
 } from "./query-result-proxy.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
+import { fromURI, normalizeEntityId } from "./uri-utils.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;

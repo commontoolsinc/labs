@@ -353,7 +353,7 @@ export function createDoc<T>(
       return sourceCell;
     },
     set sourceCell(cell: DocImpl<any> | undefined) {
-      if (sourceCell && sourceCell !== cell) {
+      if (sourceCell && JSON.stringify(sourceCell) !== JSON.stringify(cell)) {
         throw new Error(
           `Source cell already set: ${JSON.stringify(sourceCell)} -> ${
             JSON.stringify(cell)

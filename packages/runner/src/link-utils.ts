@@ -1,9 +1,20 @@
 import { isRecord } from "@commontools/utils/types";
+import { type DID } from "@commontools/identity";
 import { type JSONSchema } from "./builder/types.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
-import { isCell, isCellLink, isJSONCellLink, isSigilLink, isAnyCellLink, isSigilValue, type CellLink, type SigilLink, type SigilAlias, type JSONCellLink } from "./cell.ts";
-import { type EntityId } from "./doc-map.ts";
-import { toURI, fromURI } from "./uri-utils.ts";
+import { isDoc } from "./doc.ts";
+import {
+  type CellLink,
+  isAnyCellLink,
+  isCell,
+  isCellLink,
+  isJSONCellLink,
+  isSigilLink,
+  isSigilValue,
+  type JSONCellLink,
+  type SigilAlias,
+  type SigilLink,
+} from "./cell.ts";
+import { toURI } from "./uri-utils.ts";
 
 /**
  * Normalized link structure returned by parsers
@@ -11,7 +22,7 @@ import { toURI, fromURI } from "./uri-utils.ts";
 export type NormalizedLink = {
   id: string; // URI format with "of:" prefix
   path: string[];
-  space?: string;
+  space?: DID;
   schema?: JSONSchema;
 };
 
@@ -62,7 +73,7 @@ export function isAlias(value: any): boolean {
 export function parseLink(
   value: any,
   baseCell?: CellLink,
-  space?: string
+  space?: DID,
 ): NormalizedLink | undefined {
   if (isCell(value)) {
     // Extract from Cell using its entityId and internal path
@@ -110,7 +121,7 @@ export function parseLink(
 export function parseLinkOrThrow(
   value: any,
   baseCell?: CellLink,
-  space?: string
+  space?: DID,
 ): NormalizedLink {
   const result = parseLink(value, baseCell, space);
   if (!result) {
@@ -125,7 +136,7 @@ export function parseLinkOrThrow(
 export function parseCellLink(
   value: any,
   baseCell?: CellLink,
-  space?: string
+  space?: DID,
 ): NormalizedLink | undefined {
   if (!isAnyCellLink(value)) return undefined;
 
@@ -134,7 +145,7 @@ export function parseCellLink(
     const cellLink = value as CellLink;
     return {
       id: toURI(cellLink.cell.entityId),
-      path: cellLink.path.map(p => p.toString()),
+      path: cellLink.path.map((p) => p.toString()),
       space: cellLink.space || cellLink.cell.space,
       schema: cellLink.schema,
     };
@@ -145,7 +156,7 @@ export function parseCellLink(
     const jsonLink = value as JSONCellLink;
     return {
       id: toURI(jsonLink.cell["/"]),
-      path: jsonLink.path.map(p => p.toString()),
+      path: jsonLink.path.map((p) => p.toString()),
       space: space, // Space must come from context for JSON links
     };
   }
@@ -154,10 +165,10 @@ export function parseCellLink(
   if (isSigilLink(value)) {
     const sigilLink = value as SigilLink;
     const link = sigilLink["@"]["link-v0.1"];
-    
+
     // Resolve relative references
     let id = link.id;
-    let path = link.path || [];
+    const path = link.path || [];
     let resolvedSpace = link.space || space;
 
     // If no id provided, use base cell's document
@@ -167,12 +178,14 @@ export function parseCellLink(
     }
 
     if (!id) {
-      throw new Error("Cannot resolve cell link: no id provided and no base cell");
+      throw new Error(
+        "Cannot resolve cell link: no id provided and no base cell",
+      );
     }
 
     return {
       id,
-      path: path.map(p => p.toString()),
+      path: path.map((p) => p.toString()),
       space: resolvedSpace,
     };
   }
@@ -186,11 +199,13 @@ export function parseCellLink(
 export function parseCellLinkOrThrow(
   value: any,
   baseCell?: CellLink,
-  space?: string
+  space?: DID,
 ): NormalizedLink {
   const result = parseCellLink(value, baseCell, space);
   if (!result) {
-    throw new Error(`Cannot parse value as cell link: ${JSON.stringify(value)}`);
+    throw new Error(
+      `Cannot parse value as cell link: ${JSON.stringify(value)}`,
+    );
   }
   return result;
 }
@@ -201,7 +216,7 @@ export function parseCellLinkOrThrow(
 function parseAlias(
   value: any,
   baseCell?: CellLink,
-  space?: string
+  space?: DID,
 ): NormalizedLink | undefined {
   if (!isAlias(value)) return undefined;
 
@@ -233,12 +248,16 @@ function parseAlias(
     }
 
     if (!id) {
-      throw new Error("Cannot resolve alias: no cell provided and no base cell");
+      throw new Error(
+        "Cannot resolve alias: no cell provided and no base cell",
+      );
     }
 
     return {
       id,
-      path: Array.isArray(alias.path) ? alias.path.map((p: any) => p.toString()) : [],
+      path: Array.isArray(alias.path)
+        ? alias.path.map((p: any) => p.toString())
+        : [],
       space: resolvedSpace,
       schema: alias.schema as JSONSchema | undefined,
     };
@@ -252,10 +271,10 @@ function parseAlias(
   ) {
     const sigilAlias = value as SigilAlias;
     const alias = sigilAlias["@"]["alias-v0.1"];
-    
+
     // Resolve relative references
     let id = alias.id;
-    let path = alias.path || [];
+    const path = alias.path || [];
     let resolvedSpace = alias.space || space;
 
     // If no id provided, use base cell's document
@@ -270,7 +289,7 @@ function parseAlias(
 
     return {
       id,
-      path: path.map(p => p.toString()),
+      path: path.map((p) => p.toString()),
       space: resolvedSpace,
       schema: alias.schema,
     };
@@ -286,21 +305,21 @@ export function areLinksSame(
   value1: any,
   value2: any,
   baseCell?: CellLink,
-  space?: string
+  space?: DID,
 ): boolean {
   // If both are the same object, they're equal
   if (value1 === value2) return true;
-  
+
   // If either is null/undefined, they're only equal if both are
   if (!value1 || !value2) return value1 === value2;
-  
+
   // Try parsing both as links
   const link1 = parseLink(value1, baseCell, space);
   const link2 = parseLink(value2, baseCell, space);
-  
+
   // If one parses and the other doesn't, they're not equal
   if (!link1 || !link2) return false;
-  
+
   // Compare normalized links
   return (
     link1.id === link2.id &&

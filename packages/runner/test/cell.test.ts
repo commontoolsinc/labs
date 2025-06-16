@@ -15,6 +15,9 @@ import { expectCellLinksEqual, normalizeCellLink } from "./test-helpers.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
+const signer2 = await Identity.fromPassphrase("test operator 2");
+const space2 = signer2.did();
+
 describe("Cell", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
@@ -1682,54 +1685,59 @@ describe("asCell with schema", () => {
 
 describe("getAsLink method", () => {
   let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should return new sigil format", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-test",
-      "test",
+      space,
     );
     const cell = c.asCell();
-    
+
     // Get the new sigil format
     const link = cell.getAsLink();
-    
+
     // Verify structure
     expect(link["@"]).toBeDefined();
     expect(link["@"]["link-v0.1"]).toBeDefined();
     expect(link["@"]["link-v0.1"].id).toBeDefined();
     expect(link["@"]["link-v0.1"].path).toBeDefined();
-    
+
     // Verify id has of: prefix
     expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
-    
+
     // Verify path is empty array
     expect(link["@"]["link-v0.1"].path).toEqual([]);
-    
+
     // Verify space is included if present
-    expect(link["@"]["link-v0.1"].space).toBe("test");
+    expect(link["@"]["link-v0.1"].space).toBe(space);
   });
 
   it("should return correct path for nested cells", () => {
     const c = runtime.documentMap.getDoc(
       { nested: { value: 42 } },
-      "getAsLink-nested-test", 
-      "test",
+      "getAsLink-nested-test",
+      space,
     );
     const nestedCell = c.asCell(["nested", "value"]);
-    
+
     const link = nestedCell.getAsLink();
-    
+
     expect(link["@"]["link-v0.1"].path).toEqual(["nested", "value"]);
   });
 
@@ -1737,13 +1745,13 @@ describe("getAsLink method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-json-test",
-      "test",
+      space,
     );
     const cell = c.asCell();
-    
+
     const link = cell.getAsLink();
     const json = cell.toJSON();
-    
+
     expect(link).toEqual(json);
   });
 
@@ -1751,14 +1759,14 @@ describe("getAsLink method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42, other: "test" },
       "getAsLink-base-test",
-      "test",
+      space,
     );
     const cell = c.asCell(["value"]);
     const baseCell = c.asCell();
-    
+
     // Link relative to base cell (same document)
     const link = cell.getAsLink({ base: baseCell });
-    
+
     // Should omit id and space since they're the same
     expect(link["@"]["link-v0.1"].id).toBeUndefined();
     expect(link["@"]["link-v0.1"].space).toBeUndefined();
@@ -1769,19 +1777,19 @@ describe("getAsLink method", () => {
     const c1 = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-base-test-1",
-      "test",
+      space,
     );
     const c2 = runtime.documentMap.getDoc(
       { other: "test" },
       "getAsLink-base-test-2",
-      "test",
+      space,
     );
     const cell = c1.asCell(["value"]);
     const baseCell = c2.asCell();
-    
+
     // Link relative to base cell (different document, same space)
     const link = cell.getAsLink({ base: baseCell });
-    
+
     // Should include id but not space since space is the same
     expect(link["@"]["link-v0.1"].id).toBeDefined();
     expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
@@ -1793,23 +1801,23 @@ describe("getAsLink method", () => {
     const c1 = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-base-test-1",
-      "space1",
+      space,
     );
     const c2 = runtime.documentMap.getDoc(
       { other: "test" },
       "getAsLink-base-test-2",
-      "space2",
+      space2,
     );
     const cell = c1.asCell(["value"]);
     const baseCell = c2.asCell();
-    
+
     // Link relative to base cell (different space)
     const link = cell.getAsLink({ base: baseCell });
-    
+
     // Should include both id and space since they're different
     expect(link["@"]["link-v0.1"].id).toBeDefined();
     expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
-    expect(link["@"]["link-v0.1"].space).toBe("space1");
+    expect(link["@"]["link-v0.1"].space).toBe(space);
     expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
   });
 
@@ -1817,14 +1825,14 @@ describe("getAsLink method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-schema-test",
-      "test",
+      space,
     );
     const schema = { type: "number", minimum: 0 } as const;
     const cell = c.asCell(["value"], undefined, schema);
-    
+
     // Link with schema included
     const link = cell.getAsLink({ includeSchema: true });
-    
+
     expect(link["@"]["link-v0.1"].schema).toEqual(schema);
     expect(link["@"]["link-v0.1"].id).toBeDefined();
     expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
@@ -1834,14 +1842,14 @@ describe("getAsLink method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-no-schema-test",
-      "test",
+      space,
     );
     const schema = { type: "number", minimum: 0 } as const;
     const cell = c.asCell(["value"], undefined, schema);
-    
+
     // Link without schema
     const link = cell.getAsLink({ includeSchema: false });
-    
+
     expect(link["@"]["link-v0.1"].schema).toBeUndefined();
   });
 
@@ -1849,14 +1857,14 @@ describe("getAsLink method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-default-schema-test",
-      "test",
+      space,
     );
     const schema = { type: "number", minimum: 0 } as const;
     const cell = c.asCell(["value"], undefined, schema);
-    
+
     // Link with default options (no schema)
     const link = cell.getAsLink();
-    
+
     expect(link["@"]["link-v0.1"].schema).toBeUndefined();
   });
 
@@ -1864,20 +1872,20 @@ describe("getAsLink method", () => {
     const c1 = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-combined-test-1",
-      "test",
+      space,
     );
     const c2 = runtime.documentMap.getDoc(
       { other: "test" },
       "getAsLink-combined-test-2",
-      "test",
+      space,
     );
     const schema = { type: "number", minimum: 0 } as const;
     const cell = c1.asCell(["value"], undefined, schema);
     const baseCell = c2.asCell();
-    
+
     // Link with both base and schema options
     const link = cell.getAsLink({ base: baseCell, includeSchema: true });
-    
+
     // Should include id (different docs) but not space (same space)
     expect(link["@"]["link-v0.1"].id).toBeDefined();
     expect(link["@"]["link-v0.1"].space).toBeUndefined();
@@ -1889,67 +1897,72 @@ describe("getAsLink method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsLink-no-cell-schema-test",
-      "test",
+      space,
     );
     const cell = c.asCell(["value"]); // No schema provided
-    
+
     // Link with includeSchema but cell has no schema
     const link = cell.getAsLink({ includeSchema: true });
-    
+
     expect(link["@"]["link-v0.1"].schema).toBeUndefined();
   });
 });
 
 describe("getAsAlias method", () => {
   let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should return new sigil alias format", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsAlias-test",
-      "test",
+      space,
     );
     const cell = c.asCell();
-    
+
     // Get the new sigil alias format
     const alias = cell.getAsAlias();
-    
+
     // Verify structure
     expect(alias["@"]).toBeDefined();
     expect(alias["@"]["alias-v0.1"]).toBeDefined();
     expect(alias["@"]["alias-v0.1"].id).toBeDefined();
     expect(alias["@"]["alias-v0.1"].path).toBeDefined();
-    
+
     // Verify id has of: prefix
     expect(alias["@"]["alias-v0.1"].id).toMatch(/^of:/);
-    
+
     // Verify path is empty array
     expect(alias["@"]["alias-v0.1"].path).toEqual([]);
-    
+
     // Verify space is included if present
-    expect(alias["@"]["alias-v0.1"].space).toBe("test");
+    expect(alias["@"]["alias-v0.1"].space).toBe(space);
   });
 
   it("should return correct path for nested cells", () => {
     const c = runtime.documentMap.getDoc(
       { nested: { value: 42 } },
-      "getAsAlias-nested-test", 
-      "test",
+      "getAsAlias-nested-test",
+      space,
     );
     const nestedCell = c.asCell(["nested", "value"]);
-    
+
     const alias = nestedCell.getAsAlias();
-    
+
     expect(alias["@"]["alias-v0.1"].path).toEqual(["nested", "value"]);
   });
 
@@ -1957,13 +1970,13 @@ describe("getAsAlias method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsAlias-baseSpace-test",
-      "test",
+      space,
     );
     const cell = c.asCell();
-    
+
     // Alias with same baseSpace should omit space
-    const alias = cell.getAsAlias({ baseSpace: "test" });
-    
+    const alias = cell.getAsAlias({ baseSpace: space });
+
     expect(alias["@"]["alias-v0.1"].id).toBeDefined();
     expect(alias["@"]["alias-v0.1"].space).toBeUndefined();
     expect(alias["@"]["alias-v0.1"].path).toEqual([]);
@@ -1973,15 +1986,15 @@ describe("getAsAlias method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsAlias-different-baseSpace-test",
-      "different-space",
+      space2,
     );
     const cell = c.asCell();
-    
+
     // Alias with different baseSpace should include space
-    const alias = cell.getAsAlias({ baseSpace: "test" });
-    
+    const alias = cell.getAsAlias({ baseSpace: space });
+
     expect(alias["@"]["alias-v0.1"].id).toBeDefined();
-    expect(alias["@"]["alias-v0.1"].space).toBe("different-space");
+    expect(alias["@"]["alias-v0.1"].space).toBe(space2);
     expect(alias["@"]["alias-v0.1"].path).toEqual([]);
   });
 
@@ -1989,14 +2002,14 @@ describe("getAsAlias method", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsAlias-schema-test",
-      "test",
+      space,
     );
     const schema = { type: "number", minimum: 0 } as const;
     const cell = c.asCell(["value"], undefined, schema);
-    
+
     // Alias with includeSchema option
     const alias = cell.getAsAlias({ includeSchema: true });
-    
+
     expect(alias["@"]["alias-v0.1"].schema).toEqual(schema);
   });
 
@@ -2004,19 +2017,19 @@ describe("getAsAlias method", () => {
     const c1 = runtime.documentMap.getDoc(
       { value: 42 },
       "getAsAlias-base-test-1",
-      "test",
+      space,
     );
     const c2 = runtime.documentMap.getDoc(
       { other: "test" },
       "getAsAlias-base-test-2",
-      "test",
+      space,
     );
     const cell = c1.asCell(["value"]);
     const baseCell = c2.asCell();
-    
+
     // Alias relative to base cell (different document, same space)
     const alias = cell.getAsAlias({ base: baseCell });
-    
+
     // Should include id (different docs) but not space (same space)
     expect(alias["@"]["alias-v0.1"].id).toBeDefined();
     expect(alias["@"]["alias-v0.1"].space).toBeUndefined();
