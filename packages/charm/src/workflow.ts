@@ -12,7 +12,7 @@
 
 import { Cell, Runtime } from "@commontools/runner";
 import { Charm, charmId, CharmManager } from "./manager.ts";
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "@commontools/runner";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";

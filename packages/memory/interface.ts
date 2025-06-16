@@ -1,6 +1,6 @@
 import type { Reference } from "merkle-reference";
-import { JSONValue, SchemaContext } from "@commontools/builder";
-import { SchemaPathSelector } from "@commontools/builder/traverse";
+import { JSONValue, SchemaContext } from "@commontools/runner";
+import { SchemaPathSelector } from "@commontools/runner/traverse";
 
 export type { JSONValue, Reference, SchemaContext, SchemaPathSelector };
 

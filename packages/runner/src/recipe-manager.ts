@@ -1,4 +1,4 @@
-import { JSONSchema, Module, Recipe, Schema } from "@commontools/builder";
+import { JSONSchema, Module, Recipe, Schema } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";

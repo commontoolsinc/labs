@@ -13,24 +13,9 @@ import type {
   JSONSchema,
   JSONValue,
   SchemaContext,
-} from "./types.ts";
-import { isAlias } from "./types.ts";
-
-export const deepEqual = (a: any, b: any): boolean => {
-  if (a === b) return true;
-  if (isRecord(a) && isRecord(b)) {
-    if (a.constructor !== b.constructor) return false;
-    const keysA = Object.keys(a);
-    const keysB = Object.keys(b);
-    if (keysA.length !== keysB.length) return false;
-    for (const key of keysA) {
-      if (!keysB.includes(key)) return false;
-      if (!deepEqual(a[key], b[key])) return false;
-    }
-    return true;
-  }
-  return a !== a && b !== b; // NaN check
-};
+} from "./builder/types.ts";
+import { isAlias } from "./builder/types.ts";
+import { deepEqual } from "./path-utils.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];

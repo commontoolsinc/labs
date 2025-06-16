@@ -1,4 +1,4 @@
-import { Recipe } from "@commontools/builder";
+import { Recipe } from "../builder/types.ts";
 import { Console } from "./console.ts";
 import { Harness, HarnessedFunction } from "./harness.ts";
 import {

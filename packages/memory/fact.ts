@@ -1,4 +1,4 @@
-import { JSONValue } from "@commontools/builder";
+import { JSONValue } from "@commontools/runner";
 import {
   Assertion,
   Entity,

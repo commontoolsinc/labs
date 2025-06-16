@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import { refer } from "merkle-reference";
-import { SchemaContext } from "@commontools/builder";
+import { SchemaContext } from "@commontools/runner";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Fact from "../fact.ts";

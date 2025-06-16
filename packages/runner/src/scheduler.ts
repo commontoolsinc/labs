@@ -1,4 +1,5 @@
-import { getTopFrame, TYPE } from "@commontools/builder";
+import { getTopFrame } from "./builder/recipe.ts";
+import { TYPE } from "./builder/types.ts";
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
 import { type CellLink } from "./cell.ts";

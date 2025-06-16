@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  type Cell,
-  createBuilder,
-  type JSONSchema,
-} from "@commontools/builder";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+import { createBuilder } from "../src/builder/factory.ts";
 import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";

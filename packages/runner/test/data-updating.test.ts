@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID, ID_FIELD } from "@commontools/builder";
+import { ID, ID_FIELD } from "../src/builder/types.ts";
 import {
   addCommonIDfromObjectID,
   applyChangeSet,
@@ -8,13 +8,7 @@ import {
   normalizeAndDiff,
   setNestedValue,
 } from "../src/data-updating.ts";
-import {
-  sendValueToBinding,
-  unwrapOneLevelAndBindtoDoc,
-} from "../src/recipe-binding.ts";
-import { followAliases } from "../src/link-resolution.ts";
 import { isEqualCellLink } from "../src/type-utils.ts";
-import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import { Runtime } from "../src/runtime.ts";
 import { CellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
@@ -24,7 +18,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Utils", () => {
+describe("data-updating", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -41,163 +35,6 @@ describe("Utils", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
-  });
-
-  describe("extractDefaultValues", () => {
-    it("should extract default values from a schema", () => {
-      const schema = {
-        type: "object" as const,
-        properties: {
-          name: { type: "string" as const, default: "John" },
-          age: { type: "number" as const, default: 30 },
-          address: {
-            type: "object" as const,
-            properties: {
-              street: { type: "string" as const, default: "Main St" },
-              city: { type: "string" as const, default: "New York" },
-            },
-          },
-        },
-      };
-
-      const result = extractDefaultValues(schema);
-      expect(result).toEqual({
-        name: "John",
-        age: 30,
-        address: {
-          street: "Main St",
-          city: "New York",
-        },
-      });
-    });
-  });
-
-  describe("mergeObjects", () => {
-    it("should merge multiple objects", () => {
-      const obj1 = { a: 1, b: { x: 10 } };
-      const obj2 = { b: { y: 20 }, c: 3 };
-      const obj3 = { a: 4, d: 5 };
-
-      const result = mergeObjects<unknown>(obj1, obj2, obj3);
-      expect(result).toEqual({
-        a: 1,
-        b: { x: 10, y: 20 },
-        c: 3,
-        d: 5,
-      });
-    });
-
-    it("should handle undefined values", () => {
-      const obj1 = { a: 1 };
-      const obj2 = undefined;
-      const obj3 = { b: 2 };
-
-      const result = mergeObjects<unknown>(obj1, obj2, obj3);
-      expect(result).toEqual({ a: 1, b: 2 });
-    });
-
-    it("should give precedence to earlier objects in the case of a conflict", () => {
-      const obj1 = { a: 1 };
-      const obj2 = { a: 2, b: { c: 3 } };
-      const obj3 = { a: 3, b: { c: 4 } };
-
-      const result = mergeObjects(obj1, obj2, obj3);
-      expect(result).toEqual({ a: 1, b: { c: 3 } });
-    });
-
-    it("should treat cell aliases and references as values", () => {
-      const testCell = runtime.documentMap.getDoc(
-        undefined,
-        "should treat cell aliases and references as values 1",
-        space,
-      );
-      const obj1 = { a: { $alias: { path: [] } } };
-      const obj2 = { a: 2, b: { c: { cell: testCell, path: [] } } };
-      const obj3 = {
-        a: { $alias: { cell: testCell, path: ["a"] } },
-        b: { c: 4 },
-      };
-
-      const result = mergeObjects<unknown>(obj1, obj2, obj3);
-      expect(result).toEqual({
-        a: { $alias: { path: [] } },
-        b: { c: { cell: testCell, path: [] } },
-      });
-    });
-  });
-
-  describe("sendValueToBinding", () => {
-    it("should send value to a simple binding", () => {
-      const testCell = runtime.documentMap.getDoc(
-        { value: 0 },
-        "should send value to a simple binding 1",
-        space,
-      );
-      sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
-      expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
-    });
-
-    it("should handle array bindings", () => {
-      const testCell = runtime.documentMap.getDoc(
-        { arr: [0, 0, 0] },
-        "should handle array bindings 1",
-        space,
-      );
-      sendValueToBinding(
-        testCell,
-        [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
-        [1, 3],
-      );
-      expect(testCell.getAsQueryResult()).toEqual({ arr: [1, 0, 3] });
-    });
-
-    it("should handle bindings with multiple levels", () => {
-      const testCell = runtime.documentMap.getDoc(
-        {
-          user: {
-            name: {
-              first: "John",
-              last: "Doe",
-            },
-            age: 30,
-          },
-        },
-        "should handle bindings with multiple levels 1",
-        space,
-      );
-
-      const binding = {
-        person: {
-          fullName: {
-            firstName: { $alias: { path: ["user", "name", "first"] } },
-            lastName: { $alias: { path: ["user", "name", "last"] } },
-          },
-          currentAge: { $alias: { path: ["user", "age"] } },
-        },
-      };
-
-      const value = {
-        person: {
-          fullName: {
-            firstName: "Jane",
-            lastName: "Smith",
-          },
-          currentAge: 25,
-        },
-      };
-
-      sendValueToBinding(testCell, binding, value);
-
-      expect(testCell.getAsQueryResult()).toEqual({
-        user: {
-          name: {
-            first: "Jane",
-            last: "Smith",
-          },
-          age: 25,
-        },
-      });
-    });
   });
 
   describe("setNestedValue", () => {
@@ -295,93 +132,6 @@ describe("Utils", () => {
       expect(testCell.get()).toHaveProperty("a");
       expect(testCell.get().a).toHaveLength(3);
       expect(testCell.getAsQueryResult().a).toEqual([1, 2, 3]);
-    });
-  });
-
-  describe("mapBindingToCell", () => {
-    it("should map bindings to cell aliases", () => {
-      const testCell = runtime.documentMap.getDoc(
-        { a: 1, b: { c: 2 } },
-        "should map bindings to cell aliases 1",
-        space,
-      );
-      const binding = {
-        x: { $alias: { path: ["a"] } },
-        y: { $alias: { path: ["b", "c"] } },
-        z: 3,
-      };
-
-      const result = unwrapOneLevelAndBindtoDoc(binding, testCell);
-      expect(result).toEqual({
-        x: { $alias: { cell: testCell, path: ["a"] } },
-        y: { $alias: { cell: testCell, path: ["b", "c"] } },
-        z: 3,
-      });
-    });
-  });
-
-  describe("followAliases", () => {
-    it("should follow a simple alias", () => {
-      const testCell = runtime.documentMap.getDoc(
-        { value: 42 },
-        "should follow a simple alias 1",
-        space,
-      );
-      const binding = { $alias: { path: ["value"] } };
-      const result = followAliases(binding, testCell);
-      expect(result.cell.getAtPath(result.path)).toBe(42);
-    });
-
-    it("should follow nested aliases", () => {
-      const innerCell = runtime.documentMap.getDoc(
-        { inner: 10 },
-        "should follow nested aliases 1",
-        space,
-      );
-      const outerCell = runtime.documentMap.getDoc(
-        {
-          outer: { $alias: { cell: innerCell, path: ["inner"] } },
-        },
-        "should follow nested aliases 2",
-        space,
-      );
-      const binding = { $alias: { path: ["outer"] } };
-      const result = followAliases(binding, outerCell);
-      expect(result.cell).toEqual(innerCell);
-      expect(result.path).toEqual(["inner"]);
-      expect(result.cell.getAtPath(result.path)).toBe(10);
-    });
-
-    it("should throw an error on circular aliases", () => {
-      const cellA = runtime.documentMap.getDoc(
-        {},
-        "should throw an error on circular aliases 1",
-        space,
-      );
-      const cellB = runtime.documentMap.getDoc(
-        {},
-        "should throw an error on circular aliases 2",
-        space,
-      );
-      cellA.send({ alias: { $alias: { cell: cellB, path: ["alias"] } } });
-      cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
-      const binding = { $alias: { path: ["alias"] } };
-      expect(() => followAliases(binding, cellA)).toThrow("cycle detected");
-    });
-
-    it("should allow aliases in aliased paths", () => {
-      const testCell = runtime.documentMap.getDoc(
-        {
-          a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
-        },
-        "should allow aliases in aliased paths 1",
-        space,
-      );
-      const binding = { $alias: { path: ["a", "a", "c"] } };
-      const result = followAliases(binding, testCell);
-      expect(result.cell).toEqual(testCell);
-      expect(result.path).toEqual(["a", "b", "c"]);
-      expect(result.cell.getAtPath(result.path)).toBe(1);
     });
   });
 
@@ -581,11 +331,10 @@ describe("Utils", () => {
     });
 
     it("should handle ID-based entity objects", () => {
-      const testSpace = space;
       const testCell = runtime.documentMap.getDoc(
         { items: [] },
         "should handle ID-based entity objects",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["items", 0] };
 
@@ -608,11 +357,10 @@ describe("Utils", () => {
     });
 
     it("should update the same document with ID-based entity objects", () => {
-      const testSpace = space;
       const testDoc = runtime.documentMap.getDoc<any>(
         { items: [] },
         "should update the same document with ID-based entity objects",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testDoc, path: ["items", 0] };
 
@@ -646,11 +394,10 @@ describe("Utils", () => {
     });
 
     it("should update the same document with numeric ID-based entity objects", () => {
-      const testSpace = space;
       const testDoc = runtime.documentMap.getDoc<any>(
         { items: [] },
         "should update the same document with ID-based entity objects",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testDoc, path: ["items", 0] };
 
@@ -684,11 +431,10 @@ describe("Utils", () => {
     });
 
     it("should handle ID_FIELD redirects and reuse existing documents", () => {
-      const testSpace = space;
       const testDoc = runtime.documentMap.getDoc<any>(
         { items: [] },
         "should handle ID_FIELD redirects",
-        testSpace,
+        space,
       );
 
       // Create an initial item
@@ -728,11 +474,10 @@ describe("Utils", () => {
     });
 
     it("should treat different properties as different ID namespaces", () => {
-      const testSpace = space;
       const testDoc = runtime.documentMap.getDoc<any>(
         undefined,
         "it should treat different properties as different ID namespaces",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testDoc, path: [] };
 

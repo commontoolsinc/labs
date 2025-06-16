@@ -13,8 +13,8 @@ import {
   toOpaqueRef,
   type UnsafeBinding,
 } from "./types.ts";
-import { ContextualFlowControl } from "./cfc.ts";
-import { hasValueAtPath, setValueAtPath } from "./utils.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";
 import { createNodeFactory } from "./module.ts";
 

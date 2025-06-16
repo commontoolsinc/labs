@@ -1,4 +1,4 @@
-import { SchemaContext } from "@commontools/builder";
+import { SchemaContext } from "../builder/types.ts";
 import type { Entity, Result, Unit } from "@commontools/memory/interface";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../doc-map.ts";

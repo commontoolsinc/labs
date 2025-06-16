@@ -1,5 +1,5 @@
 import { isObject } from "@commontools/utils/types";
-import type { JSONSchema } from "./types.ts";
+import type { JSONSchema } from "./builder/types.ts";
 
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be

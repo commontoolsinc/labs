@@ -9,15 +9,17 @@ import {
   type JSONValue,
   type Module,
   type NodeFactory,
-  popFrame,
-  pushFrameFromCause,
   type Recipe,
-  recipeFromFrame,
   TYPE,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   type UnsafeBinding,
-} from "@commontools/builder";
+} from "./builder/types.ts";
+import {
+  popFrame,
+  pushFrameFromCause,
+  recipeFromFrame,
+} from "./builder/recipe.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";

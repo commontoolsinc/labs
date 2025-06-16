@@ -10,7 +10,7 @@ import {
   createJsonSchema,
   JSONSchema,
   JSONSchemaMutable,
-} from "@commontools/builder";
+} from "@commontools/runner";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";

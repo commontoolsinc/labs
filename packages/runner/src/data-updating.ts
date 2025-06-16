@@ -1,13 +1,13 @@
 import { isRecord } from "@commontools/utils/types";
 import {
   type Alias,
-  ContextualFlowControl,
   ID,
   ID_FIELD,
   isAlias,
   type JSONSchema,
   type JSONValue,
-} from "@commontools/builder";
+} from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";

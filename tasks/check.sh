@@ -10,8 +10,8 @@ if [ "$DENO_VERSION" != "$DENO_VERSION_REQUIRED" ]; then
 fi
 
 deno check \
+  packages/api \
   packages/background-charm-service \
-  packages/builder \
   packages/charm \
   packages/cli/*.ts \
   packages/cli/test \

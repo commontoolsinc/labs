@@ -1,6 +1,6 @@
 import { refer } from "merkle-reference";
 import { isRecord } from "@commontools/utils/types";
-import { isOpaqueRef } from "@commontools/builder";
+import { isOpaqueRef } from "./builder/types.ts";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
   getCellLinkOrThrow,

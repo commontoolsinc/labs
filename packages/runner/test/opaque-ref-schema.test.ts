@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { createBuilder } from "../src/index.ts";
-import { popFrame, pushFrame } from "../src/recipe.ts";
-import type { Frame, JSONSchema } from "../src/types.ts";
+import { createBuilder } from "../src/builder/factory.ts";
+import { popFrame, pushFrame } from "../src/builder/recipe.ts";
+import type { Frame, JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";

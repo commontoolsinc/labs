@@ -8,7 +8,7 @@ import {
   Schema,
   TYPE,
   UI,
-} from "@commontools/builder";
+} from "@commontools/runner";
 import {
   type Cell,
   createRef,

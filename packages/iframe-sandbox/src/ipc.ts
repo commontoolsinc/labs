@@ -1,4 +1,4 @@
-import { type JSONSchema } from "@commontools/builder";
+import { type JSONSchema } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 
 export const isJSONSchema = (source: unknown): source is JSONSchema => {

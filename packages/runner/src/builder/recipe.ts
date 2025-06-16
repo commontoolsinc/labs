@@ -25,13 +25,15 @@ import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
   connectInputAndOutputs,
+} from "./node-utils.ts";
+import {
   createJsonSchema,
   moduleToJSON,
   recipeToJSON,
-  setValueAtPath,
   toJSONWithAliases,
-  traverseValue,
-} from "./utils.ts";
+} from "./json-utils.ts";
+import { setValueAtPath } from "../path-utils.ts";
+import { traverseValue } from "../traverse-utils.ts";
 
 /** Declare a recipe
  *
