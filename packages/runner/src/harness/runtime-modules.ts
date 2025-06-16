@@ -1,4 +1,4 @@
-import { createBuilder } from "@commontools/builder";
+import { createBuilder } from "../builder/factory.ts";
 import { cache } from "@commontools/static";
 import turndown from "turndown";
 import { IRuntime } from "../runtime.ts";
