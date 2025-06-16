@@ -16,7 +16,7 @@ const initializeRuntime = () => {
     console.log(`Initializing runtime with signer ${identity.did()}...`);
     runtime = new Runtime({
       storageManager: StorageManager.open({
-        address: new URL(env.MEMORY_URL),
+        address: new URL("/api/storage/memory", env.MEMORY_URL),
         as: identity,
       }),
       blobbyServerUrl: env.MEMORY_URL,
