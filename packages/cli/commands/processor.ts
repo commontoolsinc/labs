@@ -1,45 +1,28 @@
 import { RunCommand } from "../interface.ts";
-import {
-  getTypeLibs,
-  ProgramGraph,
-  Source,
-  TypeScriptCompiler,
-  UnsafeEvalRuntime,
-} from "@commontools/js-runtime";
+import { type Source } from "@commontools/js-runtime";
+import { Engine, EngineProgramResolver, Runtime } from "@commontools/runner";
 import { basename, dirname, join } from "@std/path";
-import { cache } from "@commontools/static";
 
-type RUNTIME_IDENTIFIER = "commontools";
-const RUNTIME_TYPES: Record<RUNTIME_IDENTIFIER, string> = {
-  "commontools": await cache.getText(
-    "types/commontools.d.ts",
-  ),
-};
-
-async function createRuntimeDependencies(): Promise<
-  Record<RUNTIME_IDENTIFIER, any>
-> {
+async function createRuntime() {
   const { Runtime } = await import("@commontools/runner");
   const { StorageManager } = await import(
     "@commontools/runner/storage/cache.deno"
   );
-  const { createBuilder } = await import("@commontools/builder");
   const { Identity } = await import("@commontools/identity");
   const storageManager = StorageManager.emulate({
     as: await Identity.fromPassphrase("builder"),
   });
-  const builder = createBuilder(
-    new Runtime({ storageManager, blobbyServerUrl: import.meta.url }),
-  );
-  return {
-    "commontools": builder,
-  };
+  return new Runtime({ storageManager, blobbyServerUrl: import.meta.url });
 }
 
-class CliProgram implements ProgramGraph {
+// Extend `EngineProgramResolver` to add the necessary 3P module
+// types when needed, but otherwise lazily crawl the filesystem
+// while walking source files
+class CliProgram extends EngineProgramResolver {
   private fsRoot: string;
   private _entry: Source;
   constructor(entryPath: string) {
+    super(entryPath, {});
     this.fsRoot = dirname(entryPath);
     this._entry = {
       name: entryPath.substring(this.fsRoot.length),
@@ -47,31 +30,22 @@ class CliProgram implements ProgramGraph {
     };
   }
 
-  entry(): Source {
+  override entry(): Source {
     return this._entry;
   }
 
-  resolveSource(specifier: string): Source | undefined {
-    if (specifier.endsWith(".d.ts")) {
-      const bare = specifier.substring(0, specifier.length - 5);
-      if (bare in RUNTIME_TYPES) {
-        return {
-          name: specifier,
-          contents: RUNTIME_TYPES[bare as RUNTIME_IDENTIFIER],
-        };
-      }
-    }
+  override resolveSource(specifier: string): Promise<Source | undefined> {
     if (specifier && specifier[0] === "/") {
       const absPath = join(
         this.fsRoot,
         specifier.substring(1, specifier.length),
       );
-      return {
+      return Promise.resolve({
         name: specifier,
         contents: Deno.readTextFileSync(absPath),
-      };
+      });
     }
-    return undefined;
+    return super.resolveSource(specifier);
   }
 }
 
@@ -83,26 +57,16 @@ export class Processor {
       ? basename(command.output)
       : undefined;
     const program = new CliProgram(command.entry);
-    const compiler = new TypeScriptCompiler(await getTypeLibs());
-    const compiled = compiler.compile(program, {
+    const engine = new Engine(await createRuntime());
+    const { output, exports } = await engine.process(program, {
       noCheck: command.noCheck,
+      noRun: command.noRun,
       filename,
-      runtimeModules: Object.keys(RUNTIME_TYPES),
     });
 
     if (command.output) {
-      await Deno.writeTextFile(command.output, compiled.js);
+      await Deno.writeTextFile(command.output, output.js);
     }
-
-    if (command.noRun) {
-      return;
-    }
-
-    const runtime = new UnsafeEvalRuntime();
-    const isolate = runtime.getIsolate("");
-    const exports = isolate.execute(compiled).invoke(
-      await createRuntimeDependencies(),
-    );
-    return exports.inner();
+    return command.noRun ? undefined : exports;
   }
 }

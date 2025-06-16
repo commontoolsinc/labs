@@ -1,4 +1,4 @@
-import { cache } from "@commontools/static";
+import { Engine } from "@commontools/runner";
 import { Command } from "../interface.ts";
 import { join } from "@std/path/join";
 
@@ -8,6 +8,12 @@ const tsConfig = {
     // types provided by the runtime.
     "noLib": true,
     "types": ["ct-env"],
+    "typeRoots": ["./.ct-types"],
+    // This is specifically for `turndown` which has a
+    // strange way of exporting itself -- TBD if
+    // this needs to be added to the runtime TSC config,
+    // but maybe that's handled with the __esDefault flag?
+    "allowSyntheticDefaultImports": true,
     "target": "ES2023",
     "jsx": "react-jsx",
     "strictNullChecks": true,
@@ -41,24 +47,26 @@ const jsxRuntime = `declare module "react/jsx-runtime" {
 // environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
 export async function initWorkspace(command: Command) {
   const { cwd } = command;
-  const apiTypes = await cache.getText(
-    "types/commontools.d.ts",
-  );
-  const webTypes = await cache.getText(
-    "types/dom.d.ts",
-  );
-  const esTypes = await cache.getText(
-    "types/es2023.d.ts",
-  );
+  const runtimeModuleTypes = await Engine.getRuntimeModuleTypes();
+  const envTypes = await Engine.getEnvironmentTypes();
+
+  // Concatenate all environment types into a single "lib",
+  // which will be referred to as "ct-env" in the typescript config
+  const ctEnv = Object.values(envTypes).reduce((env, types) => {
+    env += `${env}\n${types}`;
+    return env;
+  }, "");
 
   const types = {
-    "commontools": apiTypes,
-    "ct-env": `${esTypes}\n${webTypes}`,
+    "commontools": runtimeModuleTypes.commontools,
+    "turndown": runtimeModuleTypes.turndown,
+    "dom-parser": runtimeModuleTypes["dom-parser"],
+    "ct-env": ctEnv,
     "react/jsx-runtime": jsxRuntime,
   };
 
   for (const [name, typeDef] of Object.entries(types)) {
-    const path = join(cwd, "node_modules", "@types", name);
+    const path = join(cwd, ".ct-types", name);
     await Deno.mkdir(path, {
       recursive: true,
     });

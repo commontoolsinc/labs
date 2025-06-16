@@ -13,11 +13,11 @@ export interface ResolveModuleConfig {
   target: ts.ScriptTarget;
 }
 
-export function resolveProgram(
+export async function resolveProgram(
   graph: ProgramResolver,
   { unresolvedModules, target, resolveUnresolvedModuleTypes }:
     ResolveModuleConfig,
-): Program {
+): Promise<Program> {
   const entry = graph.entry();
   const sources = new Map([[entry.name, entry]]);
   const toProcess = [entry.name];
@@ -35,13 +35,13 @@ export function resolveProgram(
       if (sources.has(identifier)) {
         continue;
       }
-      const newSource = graph.resolveSource(identifier);
+      const newSource = await graph.resolveSource(identifier);
       if (!newSource) {
         isUnresolvedModuleOk(identifier, unresolvedModules);
         if (resolveUnresolvedModuleTypes) {
           const typeDefIdentifier = `${identifier}.d.ts`;
           if (!sources.has(typeDefIdentifier)) {
-            const typeDef = graph.resolveSource(typeDefIdentifier);
+            const typeDef = await graph.resolveSource(typeDefIdentifier);
             if (typeDef) sources.set(typeDefIdentifier, typeDef);
           }
         }
