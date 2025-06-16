@@ -123,7 +123,7 @@ export async function setBGCharm({
 
   console.log(
     "charmsCell",
-    JSON.stringify(charmsCell.getAsCellLink(), null, 2),
+    JSON.stringify(charmsCell.getAsLink(), null, 2),
   );
 
   const charms = charmsCell.get() || [];

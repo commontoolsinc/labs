@@ -23,7 +23,7 @@ export function ifElse(
     const condition = inputsCell.withLog(log).key(0).get();
 
     const ref = inputsCell.withLog(log).key(condition ? 1 : 2)
-      .getAsCellLink();
+      .getAsLink();
 
     result.send(ref, log);
   };

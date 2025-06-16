@@ -637,18 +637,22 @@ export class CharmManager {
             return; // Direct cell references fully handled
           }
 
-          // Direct $alias handling (for cases not caught by isAlias)
-          if (value.$alias && value.$alias.cell) {
+          // Handle $alias and other link formats not caught by maybeGetCellLink
+          if (value.$alias) {
             try {
-              const aliasId = getEntityId(value.$alias.cell);
-              if (aliasId) addMatchingCharm(aliasId);
+              // Use maybeGetCellLink to handle all formats including new sigil format
+              const aliasLink = maybeGetCellLink(value.$alias, parent);
+              if (aliasLink) {
+                const aliasId = getEntityId(aliasLink.cell);
+                if (aliasId) addMatchingCharm(aliasId);
 
-              const sourceRefId = followSourceToResultRef(
-                value.$alias.cell.asCell(),
-                new Set(),
-                0,
-              );
-              if (sourceRefId) addMatchingCharm(sourceRefId);
+                const sourceRefId = followSourceToResultRef(
+                  aliasLink.cell.asCell(),
+                  new Set(),
+                  0,
+                );
+                if (sourceRefId) addMatchingCharm(sourceRefId);
+              }
             } catch (err) {
               console.debug("Error handling alias reference:", err);
             }
@@ -992,23 +996,27 @@ export class CharmManager {
           return false; // Cell link has been fully handled
         }
 
-        // Direct $alias handling (for cases not caught by isAlias)
-        if (value.$alias && value.$alias.cell) {
+        // Handle $alias and other link formats not caught by maybeGetCellLink
+        if (value.$alias) {
           try {
-            // Check if the alias points to our target
-            const aliasId = getEntityId(value.$alias.cell);
-            if (aliasId && aliasId["/"] === charmId["/"]) {
-              return true;
-            }
+            // Use maybeGetCellLink to handle all formats including new sigil format
+            const aliasLink = maybeGetCellLink(value.$alias, parent);
+            if (aliasLink) {
+              // Check if the alias points to our target
+              const aliasId = getEntityId(aliasLink.cell);
+              if (aliasId && aliasId["/"] === charmId["/"]) {
+                return true;
+              }
 
-            // Check if source chain leads to our target
-            const sourceRefId = followSourceToResultRef(
-              value.$alias.cell,
-              new Set(),
-              0,
-            );
-            if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-              return true;
+              // Check if source chain leads to our target
+              const sourceRefId = followSourceToResultRef(
+                aliasLink.cell,
+                new Set(),
+                0,
+              );
+              if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
+                return true;
+              }
             }
           } catch (err) {
             console.debug(

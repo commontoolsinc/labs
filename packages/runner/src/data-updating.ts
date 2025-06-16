@@ -10,11 +10,11 @@ import {
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { type CellLink, isCell, isCellLink, isAnyCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followAliases } from "./link-resolution.ts";
 import { maybeUnwrapProxy, arrayEqual } from "./type-utils.ts";
-import { areLinksSame, isLink } from "./link-utils.ts";
+import { areLinksSame, isLink, parseLink } from "./link-utils.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -38,7 +38,7 @@ export function setNestedValue<T>(
     isRecord(value) &&
     Array.isArray(value) === Array.isArray(destValue) &&
     !isDoc(value) &&
-    !isCellLink(value) &&
+    !isAnyCellLink(value) &&
     !isCell(value)
   ) {
     let success = true;
@@ -206,12 +206,8 @@ export function normalizeAndDiff(
     return normalizeAndDiff(ref, newValue, log, context);
   }
 
-  if (isCellLink(newValue)) {
-    if (
-      isCellLink(currentValue) &&
-      currentValue.cell === newValue.cell &&
-      arrayEqual(currentValue.path, newValue.path)
-    ) {
+  if (isAnyCellLink(newValue)) {
+    if (isAnyCellLink(currentValue) && areLinksSame(newValue, currentValue, current, current.cell.space)) {
       return [];
     } else {
       return [
@@ -321,7 +317,7 @@ export function normalizeAndDiff(
     // Note that the alias case is handled above
     if (
       typeof currentValue !== "object" || currentValue === null ||
-      isCellLink(currentValue)
+      isAnyCellLink(currentValue)
     ) {
       changes.push({ location: current, value: {} });
     }
@@ -420,7 +416,7 @@ export function addCommonIDfromObjectID(
 
     if (
       isRecord(obj) && !isCell(obj) &&
-      !isCellLink(obj) && !isDoc(obj)
+      !isAnyCellLink(obj) && !isDoc(obj)
     ) {
       Object.values(obj).forEach((v) => traverse(v));
     }
