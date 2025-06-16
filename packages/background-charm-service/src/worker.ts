@@ -97,7 +97,7 @@ async function initialize(
   runtime = new Runtime({
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL(toolshedUrl),
+      address: new URL("/api/storage/memory", toolshedUrl),
     }),
     blobbyServerUrl: toolshedUrl,
     recipeEnvironment: { apiUrl },
