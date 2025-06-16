@@ -1,4 +1,5 @@
 import { isObject, isRecord } from "@commontools/utils/types";
+import { type DID } from "@commontools/identity";
 import { getTopFrame } from "./builder/recipe.ts";
 import {
   type Cell,
@@ -238,7 +239,7 @@ export interface Stream<T> {
  * A cell link is a doc and a path within that doc.
  */
 export type CellLink = {
-  space?: string;
+  space?: DID;
   cell: DocImpl<any>;
   path: PropertyKey[];
   schema?: JSONSchema;
@@ -257,7 +258,7 @@ export type LinkV01 = {
   "link-v0.1": {
     id?: string;
     path?: (string | number)[];
-    space?: string;
+    space?: DID;
     schema?: JSONSchema;
   };
 };
@@ -269,7 +270,7 @@ export type AliasV01 = {
   "alias-v0.1": {
     id?: string;
     path?: (string | number)[];
-    space?: string;
+    space?: DID;
     schema?: JSONSchema;
   };
 };
