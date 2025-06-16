@@ -7,7 +7,7 @@ import {
   type MemorySpace,
   Runtime,
 } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { StorageManager } from "@commontools/runner/storage/cache";
 import {
   createAdminSession,
   type DID,
@@ -94,7 +94,7 @@ async function main() {
   const runtime = new Runtime({
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL(toolshedUrl),
+      address: new URL("/api/storage/memory", toolshedUrl),
     }),
     blobbyServerUrl: toolshedUrl,
   });
