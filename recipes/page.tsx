@@ -129,13 +129,28 @@ const updateTags = handler<{ detail: { value: string } }, { tags: string[] }>(
   },
 );
 
-const addPage = handler<
-  { detail: { message: string } },
-  { pages: { title: string; lists: any[]; pages: any[]; tags: string[] } }
+const addLinkedPage = handler<
+  { },
+  {
+    pages: { title: string; lists: any[]; pages: any[]; tags: string[] },
+    selectedPage: any
+  }
 >(
-  (event, { pages }) => {
-    const task = event.detail?.message?.trim();
-    if (task) pages.push({ title: task, lists: [], pages: [], tags: [] });
+  ({}, { pages, selectedPage }) => {
+    if (selectedPage) {
+      pages.push(selectedPage)
+    }
+  },
+);
+
+const addNewPage = handler<
+  { },
+  {
+    pages: { title: string; lists: any[]; pages: any[]; tags: string[] },
+  }
+>(
+  ({}, { pages, selectedPage }) => {
+      pages.push({ title: prompt(), lists: [], pages: [], tags: [] });
   },
 );
 
@@ -271,9 +286,10 @@ const Dropdown = recipe(DropdownInputSchema, DropdownOutputSchema, ({ pages, sel
  * -----------------------------------------------------------------------------
  */
 export const Page = recipe(PageInputSchema, PageResultSchema, (
-  { page: { title, lists, pages, body, tags, referenceablePages } },
+  { page: { title, lists, pages, body, tags }, selectedPage, referenceablePages },
 ) => {
   const tagString = derive(tags, (tags: string[]) => tags.join(", "));
+  const selectedSubPage = cell(null);
 
   return {
     [NAME]: title,
@@ -376,8 +392,12 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
                         },
                       );
 
+                      const visitPage = handler<{},{}>((e, s) => {
+                        s.selectedPage = s.page;
+                      })
+
                       return (
-                        <div style="border: 1px solid #ccc; padding: 16px; border-radius: 8px; background: #f9f9f9;">
+                        <div onClick={visitPage({ page, selectedPage })} style="border: 1px solid #ccc; padding: 16px; border-radius: 8px; background: #f9f9f9; cursor: pointer;">
                           <h3 style="font-weight: bold; margin: 0;">
                             {page.title}
                           </h3>
@@ -390,12 +410,10 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
                   ),
                 )}
               </common-hstack>
-              {Dropdown({ pages: referenceablePages })[UI]}
-              <common-send-message
-                name="Add"
-                placeholder="New page"
-                onmessagesend={addPage({ pages })}
-              />
+              <common-hstack>{Dropdown({ pages: referenceablePages, selectedPage: selectedSubPage })[UI]}
+              <common-button onClick={addLinkedPage({ pages, selectedPage: selectedSubPage })}>link</common-button>
+              <common-button onClick={addNewPage({ pages })}>add new</common-button>
+              </common-hstack>
             </common-vstack>
           </section>
         </common-vstack>
@@ -460,6 +478,14 @@ const addTopLevelPage = handler(AddPageEventSchema, AddPageStateSchema, (event, 
 export default recipe(PageManagerInputSchema, AnySchema, ({ pages }) => {
   const selectedPage = cell(null);
 
+  const navigate = handler<{ page: any }, { selectedPage: any }>(
+    { page: { type: "object" } },
+    { pages: { type: "array" }, selectedPage: { type: "object" } },
+    ({ page }, state) => {
+      state.selectedPage = page;
+    }
+  );
+
   return {
     [NAME]: "Page Manager",
     [UI]: (
@@ -473,10 +499,12 @@ export default recipe(PageManagerInputSchema, AnySchema, ({ pages }) => {
           />
           </common-hstack>
           <div style="border: 1px solid red;">
-            {ifElse(selectedPage, Page({ page: selectedPage, referenceablePages: pages })[UI], <div>&nbsp;</div>)}
+            {ifElse(selectedPage, Page({ page: selectedPage, referenceablePages: pages, selectedPage })[UI], <div>&nbsp;</div>)}
           </div>
       </common-vstack>
     ),
     pages,
+    navigate,
+    selectedPage,
   };
 });
