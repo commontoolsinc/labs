@@ -165,8 +165,6 @@ export interface IStorage {
   ): Promise<DocImpl<T>> | DocImpl<T>;
   synced(): Promise<void>;
   cancelAll(): Promise<void>;
-  setSigner(signer: Signer): void;
-  hasSigner(): boolean;
 }
 
 export interface IRecipeManager {
