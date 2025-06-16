@@ -25,7 +25,6 @@ import {
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObject } from "@commontools/utils/types";
-import { Memory } from "../../memory/provider.ts";
 
 /**
  * Extracts the ID from a charm.
@@ -134,8 +133,6 @@ export class CharmManager {
     public runtime: Runtime,
   ) {
     this.space = this.session.space;
-
-    this.runtime.storage.setSigner(session.as);
 
     this.charms = this.runtime.getCell(
       this.space,

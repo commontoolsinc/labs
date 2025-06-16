@@ -43,20 +43,19 @@ if (!name) {
 // Storage and blobby server URL are now configured in Runtime constructor
 setLLMUrl(apiUrl);
 
-const identity = await Identity.fromPassphrase("common user");
+const session = await createSession({
+  identity: await Identity.fromPassphrase("common user"),
+  name,
+});
 
 const runtime = new Runtime({
   storageManager: StorageManager.open({
     address: new URL("/api/storage/memory", apiUrl),
-    as: identity,
+    as: session.as,
   }),
   blobbyServerUrl: apiUrl,
 });
 
-const session = await createSession({
-  identity,
-  name,
-});
 const charmManager = new CharmManager(session, runtime);
 
 const verifier =
