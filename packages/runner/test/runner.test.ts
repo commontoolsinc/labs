@@ -671,16 +671,22 @@ describe("runRecipe", () => {
 });
 
 describe("runner utils", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
-  afterEach(() => {
-    return runtime.dispose();
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   describe("extractDefaultValues", () => {
@@ -749,7 +755,7 @@ describe("runner utils", () => {
       const testCell = runtime.documentMap.getDoc(
         undefined,
         "should treat cell aliases and references as values 1",
-        "test",
+        space,
       );
       const obj1 = { a: { $alias: { path: [] } } };
       const obj2 = { a: 2, b: { c: { cell: testCell, path: [] } } };

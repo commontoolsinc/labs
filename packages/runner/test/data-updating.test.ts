@@ -12,18 +12,29 @@ import { isEqualCellLink } from "../src/type-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { CellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("data-updating", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
-  afterEach(() => {
-    return runtime.dispose();
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   describe("setNestedValue", () => {
@@ -31,7 +42,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: 1, b: { c: 2 } },
         "should set a value at a path 1",
-        "test",
+        space,
       );
       const success = setNestedValue(testCell, ["b", "c"], 3);
       expect(success).toBe(true);
@@ -42,7 +53,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: 1, b: { c: 2, d: 3 } },
         "should delete no longer used fields 1",
-        "test",
+        space,
       );
       const success = setNestedValue(testCell, ["b"], { c: 4 });
       expect(success).toBe(true);
@@ -53,7 +64,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: 1, b: { c: 2 } },
         "should log no changes 1",
-        "test",
+        space,
       );
       const log: ReactivityLog = { reads: [], writes: [] };
       const success = setNestedValue(testCell, [], { a: 1, b: { c: 2 } }, log);
@@ -66,7 +77,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: 1, b: { c: 2 } },
         "should log minimal changes 1",
-        "test",
+        space,
       );
       const log: ReactivityLog = { reads: [], writes: [] };
       const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
@@ -80,9 +91,9 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: 1, b: { c: 2 } },
         "should fail when setting a nested value on a frozen cell 1",
-        "test",
+        space,
       );
-      testCell.freeze();
+      testCell.freeze("test");
       const log: ReactivityLog = { reads: [], writes: [] };
       const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
       expect(success).toBe(false);
@@ -92,7 +103,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: [1, 2, 3] },
         "should correctly update with shorter arrays 1",
-        "test",
+        space,
       );
       const success = setNestedValue(testCell, ["a"], [1, 2]);
       expect(success).toBe(true);
@@ -103,7 +114,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: [1, 2, 3] },
         "should correctly update with a longer arrays 1",
-        "test",
+        space,
       );
       const success = setNestedValue(testCell, ["a"], [1, 2, 3, 4]);
       expect(success).toBe(true);
@@ -114,7 +125,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: { b: 1 } },
         "should overwrite an object with an array 1",
-        "test",
+        space,
       );
       const success = setNestedValue(testCell, ["a"], [1, 2, 3]);
       expect(success).toBeTruthy();
@@ -129,7 +140,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { value: 42 },
         "normalizeAndDiff simple value changes",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["value"] };
       const changes = normalizeAndDiff(current, 100);
@@ -143,7 +154,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { user: { name: "John", age: 30 } },
         "normalizeAndDiff object property changes",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["user"] };
       const changes = normalizeAndDiff(current, { name: "Jane", age: 30 });
@@ -160,7 +171,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { user: { name: "John" } },
         "normalizeAndDiff added object properties",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["user"] };
       const changes = normalizeAndDiff(current, { name: "John", age: 30 });
@@ -177,7 +188,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { user: { name: "John", age: 30 } },
         "normalizeAndDiff removed object properties",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["user"] };
       const changes = normalizeAndDiff(current, { name: "John" });
@@ -194,7 +205,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { items: [1, 2, 3] },
         "normalizeAndDiff array length changes",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["items"] };
       const changes = normalizeAndDiff(current, [1, 2]);
@@ -213,7 +224,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { items: [1, 2, 3] },
         "normalizeAndDiff array element changes",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["items"] };
       const changes = normalizeAndDiff(current, [1, 5, 3]);
@@ -233,7 +244,7 @@ describe("data-updating", () => {
           alias: { $alias: { path: ["value"] } },
         },
         "normalizeAndDiff follow aliases",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["alias"] };
       const changes = normalizeAndDiff(current, 100);
@@ -252,7 +263,7 @@ describe("data-updating", () => {
           alias: { $alias: { path: ["value"] } },
         },
         "normalizeAndDiff update aliases",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["alias"] };
       const changes = normalizeAndDiff(current, 100);
@@ -299,7 +310,7 @@ describe("data-updating", () => {
           },
         },
         "normalizeAndDiff nested changes",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["user", "profile"] };
       const changes = normalizeAndDiff(current, {
@@ -320,11 +331,10 @@ describe("data-updating", () => {
     });
 
     it("should handle ID-based entity objects", () => {
-      const testSpace = "test";
       const testCell = runtime.documentMap.getDoc(
         { items: [] },
         "should handle ID-based entity objects",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["items", 0] };
 
@@ -347,11 +357,10 @@ describe("data-updating", () => {
     });
 
     it("should update the same document with ID-based entity objects", () => {
-      const testSpace = "test";
       const testDoc = runtime.documentMap.getDoc<any>(
         { items: [] },
         "should update the same document with ID-based entity objects",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testDoc, path: ["items", 0] };
 
@@ -385,11 +394,10 @@ describe("data-updating", () => {
     });
 
     it("should update the same document with numeric ID-based entity objects", () => {
-      const testSpace = "test";
       const testDoc = runtime.documentMap.getDoc<any>(
         { items: [] },
         "should update the same document with ID-based entity objects",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testDoc, path: ["items", 0] };
 
@@ -423,11 +431,10 @@ describe("data-updating", () => {
     });
 
     it("should handle ID_FIELD redirects and reuse existing documents", () => {
-      const testSpace = "test";
       const testDoc = runtime.documentMap.getDoc<any>(
         { items: [] },
         "should handle ID_FIELD redirects",
-        testSpace,
+        space,
       );
 
       // Create an initial item
@@ -467,11 +474,10 @@ describe("data-updating", () => {
     });
 
     it("should treat different properties as different ID namespaces", () => {
-      const testSpace = "test";
       const testDoc = runtime.documentMap.getDoc<any>(
         undefined,
         "it should treat different properties as different ID namespaces",
-        testSpace,
+        space,
       );
       const current: CellLink = { cell: testDoc, path: [] };
 
@@ -497,7 +503,7 @@ describe("data-updating", () => {
       const testCell = runtime.documentMap.getDoc(
         { value: 42 },
         "normalizeAndDiff no changes",
-        "test",
+        space,
       );
       const current: CellLink = { cell: testCell, path: ["value"] };
       const changes = normalizeAndDiff(current, 42);
@@ -509,12 +515,12 @@ describe("data-updating", () => {
       const docA = runtime.documentMap.getDoc(
         { name: "Doc A" },
         "normalizeAndDiff doc reference A",
-        "test",
+        space,
       );
       const docB = runtime.documentMap.getDoc(
         { value: { name: "Original" } },
         "normalizeAndDiff doc reference B",
-        "test",
+        space,
       );
 
       const current: CellLink = { cell: docB, path: ["value"] };
@@ -529,12 +535,12 @@ describe("data-updating", () => {
       const docA = runtime.documentMap.getDoc(
         { name: "Doc A" },
         "normalizeAndDiff doc reference no change A",
-        "test",
+        space,
       );
       const docB = runtime.documentMap.getDoc(
         { value: { name: "Original" } },
         "normalizeAndDiff doc reference no change B",
-        "test",
+        space,
       );
 
       const current: CellLink = { cell: docB, path: ["value"] };
@@ -563,12 +569,12 @@ describe("data-updating", () => {
       const itemDoc = runtime.documentMap.getDoc(
         { id: "item1", name: "Original Item" },
         "addCommonIDfromObjectID reuse items",
-        "test",
+        space,
       );
       const testDoc = runtime.documentMap.getDoc(
         { items: [{ cell: itemDoc, path: [] }] },
         "addCommonIDfromObjectID arrays",
-        "test",
+        space,
       );
 
       const data = {

@@ -5,18 +5,29 @@ import {
   unwrapOneLevelAndBindtoDoc,
 } from "../src/recipe-binding.ts";
 import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("recipe-binding", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
-  afterEach(() => {
-    return runtime.dispose();
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   describe("sendValueToBinding", () => {
@@ -24,7 +35,7 @@ describe("recipe-binding", () => {
       const testCell = runtime.documentMap.getDoc(
         { value: 0 },
         "should send value to a simple binding 1",
-        "test",
+        space,
       );
       sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
@@ -34,7 +45,7 @@ describe("recipe-binding", () => {
       const testCell = runtime.documentMap.getDoc(
         { arr: [0, 0, 0] },
         "should handle array bindings 1",
-        "test",
+        space,
       );
       sendValueToBinding(
         testCell,
@@ -56,7 +67,7 @@ describe("recipe-binding", () => {
           },
         },
         "should handle bindings with multiple levels 1",
-        "test",
+        space,
       );
 
       const binding = {
@@ -98,7 +109,7 @@ describe("recipe-binding", () => {
       const testCell = runtime.documentMap.getDoc(
         { a: 1, b: { c: 2 } },
         "should map bindings to cell aliases 1",
-        "test",
+        space,
       );
       const binding = {
         x: { $alias: { path: ["a"] } },
