@@ -298,6 +298,7 @@ export function createDoc<T>(
 
       let changed = false;
       if (path.length > 0) {
+        if (value === undefined) value = (typeof path[0] === "number" ? [] : {}) as T;
         changed = setValueAtPath(value, path, newValue);
       } else if (!deepEqual(value, newValue)) {
         changed = true;

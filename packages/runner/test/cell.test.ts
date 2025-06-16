@@ -1279,6 +1279,30 @@ describe("asCell with schema", () => {
     });
   });
 
+  it("should handle update when there is no previous value", () => {
+    const c = runtime.documentMap.getDoc<
+      { name: string; age: number } | undefined
+    >(
+      undefined,
+      "should handle update when there is no previous value",
+      space,
+    );
+    const cell = c.asCell();
+
+    cell.update({ name: "test", age: 42 });
+    expect(cell.get()).toEqual({
+      name: "test",
+      age: 42,
+    });
+
+    // Should still work for subsequent updates
+    cell.update({ age: 43 });
+    expect(cell.get()).toEqual({
+      name: "test",
+      age: 43,
+    });
+  });
+
   it("should push values to array using push method", () => {
     const c = runtime.documentMap.getDoc(
       { items: [1, 2, 3] },

@@ -307,6 +307,30 @@ function createRegularCell<T>(
       if (!isRecord(values)) {
         throw new Error("Can't update with non-object value");
       }
+      // Get current value, following aliases and references
+      const ref = resolveLinkToValue(doc, path, log, schema, rootSchema);
+      const currentValue = ref.cell.getAtPath(ref.path);
+
+      // If there's no current value, initialize based on schema
+      if (currentValue === undefined) {
+        if (schema) {
+          // Check if schema allows objects
+          const allowsObject = schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object")) ||
+            (schema.anyOf &&
+              schema.anyOf.some((s) =>
+                typeof s === "object" && s.type === "object"
+              ));
+
+          if (!allowsObject) {
+            throw new Error(
+              "Cannot update with object value - schema does not allow objects",
+            );
+          }
+        }
+        ref.cell.setAtPath(ref.path, {}, log, schema);
+      }
+
+      // Now update each property
       for (const [key, value] of Object.entries(values)) {
         // Workaround for type checking, since T can be Cell<> and that's fine.
         (self.key as any)(key).set(value);
