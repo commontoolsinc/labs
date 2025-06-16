@@ -32,7 +32,8 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
   const manifest = JSON.parse(await Deno.readTextFile("./deno.json"));
   const members: string[] = manifest.workspace;
 
-  let success = true;
+  const failedPackages: string[] = [];
+
   for (const memberPath of members) {
     // Convert "./packages/memory" to "memory"
     const packageName = memberPath.substring(2).split("/")[1];
@@ -43,18 +44,22 @@ export async function runTests(disabledPackages: string[]): Promise<boolean> {
     console.log(`Testing ${packageName}...`);
     const packagePath = path.join(workspaceCwd, "packages", packageName);
     if (!await testPackage(packagePath)) {
-      success = false;
+      failedPackages.push(packageName);
     }
   }
 
-  if (success) {
+  if (failedPackages.length === 0) {
     console.log("All tests passing!");
   } else {
     console.error("One or more tests failed.");
+    console.error("Failed packages:");
+    for (const pkg of failedPackages) {
+      console.error(`- ${pkg}`);
+    }
     Deno.exit(1);
   }
 
-  return success;
+  return failedPackages.length === 0;
 }
 
 // Only run if this is the main module
