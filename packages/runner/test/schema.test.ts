@@ -608,7 +608,7 @@ describe("Schema Support", () => {
           ],
         },
         "should handle circular references in objects 1",
-        "test",
+        space,
       );
 
       // Set up circular references using cell links
@@ -658,7 +658,7 @@ describe("Schema Support", () => {
           },
         },
         "should handle nested circular references 1",
-        "test",
+        space,
       );
 
       // Set up circular references using cell links
@@ -720,7 +720,7 @@ describe("Schema Support", () => {
           ],
         },
         "should handle circular references with anyOf 1",
-        "test",
+        space,
       );
 
       // Set up circular references using cell links
