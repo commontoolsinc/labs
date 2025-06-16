@@ -178,10 +178,6 @@ export async function getBGCharms(
   bgSpace = bgSpace ?? BG_SYSTEM_SPACE_ID;
   bgCause = bgCause ?? BG_CELL_CAUSE;
 
-  if (!runtime.storage.hasSigner()) {
-    throw new Error("Storage has no signer");
-  }
-
   const schema = {
     type: "array",
     items: {

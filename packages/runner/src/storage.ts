@@ -122,14 +122,6 @@ export class Storage implements IStorage {
     this.addCancel = addCancel;
   }
 
-  setSigner(signer: Signer): void {
-    this.signer = signer;
-  }
-
-  hasSigner(): boolean {
-    return this.signer !== undefined;
-  }
-
   /**
    * Load cell from storage. Will also subscribe to new changes.
    *

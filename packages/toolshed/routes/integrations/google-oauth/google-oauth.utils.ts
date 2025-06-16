@@ -145,10 +145,6 @@ export async function getAuthCell(docLink: CellLink | string) {
       ? JSON.parse(docLink)
       : docLink;
 
-    if (!runtime.storage.hasSigner()) {
-      throw new Error("Unable to talk to storage: not configured.");
-    }
-
     // We already should have the schema on the parsedDocLink (from our state),
     // but if it's missing, we can add it  here.
     parsedDocLink.schema = parsedDocLink.schema ?? AuthSchema;
