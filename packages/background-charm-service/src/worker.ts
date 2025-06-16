@@ -7,8 +7,9 @@ import {
   type ErrorWithContext,
   isStream,
   Runtime,
-  StorageManager,
 } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 import {
   InitializationData,

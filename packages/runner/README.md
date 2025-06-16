@@ -674,7 +674,7 @@ export interface IStorageManager {
 The storage manager opens storage providers for different memory spaces. The StorageManager provides convenient factory methods:
 
 ```ts
-import { StorageManager } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache ";
 import { Identity } from "@commontools/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");

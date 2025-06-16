@@ -5,7 +5,8 @@ import {
   useEffect,
   useState,
 } from "react";
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache";
 import { useAuthentication } from "./AuthenticationContext.tsx";
 import { setupIframe } from "@/iframe-ctx.ts";
 import * as Sentry from "@sentry/react";
