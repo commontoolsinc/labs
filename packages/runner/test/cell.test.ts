@@ -112,7 +112,7 @@ describe("Cell", () => {
     const c = runtime.documentMap.getDoc(
       { x: 1, y: 2 },
       "should get raw value using getRaw",
-      "test",
+      space,
     );
     const cell = c.asCell();
     expect(cell.getRaw()).toEqual({ x: 1, y: 2 });
@@ -122,7 +122,7 @@ describe("Cell", () => {
     const c = runtime.documentMap.getDoc(
       { x: 1, y: 2 },
       "should set raw value using setRaw",
-      "test",
+      space,
     );
     const cell = c.asCell();
     const result = cell.setRaw({ x: 10, y: 20 });
@@ -134,7 +134,7 @@ describe("Cell", () => {
     const c = runtime.documentMap.getDoc(
       42,
       "should work with primitive values in getRaw/setRaw",
-      "test",
+      space,
     );
     const cell = c.asCell();
 
@@ -149,7 +149,7 @@ describe("Cell", () => {
     const c = runtime.documentMap.getDoc(
       [1, 2, 3],
       "should work with arrays in getRaw/setRaw",
-      "test",
+      space,
     );
     const cell = c.asCell();
 
@@ -164,7 +164,7 @@ describe("Cell", () => {
     const c = runtime.documentMap.getDoc(
       { nested: { value: 42 } },
       "should respect path in getRaw/setRaw for nested properties",
-      "test",
+      space,
     );
     const nestedCell = c.asCell(["nested", "value"]);
 

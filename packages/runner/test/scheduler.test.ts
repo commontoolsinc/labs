@@ -43,7 +43,7 @@ describe("scheduler", () => {
     );
     b.set(2);
     const c = runtime.getCell<number>(
-      "test",
+      space,
       "should run actions when cells change 3",
     );
     c.set(0);
@@ -65,7 +65,7 @@ describe("scheduler", () => {
   it("schedule shouldn't run immediately", async () => {
     let runCount = 0;
     const a = runtime.getCell<number>(
-      "test",
+      space,
       "should schedule shouldn't run immediately 1",
     );
     a.set(1);
@@ -75,7 +75,7 @@ describe("scheduler", () => {
     );
     b.set(2);
     const c = runtime.getCell<number>(
-      "test",
+      space,
       "should schedule shouldn't run immediately 3",
     );
     c.set(0);
@@ -102,11 +102,11 @@ describe("scheduler", () => {
 
   it("should remove actions", async () => {
     let runCount = 0;
-    const a = runtime.getCell<number>("test", "should remove actions 1");
+    const a = runtime.getCell<number>(space, "should remove actions 1");
     a.set(1);
-    const b = runtime.getCell<number>("test", "should remove actions 2");
+    const b = runtime.getCell<number>(space, "should remove actions 2");
     b.set(2);
-    const c = runtime.getCell<number>("test", "should remove actions 3");
+    const c = runtime.getCell<number>(space, "should remove actions 3");
     c.set(0);
     const adder: Action = (log) => {
       runCount++;
@@ -133,17 +133,17 @@ describe("scheduler", () => {
   it("scheduler should return a cancel function", async () => {
     let runCount = 0;
     const a = runtime.getCell<number>(
-      "test",
+      space,
       "scheduler should return a cancel function 1",
     );
     a.set(1);
     const b = runtime.getCell<number>(
-      "test",
+      space,
       "scheduler should return a cancel function 2",
     );
     b.set(2);
     const c = runtime.getCell<number>(
-      "test",
+      space,
       "scheduler should return a cancel function 3",
     );
     c.set(0);
@@ -176,27 +176,27 @@ describe("scheduler", () => {
   it("should run actions in topological order", async () => {
     const runs: string[] = [];
     const a = runtime.getCell<number>(
-      "test",
+      space,
       "should run actions in topological order 1",
     );
     a.set(1);
     const b = runtime.getCell<number>(
-      "test",
+      space,
       "should run actions in topological order 2",
     );
     b.set(2);
     const c = runtime.getCell<number>(
-      "test",
+      space,
       "should run actions in topological order 3",
     );
     c.set(0);
     const d = runtime.getCell<number>(
-      "test",
+      space,
       "should run actions in topological order 4",
     );
     d.set(1);
     const e = runtime.getCell<number>(
-      "test",
+      space,
       "should run actions in topological order 5",
     );
     e.set(0);
@@ -234,27 +234,27 @@ describe("scheduler", () => {
   it("should stop eventually when encountering infinite loops", async () => {
     let maxRuns = 120; // More than the limit in scheduler
     const a = runtime.getCell<number>(
-      "test",
+      space,
       "should stop eventually when encountering infinite loops 1",
     );
     a.set(1);
     const b = runtime.getCell<number>(
-      "test",
+      space,
       "should stop eventually when encountering infinite loops 2",
     );
     b.set(2);
     const c = runtime.getCell<number>(
-      "test",
+      space,
       "should stop eventually when encountering infinite loops 3",
     );
     c.set(0);
     const d = runtime.getCell<number>(
-      "test",
+      space,
       "should stop eventually when encountering infinite loops 4",
     );
     d.set(1);
     const e = runtime.getCell<number>(
-      "test",
+      space,
       "should stop eventually when encountering infinite loops 5",
     );
     e.set(0);
@@ -293,12 +293,12 @@ describe("scheduler", () => {
 
   it("should not loop on r/w changes on its own output", async () => {
     const counter = runtime.getCell<number>(
-      "test",
+      space,
       "should not loop on r/w changes on its own output 1",
     );
     counter.set(0);
     const by = runtime.getCell<number>(
-      "test",
+      space,
       "should not loop on r/w changes on its own output 2",
     );
     by.set(1);
@@ -355,12 +355,12 @@ describe("event handling", () => {
 
   it("should queue and process events", async () => {
     const eventCell = runtime.getCell<number>(
-      "test",
+      space,
       "should queue and process events 1",
     );
     eventCell.set(0);
     const eventResultCell = runtime.getCell<number>(
-      "test",
+      space,
       "should queue and process events 2",
     );
     eventResultCell.set(0);
@@ -385,7 +385,7 @@ describe("event handling", () => {
 
   it("should remove event handlers", async () => {
     const eventCell = runtime.getCell<number>(
-      "test",
+      space,
       "should remove event handlers 1",
     );
     eventCell.set(0);
@@ -418,7 +418,7 @@ describe("event handling", () => {
 
   it("should handle events with nested paths", async () => {
     const parentCell = runtime.getCell<{ child: { value: number } }>(
-      "test",
+      space,
       "should handle events with nested paths 1",
     );
     parentCell.set({ child: { value: 0 } });
@@ -444,7 +444,7 @@ describe("event handling", () => {
 
   it("should process events in order", async () => {
     const eventCell = runtime.getCell<number>(
-      "test",
+      space,
       "should process events in order 1",
     );
     eventCell.set(0);
@@ -467,12 +467,12 @@ describe("event handling", () => {
 
   it("should trigger recomputation of dependent cells", async () => {
     const eventCell = runtime.getCell<number>(
-      "test",
+      space,
       "should trigger recomputation of dependent cells 1",
     );
     eventCell.set(0);
     const eventResultCell = runtime.getCell<number>(
-      "test",
+      space,
       "should trigger recomputation of dependent cells 2",
     );
     eventResultCell.set(0);
@@ -541,7 +541,7 @@ describe("compactifyPaths", () => {
 
   it("should compactify paths", () => {
     const testCell = runtime.getCell<Record<string, any>>(
-      "test",
+      space,
       "should compactify paths 1",
     );
     testCell.set({});
@@ -562,7 +562,7 @@ describe("compactifyPaths", () => {
 
   it("should remove duplicate paths", () => {
     const testCell = runtime.getCell<Record<string, any>>(
-      "test",
+      space,
       "should remove duplicate paths 1",
     );
     testCell.set({});
@@ -579,12 +579,12 @@ describe("compactifyPaths", () => {
 
   it("should not compactify across cells", () => {
     const cellA = runtime.getCell<Record<string, any>>(
-      "test",
+      space,
       "should not compactify across cells 1",
     );
     cellA.set({});
     const cellB = runtime.getCell<Record<string, any>>(
-      "test",
+      space,
       "should not compactify across cells 2",
     );
     cellB.set({});
@@ -598,7 +598,7 @@ describe("compactifyPaths", () => {
 
   it("empty paths should trump all other ones", () => {
     const cellA = runtime.getCell<Record<string, any>>(
-      "test",
+      space,
       "should remove duplicate paths 1",
     );
     cellA.set({});

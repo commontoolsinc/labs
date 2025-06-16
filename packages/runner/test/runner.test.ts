@@ -534,7 +534,10 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.getCell<any>("test", "state preservation test");
+    const resultCell = runtime.getCell<any>(
+      space,
+      "state preservation test",
+    );
 
     // First run
     await runtime.runSynced(resultCell, recipe, { value: 1 });
@@ -589,7 +592,7 @@ describe("runRecipe", () => {
 
     // Create first instance
     const result1Cell = runtime.getCell(
-      "test",
+      space,
       "should create separate copies of initial values 1",
     );
     const result1 = await runtime.runSynced(result1Cell, recipe, { input: 5 });
@@ -597,7 +600,7 @@ describe("runRecipe", () => {
 
     // Create second instance
     const result2Cell = runtime.getCell(
-      "test",
+      space,
       "should create separate copies of initial values 2",
     );
     const result2 = await runtime.runSynced(result2Cell, recipe, { input: 10 });
