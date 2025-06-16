@@ -266,7 +266,15 @@ export function validateAndTransform(
   schema?: JSONSchema,
   log?: ReactivityLog,
   rootSchema: JSONSchema | undefined = schema,
-  seen: CellLink[] = [],
+  seen: Array<
+    {
+      cell: DocImpl<any>;
+      path: PropertyKey[];
+      schema?: JSONSchema;
+      rootSchema?: JSONSchema;
+      value: any;
+    }
+  > = [],
 ): any {
   let resolvedSchema = resolveSchema(schema, rootSchema, true);
 
@@ -287,6 +295,19 @@ export function validateAndTransform(
   if (!resolvedSchema && resolvedRef.schema) {
     resolvedSchema = resolvedRef.schema;
     rootSchema = resolvedRef.rootSchema || resolvedRef.schema;
+  }
+
+  // Check if we've seen this exact cell/path/schema combination before
+  const seenEntry = seen.find(
+    (entry) =>
+      JSON.stringify(entry.cell) === JSON.stringify(doc) &&
+      entry.path.length === path.length &&
+      entry.path.every((p, i) => p === path[i]) &&
+      JSON.stringify(entry.schema) === JSON.stringify(resolvedSchema) &&
+      JSON.stringify(entry.rootSchema) === JSON.stringify(rootSchema),
+  );
+  if (seenEntry) {
+    return seenEntry.value;
   }
 
   // If this should be a reference, return as a Cell of resolvedSchema
@@ -367,7 +388,7 @@ export function validateAndTransform(
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
-    return processDefaultValue(
+    const result = processDefaultValue(
       doc,
       path,
       resolvedSchema.default,
@@ -375,6 +396,14 @@ export function validateAndTransform(
       log,
       rootSchema,
     );
+    seen.push({
+      cell: doc,
+      path,
+      schema: resolvedSchema,
+      rootSchema,
+      value: result,
+    });
+    return result;
   }
 
   // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
@@ -452,6 +481,7 @@ export function validateAndTransform(
         .filter((option) => option.type === "object")
         .map((option) => {
           const extraLog = { reads: [], writes: [] } satisfies ReactivityLog;
+          const candidateSeen = [...seen];
           return {
             schema: option,
             result: validateAndTransform(
@@ -460,21 +490,30 @@ export function validateAndTransform(
               option,
               extraLog,
               rootSchema,
-              seen,
+              candidateSeen,
             ),
             extraLog,
           };
         });
 
-      if (candidates.length === 0) return undefined;
+      if (candidates.length === 0) {
+        seen.push({
+          cell: doc,
+          path,
+          schema: resolvedSchema,
+          rootSchema,
+          value: undefined,
+        });
+        return undefined;
+      }
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
       const extraReads: CellLink[] = [];
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
-          log?.reads.push(...extraLog.reads);
-          return result; // TODO(seefeld): Complain if it's a mix of cells and non-cells?
+          merged = result;
+          break; // TODO(seefeld): Complain if it's a mix of cells and non-cells?
         } else if (isRecord(result)) {
           merged = { ...merged, ...result };
           extraReads.push(...extraLog.reads);
@@ -485,24 +524,37 @@ export function validateAndTransform(
           );
         }
       }
+      log?.reads.push(...extraReads);
+      seen.push({
+        cell: doc,
+        path,
+        schema: resolvedSchema,
+        rootSchema,
+        value: merged,
+      });
       return merged;
     } else {
+      // For primitive types, try each option that matches the type
       const candidates = options
         .filter((option) =>
           (option.type === "integer" ? "number" : option.type) ===
             typeof value as string
         )
-        .map((option) => ({
-          schema: option,
-          result: validateAndTransform(
-            doc,
-            path,
-            option,
-            log,
-            rootSchema,
-            seen,
-          ),
-        }));
+        .map((option) => {
+          // Create a new seen array for each candidate to avoid false positives
+          const candidateSeen = [...seen];
+          return {
+            schema: option,
+            result: validateAndTransform(
+              doc,
+              path,
+              option,
+              log,
+              rootSchema,
+              candidateSeen,
+            ),
+          };
+        });
 
       if (candidates.length === 0) return undefined;
       if (candidates.length === 1) return candidates[0].result;
@@ -526,6 +578,14 @@ export function validateAndTransform(
     if (!isRecord(value)) value = {};
 
     const result: Record<string, any> = {};
+    // Add to seen before processing children to handle self-referential structures
+    seen.push({
+      cell: doc,
+      path,
+      schema: resolvedSchema,
+      rootSchema,
+      value: result,
+    });
 
     // Handle explicitly defined properties
     const cfc = new ContextualFlowControl();
@@ -590,23 +650,41 @@ export function validateAndTransform(
 
   if (resolvedSchema.type === "array" && resolvedSchema.items) {
     if (!Array.isArray(value)) {
-      return [];
+      const result: any[] = [];
+      seen.push({
+        cell: doc,
+        path,
+        schema: resolvedSchema,
+        rootSchema,
+        value: result,
+      });
+      return result;
     }
-    return value.map((_, i) =>
-      validateAndTransform(
+    const result: any[] = [];
+    seen.push({
+      cell: doc,
+      path,
+      schema: resolvedSchema,
+      rootSchema,
+      value: result,
+    });
+    // Now process elements after adding the array to seen
+    for (let i = 0; i < value.length; i++) {
+      result[i] = validateAndTransform(
         doc,
         [...path, i],
         resolvedSchema.items!,
         log,
         rootSchema,
         seen,
-      )
-    );
+      );
+    }
+    return result;
   }
 
   // For primitive types, return as is
   if (value === undefined && resolvedSchema.default !== undefined) {
-    return processDefaultValue(
+    const result = processDefaultValue(
       doc,
       path,
       resolvedSchema.default,
@@ -614,6 +692,17 @@ export function validateAndTransform(
       log,
       rootSchema,
     );
+    seen.push({
+      cell: doc,
+      path,
+      schema: resolvedSchema,
+      rootSchema,
+      value: result,
+    });
+    return result;
   }
+
+  // Add the current value to seen before returning
+  seen.push({ cell: doc, path, schema: resolvedSchema, rootSchema, value });
   return value;
 }
