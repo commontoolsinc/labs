@@ -10,6 +10,7 @@ import {
   ifElse,
   recipe,
   Schema,
+  cell,
   UI,
 } from "@commontools/builder/interface";
 
@@ -89,6 +90,11 @@ const PageInputSchema = {
     tags: {
       type: "array",
       items: { type: "string" },
+      default: [],
+    },
+    referenceablePages: {
+      type: "array",
+      items: PageResultSchema,
       default: [],
     },
   },
@@ -202,6 +208,54 @@ const viewList = handler<{ list: { title: string; items: any[] } }, void>(
     );
   },
 );
+const DropdownInputSchema = {
+  type: "object",
+  properties: {
+    pages: {
+      type: "array",
+      items: PageResultSchema,
+    },
+    selectedPage: PageResultSchema,
+  },
+  required: ["pages"],
+} as const satisfies JSONSchema;
+
+const DropdownOutputSchema = {
+  type: "object",
+  properties: {
+    selectedPage: PageResultSchema,
+  },
+  required: ["selectedPage"],
+} as const satisfies JSONSchema;
+
+const Dropdown = recipe(DropdownInputSchema, DropdownOutputSchema, ({ pages, selectedPage }) => {
+  const open = cell(false)
+  const openDropdown = handler<{ open: boolean }>(({}, state) => {
+    state.open = !state.open
+  })
+  const onSelect = handler<>(({}, state) => {
+    state.selectedPage = state.page
+    state.open = false
+  })
+  const selectionLabel = derive(selectedPage, (selectedPage) => {
+    return selectedPage ? selectedPage.title : "Select a page"
+  })
+
+  const dropdownArrow = derive(open, (open) => {
+    return open ? "▲" : "▼"
+  })
+
+  return {
+    [UI]: <common-vstack style="max-width: 192px;">
+      <label style="border: 1px solid black; display: inline-block; padding: 5px;" onClick={openDropdown({ open })}>{selectionLabel} {dropdownArrow}</label>
+      {ifElse(open, pages.map((page) => (
+        <div style="background-color: grey;" onClick={onSelect({ page, selectedPage, open })}>
+          {page.title}
+        </div>
+      )), <div></div>)}
+    </common-vstack>
+  }
+})
 
 /**
  * -----------------------------------------------------------------------------
@@ -209,7 +263,7 @@ const viewList = handler<{ list: { title: string; items: any[] } }, void>(
  * -----------------------------------------------------------------------------
  */
 export const Page = recipe(PageInputSchema, PageResultSchema, (
-  { title, lists, pages, body, tags },
+  { title, lists, pages, body, tags, referenceablePages },
 ) => {
   const tagString = derive(tags, (tags: string[]) => tags.join(", "));
 
@@ -328,6 +382,7 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
                   ),
                 )}
               </common-hstack>
+              {Dropdown({ pages: referenceablePages })[UI]}
               <common-send-message
                 name="Add"
                 placeholder="New page"
@@ -367,12 +422,36 @@ const PageManagerInputSchema = {
   required: ["pages"],
 } as const satisfies JSONSchema;
 
-const addTopLevelPage = handler<
-  { detail: { message: string } },
-  { pages: PageInputs[] }
->((event, { pages }) => {
+const AddPageEventSchema = {
+  type: "object",
+  properties: {
+    detail: {
+      type: "object",
+      properties: {
+        message: { type: "string" }
+      },
+      required: ["message"]
+    },
+  },
+  required: ["detail"]
+} as const satisfies JSONSchema;
+
+const AddPageStateSchema = {
+  type: "object",
+  properties: {
+    pages: {
+      type: "array",
+      items: PageInputSchema,
+      default: [],
+      asCell: true
+    },
+  },
+  required: ["pages"],
+} as const satisfies JSONSchema;
+
+const addTopLevelPage = handler(AddPageEventSchema, AddPageStateSchema, (event, { pages }) => {
   const title = event.detail?.message?.trim();
-  if (title) pages.push({ title, body: "", lists: [], pages: [], tags: [] });
+  if (title) pages.push({ title, body: "", lists: [], pages: [], tags: [], referenceablePages: pages });
 });
 
 const focusPage = handler<{  }, { focus: number[], idx: number }>(
@@ -407,6 +486,7 @@ export default recipe(PageManagerInputSchema, AnySchema, ({ pages, focus }) => {
               onmessagesend={addTopLevelPage({ pages })}
             />
           </common-hstack>
+          {Dropdown({ pages })[UI]}
         <common-hstack gap="sm" style='background: grey;'>
           {focusedPages.map(p => <label>{p.title}</label>)}
         </common-hstack>
