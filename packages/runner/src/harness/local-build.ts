@@ -6,6 +6,7 @@ import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
 import turndown from "turndown";
 import { createBuilder } from "@commontools/builder";
+import { h } from "@commontools/api";
 import { type IRuntime } from "../runtime.ts";
 
 let DOMParser: any;
@@ -206,7 +207,7 @@ export const tsToExports = async (
     }
     switch (moduleName) {
       case "@commontools/html":
-        return commonHtml;
+        return Object.assign({}, commonHtml, { h });
       case "@commontools/builder":
       case "@commontools/builder/interface":
       case "commontools":

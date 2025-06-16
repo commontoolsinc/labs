@@ -20,6 +20,7 @@ import {
   isCellLink,
   isDoc,
   maybeGetCellLink,
+  type MemorySpace,
   Runtime,
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
@@ -116,7 +117,7 @@ function filterOutEntity(
 }
 
 export class CharmManager {
-  private space: string;
+  private space: MemorySpace;
 
   private charms: Cell<Cell<Charm>[]>;
   private pinnedCharms: Cell<Cell<Charm>[]>;
@@ -132,8 +133,6 @@ export class CharmManager {
     public runtime: Runtime,
   ) {
     this.space = this.session.space;
-
-    this.runtime.storage.setSigner(session.as);
 
     this.charms = this.runtime.getCell(
       this.space,
@@ -158,7 +157,7 @@ export class CharmManager {
     ]);
   }
 
-  getSpace(): string {
+  getSpace(): MemorySpace {
     return this.space;
   }
 

@@ -20,7 +20,7 @@ import { type EntityId } from "./doc-map.ts";
 import type { IRuntime } from "./runtime.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
-import { Labels } from "./storage.ts";
+import { Labels, MemorySpace } from "./storage.ts";
 import { arrayEqual } from "./type-utils.ts";
 
 // Remove the arrayEqual function since we import it now
@@ -173,7 +173,7 @@ export type DocImpl<T> = {
    * The space this doc belongs to.
    * Required when entityId is set.
    */
-  space: string;
+  space: MemorySpace;
 
   /**
    * Get current entity ID.
@@ -254,7 +254,7 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
 export function createDoc<T>(
   value: T,
   entityId: EntityId,
-  space: string,
+  space: MemorySpace,
   runtime: IRuntime,
 ): DocImpl<T> {
   const callbacks = new Set<
@@ -342,10 +342,10 @@ export function createDoc<T>(
     set entityId(id: EntityId) {
       throw new Error("Can't set entity ID directly, use getDocByEntityId");
     },
-    get space(): string {
+    get space(): MemorySpace {
       return space;
     },
-    set space(newSpace: string) {
+    set space(newSpace: MemorySpace) {
       throw new Error("Can't set space directly, use getDocByEntityId");
     },
     get sourceCell(): DocImpl<any> | undefined {

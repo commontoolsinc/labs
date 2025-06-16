@@ -1,41 +1,40 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
-import { StorageProvider } from "../src/storage/base.ts";
-import { type CellLink } from "../src/cell.ts";
 import { type DocImpl } from "../src/doc.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
 import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Storage", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let storage2: StorageProvider;
   let testDoc: DocImpl<any>;
   let n = 0;
 
   beforeEach(() => {
-    // Create shared storage provider for testing
-    storage2 = new VolatileStorageProvider("test");
-
+    storageManager = StorageManager.emulate({ as: signer });
     // Create runtime with the shared storage provider
     // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
-      signer: signer,
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
 
     testDoc = runtime.documentMap.getDoc<string>(
       undefined as unknown as string,
       `storage test cell ${n++}`,
-      "test",
+      space,
     );
   });
 
   afterEach(async () => {
     await runtime?.storage.cancelAll();
-    await storage2?.destroy();
+    await storageManager?.close();
+    // _processCurrentBatch leaves sleep behind that makes deno error
+    await new Promise((wake) => setTimeout(wake, 1));
   });
 
   describe("persistDoc", () => {
@@ -45,16 +44,24 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      await storage2.sync(testDoc.entityId!);
-      const value = storage2.get(testDoc.entityId!);
-      expect(value?.value).toEqual(testValue);
+      const query = storageManager
+        .mount(space)
+        .query({
+          select: { _: { "application/json": {} } },
+        });
+
+      await query;
+
+      const [fact] = query.facts;
+
+      expect(fact.is).toEqual({ value: testValue });
     });
 
     it("should persist a cells and referenced cell references within it", async () => {
       const refDoc = runtime.documentMap.getDoc(
         "hello",
         "should persist a cells and referenced cell references within it",
-        "test",
+        space,
       );
 
       const testValue = {
@@ -65,16 +72,15 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      await storage2.sync(refDoc.entityId!);
-      const value = storage2.get(refDoc.entityId!);
-      expect(value?.value).toEqual("hello");
+      const entry = storageManager.open(space).get(refDoc.entityId);
+      expect(entry?.value).toEqual("hello");
     });
 
     it("should persist a cells and referenced cells within it", async () => {
       const refDoc = runtime.documentMap.getDoc(
         "hello",
         "should persist a cells and referenced cells 1",
-        "test",
+        space,
       );
 
       const testValue = {
@@ -85,9 +91,8 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      await storage2.sync(refDoc.entityId!);
-      const value = storage2.get(refDoc.entityId!);
-      expect(value?.value).toEqual("hello");
+      const entry = storageManager.open(space).get(refDoc.entityId);
+      expect(entry?.value).toEqual("hello");
     });
   });
 
@@ -100,16 +105,27 @@ describe("Storage", () => {
 
       await runtime.storage.synced();
 
-      await storage2.sync(testDoc.entityId!);
-      const value = storage2.get(testDoc.entityId!);
-      expect(value?.value).toBe("value 2");
+      const query = storageManager
+        .mount(space)
+        .query({
+          select: { _: { "application/json": {} } },
+        });
+
+      await query;
+
+      const [fact] = query.facts;
+
+      expect(fact?.is).toEqual({ value: "value 2" });
     });
   });
 
   describe("syncDoc", () => {
     it("should wait for a doc to appear", async () => {
       let synced = false;
-      storage2.sync(testDoc.entityId!, true).then(() => (synced = true));
+
+      storageManager.open(space).sync(testDoc.entityId!, true).then(
+        () => (synced = true),
+      );
       expect(synced).toBe(false);
 
       testDoc.send("test");
@@ -119,7 +135,9 @@ describe("Storage", () => {
 
     it("should wait for a undefined doc to appear", async () => {
       let synced = false;
-      storage2.sync(testDoc.entityId!, true).then(() => (synced = true));
+      storageManager.open(space).sync(testDoc.entityId!, true).then(
+        () => (synced = true),
+      );
       expect(synced).toBe(false);
 
       await runtime.storage.syncCell(testDoc);
@@ -132,14 +150,15 @@ describe("Storage", () => {
       const ephemeralDoc = runtime.documentMap.getDoc(
         "transient",
         "ephemeral",
-        "test",
+        space,
       );
       ephemeralDoc.ephemeral = true;
       await runtime.storage.syncCell(ephemeralDoc);
+      const provider = storageManager.open(space);
 
-      await storage2.sync(ephemeralDoc.entityId!);
-      const value = storage2.get(ephemeralDoc.entityId!);
-      expect(value).toBeUndefined();
+      await provider.sync(ephemeralDoc.entityId!);
+      const record = provider.get(ephemeralDoc.entityId!);
+      expect(record).toBeUndefined();
     });
   });
 
@@ -155,9 +174,17 @@ describe("Storage", () => {
 
       await runtime.storage.synced();
 
-      await storage2.sync(testDoc.entityId!);
-      const value = storage2.get(testDoc.entityId!);
-      expect(value?.value).toBe("value 2");
+      const query = storageManager
+        .mount(space)
+        .query({
+          select: { _: { "application/json": {} } },
+        });
+
+      await query;
+
+      const [fact] = query.facts;
+
+      expect(fact?.is).toEqual({ value: "value 2" });
     });
   });
 });

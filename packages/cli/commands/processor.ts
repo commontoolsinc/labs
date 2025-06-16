@@ -20,8 +20,17 @@ async function createRuntimeDependencies(): Promise<
   Record<RUNTIME_IDENTIFIER, any>
 > {
   const { Runtime } = await import("@commontools/runner");
+  const { StorageManager } = await import(
+    "@commontools/runner/storage/cache.deno"
+  );
   const { createBuilder } = await import("@commontools/builder");
-  const builder = createBuilder(new Runtime({ storageUrl: "volatile://" }));
+  const { Identity } = await import("@commontools/identity");
+  const storageManager = StorageManager.emulate({
+    as: await Identity.fromPassphrase("builder"),
+  });
+  const builder = createBuilder(
+    new Runtime({ storageManager, blobbyServerUrl: import.meta.url }),
+  );
   return {
     "commontools": builder,
   };

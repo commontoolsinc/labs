@@ -1,8 +1,13 @@
-#!/usr/bin/env -S deno run --allow-read --allow-net --allow-env
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import { getEntityId, isStream, Runtime } from "@commontools/runner";
+import {
+  getEntityId,
+  isStream,
+  type MemorySpace,
+  Runtime,
+} from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache";
 import {
   createAdminSession,
   type DID,
@@ -87,8 +92,11 @@ async function main() {
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
   const runtime = new Runtime({
-    storageUrl: toolshedUrl,
-    signer: identity,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL("/api/storage/memory", toolshedUrl),
+    }),
+    blobbyServerUrl: toolshedUrl,
   });
   const charmManager = new CharmManager(session, runtime);
   await charmManager.ready;
@@ -165,6 +173,7 @@ async function main() {
       typeof value.cell["/"] === "string" &&
       Array.isArray(value.path)
     ) {
+      const space = (value.space ?? spaceDID) as MemorySpace;
       return runtime.getCellFromLink({
         space,
         cell: runtime.documentMap.getDocByEntityId(

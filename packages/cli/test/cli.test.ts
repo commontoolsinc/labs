@@ -22,6 +22,7 @@ describe("CLI", () => {
 
     const out = processStream(stdout);
     const err = processStream(stderr);
+
     expect(err.length).toBe(1); // deno run etc.
     expect(out[out.length - 1]).toBe("25");
     expect(code).toBe(0);

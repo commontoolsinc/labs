@@ -8,6 +8,8 @@ import {
   isStream,
   Runtime,
 } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 import {
   InitializationData,
@@ -93,9 +95,11 @@ async function initialize(
 
   // Initialize runtime and charm manager
   runtime = new Runtime({
-    storageUrl: toolshedUrl,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL("/api/storage/memory", toolshedUrl),
+    }),
     blobbyServerUrl: toolshedUrl,
-    signer: identity,
     recipeEnvironment: { apiUrl },
     consoleHandler: consoleHandler,
     errorHandlers: [errorHandler],

@@ -4,6 +4,7 @@ import {
   type Immutable,
   isNumber,
   isObject,
+  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -14,7 +15,22 @@ import type {
   SchemaContext,
 } from "./types.ts";
 import { isAlias } from "./types.ts";
-import { deepEqual } from "./utils.ts";
+
+export const deepEqual = (a: any, b: any): boolean => {
+  if (a === b) return true;
+  if (isRecord(a) && isRecord(b)) {
+    if (a.constructor !== b.constructor) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (const key of keysA) {
+      if (!keysB.includes(key)) return false;
+      if (!deepEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  return a !== a && b !== b; // NaN check
+};
 
 export type SchemaPathSelector = {
   path: readonly string[];

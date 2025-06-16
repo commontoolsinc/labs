@@ -1,8 +1,8 @@
 {
   "name": "@commontools/cli",
   "tasks": {
-    "cli": "deno run --allow-read --allow-write --allow-env=TOOLSHED_API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV ./mod.ts",
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env=TOOLSHED_API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
+    "cli": "deno run --allow-ffi --allow-read --allow-write --allow-env=DENO_SQLITE_PATH,DENO_SQLITE_LOCAL,DENO_DIR,HOME,XDG_CACHE_HOME,TOOLSHED_API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV ./mod.ts",
+    "test": "deno test --allow-ffi  --allow-read --allow-write --allow-run --allow-env=DENO_SQLITE_PATH,DENO_SQLITE_LOCAL,DENO_DIR,HOME,XDG_CACHE_HOME,TOOLSHED_API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
   "exports": {
     ".": "./mod.ts"

@@ -1,5 +1,4 @@
-import { StorageProvider } from "../runner/src/storage/base.ts";
-import { Provider as CachedStorageProvider } from "../runner/src/storage/cache.ts";
+import { StorageManager } from "../runner/src/storage/cache.ts";
 import { EntityId } from "../runner/src/doc-map.ts";
 import { Identity } from "../identity/src/index.ts";
 
@@ -34,12 +33,11 @@ function entity_id(i: number): EntityId {
 async function main() {
   const authority = await Identity.fromPassphrase("ellyse5");
 
-  const storageProvider: StorageProvider = new CachedStorageProvider({
+  const storageProvider = StorageManager.open({
     id: import.meta.url,
     address: new URL("/api/storage/memory", BASE_URL),
-    space: authority.did(),
     as: authority,
-  });
+  }).open(authority.did());
 
   console.log(
     "created RemoteStorageProvider: " +

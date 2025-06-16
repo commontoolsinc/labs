@@ -5,18 +5,29 @@ import { type ReactivityLog } from "../src/scheduler.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { compactifyPaths } from "../src/scheduler.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("scheduler", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should run actions when cells change", async () => {
@@ -24,17 +35,17 @@ describe("scheduler", () => {
     const a = runtime.documentMap.getDoc(
       1,
       "should run actions when cells change 1",
-      "test",
+      space,
     );
     const b = runtime.documentMap.getDoc(
       2,
       "should run actions when cells change 2",
-      "test",
+      space,
     );
     const c = runtime.documentMap.getDoc(
       0,
       "should run actions when cells change 3",
-      "test",
+      space,
     );
     const adder: Action = (log) => {
       runCount++;
@@ -56,17 +67,17 @@ describe("scheduler", () => {
     const a = runtime.documentMap.getDoc(
       1,
       "should schedule shouldn't run immediately 1",
-      "test",
+      space,
     );
     const b = runtime.documentMap.getDoc(
       2,
       "should schedule shouldn't run immediately 2",
-      "test",
+      space,
     );
     const c = runtime.documentMap.getDoc(
       0,
       "should schedule shouldn't run immediately 3",
-      "test",
+      space,
     );
     const adder: Action = (log) => {
       runCount++;
@@ -91,9 +102,9 @@ describe("scheduler", () => {
 
   it("should remove actions", async () => {
     let runCount = 0;
-    const a = runtime.documentMap.getDoc(1, "should remove actions 1", "test");
-    const b = runtime.documentMap.getDoc(2, "should remove actions 2", "test");
-    const c = runtime.documentMap.getDoc(0, "should remove actions 3", "test");
+    const a = runtime.documentMap.getDoc(1, "should remove actions 1", space);
+    const b = runtime.documentMap.getDoc(2, "should remove actions 2", space);
+    const c = runtime.documentMap.getDoc(0, "should remove actions 3", space);
     const adder: Action = (log) => {
       runCount++;
       c.asCell([], log).send(
@@ -121,17 +132,17 @@ describe("scheduler", () => {
     const a = runtime.documentMap.getDoc(
       1,
       "scheduler should return a cancel function 1",
-      "test",
+      space,
     );
     const b = runtime.documentMap.getDoc(
       2,
       "scheduler should return a cancel function 2",
-      "test",
+      space,
     );
     const c = runtime.documentMap.getDoc(
       0,
       "scheduler should return a cancel function 3",
-      "test",
+      space,
     );
     const adder: Action = (log) => {
       runCount++;
@@ -164,27 +175,27 @@ describe("scheduler", () => {
     const a = runtime.documentMap.getDoc(
       1,
       "should run actions in topological order 1",
-      "test",
+      space,
     );
     const b = runtime.documentMap.getDoc(
       2,
       "should run actions in topological order 2",
-      "test",
+      space,
     );
     const c = runtime.documentMap.getDoc(
       0,
       "should run actions in topological order 3",
-      "test",
+      space,
     );
     const d = runtime.documentMap.getDoc(
       1,
       "should run actions in topological order 4",
-      "test",
+      space,
     );
     const e = runtime.documentMap.getDoc(
       0,
       "should run actions in topological order 5",
-      "test",
+      space,
     );
     const adder1: Action = (log) => {
       runs.push("adder1");
@@ -222,27 +233,27 @@ describe("scheduler", () => {
     const a = runtime.documentMap.getDoc(
       1,
       "should stop eventually when encountering infinite loops 1",
-      "test",
+      space,
     );
     const b = runtime.documentMap.getDoc(
       2,
       "should stop eventually when encountering infinite loops 2",
-      "test",
+      space,
     );
     const c = runtime.documentMap.getDoc(
       0,
       "should stop eventually when encountering infinite loops 3",
-      "test",
+      space,
     );
     const d = runtime.documentMap.getDoc(
       1,
       "should stop eventually when encountering infinite loops 4",
-      "test",
+      space,
     );
     const e = runtime.documentMap.getDoc(
       0,
       "should stop eventually when encountering infinite loops 5",
-      "test",
+      space,
     );
     const adder1: Action = (log) => {
       c.asCell([], log).send(
@@ -281,12 +292,12 @@ describe("scheduler", () => {
     const counter = runtime.documentMap.getDoc(
       0,
       "should not loop on r/w changes on its own output 1",
-      "test",
+      space,
     );
     const by = runtime.documentMap.getDoc(
       1,
       "should not loop on r/w changes on its own output 2",
-      "test",
+      space,
     );
     const inc: Action = (log) =>
       counter
@@ -321,28 +332,34 @@ describe("scheduler", () => {
 });
 
 describe("event handling", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should queue and process events", async () => {
     const eventCell = runtime.documentMap.getDoc(
       0,
       "should queue and process events 1",
-      "test",
+      space,
     );
     const eventResultCell = runtime.documentMap.getDoc(
       0,
       "should queue and process events 2",
-      "test",
+      space,
     );
     let eventCount = 0;
 
@@ -370,7 +387,7 @@ describe("event handling", () => {
     const eventCell = runtime.documentMap.getDoc(
       0,
       "should remove event handlers 1",
-      "test",
+      space,
     );
     let eventCount = 0;
 
@@ -403,7 +420,7 @@ describe("event handling", () => {
     const parentCell = runtime.documentMap.getDoc(
       { child: { value: 0 } },
       "should handle events with nested paths 1",
-      "test",
+      space,
     );
     let eventCount = 0;
 
@@ -429,7 +446,7 @@ describe("event handling", () => {
     const eventCell = runtime.documentMap.getDoc(
       0,
       "should process events in order 1",
-      "test",
+      space,
     );
     const events: number[] = [];
 
@@ -455,12 +472,12 @@ describe("event handling", () => {
     const eventCell = runtime.documentMap.getDoc(
       0,
       "should trigger recomputation of dependent cells 1",
-      "test",
+      space,
     );
     const eventResultCell = runtime.documentMap.getDoc(
       0,
       "should trigger recomputation of dependent cells 2",
-      "test",
+      space,
     );
     let eventCount = 0;
     let actionCount = 0;
@@ -503,23 +520,29 @@ describe("event handling", () => {
 });
 
 describe("compactifyPaths", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
-  afterEach(() => {
-    return runtime.dispose();
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should compactify paths", () => {
     const testCell = runtime.documentMap.getDoc(
       {},
       "should compactify paths 1",
-      "test",
+      space,
     );
     const paths = [
       { cell: testCell, path: ["a", "b"] },
@@ -537,7 +560,7 @@ describe("compactifyPaths", () => {
     const testCell = runtime.documentMap.getDoc(
       {},
       "should remove duplicate paths 1",
-      "test",
+      space,
     );
     const paths = [
       { cell: testCell, path: ["a", "b"] },
@@ -551,12 +574,12 @@ describe("compactifyPaths", () => {
     const cellA = runtime.documentMap.getDoc(
       {},
       "should not compactify across cells 1",
-      "test",
+      space,
     );
     const cellB = runtime.documentMap.getDoc(
       {},
       "should not compactify across cells 2",
-      "test",
+      space,
     );
     const paths = [
       { cell: cellA, path: ["a", "b"] },
@@ -570,7 +593,7 @@ describe("compactifyPaths", () => {
     const cellA = runtime.documentMap.getDoc(
       {},
       "should remove duplicate paths 1",
-      "test",
+      space,
     );
     const paths = [
       { cell: cellA, path: ["a", "b"] },

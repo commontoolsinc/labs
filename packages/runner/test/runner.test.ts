@@ -2,18 +2,29 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Recipe } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("runRecipe", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should work with passthrough", async () => {
@@ -45,7 +56,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should work with passthrough",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -114,7 +125,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should work with nested recipes",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -145,7 +156,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should run a simple module",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -179,7 +190,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should run a simple module with no outputs",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -214,7 +225,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle incorrect inputs gracefully",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -258,7 +269,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle nested recipes",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -285,7 +296,7 @@ describe("runRecipe", () => {
     const inputCell = runtime.documentMap.getDoc(
       { input: 10, output: 0 },
       "should allow passing a cell as a binding: input cell",
-      "test",
+      space,
     );
     const result = runtime.run(
       recipe,
@@ -293,7 +304,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should allow passing a cell as a binding",
-        "test",
+        space,
       ),
     );
 
@@ -330,7 +341,7 @@ describe("runRecipe", () => {
     const inputCell = runtime.documentMap.getDoc(
       { input: 10, output: 0 },
       "should allow stopping a recipe: input cell",
-      "test",
+      space,
     );
     const result = runtime.run(
       recipe,
@@ -338,7 +349,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should allow stopping a recipe",
-        "test",
+        space,
       ),
     );
 
@@ -395,7 +406,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "default values test - partial",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -408,7 +419,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "default values test - all defaults",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -467,7 +478,7 @@ describe("runRecipe", () => {
     const result = runtime.run(
       recipe,
       { config: { values: [10, 20, 30, 40], operation: "avg" } },
-      runtime.documentMap.getDoc(undefined, "complex schema test", "test"),
+      runtime.documentMap.getDoc(undefined, "complex schema test", space),
     );
     await runtime.idle();
     expect(result.getAsQueryResult()).toEqual({ result: 25 });
@@ -524,7 +535,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "merge defaults test",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -563,7 +574,7 @@ describe("runRecipe", () => {
     const resultCell = runtime.documentMap.getDoc<any>(
       undefined,
       "state preservation test",
-      "test",
+      space,
     );
 
     // First run
@@ -624,7 +635,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should create separate copies of initial values 1",
-        "test",
+        space,
       ),
     );
     await runtime.idle();
@@ -636,7 +647,7 @@ describe("runRecipe", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should create separate copies of initial values 2",
-        "test",
+        space,
       ),
     );
     await runtime.idle();

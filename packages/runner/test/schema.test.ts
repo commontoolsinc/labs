@@ -3,18 +3,29 @@ import { expect } from "@std/expect";
 import { type Cell, CellLink, isCell, isStream } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Schema Support", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
   });
 
-  afterEach(() => {
-    return runtime.dispose();
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
   });
 
   describe("Examples", () => {
@@ -29,7 +40,7 @@ describe("Schema Support", () => {
           tags: ["a", "b"],
         },
         "allows mapping of fields via interim cells 1",
-        "test",
+        space,
       );
 
       // This is what the system (or someone manually) would create to remap
@@ -46,7 +57,7 @@ describe("Schema Support", () => {
           tag: { cell: c, path: ["tags", 0] },
         },
         "allows mapping of fields via interim cells 2",
-        "test",
+        space,
       );
 
       // This schema is how the recipient specifies what they want
@@ -92,11 +103,11 @@ describe("Schema Support", () => {
           current: runtime.documentMap.getDoc(
             { label: "first" },
             "should support nested sinks 1",
-            "test",
+            space,
           ).asCell().getAsCellLink(),
         },
         "should support nested sinks 2",
-        "test",
+        space,
       ).asCell([], undefined, schema);
 
       const rootValues: string[] = [];
@@ -144,7 +155,7 @@ describe("Schema Support", () => {
       const second = runtime.documentMap.getDoc(
         { label: "second" },
         "should support nested sinks 3",
-        "test",
+        space,
       ).asCell();
       c.key("current").set(second);
 
@@ -202,13 +213,13 @@ describe("Schema Support", () => {
       const initialDoc = runtime.documentMap.getDoc(
         { foo: { label: "first" } },
         "should support nested sinks via asCell with aliases 1",
-        "test",
+        space,
       );
       const initial = initialDoc.asCell();
       const linkDoc = runtime.documentMap.getDoc(
         initial.getAsCellLink(),
         "should support nested sinks via asCell with aliases 2",
-        "test",
+        space,
       );
       const doc = runtime.documentMap.getDoc(
         {
@@ -216,7 +227,7 @@ describe("Schema Support", () => {
           current: { $alias: { cell: linkDoc, path: ["foo"] } },
         },
         "should support nested sinks via asCell with aliases 3",
-        "test",
+        space,
       );
       const root = doc.asCell([], undefined, schema);
 
@@ -248,7 +259,7 @@ describe("Schema Support", () => {
       expect(JSON.parse(JSON.stringify(current.getAsCellLink()))).toEqual({
         cell: doc.toJSON(),
         path: ["current", "label"],
-        space: "test",
+        space,
         schema: current.schema,
         rootSchema: current.rootSchema,
       });
@@ -273,7 +284,7 @@ describe("Schema Support", () => {
       expect(JSON.parse(JSON.stringify(first.getAsCellLink()))).toEqual({
         cell: initialDoc.toJSON(),
         path: ["foo"],
-        space: "test",
+        space,
         schema: omitSchema,
         rootSchema: schema,
       });
@@ -301,7 +312,7 @@ describe("Schema Support", () => {
       const second = runtime.documentMap.getDoc(
         { foo: { label: "second" } },
         "should support nested sinks via asCell with aliases 4",
-        "test",
+        space,
       ).asCell();
       linkDoc.send(second.getAsCellLink());
 
@@ -342,7 +353,7 @@ describe("Schema Support", () => {
       const third = runtime.documentMap.getDoc(
         { label: "third" },
         "should support nested sinks via asCell with aliases 5",
-        "test",
+        space,
       ).asCell();
       doc.setAtPath(["current"], {
         $alias: { cell: third.getDoc(), path: [] },
@@ -400,7 +411,7 @@ describe("Schema Support", () => {
           bool: true,
         },
         "should handle primitive types 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -431,7 +442,7 @@ describe("Schema Support", () => {
           },
         },
         "should handle nested objects 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -465,7 +476,7 @@ describe("Schema Support", () => {
           items: [1, 2, 3],
         },
         "should handle arrays 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -496,7 +507,7 @@ describe("Schema Support", () => {
           },
         },
         "should return a Cell for reference properties 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -529,7 +540,7 @@ describe("Schema Support", () => {
           nested: { id: 2 },
         },
         "Should support a reference at the root 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -563,7 +574,7 @@ describe("Schema Support", () => {
           ],
         },
         "should handle self-references with $ref 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -599,7 +610,7 @@ describe("Schema Support", () => {
           },
         },
         "should preserve schema when using key 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -641,7 +652,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         { value: 42 },
         "should select the correct candidate for primitive types (number) 1",
-        "test",
+        space,
       );
       const schema = {
         type: "object",
@@ -661,7 +672,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         { value: "hello" },
         "should select the correct candidate for primitive types (string) 1",
-        "test",
+        space,
       );
       const schema = {
         type: "object",
@@ -681,7 +692,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         { item: { a: 100, b: "merged" } },
         "should merge object candidates in anyOf 1",
-        "test",
+        space,
       );
       const schema = {
         type: "object",
@@ -714,7 +725,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         { value: true },
         "should return undefined if no anyOf candidate matches 1",
-        "test",
+        space,
       );
       const schema = {
         type: "object",
@@ -734,7 +745,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         { value: { a: 1 } },
         "should return undefined when value is an object 1",
-        "test",
+        space,
       );
       const schema = {
         type: "object",
@@ -752,9 +763,9 @@ describe("Schema Support", () => {
 
     it("should handle anyOf in array items", () => {
       const c = runtime.documentMap.getDoc(
-        { arr: [42, "test", true] },
+        { arr: [42, space, true] },
         "should handle anyOf in array items 1",
-        "test",
+        space,
       );
       const schema = {
         type: "object",
@@ -772,7 +783,7 @@ describe("Schema Support", () => {
       const cell = c.asCell([], undefined, schema);
       const result = cell.get();
       expect(result.arr[0]).toBe(42);
-      expect(result.arr[1]).toBe("test");
+      expect(result.arr[1]).toBe(space);
       expect(result.arr[2]).toBeUndefined();
     });
 
@@ -781,7 +792,7 @@ describe("Schema Support", () => {
       const cObject = runtime.documentMap.getDoc(
         { mixed: { foo: "bar" } },
         "should select the correct candidate when mixing 1",
-        "test",
+        space,
       );
       const schemaObject = {
         type: "object",
@@ -811,7 +822,7 @@ describe("Schema Support", () => {
       const cArray = runtime.documentMap.getDoc(
         { mixed: ["bar", "baz"] },
         "should select the correct candidate when mixing 2",
-        "test",
+        space,
       );
       const schemaArray = {
         type: "object",
@@ -839,7 +850,7 @@ describe("Schema Support", () => {
         const c = runtime.documentMap.getDoc(
           { data: [1, 2, 3] },
           "should handle multiple array type options 1",
-          "test",
+          space,
         );
         const schema = {
           type: "object",
@@ -862,7 +873,7 @@ describe("Schema Support", () => {
         const c = runtime.documentMap.getDoc(
           { data: ["hello", 42, true] },
           "should merge item schemas when multiple array options 1",
-          "test",
+          space,
         );
         const schema = {
           type: "object",
@@ -891,7 +902,7 @@ describe("Schema Support", () => {
             ],
           },
           "should handle nested anyOf in array items 1",
-          "test",
+          space,
         );
         const schema = {
           type: "object",
@@ -932,7 +943,7 @@ describe("Schema Support", () => {
         const c = runtime.documentMap.getDoc(
           { data: { key: "value" } },
           "should return empty array when no array options match 1",
-          "test",
+          space,
         );
         const schema = {
           type: "object",
@@ -967,7 +978,7 @@ describe("Schema Support", () => {
             ],
           },
           "should work for the vdom schema with $ref 1",
-          "test",
+          space,
         );
 
         const withLinks = runtime.documentMap.getDoc(
@@ -979,7 +990,7 @@ describe("Schema Support", () => {
                 cell: runtime.documentMap.getDoc(
                   { color: "red" },
                   "should work for the vdom schema with $ref 2",
-                  "test",
+                  space,
                 ),
                 path: [],
               },
@@ -994,13 +1005,13 @@ describe("Schema Support", () => {
                       cell: runtime.documentMap.getDoc(
                         { type: "text", value: "world" },
                         "should work for the vdom schema with $ref 4",
-                        "test",
+                        space,
                       ),
                       path: [],
                     },
                   ],
                   "should work for the vdom schema with $ref 5",
-                  "test",
+                  space,
                 ),
                 path: [],
               },
@@ -1008,7 +1019,7 @@ describe("Schema Support", () => {
             ],
           },
           "should work for the vdom schema with $ref 3",
-          "test",
+          space,
         );
 
         const vdomSchema = {
@@ -1075,7 +1086,7 @@ describe("Schema Support", () => {
           // age is not defined
         },
         "should use the default value when property is undefined 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -1100,7 +1111,7 @@ describe("Schema Support", () => {
           // profile is not defined
         },
         "should use the default value with asCell for objects 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -1145,7 +1156,7 @@ describe("Schema Support", () => {
           // tags is not defined
         },
         "should use the default value with asCell for arrays 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -1217,7 +1228,7 @@ describe("Schema Support", () => {
           },
         },
         "should use the default value with nested schema 1",
-        "test",
+        space,
       );
 
       const cell = c.asCell([], undefined, schema);
@@ -1241,7 +1252,7 @@ describe("Schema Support", () => {
           },
         },
         "should use the default value with nested schema 2",
-        "test",
+        space,
       );
 
       const cell2 = c2.asCell([], undefined, schema);
@@ -1301,7 +1312,7 @@ describe("Schema Support", () => {
           ],
         },
         "should use the default value for array items 1",
-        "test",
+        space,
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1315,7 +1326,7 @@ describe("Schema Support", () => {
       const c2 = runtime.documentMap.getDoc(
         undefined,
         "should use the default value for array items 2",
-        "test",
+        space,
       );
       const cell2 = c2.asCell([], undefined, schema);
       const value2 = cell2.get();
@@ -1366,7 +1377,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         undefined,
         "should handle default values with additionalProperties 1",
-        "test",
+        space,
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1409,7 +1420,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         undefined,
         "should use the default value at the root level 1",
-        "test",
+        space,
       );
       const cell = c.asCell([], undefined, schema);
 
@@ -1425,7 +1436,7 @@ describe("Schema Support", () => {
 
       // Verify it can be updated
       cell.set(
-        runtime.getImmutableCell("test", {
+        runtime.getImmutableCell(space, {
           name: "Updated User",
           settings: { theme: "dark" },
         }),
@@ -1448,7 +1459,7 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         undefined,
         "should make immutable cells if they provide the default value 1",
-        "test",
+        space,
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
@@ -1456,7 +1467,7 @@ describe("Schema Support", () => {
       expect(value?.name?.get()).toBe("Default Name");
 
       cell.set(
-        runtime.getImmutableCell("test", { name: "Updated Name" }),
+        runtime.getImmutableCell(space, { name: "Updated Name" }),
       );
 
       // Expect the cell to be immutable
@@ -1475,14 +1486,14 @@ describe("Schema Support", () => {
       const c = runtime.documentMap.getDoc(
         undefined,
         "should make mutable cells if parent provides the default value 1",
-        "test",
+        space,
       );
       const cell = c.asCell([], undefined, schema);
       const value = cell.get();
       expect(isCell(value.name)).toBe(true);
       expect(value.name.get()).toBe("First default name");
 
-      cell.set({ name: runtime.getImmutableCell("test", "Updated Name") });
+      cell.set({ name: runtime.getImmutableCell(space, "Updated Name") });
 
       // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
@@ -1497,7 +1508,7 @@ describe("Schema Support", () => {
           events: { $stream: true },
         },
         "should create a stream for properties marked with asStream 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -1532,7 +1543,7 @@ describe("Schema Support", () => {
           },
         },
         "should handle nested streams in objects 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -1570,7 +1581,7 @@ describe("Schema Support", () => {
           // Missing events property
         },
         "should not create a stream when property is missing 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -1598,7 +1609,7 @@ describe("Schema Support", () => {
           streamData: { $stream: true },
         },
         "should behave correctly when both asCell and asStream are in the schema 1",
-        "test",
+        space,
       );
 
       const schema = {
@@ -1632,7 +1643,7 @@ describe("Schema Support", () => {
       const { promise, resolve } = Promise.withResolvers();
       runtime.scheduler.runningPromise = promise;
       expect(runtime.scheduler.runningPromise).toBeDefined();
-      resolve("test");
+      resolve(space);
       await promise;
       expect(runtime.scheduler.runningPromise).toBeUndefined();
     });
@@ -1649,7 +1660,7 @@ describe("Schema Support", () => {
         runtime.scheduler.runningPromise = promise2;
       }).toThrow("Cannot set running while another promise is in progress");
 
-      resolve1("test");
+      resolve1(space);
       await promise1;
       expect(runtime.scheduler.runningPromise).toBeUndefined();
     });

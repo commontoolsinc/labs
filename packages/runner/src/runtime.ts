@@ -11,6 +11,14 @@ import {
   ContextualFlowControl,
   setRecipeEnvironment,
 } from "@commontools/builder";
+
+import type {
+  IStorageManager,
+  IStorageProvider,
+  MemorySpace,
+} from "./storage/interface.ts";
+
+export type { IStorageManager, IStorageProvider, MemorySpace };
 import type { Cell, CellLink } from "./cell.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
@@ -24,7 +32,7 @@ import { ConsoleMethod } from "./harness/console.ts";
 export type ErrorWithContext = Error & {
   action: Action;
   charmId: string;
-  space: string;
+  space: MemorySpace;
   recipeId: string;
 };
 
@@ -43,11 +51,10 @@ export interface CharmMetadata {
 }
 
 export interface RuntimeOptions {
-  storageUrl: string;
-  signer?: Signer;
+  storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
-  blobbyServerUrl?: string;
+  blobbyServerUrl: string;
   recipeEnvironment?: RecipeEnvironment;
   debug?: boolean;
 }
@@ -69,26 +76,26 @@ export interface IRuntime {
 
   // Cell factory methods
   getCell<T>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromEntityId<T>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId,
     path?: PropertyKey[],
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId,
     path: PropertyKey[],
     schema: S,
@@ -105,13 +112,13 @@ export interface IRuntime {
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getImmutableCell<T>(
-    space: string,
+    space: MemorySpace,
     data: T,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     data: any,
     schema: S,
     log?: ReactivityLog,
@@ -171,7 +178,7 @@ export interface IRecipeManager {
   registerRecipe(
     params: {
       recipeId: string;
-      space: string;
+      space: MemorySpace;
       recipe: Recipe | Module;
       recipeMeta: any;
     },
@@ -189,13 +196,13 @@ export interface IModuleRegistry {
 export interface IDocumentMap {
   readonly runtime: IRuntime;
   getDocByEntityId<T = any>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     createIfNotFound?: boolean,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
-  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void;
-  getDoc<T>(value: T, cause: any, space: string): DocImpl<T>;
+  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: MemorySpace): void;
+  getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T>;
   cleanup(): void;
 }
 
@@ -263,11 +270,9 @@ export class Runtime implements IRuntime {
   readonly cfc: ContextualFlowControl;
 
   constructor(options: RuntimeOptions) {
-    // Generate unique ID for this runtime instance
-    this.id = crypto.randomUUID();
-
     // Create harness first (no dependencies on other services)
     this.harness = new UnsafeEvalHarness(this);
+    this.id = options.storageManager.id;
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -276,14 +281,11 @@ export class Runtime implements IRuntime {
       options.errorHandlers,
     );
 
-    if (!options.storageUrl) {
-      throw new Error("storageUrl is required");
+    if (!options.blobbyServerUrl) {
+      throw new Error("blobbyServerUrl is required");
     }
 
-    this.storage = new Storage(this, {
-      remoteStorageUrl: new URL(options.storageUrl),
-      signer: options.signer,
-    });
+    this.storage = new Storage(this, options.storageManager);
 
     this.documentMap = new DocumentMap(this);
     this.moduleRegistry = new ModuleRegistry(this);
@@ -300,7 +302,7 @@ export class Runtime implements IRuntime {
     // The blobby server URL would be used by recipe manager for publishing
     this.blobbyServerUrl = new URL(
       "/api/storage/blobby",
-      options.blobbyServerUrl ?? options.storageUrl,
+      options.blobbyServerUrl,
     ).toString();
 
     // Handle recipe environment configuration
@@ -354,19 +356,19 @@ export class Runtime implements IRuntime {
 
   // Cell factory methods
   getCell<T>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCell(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
     log?: ReactivityLog,
@@ -377,21 +379,21 @@ export class Runtime implements IRuntime {
   }
 
   getCellFromEntityId<T>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     path?: PropertyKey[],
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[],
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromEntityId(
-    space: string,
+    space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[] = [],
     schema?: JSONSchema,
@@ -422,7 +424,7 @@ export class Runtime implements IRuntime {
       doc = cellLink.cell;
     } else if (cellLink.space) {
       doc = this.documentMap.getDocByEntityId(
-        cellLink.space,
+        cellLink.space as MemorySpace,
         getEntityId(cellLink.cell)!,
         true,
       )!;
@@ -437,19 +439,19 @@ export class Runtime implements IRuntime {
   }
 
   getImmutableCell<T>(
-    space: string,
+    space: MemorySpace,
     data: T,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     data: any,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getImmutableCell(
-    space: string,
+    space: MemorySpace,
     data: any,
     schema?: JSONSchema,
     log?: ReactivityLog,

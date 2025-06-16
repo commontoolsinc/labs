@@ -25,7 +25,7 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
-export { Storage } from "./storage.ts";
+export { type MemorySpace, Storage } from "./storage.ts";
 export { type ConsoleEvent, ConsoleMethod } from "./harness/console.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { followAliases, maybeGetCellLink } from "./link-resolution.ts";

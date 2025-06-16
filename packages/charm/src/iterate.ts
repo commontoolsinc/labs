@@ -1,4 +1,10 @@
-import { Cell, isCell, isStream, type Runtime } from "@commontools/runner";
+import {
+  Cell,
+  isCell,
+  isStream,
+  type MemorySpace,
+  type Runtime,
+} from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 import {
   createJsonSchema,
@@ -506,7 +512,7 @@ export async function compileRecipe(
   recipeSrc: string,
   spec: string,
   runtime: Runtime,
-  space: string,
+  space: MemorySpace,
   parents?: string[],
 ) {
   const recipe = await runtime.harness.runSingle(recipeSrc);
@@ -540,7 +546,13 @@ export async function compileAndRunRecipe(
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {
-  const recipe = await compileRecipe(recipeSrc, spec, charmManager.runtime, charmManager.getSpace(), parents);
+  const recipe = await compileRecipe(
+    recipeSrc,
+    spec,
+    charmManager.runtime,
+    charmManager.getSpace(),
+    parents,
+  );
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }
