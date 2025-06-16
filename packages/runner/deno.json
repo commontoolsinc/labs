@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./storage/inspector": "./src/storage/inspector.ts",
-    "./storage/cache": "./src/storage/cache.ts"
+    "./storage/cache": "./src/storage/cache.ts",
+    "./storage/cache.deno": "./src/storage/cache.deno.ts"
   }
 }

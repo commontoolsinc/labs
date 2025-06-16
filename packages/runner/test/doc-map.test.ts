@@ -4,9 +4,7 @@ import { createRef, type EntityId, getEntityId } from "../src/doc-map.ts";
 import { refer } from "merkle-reference";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
-import { StorageManager } from "../src/storage/cache.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

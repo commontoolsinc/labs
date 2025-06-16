@@ -19,7 +19,7 @@ import { Runtime } from "../src/runtime.ts";
 import { CellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "../src/storage/cache.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

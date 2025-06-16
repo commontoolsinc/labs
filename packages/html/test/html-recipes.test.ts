@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { h, render, VNode } from "../src/index.ts";
 import { createBuilder } from "@commontools/builder";
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
 import { Identity } from "@commontools/identity";

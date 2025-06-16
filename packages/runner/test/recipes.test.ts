@@ -10,7 +10,7 @@ import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/link-resolution.ts";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "../src/storage/cache.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

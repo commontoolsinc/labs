@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { type DocImpl } from "../src/doc.ts";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "../src/storage/cache.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

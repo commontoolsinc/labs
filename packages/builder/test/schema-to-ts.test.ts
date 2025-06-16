@@ -11,7 +11,7 @@ import {
 import { popFrame, pushFrame, recipe } from "../src/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

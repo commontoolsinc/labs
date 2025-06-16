@@ -41,7 +41,6 @@ import type { MemorySpaceSession } from "@commontools/memory/consumer";
 import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
-import * as MemoryProvider from "@commontools/memory/provider";
 import * as Codec from "@commontools/memory/codec";
 import { type Cancel, type EntityId } from "@commontools/runner";
 import { type IStorageProvider, type StorageValue } from "./interface.ts";
@@ -1306,19 +1305,14 @@ export class StorageManager implements IStorageManager {
 
   static open(options: Options) {
     if (options.address.protocol === "memory:") {
-      return new StorageManagerEmulator(options);
+      throw new RangeError(
+        "memory: protocol is not supported in browser runtime",
+      );
     } else {
       return new this(options);
     }
   }
-  static emulate(
-    options: Omit<Options, "address">,
-  ) {
-    return new StorageManagerEmulator({
-      ...options,
-      address: new URL("memory://"),
-    });
-  }
+
   protected constructor(
     { address, as, id = crypto.randomUUID(), settings = defaultSettings }:
       Options,
@@ -1362,32 +1356,6 @@ export class StorageManager implements IStorageManager {
     }
 
     await Promise.all(promises);
-  }
-}
-
-class StorageManagerEmulator extends StorageManager {
-  #session?: Consumer.MemoryConsumer<MemorySpace>;
-
-  #providers: Map<string, Provider> = new Map();
-  session() {
-    if (!this.#session) {
-      const provider = MemoryProvider.emulate({ serviceDid: this.as.did() });
-      this.#session = Consumer.open({
-        as: this.as,
-        session: provider.session(),
-      });
-    }
-    return this.#session;
-  }
-  override connect(space: MemorySpace) {
-    return Provider.open({
-      space,
-      session: this.session(),
-    });
-  }
-
-  mount(space: MemorySpace) {
-    return this.session().mount(space);
   }
 }
 

@@ -1,7 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { scrub } from "../src/iterate.ts";
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { JSONSchema } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
 

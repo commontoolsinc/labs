@@ -12,9 +12,9 @@ import type {
   SchemaPathSelector,
   State,
 } from "@commontools/memory/interface";
-import { type Entity } from "@commontools/memory";
+import type { Entity } from "@commontools/memory/interface";
 import { Runtime } from "../src/runtime.ts";
-import { StorageManager } from "../src/storage/cache.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { ClientObjectManager } from "../src/storage/query.ts";
 

@@ -37,8 +37,6 @@ import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 
-export { StorageManager } from "./storage/cache.ts";
-
 export class Runner implements IRunner {
   readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
   private allCancels = new Set<Cancel>();

@@ -19,7 +19,10 @@ const RUNTIME_TYPES: Record<RUNTIME_IDENTIFIER, string> = {
 async function createRuntimeDependencies(): Promise<
   Record<RUNTIME_IDENTIFIER, any>
 > {
-  const { Runtime, StorageManager } = await import("@commontools/runner");
+  const { Runtime } = await import("@commontools/runner");
+  const { StorageManager } = await import(
+    "@commontools/runner/storage/cache.deno"
+  );
   const { createBuilder } = await import("@commontools/builder");
   const { Identity } = await import("@commontools/identity");
   const storageManager = StorageManager.emulate({

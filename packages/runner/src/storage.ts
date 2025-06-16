@@ -2,9 +2,12 @@ import { isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 import { Signer } from "@commontools/identity";
-import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
-import { MemorySpace, SchemaContext } from "@commontools/memory/interface";
+import {
+  MemorySpace,
+  SchemaContext,
+  TransactionResult,
+} from "@commontools/memory/interface";
 import { SchemaNone } from "@commontools/memory/schema";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";

@@ -4,7 +4,7 @@ import { type Cell, CellLink, isCell, isStream } from "../src/cell.ts";
 import type { JSONSchema } from "@commontools/builder";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
-import { StorageManager } from "../src/storage/cache.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

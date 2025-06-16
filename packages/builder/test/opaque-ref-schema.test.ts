@@ -3,7 +3,8 @@ import { expect } from "@std/expect";
 import { createBuilder } from "../src/index.ts";
 import { popFrame, pushFrame } from "../src/recipe.ts";
 import type { Frame, JSONSchema } from "../src/types.ts";
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 
 const signer = await Identity.fromPassphrase("test operator");
