@@ -596,6 +596,178 @@ describe("Schema Support", () => {
       expect(value.children[0].name).toBe("child1");
       expect(value.children[1].name).toBe("child2");
     });
+
+    it("should handle circular references in objects", () => {
+      const c = runtime.documentMap.getDoc(
+        {
+          name: "root",
+          parent: null,
+          children: [
+            { name: "child1", parent: null, children: [] },
+            { name: "child2", parent: null, children: [] },
+          ],
+        },
+        "should handle circular references in objects 1",
+        "test",
+      );
+
+      // Set up circular references using cell links
+      c.setAtPath(["parent"], { cell: c, path: [] });
+      c.setAtPath(["children", 0, "parent"], { cell: c, path: [] });
+      c.setAtPath(["children", 1, "parent"], { cell: c, path: [] });
+
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          parent: { $ref: "#" },
+          children: {
+            type: "array",
+            items: { $ref: "#" },
+          },
+        },
+        required: ["name", "parent", "children"],
+      } as const satisfies JSONSchema;
+
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get() as {
+        name: string;
+        parent: any;
+        children: Array<{ name: string; parent: any; children: any[] }>;
+      };
+
+      // Verify the structure is maintained
+      expect(value.name).toBe("root");
+      expect(value.parent.name).toBe("root");
+      expect(value.children[0].name).toBe("child1");
+      expect(value.children[0].parent.name).toBe("root");
+      expect(value.children[1].name).toBe("child2");
+      expect(value.children[1].parent.name).toBe("root");
+    });
+
+    it("should handle nested circular references", () => {
+      const c = runtime.documentMap.getDoc(
+        {
+          name: "root",
+          nested: {
+            name: "nested",
+            items: [
+              { name: "item1", value: null },
+              { name: "item2", value: null },
+            ],
+          },
+        },
+        "should handle nested circular references 1",
+        "test",
+      );
+
+      // Set up circular references using cell links
+      c.setAtPath(["nested", "items", 0, "value"], { cell: c, path: [] });
+      c.setAtPath(["nested", "items", 1, "value"], {
+        cell: c,
+        path: ["nested"],
+      });
+
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          nested: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    value: { $ref: "#" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get() as {
+        name: string;
+        nested: {
+          name: string;
+          items: Array<{ name: string; value: any }>;
+        };
+      };
+
+      // Verify the structure is maintained
+      expect(value.name).toBe("root");
+      expect(value.nested.name).toBe("nested");
+      expect(value.nested.items[0].name).toBe("item1");
+      expect(value.nested.items[0].value.name).toBe("root");
+      expect(value.nested.items[1].name).toBe("item2");
+      expect(value.nested.items[1].value.name).toBe("nested");
+    });
+
+    it("should handle circular references with anyOf", () => {
+      const c = runtime.documentMap.getDoc(
+        {
+          type: "node",
+          name: "root",
+          children: [
+            { type: "node", name: "child1", children: [] },
+            { type: "leaf", name: "child2", value: null },
+          ],
+        },
+        "should handle circular references with anyOf 1",
+        "test",
+      );
+
+      // Set up circular references using cell links
+      c.setAtPath(["children", 1, "value"], { cell: c, path: [] });
+
+      const schema = {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          name: { type: "string" },
+          children: {
+            type: "array",
+            items: {
+              anyOf: [
+                { $ref: "#" },
+                {
+                  type: "object",
+                  properties: {
+                    type: { type: "string" },
+                    name: { type: "string" },
+                    value: { $ref: "#" },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get() as {
+        type: string;
+        name: string;
+        children: Array<{
+          type: string;
+          name: string;
+          children?: any[];
+          value?: any;
+        }>;
+      };
+
+      // Verify the structure is maintained
+      expect(value.name).toBe("root");
+      expect(value.children[0].name).toBe("child1");
+      expect(value.children[1].name).toBe("child2");
+      expect(value.children[1].value.name).toBe("root");
+    });
   });
 
   describe("Key Navigation", () => {
