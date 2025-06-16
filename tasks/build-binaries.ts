@@ -233,6 +233,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
   console.log("Building CLI binary...");
   // Figure out the full list requested by typescript and
   // friends
+  // Globs don't work for compile(?)
   const envs = [
     "TOOLSHED_API_URL",
     "TSC_WATCHFILE",
@@ -269,8 +270,9 @@ async function buildCli(config: BuildConfig): Promise<void> {
       "--no-check",
       "--allow-write",
       "--allow-read",
-      // Globs don't work for compile(?)
       "--allow-env",
+      "--allow-ffi", // for @db/sqlite
+      "--allow-net", // for @db/sqlite lazy download
       "--include",
       config.staticTypesPath(),
       config.cliEntryPath(),
