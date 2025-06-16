@@ -8,7 +8,8 @@
 import { charmListSchema } from "../charm/src/manager.ts";
 import { Cell, type CellLink } from "../runner/src/cell.ts";
 import { DocImpl } from "../runner/src/doc.ts";
-import { Runtime, StorageManager } from "../runner/src/index.ts";
+import { Runtime } from "../runner/src/index.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "../identity/src/index.ts";
 import { getEntityId } from "../runner/src/doc-map.ts";
 

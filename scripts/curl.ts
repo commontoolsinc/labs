@@ -1,7 +1,7 @@
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { type DID, Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 // Some examples of how you can use this to play with the classification labels
 // Store the empty list
 // > deno task curl --spaceName robin --data '[]' ct://did:key:z6MkjMowGqCog2ZfvNBNrx32p2Fa2bKR1nT7pUWiPQFWzVAg/baedreih5ute2slgsylwtbszccarx6ky2ca3mtticxug6sfj3nwamacefmn/application/json

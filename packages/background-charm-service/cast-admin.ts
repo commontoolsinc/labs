@@ -1,6 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import { getEntityId, Runtime, StorageManager } from "@commontools/runner";
+import { getEntityId, Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type DID } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
 import {

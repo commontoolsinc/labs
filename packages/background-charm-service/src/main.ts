@@ -1,5 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { BackgroundCharmService } from "./service.ts";
 import { getIdentity, log } from "./utils.ts";
 import { env } from "./env.ts";

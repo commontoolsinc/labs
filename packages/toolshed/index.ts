@@ -2,7 +2,8 @@ import app from "@/app.ts";
 import env from "@/env.ts";
 import * as Sentry from "@sentry/deno";
 import { identity } from "@/lib/identity.ts";
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { memory } from "@/routes/storage/memory.ts";
 
 // Create a global runtime instance for the server

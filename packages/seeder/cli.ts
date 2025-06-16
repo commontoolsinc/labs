@@ -1,5 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { setLLMUrl } from "@commontools/llm";
 import { createSession, Identity } from "@commontools/identity";
 import { CharmManager } from "@commontools/charm";

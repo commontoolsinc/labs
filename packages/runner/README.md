@@ -27,7 +27,8 @@ testability, isolation, and control over service configuration.
 All services are now accessed through a `Runtime` instance:
 
 ```typescript
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 // Create a runtime instance with configuration
 const runtime = new Runtime({
@@ -162,7 +163,8 @@ structures.
 Cells are now created through the Runtime instance rather than global functions:
 
 ```typescript
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 
 // Set up storage manager
@@ -232,6 +234,7 @@ const cleanup = settingsCell.sink((value) => {
 
 // Clean up subscription when done
 cleanup();
+
 ```
 
 ### Cells with Type-Safe Schemas
@@ -241,7 +244,8 @@ validation, and automatic transformation of data. The `Schema<>` helper from the
 Builder package provides TypeScript type inference.
 
 ```typescript
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
 
@@ -308,6 +312,7 @@ settingsCell.set({ theme: "dark", notifications: false });
 // Key navigation preserves schema
 const nameCell = userCell.key("name");
 console.log(nameCell.get()); // "Alice"
+
 ```
 
 ### Running Recipes
@@ -317,7 +322,8 @@ the Builder package and executed by the Runner, which manages dependencies and
 updates results automatically.
 
 ```typescript
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { derive, recipe } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
 
@@ -380,6 +386,7 @@ console.log(result.get()); // { result: 20 }
 
 // Stop recipe execution when no longer needed
 runtime.runner.stop(result);
+
 ```
 
 ### Storage
@@ -388,7 +395,8 @@ The storage system provides persistence for cells and synchronization across
 clients.
 
 ```typescript
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache";
 import { Identity } from "@commontools/identity";
 
 // Create identity for authentication
@@ -422,6 +430,7 @@ await runtime.storage.synced();
 
 // When cells with the same causal ID are synced across instances,
 // they will automatically be kept in sync with the latest value
+
 ```
 
 ## Advanced Features
@@ -431,7 +440,8 @@ await runtime.storage.synced();
 You can map and transform data using cells with schemas:
 
 ```typescript
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "@commontools/builder";
 import { Identity } from "@commontools/identity";
 
@@ -514,6 +524,7 @@ console.log(result);
 //   kind: "user",
 //   firstTag: "tag1"
 // }
+
 ```
 
 ### Nested Reactivity
@@ -521,7 +532,8 @@ console.log(result);
 Cells can react to changes in deeply nested structures:
 
 ```typescript
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 
 // Set up storage manager
@@ -592,6 +604,7 @@ rootCell.key("current").key("label").set("updated");
 // "Label value: updated"
 // "Nested value: { label: 'updated' }"
 // "Root changed: { value: 'root', current: { label: 'updated' } }"
+
 ```
 
 ## Migration from Singleton Pattern
@@ -607,7 +620,8 @@ await storage.syncCell(cell);
 await idle();
 
 // NEW (current):
-import { Runtime, StorageManager } from "@commontools/runner";
+import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 
 const signer = await Identity.fromPassphrase("my-passphrase");
@@ -674,7 +688,6 @@ const storageManager = StorageManager.open({
   as: signer,
 });
 ```
-
 
 The `@commontools/storage/cache` provides  a default implementation of the `IStorageManager` interface.
 
