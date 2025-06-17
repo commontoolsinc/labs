@@ -567,7 +567,11 @@ export class CharmManager {
               const docId = getEntityId(value);
               if (docId) addMatchingCharm(docId);
 
-              const sourceRefId = followSourceToResultRef(value.asCell(), new Set(), 0);
+              const sourceRefId = followSourceToResultRef(
+                value.asCell(),
+                new Set(),
+                0,
+              );
               if (sourceRefId) addMatchingCharm(sourceRefId);
             } catch (err) {
               console.debug("Error handling doc:", err);
@@ -746,7 +750,12 @@ export class CharmManager {
 
       // Start processing from the argument value
       if (argumentValue && typeof argumentValue === "object") {
-        processValue(argumentValue, this.runtime.getCellFromLink(argumentLink), new Set(), 0);
+        processValue(
+          argumentValue,
+          this.runtime.getCellFromLink(argumentLink),
+          new Set(),
+          0,
+        );
       }
     } catch (error) {
       console.debug("Error finding references in charm arguments:", error);
@@ -819,7 +828,11 @@ export class CharmManager {
       // If document has a sourceCell, follow it
       const value = cell.getRaw();
       if (value && typeof value === "object" && value.sourceCell) {
-        return followSourceToResultRef(value.sourceCell.asCell(), visited, depth + 1);
+        return followSourceToResultRef(
+          value.sourceCell.asCell(),
+          visited,
+          depth + 1,
+        );
       }
 
       // If we've reached the end and have a resultRef, return it
@@ -880,7 +893,11 @@ export class CharmManager {
             }
 
             // Check if this doc's source chain leads to our target
-            const sourceRefId = followSourceToResultRef(value.asCell(), new Set(), 0);
+            const sourceRefId = followSourceToResultRef(
+              value.asCell(),
+              new Set(),
+              0,
+            );
             if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
               return true;
             }
@@ -1126,7 +1143,12 @@ export class CharmManager {
         // Check if the charm document references our target
         if (charmValue && typeof charmValue === "object") {
           if (
-            checkRefersToTarget(charmValue, this.runtime.getCellFromLink(otherCellLink), new Set(), 0)
+            checkRefersToTarget(
+              charmValue,
+              this.runtime.getCellFromLink(otherCellLink),
+              new Set(),
+              0,
+            )
           ) {
             addReadingCharm(otherCharm);
             continue; // Skip additional checks for this charm
@@ -1258,12 +1280,7 @@ export class CharmManager {
   ): Promise<Cell<Charm>> {
     await this.runtime.idle();
 
-    const charm = this.runtime.getCellFromEntityId(
-      this.space,
-      createRef({ recipe, inputs }, cause),
-      [],
-      charmSchema,
-    );
+    const charm = this.runtime.getCell(this.space, cause, charmSchema);
     await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
     await this.add([charm]);
