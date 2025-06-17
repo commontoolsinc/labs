@@ -735,7 +735,7 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
-    const recipeId = charm.getDoc().sourceCell?.get()?.[TYPE];
+    const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe(space);
@@ -800,7 +800,7 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
 
-    const recipeId = charm.getDoc().sourceCell?.get()?.[TYPE];
+    const recipeId = charm.getSourceCell()?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe(space);
@@ -811,7 +811,7 @@ describe("Recipe Runner", () => {
     // Make sure it recovers:
     dividend.send(2);
     await runtime.idle();
-    expect((charm.getRaw() as any).result.$alias.cell).toBe(charm.getDoc().sourceCell);
+    expect((charm.getRaw() as any).result.$alias.cell).toBe(charm.getSourceCell()?.getDoc());
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });
 
@@ -926,20 +926,16 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charm = runtime.run(
-      slowHandlerRecipe,
-      { result: 0 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "idle should not wait for deliberately async handlers",
-        space,
-      ),
+    const charmCell = runtime.getCell<{ result: number; updater: any }>(
+      space,
+      "idle should not wait for deliberately async handlers",
     );
+    const charm = runtime.run(slowHandlerRecipe, { result: 0 }, charmCell);
 
     await runtime.idle();
 
     // Trigger the handler
-    charm.asCell(["updater"]).send({ value: 5 });
+    charm.key("updater").send({ value: 5 });
 
     await runtime.idle();
     expect(handlerCalled).toBe(true);
@@ -948,7 +944,7 @@ describe("Recipe Runner", () => {
     // Now idle should wait for the handler's promise to resolve
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
-    expect(charm.asCell().get()).toMatchObject({ result: 10 });
+    expect(charm.get()).toMatchObject({ result: 10 });
   });
 
   it("should create and use a named cell inside a lift", async () => {
@@ -972,25 +968,21 @@ describe("Recipe Runner", () => {
     );
     input.set(5);
 
-    const result = runtime.run(
-      wrapperRecipe,
-      { value: input },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should create and use a named cell inside a lift",
-        space,
-      ),
+    const resultCell = runtime.getCell<{ value: Cell<number> }>(
+      space,
+      "should create and use a named cell inside a lift",
+      {
+        type: "object",
+        properties: { value: { type: "number", asCell: true } },
+        required: ["value"],
+      }
     );
+    const result = runtime.run(wrapperRecipe, { value: input }, resultCell);
 
     await runtime.idle();
 
     // Initial state
-    const wrapper = result.asCell([], undefined, {
-      type: "object",
-      properties: { value: { type: "number", asCell: true } },
-      required: ["value"],
-    });
-    const wrapperCell = wrapper.get().value;
+    const wrapperCell = result.key("value").get();
     expect(isCell(wrapperCell)).toBe(true);
     expect(wrapperCell.get()).toBe(5);
 
@@ -1028,20 +1020,16 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.run(
-      itemsRecipe,
-      { items: [] },
-      runtime.documentMap.getDoc(
-        undefined,
-        "should handle pushing objects that reference their containing array",
-        space,
-      ),
+    const resultCell = runtime.getCell<{ items: any[]; stream: any }>(
+      space,
+      "should handle pushing objects that reference their containing array",
     );
+    const result = runtime.run(itemsRecipe, { items: [] }, resultCell);
 
     await runtime.idle();
 
     // Add first item
-    result.asCell(["stream"]).send({ detail: { message: "First Item" } });
+    result.key("stream").send({ detail: { message: "First Item" } });
     await runtime.idle();
 
     const firstState = result.getAsQueryResult();
@@ -1052,7 +1040,7 @@ describe("Recipe Runner", () => {
     expect(firstState.items[0].items).toBe(firstState.items);
 
     // Add second item
-    result.asCell(["stream"]).send({ detail: { message: "Second Item" } });
+    result.key("stream").send({ detail: { message: "Second Item" } });
     await runtime.idle();
 
     const secondState = result.getAsQueryResult();
