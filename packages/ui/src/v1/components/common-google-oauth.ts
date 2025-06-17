@@ -23,12 +23,14 @@ export class CommonGoogleOauthElement extends LitElement {
     authStatus: { type: String },
     isLoading: { type: Boolean },
     authResult: { type: Object },
+    scopes: { type: Array },
   };
 
   declare auth: Cell<AuthData> | undefined;
   declare authStatus: string;
   declare isLoading: boolean;
   declare authResult: Record<string, unknown> | null;
+  declare scopes: string[] | undefined;
 
   constructor() {
     super();
@@ -37,14 +39,20 @@ export class CommonGoogleOauthElement extends LitElement {
     this.authResult = null;
   }
 
+  override connectedCallback() {
+    super.connectedCallback();
+  }
+
+  override updated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.updated(changedProperties);
+  }
+
   async handleClick() {
     this.isLoading = true;
     this.authStatus = "Initiating OAuth flow...";
     this.authResult = null;
 
     const authCellId = JSON.stringify(this.auth?.getAsCellLink());
-
-    console.log("authCellId", authCellId);
 
     // `ct://${spaceDid}/${cellId}`
 
@@ -59,6 +67,7 @@ export class CommonGoogleOauthElement extends LitElement {
     const payload = {
       authCellId,
       integrationCharmId: charmId,
+      scopes: this.scopes,
     };
 
     try {
@@ -72,7 +81,6 @@ export class CommonGoogleOauthElement extends LitElement {
       }
 
       const resp = await response.json();
-      console.log("OAuth URL:", resp.url);
       this.authStatus = "Opening OAuth window...";
 
       // TODO(jesse): do we need this? Since we have a cell
@@ -82,7 +90,6 @@ export class CommonGoogleOauthElement extends LitElement {
         if (event.origin !== globalThis.location.origin) return;
 
         if (event.data && event.data.type === "oauth-callback") {
-          console.log("Received OAuth callback data:", event.data);
           this.authResult = event.data.result;
           this.authStatus = event.data.result.success
             ? "Authentication successful!"
