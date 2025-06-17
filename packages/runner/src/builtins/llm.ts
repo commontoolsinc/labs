@@ -1,5 +1,11 @@
 import { type DocImpl } from "../doc.ts";
-import { DEFAULT_MODEL_NAME, LLMClient, LLMRequest } from "@commontools/llm";
+import { 
+  DEFAULT_MODEL_NAME, 
+  DEFAULT_GENERATE_OBJECT_MODELS,
+  LLMClient, 
+  LLMRequest,
+  LLMGenerateObjectRequest,
+} from "@commontools/llm";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { refer } from "merkle-reference";
@@ -7,6 +13,7 @@ import { type ReactivityLog } from "../scheduler.ts";
 import {
   BuiltInLLMParams,
   BuiltInLLMState,
+  BuiltInGenerateObjectParams,
 } from "@commontools/api";
 
 const client = new LLMClient();
@@ -138,6 +145,135 @@ export function llm(
         if (thisRun !== currentRun) return;
 
         console.error("Error generating data", error);
+
+        await runtime.idle();
+
+        pending.setAtPath([], false, log);
+        result.setAtPath([], undefined, log);
+        partial.setAtPath([], undefined, log);
+
+        // TODO(seefeld): Not writing now, so we retry the request after failure.
+        // Replace this with more fine-grained retry logic.
+        // requestHash.setAtPath([], hash, log);
+      });
+  };
+}
+
+/**
+ * Generate structured data via an LLM using JSON mode.
+ *
+ * Returns the complete result as `result` and the incremental result as
+ * `partial`. `pending` is true while a request is pending.
+ *
+ * @param prompt - The prompt to send to the LLM.
+ * @param schema - JSON Schema to validate the response against.
+ * @param system - Optional system message.
+ * @param maxTokens - Maximum number of tokens to generate.
+ * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODELS).
+ * @param cache - Whether to cache the response (defaults to true).
+ * @param metadata - Additional metadata to pass to the LLM.
+ *
+ * @returns { pending: boolean, result?: object, partial?: string } - As individual
+ *   docs, representing `pending` state, final `result` and incrementally
+ *   updating `partial` result.
+ */
+export function generateObject(
+  inputsCell: DocImpl<BuiltInGenerateObjectParams>,
+  sendResult: (result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause: any,
+  parentDoc: DocImpl<any>,
+  runtime: IRuntime,
+): Action {
+  const pending = runtime.documentMap.getDoc(
+    false,
+    { generateObject: { pending: cause } },
+    parentDoc.space,
+  );
+  const result = runtime.documentMap.getDoc<Record<string, unknown> | undefined>(
+    undefined,
+    {
+      generateObject: { result: cause },
+    },
+    parentDoc.space,
+  );
+  const partial = runtime.documentMap.getDoc<string | undefined>(
+    undefined,
+    {
+      generateObject: { partial: cause },
+    },
+    parentDoc.space,
+  );
+  const requestHash = runtime.documentMap.getDoc<string | undefined>(
+    undefined,
+    {
+      generateObject: { requestHash: cause },
+    },
+    parentDoc.space,
+  );
+
+  sendResult({ pending, result, partial, requestHash });
+
+  let currentRun = 0;
+  let previousCallHash: string | undefined = undefined;
+
+  return (log: ReactivityLog) => {
+    const thisRun = ++currentRun;
+
+    const { prompt, maxTokens, model, schema, system, cache, metadata } =
+      inputsCell.getAsQueryResult([], log) ?? {};
+
+    if (!prompt || !schema) {
+      pending.setAtPath([], false, log);
+      return;
+    }
+
+    const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
+
+    const generateObjectParams: LLMGenerateObjectRequest = {
+      prompt,
+      maxTokens: maxTokens ?? 8192,
+      schema: JSON.parse(JSON.stringify(schema)),
+      model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+      metadata: {
+        ...readyMetadata,
+        context: "charm",
+      },
+      cache: cache ?? true,
+    };
+
+    if (system) {
+      generateObjectParams.system = system;
+    }
+
+    const hash = refer(generateObjectParams).toString();
+
+    // Return if the same request is being made again, either concurrently (same
+    // as previousCallHash) or when rehydrated from storage (same as the
+    // contents of the requestHash doc).
+    if (hash === previousCallHash || hash === requestHash.get()) return;
+    previousCallHash = hash;
+
+    result.setAtPath([], undefined, log);
+    partial.setAtPath([], undefined, log);
+    pending.setAtPath([], true, log);
+
+    const resultPromise = client.generateObject(generateObjectParams);
+
+    resultPromise
+      .then(async (response) => {
+        if (thisRun !== currentRun) return;
+
+        await runtime.idle();
+
+        pending.setAtPath([], false, log);
+        result.setAtPath([], response.object, log);
+        requestHash.setAtPath([], hash, log);
+      })
+      .catch(async (error) => {
+        if (thisRun !== currentRun) return;
+
+        console.error("Error generating object", error);
 
         await runtime.idle();
 

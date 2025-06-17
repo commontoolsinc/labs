@@ -4,11 +4,13 @@ import type {
   FeedbackRoute,
   GenerateTextRoute,
   GetModelsRoute,
+  GenerateObjectRoute,
 } from "./llm.routes.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import { hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
+import { generateObject as generateObjectCore } from "./generateObject.ts";
 import { findModel } from "./models.ts";
 import env from "@/env.ts";
 import { isLLMRequest, type LLMMessage } from "@commontools/llm/types";
@@ -236,6 +238,36 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
     return c.json({ success: true }, HttpStatusCodes.OK);
   } catch (error) {
     console.error("Error submitting feedback:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
+  }
+};
+
+/**
+ * Handler for POST /generateObject endpoint
+ * Generates structured JSON objects using specified LLM model
+ */
+export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (c) => {
+  const payload = await c.req.json();
+
+  if (!payload.prompt || !payload.schema) {
+    return c.json({ error: "Missing required fields: prompt and schema" }, HttpStatusCodes.BAD_REQUEST);
+  }
+
+  if (!payload.metadata) {
+    payload.metadata = {};
+  }
+
+  const user = c.req.header("Tailscale-User-Login");
+  if (user) {
+    payload.metadata.user = user;
+  }
+
+  try {
+    const result = await generateObjectCore(payload);
+    return c.json(result);
+  } catch (error) {
+    console.error("Error in generateObject:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
   }
