@@ -880,7 +880,7 @@ export class Provider implements StorageProvider {
     const of = BaseStorageProvider.toEntity(entityId);
     const { workspace } = this;
     const address = { the, of };
-    console.log("Called sink for", of);
+    console.log("Called sink for", JSON.stringify(entityId));
     const subscriber = (revision?: Revision<State>) => {
       if (revision) {
         // ⚠️ We may not have a value because fact was retracted or

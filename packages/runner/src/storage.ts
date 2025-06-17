@@ -2,12 +2,11 @@ import { isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 import { Signer } from "@commontools/identity";
-import { JSONObject, type SchemaContext } from "@commontools/builder";
+import { type SchemaContext } from "@commontools/builder";
 import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
 import {
   FactAddress,
-  MemorySpace,
   Revision,
   SchemaNone,
   State,
@@ -249,61 +248,93 @@ export class Storage implements IStorage {
     this.docIsSyncing.add(doc);
 
     // Start loading the doc and safe the promise for processBatch to await for
-    const loadingPromise = this._getStorageProviderForSpace(doc.space)
-      .sync(doc.entityId!, false, schemaContext)
-      .then((result) => {
-        if (result.error) {
-          // This will be a decoupled doc that is not persisted and cannot be edited
-          doc.ephemeral = true;
-          doc.freeze();
-        } else {
-          // There's a few different ways we could do this.
-          // We could run a schema traverse on the resulting doc as retrieved
-          // from storage, and from that, we would have a list of relevant
-          // documents.
-          // Instead, here I'm using the list of returned documents in the
-          // server's response, allowing me to avoid duplicating that work.
-          // If we want to decouple these more, though, we can.
-          this._integrateResults(
-            doc,
-            result.ok as Selection<FactAddress, Revision<State>>,
+    const storageProvider = this._getStorageProviderForSpace(doc.space);
+    const loadingPromise = storageProvider.sync(
+      doc.entityId!,
+      false,
+      schemaContext,
+    ).then((result) => {
+      if (result.error) {
+        // This will be a decoupled doc that is not persisted and cannot be edited
+        doc.ephemeral = true;
+        doc.freeze();
+      } else {
+        // I'm using the list of returned documents in the server's response,
+        // allowing me to avoid running a local schema query.
+        const selection = result.ok as Selection<
+          FactAddress,
+          Revision<State>
+        >;
+        console.log("selection", selection);
+        // When using volatile from testing, we have an empty selection.
+        // I don't try to handle this correctly, since
+        let selectionArray: [FactAddress, unknown][];
+        if (selection.size === undefined) {
+          console.log(
+            "Working with volatile storage, so we don't have the response. Could use schema traversal.",
           );
+          const idStr = doc.entityId.toJSON!()["/"];
+          selectionArray = [[
+            {
+              of: `of:${idStr}`,
+              the: "application/json",
+            } as FactAddress,
+            undefined,
+          ]];
+        } else {
+          selectionArray = [...selection];
         }
-        this._resolvePromises(doc);
-        return doc;
-      });
+        // Ignore any entries that aren't the json. We typically have the
+        // per-space transaction entry, and may have labels.
+        // We'll also ensure we're only dealing with the entity ids that will
+        // be managed in our document map.
+        const entityIds = selectionArray.map(([docAddr, _value]) => docAddr)
+          .filter((docAddr) =>
+            docAddr.the === "application/json" && docAddr.of.startsWith("of:")
+          ).map((docAddr) => {
+            return { "/": docAddr.of.slice(3) };
+          });
+        console.log("Entity ids:", entityIds);
+        this._integrateResults(doc, storageProvider, entityIds);
+      }
+
+      this._resolvePromises(doc);
+      return doc;
+    });
     this.loadingPromises.set(doc, loadingPromise);
 
     // Create a promise that gets resolved once the doc and all its
     // dependencies are loaded. It'll return the doc when done.
     const { promise, resolve } = defer<void, Error>();
     this.loadingResolves.set(doc, resolve);
-    this.docIsLoading.set(doc, promise.then(() => doc));
+    this.docIsLoading.set(
+      doc,
+      promise.then(() => {
+        console.log(
+          "Resolved docIsloading for",
+          JSON.stringify(doc.entityId),
+          JSON.stringify(doc.value),
+        );
+        return doc;
+      }),
+    );
 
     // Return the doc, to make calls chainable.
     return doc;
   }
 
+  // Take the data from our storage provider and integrate that into the
+  // document map.
   private _integrateResults<T>(
     doc: DocImpl<T>,
-    selection: Selection<FactAddress, Revision<State>>,
+    storageProvider: StorageProvider,
+    entityIds: EntityId[],
   ) {
-    // Ignore any entries that aren't the json. We typically have the
-    // per-space transaction entry, and may have labels.
-    // We'll also ensure we're only dealing with the entity ids that will
-    // be managed in our document map.
-    const filtered = [...selection].filter(([docAddr, _value]) =>
-      docAddr.the === "application/json" && docAddr.of.startsWith("of:")
-    );
+    const docMap = this.runtime.documentMap;
     // First, make sure we have all these docs in the runtime document map
-    for (const [docAddr, _value] of filtered) {
-      const entityId = { "/": docAddr.of.slice(3) };
-      console.log(entityId);
-      this.runtime.documentMap.getDocByEntityId(
-        doc.space,
-        entityId,
-        true,
-      )!;
+    for (const entityId of entityIds) {
+      console.log("Creating entry with entityId", entityId);
+      docMap.getDocByEntityId(doc.space, entityId, true)!;
     }
 
     // Now make another pass. At this point, we can leave any docs that aren't
@@ -311,30 +342,24 @@ export class Storage implements IStorage {
     // that are present.
     // This does not preserve any dependency order like the topological sort
     // does, but I don't think we need to do this anymore.
-    for (const [docAddr, value] of filtered) {
-      const entityId = { "/": docAddr.of.slice(3) };
-      const isValue = value.is as JSONObject | undefined;
-      const newDoc = this.runtime.documentMap.getDocByEntityId(
-        doc.space,
-        entityId,
-        false,
-      )!;
+    // I use the storage provider to get the nursery version if it's more recent.
+    // This makes it so if I have local changes, they aren't lost.
+    for (const entityId of entityIds) {
+      const obj = storageProvider.get(entityId)!;
+      const newDoc = docMap.getDocByEntityId(doc.space, entityId, false)!;
       // NOTE(@ubik2): I can't recall if a retraction will come over as a missing isValue.
       // We may still be doing the "value" wrapping in the network protocol, even though
       // that's not what they look like on the server. Not urgent, since we don't do
       // retractions right now.
-      if (isValue !== undefined) {
-        console.log("value", isValue);
-        const newValue = this._setupCellLinks(
-          newDoc,
-          isValue.value,
-          isValue?.source as { "/": string } | undefined,
-        );
+      if (obj !== undefined) {
+        console.log("value", obj);
+        const newValue = this._setupCellLinks(newDoc, obj.value, obj.source);
         console.log("newvalue", newValue);
-        // TODO(@ubik2): We may have newer changes than "since" in the nursery
-        // (our local copy). If so, we probably don't want to do this swap.
-        newDoc.send(newValue);
+        newDoc.send(newValue.value);
       }
+      // Any updates to these docs should be sent to storage, and any update
+      // in storage should be used to update these docs.
+      this._subscribeToChangesNew(newDoc);
     }
   }
 
@@ -648,42 +673,6 @@ export class Storage implements IStorage {
       this.readValues.set(doc, newValue);
 
       this._addToBatch([{ doc, type: "doc" }]);
-    }
-  }
-
-  private getDocFromRuntimeOrStorage(
-    space: MemorySpace,
-    entityId: { "/": string },
-  ) {
-    // Any dependent docs that we expected should already be loaded,
-    // so we can just grab them from the runtime's document map.
-    // If they aren't available, then leave the link in its raw form.
-    const dependency = this.runtime.documentMap.getDocByEntityId(
-      space,
-      entityId,
-      false,
-    );
-    if (dependency !== undefined) {
-      // FIXME: I still need to traverse, swapping links as I go, because I
-      // may have and old record which did not include some links, and now
-      // I have a new record which includes those links. I want to swap in
-      // those links.
-      return dependency;
-    }
-
-    // Check in storage - we may have fetched the doc, but not set it up
-    // in our runtime's document map.
-    const storageValue = this._getStorageProviderForSpace(space).get(entityId);
-    if (storageValue !== undefined) {
-      const depDoc = this.runtime.documentMap.getDocByEntityId(
-        space,
-        entityId,
-        true,
-      )!;
-      // If we hadn't set it up in our document map, we probably need to
-      // evaluate this doc's links as well.
-      this._batchForDoc(depDoc, storageValue.value, storageValue.source);
-      return depDoc;
     }
   }
 
@@ -1077,6 +1066,32 @@ export class Storage implements IStorage {
       this._getStorageProviderForSpace(doc.space).sink(
         doc.entityId!,
         (value) => this._batchForDoc(doc, value.value, value.source),
+      ),
+    );
+  }
+
+  private _subscribeToChangesNew(doc: DocImpl<any>): void {
+    log(() => ["subscribe to changes", JSON.stringify(doc.entityId)]);
+
+    // Subscribe to doc changes, send updates to storage
+    this.addCancel(
+      doc.updates((value, _path, labels) => {
+        log(
+          () => [
+            "got from doc",
+            JSON.stringify(doc.entityId),
+            JSON.stringify(value),
+          ],
+        );
+        return this._batchForStorage(doc, labels);
+      }),
+    );
+
+    // Subscribe to storage updates, send results to doc
+    this.addCancel(
+      this._getStorageProviderForSpace(doc.space).sink(
+        doc.entityId!,
+        (value) => this._setupCellLinks(doc, value.value, value.source),
       ),
     );
   }

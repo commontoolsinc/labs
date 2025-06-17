@@ -31,9 +31,6 @@ import { isObject } from "@commontools/utils/types";
  * @returns The charm ID string, or undefined if no ID is found
  */
 export function charmId(charm: Cell<Charm>): string | undefined {
-  console.log(charm);
-  console.log(charm.entityId);
-  console.trace();
   const id = getEntityId(charm);
   if (!id) return undefined;
   const idValue = id["/"];
