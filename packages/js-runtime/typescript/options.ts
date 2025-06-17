@@ -12,6 +12,8 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     strict: true,
+    strictNullChecks: true,
+    strictFunctionTypes: true,
 
     /**
      * Module
@@ -28,7 +30,7 @@ export const getCompilerOptions = (): CompilerOptions => {
 
     removeComments: true,
     noEmitOnError: true,
-    declarations: true,
+    declaration: true,
     // Enable source map generation.
     sourceMap: true,
     // We want the source map to include the original TypeScript files
