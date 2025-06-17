@@ -207,7 +207,7 @@ export function followLinks(
     const target = result.cell.getAtPath(result.path);
 
     nextRef = !onlyAliases || isAlias(target)
-      ? parseToLegacyCellLink(target, result.cell.runtime, result.cell.space)
+      ? parseToLegacyCellLink(target, result.cell.asCell())
       : undefined;
 
     if (nextRef !== undefined) {

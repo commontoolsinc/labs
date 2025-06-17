@@ -617,11 +617,7 @@ export class CharmManager {
           }
 
           // Try to get a cell link from various types of values
-          const cellLink = parseToLegacyCellLink(
-            value,
-            this.runtime,
-            this.space,
-          );
+          const cellLink = parseToLegacyCellLink(value, parent);
           if (cellLink) {
             try {
               const cellId = getEntityId(cellLink.cell);
@@ -643,11 +639,7 @@ export class CharmManager {
           if (value.$alias) {
             try {
               // Use maybeGetCellLink to handle all formats including new sigil format
-              const aliasLink = parseToLegacyCellLink(
-                value.$alias,
-                this.runtime,
-                this.space,
-              );
+              const aliasLink = parseToLegacyCellLink(value.$alias, parent);
               if (aliasLink) {
                 const aliasId = getEntityId(aliasLink.cell);
                 if (aliasId) addMatchingCharm(aliasId);
@@ -688,10 +680,7 @@ export class CharmManager {
               if (value[i] == null) continue;
 
               // Skip items that might be cells to avoid Copy trap
-              if (
-                typeof value[i] === "object" &&
-                (isCell(value[i]) || isDoc(value[i]) || isCellLink(value[i]))
-              ) {
+              if (isCell(value[i]) || isDoc(value[i]) || isCellLink(value[i])) {
                 try {
                   // Process each cell directly
                   processValue(
@@ -975,11 +964,7 @@ export class CharmManager {
         }
 
         // Use maybeGetCellLink to handle various reference types
-        const cellLink = parseToLegacyCellLink(
-          value,
-          this.runtime,
-          this.space,
-        );
+        const cellLink = parseToLegacyCellLink(value, parent);
         if (cellLink) {
           try {
             // Check if the linked doc is our target
@@ -1010,11 +995,7 @@ export class CharmManager {
         if (value.$alias) {
           try {
             // Use maybeGetCellLink to handle all formats including new sigil format
-            const aliasLink = parseToLegacyCellLink(
-              value.$alias,
-              this.runtime,
-              this.space,
-            );
+            const aliasLink = parseToLegacyCellLink(value.$alias, parent);
             if (aliasLink) {
               // Check if the alias points to our target
               const aliasId = getEntityId(aliasLink.cell);

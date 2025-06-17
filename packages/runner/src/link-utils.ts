@@ -309,27 +309,29 @@ export function parseAlias(
  */
 export function parseToLegacyCellLink(
   value: any,
-  runtime?: IRuntime,
-  space?: MemorySpace,
+  baseCell?: Cell,
 ): CellLink | undefined {
+  if (!value) return undefined;
+
   const doc = isDoc(value)
     ? value
-    : isDoc(value.cell)
-    ? value.cell
-    : isDoc(value.$alias?.cell)
-    ? value.$alias?.cell
+    : (isRecord(value) && isDoc((value as any).cell))
+    ? (value as any).cell
+    : (isRecord(value) && (value as any).$alias &&
+        isDoc((value as any).$alias.cell))
+    ? (value as any).$alias.cell
     : undefined;
 
-  const link = parseLink(value);
+  const link = parseLink(value, baseCell);
   if (!link) return undefined;
 
-  if (!doc && (!runtime || !space)) {
-    throw new Error("No runtime or space, but link only had id");
+  if (!doc && !baseCell) {
+    throw new Error("No base cell, but link only had id");
   }
 
   return {
-    cell: doc ?? runtime!.documentMap.getDocByEntityId(
-      link.space ?? space!,
+    cell: doc ?? baseCell!.getDoc().runtime!.documentMap.getDocByEntityId(
+      link.space ?? baseCell!.space,
       link.id,
       true,
     )!,
