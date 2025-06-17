@@ -1,5 +1,4 @@
 import { isRecord } from "@commontools/utils/types";
-import { type DID } from "@commontools/identity";
 import { type JSONSchema } from "./builder/types.ts";
 import { isDoc } from "./doc.ts";
 import {
@@ -11,6 +10,7 @@ import {
   isSigilLink,
   isSigilValue,
   type JSONCellLink,
+  type MemorySpace,
   type SigilAlias,
   type SigilLink,
 } from "./cell.ts";
@@ -22,7 +22,7 @@ import { toURI } from "./uri-utils.ts";
 export type NormalizedLink = {
   id: string; // URI format with "of:" prefix
   path: string[];
-  space?: DID;
+  space?: MemorySpace;
   schema?: JSONSchema;
 };
 
@@ -73,7 +73,7 @@ export function isAlias(value: any): boolean {
 export function parseLink(
   value: any,
   baseCell?: CellLink,
-  space?: DID,
+  space?: MemorySpace,
 ): NormalizedLink | undefined {
   if (isCell(value)) {
     // Extract from Cell using its entityId and internal path
@@ -121,7 +121,7 @@ export function parseLink(
 export function parseLinkOrThrow(
   value: any,
   baseCell?: CellLink,
-  space?: DID,
+  space?: MemorySpace,
 ): NormalizedLink {
   const result = parseLink(value, baseCell, space);
   if (!result) {
@@ -136,7 +136,7 @@ export function parseLinkOrThrow(
 export function parseCellLink(
   value: any,
   baseCell?: CellLink,
-  space?: DID,
+  space?: MemorySpace,
 ): NormalizedLink | undefined {
   if (!isAnyCellLink(value)) return undefined;
 
@@ -199,7 +199,7 @@ export function parseCellLink(
 export function parseCellLinkOrThrow(
   value: any,
   baseCell?: CellLink,
-  space?: DID,
+  space?: MemorySpace,
 ): NormalizedLink {
   const result = parseCellLink(value, baseCell, space);
   if (!result) {
@@ -216,7 +216,7 @@ export function parseCellLinkOrThrow(
 function parseAlias(
   value: any,
   baseCell?: CellLink,
-  space?: DID,
+  space?: MemorySpace,
 ): NormalizedLink | undefined {
   if (!isAlias(value)) return undefined;
 
@@ -305,7 +305,7 @@ export function areLinksSame(
   value1: any,
   value2: any,
   baseCell?: CellLink,
-  space?: DID,
+  space?: MemorySpace,
 ): boolean {
   // If both are the same object, they're equal
   if (value1 === value2) return true;

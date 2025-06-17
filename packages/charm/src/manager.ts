@@ -641,7 +641,7 @@ export class CharmManager {
           if (value.$alias) {
             try {
               // Use maybeGetCellLink to handle all formats including new sigil format
-              const aliasLink = maybeGetCellLink(value.$alias, parent);
+              const aliasLink = maybeGetCellLink(value.$alias, parent.getDoc());
               if (aliasLink) {
                 const aliasId = getEntityId(aliasLink.cell);
                 if (aliasId) addMatchingCharm(aliasId);
@@ -1000,7 +1000,7 @@ export class CharmManager {
         if (value.$alias) {
           try {
             // Use maybeGetCellLink to handle all formats including new sigil format
-            const aliasLink = maybeGetCellLink(value.$alias, parent);
+            const aliasLink = maybeGetCellLink(value.$alias, parent.getDoc());
             if (aliasLink) {
               // Check if the alias points to our target
               const aliasId = getEntityId(aliasLink.cell);
@@ -1010,7 +1010,7 @@ export class CharmManager {
 
               // Check if source chain leads to our target
               const sourceRefId = followSourceToResultRef(
-                aliasLink.cell,
+                aliasLink.cell.asCell(),
                 new Set(),
                 0,
               );

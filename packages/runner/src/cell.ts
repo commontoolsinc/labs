@@ -1,5 +1,5 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type DID } from "@commontools/identity";
+import { type MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
 import {
   type Cell,
@@ -158,14 +158,14 @@ declare module "@commontools/api" {
     getAsLink(
       options?: {
         base?: Cell<any>;
-        baseSpace?: DID;
+        baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
     ): SigilLink;
     getAsAlias(
       options?: {
         base?: Cell<any>;
-        baseSpace?: DID;
+        baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
     ): SigilAlias;
@@ -204,6 +204,8 @@ declare module "@commontools/api" {
 
 export type { Cell } from "@commontools/api";
 
+export type { MemorySpace } from "@commontools/memory/interface";
+
 /**
  * Cellify is a type utility that allows any part of type T to be wrapped in
  * Cell<>, and allow any part of T that is currently wrapped in Cell<> to be
@@ -239,7 +241,7 @@ export interface Stream<T> {
  * A cell link is a doc and a path within that doc.
  */
 export type CellLink = {
-  space?: DID;
+  space?: MemorySpace;
   cell: DocImpl<any>;
   path: PropertyKey[];
   schema?: JSONSchema;
@@ -258,7 +260,7 @@ export type LinkV01 = {
   "link-v0.1": {
     id?: string;
     path?: (string | number)[];
-    space?: DID;
+    space?: MemorySpace;
     schema?: JSONSchema;
   };
 };
@@ -270,7 +272,7 @@ export type AliasV01 = {
   "alias-v0.1": {
     id?: string;
     path?: (string | number)[];
-    space?: DID;
+    space?: MemorySpace;
     schema?: JSONSchema;
   };
 };
@@ -301,7 +303,11 @@ function createSigilReference(
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema?: JSONSchema,
-  options?: { base?: Cell<any>; baseSpace?: DID; includeSchema?: boolean },
+  options?: {
+    base?: Cell<any>;
+    baseSpace?: MemorySpace;
+    includeSchema?: boolean;
+  },
 ): SigilLink | SigilAlias {
   // Create the base structure
   const reference: any = {
@@ -597,7 +603,7 @@ function createRegularCell<T>(
     getAsLink: (
       options?: {
         base?: Cell<any>;
-        baseSpace?: DID;
+        baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
     ): SigilLink => {
@@ -612,7 +618,7 @@ function createRegularCell<T>(
     getAsAlias: (
       options?: {
         base?: Cell<any>;
-        baseSpace?: DID;
+        baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
     ): SigilAlias => {
