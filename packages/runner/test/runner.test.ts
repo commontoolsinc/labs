@@ -24,6 +24,7 @@ describe("runRecipe", () => {
   });
 
   afterEach(async () => {
+    await runtime?.storage.synced();
     await runtime?.dispose();
     await storageManager?.close();
   });
