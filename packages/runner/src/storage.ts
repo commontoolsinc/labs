@@ -356,6 +356,13 @@ export class Storage implements IStorage {
         const newValue = this._setupCellLinks(newDoc, obj.value, obj.source);
         console.log("newvalue", newValue);
         newDoc.send(newValue.value);
+        if (obj.source) {
+          newDoc.sourceCell = this.runtime.documentMap.getDocByEntityId(
+            doc.space,
+            obj.source,
+            false,
+          );
+        }
       }
       // Any updates to these docs should be sent to storage, and any update
       // in storage should be used to update these docs.
