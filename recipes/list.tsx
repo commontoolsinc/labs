@@ -7,7 +7,7 @@ import {
   recipe,
   Schema,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 const TodoItemSchema = {
   type: "object",

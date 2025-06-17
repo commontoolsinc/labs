@@ -1,19 +1,19 @@
 import { h } from "@commontools/html";
 import {
+  cell,
   compileAndRun,
   derive,
   handler,
-  str,
+  ifElse,
   JSONSchema,
   NAME,
   navigateTo,
-  render,
-  ifElse,
   recipe,
+  render,
   Schema,
-  cell,
+  str,
   UI,
-} from "@commontools/builder/interface";
+} from "commontools";
 
 const ListItemSchema = {
   type: "object",
@@ -98,7 +98,15 @@ const PageInputSchema = {
         },
       },
       required: ["lists", "pages"],
+      default: {
+        title: "untitled page",
+        body: "",
+        lists: [],
+        pages: [],
+        tags: [],
+      },
     },
+    selectedPage: PageResultSchema,
     referenceablePages: {
       type: "array",
       items: PageResultSchema,
@@ -111,7 +119,10 @@ const AnySchema = {} as const satisfies JSONSchema;
 
 export type PageInputs = Schema<typeof PageInputSchema>;
 
-const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
+const updateTitle = handler<
+  { detail: { value: string } },
+  { title: string | undefined }
+>(
   ({ detail }, state) => {
     state.title = detail?.value ?? "untitled";
   },
@@ -130,27 +141,32 @@ const updateTags = handler<{ detail: { value: string } }, { tags: string[] }>(
 );
 
 const addLinkedPage = handler<
-  { },
+  void,
   {
-    pages: { title: string; lists: any[]; pages: any[]; tags: string[] },
-    selectedPage: any
+    pages: any[];
+    selectedPage: any;
   }
 >(
-  ({}, { pages, selectedPage }) => {
+  (_, { pages, selectedPage }) => {
     if (selectedPage) {
-      pages.push(selectedPage)
+      pages.push(selectedPage);
     }
   },
 );
 
 const addNewPage = handler<
-  { },
+  { detail: { value: string } },
   {
-    pages: { title: string; lists: any[]; pages: any[]; tags: string[] },
+    pages: any[];
   }
 >(
-  ({}, { pages, selectedPage }) => {
-      pages.push({ title: prompt(), lists: [], pages: [], tags: [] });
+  (ev, { pages }) => {
+    pages?.push({
+      title: ev.detail.value ?? "untitled",
+      lists: [],
+      pages: [],
+      tags: [],
+    });
   },
 );
 
@@ -184,23 +200,28 @@ const removeItem = handler<
   },
 );
 
-const viewList = handler<{ list: { title: string; items: any[] } }, void>(
-  ({ list }) => {
-    debugger;
+const viewList = handler<void, { list: { title: string; items: any[] } }>(
+  (_, { list }) => {
     return navigateTo(
       recipe(
         AnySchema,
         {},
         (list: { title: string; items: any[] }) => {
           return (
-            <div style="border: 1px solid black; padding: 10px; border-radius: 5px;">
-              <h2 style="font-weight: bold;">{list.title}</h2>
+            <div
+              style={{
+                border: "1px solid black",
+                padding: "10px",
+                borderRadius: "5px",
+              }}
+            >
+              <h2 style={{ fontWeight: "bold" }}>{list.title}</h2>
               <common-vstack gap="md">
-                <ul style="list-style-type: disc;">
+                <ul style={{ listStyleType: "disc" }}>
                   {list.items.map((
                     item: { title: string; done: boolean },
                   ) => (
-                    <li style="margin-left: 16px;">
+                    <li style={{ marginLeft: "16px" }}>
                       <common-hstack gap="sm">
                         {item.title}
                         <sl-button
@@ -219,9 +240,9 @@ const viewList = handler<{ list: { title: string; items: any[] } }, void>(
                   onmessagesend={addItem({ list })}
                 />
               </common-vstack>
-              <common-button onClick={viewList({ list })}>
+              <ct-button onClick={viewList({ list })}>
                 View
-              </common-button>
+              </ct-button>
             </div>
           );
         },
@@ -229,56 +250,6 @@ const viewList = handler<{ list: { title: string; items: any[] } }, void>(
     );
   },
 );
-const DropdownInputSchema = {
-  type: "object",
-  properties: {
-    pages: {
-      type: "array",
-      items: PageResultSchema,
-    },
-    selectedPage: PageResultSchema,
-  },
-  required: ["pages"],
-} as const satisfies JSONSchema;
-
-const DropdownOutputSchema = {
-  type: "object",
-  properties: {
-    selectedPage: PageResultSchema,
-  },
-  required: ["selectedPage"],
-} as const satisfies JSONSchema;
-
-const Dropdown = recipe(DropdownInputSchema, DropdownOutputSchema, ({ pages, selectedPage }) => {
-  const open = cell(false)
-  const openDropdown = handler<{ open: boolean }>(({}, state) => {
-    state.open = !state.open
-  })
-  const onSelect = handler<>(({}, state) => {
-    state.selectedPage = state.page
-    state.open = false
-  })
-  const selectionLabel = derive(selectedPage, (selectedPage) => {
-    return selectedPage ? selectedPage.title : "Select a page"
-  })
-
-  const dropdownArrow = derive(open, (open) => {
-    return open ? "▲" : "▼"
-  })
-
-  return {
-    [UI]: <common-vstack style="max-width: 192px;">
-      <label style="border: 1px solid black; display: inline-block; padding: 5px;" onClick={openDropdown({ open })}>{selectionLabel} {dropdownArrow}</label>
-      <div style="position: relative;">
-        {ifElse(open, <div style="position: absolute;">{pages.map((page) => (
-          <div style="background-color: grey;" onClick={onSelect({ page, selectedPage, open })}>
-            {page.title}
-          </div>
-        ))}</div>, <div style="display: none">&nbsp;</div>)}
-      </div>
-    </common-vstack>
-  }
-})
 
 /**
  * -----------------------------------------------------------------------------
@@ -286,15 +257,37 @@ const Dropdown = recipe(DropdownInputSchema, DropdownOutputSchema, ({ pages, sel
  * -----------------------------------------------------------------------------
  */
 export const Page = recipe(PageInputSchema, PageResultSchema, (
-  { page: { title, lists, pages, body, tags }, selectedPage, referenceablePages },
+  {
+    page: { title, lists, pages, body, tags },
+    selectedPage,
+    referenceablePages,
+  },
 ) => {
-  const tagString = derive(tags, (tags: string[]) => tags.join(", "));
+  const tagString = derive(tags, (tags: string[]) => (tags || []).join(", "));
   const selectedSubPage = cell(null);
+  const selectItems = derive(
+    referenceablePages,
+    (pages) => pages.map((page) => ({ label: page.title, value: page })),
+  );
+
+  const changeSubpage = handler<
+    { detail: { value: any } },
+    { selectedSubPage: any }
+  >(({ detail: { value } }, state) => {
+    state.selectedSubPage = value;
+  });
 
   return {
     [NAME]: title,
     [UI]: (
-      <div style="border: 1px solid grey; padding: 10px; border-radius: 5px; background-color: #f9f9f9;">
+      <div
+        style={{
+          border: "1px solid grey",
+          padding: "10px",
+          borderRadius: "5px",
+          backgroundColor: "#f9f9f9",
+        }}
+      >
         <common-input
           value={title}
           placeholder="Page title"
@@ -317,7 +310,7 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
         </fieldset>
         <common-vstack gap="lg">
           <section>
-            <h1 style="font-weight: bold; font-size: 1.5rem;">Lists</h1>
+            <h1 style={{ fontWeight: "bold", fontSize: "1.5rem" }}>Lists</h1>
             <common-vstack gap="lg">
               {lists.map(
                 recipe(
@@ -325,14 +318,20 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
                   {},
                   (list: { title: string; items: any[] }) => {
                     return (
-                      <div style="border: 1px solid black; padding: 10px; border-radius: 5px;">
-                        <h2 style="font-weight: bold;">{list.title}</h2>
+                      <div
+                        style={{
+                          border: "1px solid black",
+                          padding: "10px",
+                          borderRadius: "5px",
+                        }}
+                      >
+                        <h2 style={{ fontWeight: "bold" }}>{list.title}</h2>
                         <common-vstack gap="md">
-                          <ul style="list-style-type: disc;">
+                          <ul style={{ listStyleType: "disc" }}>
                             {list.items.map((
                               item: { title: string; done: boolean },
                             ) => (
-                              <li style="margin-left: 16px;">
+                              <li style={{ marginLeft: "16px" }}>
                                 <common-hstack gap="sm">
                                   {item.title}
                                   <sl-button
@@ -351,9 +350,6 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
                             onmessagesend={addItem({ list })}
                           />
                         </common-vstack>
-                        <common-button onClick={viewList({ list })}>
-                          View
-                        </common-button>
                       </div>
                     );
                   },
@@ -368,51 +364,64 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
           </section>
 
           <section>
-            <h1 style="font-weight: bold;">Pages</h1>
+            <h1 style={{ fontWeight: "bold" }}>Pages</h1>
             <common-vstack gap="sm">
               <common-hstack gap="md">
                 {pages.map(
                   recipe(
-                    AnySchema,
+                    PageResultSchema,
                     {},
-                    (
-                      page: {
-                        title: string;
-                        pages: any[];
-                        lists: any[];
-                        tags: string[];
-                      },
-                    ) => {
+                    (page) => {
                       const summary = derive(
                         [page.pages, page.lists, page.tags],
                         ([pages, lists, tags]) => {
                           return `Pages: ${pages.length}, Lists: ${lists.length}, Tags: ${
-                            tags.map((t) => "#" + t).join(", ")
+                            tags.map((t: string) => "#" + t).join(", ")
                           }`;
                         },
                       );
 
-                      const visitPage = handler<{},{}>((e, s) => {
+                      const visitPage = handler<
+                        void,
+                        { selectedPage: any; page: any }
+                      >((e, s) => {
                         s.selectedPage = s.page;
-                      })
+                      });
 
                       return (
-                        <div onClick={visitPage({ page, selectedPage })} style="border: 1px solid #ccc; padding: 16px; border-radius: 8px; background: #f9f9f9; cursor: pointer;">
-                          <h3 style="font-weight: bold; margin: 0;">
+                        <ct-card
+                          onClick={visitPage({ page, selectedPage })}
+                        >
+                          <h3 style={{ fontWeight: "bold", margin: 0 }}>
                             {page.title}
                           </h3>
                           <details>
                             <summary>{summary}</summary>
                           </details>
-                        </div>
+                        </ct-card>
                       );
                     },
                   ),
                 )}
               </common-hstack>
-              <common-hstack>{Dropdown({ pages: referenceablePages, selectedPage: selectedSubPage })[UI]}
-              <common-button onClick={addLinkedPage({ pages, selectedPage: selectedSubPage })}>link</common-button>
-              <common-button onClick={addNewPage({ pages })}>add new</common-button>
+              <common-hstack>
+                <ct-select
+                  items={selectItems}
+                  onchange={changeSubpage({ selectedSubPage })}
+                />
+                <ct-button
+                  onClick={addLinkedPage({
+                    pages,
+                    selectedPage: selectedSubPage,
+                  })}
+                >
+                  link
+                </ct-button>
+                <ct-message-input
+                  buttonText="Add new page"
+                  placeholder="New page"
+                  onct-send={addNewPage({ pages })}
+                />
               </common-hstack>
             </common-vstack>
           </section>
@@ -436,7 +445,7 @@ const PageManagerInputSchema = {
   properties: {
     pages: {
       type: "array",
-      items: PageInputSchema,
+      items: PageResultSchema,
       default: [],
     },
   },
@@ -449,12 +458,12 @@ const AddPageEventSchema = {
     detail: {
       type: "object",
       properties: {
-        message: { type: "string" }
+        message: { type: "string" },
       },
-      required: ["message"]
+      required: ["message"],
     },
   },
-  required: ["detail"]
+  required: ["detail"],
 } as const satisfies JSONSchema;
 
 const AddPageStateSchema = {
@@ -462,45 +471,85 @@ const AddPageStateSchema = {
   properties: {
     pages: {
       type: "array",
-      items: PageInputSchema,
+      items: PageResultSchema,
       default: [],
-      asCell: true
+      asCell: true,
     },
   },
   required: ["pages"],
 } as const satisfies JSONSchema;
 
-const addTopLevelPage = handler(AddPageEventSchema, AddPageStateSchema, (event, { pages }) => {
-  const title = event.detail?.message?.trim();
-  if (title) pages.push({ title, body: "", lists: [], pages: [], tags: [], referenceablePages: pages });
-});
+const addTopLevelPage = handler(
+  AddPageEventSchema,
+  AddPageStateSchema,
+  (event, { pages }) => {
+    const title = event.detail?.message?.trim();
+    if (title) {
+      pages.push({
+        title,
+        lists: [],
+        pages: [],
+        tags: [],
+      });
+    }
+  },
+);
 
 export default recipe(PageManagerInputSchema, AnySchema, ({ pages }) => {
   const selectedPage = cell(null);
 
   const navigate = handler<{ page: any }, { selectedPage: any }>(
-    { page: { type: "object" } },
-    { pages: { type: "array" }, selectedPage: { type: "object" } },
     ({ page }, state) => {
       state.selectedPage = page;
-    }
+    },
   );
+
+  const onFocusChanged = handler<
+    { detail: { value: any } },
+    { selectedPage: any }
+  >(
+    (ev, state) => {
+      state.selectedPage = ev.detail.value;
+    },
+  );
+
+  const items = derive(pages, (ps) => {
+    return ps.map((p) => ({
+      label: p.title,
+      value: p,
+    }));
+  });
+
+  const test = handler<any, any>((_, state) => {
+    state.selectedPage = state.pages[0];
+  });
 
   return {
     [NAME]: "Page Manager",
     [UI]: (
       <common-vstack gap="lg">
-          <common-hstack>
-          {Dropdown({ pages, selectedPage })[UI]}
-          <common-send-message
-            name="Add page"
-            placeholder="New page"
-            onmessagesend={addTopLevelPage({ pages })}
+        <common-hstack>
+          <ct-select
+            onchange={onFocusChanged({ selectedPage })}
+            items={items}
           />
-          </common-hstack>
-          <div style="border: 1px solid red;">
-            {ifElse(selectedPage, Page({ page: selectedPage, referenceablePages: pages, selectedPage })[UI], <div>&nbsp;</div>)}
-          </div>
+          <ct-message-input
+            buttonText="Add page"
+            placeholder="New page"
+            onct-send={addTopLevelPage({ pages })}
+          />
+        </common-hstack>
+        <ct-card>
+          {ifElse(
+            selectedPage,
+            view(Page({
+              page: selectedPage,
+              referenceablePages: pages,
+              selectedPage,
+            })),
+            <div>&nbsp;</div>,
+          )}
+        </ct-card>
       </common-vstack>
     ),
     pages,
@@ -508,3 +557,7 @@ export default recipe(PageManagerInputSchema, AnySchema, ({ pages }) => {
     selectedPage,
   };
 });
+
+function view(x: any) {
+  return x[UI];
+}

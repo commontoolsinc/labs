@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CT Message Input Demo</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 2rem;
+      background: #f5f5f5;
+    }
+
+    .demo-section {
+      background: white;
+      border-radius: 8px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      color: #333;
+      margin-bottom: 2rem;
+    }
+
+    h2 {
+      color: #666;
+      font-size: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .example {
+      margin-bottom: 1.5rem;
+    }
+
+    .example-label {
+      font-weight: 500;
+      margin-bottom: 0.5rem;
+      color: #555;
+    }
+
+    .message-output {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #f0f0f0;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 0.875rem;
+      min-height: 100px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .message-item {
+      padding: 0.25rem 0;
+      border-bottom: 1px solid #ddd;
+    }
+
+    ct-message-input {
+      --ct-message-input-height: 3rem;
+    }
+
+    .compact ct-message-input {
+      --ct-message-input-height: 2rem;
+      --ct-message-input-gap: 0.25rem;
+    }
+  </style>
+  <script type="module">
+    // Import the components
+    import './ct-message-input.js';
+    import '../../ct-input/ct-input.js';
+    import '../../ct-button/ct-button.js';
+
+    // Message display functionality
+    function addMessage(containerId, message) {
+      const output = document.getElementById(containerId);
+      const messageEl = document.createElement('div');
+      messageEl.className = 'message-item';
+      messageEl.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      output.insertBefore(messageEl, output.firstChild);
+    }
+
+    // Set up event listeners
+    document.addEventListener('DOMContentLoaded', () => {
+      // Basic example
+      const basic = document.getElementById('basic-input');
+      basic.addEventListener('ct-send', (e) => {
+        addMessage('basic-output', e.detail.message);
+      });
+
+      // Custom button text example
+      const custom = document.getElementById('custom-input');
+      custom.addEventListener('ct-send', (e) => {
+        addMessage('custom-output', e.detail.message);
+      });
+
+      // Styled example
+      const styled = document.getElementById('styled-input');
+      styled.addEventListener('ct-send', (e) => {
+        addMessage('styled-output', e.detail.message);
+      });
+
+      // Programmatic example
+      const programmatic = document.getElementById('programmatic-input');
+      programmatic.addEventListener('ct-send', (e) => {
+        addMessage('programmatic-output', e.detail.message);
+      });
+
+      // Set initial value button
+      document.getElementById('set-value-btn').addEventListener('click', () => {
+        programmatic.value = 'Hello from JavaScript!';
+      });
+
+      // Toggle disabled button
+      document.getElementById('toggle-disabled-btn').addEventListener('click', () => {
+        programmatic.disabled = !programmatic.disabled;
+      });
+    });
+  </script>
+</head>
+<body>
+  <h1>CT Message Input Component Demo</h1>
+
+  <div class="demo-section">
+    <h2>Basic Usage</h2>
+    <div class="example">
+      <div class="example-label">Default message input:</div>
+      <ct-message-input
+        id="basic-input"
+        placeholder="Type a message..."
+      ></ct-message-input>
+      <div id="basic-output" class="message-output">
+        <div style="color: #999;">Messages will appear here...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <h2>Custom Button Text</h2>
+    <div class="example">
+      <div class="example-label">With custom button text:</div>
+      <ct-message-input
+        id="custom-input"
+        placeholder="What's on your mind?"
+        button-text="Post"
+      ></ct-message-input>
+      <div id="custom-output" class="message-output">
+        <div style="color: #999;">Posts will appear here...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <h2>Different Sizes</h2>
+    <div class="example">
+      <div class="example-label">Large input:</div>
+      <ct-message-input
+        id="styled-input"
+        placeholder="Type your message here..."
+        button-text="Send Message"
+        style="--ct-message-input-height: 3.5rem; font-size: 1.125rem;"
+      ></ct-message-input>
+      <div id="styled-output" class="message-output">
+        <div style="color: #999;">Messages will appear here...</div>
+      </div>
+    </div>
+
+    <div class="example compact">
+      <div class="example-label">Compact input:</div>
+      <ct-message-input
+        placeholder="Quick reply..."
+        button-text="Reply"
+      ></ct-message-input>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <h2>Programmatic Control</h2>
+    <div class="example">
+      <div class="example-label">Control via JavaScript:</div>
+      <ct-message-input
+        id="programmatic-input"
+        placeholder="Controllable input..."
+      ></ct-message-input>
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button id="set-value-btn">Set Value</button>
+        <button id="toggle-disabled-btn">Toggle Disabled</button>
+      </div>
+      <div id="programmatic-output" class="message-output">
+        <div style="color: #999;">Messages will appear here...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <h2>Features</h2>
+    <ul>
+      <li>Press Enter to send messages</li>
+      <li>Automatically clears input after sending</li>
+      <li>Customizable placeholder and button text</li>
+      <li>Disabled state support</li>
+      <li>Programmatic value control</li>
+      <li>Custom styling via CSS variables</li>
+      <li>Accessible with keyboard navigation</li>
+      <li>Emits 'ct-send' event with message details</li>
+    </ul>
+  </div>
+</body>
+</html>
