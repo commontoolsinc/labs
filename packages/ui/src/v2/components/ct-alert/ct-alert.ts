@@ -287,6 +287,7 @@ export class CTAlert extends BaseElement {
           <div class="alert-description" part="description">
             <slot name="description"></slot>
           </div>
+          <slot></slot>
         </div>
         ${this.dismissible
         ? html`

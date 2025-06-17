@@ -134,14 +134,14 @@ async function main() {
     // and replace them with the corresponding JSON object.
     //
     // Example: "@#bafed0de/path/to/value" and "{ foo: @#bafed0de/a/path }"
-    const regex = /(?:^|[:\s,{])(@#[a-zA-Z0-9]+(?:\/[^\/\s"',}]+)*)/g;
+    const regex = /(@#[a-zA-Z0-9]+(?:\/[^\/\s"',}\]]*)*)/g;
     const inputTransformed = input.replace(
       regex,
       (match, fullRef) => {
         // Extract hash and path from the full reference
-        // fullRef format is @#hash/path
+        // fullRef format is @#hash/path or @#hash
         const hashMatch = fullRef.match(
-          /@#([a-zA-Z0-9]+)((?:\/[^\/\s"',}]+)*)/,
+          /@#([a-zA-Z0-9]+)((?:\/[^\/\s"',}\]]*)*)/,
         );
         if (!hashMatch) return match;
 
@@ -150,12 +150,10 @@ async function main() {
         // Create the cell JSON object
         const linkJson = JSON.stringify({
           cell: { "/": hash },
-          path: path.split("/").filter(Boolean).map(decodeURIComponent),
+          path: path ? path.split("/").filter(Boolean).map(decodeURIComponent) : [],
         });
 
-        // If the match starts with @, it means the reference is at the beginning of the string
-        // or the entire string is a reference - don't prepend any character
-        return match.charAt(0) === "@" ? linkJson : match.charAt(0) + linkJson;
+        return linkJson;
       },
     );
     try {

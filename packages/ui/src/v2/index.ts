@@ -53,6 +53,8 @@ export * from "./components/ct-toggle-group/index.ts";
 export * from "./components/ct-vgroup/index.ts";
 export * from "./components/ct-vscroll/index.ts";
 export * from "./components/ct-vstack/index.ts";
+export * from "./components/ct-select/index.ts";
+export * from "./components/ct-message-input/ct-message-input.ts";
 
 // Type exports
 export type * from "./utils/types.ts";
