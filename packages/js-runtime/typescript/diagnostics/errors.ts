@@ -1,18 +1,26 @@
 import ts, { type Diagnostic, DiagnosticMessageChain } from "typescript";
+import { renderInline } from "./render.ts";
+
+export interface ErrorDetails {
+  readonly diagnostic: Diagnostic;
+  source?: string;
+}
 
 export type CompilationErrorType = "MODULE_NOT_FOUND" | "ERROR";
 
 export class CompilationError {
+  source?: string;
   file?: string;
   line?: number;
   column?: number;
   message: string;
   type: CompilationErrorType;
 
-  constructor(diagnostic: Diagnostic) {
+  constructor({ diagnostic, source }: ErrorDetails) {
     const { file, start } = diagnostic;
     const { message, type } = this.parseMessage(diagnostic.messageText);
 
+    this.source = source;
     this.message = message;
     this.type = type;
 
@@ -50,23 +58,32 @@ export class CompilationError {
     const source = file ? ` [${file}${location}]` : "";
     return `[${this.type}] ${this.message}${source}`;
   }
+
+  displayInline(): string {
+    if (
+      !this.source || this.line === undefined || this.column === undefined ||
+      this.file === undefined
+    ) {
+      return this.display();
+    }
+
+    const inline = renderInline({
+      source: this.source,
+      line: this.line,
+      column: this.column,
+      contextLines: 2,
+    });
+    return `[${this.type}] ${this.message}\n${inline}`;
+  }
 }
 
 export class CompilerError extends Error {
   override name = "CompilerError";
-  errors: CompilationError[];
-  constructor(diagnostics: readonly Diagnostic[]) {
-    const errors = diagnostics.map((d) => new CompilationError(d));
-    const message = errors.map((error) => error.display()).join("\n");
+  #errors: CompilationError[];
+  constructor(errorDetails: ErrorDetails[]) {
+    const errors = errorDetails.map((d) => new CompilationError(d));
+    const message = errors.map((error) => error.displayInline()).join("\n");
     super(message);
-    this.errors = errors;
-  }
-
-  // Generates and throws an error if any diagnostics found in the input.
-  static check(diagnostics: readonly Diagnostic[] | undefined) {
-    if (!diagnostics || diagnostics.length === 0) {
-      return;
-    }
-    throw new CompilerError(diagnostics);
+    this.#errors = errors;
   }
 }
