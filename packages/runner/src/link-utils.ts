@@ -331,7 +331,7 @@ export function parseToLegacyCellLink(
 
   return {
     cell: doc ?? baseCell!.getDoc().runtime!.documentMap.getDocByEntityId(
-      link.space ?? baseCell!.space,
+      link.space ?? baseCell!.space!,
       link.id,
       true,
     )!,
