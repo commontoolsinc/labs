@@ -97,26 +97,47 @@ const deleteItem = handler<never, { items: TodoItem[]; item: TodoItem }>(
   },
 );
 
+const Questions = recipe({
+  type: "object",
+  properties: { items: { type: "array", items: ItemSchema } },
+}, {
+  type: "object",
+  properties: {
+    questions: { type: "array", items: { type: "string" } },
+    results: { type: "array", items: { type: "string" } },
+  },
+}, ({ items }) => {
+  const results = items.map((item) => {
+    const question = llm({
+      system:
+        `Ask a snarky, sarcastic, clever question about the attached item:`,
+      messages: [
+        str`<attached-item>${item.title}</attached-item>`,
+      ],
+    });
+
+    return { title: item.title, question: question.result, item };
+  }) as any;
+
+  const questions = derive(
+    results,
+    (r) =>
+      r.map((i: { title: string; question: string; item: any }) => i.question),
+  );
+
+  return {
+    questions,
+    results,
+  };
+});
+
 export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
   derive(items, (items) => {
     console.log("todo list items changed", { items });
   });
 
-  const results = derive(items, (items) => {
-    return items.map((item) => {
-      const question = llm({
-        system:
-          `Ask a snarky, sarcastic, clever question about the attached item:`,
-        messages: [
-          `<attached-item>${item.title}</attached-item>`,
-        ],
-      });
-
-      return { title: item.title, question: question.result, item };
-    });
-  }) as any[]; // TODO(@bf): work out why needed
-
-  const questions = derive(results, (r) => r.map((i) => i.question));
+  // TODO(@bf): why any needed?
+  const { results, questions } = Questions({ items }) as any;
 
   return {
     [NAME]: title,
@@ -129,7 +150,13 @@ export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
           customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
         />
         <common-vstack gap="sm">
-          {results.map(({ title, question, item }) => (
+          {results.map((
+            { title, question, item }: {
+              title: string;
+              question: string;
+              item: any;
+            },
+          ) => (
             <li>
               <common-vstack>
                 <blockquote>
