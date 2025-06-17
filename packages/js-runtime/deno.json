@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./mod.ts",
+    "./typescript": "./typescript/mod.ts",
     "./cli": "./cli/mod.ts"
   }
 }

@@ -7,3 +7,4 @@ export {
   type CompilationErrorType,
   CompilerError,
 } from "./error.ts";
+export { getCompilerOptions } from "./options.ts";
