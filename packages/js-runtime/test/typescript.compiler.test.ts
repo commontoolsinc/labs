@@ -90,15 +90,24 @@ describe("TypeScriptCompiler", () => {
     await compiler.resolveAndCompile(program);
   });
 
-  /*
-  it("Handles runtime modules without types", async () => {
+  it("Inlines errors", async () => {
+    const compiler = new TypeScriptCompiler(types);
     const program = new InMemoryProgram("/main.tsx", {
-      "/main.tsx": "import { add } from '@std/math';export default add(10,2)",
+      "/main.tsx": `
+function add(x: number, y: number): number {
+  return x + y;
+} 
+
+export default add(5, "5");`,
     });
-    const compiler = new TypeScriptCompiler(await getTypeLibs());
-    compiler.compile(program, { runtimeModules: ["@std/math"] });
+
+    const expected = `4 | } 
+5 | 
+6 | export default add(5, \"5\");
+  |                       ^
+`;
+    await expect(compiler.resolveAndCompile(program)).rejects.toThrow(expected);
   });
-  */
 
   for (const { name, source, expectedError, ...options } of TESTS) {
     it(name, () => {

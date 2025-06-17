@@ -23,7 +23,7 @@ import { getCompilerOptions, TARGET } from "./options.ts";
 import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
-import { CompilerError } from "./error.ts";
+import { Checker } from "./diagnostics/mod.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -270,28 +270,15 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       host,
     );
 
-    // Filter out the default type lib of generated sources
-    const sourceFiles = tsProgram.getSourceFiles().filter((source) =>
-      !source.fileName.startsWith(VFS_TYPES_DIR)
-    );
-
-    let sourceEntry;
-    for (const sourceFile of sourceFiles) {
-      if (sourceFile.fileName === program.entry) {
-        assert(!sourceEntry, "Source entry not yet set.");
-        sourceEntry = sourceFile;
-      }
-
-      if (!noCheck) {
-        // check types
-        const diagnostics = tsProgram.getSemanticDiagnostics(sourceFile);
-        CompilerError.check(diagnostics);
-      }
-      // check compilation
-      const diagnostics = tsProgram.getDeclarationDiagnostics(sourceFile);
-      CompilerError.check(diagnostics);
+    const checker = new Checker(tsProgram);
+    if (!noCheck) {
+      checker.typeCheck();
     }
+    checker.declarationCheck();
 
+    const sourceEntry = tsProgram.getSourceFiles().find((source) =>
+      source.fileName === program.entry
+    );
     if (!sourceEntry) {
       throw new Error("Missing source entry.");
     }
@@ -299,7 +286,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       sourceEntry,
     );
-    CompilerError.check(diagnostics);
+    checker.check(diagnostics);
 
     if (emitSkipped) {
       throw new Error("Emit skipped. Check diagnostics.");
