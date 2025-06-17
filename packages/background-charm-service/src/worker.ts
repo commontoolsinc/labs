@@ -268,3 +268,10 @@ self.addEventListener("message", async (event: MessageEvent) => {
     });
   }
 });
+
+// Signal to the controller that the worker is ready to receive messages.
+// This handshake prevents race conditions where the controller might send
+// the initialization message before the worker has set up its message listener.
+if (typeof self !== "undefined" && self.postMessage) {
+  self.postMessage({ type: "ready", msgId: -1 });
+}
