@@ -132,6 +132,16 @@ export interface IRuntime {
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
   runSynced(
     resultCell: Cell<any>,
     recipe: Recipe | Module,
@@ -214,6 +224,16 @@ export interface IRunner {
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
 
   runSynced(
     resultCell: Cell<any>,
@@ -467,12 +487,22 @@ export class Runtime implements IRuntime {
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
   run<T, R = any>(
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R> {
-    return this.runner.run(recipeOrModule, argument, resultCell);
+    resultCell: DocImpl<R> | Cell<R>,
+  ): DocImpl<R> | Cell<R> {
+    return this.runner.run(recipeOrModule, argument, resultCell as any);
   }
 
   runSynced(
