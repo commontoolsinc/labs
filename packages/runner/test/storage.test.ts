@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
-import { type DocImpl } from "../src/doc.ts";
+import { type Cell } from "../src/cell.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -11,7 +11,7 @@ const space = signer.did();
 describe("Storage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let testDoc: DocImpl<any>;
+  let testDoc: Cell<any>;
   let n = 0;
 
   beforeEach(() => {
@@ -23,10 +23,9 @@ describe("Storage", () => {
       storageManager,
     });
 
-    testDoc = runtime.documentMap.getDoc<string>(
-      undefined as unknown as string,
-      `storage test cell ${n++}`,
+    testDoc = runtime.getCell<string>(
       space,
+      `storage test cell ${n++}`,
     );
   });
 
@@ -58,40 +57,40 @@ describe("Storage", () => {
     });
 
     it("should persist a cells and referenced cell references within it", async () => {
-      const refDoc = runtime.documentMap.getDoc(
-        "hello",
-        "should persist a cells and referenced cell references within it",
+      const refDoc = runtime.getCell<string>(
         space,
+        "should persist a cells and referenced cell references within it",
       );
+      refDoc.set("hello");
 
       const testValue = {
         data: "test",
-        ref: { cell: refDoc, path: [] },
+        ref: { cell: refDoc.getDoc(), path: [] },
       };
       testDoc.send(testValue);
 
       await runtime.storage.syncCell(testDoc);
 
-      const entry = storageManager.open(space).get(refDoc.entityId);
+      const entry = storageManager.open(space).get(refDoc.getDoc().entityId);
       expect(entry?.value).toEqual("hello");
     });
 
     it("should persist a cells and referenced cells within it", async () => {
-      const refDoc = runtime.documentMap.getDoc(
-        "hello",
-        "should persist a cells and referenced cells 1",
+      const refDoc = runtime.getCell<string>(
         space,
+        "should persist a cells and referenced cells 1",
       );
+      refDoc.setRaw("hello");
 
       const testValue = {
         data: "test",
-        otherDoc: refDoc,
+        otherDoc: refDoc.getDoc(),
       };
       testDoc.send(testValue);
 
       await runtime.storage.syncCell(testDoc);
 
-      const entry = storageManager.open(space).get(refDoc.entityId);
+      const entry = storageManager.open(space).get(refDoc.getDoc().entityId);
       expect(entry?.value).toEqual("hello");
     });
   });
@@ -123,7 +122,7 @@ describe("Storage", () => {
     it("should wait for a doc to appear", async () => {
       let synced = false;
 
-      storageManager.open(space).sync(testDoc.entityId!, true).then(
+      storageManager.open(space).sync(testDoc.getDoc().entityId!, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -135,7 +134,7 @@ describe("Storage", () => {
 
     it("should wait for a undefined doc to appear", async () => {
       let synced = false;
-      storageManager.open(space).sync(testDoc.entityId!, true).then(
+      storageManager.open(space).sync(testDoc.getDoc().entityId!, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -147,17 +146,17 @@ describe("Storage", () => {
 
   describe("ephemeral docs", () => {
     it("should not be loaded from storage", async () => {
-      const ephemeralDoc = runtime.documentMap.getDoc(
-        "transient",
-        "ephemeral",
+      const ephemeralDoc = runtime.getCell<string>(
         space,
+        "ephemeral",
       );
-      ephemeralDoc.ephemeral = true;
+      ephemeralDoc.set("transient");
+      ephemeralDoc.getDoc().ephemeral = true;
       await runtime.storage.syncCell(ephemeralDoc);
       const provider = storageManager.open(space);
 
-      await provider.sync(ephemeralDoc.entityId!);
-      const record = provider.get(ephemeralDoc.entityId!);
+      await provider.sync(ephemeralDoc.getDoc().entityId!);
+      const record = provider.get(ephemeralDoc.getDoc().entityId!);
       expect(record).toBeUndefined();
     });
   });
