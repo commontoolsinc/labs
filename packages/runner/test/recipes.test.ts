@@ -838,15 +838,11 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const result = runtime.run(
-      slowRecipe,
-      { x: 1 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "idle should wait for slow async lifted functions",
-        space,
-      ),
+    const resultCell = runtime.getCell<{ result: number }>(
+      space,
+      "idle should wait for slow async lifted functions",
     );
+    const result = runtime.run(slowRecipe, { x: 1 }, resultCell);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(liftCalled).toBe(true);
@@ -854,7 +850,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
     expect(timeoutCalled).toBe(true);
-    expect(result.asCell().get()).toMatchObject({ result: 2 });
+    expect(result.get()).toMatchObject({ result: 2 });
   });
 
   it("idle should wait for slow async handlers", async () => {
@@ -882,20 +878,16 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const charm = runtime.run(
-      slowHandlerRecipe,
-      { result: 0 },
-      runtime.documentMap.getDoc(
-        undefined,
-        "idle should wait for slow async handlers",
-        space,
-      ),
+    const charmCell = runtime.getCell<{ result: number; updater: any }>(
+      space,
+      "idle should wait for slow async handlers",
     );
+    const charm = runtime.run(slowHandlerRecipe, { result: 0 }, charmCell);
 
     await runtime.idle();
 
     // Trigger the handler
-    charm.asCell(["updater"]).send({ value: 5 });
+    charm.key("updater").send({ value: 5 });
 
     // Give a small delay to start the handler but not enough to complete
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -905,7 +897,7 @@ describe("Recipe Runner", () => {
     // Now idle should wait for the handler's promise to resolve
     await runtime.idle();
     expect(timeoutCalled).toBe(true);
-    expect(charm.asCell().get()).toMatchObject({ result: 10 });
+    expect(charm.get()).toMatchObject({ result: 10 });
   });
 
   it("idle should not wait for deliberately async handlers", async () => {
