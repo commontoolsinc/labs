@@ -105,13 +105,14 @@ export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
   const results = derive(items, (items) => {
     return items.map((item) => {
       const question = llm({
-        system: `Ask a question about the attached item:`,
+        system:
+          `Ask a snarky, sarcastic, clever question about the attached item:`,
         messages: [
           `<attached-item>${item.title}</attached-item>`,
         ],
-      }).result || "";
+      });
 
-      return { title: item.title, question, item };
+      return { title: item.title, question: question.result, item };
     });
   }) as any[]; // TODO: work out why needed
 
