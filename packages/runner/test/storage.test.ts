@@ -65,7 +65,7 @@ describe("Storage", () => {
 
       const testValue = {
         data: "test",
-        ref: { cell: refDoc.getDoc(), path: [] },
+        ref: refDoc.getAsCellLink(),
       };
       testDoc.send(testValue);
 
@@ -80,11 +80,11 @@ describe("Storage", () => {
         space,
         "should persist a cells and referenced cells 1",
       );
-      refDoc.setRaw("hello");
+      refDoc.set("hello");
 
       const testValue = {
         data: "test",
-        otherDoc: refDoc.getDoc(),
+        otherDoc: refDoc,
       };
       testDoc.send(testValue);
 
