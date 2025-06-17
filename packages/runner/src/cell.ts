@@ -192,7 +192,7 @@ declare module "@commontools/api" {
       & ("argument" extends keyof Schema<S> ? unknown
         : { argument: any })
     >;
-    toJSON(): SigilLink;
+    toJSON(): JSONCellLink;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
     value: T;
@@ -652,21 +652,8 @@ function createRegularCell<T>(
     setRaw: (value: any) => doc.setAtPath(path, value),
     getSourceCell: (newSchema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, newSchema, newSchema) as Cell<any>,
-    toJSON: (): SigilLink => {
-      // Return new sigil format
-      const link: SigilLink = {
-        "@": {
-          "link-v0.1": {
-            id: toURI(doc.entityId),
-            path: path.map((p) => p.toString()),
-          },
-        },
-      };
-      if (doc.space) {
-        link["@"]["link-v0.1"].space = doc.space;
-      }
-      return link;
-    },
+    toJSON: (): JSONCellLink => // Keep old format for backward compatibility
+    ({ cell: doc.toJSON()!, path: path as (string | number)[] }),
     get value(): T {
       return self.get();
     },
@@ -677,7 +664,7 @@ function createRegularCell<T>(
       return doc.space;
     },
     get entityId(): EntityId | undefined {
-      return getEntityId(self.getAsCellLink());
+      return getEntityId({ cell: doc, path });
     },
     [isCellMarker]: true,
     get copyTrap(): boolean {
