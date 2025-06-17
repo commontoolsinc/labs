@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { TYPE } from "@commontools/builder";
+import { TYPE } from "@commontools/runner";
 import { saveSpell } from "@commontools/charm";
 import { createPath } from "@/routes.ts";
 

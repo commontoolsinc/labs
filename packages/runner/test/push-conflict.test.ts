@@ -1,44 +1,86 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID } from "@commontools/builder";
+import { ID } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
 import { type IStorage, Runtime } from "../src/runtime.ts";
 import { isCellLink } from "../src/cell.ts";
-import { VolatileStorageProvider } from "../src/storage/volatile.ts";
+import * as Memory from "@commontools/memory";
+import * as Consumer from "@commontools/memory/consumer";
+import { Provider } from "../src/storage/cache.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
 
 describe("Push conflict", () => {
   let runtime: Runtime;
+  let session: Memory.Memory.Memory;
+  let memory: Provider;
   let storage: IStorage;
+  let provider: Memory.Provider.Provider<Memory.Protocol>;
+  let consumer: Consumer.MemoryConsumer<Consumer.MemorySpace>;
+  const storageManager = {
+    id: "some id",
+    open: (space: Consumer.MemorySpace) =>
+      Provider.open({
+        space,
+        session: consumer,
+      }),
+  };
 
-  beforeEach(async () => {
+  beforeEach(() => {
+    session = Memory.Memory.emulate({ serviceDid: signer.did() });
+
+    // Create memory service for testing
+    provider = Memory.Provider.create(session);
+
+    consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
     storage = runtime.storage;
-    storage.setSigner(await Identity.fromPassphrase("test operator"));
   });
 
   afterEach(async () => {
     await runtime?.dispose();
+    await provider?.close();
+    await session.close();
   });
 
   it("should resolve push conflicts", async () => {
     const listDoc = runtime.documentMap.getDoc<any[]>(
       [],
       "list",
-      "push conflict",
+      signer.did(),
     );
     const list = listDoc.asCell();
     await storage.syncCell(list);
 
-    const memory = new VolatileStorageProvider("push conflict");
+    const source = session.clone();
+    source.subscribers.clear();
+    const provider = Memory.Provider.create(source);
+    const consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+    memory = Provider.open({
+      space: signer.did(),
+      session: consumer,
+    });
 
     // Update memory without notifying main storage
     await memory.sync(listDoc.entityId, true); // Get current value
+    expect(memory.get(listDoc.entityId)).toEqual({ value: [] });
+
     await memory.send([{
       entityId: listDoc.entityId,
       value: { value: [1, 2, 3] },
-    }], true); // true = do not notify main storage
+    }]);
+
+    expect(memory.get(listDoc.entityId)).toEqual({ value: [1, 2, 3] });
 
     let retryCalled = false;
     listDoc.retry = [(value) => {
@@ -55,8 +97,8 @@ describe("Push conflict", () => {
     await storage.synced();
 
     // We successfully replayed the change on top of the db:
-    expect(list.get()).toEqual([1, 2, 3, 4]);
     expect(retryCalled).toEqual(true);
+    expect(list.get()).toEqual([1, 2, 3, 4]);
 
     // Retry list should be empty now, since the change was applied.
     expect(!!listDoc.retry?.length).toBe(false);
@@ -66,12 +108,12 @@ describe("Push conflict", () => {
     const nameDoc = runtime.documentMap.getDoc<string | undefined>(
       undefined,
       "name",
-      "push and set",
+      signer.did(),
     );
     const listDoc = runtime.documentMap.getDoc<any[]>(
       [],
       "list 2",
-      "push and set",
+      signer.did(),
     );
 
     const name = nameDoc.asCell();
@@ -80,7 +122,17 @@ describe("Push conflict", () => {
     await storage.syncCell(name);
     await storage.syncCell(list);
 
-    const memory = new VolatileStorageProvider("push and set");
+    const source = session.clone();
+    source.subscribers.clear();
+    const provider = Memory.Provider.create(source);
+    const consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+    memory = Provider.open({
+      space: signer.did(),
+      session: consumer,
+    });
 
     // Update memory without notifying main storage
     await memory.sync(nameDoc.entityId, true); // Get current value
@@ -91,7 +143,7 @@ describe("Push conflict", () => {
     }, {
       entityId: listDoc.entityId,
       value: { value: [1, 2, 3] },
-    }], true); // true = do not notify main storage
+    }]);
 
     let retryCalled = 0;
     listDoc.retry = [(value) => {
@@ -122,12 +174,12 @@ describe("Push conflict", () => {
     const nameDoc = runtime.documentMap.getDoc<string | undefined>(
       undefined,
       "name 2",
-      "push and set",
+      signer.did(),
     );
     const listDoc = runtime.documentMap.getDoc<any[]>(
       [],
       "list 3",
-      "push and set",
+      signer.did(),
     );
 
     const name = nameDoc.asCell();
@@ -136,7 +188,17 @@ describe("Push conflict", () => {
     await storage.syncCell(name);
     await storage.syncCell(list);
 
-    const memory = new VolatileStorageProvider("push and set");
+    const source = session.clone();
+    source.subscribers.clear();
+    const provider = Memory.Provider.create(source);
+    const consumer = Consumer.open({
+      as: signer,
+      session: provider.session(),
+    });
+    memory = Provider.open({
+      space: signer.did(),
+      session: consumer,
+    });
 
     // Update memory without notifying main storage
     await memory.sync(nameDoc.entityId, true); // Get current value
@@ -147,7 +209,7 @@ describe("Push conflict", () => {
     }, {
       entityId: listDoc.entityId,
       value: { value: [{ n: 1 }, { n: 2 }, { n: 3 }] },
-    }], true); // true = do not notify main storage
+    }]);
 
     let retryCalled = 0;
     listDoc.retry = [(value) => {

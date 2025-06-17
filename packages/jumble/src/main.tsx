@@ -18,7 +18,6 @@ import CharmList from "@/views/CharmList.tsx";
 import CharmShowView from "@/views/CharmShowView.tsx";
 import CharmDetailView from "@/views/CharmDetailView.tsx";
 import { AuthenticationProvider } from "@/contexts/AuthenticationContext.tsx";
-import { setupIframe } from "@/iframe-ctx.ts";
 import GenerateJSONView from "@/views/utility/GenerateJSONView.tsx";
 import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView.tsx";
 import SpellbookDetailView from "@/views/spellbook/SpellbookDetailView.tsx";
@@ -27,8 +26,10 @@ import SpellbookLaunchView from "@/views/spellbook/SpellbookLaunchView.tsx";
 import FullscreenInspectorView from "@/views/FullscreenInspectorView.tsx";
 import { ActionManagerProvider } from "@/contexts/ActionManagerContext.tsx";
 import { ActivityProvider } from "@/contexts/ActivityContext.tsx";
+import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { RuntimeProvider } from "@/contexts/RuntimeContext.tsx";
 import { ROUTES } from "@/routes.ts";
+import { AuthenticationView } from "@/views/AuthenticationView.tsx";
 
 // Determine environment based on hostname
 const determineEnvironment = () => {
@@ -83,95 +84,92 @@ const ReplicaRedirect = () => {
   return <div>redirecting...</div>;
 };
 
-// Create runtime with error and console handlers
-let errorCount = 0;
-const runtime = new Runtime({
-  storageUrl: location.origin,
-  errorHandlers: [(error) => {
-    !errorCount++ &&
-      globalThis.alert(
-        "Uncaught error in recipe: " + error.message + "\n" + error.stack,
-      );
-    // Also send to Sentry
-    Sentry.captureException(error);
-  }],
-  consoleHandler: (metadata, method, args) => {
-    // Handle console messages depending on charm context.
-    // This is essentially the same as the default handling currently,
-    // but adding this here for future use.
-    if (metadata?.charmId) {
-      return [`Charm(${metadata.charmId}) [${method}]:`, ...args];
-    }
-    return [`Console [${method}]:`, ...args];
-  },
-});
+export const MainView = () => {
+  const auth = useAuthentication();
 
-setupIframe(runtime);
+  return auth?.session ? <AuthenticatedView /> : <AuthenticationView />;
+};
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ErrorBoundary fallback={<div>An error has occurred</div>}>
-      <RuntimeProvider runtime={runtime}>
-        <AuthenticationProvider>
-          <CharmsProvider>
-            <ActionManagerProvider>
-              <ActivityProvider>
-                <Router>
-                  <SentryRoutes>
-                    {/* Redirect root to saved replica or default */}
-                    <Route
-                      path={ROUTES.root}
-                      element={<ReplicaRedirect />}
-                    />
-                    <Route
-                      path={ROUTES.inspector}
-                      element={<FullscreenInspectorView />}
-                    />
-                    <Route
-                      path={ROUTES.replicaRoot}
-                      element={<Shell />}
-                    >
-                      <Route index element={<CharmList />} />
-                      <Route
-                        path={ROUTES.charmShow}
-                        element={<CharmShowView />}
-                      />
-                      <Route
-                        path={ROUTES.charmDetail}
-                        element={<CharmDetailView />}
-                      />
-                      <Route
-                        path={ROUTES.stackedCharms}
-                        element={<StackedCharmsView />}
-                      />
-                    </Route>
+export const AuthenticatedView = () => (
+  <RuntimeProvider>
+    <CharmsProvider>
+      <ActionManagerProvider>
+        <ActivityProvider>
+          <Router>
+            <SentryRoutes>
+              {/* Redirect root to saved replica or default */}
+              <Route
+                path={ROUTES.root}
+                element={<ReplicaRedirect />}
+              />
+              <Route
+                path={ROUTES.inspector}
+                element={<FullscreenInspectorView />}
+              />
+              <Route
+                path={ROUTES.replicaRoot}
+                element={<Shell />}
+              >
+                <Route index element={<CharmList />} />
+                <Route
+                  path={ROUTES.charmShow}
+                  element={<CharmShowView />}
+                />
+                <Route
+                  path={ROUTES.charmDetail}
+                  element={<CharmDetailView />}
+                />
+                <Route
+                  path={ROUTES.stackedCharms}
+                  element={<StackedCharmsView />}
+                />
+              </Route>
 
-                    {/* Spellbook routes */}
-                    <Route
-                      path={ROUTES.spellbookIndex}
-                      element={<SpellbookIndexView />}
-                    />
-                    <Route
-                      path={ROUTES.spellbookDetail}
-                      element={<SpellbookDetailView />}
-                    />
-                    <Route
-                      path={ROUTES.spellbookLaunch}
-                      element={<SpellbookLaunchView />}
-                    />
+              {/* Spellbook routes */}
+              <Route
+                path={ROUTES.spellbookIndex}
+                element={<SpellbookIndexView />}
+              />
+              <Route
+                path={ROUTES.spellbookDetail}
+                element={<SpellbookDetailView />}
+              />
+              <Route
+                path={ROUTES.spellbookLaunch}
+                element={<SpellbookLaunchView />}
+              />
 
-                    {/* internal tools / experimental routes */}
-                    <Route
-                      path={ROUTES.utilityJsonGen}
-                      element={<GenerateJSONView />}
-                    />
-                  </SentryRoutes>
-                </Router>
-              </ActivityProvider>
-            </ActionManagerProvider>
-          </CharmsProvider>
-        </AuthenticationProvider>
-      </RuntimeProvider>
-    </ErrorBoundary>
-  </StrictMode>,
+              {/* internal tools / experimental routes */}
+              <Route
+                path={ROUTES.utilityJsonGen}
+                element={<GenerateJSONView />}
+              />
+            </SentryRoutes>
+          </Router>
+        </ActivityProvider>
+      </ActionManagerProvider>
+    </CharmsProvider>
+  </RuntimeProvider>
 );
+
+export const main = () => {
+  const url = new URL(document.URL);
+  // If we are in the root path we push state
+  if (url.pathname === "/") {
+    const space = localStorage.getItem("lastReplica");
+    const path = space ? `/${space}` : ROUTES.defaultReplica;
+    history.replaceState(null, "", path);
+  }
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <ErrorBoundary fallback={<div>An error has occurred</div>}>
+        <AuthenticationProvider>
+          <MainView />
+        </AuthenticationProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+};
+
+main();

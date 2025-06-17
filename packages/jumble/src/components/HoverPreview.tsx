@@ -1,5 +1,5 @@
 import { Cell } from "@commontools/runner";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 import { CommonCard } from "@/components/common/CommonCard.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { Charm, charmId } from "@commontools/charm";

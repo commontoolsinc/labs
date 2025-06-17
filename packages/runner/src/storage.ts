@@ -2,15 +2,16 @@ import { isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import { sleep } from "@commontools/utils/sleep";
 import { Signer } from "@commontools/identity";
-import { type SchemaContext } from "@commontools/builder";
-import { TransactionResult } from "@commontools/memory";
 import { refer } from "@commontools/memory/reference";
-import {
+import type {
   FactAddress,
+  MemorySpace,
   Revision,
-  SchemaNone,
+  SchemaContext,
   State,
+  TransactionResult,
 } from "@commontools/memory/interface";
+import { SchemaNone } from "@commontools/memory/schema";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
@@ -19,21 +20,17 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import {
-  BaseStorageProvider,
-  type Labels,
-  StorageProvider,
+import type {
+  IStorageManager,
+  IStorageProvider,
+  Labels,
   StorageValue,
-} from "./storage/base.ts";
+} from "./storage/interface.ts";
+import { BaseStorageProvider } from "./storage/base.ts";
 import { log } from "./log.ts";
-import {
-  Provider as CachedStorageProvider,
-  Selection,
-} from "./storage/cache.ts";
-import { VolatileStorageProvider } from "./storage/volatile.ts";
 import type { IRuntime, IStorage } from "./runtime.ts";
-
-export type { Labels };
+import type { Selection } from "./storage/cache.ts";
+export type { Labels, MemorySpace };
 
 type Job = {
   doc: DocImpl<any>;
@@ -76,8 +73,7 @@ type Job = {
 export class Storage implements IStorage {
   // Map from space to storage provider. TODO(seefeld): Push spaces to storage
   // providers.
-  private storageProviders = new Map<string, StorageProvider>();
-  private remoteStorageUrl: URL | undefined;
+  private storageProviders = new Map<string, IStorageProvider>();
   private signer: Signer | undefined;
 
   // Any doc here is being synced or in the process of spinning up syncing. See
@@ -122,27 +118,11 @@ export class Storage implements IStorage {
 
   constructor(
     readonly runtime: IRuntime,
-    options: {
-      remoteStorageUrl: URL;
-      signer?: Signer;
-    },
+    private readonly storageManager: IStorageManager,
   ) {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
-
-    // Set configuration from constructor options
-    this.remoteStorageUrl = options.remoteStorageUrl;
-
-    if (options.signer) this.signer = options.signer;
-  }
-
-  setSigner(signer: Signer): void {
-    this.signer = signer;
-  }
-
-  hasSigner(): boolean {
-    return this.signer !== undefined;
   }
 
   /**
@@ -187,42 +167,13 @@ export class Storage implements IStorage {
     this.cancel();
   }
 
-  private _getStorageProviderForSpace(space: string): StorageProvider {
+  private _getStorageProviderForSpace(space: MemorySpace): IStorageProvider {
     if (!space) throw new Error("No space set");
 
     let provider = this.storageProviders.get(space);
 
     if (!provider) {
-      // Default to "schema", but let either custom URL (used in tests) or
-      // environment variable override this.
-      const type = this.remoteStorageUrl?.protocol === "volatile:"
-        ? "volatile"
-        : ((import.meta as any).env?.VITE_STORAGE_TYPE ?? "schema");
-
-      if (type === "volatile") {
-        provider = new VolatileStorageProvider(space);
-      } else if (type === "schema" || type === "cached") {
-        if (!this.remoteStorageUrl) {
-          throw new Error("No remote storage URL set");
-        }
-        if (!this.signer) {
-          throw new Error("No signer set for schema storage");
-        }
-        const settings = {
-          maxSubscriptionsPerSpace: 50_000,
-          connectionTimeout: 30_000,
-          useSchemaQueries: type === "schema",
-        };
-        provider = new CachedStorageProvider({
-          id: this.runtime.id,
-          address: new URL("/api/storage/memory", this.remoteStorageUrl!),
-          space: space as `did:${string}:${string}`,
-          as: this.signer,
-          settings: settings,
-        });
-      } else {
-        throw new Error(`Unknown storage type: ${type}`);
-      }
+      provider = this.storageManager.open(space);
       this.storageProviders.set(space, provider);
     }
     return provider;
@@ -257,7 +208,7 @@ export class Storage implements IStorage {
       if (result.error) {
         // This will be a decoupled doc that is not persisted and cannot be edited
         doc.ephemeral = true;
-        doc.freeze();
+        doc.freeze("loading error");
       } else {
         // I'm using the list of returned documents in the server's response,
         // allowing me to avoid running a local schema query.
@@ -327,7 +278,7 @@ export class Storage implements IStorage {
   // document map.
   private _integrateResults<T>(
     doc: DocImpl<T>,
-    storageProvider: StorageProvider,
+    storageProvider: IStorageProvider,
     entityIds: EntityId[],
   ) {
     const docMap = this.runtime.documentMap;
@@ -452,7 +403,7 @@ export class Storage implements IStorage {
   }
 
   private _ensureIsSyncedById<T>(
-    space: string,
+    space: MemorySpace,
     id: EntityId | string,
     expectedInStorage: boolean = false,
     schemaContext?: SchemaContext,
@@ -499,11 +450,7 @@ export class Storage implements IStorage {
           console.log("got result error", result.error);
           // This will be a decoupled doc that is not persisted and cannot be edited
           doc.ephemeral = true;
-          doc.freeze();
-        } else {
-          console.log("Sync of", JSON.stringify(doc.entityId), "completed");
-          // at ths point, the storage provider has the right value, but it hasn't been set in doc
-          console.log(result.ok as any);
+          doc.freeze("loading error");
         }
         return doc;
       });
@@ -837,7 +784,7 @@ export class Storage implements IStorage {
 
     // Sort storage jobs by space
     const storageJobsBySpace = new Map<
-      string,
+      MemorySpace,
       { entityId: EntityId; value: StorageValue }[]
     >();
     storageJobs.forEach((value, doc) => {
@@ -849,7 +796,7 @@ export class Storage implements IStorage {
     log(() => ["storage jobs start"]);
 
     const process = (
-      space: string,
+      space: MemorySpace,
       jobs: { entityId: EntityId; value: StorageValue }[],
     ): Promise<
       { ok: object; err?: undefined } | { ok?: undefined; err?: Error }

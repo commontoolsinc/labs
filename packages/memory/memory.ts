@@ -47,6 +47,13 @@ export class Memory implements Session, MemorySession {
     this.ready = Promise.resolve();
     this.#serviceDid = options.serviceDid;
   }
+  clone() {
+    return new Memory(
+      { store: this.store, serviceDid: this.serviceDid() },
+      new Set(this.subscribers),
+      new Map(this.spaces),
+    );
+  }
 
   serviceDid(): DID {
     return this.#serviceDid;
@@ -238,9 +245,12 @@ export const mount = async (
   });
 };
 
-export interface Options {
-  store: URL;
+export interface ServiceOptions {
   serviceDid: DID;
+}
+
+export interface Options extends ServiceOptions {
+  store: URL;
 }
 
 export const open = async (
@@ -260,6 +270,16 @@ export const open = async (
     }
   });
 };
+
+/**
+ * Creates an ephemeral memory session. It will not persist
+ * anything and it's primary use is in testing.
+ */
+export const emulate = (options: ServiceOptions) =>
+  new Memory({
+    ...options,
+    store: new URL("memory://"),
+  });
 
 export const close = async (session: Session) => {
   return await traceAsync("memory.close", async (span) => {

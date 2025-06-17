@@ -94,7 +94,7 @@ class BuildConfig {
   }
 
   cliEntryPath() {
-    return this.path("packages", "js-runtime", "cli", "mod.ts");
+    return this.path("packages", "cli", "mod.ts");
   }
 
   distDir() {
@@ -231,6 +231,9 @@ async function buildBgCharmService(config: BuildConfig): Promise<void> {
 
 async function buildCli(config: BuildConfig): Promise<void> {
   console.log("Building CLI binary...");
+  // Figure out the full list requested by typescript and
+  // friends
+  // Globs don't work for compile(?)
   const envs = [
     "TOOLSHED_API_URL",
     "TSC_WATCHFILE",
@@ -248,6 +251,12 @@ async function buildCli(config: BuildConfig): Promise<void> {
     "NODE_INSPECTOR_IPC",
     "VSCODE_INSPECTOR_OPTIONS",
     "NODE_ENV",
+    // sqlite3 library requires these
+    "DENO_SQLITE_PATH",
+    "DENO_SQLITE_LOCAL",
+    "DENO_DIR",
+    "HOME",
+    "XDG_CACHE_HOME"
   ];
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
@@ -261,8 +270,9 @@ async function buildCli(config: BuildConfig): Promise<void> {
       "--no-check",
       "--allow-write",
       "--allow-read",
-      // Globs don't work for compile(?)
-      `--allow-env=${envs.join(",")}`,
+      "--allow-env",
+      "--allow-ffi", // for @db/sqlite
+      "--allow-net", // for @db/sqlite lazy download
       "--include",
       config.staticTypesPath(),
       config.cliEntryPath(),

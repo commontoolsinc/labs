@@ -1,11 +1,10 @@
 import ts from "typescript";
 import { RawSourceMap, SourceMapConsumer } from "source-map-js";
 import * as commonHtml from "@commontools/html";
-import * as zod from "zod";
-import * as zodToJsonSchema from "zod-to-json-schema";
 import * as merkleReference from "merkle-reference";
 import turndown from "turndown";
-import { createBuilder } from "@commontools/builder";
+import { createBuilder } from "../builder/factory.ts";
+import { h } from "@commontools/api";
 import { type IRuntime } from "../runtime.ts";
 
 let DOMParser: any;
@@ -206,17 +205,12 @@ export const tsToExports = async (
     }
     switch (moduleName) {
       case "@commontools/html":
-        return commonHtml;
+        return Object.assign({}, commonHtml, { h });
+      case "@commontools/runner":
       case "@commontools/builder":
       case "@commontools/builder/interface":
       case "commontools":
         return createBuilder(config.runtime);
-      case "zod":
-        return zod;
-      case "merkle-reference":
-        return merkleReference;
-      case "zod-to-json-schema":
-        return zodToJsonSchema;
       case "turndown":
         return turndown;
       default:

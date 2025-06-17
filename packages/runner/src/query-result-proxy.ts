@@ -1,10 +1,19 @@
 import { isRecord } from "@commontools/utils/types";
-import { getTopFrame, toOpaqueRef } from "@commontools/builder";
+import { getTopFrame } from "./builder/recipe.ts";
+import { toOpaqueRef } from "./builder/types.ts";
 import { type DocImpl, makeOpaqueRef } from "./doc.ts";
 import { type CellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
 import { resolveLinkToValue } from "./link-resolution.ts";
+
+// Maximum recursion depth to prevent infinite loops
+const MAX_RECURSION_DEPTH = 100;
+
+// Cache of target objects to their proxies, scoped by ReactivityLog
+const proxyCacheByLog = new WeakMap<ReactivityLog, WeakMap<object, any>>();
+// Use this to index cache if there is no log provided.
+const fallbackLog: ReactivityLog = { reads: [], writes: [] };
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -51,7 +60,15 @@ export function createQueryResultProxy<T>(
   valueCell: DocImpl<T>,
   valuePath: PropertyKey[],
   log?: ReactivityLog,
+  depth: number = 0,
 ): T {
+  // Check recursion depth
+  if (depth > MAX_RECURSION_DEPTH) {
+    throw new Error(
+      `Maximum recursion depth of ${MAX_RECURSION_DEPTH} exceeded`,
+    );
+  }
+
   // Resolve path and follow links to actual value.
   ({ cell: valueCell, path: valuePath } = resolveLinkToValue(
     valueCell,
@@ -64,7 +81,19 @@ export function createQueryResultProxy<T>(
 
   if (!isRecord(target)) return target;
 
-  return new Proxy(target as object, {
+  // Get the appropriate cache index by log
+  const cacheIndex = log ?? fallbackLog;
+  let logCache = proxyCacheByLog.get(cacheIndex);
+  if (!logCache) {
+    logCache = new WeakMap<object, any>();
+    proxyCacheByLog.set(cacheIndex, logCache);
+  }
+
+  // Check if we already have a proxy for this target in the cache
+  const existingProxy = logCache?.get(target);
+  if (existingProxy) return existingProxy;
+
+  const proxy = new Proxy(target as object, {
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
         if (prop === getCellLink) {
@@ -88,7 +117,12 @@ export function createQueryResultProxy<T>(
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
             const copy = target.map((_, index) =>
-              createQueryResultProxy(valueCell, [...valuePath, index], log)
+              createQueryResultProxy(
+                valueCell,
+                [...valuePath, index],
+                log,
+                depth + 1,
+              )
             );
 
             return method.apply(copy, args);
@@ -179,7 +213,12 @@ export function createQueryResultProxy<T>(
           };
       }
 
-      return createQueryResultProxy(valueCell, [...valuePath, prop], log);
+      return createQueryResultProxy(
+        valueCell,
+        [...valuePath, prop],
+        log,
+        depth + 1,
+      );
     },
     set: (target, prop, value) => {
       if (isQueryResult(value)) value = value[getCellLink];
@@ -221,6 +260,10 @@ export function createQueryResultProxy<T>(
       return true;
     },
   }) as T;
+
+  // Cache the proxy in the appropriate cache before returning
+  logCache.set(target, proxy);
+  return proxy;
 }
 
 // Wraps a value on an array so that it can be read as literal or object,

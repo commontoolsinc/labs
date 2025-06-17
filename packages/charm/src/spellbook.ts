@@ -1,4 +1,4 @@
-import { UI } from "@commontools/builder";
+import { UI } from "@commontools/runner";
 import type { Runtime } from "@commontools/runner";
 
 export interface Spell {

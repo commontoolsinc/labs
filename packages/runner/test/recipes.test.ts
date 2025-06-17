@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  type Cell,
-  createBuilder,
-  type JSONSchema,
-} from "@commontools/builder";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/link-resolution.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Recipe Runner", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let lift: ReturnType<typeof createBuilder>["lift"];
   let recipe: ReturnType<typeof createBuilder>["recipe"];
@@ -20,9 +23,14 @@ describe("Recipe Runner", () => {
   let TYPE: ReturnType<typeof createBuilder>["TYPE"];
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
+
     const builder = createBuilder(runtime);
     ({
       lift,
@@ -36,6 +44,7 @@ describe("Recipe Runner", () => {
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should run a simple recipe", async () => {
@@ -53,7 +62,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should run a simple recipe",
-        "test",
+        space,
       ),
     );
 
@@ -87,7 +96,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle nested recipes",
-        "test",
+        space,
       ),
     );
 
@@ -113,7 +122,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with defaults",
-        "test",
+        space,
       ),
     );
 
@@ -127,7 +136,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with defaults (2)",
-        "test",
+        space,
       ),
     );
 
@@ -156,7 +165,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with map nodes",
-        "test",
+        space,
       ),
     );
 
@@ -189,7 +198,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes with map nodes with closures",
-        "test",
+        space,
       ),
     );
 
@@ -217,7 +226,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle map nodes with undefined input",
-        "test",
+        space,
       ),
     );
 
@@ -246,7 +255,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(
       incRecipe,
       { counter: { value: 0 } },
-      runtime.documentMap.getDoc(undefined, "should execute handlers", "test"),
+      runtime.documentMap.getDoc(undefined, "should execute handlers", space),
     );
 
     await runtime.idle();
@@ -285,7 +294,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute handlers that use bind and this",
-        "test",
+        space,
       ),
     );
 
@@ -321,7 +330,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute handlers that use bind and this (no types)",
-        "test",
+        space,
       ),
     );
 
@@ -340,12 +349,12 @@ describe("Recipe Runner", () => {
     const counter = runtime.documentMap.getDoc(
       { value: 0 },
       "should execute recipes returned by handlers 1",
-      "test",
+      space,
     );
     const nested = runtime.documentMap.getDoc(
       { a: { b: { c: 0 } } },
       "should execute recipes returned by handlers 2",
-      "test",
+      space,
     );
 
     const values: [number, number, number][] = [];
@@ -380,7 +389,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute recipes returned by handlers",
-        "test",
+        space,
       ),
     );
 
@@ -405,12 +414,12 @@ describe("Recipe Runner", () => {
     const x = runtime.documentMap.getDoc(
       2,
       "should handle recipes returned by lifted functions 1",
-      "test",
+      space,
     );
     const y = runtime.documentMap.getDoc(
       3,
       "should handle recipes returned by lifted functions 2",
-      "test",
+      space,
     );
 
     const runCounts = {
@@ -452,7 +461,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle recipes returned by lifted functions",
-        "test",
+        space,
       ),
     );
 
@@ -506,7 +515,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should support referenced modules",
-        "test",
+        space,
       ),
     );
 
@@ -546,7 +555,7 @@ describe("Recipe Runner", () => {
     const settingsCell = runtime.documentMap.getDoc(
       { value: 5 },
       "should handle schema with cell references 1",
-      "test",
+      space,
     );
     const result = runtime.run(
       multiplyRecipe,
@@ -557,7 +566,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle schema with cell references",
-        "test",
+        space,
       ),
     );
 
@@ -616,12 +625,12 @@ describe("Recipe Runner", () => {
     const item1 = runtime.documentMap.getDoc(
       { value: 1 },
       "should handle nested cell references in schema 1",
-      "test",
+      space,
     );
     const item2 = runtime.documentMap.getDoc(
       { value: 2 },
       "should handle nested cell references in schema 2",
-      "test",
+      space,
     );
     const result = runtime.run(
       sumRecipe,
@@ -629,7 +638,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle nested cell references in schema",
-        "test",
+        space,
       ),
     );
 
@@ -673,12 +682,12 @@ describe("Recipe Runner", () => {
     const value1 = runtime.documentMap.getDoc(
       5,
       "should handle dynamic cell references with schema 1",
-      "test",
+      space,
     );
     const value2 = runtime.documentMap.getDoc(
       7,
       "should handle dynamic cell references with schema 2",
-      "test",
+      space,
     );
     const result = runtime.run(
       dynamicRecipe,
@@ -691,7 +700,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should handle dynamic cell references with schema",
-        "test",
+        space,
       ),
     );
 
@@ -731,7 +740,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should execute handlers with schemas",
-        "test",
+        space,
       ),
     );
 
@@ -780,7 +789,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "failed handlers should be ignored",
-        "test",
+        space,
       ),
     );
 
@@ -800,7 +809,7 @@ describe("Recipe Runner", () => {
     const recipeId = charm.sourceCell?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
-    expect(lastError?.space).toBe("test");
+    expect(lastError?.space).toBe(space);
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
@@ -843,7 +852,7 @@ describe("Recipe Runner", () => {
     const dividend = runtime.documentMap.getDoc(
       1,
       "failed lifted functions should be ignored 1",
-      "test",
+      space,
     );
 
     const charm = runtime.run(
@@ -852,7 +861,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "failed lifted handlers should be ignored",
-        "test",
+        space,
       ),
     );
 
@@ -869,7 +878,7 @@ describe("Recipe Runner", () => {
     const recipeId = charm.sourceCell?.get()?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
-    expect(lastError?.space).toBe("test");
+    expect(lastError?.space).toBe(space);
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
@@ -910,7 +919,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "idle should wait for slow async lifted functions",
-        "test",
+        space,
       ),
     );
 
@@ -954,7 +963,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "idle should wait for slow async handlers",
-        "test",
+        space,
       ),
     );
 
@@ -1006,7 +1015,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "idle should wait for slow async handlers",
-        "test",
+        space,
       ),
     );
 
@@ -1040,7 +1049,7 @@ describe("Recipe Runner", () => {
     );
 
     const input = runtime.getCell(
-      "test",
+      space,
       "should create and use a named cell inside a lift input",
       { type: "number" },
     );
@@ -1052,7 +1061,7 @@ describe("Recipe Runner", () => {
       runtime.documentMap.getDoc(
         undefined,
         "should create and use a named cell inside a lift",
-        "test",
+        space,
       ),
     );
 
@@ -1080,5 +1089,70 @@ describe("Recipe Runner", () => {
 
     // That same value was updated, which shows that the id was stable
     expect(ref.cell.get()).toBe(10);
+  });
+
+  it("should handle pushing objects that reference their containing array", async () => {
+    const addItemHandler = handler<
+      { detail: { message: string } },
+      { items: Array<{ title: string; items: any[] }> }
+    >((event, { items }) => {
+      const title = event.detail?.message?.trim();
+      if (title) {
+        items.push({ title, items });
+      }
+    });
+
+    const itemsRecipe = recipe<
+      { items: Array<{ title: string; items: any[] }> }
+    >(
+      "Items with self-reference",
+      ({ items }) => {
+        return { items, stream: addItemHandler({ items }) };
+      },
+    );
+
+    const result = runtime.run(
+      itemsRecipe,
+      { items: [] },
+      runtime.documentMap.getDoc(
+        undefined,
+        "should handle pushing objects that reference their containing array",
+        space,
+      ),
+    );
+
+    await runtime.idle();
+
+    // Add first item
+    result.asCell(["stream"]).send({ detail: { message: "First Item" } });
+    await runtime.idle();
+
+    const firstState = result.getAsQueryResult();
+    expect(firstState.items).toHaveLength(1);
+    expect(firstState.items[0].title).toBe("First Item");
+
+    // Test reuse of proxy for array items
+    expect(firstState.items[0].items).toBe(firstState.items);
+
+    // Add second item
+    result.asCell(["stream"]).send({ detail: { message: "Second Item" } });
+    await runtime.idle();
+
+    const secondState = result.getAsQueryResult();
+    expect(secondState.items).toHaveLength(2);
+    expect(secondState.items[1].title).toBe("Second Item");
+
+    // All three should point to the same array
+    expect(secondState.items[0].items).toBe(secondState.items);
+    expect(secondState.items[1].items).toBe(secondState.items);
+
+    // And triple check that it actually refers to the same underlying array
+    expect(firstState.items[0].items[1].title).toBe("Second Item");
+
+    const recurse = ({ items }: { items: { items: any[] }[] }): any =>
+      items.map((item) => recurse(item));
+
+    // Now test that we catch infinite recursion
+    expect(() => recurse(firstState)).toThrow();
   });
 });

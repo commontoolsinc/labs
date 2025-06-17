@@ -81,7 +81,7 @@ This model enables:
 
 Start the service:
 
-```
+```sh
 TOOLSHED_API_URL=http://localhost:8000 OPERATOR_PASS=your-passphrase deno task start
 ```
 

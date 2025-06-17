@@ -1,4 +1,4 @@
-import type { JSONObject, JSONValue } from "@commontools/builder";
+import type { JSONObject, JSONValue } from "@commontools/runner";
 import {
   BaseObjectManager,
   type CellTarget,
@@ -10,7 +10,7 @@ import {
   type PointerCycleTracker,
   SchemaObjectTraverser,
   type ValueEntry,
-} from "@commontools/builder/traverse";
+} from "@commontools/runner/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
 import { the as COMMIT_THE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
@@ -22,8 +22,8 @@ import {
   type FactSelection,
   type MemorySpace,
   type SchemaQuery,
-  SelectAllString,
 } from "./interface.ts";
+import { SelectAllString } from "./schema.ts";
 import {
   getChange,
   getRevision,

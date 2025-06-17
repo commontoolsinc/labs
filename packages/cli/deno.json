@@ -1,18 +1,10 @@
 {
+  "name": "@commontools/cli",
   "tasks": {
-    "start": "deno run --allow-read --allow-env --allow-net main.ts",
-    "google-importer": "deno run --allow-read --allow-env --allow-net google-importer.ts",
-    "background-runner": "deno run --allow-read --allow-env --allow-net background-charm-runner.ts",
-    "memorydemo": "deno run --allow-read --allow-env --allow-net memory_demo.ts",
-    "curl": "deno run --allow-read --allow-env --allow-net curl.ts",
-    "test": "deno test",
-    "charmdemo": "deno run --allow-read --allow-env --allow-net charm_demo.ts",
-    "name2did": "deno run -A name2did.ts",
-    "castRecipe": "deno run --allow-read --allow-env --allow-net cast-recipe.ts",
-    "key-gen": "deno run key-gen.ts",
-    "key-did": "deno run --allow-read key-did.ts"
+    "cli": "deno run --allow-ffi --allow-read --allow-write --allow-env ./mod.ts",
+    "test": "deno test --allow-ffi --allow-read --allow-write --allow-run --allow-env test/*.test.ts"
   },
-  "imports": {
-    "open": "https://deno.land/x/open@v0.0.6/index.ts"
+  "exports": {
+    ".": "./mod.ts"
   }
 }

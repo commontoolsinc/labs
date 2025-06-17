@@ -1,7 +1,12 @@
 import { Charm } from "@commontools/charm";
-import { type Cell, getEntityId, type Runtime } from "@commontools/runner";
+import {
+  type Cell,
+  getEntityId,
+  type MemorySpace,
+  type Runtime,
+} from "@commontools/runner";
 import { Identity, type IdentityCreateConfig } from "@commontools/identity";
-import { ID, type JSONSchema } from "@commontools/builder";
+import { ID, type JSONSchema } from "@commontools/runner";
 import {
   BG_CELL_CAUSE,
   BG_SYSTEM_SPACE_ID,
@@ -107,7 +112,7 @@ export async function setBGCharm({
   charmId: string;
   integration: string;
   runtime: Runtime;
-  bgSpace?: string;
+  bgSpace?: MemorySpace;
   bgCause?: string;
 }): Promise<boolean> {
   const charmsCell = await getBGCharms({
@@ -163,7 +168,7 @@ export async function setBGCharm({
 
 export async function getBGCharms(
   { bgSpace, bgCause, runtime }: {
-    bgSpace?: string;
+    bgSpace?: MemorySpace;
     bgCause?: string;
     runtime: Runtime;
   },
@@ -172,10 +177,6 @@ export async function getBGCharms(
 > {
   bgSpace = bgSpace ?? BG_SYSTEM_SPACE_ID;
   bgCause = bgCause ?? BG_CELL_CAUSE;
-
-  if (!runtime.storage.hasSigner()) {
-    throw new Error("Storage has no signer");
-  }
 
   const schema = {
     type: "array",

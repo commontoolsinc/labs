@@ -3,7 +3,7 @@ import {
   IPC,
   setIframeContextHandler,
 } from "@commontools/iframe-sandbox";
-import { components } from "@commontools/ui";
+import { v1 } from "@commontools/ui";
 import {
   Action,
   addCommonIDfromObjectID,
@@ -20,7 +20,7 @@ import {
   updateJob,
 } from "@/contexts/ActivityContext.tsx";
 
-const CommonCharmElement = components.CommonCharm.CommonCharmElement;
+const CommonCharmElement = v1.components.CommonCharm.CommonCharmElement;
 const llm = new LLMClient();
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing

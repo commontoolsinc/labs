@@ -1,16 +1,16 @@
-import type { JSONValue } from "@commontools/builder";
 import type {
   Cause,
   Changes,
   Entity,
   Fact,
   FactSelection,
+  JSONValue,
   OfTheCause,
   Select,
   SelectAll,
   The,
 } from "./interface.ts";
-import { SelectAllString } from "./interface.ts";
+import { SelectAllString } from "./schema.ts";
 
 export const from = (
   source: Iterable<[fact: Fact, since: number]>,

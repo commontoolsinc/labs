@@ -1,4 +1,4 @@
-import type { JSONObject, JSONValue } from "@commontools/builder";
+import type { JSONObject, JSONValue } from "../builder/types.ts";
 import {
   BaseObjectManager,
   type CellTarget,
@@ -9,7 +9,7 @@ import {
   MinimalSchemaSelector,
   SchemaObjectTraverser,
   type ValueEntry,
-} from "@commontools/builder/traverse";
+} from "../traverse.ts";
 import type {
   FactAddress,
   Revision,

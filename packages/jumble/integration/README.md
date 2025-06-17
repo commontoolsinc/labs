@@ -1,10 +1,10 @@
-# integration tests:
+# integration tests
 
 1. run toolshed on 8000 (default) - in toolshed: `deno task dev`
 2. run jumble on 5173 (with toolshed pointing to 8000) - in jumble:
    `deno task dev-local`
 
-# Notes on AI iteration
+## Notes on AI iteration
 
 - we store cached llm responses in these integration tests
 - this allows running them with an expected response - assuming the request

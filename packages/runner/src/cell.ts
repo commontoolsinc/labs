@@ -1,13 +1,13 @@
 import { isObject, isRecord } from "@commontools/utils/types";
+import { getTopFrame } from "./builder/recipe.ts";
 import {
   type Cell,
-  getTopFrame,
   ID,
   ID_FIELD,
   isStreamAlias,
   type JSONSchema,
   type Schema,
-} from "@commontools/builder";
+} from "./builder/types.ts";
 import { type DeepKeyLookup, type DocImpl, isDoc } from "./doc.ts";
 import { getEntityId } from "./doc-map.ts";
 import {
@@ -76,6 +76,16 @@ import { validateAndTransform } from "./schema.ts";
  * @method getAsCellLink Returns a cell link for the cell.
  * @returns {CellLink}
  *
+ * @method getRaw Raw access method, without following aliases (which would 
+ * write to the destination instead of the cell itself). 
+ * @returns {any} - Raw document data
+ *
+ * @method setRaw Raw write method that bypasses Cell validation, 
+ * transformation, and alias resolution. Writes directly to the cell without 
+ * following aliases. 
+ * @param {any} value - Raw value to write directly to document
+ * @returns {boolean} - Result from underlying doc.send()
+ *
  * @method getSourceCell Returns the source cell with optional schema.
  * @param {JSONSchema} schema - Optional schema to apply.
  * @returns {Cell<T & {[TYPE]: string | undefined} & {argument: any}>}
@@ -141,6 +151,8 @@ declare module "@commontools/api" {
     ): QueryResult<DeepKeyLookup<T, Path>>;
     getAsCellLink(): CellLink;
     getDoc(): DocImpl<any>;
+    getRaw(): any;
+    setRaw(value: any): boolean;
     getSourceCell<T>(
       schema?: JSONSchema,
     ): Cell<
@@ -307,6 +319,30 @@ function createRegularCell<T>(
       if (!isRecord(values)) {
         throw new Error("Can't update with non-object value");
       }
+      // Get current value, following aliases and references
+      const ref = resolveLinkToValue(doc, path, log, schema, rootSchema);
+      const currentValue = ref.cell.getAtPath(ref.path);
+
+      // If there's no current value, initialize based on schema
+      if (currentValue === undefined) {
+        if (schema) {
+          // Check if schema allows objects
+          const allowsObject = schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object")) ||
+            (schema.anyOf &&
+              schema.anyOf.some((s) =>
+                typeof s === "object" && s.type === "object"
+              ));
+
+          if (!allowsObject) {
+            throw new Error(
+              "Cannot update with object value - schema does not allow objects",
+            );
+          }
+        }
+        ref.cell.setAtPath(ref.path, {}, log, schema);
+      }
+
+      // Now update each property
       for (const [key, value] of Object.entries(values)) {
         // Workaround for type checking, since T can be Cell<> and that's fine.
         (self.key as any)(key).set(value);
@@ -406,6 +442,8 @@ function createRegularCell<T>(
     getAsCellLink: () => // Add space here, so that JSON.stringify() of this retains the space.
     ({ space: doc.space, cell: doc, path, schema, rootSchema }),
     getDoc: () => doc,
+    getRaw: () => doc.getAtPath(path),
+    setRaw: (value: any) => doc.setAtPath(path, value),
     getSourceCell: (newSchema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, newSchema, newSchema) as Cell<any>,
     toJSON: () =>

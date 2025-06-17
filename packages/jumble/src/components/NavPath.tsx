@@ -1,5 +1,5 @@
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { CharmLink } from "@/components/CharmLink.tsx";

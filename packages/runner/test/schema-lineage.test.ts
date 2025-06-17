@@ -1,21 +1,28 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  type Cell,
-  createBuilder,
-  type JSONSchema,
-} from "@commontools/builder";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+import { createBuilder } from "../src/builder/factory.ts";
 import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Schema Lineage", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let recipe: ReturnType<typeof createBuilder>["recipe"];
   let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
     const builder = createBuilder(runtime);
     ({ recipe, UI } = builder);
@@ -23,6 +30,7 @@ describe("Schema Lineage", () => {
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   describe("Schema Propagation through Aliases", () => {
@@ -31,7 +39,7 @@ describe("Schema Lineage", () => {
       const targetDoc = runtime.documentMap.getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target",
-        "test",
+        space,
       );
 
       // Create a schema for our alias
@@ -54,7 +62,7 @@ describe("Schema Lineage", () => {
           },
         },
         "schema-lineage-source",
-        "test",
+        space,
       );
 
       // Access the doc without providing a schema
@@ -76,7 +84,7 @@ describe("Schema Lineage", () => {
       const targetDoc = runtime.documentMap.getDoc(
         { count: 42, label: "test" },
         "schema-lineage-target-explicit",
-        "test",
+        space,
       );
 
       // Create schemas with different types
@@ -107,7 +115,7 @@ describe("Schema Lineage", () => {
           },
         },
         "schema-lineage-source-explicit",
-        "test",
+        space,
       );
 
       // Access the doc with explicit schema
@@ -130,7 +138,7 @@ describe("Schema Lineage", () => {
       const valueDoc = runtime.documentMap.getDoc(
         { count: 5, name: "test" },
         "deep-alias-value",
-        "test",
+        space,
       );
 
       // Create a schema for our first level alias
@@ -147,7 +155,7 @@ describe("Schema Lineage", () => {
           },
         },
         "count-alias",
-        "test",
+        space,
       );
 
       // Create a third level of aliasing
@@ -159,7 +167,7 @@ describe("Schema Lineage", () => {
           },
         },
         "final-alias",
-        "test",
+        space,
       );
 
       // Access the doc without providing a schema
@@ -181,7 +189,7 @@ describe("Schema Lineage", () => {
           ],
         },
         "nested-doc-with-alias",
-        "test",
+        space,
       );
 
       // Define schemas for the nested objects
@@ -206,7 +214,7 @@ describe("Schema Lineage", () => {
           },
         },
         "items-alias",
-        "test",
+        space,
       );
 
       // Access the items with a schema that specifies array items should be cells
@@ -232,13 +240,18 @@ describe("Schema Lineage", () => {
 });
 
 describe("Schema propagation end-to-end example", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let recipe: ReturnType<typeof createBuilder>["recipe"];
   let UI: ReturnType<typeof createBuilder>["UI"];
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
     const builder = createBuilder(runtime);
     ({ recipe, UI } = builder);
@@ -246,6 +259,7 @@ describe("Schema propagation end-to-end example", () => {
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
 
   it("should propagate schema through a recipe", () => {
@@ -277,7 +291,7 @@ describe("Schema propagation end-to-end example", () => {
     const result = runtime.documentMap.getDoc(
       undefined,
       "should propagate schema through a recipe",
-      "test",
+      space,
     );
     runtime.run(
       testRecipe,

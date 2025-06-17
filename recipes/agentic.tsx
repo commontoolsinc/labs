@@ -1,7 +1,7 @@
 import {
-  h,
   compileAndRun,
   derive,
+  h,
   ifElse,
   JSONSchema,
   lift,
@@ -52,7 +52,7 @@ const OutputSchema = {
 } as const satisfies JSONSchema;
 
 const wrapCode = (src: string) => `
-import { lift, recipe, derive, handler, llm } from "@commontools/builder";
+import { lift, recipe, derive, handler, llm } from "commontools";
 
 const math = lift((expression: string) => {
   console.log("math", expression);

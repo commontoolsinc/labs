@@ -1,8 +1,8 @@
 import type { Reference } from "merkle-reference";
-import { JSONValue, SchemaContext } from "@commontools/builder";
-import { SchemaPathSelector } from "@commontools/builder/traverse";
+import { JSONValue, SchemaContext } from "@commontools/runner";
+import { SchemaPathSelector } from "@commontools/runner/traverse";
 
-export type { Reference, SchemaPathSelector };
+export type { JSONValue, Reference, SchemaContext, SchemaPathSelector };
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
@@ -895,7 +895,7 @@ export type Conflict = {
   /**
    * Actual memory state in the replica repository.
    */
-  actual: Fact | null;
+  actual: Revision<Fact> | null;
 };
 
 export type ToJSON<T> = T & {
@@ -980,11 +980,3 @@ export type Variant<U extends Record<string, unknown>> = {
       [K in Key]: U[Key];
     };
 }[keyof U];
-
-// This will match every doc reachable by the specified set of documents
-export const SchemaAll: SchemaContext = { schema: true, rootSchema: true };
-
-// This is equivalent to a standard query, and will only match the specified documents
-export const SchemaNone: SchemaContext = { schema: false, rootSchema: false };
-
-export const SelectAllString = "_";

@@ -9,15 +9,17 @@ import {
   type JSONValue,
   type Module,
   type NodeFactory,
-  popFrame,
-  pushFrameFromCause,
   type Recipe,
-  recipeFromFrame,
   TYPE,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   type UnsafeBinding,
-} from "@commontools/builder";
+} from "./builder/types.ts";
+import {
+  popFrame,
+  pushFrameFromCause,
+  recipeFromFrame,
+} from "./builder/recipe.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
@@ -345,11 +347,12 @@ export class Runner implements IRunner {
    * A better strategy would be to schedule based on effects and unregister the
    * effects driving execution, e.g. the UI.
    *
-   * @param resultCell - The result doc to stop.
+   * @param resultCell - The result doc or cell to stop.
    */
-  stop<T>(resultCell: DocImpl<T>): void {
-    this.cancels.get(resultCell)?.();
-    this.cancels.delete(resultCell);
+  stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
+    const doc = isDoc(resultCell) ? resultCell : (resultCell as Cell<T>).getDoc();
+    this.cancels.get(doc)?.();
+    this.cancels.delete(doc);
   }
 
   stopAll(): void {
@@ -510,7 +513,7 @@ export class Runner implements IRunner {
           cause,
           processCell.space,
         );
-        inputsCell.freeze();
+        inputsCell.freeze("event handler");
 
         const frame = pushFrameFromCause(cause, {
           recipe,
@@ -558,7 +561,7 @@ export class Runner implements IRunner {
       const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, {
         immutable: inputs,
       }, processCell.space);
-      inputsCell.freeze();
+      inputsCell.freeze("javascript node");
 
       let previousResultDoc: DocImpl<any> | undefined;
       let previousResultRecipeAsString: string | undefined;

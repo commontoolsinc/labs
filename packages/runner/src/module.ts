@@ -1,8 +1,8 @@
+import { createNodeFactory } from "./builder/module.ts";
 import {
-  createNodeFactory,
   Module,
   type ModuleFactory,
-} from "@commontools/builder";
+} from "./builder/types.ts";
 import type { DocImpl } from "./doc.ts";
 import type { Action } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";

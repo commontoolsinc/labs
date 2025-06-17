@@ -288,8 +288,6 @@ export class SpaceManager {
     );
     this.workerController = newWorker;
 
-    const initialize = newWorker.initialize();
-
     if (previousWorker) {
       console.log(`${this.did} Restarting Worker Controller`);
       previousWorker.removeEventListener("error", this.onTerminalError);
@@ -301,7 +299,7 @@ export class SpaceManager {
     }
 
     try {
-      await initialize;
+      await newWorker.initializeResolve;
       console.log(`${this.did} Worker controller ready for work`);
     } catch (e) {
       // Initialization error. This "should not" occur, but is seen on invalid IPC requests
