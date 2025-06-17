@@ -158,14 +158,14 @@ declare module "@commontools/api" {
     getAsLink(
       options?: {
         base?: Cell<any>;
-        baseSpace?: string;
+        baseSpace?: DID;
         includeSchema?: boolean;
       },
     ): SigilLink;
     getAsAlias(
       options?: {
         base?: Cell<any>;
-        baseSpace?: string;
+        baseSpace?: DID;
         includeSchema?: boolean;
       },
     ): SigilAlias;
@@ -297,11 +297,11 @@ export type JSONCellLink = {
  * Creates a sigil reference (link or alias) with shared logic
  */
 function createSigilReference(
-  sigilType: "link-v0.1" | "alias-v0.1",
+  sigilType: keyof SigilLink["@"] | keyof SigilAlias["@"],
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema?: JSONSchema,
-  options?: { base?: Cell<any>; baseSpace?: string; includeSchema?: boolean },
+  options?: { base?: Cell<any>; baseSpace?: DID; includeSchema?: boolean },
 ): SigilLink | SigilAlias {
   // Create the base structure
   const reference: any = {
@@ -339,9 +339,7 @@ function createSigilReference(
   } else {
     // Include id and space when no base is provided
     reference["@"][sigilType].id = toURI(doc.entityId);
-    if (doc.space) {
-      reference["@"][sigilType].space = doc.space;
-    }
+    reference["@"][sigilType].space = doc.space;
   }
 
   // Include schema if requested
@@ -599,7 +597,7 @@ function createRegularCell<T>(
     getAsLink: (
       options?: {
         base?: Cell<any>;
-        baseSpace?: string;
+        baseSpace?: DID;
         includeSchema?: boolean;
       },
     ): SigilLink => {
@@ -614,7 +612,7 @@ function createRegularCell<T>(
     getAsAlias: (
       options?: {
         base?: Cell<any>;
-        baseSpace?: string;
+        baseSpace?: DID;
         includeSchema?: boolean;
       },
     ): SigilAlias => {
