@@ -1,6 +1,5 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { maybeGetCellLink } from "@commontools/runner";
 
 /**
  * These tests focus on the core functionality used by our charm reference detection

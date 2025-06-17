@@ -1,11 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  isAlias,
-  isModule,
-  isRecipe,
-  type Opaque,
-} from "../src/builder/types.ts";
+import { isModule, isRecipe, type Opaque } from "../src/builder/types.ts";
+import { isAlias } from "../src/link-utils.ts";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -37,6 +33,9 @@ describe("value type", () => {
 describe("utility functions", () => {
   it("isAlias correctly identifies aliases", () => {
     expect(isAlias({ $alias: { path: ["path", "to", "value"] } })).toBe(true);
+    expect(isAlias({ "@": { "alias-v0.1": { id: "path/to/value" } } })).toBe(
+      true,
+    );
     expect(isAlias({ notAlias: "something" })).toBe(false);
   });
 

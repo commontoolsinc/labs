@@ -34,7 +34,16 @@ export {
   EngineProgramResolver,
 } from "./harness/index.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
-export { followAliases, maybeGetCellLink } from "./link-resolution.ts";
+export { followAliases } from "./link-resolution.ts";
+export {
+  areLinksSame,
+  isAlias,
+  isLink,
+  parseAlias,
+  parseLink,
+  parseLinkOrThrow,
+  parseToLegacyCellLink,
+} from "./link-utils.ts";
 export * from "./recipe-manager.ts";
 
 // Builder functionality (migrated from @commontools/builder package)
@@ -60,7 +69,6 @@ export {
   recipeFromFrame,
 } from "./builder/recipe.ts";
 export {
-  type Alias,
   AuthSchema,
   type Cell as BuilderCell,
   type Child,
@@ -69,11 +77,10 @@ export {
   type HandlerFactory,
   ID,
   ID_FIELD,
-  isAlias,
   isModule,
   isOpaqueRef,
   isRecipe,
-  isStreamAlias,
+  isStreamValue,
   type JSONObject,
   type JSONSchema,
   type JSONSchemaMutable,
@@ -93,7 +100,7 @@ export {
   type SchemaContext,
   type SchemaWithoutCell,
   type Stream as BuilderStream,
-  type StreamAlias,
+  type StreamValue as StreamAlias,
   type toJSON,
   toOpaqueRef,
   TYPE,

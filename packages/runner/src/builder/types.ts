@@ -135,44 +135,11 @@ export type SchemaContext = {
   rootSchema: JSONSchema | boolean;
 };
 
-export type Alias = {
-  $alias: {
-    cell?: unknown;
-    path: PropertyKey[];
-    schema?: JSONSchema;
-    rootSchema?: JSONSchema;
-  };
-};
-
-export function isAlias(value: unknown): value is Alias {
-  // Check legacy $alias format
-  if (isObject(value) && "$alias" in value && isObject(value.$alias) &&
-    "path" in value.$alias &&
-    Array.isArray(value.$alias.path)) {
-    return true;
-  }
-
-  // Check new sigil alias format
-  if (
-    isObject(value) &&
-    "@" in value &&
-    isObject(value["@"]) &&
-    "alias-v0.1" in value["@"] &&
-    isObject(value["@"]["alias-v0.1"])
-  ) {
-    const alias = value["@"]["alias-v0.1"] as any;
-    // Either id or path must be present
-    return typeof alias.id === "string" || Array.isArray(alias.path);
-  }
-
-  return false;
-}
-
-export type StreamAlias = {
+export type StreamValue = {
   $stream: true;
 };
 
-export function isStreamAlias(value: unknown): value is StreamAlias {
+export function isStreamValue(value: unknown): value is StreamValue {
   return isObject(value) && "$stream" in value && value.$stream === true;
 }
 
@@ -195,7 +162,7 @@ export function isModule(value: unknown): value is Module {
 
 export type Node = {
   description?: string;
-  module: Module | Alias;
+  module: Module; // TODO(seefeld): Add `Alias` here once supported
   inputs: JSONValue;
   outputs: JSONValue;
 };

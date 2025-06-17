@@ -1,12 +1,19 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type CellLink, isCell, isCellLink } from "../cell.ts";
-import { maybeGetCellLink } from "../link-resolution.ts";
+import {
+  type CellLink,
+  isCell,
+  isCellLink,
+  type LegacyAlias,
+} from "../cell.ts";
+import {
+  isAlias,
+  isLegacyAlias,
+  parseToLegacyCellLink,
+} from "../link-utils.ts";
 import { isDoc } from "../doc.ts";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
-  type Alias,
   canBeOpaqueRef,
-  isAlias,
   isOpaqueRef,
   isRecipe,
   isShadowRef,
@@ -60,12 +67,12 @@ export function toJSONWithAliases(
           ...(exported?.schema ? { schema: exported.schema } : {}),
           ...(exported?.rootSchema ? { rootSchema: exported.rootSchema } : {}),
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else throw new Error(`Cell not found in paths`);
   }
 
-  if (isAlias(value)) {
-    const alias = (value as Alias).$alias;
+  if (isLegacyAlias(value)) {
+    const alias = (value as LegacyAlias).$alias;
     if (isShadowRef(alias.cell)) {
       const cell = alias.cell.shadowOf;
       if (cell.export().frame !== getTopFrame()) {
@@ -85,14 +92,14 @@ export function toJSONWithAliases(
         $alias: {
           path: [...paths.get(cell)!, ...alias.path] as (string | number)[],
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else if (!("cell" in alias) || typeof alias.cell === "number") {
       return {
         $alias: {
           cell: ((alias.cell as number) ?? 0) + 1,
           path: alias.path as (string | number)[],
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else {
       throw new Error(`Invalid alias cell`);
     }
@@ -149,12 +156,9 @@ export function createJsonSchema(
     }
 
     if (isAlias(value)) {
-      // Use maybeGetCellLink to handle all alias formats
-      const aliasLink = maybeGetCellLink(value.$alias);
-      if (aliasLink && isDoc(aliasLink.cell)) {
-        value = aliasLink.cell.getAtPath(aliasLink.path);
-      } else if (value.$alias && Array.isArray(value.$alias.path)) {
-        value = getValueAtPath(example, value.$alias.path);
+      const link = parseToLegacyCellLink(value);
+      if (link && isDoc(link.cell)) {
+        value = link.cell.getAtPath(link.path);
       }
       return analyzeType(value);
     }

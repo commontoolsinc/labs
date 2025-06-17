@@ -5,9 +5,10 @@ import {
   type Cell,
   ID,
   ID_FIELD,
-  isStreamAlias,
+  isStreamValue,
   type JSONSchema,
   type Schema,
+  type ShadowRef,
 } from "./builder/types.ts";
 import { type DeepKeyLookup, type DocImpl, isDoc } from "./doc.ts";
 import { getEntityId } from "./doc-map.ts";
@@ -196,6 +197,7 @@ declare module "@commontools/api" {
     rootSchema?: JSONSchema;
     value: T;
     cellLink: CellLink;
+    space: MemorySpace;
     entityId: EntityId | undefined;
     [isCellMarker]: true;
     copyTrap: boolean;
@@ -248,6 +250,15 @@ export type CellLink = {
   rootSchema?: JSONSchema;
 };
 
+export type LegacyAlias = {
+  $alias: {
+    cell?: DocImpl<any> | ShadowRef | number;
+    path: PropertyKey[];
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+  };
+};
+
 /**
  * Generic sigil value type for future extensions
  */
@@ -256,24 +267,28 @@ export type SigilValue<T> = { "@": T };
 /**
  * Link sigil value v0.1
  */
+export const LINK_V01_TAG = "link-v0.1" as const;
 export type LinkV01 = {
-  "link-v0.1": {
+  [LINK_V01_TAG]: {
     id?: string;
     path?: (string | number)[];
     space?: MemorySpace;
     schema?: JSONSchema;
+    rootSchema?: JSONSchema;
   };
 };
 
 /**
  * Alias sigil value v0.1
  */
+export const ALIAS_V01_TAG = "alias-v0.1" as const;
 export type AliasV01 = {
-  "alias-v0.1": {
+  [ALIAS_V01_TAG]: {
     id?: string;
     path?: (string | number)[];
     space?: MemorySpace;
     schema?: JSONSchema;
+    rootSchema?: JSONSchema;
   };
 };
 
@@ -281,11 +296,13 @@ export type AliasV01 = {
  * Sigil link type
  */
 export type SigilLink = SigilValue<LinkV01>;
+export type SigilLinkTag = typeof LINK_V01_TAG;
 
 /**
  * Sigil alias type
  */
 export type SigilAlias = SigilValue<AliasV01>;
+export type SigilAliasTag = typeof ALIAS_V01_TAG;
 
 /**
  * JSON cell link format used in storage
@@ -299,7 +316,7 @@ export type JSONCellLink = {
  * Creates a sigil reference (link or alias) with shared logic
  */
 function createSigilReference(
-  sigilType: keyof SigilLink["@"] | keyof SigilAlias["@"],
+  sigilType: SigilLinkTag | SigilAliasTag,
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema?: JSONSchema,
@@ -373,7 +390,7 @@ export function createCell<T>(
     rootSchema = ref.rootSchema || ref.schema;
   }
 
-  if (isStreamAlias(ref.cell.getAtPath(ref.path))) {
+  if (isStreamValue(ref.cell.getAtPath(ref.path))) {
     return createStreamCell(
       ref.cell,
       ref.path,
@@ -655,6 +672,9 @@ function createRegularCell<T>(
     },
     get cellLink(): CellLink {
       return { space: doc.space, cell: doc, path, schema, rootSchema };
+    },
+    get space(): MemorySpace {
+      return doc.space;
     },
     get entityId(): EntityId | undefined {
       return getEntityId(self.getAsCellLink());

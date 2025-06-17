@@ -1,13 +1,12 @@
 import { isRecord } from "@commontools/utils/types";
 import {
-  type Alias,
-  isAlias,
   type Recipe,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   type UnsafeBinding,
 } from "./builder/types.ts";
+import { isLegacyAlias } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
@@ -32,7 +31,7 @@ export function sendValueToBinding<T>(
   log?: ReactivityLog,
 ): void {
   const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
-  if (isAlias(binding)) {
+  if (isLegacyAlias(binding)) {
     const ref = followAliases(binding, doc, log);
     diffAndUpdate(ref, value, log, { doc, binding });
   } else if (Array.isArray(binding)) {
@@ -85,7 +84,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
 ): T {
   const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
   function convert(binding: unknown): unknown {
-    if (isAlias(binding)) {
+    if (isLegacyAlias(binding)) {
       const alias = { ...binding.$alias };
       if (typeof alias.cell === "number") {
         if (alias.cell === 1) {
@@ -151,7 +150,7 @@ export function findAllAliasedCells<T>(
 ): CellLink[] {
   const docs: CellLink[] = [];
   function find(binding: unknown, origDoc: DocImpl<T>): void {
-    if (isAlias(binding)) {
+    if (isLegacyAlias(binding)) {
       // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
       if (typeof binding.$alias.cell === "number") return;
       const doc = (binding.$alias.cell ?? origDoc) as DocImpl<T>;

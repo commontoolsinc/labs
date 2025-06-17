@@ -1,20 +1,25 @@
 import { isRecord } from "@commontools/utils/types";
 import {
-  type Alias,
   ID,
   ID_FIELD,
-  isAlias,
   type JSONSchema,
   type JSONValue,
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import { type CellLink, isCell, isCellLink, isAnyCellLink } from "./cell.ts";
+import {
+  type CellLink,
+  isAnyCellLink,
+  isCell,
+  isCellLink,
+  type LegacyAlias,
+  type SigilAlias,
+} from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followAliases } from "./link-resolution.ts";
-import { maybeUnwrapProxy, arrayEqual } from "./type-utils.ts";
-import { areLinksSame, isLink, parseLink } from "./link-utils.ts";
+import { arrayEqual, maybeUnwrapProxy } from "./type-utils.ts";
+import { areLinksSame, isAlias, isLink, parseAlias } from "./link-utils.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -65,7 +70,7 @@ export function setNestedValue<T>(
     return success;
   } else if (isLink(value) && isLink(destValue)) {
     // Use the new link comparison function that supports all formats
-    if (!areLinksSame(value, destValue, { cell: doc, path: [] }, doc.space)) {
+    if (!areLinksSame(value, destValue, doc.asCell())) {
       doc.setAtPath(path, value, log);
     }
     return true;
@@ -186,10 +191,12 @@ export function normalizeAndDiff(
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isAlias(newValue)) {
+    const alias = parseAlias(newValue)!;
+    const currentAlias = parseAlias(currentValue);
     if (
-      isAlias(currentValue) &&
-      newValue.$alias.cell === currentValue.$alias.cell &&
-      arrayEqual(newValue.$alias.path, currentValue.$alias.path)
+      currentAlias !== undefined &&
+      alias.id === currentAlias.id &&
+      arrayEqual(alias.path, currentAlias.path)
     ) {
       return [];
     } else {
@@ -207,7 +214,10 @@ export function normalizeAndDiff(
   }
 
   if (isAnyCellLink(newValue)) {
-    if (isAnyCellLink(currentValue) && areLinksSame(newValue, currentValue, current, current.cell.space)) {
+    if (
+      isAnyCellLink(currentValue) &&
+      areLinksSame(newValue, currentValue, current.cell.asCell())
+    ) {
       return [];
     } else {
       return [

@@ -4,7 +4,6 @@ import {
   type Immutable,
   isNumber,
   isObject,
-  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -14,9 +13,10 @@ import type {
   JSONValue,
   SchemaContext,
 } from "./builder/types.ts";
-import { isAlias } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
-import { isSigilValue, type SigilLink, type SigilAlias } from "./cell.ts";
+import { isAlias, parseLink } from "./link-utils.ts";
+import { getEntityId } from "./doc-map.ts";
+import { isSigilValue, type SigilAlias, type SigilLink } from "./cell.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -479,48 +479,14 @@ function narrowSchema(
  *   - cellTarget: The target cell identifier as a string, or undefined if it refers to the current document
  */
 export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
-  // Handle legacy $alias format
-  if (isAlias(value)) {
-    if (isObject(value.$alias.cell) && "/" in value.$alias.cell) {
-      return {
-        path: value.$alias.path.map((p) => p.toString()),
-        cellTarget: value.$alias.cell["/"] as string,
-      };
-    }
-    return {
-      path: value.$alias.path.map((p) => p.toString()),
-      cellTarget: undefined,
-    };
-  }
-  
-  // Handle legacy JSON cell link format
-  else if (isJSONCellLink(value)) {
-    return { path: value.path, cellTarget: value.cell["/"] as string };
-  }
-  
-  // Handle new sigil link format
-  else if (isSigilLink(value)) {
-    const link = value["@"]["link-v0.1"];
-    const path = link.path ? link.path.map((p) => p.toString()) : [];
-    // Remove "of:" prefix if present for storage compatibility
-    const cellTarget = link.id ? link.id.replace(/^of:/, "") : undefined;
-    return { path, cellTarget };
-  }
-  
-  // Handle new sigil alias format
-  else if (isSigilAlias(value)) {
-    const alias = value["@"]["alias-v0.1"];
-    const path = alias.path ? alias.path.map((p) => p.toString()) : [];
-    // Remove "of:" prefix if present for storage compatibility
-    const cellTarget = alias.id ? alias.id.replace(/^of:/, "") : undefined;
-    return { path, cellTarget };
-  }
-  
-  return { path: [], cellTarget: undefined };
+  const link = parseLink(value);
+  if (!link) return { path: [], cellTarget: undefined };
+  return { path: link.path, cellTarget: getEntityId(link.id)?.["/"] };
 }
 
 export function isPointer(value: unknown): boolean {
-  return (isAlias(value) || isJSONCellLink(value) || isSigilLink(value) || isSigilAlias(value));
+  return (isAlias(value) || isJSONCellLink(value) || isSigilLink(value) ||
+    isSigilAlias(value));
 }
 
 /**

@@ -18,8 +18,9 @@ import {
   isCell,
   isCellLink,
   isDoc,
-  maybeGetCellLink,
   type MemorySpace,
+  parseLink,
+  parseToLegacyCellLink,
   Runtime,
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
@@ -508,11 +509,8 @@ export class CharmManager {
 
               // If we've reached the end and have a resultRef, return it
               if (value.resultRef) {
-                // Use maybeGetCellLink for safer access to resultRef
-                const resultLink = maybeGetCellLink(value.resultRef);
-                if (resultLink) {
-                  return getEntityId(resultLink.cell);
-                }
+                const { id } = parseLink(value.resultRef, cell)!;
+                if (id) return getEntityId(id);
               }
             }
           } catch (err) {
@@ -619,7 +617,11 @@ export class CharmManager {
           }
 
           // Try to get a cell link from various types of values
-          const cellLink = maybeGetCellLink(value, parent.getDoc());
+          const cellLink = parseToLegacyCellLink(
+            value,
+            this.runtime,
+            this.space,
+          );
           if (cellLink) {
             try {
               const cellId = getEntityId(cellLink.cell);
@@ -641,7 +643,11 @@ export class CharmManager {
           if (value.$alias) {
             try {
               // Use maybeGetCellLink to handle all formats including new sigil format
-              const aliasLink = maybeGetCellLink(value.$alias, parent.getDoc());
+              const aliasLink = parseToLegacyCellLink(
+                value.$alias,
+                this.runtime,
+                this.space,
+              );
               if (aliasLink) {
                 const aliasId = getEntityId(aliasLink.cell);
                 if (aliasId) addMatchingCharm(aliasId);
@@ -969,7 +975,11 @@ export class CharmManager {
         }
 
         // Use maybeGetCellLink to handle various reference types
-        const cellLink = maybeGetCellLink(value, parent.getDoc());
+        const cellLink = parseToLegacyCellLink(
+          value,
+          this.runtime,
+          this.space,
+        );
         if (cellLink) {
           try {
             // Check if the linked doc is our target
@@ -1000,7 +1010,11 @@ export class CharmManager {
         if (value.$alias) {
           try {
             // Use maybeGetCellLink to handle all formats including new sigil format
-            const aliasLink = maybeGetCellLink(value.$alias, parent.getDoc());
+            const aliasLink = parseToLegacyCellLink(
+              value.$alias,
+              this.runtime,
+              this.space,
+            );
             if (aliasLink) {
               // Check if the alias points to our target
               const aliasId = getEntityId(aliasLink.cell);
