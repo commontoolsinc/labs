@@ -114,7 +114,7 @@ export default recipe(ListSchema, ResultSchema, ({ title, items }) => {
 
       return { title: item.title, question: question.result, item };
     });
-  }) as any[]; // TODO: work out why needed
+  }) as any[]; // TODO(@bf): work out why needed
 
   const questions = derive(results, (r) => r.map((i) => i.question));
 
