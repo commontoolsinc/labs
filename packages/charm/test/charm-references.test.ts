@@ -1,14 +1,6 @@
 import { assertEquals } from "@std/assert";
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { CharmManager } from "../src/manager.ts";
-import {
-  Cell,
-  DocImpl,
-  EntityId,
-  getEntityId,
-  maybeGetCellLink,
-} from "@commontools/runner";
-import { NAME } from "@commontools/runner";
+import { describe, it } from "@std/testing/bdd";
+import { EntityId } from "@commontools/runner";
 
 // Create a mock environment for testing reference detection
 describe("Charm reference detection", () => {

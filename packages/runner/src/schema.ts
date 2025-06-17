@@ -1,10 +1,7 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
-import {
-  isAlias,
-  type JSONSchema,
-  type JSONValue,
-} from "./builder/types.ts";
+import { type JSONSchema, type JSONValue } from "./builder/types.ts";
+import { isAlias } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
 import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";

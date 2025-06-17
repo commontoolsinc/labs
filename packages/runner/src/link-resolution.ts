@@ -1,19 +1,22 @@
-import {
-  type Alias,
-  isAlias,
-  type JSONSchema,
-} from "./builder/types.ts";
+import { type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
-import { type ReactivityLog } from "./scheduler.ts";
+import { type DocImpl } from "./doc.ts";
 import {
-  getCellLinkOrThrow,
-  isQueryResultForDereferencing,
-} from "./query-result-proxy.ts";
+  type Cell,
+  type CellLink,
+  isCell,
+  type LegacyAlias,
+  type SigilAlias,
+} from "./cell.ts";
+import { type ReactivityLog } from "./scheduler.ts";
 import { arrayEqual } from "./type-utils.ts";
-import { isLink, parseLink, type NormalizedLink } from "./link-utils.ts";
-import { toURI } from "./uri-utils.ts";
+import {
+  isAlias,
+  isLink,
+  parseAlias,
+  parseLink,
+  parseToLegacyCellLink,
+} from "./link-utils.ts";
 
 /**
  * Track visited cell links and memoize results during path resolution
@@ -204,7 +207,7 @@ export function followLinks(
     const target = result.cell.getAtPath(result.path);
 
     nextRef = !onlyAliases || isAlias(target)
-      ? maybeGetCellLink(target, result.cell)
+      ? parseToLegacyCellLink(target, result.cell.runtime, result.cell.space)
       : undefined;
 
     if (nextRef !== undefined) {
@@ -243,60 +246,27 @@ export function followLinks(
   return result;
 }
 
-export function maybeGetCellLink<T>(
-  value: unknown,
-  parent?: DocImpl<T>,
-): CellLink | undefined {
-  if (isQueryResultForDereferencing(value)) return getCellLinkOrThrow(value);
-  else if (isCellLink(value)) return value;
-  else if (isDoc(value)) return { cell: value, path: [] } satisfies CellLink;
-  else if (isCell(value)) return value.getAsCellLink();
-  else if (isAlias(value)) {
-    if (!parent && !value.$alias.cell) {
-      throw new Error(
-        `Alias without cell and no parent provided: ${JSON.stringify(value)}`,
-      );
-    }
-    return { cell: parent, ...value.$alias } as CellLink;
-  }
-  
-  // Handle other link formats using the parser
-  else if (isLink(value)) {
-    try {
-      const baseCellLink = parent ? { cell: parent, path: [] } as CellLink : undefined;
-      const parsed = parseLink(value, baseCellLink, parent?.space);
-      if (parsed && parent?.runtime) {
-        // Convert back to CellLink format for compatibility
-        const entityId = { "/": parsed.id.replace(/^of:/, "") };
-        const doc = parent.runtime.documentMap.getDocByEntityId(parsed.space || parent.space, entityId);
-        if (doc) {
-          return {
-            cell: doc,
-            path: parsed.path,
-            space: parsed.space,
-            schema: parsed.schema,
-          } as CellLink;
-        }
-      }
-    } catch (e) {
-      // Fall through to return undefined
-    }
-  }
-  
-  return undefined;
-}
-
 // Follows aliases and returns cell reference describing the last alias.
 // Only logs interim aliases, not the first one, and not the non-alias value.
 export function followAliases<T = any>(
-  alias: Alias,
+  alias: LegacyAlias | SigilAlias,
   docOrCell: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
 ): CellLink {
   if (isAlias(alias)) {
     const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
+    const parsedAlias = parseAlias(alias, doc.asCell())!;
     return followLinks(
-      { cell: doc, ...alias.$alias } as CellLink,
+      {
+        cell: doc.runtime.documentMap.getDocByEntityId(
+          parsedAlias.space!,
+          parsedAlias.id,
+        ),
+        path: parsedAlias.path,
+        space: parsedAlias.space,
+        schema: parsedAlias.schema,
+        rootSchema: parsedAlias.rootSchema,
+      } as CellLink,
       log,
       createVisits(),
       true,
