@@ -12,7 +12,7 @@ export async function generateObject(
   params: LLMGenerateObjectRequest,
 ): Promise<LLMGenerateObjectResponse> {
   try {
-    const model = findModel(params.model ?? DEFAULT_GENERATE_OBJECT_MODELS);
+    const modelConfig = findModel(params.model ?? DEFAULT_GENERATE_OBJECT_MODELS);
     const ajv = new Ajv({ allErrors: true, strict: false });
     const validator = ajv.compile(params.schema);
 
@@ -43,7 +43,7 @@ export async function generateObject(
     }
 
     const { object } = await generateObjectCore({
-      model: model.model,
+      model: modelConfig.model,
       prompt: params.prompt,
       mode: "json",
       schema: jsonSchema(params.schema, {
@@ -60,6 +60,8 @@ export async function generateObject(
           };
         },
       }),
+      maxTokens: params.maxTokens,
+      ...(params.system && { system: params.system }),
     });
 
     return {
@@ -68,6 +70,6 @@ export async function generateObject(
     };
   } catch (error) {
     console.error("Error generating object:", error);
-    throw new Error(`Failed to generate object: ${error}`);
+    throw error instanceof Error ? error : new Error(`Failed to generate object: ${error}`);
   }
 }

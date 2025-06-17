@@ -37,15 +37,11 @@ const outputSchema = {
 
 // Handler to increment the number
 const adder = handler({}, inputSchema, (_, state) => {
-  console.log("incrementing number");
   state.number.set(state.number.get() + 1);
 });
 
 // Handler to set a specific number
-const setNumber = handler({
-  type: "object",
-  properties: {},
-}, {
+const setNumber = handler({}, {
   type: "object",
   properties: {
     number: { type: "number", asCell: true },
@@ -73,13 +69,15 @@ const generateImageUrl = lift(({ imagePrompt }) => {
 
 export default recipe(inputSchema, outputSchema, (cell) => {
   // Use generateObject to get structured data from the LLM
-  const { result: object, pending } = generateObject(generatePrompt({ number: cell.number }));
+  const { result: object, pending } = generateObject(
+    generatePrompt({ number: cell.number }),
+  );
 
   return {
     [NAME]: str`Number Story: ${object?.title || "Loading..."}`,
     [UI]: (
       <div>
-        <ct-button onClick={adder(cell)}>
+        <ct-button onClick={adder({ number: cell.number })}>
           Current number: {cell.number} (click to increment)
         </ct-button>
         {ifElse(
@@ -90,7 +88,9 @@ export default recipe(inputSchema, outputSchema, (cell) => {
             {ifElse(
               object?.imagePrompt,
               <p>
-                <img src={generateImageUrl({ imagePrompt: object.imagePrompt })} />
+                <img
+                  src={generateImageUrl({ imagePrompt: object.imagePrompt })}
+                />
               </p>,
               <p>No image prompt</p>,
             )}
@@ -109,7 +109,9 @@ export default recipe(inputSchema, outputSchema, (cell) => {
                 <ul>
                   {object.seeAlso.map((n: number) => (
                     <li>
-                      <ct-button onClick={setNumber({ number: cell.number, n })}>
+                      <ct-button
+                        onClick={setNumber({ number: cell.number, n })}
+                      >
                         {n}
                       </ct-button>
                     </li>
@@ -118,7 +120,7 @@ export default recipe(inputSchema, outputSchema, (cell) => {
               </div>,
               <p>No related numbers</p>,
             )}
-          </div>
+          </div>,
         )}
       </div>
     ),

@@ -263,8 +263,37 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (c) =>
     payload.metadata.user = user;
   }
 
+  const cacheKey = await hashKey(
+    JSON.stringify(removeNonCacheableFields(payload)),
+  );
+
+  // Check cache if enabled
+  if (payload.cache !== false) {
+    const cachedResult = await loadFromCache(cacheKey);
+    if (cachedResult) {
+      return c.json({
+        object: cachedResult.object,
+        id: cachedResult.id,
+      });
+    }
+  }
+
   try {
     const result = await generateObjectCore(payload);
+    
+    // Save to cache if enabled
+    if (payload.cache !== false) {
+      try {
+        await saveToCache(cacheKey, {
+          ...removeNonCacheableFields(payload),
+          object: result.object,
+          id: result.id,
+        });
+      } catch (e) {
+        console.error("Error saving generateObject response to cache:", e);
+      }
+    }
+    
     return c.json(result);
   } catch (error) {
     console.error("Error in generateObject:", error);

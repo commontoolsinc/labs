@@ -37,10 +37,6 @@ export class LLMClient {
       );
     }
 
-    if (!response.body) {
-      throw new Error("No response body");
-    }
-
     const data = await response.json();
     return data;
   }
