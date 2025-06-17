@@ -71,7 +71,7 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      const entry = storageManager.open(space).get(refDoc.getDoc().entityId);
+      const entry = storageManager.open(space).get(refDoc.entityId!);
       expect(entry?.value).toEqual("hello");
     });
 
@@ -90,7 +90,7 @@ describe("Storage", () => {
 
       await runtime.storage.syncCell(testDoc);
 
-      const entry = storageManager.open(space).get(refDoc.getDoc().entityId);
+      const entry = storageManager.open(space).get(refDoc.entityId!);
       expect(entry?.value).toEqual("hello");
     });
   });
@@ -122,7 +122,7 @@ describe("Storage", () => {
     it("should wait for a doc to appear", async () => {
       let synced = false;
 
-      storageManager.open(space).sync(testDoc.getDoc().entityId!, true).then(
+      storageManager.open(space).sync(testDoc.entityId!, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -134,7 +134,7 @@ describe("Storage", () => {
 
     it("should wait for a undefined doc to appear", async () => {
       let synced = false;
-      storageManager.open(space).sync(testDoc.getDoc().entityId!, true).then(
+      storageManager.open(space).sync(testDoc.entityId!, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -155,8 +155,8 @@ describe("Storage", () => {
       await runtime.storage.syncCell(ephemeralDoc);
       const provider = storageManager.open(space);
 
-      await provider.sync(ephemeralDoc.getDoc().entityId!);
-      const record = provider.get(ephemeralDoc.getDoc().entityId!);
+      await provider.sync(ephemeralDoc.entityId!);
+      const record = provider.get(ephemeralDoc.entityId!);
       expect(record).toBeUndefined();
     });
   });

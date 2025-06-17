@@ -740,7 +740,7 @@ describe("Recipe Runner", () => {
     expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.charmId).toBe(
-      JSON.parse(JSON.stringify(charm.getDoc().entityId))["/"],
+      JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
 
     // NOTE(ja): this test is really important after a handler
@@ -805,7 +805,7 @@ describe("Recipe Runner", () => {
     expect(lastError?.recipeId).toBe(recipeId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.charmId).toBe(
-      JSON.parse(JSON.stringify(charm.getDoc().entityId))["/"],
+      JSON.parse(JSON.stringify(charm.entityId))["/"],
     );
 
     // Make sure it recovers:
