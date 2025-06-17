@@ -187,7 +187,7 @@ export class Runner implements IRunner {
       const ref = isCellLink(argument)
         ? argument
         : isCell(argument)
-        ? argument.getAsLink({ base: processCell.asCell() })
+        ? argument.getAsCellLink()
         : isQueryResultForDereferencing(argument)
         ? getCellLinkOrThrow(argument)
         : ({ cell: argument, path: [] } satisfies CellLink);

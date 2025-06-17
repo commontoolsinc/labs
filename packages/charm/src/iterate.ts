@@ -269,7 +269,7 @@ export function scrub(data: any): any {
  * @param data The data to process
  * @param baseSpace Optional base space DID to make links relative to
  */
-function turnCellsIntoAliases(data: any, baseSpace?: string): any {
+function turnCellsIntoAliases(data: any, baseSpace?: MemorySpace): any {
   if (isCell(data)) {
     return { $alias: data.getAsAlias(baseSpace ? { baseSpace } : undefined) };
   } else if (Array.isArray(data)) {
