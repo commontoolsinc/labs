@@ -391,7 +391,7 @@ const getCalendars = handler(
     }
 
     googleRequest(
-      auth,
+      state.auth,
       new URL(`https://www.googleapis.com/calendar/v3/users/me/calendarList`),
     )
       .then((res) => res.json())
