@@ -379,11 +379,14 @@ export function createCell<T>(
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema: JSONSchema | undefined = schema,
+  noResolve = false,
 ): Cell<T> {
   // Resolve the path to check whether it's a stream. We're not logging this right now.
   // The corner case where during it's lifetime this changes from non-stream to stream
   // or vice versa will not be detected.
-  const ref = resolveLinkToValue(doc, path, undefined, schema, rootSchema);
+  const ref = noResolve
+    ? { cell: doc, path, schema, rootSchema }
+    : resolveLinkToValue(doc, path, undefined, schema, rootSchema);
   // Use schema from alias if provided and no explicit schema was set
   if (!schema && ref.schema) {
     schema = ref.schema;

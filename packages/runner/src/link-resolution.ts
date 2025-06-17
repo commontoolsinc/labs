@@ -4,6 +4,7 @@ import { type DocImpl } from "./doc.ts";
 import {
   type Cell,
   type CellLink,
+  createCell,
   isCell,
   type LegacyAlias,
   type SigilAlias,
@@ -207,7 +208,17 @@ export function followLinks(
     const target = result.cell.getAtPath(result.path);
 
     nextRef = !onlyAliases || isAlias(target)
-      ? parseToLegacyCellLink(target, result.cell.asCell())
+      ? parseToLegacyCellLink(
+        target,
+        createCell(
+          result.cell,
+          result.path,
+          undefined,
+          undefined,
+          undefined,
+          true,
+        ),
+      )
       : undefined;
 
     if (nextRef !== undefined) {
