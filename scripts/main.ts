@@ -1,3 +1,4 @@
+#!/usr/bin/env -S deno run --allow-read --allow-net --allow-env
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
@@ -150,7 +151,9 @@ async function main() {
         // Create the cell JSON object
         const linkJson = JSON.stringify({
           cell: { "/": hash },
-          path: path ? path.split("/").filter(Boolean).map(decodeURIComponent) : [],
+          path: path
+            ? path.split("/").filter(Boolean).map(decodeURIComponent)
+            : [],
         });
 
         return linkJson;
