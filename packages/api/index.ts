@@ -196,6 +196,15 @@ export type JSONSchema = {
   readonly minProperties?: number; // not validated
   readonly required?: readonly string[];
   readonly dependentRequired?: Readonly<Record<string, readonly string[]>>; // not validated
+
+  // Format annotations
+  readonly format?: string; // not validated
+
+  // Contents - none applied
+  readonly contentEncoding?: string;
+  readonly contentMediaType?: string;
+  readonly contentSchema?: JSONSchema | boolean;
+
   // Meta-Data
   readonly title?: string;
   readonly description?: string;
