@@ -640,7 +640,7 @@ describe("asCell", () => {
       { cell: c.getDoc(), path: ["stream"] },
     );
 
-    (streamCell as any).send("event");
+    streamCell.send("event");
     await runtime.idle();
 
     expect(c.get()).toStrictEqual({ stream: { $stream: true } });
