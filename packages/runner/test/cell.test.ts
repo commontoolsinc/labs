@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type DocImpl, isDoc } from "../src/doc.ts";
-import { isCell, isCellLink } from "../src/cell.ts";
+import {
+  ALIAS_V01_TAG,
+  isCell,
+  isCellLink,
+  LINK_V01_TAG,
+} from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema } from "../src/builder/types.ts";
@@ -1714,18 +1719,18 @@ describe("getAsLink method", () => {
 
     // Verify structure
     expect(link["@"]).toBeDefined();
-    expect(link["@"]["link-v0.1"]).toBeDefined();
-    expect(link["@"]["link-v0.1"].id).toBeDefined();
-    expect(link["@"]["link-v0.1"].path).toBeDefined();
+    expect(link["@"][LINK_V01_TAG]).toBeDefined();
+    expect(link["@"][LINK_V01_TAG].id).toBeDefined();
+    expect(link["@"][LINK_V01_TAG].path).toBeDefined();
 
     // Verify id has of: prefix
-    expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
+    expect(link["@"][LINK_V01_TAG].id).toMatch(/^of:/);
 
     // Verify path is empty array
-    expect(link["@"]["link-v0.1"].path).toEqual([]);
+    expect(link["@"][LINK_V01_TAG].path).toEqual([]);
 
     // Verify space is included if present
-    expect(link["@"]["link-v0.1"].space).toBe(space);
+    expect(link["@"][LINK_V01_TAG].space).toBe(space);
   });
 
   it("should return correct path for nested cells", () => {
@@ -1738,7 +1743,7 @@ describe("getAsLink method", () => {
 
     const link = nestedCell.getAsLink();
 
-    expect(link["@"]["link-v0.1"].path).toEqual(["nested", "value"]);
+    expect(link["@"][LINK_V01_TAG].path).toEqual(["nested", "value"]);
   });
 
   it("should return different formats for getAsLink vs toJSON", () => {
@@ -1758,7 +1763,8 @@ describe("getAsLink method", () => {
 
     // getAsLink returns new sigil format
     expect(link).toHaveProperty("@");
-    expect(link["@"]).toHaveProperty("link-v0.1");
+    console.log("getAsLink result @:", JSON.stringify(link["@"], null, 2));
+    expect(link["@"][LINK_V01_TAG]).toBeDefined();
 
     // toJSON returns old format for backward compatibility
     expect(json).toHaveProperty("cell");
@@ -1779,9 +1785,9 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell });
 
     // Should omit id and space since they're the same
-    expect(link["@"]["link-v0.1"].id).toBeUndefined();
-    expect(link["@"]["link-v0.1"].space).toBeUndefined();
-    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+    expect(link["@"][LINK_V01_TAG].id).toBeUndefined();
+    expect(link["@"][LINK_V01_TAG].space).toBeUndefined();
+    expect(link["@"][LINK_V01_TAG].path).toEqual(["value"]);
   });
 
   it("should create relative links with base parameter - different document", () => {
@@ -1802,10 +1808,10 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell });
 
     // Should include id but not space since space is the same
-    expect(link["@"]["link-v0.1"].id).toBeDefined();
-    expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
-    expect(link["@"]["link-v0.1"].space).toBeUndefined();
-    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+    expect(link["@"][LINK_V01_TAG].id).toBeDefined();
+    expect(link["@"][LINK_V01_TAG].id).toMatch(/^of:/);
+    expect(link["@"][LINK_V01_TAG].space).toBeUndefined();
+    expect(link["@"][LINK_V01_TAG].path).toEqual(["value"]);
   });
 
   it("should create relative links with base parameter - different space", () => {
@@ -1826,10 +1832,10 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell });
 
     // Should include both id and space since they're different
-    expect(link["@"]["link-v0.1"].id).toBeDefined();
-    expect(link["@"]["link-v0.1"].id).toMatch(/^of:/);
-    expect(link["@"]["link-v0.1"].space).toBe(space);
-    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+    expect(link["@"][LINK_V01_TAG].id).toBeDefined();
+    expect(link["@"][LINK_V01_TAG].id).toMatch(/^of:/);
+    expect(link["@"][LINK_V01_TAG].space).toBe(space);
+    expect(link["@"][LINK_V01_TAG].path).toEqual(["value"]);
   });
 
   it("should include schema when includeSchema is true", () => {
@@ -1844,9 +1850,9 @@ describe("getAsLink method", () => {
     // Link with schema included
     const link = cell.getAsLink({ includeSchema: true });
 
-    expect(link["@"]["link-v0.1"].schema).toEqual(schema);
-    expect(link["@"]["link-v0.1"].id).toBeDefined();
-    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
+    expect(link["@"][LINK_V01_TAG].schema).toEqual(schema);
+    expect(link["@"][LINK_V01_TAG].id).toBeDefined();
+    expect(link["@"][LINK_V01_TAG].path).toEqual(["value"]);
   });
 
   it("should not include schema when includeSchema is false", () => {
@@ -1861,7 +1867,7 @@ describe("getAsLink method", () => {
     // Link without schema
     const link = cell.getAsLink({ includeSchema: false });
 
-    expect(link["@"]["link-v0.1"].schema).toBeUndefined();
+    expect(link["@"][LINK_V01_TAG].schema).toBeUndefined();
   });
 
   it("should not include schema when includeSchema is undefined", () => {
@@ -1876,7 +1882,7 @@ describe("getAsLink method", () => {
     // Link with default options (no schema)
     const link = cell.getAsLink();
 
-    expect(link["@"]["link-v0.1"].schema).toBeUndefined();
+    expect(link["@"][LINK_V01_TAG].schema).toBeUndefined();
   });
 
   it("should handle both base and includeSchema options together", () => {
@@ -1898,10 +1904,10 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell, includeSchema: true });
 
     // Should include id (different docs) but not space (same space)
-    expect(link["@"]["link-v0.1"].id).toBeDefined();
-    expect(link["@"]["link-v0.1"].space).toBeUndefined();
-    expect(link["@"]["link-v0.1"].path).toEqual(["value"]);
-    expect(link["@"]["link-v0.1"].schema).toEqual(schema);
+    expect(link["@"][LINK_V01_TAG].id).toBeDefined();
+    expect(link["@"][LINK_V01_TAG].space).toBeUndefined();
+    expect(link["@"][LINK_V01_TAG].path).toEqual(["value"]);
+    expect(link["@"][LINK_V01_TAG].schema).toEqual(schema);
   });
 
   it("should handle cell without schema when includeSchema is true", () => {
@@ -1915,7 +1921,7 @@ describe("getAsLink method", () => {
     // Link with includeSchema but cell has no schema
     const link = cell.getAsLink({ includeSchema: true });
 
-    expect(link["@"]["link-v0.1"].schema).toBeUndefined();
+    expect(link["@"][LINK_V01_TAG].schema).toBeUndefined();
   });
 });
 
@@ -1950,18 +1956,18 @@ describe("getAsAlias method", () => {
 
     // Verify structure
     expect(alias["@"]).toBeDefined();
-    expect(alias["@"]["alias-v0.1"]).toBeDefined();
-    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
-    expect(alias["@"]["alias-v0.1"].path).toBeDefined();
+    expect(alias["@"][ALIAS_V01_TAG]).toBeDefined();
+    expect(alias["@"][ALIAS_V01_TAG].id).toBeDefined();
+    expect(alias["@"][ALIAS_V01_TAG].path).toBeDefined();
 
     // Verify id has of: prefix
-    expect(alias["@"]["alias-v0.1"].id).toMatch(/^of:/);
+    expect(alias["@"][ALIAS_V01_TAG].id).toMatch(/^of:/);
 
     // Verify path is empty array
-    expect(alias["@"]["alias-v0.1"].path).toEqual([]);
+    expect(alias["@"][ALIAS_V01_TAG].path).toEqual([]);
 
     // Verify space is included if present
-    expect(alias["@"]["alias-v0.1"].space).toBe(space);
+    expect(alias["@"][ALIAS_V01_TAG].space).toBe(space);
   });
 
   it("should return correct path for nested cells", () => {
@@ -1974,7 +1980,7 @@ describe("getAsAlias method", () => {
 
     const alias = nestedCell.getAsAlias();
 
-    expect(alias["@"]["alias-v0.1"].path).toEqual(["nested", "value"]);
+    expect(alias["@"][ALIAS_V01_TAG].path).toEqual(["nested", "value"]);
   });
 
   it("should omit space when baseSpace matches", () => {
@@ -1988,9 +1994,9 @@ describe("getAsAlias method", () => {
     // Alias with same baseSpace should omit space
     const alias = cell.getAsAlias({ baseSpace: space });
 
-    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
-    expect(alias["@"]["alias-v0.1"].space).toBeUndefined();
-    expect(alias["@"]["alias-v0.1"].path).toEqual([]);
+    expect(alias["@"][ALIAS_V01_TAG].id).toBeDefined();
+    expect(alias["@"][ALIAS_V01_TAG].space).toBeUndefined();
+    expect(alias["@"][ALIAS_V01_TAG].path).toEqual([]);
   });
 
   it("should include space when baseSpace differs", () => {
@@ -2004,9 +2010,9 @@ describe("getAsAlias method", () => {
     // Alias with different baseSpace should include space
     const alias = cell.getAsAlias({ baseSpace: space });
 
-    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
-    expect(alias["@"]["alias-v0.1"].space).toBe(space2);
-    expect(alias["@"]["alias-v0.1"].path).toEqual([]);
+    expect(alias["@"][ALIAS_V01_TAG].id).toBeDefined();
+    expect(alias["@"][ALIAS_V01_TAG].space).toBe(space2);
+    expect(alias["@"][ALIAS_V01_TAG].path).toEqual([]);
   });
 
   it("should include schema when includeSchema is true", () => {
@@ -2021,7 +2027,7 @@ describe("getAsAlias method", () => {
     // Alias with includeSchema option
     const alias = cell.getAsAlias({ includeSchema: true });
 
-    expect(alias["@"]["alias-v0.1"].schema).toEqual(schema);
+    expect(alias["@"][ALIAS_V01_TAG].schema).toEqual(schema);
   });
 
   it("should handle base cell for relative aliases", () => {
@@ -2042,9 +2048,9 @@ describe("getAsAlias method", () => {
     const alias = cell.getAsAlias({ base: baseCell });
 
     // Should include id (different docs) but not space (same space)
-    expect(alias["@"]["alias-v0.1"].id).toBeDefined();
-    expect(alias["@"]["alias-v0.1"].space).toBeUndefined();
-    expect(alias["@"]["alias-v0.1"].path).toEqual(["value"]);
+    expect(alias["@"][ALIAS_V01_TAG].id).toBeDefined();
+    expect(alias["@"][ALIAS_V01_TAG].space).toBeUndefined();
+    expect(alias["@"][ALIAS_V01_TAG].path).toEqual(["value"]);
   });
 });
 
