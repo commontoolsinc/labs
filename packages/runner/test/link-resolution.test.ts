@@ -4,6 +4,7 @@ import { followAliases } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { expectCellLinksEqual } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -29,65 +30,63 @@ describe("link-resolution", () => {
 
   describe("followAliases", () => {
     it("should follow a simple alias", () => {
-      const testCell = runtime.documentMap.getDoc(
-        { value: 42 },
-        "should follow a simple alias 1",
+      const testCell = runtime.getCell<{ value: number }>(
         space,
+        "should follow a simple alias 1",
       );
+      testCell.set({ value: 42 });
       const binding = { $alias: { path: ["value"] } };
       const result = followAliases(binding, testCell);
       expect(result.cell.getAtPath(result.path)).toBe(42);
     });
 
     it("should follow nested aliases", () => {
-      const innerCell = runtime.documentMap.getDoc(
-        { inner: 10 },
+      const innerCell = runtime.getCell<{ inner: number }>(
+        space,
         "should follow nested aliases 1",
-        space,
       );
-      const outerCell = runtime.documentMap.getDoc(
-        {
-          outer: { $alias: { cell: innerCell, path: ["inner"] } },
-        },
+      innerCell.set({ inner: 10 });
+      const outerCell = runtime.getCell<{ outer: any }>(
+        space,
         "should follow nested aliases 2",
-        space,
       );
+      outerCell.setRaw({
+        outer: { $alias: innerCell.key("inner").getAsCellLink() },
+      });
       const binding = { $alias: { path: ["outer"] } };
       const result = followAliases(binding, outerCell);
-      expect(result.cell).toEqual(innerCell);
-      expect(result.path).toEqual(["inner"]);
+      expectCellLinksEqual(result).toEqual(innerCell.key("inner").getAsCellLink());
       expect(result.cell.getAtPath(result.path)).toBe(10);
     });
 
     it("should throw an error on circular aliases", () => {
-      const cellA = runtime.documentMap.getDoc(
-        {},
+      const cellA = runtime.getCell<any>(
+        space,
         "should throw an error on circular aliases 1",
-        space,
       );
-      const cellB = runtime.documentMap.getDoc(
-        {},
+      cellA.set({});
+      const cellB = runtime.getCell<any>(
+        space,
         "should throw an error on circular aliases 2",
-        space,
       );
-      cellA.send({ alias: { $alias: { cell: cellB, path: ["alias"] } } });
-      cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
+      cellB.set({});
+      cellA.setRaw({ alias: { $alias: cellB.key("alias").getAsCellLink() } });
+      cellB.setRaw({ alias: { $alias: cellA.key("alias").getAsCellLink() } });
       const binding = { $alias: { path: ["alias"] } };
       expect(() => followAliases(binding, cellA)).toThrow("cycle detected");
     });
 
     it("should allow aliases in aliased paths", () => {
-      const testCell = runtime.documentMap.getDoc(
-        {
-          a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
-        },
-        "should allow aliases in aliased paths 1",
+      const testCell = runtime.getCell<any>(
         space,
+        "should allow aliases in aliased paths 1",
       );
+      testCell.setRaw({
+        a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
+      });
       const binding = { $alias: { path: ["a", "a", "c"] } };
       const result = followAliases(binding, testCell);
-      expect(result.cell).toEqual(testCell);
-      expect(result.path).toEqual(["a", "b", "c"]);
+      expectCellLinksEqual(result).toEqual(testCell.key("a").key("b").key("c").getAsCellLink());
       expect(result.cell.getAtPath(result.path)).toBe(1);
     });
   });
