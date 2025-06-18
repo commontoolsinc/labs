@@ -2,9 +2,9 @@ import * as HttpStatusCodes from "stoker/http-status-codes";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   FeedbackRoute,
+  GenerateObjectRoute,
   GenerateTextRoute,
   GetModelsRoute,
-  GenerateObjectRoute,
 } from "./llm.routes.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import { hashKey, loadFromCache, saveToCache } from "./cache.ts";
@@ -247,11 +247,16 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
  * Handler for POST /generateObject endpoint
  * Generates structured JSON objects using specified LLM model
  */
-export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (c) => {
+export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
+  c,
+) => {
   const payload = await c.req.json();
 
   if (!payload.prompt || !payload.schema) {
-    return c.json({ error: "Missing required fields: prompt and schema" }, HttpStatusCodes.BAD_REQUEST);
+    return c.json(
+      { error: "Missing required fields: prompt and schema" },
+      HttpStatusCodes.BAD_REQUEST,
+    );
   }
 
   if (!payload.metadata) {
@@ -280,7 +285,7 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (c) =>
 
   try {
     const result = await generateObjectCore(payload);
-    
+
     // Save to cache if enabled
     if (payload.cache !== false) {
       try {
@@ -293,7 +298,7 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (c) =>
         console.error("Error saving generateObject response to cache:", e);
       }
     }
-    
+
     return c.json(result);
   } catch (error) {
     console.error("Error in generateObject:", error);

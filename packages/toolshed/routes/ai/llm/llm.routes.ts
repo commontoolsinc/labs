@@ -4,9 +4,9 @@ import { jsonContent } from "stoker/openapi/helpers";
 import { z } from "zod";
 import { toZod } from "@commontools/utils/zod-utils";
 import {
+  type LLMGenerateObjectRequest,
   type LLMMessage,
   type LLMRequest,
-  type LLMGenerateObjectRequest,
   LLMTypedContent,
 } from "@commontools/llm/types";
 
