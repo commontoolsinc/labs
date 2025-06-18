@@ -48,8 +48,7 @@ export function fromURI(uri: string): string {
   const [prefix, ...rest] = uri.split(":");
   if (prefix === "of") {
     return rest.join(":");
-  }
-  return uri;
+  } else throw new Error(`Invalid URI: ${uri}`);
 }
 
 /**
@@ -60,14 +59,7 @@ export function normalizeEntityId(id: EntityId | string): string {
     return fromURI(id);
   }
   if (typeof id === "object" && id !== null && "/" in id) {
-    const value = id["/"];
-    if (typeof value === "string") {
-      return fromURI(value);
-    }
-    if (value instanceof Uint8Array) {
-      // Convert Uint8Array to string for normalization
-      return new TextDecoder().decode(value);
-    }
+    return JSON.parse(JSON.stringify(id))["/"];
   }
   throw new Error(`Invalid entity ID: ${JSON.stringify(id)}`);
 }

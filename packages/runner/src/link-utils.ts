@@ -313,6 +313,8 @@ export function parseToLegacyCellLink(
 ): CellLink | undefined {
   if (!value) return undefined;
 
+  // parseLink "forgets" the legacy docs, so we for now parse it here as well.
+  // This is in case no baseCell was provided.
   const doc = isDoc(value)
     ? value
     : (isRecord(value) && isDoc((value as any).cell))
