@@ -268,7 +268,7 @@ export type SigilValue<T> = { "/": T };
  * Embed sigil value v1
  */
 export const EMBED_V1_TAG = "embed@1" as const;
-// Temporary backwards compatibility
+
 export type EmbedV1 = {
   [EMBED_V1_TAG]: {
     id?: string;
@@ -276,23 +276,11 @@ export type EmbedV1 = {
     space?: MemorySpace;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
+    replace?: "destination";
   };
 };
 
-/**
- * Alias sigil value v1
- */
-export const ALIAS_V1_TAG = "alias@1" as const;
-// Temporary backwards compatibility
-export type AliasV1 = {
-  [ALIAS_V1_TAG]: {
-    id?: string;
-    path?: (string | number)[];
-    space?: MemorySpace;
-    schema?: JSONSchema;
-    rootSchema?: JSONSchema;
-  };
-};
+export type AliasV1 = EmbedV1 & { [EMBED_V1_TAG]: { replace: "destination" } };
 
 /**
  * Sigil link type (now using embed)
@@ -301,10 +289,9 @@ export type SigilLink = SigilValue<EmbedV1>;
 export type SigilLinkTag = typeof EMBED_V1_TAG;
 
 /**
- * Sigil alias type
+ * Sigil alias type - uses EmbedV1 with replace field
  */
 export type SigilAlias = SigilValue<AliasV1>;
-export type SigilAliasTag = typeof ALIAS_V1_TAG;
 
 /**
  * JSON cell link format used in storage
@@ -318,7 +305,7 @@ export type JSONCellLink = {
  * Creates a sigil reference (link or alias) with shared logic
  */
 function createSigilReference(
-  sigilType: SigilLinkTag | SigilAliasTag,
+  sigilType: SigilLinkTag,
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema?: JSONSchema,
@@ -644,13 +631,17 @@ function createRegularCell<T>(
         includeSchema?: boolean;
       },
     ): SigilAlias => {
-      return createSigilReference(
-        ALIAS_V1_TAG,
+      // Create using embed@1 tag with replace field
+      const reference = createSigilReference(
+        EMBED_V1_TAG,
         doc,
         path,
         schema,
         options,
-      ) as SigilAlias;
+      );
+      // Add the replace field to make it an alias
+      (reference["/"][EMBED_V1_TAG] as any).replace = "destination";
+      return reference as SigilAlias;
     },
     getDoc: () => doc,
     getRaw: () => doc.getAtPath(path),
@@ -794,13 +785,26 @@ export function isJSONCellLink(value: any): value is JSONCellLink {
 }
 
 /**
- * Check if value is a sigil link.
+ * Check if value is a sigil link (embed without replace field).
  */
 export function isSigilLink(value: any): value is SigilLink {
-  if (isSigilValue(value)) {
-    const link = value["/"][EMBED_V1_TAG];
-    // Either id or path must be present
-    return typeof link.id === "string" || Array.isArray(link.path);
+  if (isSigilValue(value) && EMBED_V1_TAG in value["/"]) {
+    const embed = value["/"][EMBED_V1_TAG];
+    // Either id or path must be present, and replace must not be present
+    return (typeof embed.id === "string" || Array.isArray(embed.path)) &&
+      !embed.replace;
+  }
+  return false;
+}
+
+/**
+ * Check if value is a sigil alias (embed with replace field).
+ */
+export function isSigilAlias(value: any): value is SigilAlias {
+  if (isSigilValue(value) && EMBED_V1_TAG in value["/"]) {
+    const embed = value["/"][EMBED_V1_TAG];
+    return (typeof embed.id === "string" || Array.isArray(embed.path)) &&
+      embed.replace === "destination";
   }
   return false;
 }

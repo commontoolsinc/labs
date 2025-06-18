@@ -2,7 +2,6 @@ import { isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
 import { isDoc } from "./doc.ts";
 import {
-  ALIAS_V1_TAG,
   type Cell,
   type CellLink,
   EMBED_V1_TAG,
@@ -59,15 +58,14 @@ export function isAlias(value: any): value is LegacyAlias | SigilAlias {
     return true;
   }
 
-  // Check new sigil alias format
+  // Check new sigil format (embed@1 with replace field)
   if (
-    isSigilValue(value) &&
-    ALIAS_V1_TAG in value["/"] &&
-    isRecord(value["/"][ALIAS_V1_TAG])
+    isSigilValue(value) && EMBED_V1_TAG in value["/"] &&
+    isRecord(value["/"][EMBED_V1_TAG])
   ) {
-    const alias = value["/"][ALIAS_V1_TAG];
-    // Either id or path must be present
-    return typeof alias.id === "string" || Array.isArray(alias.path);
+    const embed = value["/"][EMBED_V1_TAG];
+    return (typeof embed.id === "string" || Array.isArray(embed.path)) &&
+      embed.replace === "destination";
   }
 
   return false;
@@ -271,34 +269,35 @@ export function parseAlias(
     };
   }
 
-  // Handle new sigil alias format
+  // Handle new sigil format (embed@1 with replace field)
   if (
-    isSigilValue(value) &&
-    ALIAS_V1_TAG in value["/"] &&
-    isRecord(value["/"][ALIAS_V1_TAG])
+    isSigilValue(value) && EMBED_V1_TAG in value["/"] &&
+    isRecord(value["/"][EMBED_V1_TAG])
   ) {
-    const sigilAlias = value as SigilAlias;
-    const alias = sigilAlias["/"][ALIAS_V1_TAG];
+    const embed = value["/"][EMBED_V1_TAG];
+    if (embed.replace === "destination") {
+      // Resolve relative references
+      let id = embed.id;
+      const path = embed.path || [];
+      const resolvedSpace = embed.space || baseCell?.space;
 
-    // Resolve relative references
-    let id = alias.id;
-    const path = alias.path || [];
-    const resolvedSpace = alias.space || baseCell?.space;
+      // If no id provided, use base cell's document
+      if (!id && baseCell) id = toURI(baseCell.entityId);
 
-    // If no id provided, use base cell's document
-    if (!id && baseCell) id = toURI(baseCell.entityId);
+      if (!id) {
+        throw new Error(
+          "Cannot resolve alias: no id provided and no base cell",
+        );
+      }
 
-    if (!id) {
-      throw new Error("Cannot resolve alias: no id provided and no base cell");
+      return {
+        id,
+        path: path.map((p: any) => p.toString()),
+        space: resolvedSpace,
+        schema: embed.schema,
+        rootSchema: embed.rootSchema,
+      };
     }
-
-    return {
-      id,
-      path: path.map((p) => p.toString()),
-      space: resolvedSpace,
-      schema: alias.schema,
-      rootSchema: alias.rootSchema,
-    };
   }
 
   return undefined;

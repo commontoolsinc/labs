@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type DocImpl, isDoc } from "../src/doc.ts";
-import { ALIAS_V1_TAG, EMBED_V1_TAG, isCell, isCellLink } from "../src/cell.ts";
+import { EMBED_V1_TAG, isCell, isCellLink } from "../src/cell.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema } from "../src/builder/types.ts";
@@ -1951,18 +1951,19 @@ describe("getAsAlias method", () => {
 
     // Verify structure
     expect(alias["/"]).toBeDefined();
-    expect(alias["/"][ALIAS_V1_TAG]).toBeDefined();
-    expect(alias["/"][ALIAS_V1_TAG].id).toBeDefined();
-    expect(alias["/"][ALIAS_V1_TAG].path).toBeDefined();
+    expect(alias["/"][EMBED_V1_TAG]).toBeDefined();
+    expect(alias["/"][EMBED_V1_TAG].id).toBeDefined();
+    expect(alias["/"][EMBED_V1_TAG].path).toBeDefined();
+    expect(alias["/"][EMBED_V1_TAG].replace).toBe("destination");
 
     // Verify id has of: prefix
-    expect(alias["/"][ALIAS_V1_TAG].id).toMatch(/^of:/);
+    expect(alias["/"][EMBED_V1_TAG].id).toMatch(/^of:/);
 
     // Verify path is empty array
-    expect(alias["/"][ALIAS_V1_TAG].path).toEqual([]);
+    expect(alias["/"][EMBED_V1_TAG].path).toEqual([]);
 
     // Verify space is included if present
-    expect(alias["/"][ALIAS_V1_TAG].space).toBe(space);
+    expect(alias["/"][EMBED_V1_TAG].space).toBe(space);
   });
 
   it("should return correct path for nested cells", () => {
@@ -1975,7 +1976,7 @@ describe("getAsAlias method", () => {
 
     const alias = nestedCell.getAsAlias();
 
-    expect(alias["/"][ALIAS_V1_TAG].path).toEqual(["nested", "value"]);
+    expect(alias["/"][EMBED_V1_TAG].path).toEqual(["nested", "value"]);
   });
 
   it("should omit space when baseSpace matches", () => {
@@ -1989,9 +1990,9 @@ describe("getAsAlias method", () => {
     // Alias with same baseSpace should omit space
     const alias = cell.getAsAlias({ baseSpace: space });
 
-    expect(alias["/"][ALIAS_V1_TAG].id).toBeDefined();
-    expect(alias["/"][ALIAS_V1_TAG].space).toBeUndefined();
-    expect(alias["/"][ALIAS_V1_TAG].path).toEqual([]);
+    expect(alias["/"][EMBED_V1_TAG].id).toBeDefined();
+    expect(alias["/"][EMBED_V1_TAG].space).toBeUndefined();
+    expect(alias["/"][EMBED_V1_TAG].path).toEqual([]);
   });
 
   it("should include space when baseSpace differs", () => {
@@ -2005,9 +2006,9 @@ describe("getAsAlias method", () => {
     // Alias with different baseSpace should include space
     const alias = cell.getAsAlias({ baseSpace: space });
 
-    expect(alias["/"][ALIAS_V1_TAG].id).toBeDefined();
-    expect(alias["/"][ALIAS_V1_TAG].space).toBe(space2);
-    expect(alias["/"][ALIAS_V1_TAG].path).toEqual([]);
+    expect(alias["/"][EMBED_V1_TAG].id).toBeDefined();
+    expect(alias["/"][EMBED_V1_TAG].space).toBe(space2);
+    expect(alias["/"][EMBED_V1_TAG].path).toEqual([]);
   });
 
   it("should include schema when includeSchema is true", () => {
@@ -2022,7 +2023,7 @@ describe("getAsAlias method", () => {
     // Alias with includeSchema option
     const alias = cell.getAsAlias({ includeSchema: true });
 
-    expect(alias["/"][ALIAS_V1_TAG].schema).toEqual(schema);
+    expect(alias["/"][EMBED_V1_TAG].schema).toEqual(schema);
   });
 
   it("should handle base cell for relative aliases", () => {
@@ -2043,9 +2044,9 @@ describe("getAsAlias method", () => {
     const alias = cell.getAsAlias({ base: baseCell });
 
     // Should include id (different docs) but not space (same space)
-    expect(alias["/"][ALIAS_V1_TAG].id).toBeDefined();
-    expect(alias["/"][ALIAS_V1_TAG].space).toBeUndefined();
-    expect(alias["/"][ALIAS_V1_TAG].path).toEqual(["value"]);
+    expect(alias["/"][EMBED_V1_TAG].id).toBeDefined();
+    expect(alias["/"][EMBED_V1_TAG].space).toBeUndefined();
+    expect(alias["/"][EMBED_V1_TAG].path).toEqual(["value"]);
   });
 });
 

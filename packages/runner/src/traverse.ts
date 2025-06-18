@@ -94,11 +94,11 @@ type JSONCellLink = { cell: { "/": string }; path: string[] };
  * Check if value is a sigil link
  */
 function isSigilLink(value: unknown): value is SigilLink {
-  return (
-    isSigilValue(value) &&
-    EMBED_V1_TAG in value["/"] &&
-    isObject(value["/"][EMBED_V1_TAG])
-  );
+  if (!isSigilValue(value) || !(EMBED_V1_TAG in value["/"])) {
+    return false;
+  }
+  const embed = value["/"][EMBED_V1_TAG];
+  return isObject(embed) && !("replace" in embed);
 }
 
 /**
@@ -106,11 +106,10 @@ function isSigilLink(value: unknown): value is SigilLink {
  */
 function isSigilAlias(value: unknown): value is SigilAlias {
   return (
-    isSigilValue(value) &&
-    "alias@1" in value["/"] &&
-    isObject(value["/"]["alias@1"])
+    isSigilLink(value) && value["/"][EMBED_V1_TAG].replace === "destination"
   );
 }
+
 export type CellTarget = { path: string[]; cellTarget: string | undefined };
 
 export interface ObjectStorageManager<K, S, V> {
