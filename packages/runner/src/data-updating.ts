@@ -14,12 +14,17 @@ import {
   isCell,
   isCellLink,
   type LegacyAlias,
-  type SigilAlias,
+  type SigilWritethroughEmbed,
 } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { followAliases } from "./link-resolution.ts";
+import { followWritethroughs } from "./link-resolution.ts";
 import { arrayEqual, maybeUnwrapProxy } from "./type-utils.ts";
-import { areLinksSame, isAlias, isLink, parseAlias } from "./link-utils.ts";
+import {
+  areLinksSame,
+  isLink,
+  isWritethroughEmbed,
+  parseAlias,
+} from "./link-utils.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -31,8 +36,8 @@ export function setNestedValue<T>(
   log?: ReactivityLog,
 ): boolean {
   const destValue = doc.getAtPath(path);
-  if (isAlias(destValue)) {
-    const ref = followAliases(destValue, doc, log);
+  if (isWritethroughEmbed(destValue)) {
+    const ref = followWritethroughs(destValue, doc, log);
     return setNestedValue(ref.cell, ref.path, value, log);
   }
 
@@ -190,7 +195,7 @@ export function normalizeAndDiff(
   const currentValue = current.cell.getAtPath(current.path);
 
   // A new alias can overwrite a previous alias. No-op if the same.
-  if (isAlias(newValue)) {
+  if (isWritethroughEmbed(newValue)) {
     const alias = parseAlias(newValue, current.cell.asCell())!;
     const currentAlias = parseAlias(currentValue, current.cell.asCell());
     if (
@@ -206,10 +211,10 @@ export function normalizeAndDiff(
   }
 
   // Handle alias in current value (at this point: if newValue is not an alias)
-  if (isAlias(currentValue)) {
+  if (isWritethroughEmbed(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
     log?.reads.push({ ...current });
-    const ref = followAliases(currentValue, current.cell, log);
+    const ref = followWritethroughs(currentValue, current.cell, log);
     return normalizeAndDiff(ref, newValue, log, context);
   }
 

@@ -14,13 +14,13 @@ import type {
   SchemaContext,
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
-import { isAlias, parseLink } from "./link-utils.ts";
+import { isWritethroughEmbed, parseLink } from "./link-utils.ts";
 import { getEntityId } from "./doc-map.ts";
 import {
   EMBED_V1_TAG,
   isSigilValue,
-  type SigilAlias,
-  type SigilLink,
+  type SigilEmbed,
+  type SigilWritethroughEmbed,
 } from "./cell.ts";
 
 export type SchemaPathSelector = {
@@ -93,7 +93,7 @@ type JSONCellLink = { cell: { "/": string }; path: string[] };
 /**
  * Check if value is a sigil link
  */
-function isSigilLink(value: unknown): value is SigilLink {
+function isSigilLink(value: unknown): value is SigilEmbed {
   if (!isSigilValue(value) || !(EMBED_V1_TAG in value["/"])) {
     return false;
   }
@@ -104,7 +104,7 @@ function isSigilLink(value: unknown): value is SigilLink {
 /**
  * Check if value is a sigil alias
  */
-function isSigilAlias(value: unknown): value is SigilAlias {
+function isSigilAlias(value: unknown): value is SigilWritethroughEmbed {
   return (
     isSigilLink(value) && value["/"][EMBED_V1_TAG].replace === "destination"
   );
@@ -489,7 +489,8 @@ export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
 }
 
 export function isPointer(value: unknown): boolean {
-  return (isAlias(value) || isJSONCellLink(value) || isSigilLink(value) ||
+  return (isWritethroughEmbed(value) || isJSONCellLink(value) ||
+    isSigilLink(value) ||
     isSigilAlias(value));
 }
 

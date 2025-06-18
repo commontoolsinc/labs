@@ -9,13 +9,13 @@ import {
   isCell,
   isCellLink,
   isJSONCellLink,
-  isSigilLink,
+  isSigilEmbed,
   isSigilValue,
   type JSONCellLink,
   type LegacyAlias,
   type MemorySpace,
-  type SigilAlias,
-  type SigilLink,
+  type SigilEmbed,
+  type SigilWritethroughEmbed,
 } from "./cell.ts";
 import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./type-utils.ts";
@@ -44,7 +44,7 @@ export function isLink(value: any): boolean {
     isAnyCellLink(value) ||
     isCell(value) ||
     isDoc(value) ||
-    isAlias(value) ||
+    isWritethroughEmbed(value) ||
     (isRecord(value) && "/" in value) // EntityId format
   );
 }
@@ -52,7 +52,9 @@ export function isLink(value: any): boolean {
 /**
  * Check if value is an alias in any format (old $alias or new sigil)
  */
-export function isAlias(value: any): value is LegacyAlias | SigilAlias {
+export function isWritethroughEmbed(
+  value: any,
+): value is LegacyAlias | SigilWritethroughEmbed {
   // Check legacy $alias format
   if (isLegacyAlias(value)) {
     return true;
@@ -173,8 +175,8 @@ export function parseCellLink(
   }
 
   // Handle new sigil format
-  if (isSigilLink(value)) {
-    const sigilLink = value as SigilLink;
+  if (isSigilEmbed(value)) {
+    const sigilLink = value as SigilEmbed;
     const link = sigilLink["/"][EMBED_V1_TAG];
 
     // Resolve relative references
@@ -226,7 +228,7 @@ export function parseAlias(
   value: any,
   baseCell?: Cell,
 ): NormalizedLink | undefined {
-  if (!isAlias(value)) return undefined;
+  if (!isWritethroughEmbed(value)) return undefined;
 
   // Handle legacy $alias format
   if (

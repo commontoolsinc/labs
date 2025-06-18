@@ -80,7 +80,7 @@ import { toURI } from "./uri-utils.ts";
  * @returns {CellLink}
  *
  * @method getAsLink Returns a cell link for the cell (new sigil format).
- * @returns {SigilLink}
+ * @returns {SigilEmbed}
  *
  * @method getRaw Raw access method, without following aliases (which would
  * write to the destination instead of the cell itself).
@@ -162,14 +162,14 @@ declare module "@commontools/api" {
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilLink;
-    getAsAlias(
+    ): SigilEmbed;
+    getAsWritethroughEmbed(
       options?: {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilAlias;
+    ): SigilWritethroughEmbed;
     getDoc(): DocImpl<any>;
     getRaw(): any;
     setRaw(value: any): boolean;
@@ -285,13 +285,13 @@ export type AliasV1 = EmbedV1 & { [EMBED_V1_TAG]: { replace: "destination" } };
 /**
  * Sigil link type (now using embed)
  */
-export type SigilLink = SigilValue<EmbedV1>;
-export type SigilLinkTag = typeof EMBED_V1_TAG;
+export type SigilEmbed = SigilValue<EmbedV1>;
+export type SigilEmbedTag = typeof EMBED_V1_TAG;
 
 /**
  * Sigil alias type - uses EmbedV1 with replace field
  */
-export type SigilAlias = SigilValue<AliasV1>;
+export type SigilWritethroughEmbed = SigilValue<AliasV1>;
 
 /**
  * JSON cell link format used in storage
@@ -304,8 +304,7 @@ export type JSONCellLink = {
 /**
  * Creates a sigil reference (link or alias) with shared logic
  */
-function createSigilReference(
-  sigilType: SigilLinkTag,
+function createSigilEmbed(
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema?: JSONSchema,
@@ -313,12 +312,13 @@ function createSigilReference(
     base?: Cell<any>;
     baseSpace?: MemorySpace;
     includeSchema?: boolean;
+    replace?: "destination";
   },
-): SigilLink | SigilAlias {
+): SigilEmbed {
   // Create the base structure
-  const reference: any = {
+  const reference: SigilEmbed = {
     "/": {
-      [sigilType]: {
+      [EMBED_V1_TAG]: {
         path: path.map((p) => p.toString()),
       },
     },
@@ -335,28 +335,32 @@ function createSigilReference(
       docEntityId["/"] === baseEntityId["/"];
 
     if (!sameEntity) {
-      reference["/"][sigilType].id = toURI(doc.entityId);
+      reference["/"][EMBED_V1_TAG].id = toURI(doc.entityId);
     }
 
     // Only include space if it's different from base
     if (doc.space && doc.space !== baseDoc.space) {
-      reference["/"][sigilType].space = doc.space;
+      reference["/"][EMBED_V1_TAG].space = doc.space;
     }
   } else if (options?.baseSpace) {
     // Handle baseSpace option - only include space if different from baseSpace
-    reference["/"][sigilType].id = toURI(doc.entityId);
+    reference["/"][EMBED_V1_TAG].id = toURI(doc.entityId);
     if (doc.space && doc.space !== options.baseSpace) {
-      reference["/"][sigilType].space = doc.space;
+      reference["/"][EMBED_V1_TAG].space = doc.space;
     }
   } else {
     // Include id and space when no base is provided
-    reference["/"][sigilType].id = toURI(doc.entityId);
-    reference["/"][sigilType].space = doc.space;
+    reference["/"][EMBED_V1_TAG].id = toURI(doc.entityId);
+    reference["/"][EMBED_V1_TAG].space = doc.space;
   }
 
   // Include schema if requested
   if (options?.includeSchema && schema) {
-    reference["/"][sigilType].schema = schema;
+    reference["/"][EMBED_V1_TAG].schema = schema;
+  }
+
+  if (options?.replace) {
+    reference["/"][EMBED_V1_TAG].replace = options.replace;
   }
 
   return reference;
@@ -615,33 +619,28 @@ function createRegularCell<T>(
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilLink => {
-      return createSigilReference(
-        EMBED_V1_TAG,
+    ): SigilEmbed => {
+      return createSigilEmbed(
         doc,
         path,
         schema,
         options,
-      ) as SigilLink;
+      ) as SigilEmbed;
     },
-    getAsAlias: (
+    getAsWritethroughEmbed: (
       options?: {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilAlias => {
+    ): SigilWritethroughEmbed => {
       // Create using embed@1 tag with replace field
-      const reference = createSigilReference(
-        EMBED_V1_TAG,
+      return createSigilEmbed(
         doc,
         path,
         schema,
-        options,
-      );
-      // Add the replace field to make it an alias
-      (reference["/"][EMBED_V1_TAG] as any).replace = "destination";
-      return reference as SigilAlias;
+        { ...options, replace: "destination" },
+      ) as SigilWritethroughEmbed;
     },
     getDoc: () => doc,
     getRaw: () => doc.getAtPath(path),
@@ -787,7 +786,7 @@ export function isJSONCellLink(value: any): value is JSONCellLink {
 /**
  * Check if value is a sigil link (embed without replace field).
  */
-export function isSigilLink(value: any): value is SigilLink {
+export function isSigilEmbed(value: any): value is SigilEmbed {
   if (isSigilValue(value) && EMBED_V1_TAG in value["/"]) {
     const embed = value["/"][EMBED_V1_TAG];
     // Either id or path must be present, and replace must not be present
@@ -800,13 +799,11 @@ export function isSigilLink(value: any): value is SigilLink {
 /**
  * Check if value is a sigil alias (embed with replace field).
  */
-export function isSigilAlias(value: any): value is SigilAlias {
-  if (isSigilValue(value) && EMBED_V1_TAG in value["/"]) {
-    const embed = value["/"][EMBED_V1_TAG];
-    return (typeof embed.id === "string" || Array.isArray(embed.path)) &&
-      embed.replace === "destination";
-  }
-  return false;
+export function isSigilWritethroughEmbed(
+  value: any,
+): value is SigilWritethroughEmbed {
+  return isSigilEmbed(value) &&
+    value["/"][EMBED_V1_TAG].replace === "destination";
 }
 
 /**
@@ -814,6 +811,6 @@ export function isSigilAlias(value: any): value is SigilAlias {
  */
 export function isAnyCellLink(
   value: any,
-): value is CellLink | SigilLink | JSONCellLink {
-  return isCellLink(value) || isJSONCellLink(value) || isSigilLink(value);
+): value is CellLink | SigilEmbed | JSONCellLink {
+  return isCellLink(value) || isJSONCellLink(value) || isSigilEmbed(value);
 }

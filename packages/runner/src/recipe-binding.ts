@@ -10,7 +10,7 @@ import { isLegacyAlias } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { followAliases } from "./link-resolution.ts";
+import { followWritethroughs } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 
 /**
@@ -32,7 +32,7 @@ export function sendValueToBinding<T>(
 ): void {
   const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
   if (isLegacyAlias(binding)) {
-    const ref = followAliases(binding, doc, log);
+    const ref = followWritethroughs(binding, doc, log);
     diffAndUpdate(ref, value, log, { doc, binding });
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
