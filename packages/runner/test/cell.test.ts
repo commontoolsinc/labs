@@ -10,6 +10,7 @@ import { Runtime } from "../src/runtime.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { expectCellLinksEqual } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -518,11 +519,10 @@ describe("createProxy", () => {
     const proxy = c.getAsQueryResult([], log);
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
-    expect(log.writes.length).toBe(2);
-    expect(log.writes[0].cell).toBe(c.getDoc());
-    expect(log.writes[0].path).toEqual(["length"]);
-    expect(log.writes[1].cell).toBe(c.getDoc());
-    expect(log.writes[1].path).toEqual([2]);
+    expectCellLinksEqual(log.writes).toEqual([
+      c.key("length").getAsCellLink(),
+      c.key(2).getAsCellLink(),
+    ]);
     proxy.length = 4;
     expect(c.get()).toEqual([1, 2, undefined, undefined]);
     expect(log.writes.length).toBe(5);
