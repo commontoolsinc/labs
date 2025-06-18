@@ -191,8 +191,8 @@ export function normalizeAndDiff(
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isAlias(newValue)) {
-    const alias = parseAlias(newValue)!;
-    const currentAlias = parseAlias(currentValue);
+    const alias = parseAlias(newValue, current.cell.asCell())!;
+    const currentAlias = parseAlias(currentValue, current.cell.asCell());
     if (
       currentAlias !== undefined &&
       alias.id === currentAlias.id &&

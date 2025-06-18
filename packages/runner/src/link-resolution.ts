@@ -212,7 +212,7 @@ export function followLinks(
         target,
         createCell(
           result.cell,
-          result.path,
+          [],  // Use empty path to reference the document itself
           undefined,
           undefined,
           undefined,
