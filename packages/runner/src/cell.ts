@@ -262,7 +262,7 @@ export type LegacyAlias = {
 /**
  * Generic sigil value type for future extensions
  */
-export type SigilValue<T> = { "@": T };
+export type SigilValue<T> = { "/": T };
 
 /**
  * Link sigil value v0.1
@@ -328,7 +328,7 @@ function createSigilReference(
 ): SigilLink | SigilAlias {
   // Create the base structure
   const reference: any = {
-    "@": {
+    "/": {
       [sigilType]: {
         path: path.map((p) => p.toString()),
       },
@@ -346,28 +346,28 @@ function createSigilReference(
       docEntityId["/"] === baseEntityId["/"];
 
     if (!sameEntity) {
-      reference["@"][sigilType].id = toURI(doc.entityId);
+      reference["/"][sigilType].id = toURI(doc.entityId);
     }
 
     // Only include space if it's different from base
     if (doc.space && doc.space !== baseDoc.space) {
-      reference["@"][sigilType].space = doc.space;
+      reference["/"][sigilType].space = doc.space;
     }
   } else if (options?.baseSpace) {
     // Handle baseSpace option - only include space if different from baseSpace
-    reference["@"][sigilType].id = toURI(doc.entityId);
+    reference["/"][sigilType].id = toURI(doc.entityId);
     if (doc.space && doc.space !== options.baseSpace) {
-      reference["@"][sigilType].space = doc.space;
+      reference["/"][sigilType].space = doc.space;
     }
   } else {
     // Include id and space when no base is provided
-    reference["@"][sigilType].id = toURI(doc.entityId);
-    reference["@"][sigilType].space = doc.space;
+    reference["/"][sigilType].id = toURI(doc.entityId);
+    reference["/"][sigilType].space = doc.space;
   }
 
   // Include schema if requested
   if (options?.includeSchema && schema) {
-    reference["@"][sigilType].schema = schema;
+    reference["/"][sigilType].schema = schema;
   }
 
   return reference;
@@ -764,7 +764,7 @@ const isStreamMarker = Symbol("isStream");
  * Check if value is a sigil value with any type
  */
 export function isSigilValue(value: any): value is SigilValue<any> {
-  return isRecord(value) && "@" in value && isRecord(value["@"]);
+  return isRecord(value) && "/" in value && isRecord(value["/"]);
 }
 
 /**
@@ -797,10 +797,10 @@ export function isJSONCellLink(value: any): value is JSONCellLink {
 export function isSigilLink(value: any): value is SigilLink {
   if (
     isSigilValue(value) &&
-    "link-v0.1" in value["@"] &&
-    isRecord(value["@"]["link-v0.1"])
+    "link-v0.1" in value["/"] &&
+    isRecord(value["/"]["link-v0.1"])
   ) {
-    const link = value["@"]["link-v0.1"];
+    const link = value["/"]["link-v0.1"];
     // Either id or path must be present
     return typeof link.id === "string" || Array.isArray(link.path);
   }
