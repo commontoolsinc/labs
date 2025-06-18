@@ -34,12 +34,12 @@ export class ConsoleEvent extends Event {
 }
 
 export class Console {
-  #emitter: EventTarget;
-  constructor(emitter: EventTarget) {
+  #emitter?: EventTarget;
+  constructor(emitter?: EventTarget) {
     this.#emitter = emitter;
   }
   private impl(method: ConsoleMethod, ...args: any[]) {
-    this.#emitter.dispatchEvent(new ConsoleEvent(method, args));
+    this.#emitter?.dispatchEvent(new ConsoleEvent(method, args));
   }
   assert(...args: any[]) {
     return this.impl(ConsoleMethod.Assert, ...args);

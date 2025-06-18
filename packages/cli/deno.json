@@ -1,10 +1,15 @@
 {
   "name": "@commontools/cli",
   "tasks": {
-    "cli": "deno run --allow-ffi --allow-read --allow-write --allow-env ./mod.ts",
-    "test": "deno test --allow-ffi --allow-read --allow-write --allow-run --allow-env test/*.test.ts"
+    "cli": "deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env ./mod.ts",
+    "test": "deno test --allow-ffi --allow-read --allow-write --allow-run --allow-env test/*.test.ts",
+    "integration": "./integration/integration.sh"
   },
   "exports": {
     ".": "./mod.ts"
+  },
+  "imports": {
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7",
+    "@cliffy/table": "jsr:@cliffy/table@^1.0.0-rc.7"
   }
 }
