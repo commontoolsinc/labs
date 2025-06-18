@@ -32,7 +32,7 @@ describe("value type", () => {
 });
 
 describe("utility functions", () => {
-  it("isAlias correctly identifies aliases", () => {
+  it("isWritethroughEmbed correctly identifies writethrough embeds", () => {
     expect(isWritethroughEmbed({ $alias: { path: ["path", "to", "value"] } }))
       .toBe(true);
     expect(
