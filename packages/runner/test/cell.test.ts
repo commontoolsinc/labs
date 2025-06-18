@@ -629,7 +629,7 @@ describe("asCell", () => {
     expect(streamCell).not.toHaveProperty("set");
     expect(streamCell).not.toHaveProperty("key");
 
-    let lastEventSeen = "";
+    let lastEventSeen: any = null;
     let eventCount = 0;
 
     runtime.scheduler.addEventHandler(
@@ -640,12 +640,12 @@ describe("asCell", () => {
       { cell: c.getDoc(), path: ["stream"] },
     );
 
-    streamCell.send("event");
+    streamCell.send({ $stream: true });
     await runtime.idle();
 
     expect(c.get()).toStrictEqual({ stream: { $stream: true } });
     expect(eventCount).toBe(1);
-    expect(lastEventSeen).toBe("event");
+    expect(lastEventSeen).toEqual({ $stream: true });
   });
 
   it("should call sink only when the cell changes on the subpath", async () => {
