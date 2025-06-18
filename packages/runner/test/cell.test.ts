@@ -93,18 +93,18 @@ describe("Cell", () => {
   });
 
   it("should call updates callback when value changes", () => {
-    const c = runtime.documentMap.getDoc(
-      0,
-      "should call updates callback when value changes",
+    const cell = runtime.getCell<number>(
       space,
+      "should call updates callback when value changes",
     );
+    cell.set(0);
     const values: number[] = [];
-    const unsink = c.updates((value) => values.push(value));
-    c.send(1);
-    c.send(2);
-    c.send(3);
+    const unsink = cell.getDoc().updates((value) => values.push(value));
+    cell.send(1);
+    cell.send(2);
+    cell.send(3);
     unsink();
-    c.send(4);
+    cell.send(4);
     expect(values).toEqual([1, 2, 3]);
   });
 
@@ -195,22 +195,22 @@ describe("Cell utility functions", () => {
   });
 
   it("should identify a cell", () => {
-    const c = runtime.documentMap.getDoc(
-      10,
-      "should identify a cell",
+    const c = runtime.getCell(
       space,
+      "should identify a cell",
     );
-    expect(isDoc(c)).toBe(true);
-    expect(isDoc({})).toBe(false);
+    c.set(10);
+    expect(isCell(c)).toBe(true);
+    expect(isCell({})).toBe(false);
   });
 
   it("should identify a cell reference", () => {
-    const c = runtime.documentMap.getDoc(
-      10,
-      "should identify a cell reference",
+    const c = runtime.getCell<{ x: number }>(
       space,
+      "should identify a cell reference",
     );
-    const ref = { cell: c, path: ["x"] };
+    c.set({ x: 10 });
+    const ref = c.key("x").getAsCellLink();
     expect(isCellLink(ref)).toBe(true);
     expect(isCellLink({})).toBe(false);
   });
@@ -308,7 +308,7 @@ describe("createProxy", () => {
       "should handle cell references",
     );
     c.set({ x: 42 });
-    const ref = { cell: c.getDoc(), path: ["x"] };
+    const ref = c.key("x").getAsCellLink();
     const proxy = c.getAsQueryResult();
     proxy.y = ref;
     expect(proxy.y).toBe(42);
@@ -320,7 +320,7 @@ describe("createProxy", () => {
       "should handle infinite loops in cell references",
     );
     c.set({ x: 42 });
-    const ref = { cell: c.getDoc(), path: ["x"] };
+    const ref = c.key("x").getAsCellLink();
     const proxy = c.getAsQueryResult();
     proxy.x = ref;
     expect(() => proxy.x).toThrow();
@@ -1626,7 +1626,7 @@ describe("asCell with schema", () => {
     d.set({ value: 1 });
     const dCell = d;
 
-    arrayCell.push(d.getDoc());
+    arrayCell.push(d);
     arrayCell.push(dCell);
     arrayCell.push(d.getAsQueryResult());
     arrayCell.push(d.getAsCellLink());
@@ -1695,35 +1695,36 @@ describe("JSON.stringify bug", () => {
   });
 
   it("should not modify the value of the cell", () => {
-    const c = runtime.documentMap.getDoc(
-      { result: { data: 1 } },
+    const c = runtime.getCell(
+      space,
       "json-test",
-      space,
     );
-    const d = runtime.documentMap.getDoc(
-      { internal: { "__#2": { cell: c, path: ["result"] } } },
+    c.setRaw({ result: { data: 1 } });
+    const d = runtime.getCell(
+      space,
       "json-test2",
-      space,
     );
-    const e = runtime.documentMap.getDoc(
-      {
-        internal: {
-          a: { $alias: { cell: d, path: ["internal", "__#2", "data"] } },
-        },
-      },
+    d.setRaw({ internal: { "__#2": { cell: c.getDoc(), path: ["result"] } } });
+    const e = runtime.getCell(
+      space,
       "json-test3",
-      space,
     );
+    e.setRaw({
+      internal: {
+        a: { $alias: { cell: d.getDoc(), path: ["internal", "__#2", "data"] } },
+      },
+    });
     const proxy = e.getAsQueryResult();
     const json = JSON.stringify(proxy);
     expect(json).toEqual('{"internal":{"a":1}}');
     expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
-    expect(JSON.stringify(d.get())).toEqual(
+
+    expect(JSON.stringify(d.getRaw())).toEqual(
       `{"internal":{"__#2":{"cell":${
         JSON.stringify(c.entityId)
       },"path":["result"]}}}`,
     );
-    expect(JSON.stringify(e.get())).toEqual(
+    expect(JSON.stringify(e.getRaw())).toEqual(
       `{"internal":{"a":{"$alias":{"cell":${
         JSON.stringify(
           d.entityId,
