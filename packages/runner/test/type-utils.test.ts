@@ -33,7 +33,7 @@ describe("value type", () => {
 describe("utility functions", () => {
   it("isAlias correctly identifies aliases", () => {
     expect(isAlias({ $alias: { path: ["path", "to", "value"] } })).toBe(true);
-    expect(isAlias({ "@": { "alias-v0.1": { id: "path/to/value" } } })).toBe(
+    expect(isAlias({ "/": { "alias-v0.1": { id: "path/to/value" } } })).toBe(
       true,
     );
     expect(isAlias({ notAlias: "something" })).toBe(false);

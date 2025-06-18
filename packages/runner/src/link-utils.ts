@@ -62,10 +62,10 @@ export function isAlias(value: any): value is LegacyAlias | SigilAlias {
   // Check new sigil alias format
   if (
     isSigilValue(value) &&
-    "alias-v0.1" in value["@"] &&
-    isRecord(value["@"]["alias-v0.1"])
+    "alias-v0.1" in value["/"] &&
+    isRecord(value["/"]["alias-v0.1"])
   ) {
-    const alias = value["@"]["alias-v0.1"];
+    const alias = value["/"]["alias-v0.1"];
     // Either id or path must be present
     return typeof alias.id === "string" || Array.isArray(alias.path);
   }
@@ -177,7 +177,7 @@ export function parseCellLink(
   // Handle new sigil format
   if (isSigilLink(value)) {
     const sigilLink = value as SigilLink;
-    const link = sigilLink["@"][LINK_V01_TAG];
+    const link = sigilLink["/"][LINK_V01_TAG];
 
     // Resolve relative references
     let id = link.id;
@@ -274,11 +274,11 @@ export function parseAlias(
   // Handle new sigil alias format
   if (
     isSigilValue(value) &&
-    ALIAS_V01_TAG in value["@"] &&
-    isRecord(value["@"][ALIAS_V01_TAG])
+    ALIAS_V01_TAG in value["/"] &&
+    isRecord(value["/"][ALIAS_V01_TAG])
   ) {
     const sigilAlias = value as SigilAlias;
-    const alias = sigilAlias["@"][ALIAS_V01_TAG];
+    const alias = sigilAlias["/"][ALIAS_V01_TAG];
 
     // Resolve relative references
     let id = alias.id;

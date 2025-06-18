@@ -91,8 +91,8 @@ type JSONCellLink = { cell: { "/": string }; path: string[] };
 function isSigilLink(value: unknown): value is SigilLink {
   return (
     isSigilValue(value) &&
-    "link-v0.1" in value["@"] &&
-    isObject(value["@"]["link-v0.1"])
+    "link-v0.1" in value["/"] &&
+    isObject(value["/"]["link-v0.1"])
   );
 }
 
@@ -102,8 +102,8 @@ function isSigilLink(value: unknown): value is SigilLink {
 function isSigilAlias(value: unknown): value is SigilAlias {
   return (
     isSigilValue(value) &&
-    "alias-v0.1" in value["@"] &&
-    isObject(value["@"]["alias-v0.1"])
+    "alias-v0.1" in value["/"] &&
+    isObject(value["/"]["alias-v0.1"])
   );
 }
 export type CellTarget = { path: string[]; cellTarget: string | undefined };
