@@ -48,10 +48,10 @@ export function RuntimeProvider({
       }),
       blobbyServerUrl: location.origin,
       errorHandlers: [(error) => {
-        !errorCount++ &&
-          globalThis.alert(
-            "Uncaught error in recipe: " + error.message + "\n" + error.stack,
-          );
+        if (!errorCount++) {
+          console.error("Uncaught error in recipe:", error.message);
+          console.error("Stack trace:", error.stack);
+        }
         // Also send to Sentry
         Sentry.captureException(error);
       }],

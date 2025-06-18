@@ -76,11 +76,30 @@ export class Runner implements IRunner {
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
   run<T, R = any>(
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R> {
+    resultCell: DocImpl<R> | Cell<R>,
+  ): DocImpl<R> | Cell<R> {
+    // Cell version delegates to DocImpl version
+    if (isCell(resultCell)) {
+      this.run(recipeOrModule, argument, resultCell.getDoc());
+      return resultCell;
+    }
+    
+    // Otherwise run existing DocImpl logic
+    const resultDoc = resultCell as DocImpl<R>;
+    
     let processCell: DocImpl<{
       [TYPE]: string;
       argument?: T;
@@ -88,15 +107,15 @@ export class Runner implements IRunner {
       resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
     }>;
 
-    if (resultCell.sourceCell !== undefined) {
-      processCell = resultCell.sourceCell;
+    if (resultDoc.sourceCell !== undefined) {
+      processCell = resultDoc.sourceCell;
     } else {
       processCell = this.runtime.documentMap.getDoc(
         undefined,
-        { cell: resultCell, path: [] },
-        resultCell.space,
+        { cell: resultDoc, path: [] },
+        resultDoc.space,
       ) as any;
-      resultCell.sourceCell = processCell;
+      resultDoc.sourceCell = processCell;
     }
 
     let recipeId: string | undefined;
@@ -138,23 +157,23 @@ export class Runner implements IRunner {
 
     recipeId ??= this.runtime.recipeManager.generateRecipeId(recipe);
 
-    if (this.cancels.has(resultCell)) {
+    if (this.cancels.has(resultDoc)) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
       if (argument === undefined && recipeId === processCell.get()?.[TYPE]) {
-        return resultCell;
+        return resultDoc;
       }
 
       // TODO(seefeld): If recipe is the same, but argument is different, just update the argument without stopping
 
       // Otherwise stop execution of the old recipe. TODO: Await, but this will
       // make all this async.
-      this.stop(resultCell);
+      this.stop(resultDoc);
     }
 
     // Keep track of subscriptions to cancel them later
     const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(resultCell, cancel);
+    this.cancels.set(resultDoc, cancel);
     this.allCancels.add(cancel);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
@@ -202,7 +221,7 @@ export class Runner implements IRunner {
     processCell.send({
       ...processCell.get(),
       [TYPE]: recipeId || "unknown",
-      resultRef: { cell: resultCell, path: [] },
+      resultRef: { cell: resultDoc, path: [] },
       internal,
     });
     if (argument) {
@@ -219,7 +238,7 @@ export class Runner implements IRunner {
     if (recipeChanged) {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
-      resultCell.send(
+      resultDoc.send(
         unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }
@@ -242,7 +261,7 @@ export class Runner implements IRunner {
     }
 
     // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
-    return resultCell;
+    return resultDoc;
   }
 
   async runSynced(

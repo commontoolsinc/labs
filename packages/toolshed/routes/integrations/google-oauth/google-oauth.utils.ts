@@ -37,18 +37,24 @@ export interface CallbackResult extends Record<string, unknown> {
 type AuthData = Mutable<Schema<typeof AuthSchema>>;
 
 // Create OAuth client with credentials from environment variables
-export const createOAuthClient = (redirectUri: string) => {
-  return new OAuth2Client({
+export const createOAuthClient = (redirectUri: string, scopes?: string[]) => {
+  // Don't use default scopes if custom scopes are provided
+  const scopeString = scopes && scopes.length > 0
+    ? scopes.join(" ")
+    : "email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly";
+
+  const client = new OAuth2Client({
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
     tokenUri: "https://oauth2.googleapis.com/token",
     authorizationEndpointUri: "https://accounts.google.com/o/oauth2/v2/auth",
     redirectUri,
     defaults: {
-      scope:
-        "email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly",
+      scope: scopeString,
     },
   });
+
+  return client;
 };
 
 // Helper function to get the base URL
@@ -148,7 +154,9 @@ export async function getAuthCell(docLink: CellLink | string) {
     // We already should have the schema on the parsedDocLink (from our state),
     // but if it's missing, we can add it  here.
     parsedDocLink.schema = parsedDocLink.schema ?? AuthSchema;
+
     const authCell = runtime.getCellFromLink(parsedDocLink);
+
     // make sure the cell is live!
     await runtime.storage.syncCell(authCell, true);
     await runtime.storage.synced();

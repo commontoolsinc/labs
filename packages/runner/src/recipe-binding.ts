@@ -9,7 +9,7 @@ import {
   type UnsafeBinding,
 } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { type Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followAliases } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -20,31 +20,32 @@ import { diffAndUpdate } from "./data-updating.ts";
  * an alias, it will follow all aliases and send the value to the last aliased
  * doc. If the binding is a literal, we verify that it matches the value and
  * throw an error otherwise.
- * @param doc - The document context
+ * @param docOrCell - The document or cell context
  * @param binding - The binding to send to
  * @param value - The value to send
  * @param log - Optional reactivity log
  */
 export function sendValueToBinding<T>(
-  doc: DocImpl<T>,
+  docOrCell: DocImpl<T> | Cell<T>,
   binding: unknown,
   value: unknown,
   log?: ReactivityLog,
 ): void {
+  const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
   if (isAlias(binding)) {
     const ref = followAliases(binding, doc, log);
     diffAndUpdate(ref, value, log, { doc, binding });
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
-        sendValueToBinding(doc, binding[i], value[i], log);
+        sendValueToBinding(docOrCell, binding[i], value[i], log);
       }
     }
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
         sendValueToBinding(
-          doc,
+          docOrCell,
           binding[key],
           value[key],
           log,
@@ -75,13 +76,14 @@ export function sendValueToBinding<T>(
  *   = Unwrapped, executing the recipe
  *
  * @param binding - The binding to unwrap.
- * @param doc - The doc to bind to.
+ * @param docOrCell - The doc or cell to bind to.
  * @returns The unwrapped binding.
  */
 export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
-  doc: DocImpl<U>,
+  docOrCell: DocImpl<U> | Cell<U>,
 ): T {
+  const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
   function convert(binding: unknown): unknown {
     if (isAlias(binding)) {
       const alias = { ...binding.$alias };

@@ -261,7 +261,7 @@ const viewList = handler<void, { list: { title: string; items: any[] } }>(
  * Recipe Implementation
  * -----------------------------------------------------------------------------
  */
-export default recipe(PageInputSchema, PageResultSchema, (
+export const Page = recipe(PageInputSchema, PageResultSchema, (
   {
     page: { title, lists, pages, body, tags },
     selectedPage,
@@ -479,3 +479,153 @@ export default recipe(PageInputSchema, PageResultSchema, (
     tags,
   };
 });
+
+/**
+ * -----------------------------------------------------------------------------
+ * PageManager Recipe - acts as a lightweight router / window manager
+ * -----------------------------------------------------------------------------
+ */
+const PageManagerInputSchema = {
+  type: "object",
+  properties: {
+    pages: {
+      type: "array",
+      items: PageResultSchema,
+      default: [],
+    },
+    lists: {
+      type: "array",
+      items: AnySchema,
+      default: [],
+    },
+  },
+  required: ["pages", "lists"],
+} as const satisfies JSONSchema;
+
+const AddPageEventSchema = {
+  type: "object",
+  properties: {
+    detail: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+      },
+      required: ["message"],
+    },
+  },
+  required: ["detail"],
+} as const satisfies JSONSchema;
+
+const AddPageStateSchema = {
+  type: "object",
+  properties: {
+    pages: {
+      type: "array",
+      items: PageResultSchema,
+      default: [],
+      asCell: true,
+    },
+  },
+  required: ["pages"],
+} as const satisfies JSONSchema;
+
+const addTopLevelPage = handler(
+  AddPageEventSchema,
+  AddPageStateSchema,
+  (event, { pages }) => {
+    const title = event.detail?.message?.trim();
+    if (title) {
+      pages.push({
+        title,
+        lists: [],
+        pages: [],
+        tags: [],
+      });
+    }
+  },
+);
+
+export default recipe(
+  PageManagerInputSchema,
+  AnySchema,
+  ({ pages, lists }) => {
+    const selectedPage = cell(null);
+
+    const navigate = handler<{ page: any }, { selectedPage: any }>(
+      ({ page }, state) => {
+        state.selectedPage = page;
+      },
+    );
+
+    const onFocusChanged = handler<
+      { detail: { value: any } },
+      { selectedPage: any }
+    >(
+      (ev, state) => {
+        state.selectedPage = ev.detail.value;
+      },
+    );
+
+    const items = derive(pages, (ps) => {
+      return ps.map((p) => ({
+        label: p.title,
+        value: p,
+      }));
+    });
+
+    const test = handler<any, any>((_, state) => {
+      state.selectedPage = state.pages[0];
+    });
+
+    const listSelectItems = derive(
+      lists,
+      (listNodes: any[] | undefined) => {
+        return (listNodes || []).map((listNode) => ({
+          label: listNode[NAME] || "Unnamed List",
+          value: listNode,
+        }));
+      },
+    );
+
+    return {
+      [NAME]: "Page Manager",
+      [UI]: (
+        <common-vstack gap="lg">
+          <common-hstack>
+            <ct-select
+              onchange={onFocusChanged({ selectedPage })}
+              items={items}
+              placeholder="Select a page"
+            />
+            <ct-message-input
+              buttonText="Add page"
+              placeholder="New page"
+              onct-send={addTopLevelPage({ pages })}
+            />
+          </common-hstack>
+
+          <ct-card>
+            {ifElse(
+              selectedPage,
+              view(Page({
+                page: selectedPage,
+                referenceablePages: pages,
+                referenceableLists: lists,
+                selectedPage,
+              })),
+              <div>&nbsp;</div>,
+            )}
+          </ct-card>
+        </common-vstack>
+      ),
+      pages,
+      navigate,
+      lists,
+      selectedPage,
+    };
+  },
+);
+
+function view(x: any) {
+  return x[UI];
+}

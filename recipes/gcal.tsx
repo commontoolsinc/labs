@@ -522,7 +522,14 @@ export default recipe(
               </common-button>
             </common-vstack>
           </common-hstack>
-          <common-google-oauth $auth={auth} />
+          <common-google-oauth 
+            $auth={auth}
+            scopes={[
+              "email",
+              "profile",
+              "https://www.googleapis.com/auth/calendar.readonly"
+            ]}
+          />
           <div>
             <table>
               <thead>
