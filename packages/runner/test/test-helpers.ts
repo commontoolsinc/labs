@@ -1,27 +1,44 @@
 import { assertEquals } from "@std/assert";
 import { AssertionError } from "@std/assert";
 import { isAlias } from "../src/builder/types.ts";
+import { isCellLink } from "../src/cell.ts";
 
 /**
- * Normalizes an object by stripping extra metadata from CellLinks within aliases
+ * Normalizes CellLinks by keeping only cell and path properties
+ */
+function normalizeCellLink(link: any): any {
+  return { cell: link.cell, path: link.path };
+}
+
+/**
+ * Deep normalizes an object, handling CellLinks and aliases
  * Strips out extra properties like space, schema, rootSchema from CellLinks
  */
-function normalizeCellLinksInAliases(obj: any): any {
+function deepNormalizeCellLinks(obj: any): any {
   if (!obj || typeof obj !== 'object') {
     return obj;
   }
   
+  // Handle bare CellLinks
+  if (isCellLink(obj)) {
+    return normalizeCellLink(obj);
+  }
+  
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj.map(deepNormalizeCellLinks);
+  }
+  
+  // Handle objects
   const result: any = {};
   for (const [key, value] of Object.entries(obj)) {
     if (isAlias(value)) {
+      // Normalize CellLinks within aliases
       result[key] = {
-        $alias: { 
-          cell: value.$alias.cell, 
-          path: value.$alias.path 
-        }
+        $alias: normalizeCellLink(value.$alias)
       };
     } else {
-      result[key] = value;
+      result[key] = deepNormalizeCellLinks(value);
     }
   }
   return result;
@@ -30,12 +47,13 @@ function normalizeCellLinksInAliases(obj: any): any {
 /**
  * Custom expect-style matcher for CellLink equality
  * Usage: expectCellLinksEqual(actual).toEqual(expected)
+ * Works with bare CellLinks, CellLinks in aliases, and nested structures
  */
 export function expectCellLinksEqual(actual: unknown) {
   return {
     toEqual(expected: unknown, msg?: string) {
-      const normalizedActual = normalizeCellLinksInAliases(actual);
-      const normalizedExpected = normalizeCellLinksInAliases(expected);
+      const normalizedActual = deepNormalizeCellLinks(actual);
+      const normalizedExpected = deepNormalizeCellLinks(expected);
       
       try {
         assertEquals(normalizedActual, normalizedExpected, msg);
