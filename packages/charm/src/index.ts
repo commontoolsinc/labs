@@ -4,6 +4,7 @@ export {
   charmListSchema,
   CharmManager,
   charmSchema,
+  getRecipeIdFromCharm,
   processSchema,
 } from "./manager.ts";
 export { searchCharms } from "./search.ts";

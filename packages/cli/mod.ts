@@ -1,22 +1,8 @@
-import { type Command, CommandType, type RunCommand } from "./interface.ts";
-import { RuntimeCLI } from "./cli.ts";
-import { Processor } from "./commands/processor.ts";
+import { parse } from "./commands/mod.ts";
 
-export { type Command, CommandType, Processor, type RunCommand, RuntimeCLI };
-
-async function main(args: string[]) {
-  const cli = new RuntimeCLI();
-  const command = await cli.parse(args);
+export async function main(args: string[]) {
   try {
-    const result = await cli.process(command);
-    const mainExport = result && "default" in result ? result.default : result;
-    if (mainExport !== undefined) {
-      try {
-        console.log(JSON.stringify(mainExport, null, 2));
-      } catch (_e) {
-        console.log(mainExport);
-      }
-    }
+    await parse(args);
     Deno.exit(0);
   } catch (e) {
     console.error(e);

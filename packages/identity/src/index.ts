@@ -6,4 +6,9 @@ export {
 } from "./identity.ts";
 export { KeyStore } from "./key-store.ts";
 export * from "./interface.ts";
-export { createAdminSession, createSession, type Session } from "./session.ts";
+export {
+  ANYONE,
+  createAdminSession,
+  createSession,
+  type Session,
+} from "./session.ts";
