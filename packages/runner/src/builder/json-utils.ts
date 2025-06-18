@@ -6,8 +6,8 @@ import {
   type LegacyAlias,
 } from "../cell.ts";
 import {
-  isAlias,
   isLegacyAlias,
+  isWritethroughEmbed,
   parseToLegacyCellLink,
 } from "../link-utils.ts";
 import { isDoc } from "../doc.ts";
@@ -155,7 +155,7 @@ export function createJsonSchema(
       return analyzeType(value);
     }
 
-    if (isAlias(value)) {
+    if (isWritethroughEmbed(value)) {
       const link = parseToLegacyCellLink(value);
       if (link && isDoc(link.cell)) {
         value = link.cell.getAtPath(link.path);

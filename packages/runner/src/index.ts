@@ -34,11 +34,11 @@ export {
   EngineProgramResolver,
 } from "./harness/index.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
-export { followAliases } from "./link-resolution.ts";
+export { followWritethroughs } from "./link-resolution.ts";
 export {
   areLinksSame,
-  isAlias,
   isLink,
+  isWritethroughEmbed,
   parseAlias,
   parseLink,
   parseLinkOrThrow,

@@ -28,10 +28,10 @@ import {
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
-import { followAliases } from "./link-resolution.ts";
+import { followWritethroughs } from "./link-resolution.ts";
 import {
   areLinksSame,
-  isAlias,
+  isWritethroughEmbed,
   type NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
@@ -459,7 +459,7 @@ export class Runner implements IRunner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isAlias(module)) {
+    } else if (isWritethroughEmbed(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
       throw new Error(`Unknown module: ${JSON.stringify(module)}`);
@@ -501,8 +501,8 @@ export class Runner implements IRunner {
         let doc = processCell;
         let path: PropertyKey[] = [key];
         let value = inputs[key];
-        while (isAlias(value)) {
-          const ref = followAliases(value, processCell);
+        while (isWritethroughEmbed(value)) {
+          const ref = followWritethroughs(value, processCell);
           doc = ref.cell;
           path = ref.path;
           value = doc.getAtPath(path);
@@ -523,7 +523,7 @@ export class Runner implements IRunner {
         const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
         for (const key in eventInputs) {
-          if (isAlias(eventInputs[key])) {
+          if (isWritethroughEmbed(eventInputs[key])) {
             // Use format-agnostic comparison for aliases
             const alias = eventInputs[key];
 
@@ -849,7 +849,7 @@ export function mergeObjects<T>(
       typeof obj !== "object" ||
       obj === null ||
       Array.isArray(obj) ||
-      isAlias(obj) ||
+      isWritethroughEmbed(obj) ||
       isCellLink(obj) ||
       isDoc(obj) ||
       isCell(obj)

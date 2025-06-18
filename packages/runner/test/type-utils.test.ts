@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isModule, isRecipe, type Opaque } from "../src/builder/types.ts";
-import { isAlias } from "../src/link-utils.ts";
+import { isWritethroughEmbed } from "../src/link-utils.ts";
 import { EMBED_V1_TAG } from "../src/cell.ts";
 
 describe("value type", () => {
@@ -33,9 +33,10 @@ describe("value type", () => {
 
 describe("utility functions", () => {
   it("isAlias correctly identifies aliases", () => {
-    expect(isAlias({ $alias: { path: ["path", "to", "value"] } })).toBe(true);
+    expect(isWritethroughEmbed({ $alias: { path: ["path", "to", "value"] } }))
+      .toBe(true);
     expect(
-      isAlias({
+      isWritethroughEmbed({
         "/": {
           [EMBED_V1_TAG]: { id: "path/to/value", replace: "destination" },
         },
@@ -43,7 +44,7 @@ describe("utility functions", () => {
     ).toBe(
       true,
     );
-    expect(isAlias({ notAlias: "something" })).toBe(false);
+    expect(isWritethroughEmbed({ notAlias: "something" })).toBe(false);
   });
 
   it("isModule correctly identifies modules", () => {

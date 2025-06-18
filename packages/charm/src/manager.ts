@@ -1,6 +1,6 @@
 import {
   Classification,
-  isAlias,
+  isWritethroughEmbed,
   JSONSchema,
   Module,
   NAME,
@@ -13,7 +13,7 @@ import {
   type Cell,
   createRef,
   EntityId,
-  followAliases,
+  followWritethroughs,
   getEntityId,
   isCell,
   isCellLink,
@@ -594,11 +594,11 @@ export class CharmManager {
             return; // Don't process contents of cell links
           }
 
-          // Process aliases - follow them to their sources
-          if (isAlias(value)) {
+          // Process writethroughs - follow them to their sources
+          if (isWritethroughEmbed(value)) {
             try {
-              // Use followAliases, which is safer than manual traversal
-              const cellLink = followAliases(value, parent.getDoc());
+              // Use followWritethroughs, which is safer than manual traversal
+              const cellLink = followWritethroughs(value, parent.getDoc());
               if (cellLink && cellLink.cell) {
                 const cellId = getEntityId(cellLink.cell);
                 if (cellId) addMatchingCharm(cellId);
@@ -611,9 +611,9 @@ export class CharmManager {
                 if (sourceRefId) addMatchingCharm(sourceRefId);
               }
             } catch (err) {
-              console.debug("Error following aliases:", err);
+              console.debug("Error following writethroughs:", err);
             }
-            return; // Aliases have been fully handled
+            return; // Writethroughs have been fully handled
           }
 
           // Try to get a cell link from various types of values
@@ -932,11 +932,11 @@ export class CharmManager {
           return false; // Don't process cell link contents
         }
 
-        // Use isAlias and followAliases for aliases
-        if (isAlias(value)) {
+        // Use isWritethroughEmbed and followWritethroughs for writethroughs
+        if (isWritethroughEmbed(value)) {
           try {
             // Follow all aliases to their source
-            const cellLink = followAliases(value, parent.getDoc());
+            const cellLink = followWritethroughs(value, parent.getDoc());
             if (cellLink && cellLink.cell) {
               // Check if the aliased doc is our target
               const cellId = getEntityId(cellLink.cell);
@@ -960,7 +960,7 @@ export class CharmManager {
               err,
             );
           }
-          return false; // Aliases have been fully handled
+          return false; // Writethroughs have been fully handled
         }
 
         // Use maybeGetCellLink to handle various reference types

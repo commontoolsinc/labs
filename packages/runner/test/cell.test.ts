@@ -1947,7 +1947,7 @@ describe("getAsAlias method", () => {
     const cell = c.asCell();
 
     // Get the new sigil alias format
-    const alias = cell.getAsAlias();
+    const alias = cell.getAsWritethroughEmbed();
 
     // Verify structure
     expect(alias["/"]).toBeDefined();
@@ -1974,7 +1974,7 @@ describe("getAsAlias method", () => {
     );
     const nestedCell = c.asCell(["nested", "value"]);
 
-    const alias = nestedCell.getAsAlias();
+    const alias = nestedCell.getAsWritethroughEmbed();
 
     expect(alias["/"][EMBED_V1_TAG].path).toEqual(["nested", "value"]);
   });
@@ -1988,7 +1988,7 @@ describe("getAsAlias method", () => {
     const cell = c.asCell();
 
     // Alias with same baseSpace should omit space
-    const alias = cell.getAsAlias({ baseSpace: space });
+    const alias = cell.getAsWritethroughEmbed({ baseSpace: space });
 
     expect(alias["/"][EMBED_V1_TAG].id).toBeDefined();
     expect(alias["/"][EMBED_V1_TAG].space).toBeUndefined();
@@ -2004,7 +2004,7 @@ describe("getAsAlias method", () => {
     const cell = c.asCell();
 
     // Alias with different baseSpace should include space
-    const alias = cell.getAsAlias({ baseSpace: space });
+    const alias = cell.getAsWritethroughEmbed({ baseSpace: space });
 
     expect(alias["/"][EMBED_V1_TAG].id).toBeDefined();
     expect(alias["/"][EMBED_V1_TAG].space).toBe(space2);
@@ -2021,7 +2021,7 @@ describe("getAsAlias method", () => {
     const cell = c.asCell(["value"], undefined, schema);
 
     // Alias with includeSchema option
-    const alias = cell.getAsAlias({ includeSchema: true });
+    const alias = cell.getAsWritethroughEmbed({ includeSchema: true });
 
     expect(alias["/"][EMBED_V1_TAG].schema).toEqual(schema);
   });
@@ -2041,7 +2041,7 @@ describe("getAsAlias method", () => {
     const baseCell = c2.asCell();
 
     // Alias relative to base cell (different document, same space)
-    const alias = cell.getAsAlias({ base: baseCell });
+    const alias = cell.getAsWritethroughEmbed({ base: baseCell });
 
     // Should include id (different docs) but not space (same space)
     expect(alias["/"][EMBED_V1_TAG].id).toBeDefined();
