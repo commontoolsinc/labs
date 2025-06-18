@@ -265,11 +265,12 @@ export type LegacyAlias = {
 export type SigilValue<T> = { "/": T };
 
 /**
- * Link sigil value v0.1
+ * Embed sigil value v1
  */
-export const LINK_V01_TAG = "link-v0.1" as const;
-export type LinkV01 = {
-  [LINK_V01_TAG]: {
+export const EMBED_V1_TAG = "embed@1" as const;
+// Temporary backwards compatibility
+export type EmbedV1 = {
+  [EMBED_V1_TAG]: {
     id?: string;
     path?: (string | number)[];
     space?: MemorySpace;
@@ -279,11 +280,12 @@ export type LinkV01 = {
 };
 
 /**
- * Alias sigil value v0.1
+ * Alias sigil value v1
  */
-export const ALIAS_V01_TAG = "alias-v0.1" as const;
-export type AliasV01 = {
-  [ALIAS_V01_TAG]: {
+export const ALIAS_V1_TAG = "alias@1" as const;
+// Temporary backwards compatibility
+export type AliasV1 = {
+  [ALIAS_V1_TAG]: {
     id?: string;
     path?: (string | number)[];
     space?: MemorySpace;
@@ -293,16 +295,16 @@ export type AliasV01 = {
 };
 
 /**
- * Sigil link type
+ * Sigil link type (now using embed)
  */
-export type SigilLink = SigilValue<LinkV01>;
-export type SigilLinkTag = typeof LINK_V01_TAG;
+export type SigilLink = SigilValue<EmbedV1>;
+export type SigilLinkTag = typeof EMBED_V1_TAG;
 
 /**
  * Sigil alias type
  */
-export type SigilAlias = SigilValue<AliasV01>;
-export type SigilAliasTag = typeof ALIAS_V01_TAG;
+export type SigilAlias = SigilValue<AliasV1>;
+export type SigilAliasTag = typeof ALIAS_V1_TAG;
 
 /**
  * JSON cell link format used in storage
@@ -628,7 +630,7 @@ function createRegularCell<T>(
       },
     ): SigilLink => {
       return createSigilReference(
-        "link-v0.1",
+        EMBED_V1_TAG,
         doc,
         path,
         schema,
@@ -643,7 +645,7 @@ function createRegularCell<T>(
       },
     ): SigilAlias => {
       return createSigilReference(
-        "alias-v0.1",
+        ALIAS_V1_TAG,
         doc,
         path,
         schema,
@@ -795,12 +797,8 @@ export function isJSONCellLink(value: any): value is JSONCellLink {
  * Check if value is a sigil link.
  */
 export function isSigilLink(value: any): value is SigilLink {
-  if (
-    isSigilValue(value) &&
-    "link-v0.1" in value["/"] &&
-    isRecord(value["/"]["link-v0.1"])
-  ) {
-    const link = value["/"]["link-v0.1"];
+  if (isSigilValue(value)) {
+    const link = value["/"][EMBED_V1_TAG];
     // Either id or path must be present
     return typeof link.id === "string" || Array.isArray(link.path);
   }

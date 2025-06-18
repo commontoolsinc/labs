@@ -16,7 +16,12 @@ import type {
 import { deepEqual } from "./path-utils.ts";
 import { isAlias, parseLink } from "./link-utils.ts";
 import { getEntityId } from "./doc-map.ts";
-import { isSigilValue, type SigilAlias, type SigilLink } from "./cell.ts";
+import {
+  EMBED_V1_TAG,
+  isSigilValue,
+  type SigilAlias,
+  type SigilLink,
+} from "./cell.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -91,8 +96,8 @@ type JSONCellLink = { cell: { "/": string }; path: string[] };
 function isSigilLink(value: unknown): value is SigilLink {
   return (
     isSigilValue(value) &&
-    "link-v0.1" in value["/"] &&
-    isObject(value["/"]["link-v0.1"])
+    EMBED_V1_TAG in value["/"] &&
+    isObject(value["/"][EMBED_V1_TAG])
   );
 }
 
@@ -102,8 +107,8 @@ function isSigilLink(value: unknown): value is SigilLink {
 function isSigilAlias(value: unknown): value is SigilAlias {
   return (
     isSigilValue(value) &&
-    "alias-v0.1" in value["/"] &&
-    isObject(value["/"]["alias-v0.1"])
+    "alias@1" in value["/"] &&
+    isObject(value["/"]["alias@1"])
   );
 }
 export type CellTarget = { path: string[]; cellTarget: string | undefined };

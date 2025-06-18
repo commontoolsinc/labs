@@ -2,9 +2,10 @@ import { isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
 import { isDoc } from "./doc.ts";
 import {
-  ALIAS_V01_TAG,
+  ALIAS_V1_TAG,
   type Cell,
   type CellLink,
+  EMBED_V1_TAG,
   isAnyCellLink,
   isCell,
   isCellLink,
@@ -13,7 +14,6 @@ import {
   isSigilValue,
   type JSONCellLink,
   type LegacyAlias,
-  LINK_V01_TAG,
   type MemorySpace,
   type SigilAlias,
   type SigilLink,
@@ -62,10 +62,10 @@ export function isAlias(value: any): value is LegacyAlias | SigilAlias {
   // Check new sigil alias format
   if (
     isSigilValue(value) &&
-    "alias-v0.1" in value["/"] &&
-    isRecord(value["/"]["alias-v0.1"])
+    ALIAS_V1_TAG in value["/"] &&
+    isRecord(value["/"][ALIAS_V1_TAG])
   ) {
-    const alias = value["/"]["alias-v0.1"];
+    const alias = value["/"][ALIAS_V1_TAG];
     // Either id or path must be present
     return typeof alias.id === "string" || Array.isArray(alias.path);
   }
@@ -177,7 +177,7 @@ export function parseCellLink(
   // Handle new sigil format
   if (isSigilLink(value)) {
     const sigilLink = value as SigilLink;
-    const link = sigilLink["/"][LINK_V01_TAG];
+    const link = sigilLink["/"][EMBED_V1_TAG];
 
     // Resolve relative references
     let id = link.id;
@@ -237,7 +237,7 @@ export function parseAlias(
     isRecord(value.$alias) &&
     Array.isArray(value.$alias.path)
   ) {
-    const alias = value.$alias as any; // Use any for legacy format
+    const alias = value.$alias as LegacyAlias["$alias"];
     let id: string | undefined;
     let resolvedSpace = baseCell?.space;
 
@@ -263,7 +263,7 @@ export function parseAlias(
     return {
       id,
       path: Array.isArray(alias.path)
-        ? alias.path.map((p: any) => p.toString())
+        ? alias.path.map((p) => p.toString())
         : [],
       space: resolvedSpace,
       schema: alias.schema as JSONSchema | undefined,
@@ -274,11 +274,11 @@ export function parseAlias(
   // Handle new sigil alias format
   if (
     isSigilValue(value) &&
-    ALIAS_V01_TAG in value["/"] &&
-    isRecord(value["/"][ALIAS_V01_TAG])
+    ALIAS_V1_TAG in value["/"] &&
+    isRecord(value["/"][ALIAS_V1_TAG])
   ) {
     const sigilAlias = value as SigilAlias;
-    const alias = sigilAlias["/"][ALIAS_V01_TAG];
+    const alias = sigilAlias["/"][ALIAS_V1_TAG];
 
     // Resolve relative references
     let id = alias.id;
