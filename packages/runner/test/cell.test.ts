@@ -277,14 +277,14 @@ describe("createProxy", () => {
   });
 
   it("should handle aliases when writing", () => {
-    const c = runtime.getCell(
+    const c = runtime.getCell<{ x: number; y: number }>(
       space,
       "should handle aliases when writing",
     );
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = c.getAsQueryResult();
     proxy.x = 100;
-    expect((c.get() as any).y).toBe(100);
+    expect(c.get().y).toBe(100);
   });
 
   it("should handle nested cells", () => {
