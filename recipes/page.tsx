@@ -307,9 +307,8 @@ export default recipe(PageInputSchema, PageResultSchema, (
     }
   >(
     (_, { lists, selectedList }) => {
-      debugger;
       if (selectedList) {
-        lists.push(selectedList.items);
+        lists.push(selectedList);
       }
     },
   );
