@@ -1,5 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
-import { h } from "../src/jsx.ts";
+import { h } from "@commontools/api";
 import { render } from "../src/render.ts";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";

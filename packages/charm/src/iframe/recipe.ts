@@ -1,4 +1,4 @@
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "@commontools/runner";
 import { Cell, getEntityId, type Runtime } from "@commontools/runner";
 import { Charm, getRecipeIdFromCharm } from "../manager.ts";
 
@@ -17,9 +17,7 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     `    ${key}: data.${key},\n`
   ).join("\n");
 
-  return `import { h } from "@commontools/html";
-  import { recipe, UI, NAME } from "@commontools/builder";
-  import type { JSONSchema } from "@commontools/builder";
+  return `import { h, recipe, type JSONSchema, UI, NAME } from "commontools";
 
   type IFrameRecipe = {
     src: string,
@@ -63,7 +61,7 @@ function parseIframeRecipe(source: string): IFrameRecipe {
 
 export const getIframeRecipe = (
   charm: Cell<Charm>,
-  runtime: Runtime
+  runtime: Runtime,
 ): {
   recipeId: string;
   src?: string;
@@ -82,7 +80,6 @@ export const getIframeRecipe = (
   try {
     return { recipeId, src, iframe: parseIframeRecipe(src) };
   } catch (error) {
-    console.warn("Error parsing iframe recipe:", error);
     return { recipeId, src };
   }
 };

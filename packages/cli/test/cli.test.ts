@@ -16,25 +16,26 @@ describe("CLI", () => {
         "task",
         "cli",
         "run",
-        "test/fixtures/pow-5.tsx",
+        "fixtures/pow-5.tsx",
       ],
     }).output();
 
     const out = processStream(stdout);
     const err = processStream(stderr);
+
     expect(err.length).toBe(1); // deno run etc.
     expect(out[out.length - 1]).toBe("25");
     expect(code).toBe(0);
   });
 
-  it("Runs a recipe with commontools", async () => {
+  it("Runs a recipe with commontools+3P modules", async () => {
     const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
       cwd: join(import.meta.dirname!, ".."),
       args: [
         "task",
         "cli",
         "run",
-        "test/fixtures/recipe.tsx",
+        "fixtures/3p-modules.tsx",
       ],
     }).output();
 
@@ -53,7 +54,7 @@ describe("CLI", () => {
         "task",
         "cli",
         "run",
-        "test/fixtures/recipe.tsx",
+        "fixtures/recipe.tsx",
         "--no-run",
         "--output",
         temp,
@@ -76,7 +77,7 @@ describe("CLI", () => {
     // make sure to clean up files
     const root = join(import.meta.dirname!, "..");
     expect(await exists(join(root, "tsconfig.json"))).toEqual(false);
-    expect(await exists(join(root, "node_modules"))).toEqual(false);
+    expect(await exists(join(root, ".ct-types"))).toEqual(false);
 
     try {
       const { code, stdout, stderr } = await new Deno.Command(Deno.execPath(), {
@@ -94,7 +95,7 @@ describe("CLI", () => {
       expect(out.length).toBe(0);
       expect(code).toBe(0);
 
-      const types = join(root, "node_modules", "@types");
+      const types = join(root, ".ct-types");
       expect(await exists(join(root, "tsconfig.json"))).toEqual(true);
       expect(await exists(join(types, "commontools", "index.d.ts"))).toEqual(
         true,
@@ -106,7 +107,7 @@ describe("CLI", () => {
         .toEqual(true);
     } finally {
       await Deno.remove(join(root, "tsconfig.json"), { recursive: true });
-      await Deno.remove(join(root, "node_modules"), { recursive: true });
+      await Deno.remove(join(root, ".ct-types"), { recursive: true });
     }
   });
 });

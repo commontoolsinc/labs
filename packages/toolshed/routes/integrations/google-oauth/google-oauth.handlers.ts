@@ -50,17 +50,22 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
     }/api/integrations/google-oauth/callback`;
     logger.debug({ redirectUri }, "Created redirect URI");
 
-    // Create OAuth client
-    const client = createOAuthClient(redirectUri);
+    // Create OAuth client with optional scopes
+    const client = createOAuthClient(redirectUri, payload.scopes);
 
     // Generate authorization URL with PKCE
-    const { uri, codeVerifier } = await client.code.getAuthorizationUri();
+    const scopeString = payload.scopes ? payload.scopes.join(" ") : undefined;
 
-    // Create state payload that includes the code verifier
+    const { uri, codeVerifier } = await client.code.getAuthorizationUri({
+      scope: scopeString,
+    });
+
+    // Create state payload that includes the code verifier and scopes
     const statePayload = btoa(JSON.stringify({
       authCellId: payload.authCellId,
       integrationCharmId: payload.integrationCharmId,
       codeVerifier: codeVerifier,
+      scopes: payload.scopes,
     }));
 
     // Add state parameter and other required params to the URL
@@ -68,6 +73,11 @@ export const login: AppRouteHandler<LoginRoute> = async (c) => {
     authUrl.searchParams.set("state", statePayload);
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("prompt", "consent");
+
+    // Force set the scope parameter with the requested scopes
+    if (scopeString) {
+      authUrl.searchParams.set("scope", scopeString);
+    }
 
     logger.info({ authUrl: authUrl.toString() }, "Generated OAuth URL");
 
@@ -120,6 +130,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       authCellId: string;
       integrationCharmId: string;
       codeVerifier: string;
+      scopes?: string[];
     };
 
     try {
@@ -129,6 +140,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
           authCellId: decodedState.authCellId,
           integrationCharmId: decodedState.integrationCharmId,
           codeVerifier: decodedState.codeVerifier ? "present" : "missing",
+          scopes: decodedState.scopes,
         },
       }, "Decoded state parameter");
     } catch (error) {
@@ -154,8 +166,8 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     const baseUrl = getBaseUrl(c.req.url);
     const redirectUri = `${baseUrl}/api/integrations/google-oauth/callback`;
 
-    // Create OAuth client
-    const client = createOAuthClient(redirectUri);
+    // Create OAuth client with scopes from state
+    const client = createOAuthClient(redirectUri, decodedState.scopes);
 
     // Exchange authorization code for tokens
     const tokens = await client.code.getToken(
@@ -178,14 +190,18 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
 
     // Fetch user info to verify the token
     const userInfo = await fetchUserInfo(tokens.accessToken);
-    const authCellLink = JSON.parse(decodedState?.authCellId) as CellLink;
 
-    // Save tokens to auth cell
-    const tokenData = await persistTokens(tokens, userInfo, authCellLink);
+    // Save tokens to auth cell - pass authCellId as string, let persistTokens handle parsing
+    const tokenData = await persistTokens(
+      tokens,
+      userInfo,
+      decodedState.authCellId,
+    );
 
     // Add this charm to the Gmail integration charms cell
     try {
       // Get the charm ID and space from the decodedState (which is the auth cell ID)
+      const authCellLink = JSON.parse(decodedState.authCellId) as CellLink;
       const space = authCellLink.space;
       const integrationCharmId = decodedState?.integrationCharmId;
 
@@ -361,7 +377,6 @@ export const backgroundIntegration: AppRouteHandler<
 
     return createBackgroundIntegrationSuccessResponse(c, "success");
   } catch (error) {
-    console.log("error", error);
     logger.error({ error }, "Failed to process background integration request");
     return createBackgroundIntegrationErrorResponse(
       c,

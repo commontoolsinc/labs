@@ -2,7 +2,6 @@
   "workspace": [
     "./packages/api",
     "./packages/background-charm-service",
-    "./packages/builder",
     "./packages/charm",
     "./packages/cli",
     "./packages/deno-vite-plugin",
@@ -26,7 +25,8 @@
     "check": "./tasks/check.sh",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
-    "build-binaries": "./tasks/build-binaries.ts"
+    "build-binaries": "./tasks/build-binaries.ts",
+    "initialize-db": "./tasks/initialize-db.sh"
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",

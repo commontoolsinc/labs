@@ -19,7 +19,7 @@ async function main(args: string[]) {
     }
     Deno.exit(0);
   } catch (e) {
-    console.error(e && typeof e.toString === "function" ? e.toString() : e);
+    console.error(e);
     Deno.exit(1);
   }
 }

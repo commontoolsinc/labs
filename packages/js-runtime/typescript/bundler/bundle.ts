@@ -1,5 +1,6 @@
 import { SourceMap } from "../../interface.ts";
 import { getAMDLoader } from "./amd-loader.ts";
+import { encode } from "@commontools/utils/encoding";
 
 const ENTRY = "$ENTRY";
 const BUNDLE_PRE = stripNewLines(`
@@ -57,7 +58,7 @@ function stripSourceMappingUrl(input: string): string {
 // Returns a string of a JS `sourceMappingURL` comment, encoding
 // an inline source map.
 function sourceMappingUrl(sourceMap: SourceMap): string {
-  const encodedMap = btoa(JSON.stringify(sourceMap));
+  const encodedMap = btoaFix(JSON.stringify(sourceMap));
   // ${"sourceMappingURL"} prevents confusion with this file's source map
   return `//# ${"sourceMappingURL"}=data:application/json;base64,${encodedMap}\n`;
 }
@@ -66,4 +67,13 @@ function sourceMappingUrl(sourceMap: SourceMap): string {
 function sourceUrl(filename: string): string {
   // ${"sourceURL"} prevents confusion with this file's source map
   return `//# ${"sourceURL"}=${filename}\n`;
+}
+
+// `window.btoa` only works on characters that are contained in a single
+// byte. This may not be the case for source code, so handle character
+// out of range exceptions with this conversion.
+function btoaFix(input: string): string {
+  return btoa(
+    Array.from(encode(input), (byte) => String.fromCodePoint(byte)).join(""),
+  );
 }

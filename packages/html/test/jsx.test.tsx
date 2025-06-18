@@ -1,6 +1,6 @@
-import { beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
+import { h } from "@commontools/api";
 import * as assert from "./assert.ts";
-import { h } from "../src/jsx.ts";
 
 describe("jsx dom fragments support", () => {
   it("dom fragments should work", () => {

@@ -1,6 +1,6 @@
-import { JSONSchema, Module, Recipe, Schema } from "@commontools/builder";
+import { JSONSchema, Module, Recipe, Schema } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
-import type { IRecipeManager, IRuntime } from "./runtime.ts";
+import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
 
 export const recipeMetaSchema = {
@@ -25,7 +25,7 @@ export class RecipeManager implements IRecipeManager {
   constructor(readonly runtime: IRuntime) {}
 
   private async getRecipeMetaCell(
-    { recipeId, space }: { recipeId: string; space: string },
+    { recipeId, space }: { recipeId: string; space: MemorySpace },
   ): Promise<Cell<RecipeMeta>> {
     const cell = this.runtime.getCell(
       space,
@@ -66,7 +66,7 @@ export class RecipeManager implements IRecipeManager {
   async registerRecipe(
     { recipeId, space, recipe, recipeMeta }: {
       recipeId: string;
-      space: string;
+      space: MemorySpace;
       recipe: Recipe | Module;
       recipeMeta: RecipeMeta;
     },
@@ -112,7 +112,7 @@ export class RecipeManager implements IRecipeManager {
   // compiles of each recipe
   private async compileRecipeOnce(
     recipeId: string,
-    space: string,
+    space: MemorySpace,
   ): Promise<Recipe> {
     const metaCell = await this.getRecipeMetaCell({ recipeId, space });
     let recipeMeta = metaCell.get();
@@ -140,7 +140,7 @@ export class RecipeManager implements IRecipeManager {
     return recipe;
   }
 
-  async loadRecipe(id: string, space: string): Promise<Recipe> {
+  async loadRecipe(id: string, space: MemorySpace): Promise<Recipe> {
     const existing = this.recipeIdMap.get(id);
     if (existing) {
       return existing;
@@ -243,7 +243,6 @@ export class RecipeManager implements IRecipeManager {
         );
         return;
       }
-
     } catch (error) {
       console.warn("Failed to publish recipe to blobby:", error);
       // Don't throw - this is optional functionality

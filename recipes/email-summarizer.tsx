@@ -70,7 +70,7 @@ const EmailProperties = {
     title: "Markdown Content",
     description: "Email content converted to Markdown format",
   },
-} as const satisfies JSONSchema;
+} as const;
 
 const EmailSchema = {
   type: "object",
@@ -210,11 +210,7 @@ const getEmailContent = lift(
   {
     type: "object",
     properties: {
-      email: {
-        type: "object",
-        properties: EmailProperties,
-        required: Object.keys(EmailProperties),
-      },
+      email: EmailSchema,
     },
     required: ["email"],
   },

@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
-import { h, render, VNode } from "../src/index.ts";
-import { createBuilder } from "@commontools/builder";
-import { Runtime } from "@commontools/runner";
+import { render, VNode } from "../src/index.ts";
+import { createBuilder, Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
+import { Identity } from "@commontools/identity";
+import { h } from "@commontools/api";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("recipes with HTML", () => {
   let dom: JSDOM;
   let document: Document;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let lift: ReturnType<typeof createBuilder>["lift"];
   let recipe: ReturnType<typeof createBuilder>["recipe"];
@@ -25,9 +31,12 @@ describe("recipes with HTML", () => {
     globalThis.Node = dom.window.Node;
     globalThis.Text = dom.window.Text;
 
-    // Set up runtime
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
 
     const builder = createBuilder(runtime);
@@ -36,6 +45,7 @@ describe("recipes with HTML", () => {
 
   afterEach(async () => {
     await runtime?.dispose();
+    await storageManager?.close();
   });
   it("should render a simple UI", async () => {
     const simpleRecipe = recipe<{ value: number }>(
@@ -49,7 +59,7 @@ describe("recipes with HTML", () => {
     const result = runtime.run(
       simpleRecipe,
       { value: 5 },
-      runtime.documentMap.getDoc(undefined, "simple-ui-result", "test"),
+      runtime.documentMap.getDoc(undefined, "simple-ui-result", space),
     );
 
     await runtime.idle();
@@ -99,7 +109,7 @@ describe("recipes with HTML", () => {
           { title: "item 2", done: true },
         ],
       },
-      runtime.documentMap.getDoc(undefined, "todo-list-result", "test"),
+      runtime.documentMap.getDoc(undefined, "todo-list-result", space),
     );
 
     await runtime.idle();
@@ -141,7 +151,7 @@ describe("recipes with HTML", () => {
           { title: "item 2", done: true },
         ],
       },
-      runtime.documentMap.getDoc(undefined, "nested-todo-result", "test"),
+      runtime.documentMap.getDoc(undefined, "nested-todo-result", space),
     );
 
     await runtime.idle();
@@ -162,7 +172,7 @@ describe("recipes with HTML", () => {
     const result = runtime.run(
       strRecipe,
       { name: "world" },
-      runtime.documentMap.getDoc(undefined, "str-recipe-result", "test"),
+      runtime.documentMap.getDoc(undefined, "str-recipe-result", space),
     );
 
     await runtime.idle();
@@ -203,7 +213,7 @@ describe("recipes with HTML", () => {
     const result = runtime.run(
       nestedMapRecipe,
       data,
-      runtime.documentMap.getDoc(undefined, "nested-map-result", "test"),
+      runtime.documentMap.getDoc(undefined, "nested-map-result", space),
     );
 
     await runtime.idle();

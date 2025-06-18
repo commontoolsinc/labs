@@ -44,17 +44,20 @@ export class TheConflictError extends Error implements ConflictError {
   override name = "ConflictError" as const;
   conflict: Conflict;
   constructor(public transaction: Transaction, conflict: Conflict) {
+    const { since, ...actual } = conflict.actual
+      ? conflict.actual
+      : { actual: null };
     super(
       conflict.expected == null
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} already exists as ${
           refer(
-            conflict.actual,
+            actual,
           )
         }`
         : conflict.actual == null
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exists`
         : `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it is ${
-          refer(conflict.actual)
+          refer(actual)
         }`,
     );
 

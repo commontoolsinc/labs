@@ -5,17 +5,15 @@
  * I'm starting from the bottom (common memory) up and purposely calling
  * APIs that would normally call into common memory.
  */
-import { Charm, charmListSchema, CharmManager } from "../charm/src/manager.ts";
+import { charmListSchema } from "../charm/src/manager.ts";
 import { Cell, type CellLink } from "../runner/src/cell.ts";
-import { Session } from "../identity/src/index.ts";
 import { DocImpl } from "../runner/src/doc.ts";
-import { EntityId } from "../runner/src/doc-map.ts";
-import { Runtime } from "../runner/src/runtime.ts";
+import { Runtime } from "../runner/src/index.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "../identity/src/index.ts";
 import { getEntityId } from "../runner/src/doc-map.ts";
 
 const TOOLSHED_API_URL = "https://toolshed.saga-castor.ts.net/";
-const SPACE = "common-knowledge";
 
 // simple log function
 const log: <T>(s: T, prefix?: string) => void = (s, prefix?) =>
@@ -31,8 +29,11 @@ async function main() {
 
   // Create runtime with proper configuration
   const runtime = new Runtime({
-    storageUrl: TOOLSHED_API_URL,
-    signer: as_space,
+    storageManager: StorageManager.open({
+      as: as_space,
+      address: new URL("/api/storage/memory", TOOLSHED_API_URL),
+    }),
+    blobbyServerUrl: TOOLSHED_API_URL,
   });
 
   // get them charms, we can also call charmManager.getCharms()
@@ -40,7 +41,7 @@ async function main() {
   const charmsDoc: DocImpl<CellLink[]> = runtime.documentMap.getDoc<CellLink[]>(
     [],
     "charms",
-    SPACE,
+    as_space.did(),
   );
 
   // start syncing on this document

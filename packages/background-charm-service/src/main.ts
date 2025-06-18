@@ -1,5 +1,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { BackgroundCharmService } from "./service.ts";
 import { getIdentity, log } from "./utils.ts";
 import { env } from "./env.ts";
@@ -25,8 +26,11 @@ const workerTimeoutMs = (() => {
 
 const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);
 const runtime = new Runtime({
-  storageUrl: env.TOOLSHED_API_URL,
-  signer: identity,
+  storageManager: StorageManager.open({
+    as: identity,
+    address: new URL("/api/storage/memory", env.TOOLSHED_API_URL),
+  }),
+  blobbyServerUrl: env.TOOLSHED_API_URL,
 });
 const service = new BackgroundCharmService({
   identity,

@@ -1,22 +1,28 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { refer } from "merkle-reference/json";
-import type { JSONSchema, JSONValue } from "@commontools/builder";
+import type { JSONSchema, JSONValue } from "../src/index.ts";
 import {
   CycleTracker,
   MapSet,
   SchemaObjectTraverser,
-} from "@commontools/builder/traverse";
+} from "../src/traverse.ts";
 import type {
   Revision,
   SchemaPathSelector,
   State,
 } from "@commontools/memory/interface";
-import { type Entity } from "@commontools/memory";
+import type { Entity } from "@commontools/memory/interface";
 import { Runtime } from "../src/runtime.ts";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commontools/identity";
 import { ClientObjectManager } from "../src/storage/query.ts";
 
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
+
 describe("Query", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   const store: Map<string, Revision<State>> = new Map<
     string,
@@ -26,8 +32,12 @@ describe("Query", () => {
   let tracker: CycleTracker<JSONValue>;
 
   beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
     runtime = new Runtime({
-      storageUrl: "volatile://",
+      blobbyServerUrl: import.meta.url,
+      storageManager,
     });
     manager = new ClientObjectManager(store);
     tracker = new CycleTracker<JSONValue>();
@@ -47,7 +57,7 @@ describe("Query", () => {
     >(
       docValue1,
       `query test cell 1`,
-      "test",
+      space,
     );
     const entityId1 = testDoc1.entityId.toJSON!();
     const assert1 = {
@@ -68,7 +78,7 @@ describe("Query", () => {
     >(
       docValue2,
       `query test cell 2`,
-      "test",
+      space,
     );
     const entityId2 = testDoc2.entityId.toJSON!();
     const assert2 = {
@@ -138,7 +148,7 @@ describe("Query", () => {
     >(
       { employees: [{ name: { first: "Bob" } }] },
       `query test cell 1`,
-      "test",
+      space,
     );
     const entityId1 = testDoc1.entityId.toJSON!();
     const assert1 = {
@@ -158,7 +168,7 @@ describe("Query", () => {
         },
       },
       `query test cell 2`,
-      "test",
+      space,
     );
     const entityId2 = testDoc2.entityId.toJSON!();
     const assert2 = {
@@ -236,7 +246,7 @@ describe("Query", () => {
         },
       },
       `query test cell 1`,
-      "test",
+      space,
     );
     const entityId1 = testDoc1.entityId.toJSON!();
     const assert1 = {
@@ -295,7 +305,7 @@ describe("Query", () => {
     >(
       docValue1,
       `query test cell 1`,
-      "test",
+      space,
     );
     const entityId1 = testDoc1.entityId.toJSON!();
     const assert1 = {
@@ -312,7 +322,7 @@ describe("Query", () => {
     const testDoc2 = runtime.documentMap.getDoc<any>(
       docValue2,
       `query test cell 2`,
-      "test",
+      space,
     );
 
     const schema = { "type": "string" } as const satisfies JSONSchema;

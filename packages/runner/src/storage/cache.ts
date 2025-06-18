@@ -1,28 +1,34 @@
 import { fromString, refer } from "merkle-reference";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
-import {
-  ContextualFlowControl,
-  deepEqual,
-  JSONSchema,
-  JSONValue,
-  SchemaContext,
-} from "@commontools/builder";
-import { MapSet } from "@commontools/builder/traverse";
+import { type JSONSchema } from "../builder/types.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { deepEqual } from "../path-utils.ts";
+import { MapSet } from "../traverse.ts";
 import type {
   AuthorizationError,
+  Changes,
   Commit,
   ConflictError,
   ConnectionError,
+  ConsumerCommandInvocation,
   Entity,
   Fact,
   FactAddress,
+  JSONValue,
   MemorySpace,
+  Protocol,
+  ProviderCommand,
+  ProviderSession,
   QueryError,
   Result,
   Revision,
+  SchemaContext,
   SchemaPathSelector,
+  SchemaQueryArgs,
+  Signer,
   State,
+  Statement,
   The,
   TransactionError,
   UCAN,
@@ -32,16 +38,15 @@ import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
 import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
-import * as Memory from "@commontools/memory/consumer";
+import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
-import type { Cancel, EntityId } from "@commontools/runner";
-import {
-  BaseStorageProvider,
-  type StorageProvider,
-  type StorageValue,
-} from "./base.ts";
+import { type Cancel, type EntityId } from "@commontools/runner";
+import { type IStorageProvider, type StorageValue } from "./interface.ts";
+import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
+export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
+import { SchemaNone } from "@commontools/memory/schema";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -461,7 +466,7 @@ export class Replica {
     for (const [{ the, of }, context] of entries) {
       if (this.useSchemaQueries) {
         // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-        const schemaContext = context ?? Memory.SchemaNone;
+        const schemaContext = context ?? SchemaNone;
         setSelector(schemaSelector, of, the, "_", {
           path: [],
           schemaContext: schemaContext,
@@ -474,10 +479,12 @@ export class Replica {
       }
     }
 
+    // We provided schema for the top level fact that we selected, but we
+    // will have undefined schema for the entries included as links.
     let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
     // Run all our schema queries first
     if (Object.entries(schemaSelector).length > 0) {
-      const queryArgs: Memory.SchemaQueryArgs = {
+      const queryArgs: SchemaQueryArgs = {
         selectSchema: schemaSelector,
         subscribe: true,
       };
@@ -491,8 +498,6 @@ export class Replica {
         console.error("query failure", error);
         return { error };
       }
-      // We provided schema for the top level fact that we selected, but we
-      // will have undefined schema for the entries included as links.
       fetchedEntries = query.schemaFacts;
       // TODO(@ubik2) verify that we're dealing with this subscription
       // I know we're sending updates over from the provider, but make sure
@@ -702,6 +707,12 @@ export class Replica {
       // transactions that already were built upon our facts they will also fail.
       if (result.error) {
         this.nursery.merge(facts, Nursery.delete);
+        const fact = result.error.name === "ConflictError" &&
+          result.error.conflict.actual;
+        // We also update heap so it holds latest record
+        if (fact) {
+          this.heap.merge([fact], Replica.update);
+        }
       } //
       // If transaction succeeded we promote facts from nursery into a heap.
       else {
@@ -772,82 +783,355 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
+  session: Consumer.MemoryConsumer<MemorySpace>;
+  space: MemorySpace;
+  the?: string;
+  settings?: RemoteStorageProviderSettings;
+}
+
+export const defaultSettings: RemoteStorageProviderSettings = {
+  maxSubscriptionsPerSpace: 50_000,
+  connectionTimeout: 30_000,
+  useSchemaQueries: true,
+};
+
+export interface ConnectionOptions {
   /**
    * Unique identifier of the storage. Used as name of the `BroadcastChannel`
    * in order to allow inspection of the storage.
    */
   id: string;
-
   address: URL;
-  as: Memory.Signer;
-  space: MemorySpace;
-  the?: string;
-  settings?: RemoteStorageProviderSettings;
-
   inspector?: Channel;
 }
 
-const defaultSettings: RemoteStorageProviderSettings = {
-  maxSubscriptionsPerSpace: 50_000,
-  connectionTimeout: 30_000,
-  useSchemaQueries: false,
-};
+export interface ProviderConnectionOptions extends ConnectionOptions {
+  provider: Provider;
+}
 
-export class Provider implements StorageProvider {
-  connection: WebSocket | null = null;
+class ProviderConnection implements IStorageProvider {
   address: URL;
+  connection: WebSocket | null = null;
+  connectionCount = 0;
+  timeoutID = 0;
+  inspector?: Channel;
+  provider: Provider;
+  reader: ReadableStreamDefaultReader<
+    UCAN<ConsumerCommandInvocation<Protocol>>
+  >;
+  writer: WritableStreamDefaultWriter<ProviderCommand<Protocol>>;
+
+  /**
+   * queue that holds commands that we read from the session, but could not
+   * send because connection was down.
+   */
+  queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
+
+  constructor(
+    { id, address, provider, inspector }: ProviderConnectionOptions,
+  ) {
+    this.address = address;
+    this.provider = provider;
+    this.handleEvent = this.handleEvent.bind(this);
+    // Do not use a default inspector when in Deno:
+    // Requires `--unstable-broadcast-channel` flags and it is not used
+    // in that environment.
+    this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
+
+    const session = provider.session;
+    this.reader = session.readable.getReader();
+    this.writer = session.writable.getWriter();
+
+    this.connect();
+  }
+  get settings() {
+    return this.provider.settings;
+  }
+  connect() {
+    const { connection } = this;
+    // If we already have a connection we remove all the listeners from it.
+    if (connection) {
+      clearTimeout(this.timeoutID);
+      connection.removeEventListener("message", this);
+      connection.removeEventListener("open", this);
+      connection.removeEventListener("close", this);
+      connection.removeEventListener("error", this);
+    }
+
+    const webSocketUrl = new URL(this.address.href);
+    webSocketUrl.searchParams.set("space", this.provider.workspace.space);
+    const socket = new WebSocket(webSocketUrl.href);
+    this.connection = socket;
+    // Start a timer so if connection is pending longer then `connectionTimeout`
+    // we should abort and retry.
+    this.setTimeout();
+    socket.addEventListener("message", this);
+    socket.addEventListener("open", this);
+    socket.addEventListener("close", this);
+    socket.addEventListener("error", this);
+
+    this.connectionCount += 1;
+  }
+  post(
+    invocation: UCAN<ConsumerCommandInvocation<Protocol>>,
+  ) {
+    this.inspect({
+      send: invocation,
+    });
+    this.connection!.send(Codec.UCAN.toString(invocation));
+  }
+  setTimeout() {
+    this.timeoutID = setTimeout(
+      this.handleEvent,
+      this.settings.connectionTimeout,
+      { type: "timeout", target: this.connection },
+    );
+  }
+  onTimeout(socket: WebSocket) {
+    this.inspect({
+      disconnect: {
+        reason: "timeout",
+        message:
+          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
+      },
+    });
+
+    if (this.connection === socket) {
+      socket.close();
+    }
+  }
+  handleEvent(event: MessageEvent) {
+    // clear if we had timeout pending
+    clearTimeout(this.timeoutID);
+
+    switch (event.type) {
+      case "message":
+        return this.onReceive(event.data);
+      case "open":
+        return this.onOpen(event.target as WebSocket);
+      case "close":
+        return this.onDisconnect(event);
+      case "error":
+        return this.onDisconnect(event);
+      case "timeout":
+        return this.onTimeout(event.target as WebSocket);
+    }
+  }
+
+  parse(source: string): ProviderCommand<Protocol> {
+    return Codec.Receipt.fromString(source);
+  }
+  onReceive(data: string) {
+    return this.writer.write(
+      this.inspect({ receive: this.parse(data) }).receive,
+    );
+  }
+
+  async onOpen(socket: WebSocket) {
+    const { reader, queue } = this;
+
+    // Report connection to inspector
+    this.inspect({
+      connect: { attempt: this.connectionCount },
+    });
+
+    // If we did have connection
+    if (this.connectionCount > 1) {
+      this.provider.poll();
+    }
+
+    while (this.connection === socket) {
+      // First drain the queued commands if we have them.
+      for (const command of queue) {
+        this.post(command);
+        queue.delete(command);
+      }
+
+      // Next read next command from the session.
+      const next = await reader.read();
+      // If session is closed we're done.
+      if (next.done) {
+        this.close();
+      }
+
+      const command = next.value!;
+
+      // Now we make sure that our socket is still a current connection as we
+      // may have lost connection while waiting to read a command.
+      if (this.connection === socket) {
+        this.post(command);
+      } // If it is no longer our connection we simply add the command into a
+      // queue so it will be send once connection is reopen.
+      else {
+        this.queue.add(command);
+        break;
+      }
+    }
+  }
+
+  onDisconnect(event: Event) {
+    const socket = event.target as WebSocket;
+    // If connection is `null` provider was closed and we do nothing on
+    // disconnect.
+    if (this.connection === socket) {
+      // Report disconnection to inspector
+      switch (event.type) {
+        case "error":
+        case "timeout":
+        case "close": {
+          this.inspect({
+            disconnect: {
+              reason: event.type,
+              message: `Disconnected because of the ${event.type}`,
+            },
+          });
+          break;
+        }
+        default:
+          throw new Error(`Unknown event type: ${event.type}`);
+      }
+
+      this.connect();
+    }
+  }
+
+  async close() {
+    const { connection } = this;
+    this.connection = null;
+    if (connection && connection.readyState !== WebSocket.CLOSED) {
+      connection.close();
+      return await ProviderConnection.closed(connection);
+    } else {
+      return {};
+    }
+  }
+
+  async destroy(): Promise<void> {
+    await this.close();
+  }
+
+  inspect(
+    message: RawCommand,
+  ): RawCommand {
+    this.inspector?.postMessage({
+      ...message,
+      time: Date.now(),
+    });
+    return message;
+  }
+
+  /**
+   * Creates a promise that succeeds when the socket is closed or fails with
+   * the error event if the socket errors.
+   */
+  static async closed(socket: WebSocket): Promise<Unit> {
+    if (socket.readyState === WebSocket.CLOSED) {
+      return {};
+    } else {
+      return await new Promise((succeed, fail) => {
+        socket.addEventListener(
+          "close",
+          () => {
+            succeed({});
+          },
+          { once: true },
+        );
+        socket.addEventListener(
+          "error",
+          (event) => {
+            fail(event);
+          },
+          { once: true },
+        );
+      });
+    }
+  }
+  static async opened(socket: WebSocket) {
+    if (socket.readyState === WebSocket.CONNECTING) {
+      await new Promise((resolve) => {
+        socket.addEventListener("open", resolve, { once: true });
+        socket.addEventListener("error", resolve, { once: true });
+      });
+    }
+
+    switch (socket.readyState) {
+      case WebSocket.OPEN:
+        return socket;
+      case WebSocket.CLOSING:
+        throw new Error(`Socket is closing`);
+      case WebSocket.CLOSED:
+        throw new Error(`Socket is closed`);
+      default:
+        throw new Error(`Socket is in unknown state`);
+    }
+  }
+
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: StorageValue<T>) => void,
+  ) {
+    return this.provider.sink(entityId, callback);
+  }
+
+  sync(
+    entityId: EntityId,
+    expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
+  ) {
+    return this.provider.sync(entityId, expectedInStorage, schemaContext);
+  }
+
+  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
+    return this.provider.get(entityId);
+  }
+  send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
+  ) {
+    return this.provider.send(batch);
+  }
+
+  getReplica() {
+    return this.provider.getReplica();
+  }
+}
+
+export class Provider implements IStorageProvider {
   workspace: Replica;
   the: string;
-  session: Memory.MemorySession<MemorySpace>;
+  session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
   settings: RemoteStorageProviderSettings;
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
 
-  inspector?: Channel;
+  static open(options: RemoteStorageProviderOptions) {
+    return new this(options);
+  }
 
-  /**
-   * queue that holds commands that we read from the session, but could not
-   * send because connection was down.
-   */
-  queue: Set<UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>> =
-    new Set();
-  writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
-  reader: ReadableStreamDefaultReader<
-    UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>
-  >;
-
-  connectionCount = 0;
-  timeoutID = 0;
+  static connect(options: ConnectionOptions & RemoteStorageProviderOptions) {
+    return this.open(options).connect(options);
+  }
 
   constructor({
-    id,
-    address,
-    as,
+    session,
     space,
     the = "application/json",
     settings = defaultSettings,
-    inspector,
   }: RemoteStorageProviderOptions) {
-    this.address = address;
     this.the = the;
     this.settings = settings;
-    // Do not use a default inspector when in Deno:
-    // Requires `--unstable-broadcast-channel` flags and it is not used
-    // in that environment.
-    this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
-    this.handleEvent = this.handleEvent.bind(this);
-
-    const session = Memory.create({ as });
-
-    this.reader = session.readable.getReader();
-    this.writer = session.writable.getWriter();
     this.session = session;
     this.spaces = new Map();
     this.workspace = this.mount(space);
+  }
 
-    this.connect();
+  connect(options: ConnectionOptions) {
+    return new ProviderConnection({
+      id: options.id,
+      provider: this,
+      address: options.address,
+    });
   }
 
   mount(space: MemorySpace): Replica {
@@ -893,12 +1177,7 @@ export class Provider implements StorageProvider {
     entityId: EntityId,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
-  ): Promise<
-    Result<
-      Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | AuthorizationError | ConnectionError
-    >
-  > {
+  ) {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
     return this.workspace.load([[{ the, of }, schemaContext]]);
@@ -965,233 +1244,116 @@ export class Provider implements StorageProvider {
     }
   }
 
-  parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
-    return Codec.Receipt.fromString(source);
-  }
-
-  onReceive(data: string) {
-    return this.writer.write(
-      this.inspect({ receive: this.parse(data) }).receive,
-    );
-  }
-
-  inspect(
-    message: RawCommand,
-  ): RawCommand {
-    this.inspector?.postMessage({
-      ...message,
-      time: Date.now(),
-    });
-    return message;
-  }
-
-  handleEvent(event: MessageEvent) {
-    // clear if we had timeout pending
-    clearTimeout(this.timeoutID);
-
-    switch (event.type) {
-      case "message":
-        return this.onReceive(event.data);
-      case "open":
-        return this.onOpen(event.target as WebSocket);
-      case "close":
-        return this.onDisconnect(event);
-      case "error":
-        return this.onDisconnect(event);
-      case "timeout":
-        return this.onTimeout(event.target as WebSocket);
-    }
-  }
-  connect() {
-    const { connection } = this;
-    // If we already have a connection we remove all the listeners from it.
-    if (connection) {
-      clearTimeout(this.timeoutID);
-      connection.removeEventListener("message", this);
-      connection.removeEventListener("open", this);
-      connection.removeEventListener("close", this);
-      connection.removeEventListener("error", this);
-    }
-
-    const webSocketUrl = new URL(this.address.href);
-    webSocketUrl.searchParams.set("space", this.workspace.space);
-    const socket = new WebSocket(webSocketUrl.href);
-    this.connection = socket;
-    // Start a timer so if connection is pending longer then `connectionTimeout`
-    // we should abort and retry.
-    this.setTimeout();
-    socket.addEventListener("message", this);
-    socket.addEventListener("open", this);
-    socket.addEventListener("close", this);
-    socket.addEventListener("error", this);
-
-    this.connectionCount += 1;
-  }
-
-  setTimeout() {
-    this.timeoutID = setTimeout(
-      this.handleEvent,
-      this.settings.connectionTimeout,
-      { type: "timeout", target: this.connection },
-    );
-  }
-
-  onTimeout(socket: WebSocket) {
-    this.inspect({
-      disconnect: {
-        reason: "timeout",
-        message:
-          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
-      },
-    });
-
-    if (this.connection === socket) {
-      socket.close();
-    }
-  }
-
-  async onOpen(socket: WebSocket) {
-    const { reader, queue } = this;
-
-    // Report connection to inspector
-    this.inspect({
-      connect: { attempt: this.connectionCount },
-    });
-
-    // If we did have connection
-    if (this.connectionCount > 1) {
-      for (const space of this.spaces.values()) {
-        space.poll();
-      }
-    }
-
-    while (this.connection === socket) {
-      // First drain the queued commands if we have them.
-      for (const command of queue) {
-        this.post(command);
-        queue.delete(command);
-      }
-
-      // Next read next command from the session.
-      const next = await reader.read();
-      // If session is closed we're done.
-      if (next.done) {
-        this.close();
-      }
-
-      const command = next.value!;
-
-      // Now we make sure that our socket is still a current connection as we
-      // may have lost connection while waiting to read a command.
-      if (this.connection === socket) {
-        this.post(command);
-      } // If it is no longer our connection we simply add the command into a
-      // queue so it will be send once connection is reopen.
-      else {
-        this.queue.add(command);
-        break;
-      }
-    }
-  }
-
-  post(
-    invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
-  ) {
-    this.inspect({
-      send: invocation,
-    });
-    this.connection!.send(Codec.UCAN.toString(invocation));
-  }
-
-  onDisconnect(event: Event) {
-    const socket = event.target as WebSocket;
-    // If connection is `null` provider was closed and we do nothing on
-    // disconnect.
-    if (this.connection === socket) {
-      // Report disconnection to inspector
-      switch (event.type) {
-        case "error":
-        case "timeout":
-        case "close": {
-          this.inspect({
-            disconnect: {
-              reason: event.type,
-              message: `Disconnected because of the ${event.type}`,
-            },
-          });
-          break;
-        }
-        default:
-          throw new Error(`Unknown event type: ${event.type}`);
-      }
-
-      this.connect();
-    }
-  }
-
-  async close() {
-    const { connection } = this;
-    this.connection = null;
-    if (connection && connection.readyState !== WebSocket.CLOSED) {
-      connection.close();
-      return await Provider.closed(connection);
-    } else {
-      return {};
-    }
-  }
-
-  async destroy(): Promise<void> {
-    await this.close();
-  }
-
   /**
-   * Creates a promise that succeeds when the socket is closed or fails with
-   * the error event if the socket errors.
+   * Polls all spaces for changes.
    */
-  static async closed(socket: WebSocket): Promise<Unit> {
-    if (socket.readyState === WebSocket.CLOSED) {
-      return {};
-    } else {
-      return await new Promise((succeed, fail) => {
-        socket.addEventListener(
-          "close",
-          () => {
-            succeed({});
-          },
-          { once: true },
-        );
-        socket.addEventListener(
-          "error",
-          (event) => {
-            fail(event);
-          },
-          { once: true },
-        );
-      });
-    }
-  }
-  static async opened(socket: WebSocket) {
-    if (socket.readyState === WebSocket.CONNECTING) {
-      await new Promise((resolve) => {
-        socket.addEventListener("open", resolve, { once: true });
-        socket.addEventListener("error", resolve, { once: true });
-      });
-    }
-
-    switch (socket.readyState) {
-      case WebSocket.OPEN:
-        return socket;
-      case WebSocket.CLOSING:
-        throw new Error(`Socket is closing`);
-      case WebSocket.CLOSED:
-        throw new Error(`Socket is closed`);
-      default:
-        throw new Error(`Socket is in unknown state`);
+  poll() {
+    for (const space of this.spaces.values()) {
+      space.poll();
     }
   }
 
   getReplica(): string {
     return this.workspace.space;
+  }
+
+  async destroy(): Promise<void> {
+  }
+}
+
+export interface Options {
+  /**
+   * Singning authority.
+   */
+  as: Signer;
+
+  /**
+   * Address of the storage provider.
+   */
+  address: URL;
+
+  /**
+   * Unique identifier used for inspection.
+   */
+  id?: string;
+
+  /**
+   * Various settings to configure storage provider.
+   */
+  settings?: RemoteStorageProviderSettings;
+}
+
+export interface IStorageManager {
+  id: string;
+  open(space: string): IStorageProvider;
+}
+
+export interface LocalStorageOptions {
+  as: Signer;
+  id?: string;
+  settings?: RemoteStorageProviderSettings;
+}
+
+export class StorageManager implements IStorageManager {
+  address: URL;
+  as: Signer;
+  id: string;
+  settings: RemoteStorageProviderSettings;
+  #providers: Map<string, IStorageProvider> = new Map();
+
+  static open(options: Options) {
+    if (options.address.protocol === "memory:") {
+      throw new RangeError(
+        "memory: protocol is not supported in browser runtime",
+      );
+    } else {
+      return new this(options);
+    }
+  }
+
+  protected constructor(
+    { address, as, id = crypto.randomUUID(), settings = defaultSettings }:
+      Options,
+  ) {
+    this.address = address;
+    this.settings = settings;
+    this.as = as;
+    this.id = id;
+  }
+
+  /**
+   * Opens a new storage provider session for the given space. Currently this
+   * creates a new web socket connection to `${this.address}?space=${space}`
+   * in order to cluster connections for the space in the same group.
+   */
+  open(space: MemorySpace) {
+    const provider = this.#providers.get(space);
+    if (!provider) {
+      const provider = this.connect(space);
+      this.#providers.set(space, provider);
+      return provider;
+    }
+    return provider;
+  }
+
+  protected connect(space: MemorySpace): IStorageProvider {
+    const { id, address, as, settings } = this;
+    return Provider.connect({
+      id,
+      space,
+      address,
+      settings,
+      session: Consumer.create({ as }),
+    });
+  }
+
+  async close() {
+    const promises = [];
+    for (const provider of this.#providers.values()) {
+      promises.push(provider.destroy());
+    }
+
+    await Promise.all(promises);
   }
 }
 
@@ -1200,9 +1362,9 @@ export const getChanges = <
   Of extends Entity,
   Is extends JSONValue,
 >(
-  statements: Iterable<Memory.Statement>,
+  statements: Iterable<Statement>,
 ) => {
-  const changes = {} as Memory.Changes<T, Of, Is>;
+  const changes = {} as Changes<T, Of, Is>;
   for (const statement of statements) {
     if (statement.cause) {
       const cause = statement.cause.toString();

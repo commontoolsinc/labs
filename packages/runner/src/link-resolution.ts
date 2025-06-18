@@ -1,9 +1,9 @@
 import {
   type Alias,
-  ContextualFlowControl,
   isAlias,
   type JSONSchema,
-} from "@commontools/builder";
+} from "./builder/types.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";

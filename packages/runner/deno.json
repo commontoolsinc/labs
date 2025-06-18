@@ -1,10 +1,13 @@
 {
   "name": "@commontools/runner",
   "tasks": {
-    "test": "deno test --allow-env"
+    "test": "deno test --allow-ffi --allow-env --allow-read"
   },
   "exports": {
     ".": "./src/index.ts",
-    "./storage/inspector": "./src/storage/inspector.ts"
+    "./storage/inspector": "./src/storage/inspector.ts",
+    "./traverse": "./src/traverse.ts",
+    "./storage/cache": "./src/storage/cache.ts",
+    "./storage/cache.deno": "./src/storage/cache.deno.ts"
   }
 }

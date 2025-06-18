@@ -1,16 +1,14 @@
 import { isRecord } from "@commontools/utils/types";
+import { opaqueRef } from "./builder/opaque-ref.ts";
+import { getTopFrame } from "./builder/recipe.ts";
+import { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";
 import {
-  cell as opaqueRef,
-  deepEqual,
   type Frame,
-  getTopFrame,
-  getValueAtPath,
   type JSONSchema,
   type OpaqueRef,
   type Schema,
-  setValueAtPath,
   toOpaqueRef,
-} from "@commontools/builder";
+} from "./builder/types.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
   createQueryResultProxy,
@@ -20,7 +18,7 @@ import { type EntityId } from "./doc-map.ts";
 import type { IRuntime } from "./runtime.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
-import { Labels } from "./storage.ts";
+import { Labels, MemorySpace } from "./storage.ts";
 import { arrayEqual } from "./type-utils.ts";
 
 // Remove the arrayEqual function since we import it now
@@ -142,7 +140,7 @@ export type DocImpl<T> = {
    * Useful for cells that just represent a query, like a cell composed to
    * represent inputs to a module (which is just aliases).
    */
-  freeze(): void;
+  freeze(reason: string): void;
 
   /**
    * Check if cell is frozen.
@@ -173,7 +171,7 @@ export type DocImpl<T> = {
    * The space this doc belongs to.
    * Required when entityId is set.
    */
-  space: string;
+  space: MemorySpace;
 
   /**
    * Get current entity ID.
@@ -254,13 +252,13 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
 export function createDoc<T>(
   value: T,
   entityId: EntityId,
-  space: string,
+  space: MemorySpace,
   runtime: IRuntime,
 ): DocImpl<T> {
   const callbacks = new Set<
     (value: T, path: PropertyKey[], labels?: Labels) => void
   >();
-  let readOnly = false;
+  let readOnly: string | undefined = undefined;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
 
@@ -294,10 +292,11 @@ export function createDoc<T>(
       log?: ReactivityLog,
       schema?: JSONSchema,
     ) => {
-      if (readOnly) throw new Error("Cell is read-only");
+      if (readOnly) throw new Error(`Cell is read-only: ${readOnly}`);
 
       let changed = false;
       if (path.length > 0) {
+        if (value === undefined) value = (typeof path[0] === "number" ? [] : {}) as T;
         changed = setValueAtPath(value, path, newValue);
       } else if (!deepEqual(value, newValue)) {
         changed = true;
@@ -319,13 +318,13 @@ export function createDoc<T>(
       }
       return changed;
     },
-    freeze: () => {
-      readOnly = true;
+    freeze: (reason: string) => {
+      readOnly = reason;
       /* NOTE: Can't freeze actual object, since otherwise JS throws type errors
       for the cases where the proxy returns different values than what is
       proxied, e.g. for aliases. TODO: Consider changing proxy here. */
     },
-    isFrozen: () => readOnly,
+    isFrozen: () => readOnly !== undefined,
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
     // and we want to serialize that as am IPLD link to this cell.
@@ -342,10 +341,10 @@ export function createDoc<T>(
     set entityId(id: EntityId) {
       throw new Error("Can't set entity ID directly, use getDocByEntityId");
     },
-    get space(): string {
+    get space(): MemorySpace {
       return space;
     },
-    set space(newSpace: string) {
+    set space(newSpace: MemorySpace) {
       throw new Error("Can't set space directly, use getDocByEntityId");
     },
     get sourceCell(): DocImpl<any> | undefined {

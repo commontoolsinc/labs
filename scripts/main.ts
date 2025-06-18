@@ -2,7 +2,13 @@
 // Load .env file
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import { getEntityId, isStream, Runtime } from "@commontools/runner";
+import {
+  getEntityId,
+  isStream,
+  type MemorySpace,
+  Runtime,
+} from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache";
 import {
   createAdminSession,
   type DID,
@@ -87,8 +93,11 @@ async function main() {
 
   // TODO(seefeld): It only wants the space, so maybe we simplify the above and just space the space did?
   const runtime = new Runtime({
-    storageUrl: toolshedUrl,
-    signer: identity,
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL("/api/storage/memory", toolshedUrl),
+    }),
+    blobbyServerUrl: toolshedUrl,
   });
   const charmManager = new CharmManager(session, runtime);
   await charmManager.ready;
@@ -126,14 +135,14 @@ async function main() {
     // and replace them with the corresponding JSON object.
     //
     // Example: "@#bafed0de/path/to/value" and "{ foo: @#bafed0de/a/path }"
-    const regex = /(?:^|[:\s,{])(@#[a-zA-Z0-9]+(?:\/[^\/\s"',}]+)*)/g;
+    const regex = /(@#[a-zA-Z0-9]+(?:\/[^\/\s"',}\]]*)*)/g;
     const inputTransformed = input.replace(
       regex,
       (match, fullRef) => {
         // Extract hash and path from the full reference
-        // fullRef format is @#hash/path
+        // fullRef format is @#hash/path or @#hash
         const hashMatch = fullRef.match(
-          /@#([a-zA-Z0-9]+)((?:\/[^\/\s"',}]+)*)/,
+          /@#([a-zA-Z0-9]+)((?:\/[^\/\s"',}\]]*)*)/,
         );
         if (!hashMatch) return match;
 
@@ -142,12 +151,12 @@ async function main() {
         // Create the cell JSON object
         const linkJson = JSON.stringify({
           cell: { "/": hash },
-          path: path.split("/").filter(Boolean).map(decodeURIComponent),
+          path: path
+            ? path.split("/").filter(Boolean).map(decodeURIComponent)
+            : [],
         });
 
-        // If the match starts with @, it means the reference is at the beginning of the string
-        // or the entire string is a reference - don't prepend any character
-        return match.charAt(0) === "@" ? linkJson : match.charAt(0) + linkJson;
+        return linkJson;
       },
     );
     try {
@@ -165,8 +174,9 @@ async function main() {
       typeof value.cell["/"] === "string" &&
       Array.isArray(value.path)
     ) {
+      const localSpace = (value.space ?? spaceDID) as MemorySpace;
       return runtime.getCellFromLink({
-        space,
+        space: localSpace,
         cell: runtime.documentMap.getDocByEntityId(
           space,
           value.cell as { "/": string },
