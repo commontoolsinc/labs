@@ -59,9 +59,8 @@ export function expectCellLinksEqual(actual: unknown) {
         assertEquals(normalizedActual, normalizedExpected, msg);
       } catch (error) {
         if (error instanceof AssertionError) {
-          throw new AssertionError(
-            `CellLinks are not equal (after normalization).\n${error.message}`
-          );
+          error.message = `CellLinks are not equal (after normalization).\n${error.message}`;
+          throw error;
         }
         throw error;
       }
