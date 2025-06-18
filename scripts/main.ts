@@ -174,7 +174,7 @@ async function main() {
       typeof value.cell["/"] === "string" &&
       Array.isArray(value.path)
     ) {
-      const space = (value.space ?? spaceDID) as MemorySpace;
+      // const space = (value.space ?? spaceDID) as MemorySpace;
       return runtime.getCellFromLink({
         space,
         cell: runtime.documentMap.getDocByEntityId(

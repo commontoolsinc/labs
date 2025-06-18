@@ -355,10 +355,10 @@ export const Page = recipe(PageInputSchema, PageResultSchema, (
                   },
                 ),
               )}
-              <common-send-message
-                name="Add"
+              <ct-message-input
+                buttonText="Add"
                 placeholder="New list"
-                onmessagesend={addList({ lists })}
+                onct-send={addList({ lists })}
               />
             </common-vstack>
           </section>
@@ -448,6 +448,11 @@ const PageManagerInputSchema = {
       items: PageResultSchema,
       default: [],
     },
+    allCharms: {
+      type: "array",
+      items: AnySchema,
+      default: [],
+    },
   },
   required: ["pages"],
 } as const satisfies JSONSchema;
@@ -495,68 +500,93 @@ const addTopLevelPage = handler(
   },
 );
 
-export default recipe(PageManagerInputSchema, AnySchema, ({ pages }) => {
-  const selectedPage = cell(null);
+export default recipe(
+  PageManagerInputSchema,
+  AnySchema,
+  ({ pages, allCharms }) => {
+    const selectedPage = cell(null);
 
-  const navigate = handler<{ page: any }, { selectedPage: any }>(
-    ({ page }, state) => {
-      state.selectedPage = page;
-    },
-  );
+    const navigate = handler<{ page: any }, { selectedPage: any }>(
+      ({ page }, state) => {
+        state.selectedPage = page;
+      },
+    );
 
-  const onFocusChanged = handler<
-    { detail: { value: any } },
-    { selectedPage: any }
-  >(
-    (ev, state) => {
-      state.selectedPage = ev.detail.value;
-    },
-  );
+    const onFocusChanged = handler<
+      { detail: { value: any } },
+      { selectedPage: any }
+    >(
+      (ev, state) => {
+        state.selectedPage = ev.detail.value;
+      },
+    );
 
-  const items = derive(pages, (ps) => {
-    return ps.map((p) => ({
-      label: p.title,
-      value: p,
-    }));
-  });
+    const items = derive(pages, (ps) => {
+      return ps.map((p) => ({
+        label: p.title,
+        value: p,
+      }));
+    });
 
-  const test = handler<any, any>((_, state) => {
-    state.selectedPage = state.pages[0];
-  });
+    const test = handler<any, any>((_, state) => {
+      state.selectedPage = state.pages[0];
+    });
 
-  return {
-    [NAME]: "Page Manager",
-    [UI]: (
-      <common-vstack gap="lg">
-        <common-hstack>
-          <ct-select
-            onchange={onFocusChanged({ selectedPage })}
-            items={items}
-          />
-          <ct-message-input
-            buttonText="Add page"
-            placeholder="New page"
-            onct-send={addTopLevelPage({ pages })}
-          />
-        </common-hstack>
-        <ct-card>
-          {ifElse(
-            selectedPage,
-            view(Page({
-              page: selectedPage,
-              referenceablePages: pages,
+    const lists = derive(allCharms, (cs: any[] | undefined) => {
+      const results = cs?.reduce(
+        (
+          acc: { path: (string | number)[]; node: any }[],
+          charm: any,
+          charmIndex: number,
+        ) => {
+          if (charm && typeof charm === "object") {
+            if (Array.isArray(charm.items)) {
+              acc.push({ path: [charmIndex], node: charm });
+            }
+          }
+          return acc;
+        },
+        [],
+      );
+      debugger;
+      return results;
+    });
+
+    return {
+      [NAME]: "Page Manager",
+      [UI]: (
+        <common-vstack gap="lg">
+          <common-hstack>
+            <ct-select
+              onchange={onFocusChanged({ selectedPage })}
+              items={items}
+            />
+            <ct-message-input
+              buttonText="Add page"
+              placeholder="New page"
+              onct-send={addTopLevelPage({ pages })}
+            />
+          </common-hstack>
+          <ct-card>
+            {ifElse(
               selectedPage,
-            })),
-            <div>&nbsp;</div>,
-          )}
-        </ct-card>
-      </common-vstack>
-    ),
-    pages,
-    navigate,
-    selectedPage,
-  };
-});
+              view(Page({
+                page: selectedPage,
+                referenceablePages: pages,
+                selectedPage,
+              })),
+              <div>&nbsp;</div>,
+            )}
+          </ct-card>
+        </common-vstack>
+      ),
+      pages,
+      navigate,
+      lists,
+      selectedPage,
+    };
+  },
+);
 
 function view(x: any) {
   return x[UI];
