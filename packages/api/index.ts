@@ -216,9 +216,12 @@ export type JSONSchema = {
   // Common Tools extensions
   readonly [ID]?: unknown;
   readonly [ID_FIELD]?: unknown;
+  // makes it so that your handler gets a Cell object for that property. So you can call .set()/.update()/.push()/etc on it.
   readonly asCell?: boolean;
+  // streams are what handler returns. if you pass that to another handler/lift and declare it as asSteam, you can call .send on it
   readonly asStream?: boolean;
-  readonly ifc?: { classification?: string[]; integrity?: string[] }; // temporarily used to assign labels like "confidential"
+  // temporarily used to assign labels like "confidential"
+  readonly ifc?: { classification?: string[]; integrity?: string[] };
 };
 
 // Built-in types
