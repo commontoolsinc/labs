@@ -94,20 +94,15 @@ type JSONCellLink = { cell: { "/": string }; path: string[] };
  * Check if value is a sigil link
  */
 function isSigilLink(value: unknown): value is SigilEmbed {
-  if (!isSigilValue(value) || !(EMBED_V1_TAG in value["/"])) {
-    return false;
-  }
-  const embed = value["/"][EMBED_V1_TAG];
-  return isObject(embed) && !("replace" in embed);
+  return isSigilValue(value) && isObject(value["/"][EMBED_V1_TAG]);
 }
 
 /**
  * Check if value is a sigil alias
  */
 function isSigilAlias(value: unknown): value is SigilWritethroughEmbed {
-  return (
-    isSigilLink(value) && value["/"][EMBED_V1_TAG].replace === "destination"
-  );
+  return isSigilLink(value) &&
+    value["/"][EMBED_V1_TAG].replace === "destination";
 }
 
 export type CellTarget = { path: string[]; cellTarget: string | undefined };
