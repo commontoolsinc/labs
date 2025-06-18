@@ -1,19 +1,19 @@
 import { type DocImpl } from "../doc.ts";
-import { 
-  DEFAULT_MODEL_NAME, 
+import {
   DEFAULT_GENERATE_OBJECT_MODELS,
-  LLMClient, 
-  LLMRequest,
+  DEFAULT_MODEL_NAME,
+  LLMClient,
   LLMGenerateObjectRequest,
+  LLMRequest,
 } from "@commontools/llm";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
 import {
+  BuiltInGenerateObjectParams,
   BuiltInLLMParams,
   BuiltInLLMState,
-  BuiltInGenerateObjectParams,
 } from "@commontools/api";
 
 const client = new LLMClient();
@@ -177,9 +177,14 @@ export function llm(
  *   docs, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
  */
-export function generateObject(
+export function generateObject<T extends Record<string, unknown>>(
   inputsCell: DocImpl<BuiltInGenerateObjectParams>,
-  sendResult: (result: any) => void,
+  sendResult: (docs: {
+    pending: DocImpl<boolean>;
+    result: DocImpl<T | undefined>;
+    partial: DocImpl<string | undefined>;
+    requestHash: DocImpl<string | undefined>;
+  }) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentDoc: DocImpl<any>,
@@ -190,7 +195,7 @@ export function generateObject(
     { generateObject: { pending: cause } },
     parentDoc.space,
   );
-  const result = runtime.documentMap.getDoc<Record<string, unknown> | undefined>(
+  const result = runtime.documentMap.getDoc<T | undefined>(
     undefined,
     {
       generateObject: { result: cause },
@@ -254,11 +259,15 @@ export function generateObject(
     if (hash === previousCallHash || hash === requestHash.get()) return;
     previousCallHash = hash;
 
-    result.setAtPath([], undefined, log);
+    result.setAtPath([], {}, log); // FIXME(ja): setting result to undefined causes a storage conflict
     partial.setAtPath([], undefined, log);
     pending.setAtPath([], true, log);
 
-    const resultPromise = client.generateObject(generateObjectParams);
+    const resultPromise = client.generateObject(
+      generateObjectParams,
+    ) as Promise<{
+      object: T;
+    }>;
 
     resultPromise
       .then(async (response) => {
@@ -278,7 +287,7 @@ export function generateObject(
         await runtime.idle();
 
         pending.setAtPath([], false, log);
-        result.setAtPath([], undefined, log);
+        result.setAtPath([], {}, log); // FIXME(ja): setting result to undefined causes a storage conflict
         partial.setAtPath([], undefined, log);
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.

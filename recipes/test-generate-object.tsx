@@ -8,6 +8,7 @@ import {
   lift,
   NAME,
   recipe,
+  Schema,
   schema,
   str,
   UI,
@@ -34,6 +35,8 @@ const outputSchema = {
     imagePrompt: { type: "string" },
   },
 } as const satisfies JSONSchema;
+
+type OutputSchema = Schema<typeof outputSchema>;
 
 // Handler to increment the number
 const adder = handler({}, inputSchema, (_, state) => {
@@ -69,7 +72,7 @@ const generateImageUrl = lift(({ imagePrompt }) => {
 
 export default recipe(inputSchema, outputSchema, (cell) => {
   // Use generateObject to get structured data from the LLM
-  const { result: object, pending } = generateObject(
+  const { result: object, pending } = generateObject<OutputSchema>(
     generatePrompt({ number: cell.number }),
   );
 
@@ -84,42 +87,30 @@ export default recipe(inputSchema, outputSchema, (cell) => {
           pending,
           <p>Generating story...</p>,
           <div>
-            {ifElse(object?.title, <h1>{object.title}</h1>, <p>No title</p>)}
-            {ifElse(
-              object?.imagePrompt,
-              <p>
-                <img
-                  src={generateImageUrl({ imagePrompt: object.imagePrompt })}
-                />
-              </p>,
-              <p>No image prompt</p>,
-            )}
-            {ifElse(object?.story, <p>{object.story}</p>, <p>No story yet</p>)}
-            {ifElse(
-              object?.storyOrigin,
-              <p>
-                <em>{object.storyOrigin}</em>
-              </p>,
-              <p>No story origin</p>,
-            )}
-            {ifElse(
-              object?.seeAlso,
-              <div>
-                <p>See also these interesting numbers:</p>
-                <ul>
-                  {object.seeAlso.map((n: number) => (
-                    <li>
-                      <ct-button
-                        onClick={setNumber({ number: cell.number, n })}
-                      >
-                        {n}
-                      </ct-button>
-                    </li>
-                  ))}
-                </ul>
-              </div>,
-              <p>No related numbers</p>,
-            )}
+            <h1>{object?.title}</h1>
+            <p>
+              <img
+                src={generateImageUrl({ imagePrompt: object?.imagePrompt })}
+              />
+            </p>
+            <p>{object?.story}</p>
+            <p>
+              <em>{object?.storyOrigin}</em>
+            </p>
+            <div>
+              <p>See also these interesting numbers:</p>
+              <ul>
+                {object?.seeAlso?.map((n: number) => (
+                  <li>
+                    <ct-button
+                      onClick={setNumber({ number: cell.number, n })}
+                    >
+                      {n}
+                    </ct-button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>,
         )}
       </div>
