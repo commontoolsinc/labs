@@ -101,7 +101,7 @@ Specifically we have:
 
 This plan should be entirely incremental and can be rolled out step by step.
 
-- [ ] Ephemeral storage provider + Get rid of `VolatileStorageProvider` CT-420
+- [x] Ephemeral storage provider + Get rid of `VolatileStorageProvider` CT-420
 - [ ] Schema queries for everything + Source support CT-174 CT-428
   - See design note on cache, but that's not blocking progress on the rest
 - [ ] Turn off "crawler" mode in storage.ts, make sure things still work
@@ -114,7 +114,7 @@ This plan should be entirely incremental and can be rolled out step by step.
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now) CT-446
-  - [ ] Add .setRaw and .getRaw to internal `Cell` interface and use the cell
+  - [x] Add .setRaw and .getRaw to internal `Cell` interface and use the cell
         creation methods on `Runtime` and then almost all used of `DocImpl` can
         be replaced by cells and using `.[set|get]Raw` instead of
         `.[set|send|get]`
