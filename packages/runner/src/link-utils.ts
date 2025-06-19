@@ -188,14 +188,8 @@ export function parseLink(
     // If no cell provided, use base cell's document
     if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.id;
 
-    if (!id) {
-      throw new Error(
-        "Cannot resolve alias: neither id nor base provided",
-      );
-    }
-
     return {
-      id,
+      id: id!, // We allow undefined id for legacy aliases for now
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
