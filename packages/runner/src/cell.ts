@@ -787,13 +787,7 @@ export function isJSONCellLink(value: any): value is JSONCellLink {
  * Check if value is a sigil link (embed without replace field).
  */
 export function isSigilEmbed(value: any): value is SigilEmbed {
-  if (isSigilValue(value) && EMBED_V1_TAG in value["/"]) {
-    const embed = value["/"][EMBED_V1_TAG];
-    // Either id or path must be present, and replace must not be present
-    return (typeof embed.id === "string" || Array.isArray(embed.path)) &&
-      !embed.replace;
-  }
-  return false;
+  return (isSigilValue(value) && EMBED_V1_TAG in value["/"]);
 }
 
 /**
