@@ -34,6 +34,15 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
+      - name: 🔎 Check derived artifacts
+        working-directory: packages/static
+        run: |
+          deno task compile-api-types
+          if ! git diff --quiet . ; then
+            echo "Run 'deno task compile-api-types' inside the 'static' package."
+            exit 1
+          fi
+
       - name: 🧹 Lint codebase
         run: deno lint
 
@@ -171,7 +180,7 @@ jobs:
           # Copy to signed directory
           cp ./dist/bg-charm-service ./signed/
           cp ./dist/bg-charm-service.sig ./signed/
-          
+
           # Process ct binary
           echo "Processing binary: ct"
           sha256sum ./dist/ct > ./dist/ct.hash.txt
@@ -211,7 +220,7 @@ jobs:
         with:
           subject-name: ./dist/bg-charm-service
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
-      
+
       - name: 📝 Generate attestation for ct binary
         if: github.ref == 'refs/heads/main'
         id: attest_ct
@@ -277,7 +286,7 @@ jobs:
             echo -e "\033[31m✗ bg-charm-service attestation verification failed\033[0m"
             exit 1
           fi
-          
+
           # Verify ct binary attestation
           echo "::group::ct attestation details"
           gh attestation verify ./dist/ct -R ${{ github.repository }} --format json | jq
