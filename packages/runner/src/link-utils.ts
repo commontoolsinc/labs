@@ -34,6 +34,7 @@ export type NormalizedLink = {
   space?: MemorySpace;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
+  replace?: "destination";
 };
 
 /**
@@ -83,7 +84,7 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  */
 export function parseLink(
   value: any,
-  baseCell?: Cell,
+  base?: Cell | NormalizedLink,
 ): NormalizedLink | undefined {
   if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);
 
@@ -109,48 +110,34 @@ export function parseLink(
     };
   }
 
-  if (isRecord(value) && "/" in value) {
-    // Handle direct EntityId format
+  // Handle new sigil format
+  if (isSigilEmbed(value)) {
+    const sigilLink = value as SigilEmbed;
+    const link = sigilLink["/"][EMBED_V1_TAG];
+
+    // Resolve relative references
+    let id = link.id;
+    const path = link.path || [];
+    const resolvedSpace = link.space || base?.space;
+
+    // If no id provided, use base cell's document
+    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.id;
+
+    if (!id) {
+      throw new Error(
+        "Cannot resolve cell link: neither id nor base provided",
+      );
+    }
+
     return {
-      id: toURI(value),
-      path: [],
-      space: baseCell?.space,
+      id,
+      path: path.map((p) => p.toString()),
+      space: resolvedSpace,
+      schema: link.schema,
+      rootSchema: link.rootSchema,
+      replace: link.replace,
     };
   }
-
-  // Try parsing as cell link
-  const cellLink = parseCellLink(value, baseCell);
-  if (cellLink) return cellLink;
-
-  // Try parsing as alias
-  const alias = parseAlias(value, baseCell);
-  if (alias) return alias;
-
-  return undefined;
-}
-
-/**
- * Parse any link-like value to normalized format, throwing on failure
- */
-export function parseLinkOrThrow(
-  value: any,
-  baseCell?: Cell,
-): NormalizedLink {
-  const result = parseLink(value, baseCell);
-  if (!result) {
-    throw new Error(`Cannot parse value as link: ${JSON.stringify(value)}`);
-  }
-  return result;
-}
-
-/**
- * Parse cell link in any format to normalized structure
- */
-export function parseCellLink(
-  value: any,
-  baseCell?: Cell,
-): NormalizedLink | undefined {
-  if (!isAnyCellLink(value)) return undefined;
 
   // Handle legacy CellLink format (runtime format with DocImpl)
   if (isCellLink(value)) {
@@ -170,67 +157,11 @@ export function parseCellLink(
     return {
       id: toURI(jsonLink.cell["/"]),
       path: jsonLink.path.map((p) => p.toString()),
-      space: baseCell?.space, // Space must come from context for JSON links
+      space: base?.space, // Space must come from context for JSON links
     };
   }
 
-  // Handle new sigil format
-  if (isSigilEmbed(value)) {
-    const sigilLink = value as SigilEmbed;
-    const link = sigilLink["/"][EMBED_V1_TAG];
-
-    // Resolve relative references
-    let id = link.id;
-    const path = link.path || [];
-    const resolvedSpace = link.space || baseCell?.space;
-
-    // If no id provided, use base cell's document
-    if (!id && baseCell) id = toURI(baseCell.entityId);
-
-    if (!id) {
-      throw new Error(
-        "Cannot resolve cell link: no id provided and no base cell",
-      );
-    }
-
-    return {
-      id,
-      path: path.map((p) => p.toString()),
-      space: resolvedSpace,
-      schema: link.schema,
-      rootSchema: link.rootSchema,
-    };
-  }
-
-  return undefined;
-}
-
-/**
- * Parse cell link in any format to normalized structure, throwing on failure
- */
-export function parseCellLinkOrThrow(
-  value: any,
-  baseCell?: Cell,
-): NormalizedLink {
-  const result = parseCellLink(value, baseCell);
-  if (!result) {
-    throw new Error(
-      `Cannot parse value as cell link: ${JSON.stringify(value)}`,
-    );
-  }
-  return result;
-}
-
-/**
- * Parse alias in any format to normalized structure
- */
-export function parseAlias(
-  value: any,
-  baseCell?: Cell,
-): NormalizedLink | undefined {
-  if (!isWritethroughEmbed(value)) return undefined;
-
-  // Handle legacy $alias format
+  // Handle legacy alias format
   if (
     isRecord(value) &&
     "$alias" in value &&
@@ -239,7 +170,7 @@ export function parseAlias(
   ) {
     const alias = value.$alias as LegacyAlias["$alias"];
     let id: string | undefined;
-    let resolvedSpace = baseCell?.space;
+    let resolvedSpace = base?.space;
 
     // If cell is provided, convert to URI
     if (alias.cell) {
@@ -252,11 +183,11 @@ export function parseAlias(
     }
 
     // If no cell provided, use base cell's document
-    if (!id && baseCell) id = toURI(baseCell.entityId);
+    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.id;
 
     if (!id) {
       throw new Error(
-        "Cannot resolve alias: no cell provided and no base cell",
+        "Cannot resolve alias: neither id nor base provided",
       );
     }
 
@@ -271,38 +202,21 @@ export function parseAlias(
     };
   }
 
-  // Handle new sigil format (embed@1 with replace field)
-  if (
-    isSigilValue(value) && EMBED_V1_TAG in value["/"] &&
-    isRecord(value["/"][EMBED_V1_TAG])
-  ) {
-    const embed = value["/"][EMBED_V1_TAG];
-    if (embed.replace === "destination") {
-      // Resolve relative references
-      let id = embed.id;
-      const path = embed.path || [];
-      const resolvedSpace = embed.space || baseCell?.space;
-
-      // If no id provided, use base cell's document
-      if (!id && baseCell) id = toURI(baseCell.entityId);
-
-      if (!id) {
-        throw new Error(
-          "Cannot resolve alias: no id provided and no base cell",
-        );
-      }
-
-      return {
-        id,
-        path: path.map((p: any) => p.toString()),
-        space: resolvedSpace,
-        schema: embed.schema,
-        rootSchema: embed.rootSchema,
-      };
-    }
-  }
-
   return undefined;
+}
+
+/**
+ * Parse any link-like value to normalized format, throwing on failure
+ */
+export function parseLinkOrThrow(
+  value: any,
+  baseCell?: Cell,
+): NormalizedLink {
+  const result = parseLink(value, baseCell);
+  if (!result) {
+    throw new Error(`Cannot parse value as link: ${JSON.stringify(value)}`);
+  }
+  return result;
 }
 
 /**
@@ -351,7 +265,7 @@ export function parseToLegacyCellLink(
 export function areLinksSame(
   value1: any,
   value2: any,
-  baseCell?: Cell,
+  base?: Cell | NormalizedLink,
 ): boolean {
   // If both are the same object, they're equal
   if (value1 === value2) return true;
@@ -360,8 +274,8 @@ export function areLinksSame(
   if (!value1 || !value2) return value1 === value2;
 
   // Try parsing both as links
-  const link1 = parseLink(value1, baseCell);
-  const link2 = parseLink(value2, baseCell);
+  const link1 = parseLink(value1, base);
+  const link2 = parseLink(value2, base);
 
   // If one parses and the other doesn't, they're not equal
   if (!link1 || !link2) return false;

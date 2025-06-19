@@ -12,9 +12,7 @@ import {
 import { type ReactivityLog } from "./scheduler.ts";
 import { arrayEqual } from "./type-utils.ts";
 import {
-  isLink,
   isWritethroughEmbed,
-  parseAlias,
   parseLink,
   parseToLegacyCellLink,
 } from "./link-utils.ts";
@@ -266,17 +264,17 @@ export function followWritethroughs<T = any>(
 ): CellLink {
   if (isWritethroughEmbed(alias)) {
     const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
-    const parsedAlias = parseAlias(alias, doc.asCell())!;
+    const link = parseLink(alias, doc.asCell())!;
     return followLinks(
       {
         cell: doc.runtime.documentMap.getDocByEntityId(
-          parsedAlias.space!,
-          parsedAlias.id,
+          link.space!,
+          link.id,
         ),
-        path: parsedAlias.path,
-        space: parsedAlias.space,
-        schema: parsedAlias.schema,
-        rootSchema: parsedAlias.rootSchema,
+        path: link.path,
+        space: link.space,
+        schema: link.schema,
+        rootSchema: link.rootSchema,
       } as CellLink,
       log,
       createVisits(),

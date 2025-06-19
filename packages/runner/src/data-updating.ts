@@ -23,7 +23,7 @@ import {
   areLinksSame,
   isLink,
   isWritethroughEmbed,
-  parseAlias,
+  parseLink,
 } from "./link-utils.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
@@ -196,12 +196,13 @@ export function normalizeAndDiff(
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWritethroughEmbed(newValue)) {
-    const alias = parseAlias(newValue, current.cell.asCell())!;
-    const currentAlias = parseAlias(currentValue, current.cell.asCell());
+    const newLink = parseLink(newValue, current.cell.asCell())!;
+    const currentLink = parseLink(currentValue, current.cell.asCell());
     if (
-      currentAlias !== undefined &&
-      alias.id === currentAlias.id &&
-      arrayEqual(alias.path, currentAlias.path)
+      isWritethroughEmbed(currentValue) &&
+      currentLink !== undefined &&
+      newLink.id === currentLink.id &&
+      arrayEqual(newLink.path, currentLink.path)
     ) {
       return [];
     } else {
