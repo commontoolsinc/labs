@@ -122,7 +122,6 @@ export class DocObjectManager extends ClientObjectManager {
       const storageValue = this.cellLinkToJSON(
         docMapEntry,
       );
-      console.log("storageValue from docMap", storageValue);
       const docMapValue: { value: JSONValue; source?: string } = {
         value: storageValue.value,
       };
