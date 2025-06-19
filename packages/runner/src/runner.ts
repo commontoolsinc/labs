@@ -28,10 +28,10 @@ import {
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
-import { followWritethroughs } from "./link-resolution.ts";
+import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
-  isWritethroughEmbed,
+  isWriteRedirectLink,
   type NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
@@ -459,7 +459,7 @@ export class Runner implements IRunner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isWritethroughEmbed(module)) {
+    } else if (isWriteRedirectLink(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
       throw new Error(`Unknown module: ${JSON.stringify(module)}`);
@@ -501,8 +501,8 @@ export class Runner implements IRunner {
         let doc = processCell;
         let path: PropertyKey[] = [key];
         let value = inputs[key];
-        while (isWritethroughEmbed(value)) {
-          const ref = followWritethroughs(value, processCell);
+        while (isWriteRedirectLink(value)) {
+          const ref = followWriteRedirects(value, processCell);
           doc = ref.cell;
           path = ref.path;
           value = doc.getAtPath(path);
@@ -523,7 +523,7 @@ export class Runner implements IRunner {
         const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
         for (const key in eventInputs) {
-          if (isWritethroughEmbed(eventInputs[key])) {
+          if (isWriteRedirectLink(eventInputs[key])) {
             // Use format-agnostic comparison for aliases
             const alias = eventInputs[key];
 
@@ -849,7 +849,7 @@ export function mergeObjects<T>(
       typeof obj !== "object" ||
       obj === null ||
       Array.isArray(obj) ||
-      isWritethroughEmbed(obj) ||
+      isWriteRedirectLink(obj) ||
       isCellLink(obj) ||
       isDoc(obj) ||
       isCell(obj)

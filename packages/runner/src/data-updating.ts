@@ -1,28 +1,16 @@
 import { isRecord } from "@commontools/utils/types";
-import {
-  ID,
-  ID_FIELD,
-  type JSONSchema,
-  type JSONValue,
-} from "./builder/types.ts";
+import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import {
-  type CellLink,
-  isAnyCellLink,
-  isCell,
-  isCellLink,
-  type LegacyAlias,
-  type SigilWritethroughEmbed,
-} from "./cell.ts";
+import { type CellLink, isAnyCellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { followWritethroughs } from "./link-resolution.ts";
+import { followWriteRedirects } from "./link-resolution.ts";
 import { arrayEqual, maybeUnwrapProxy } from "./type-utils.ts";
 import {
   areLinksSame,
   isLink,
-  isWritethroughEmbed,
+  isWriteRedirectLink,
   parseLink,
 } from "./link-utils.ts";
 
@@ -36,8 +24,8 @@ export function setNestedValue<T>(
   log?: ReactivityLog,
 ): boolean {
   const destValue = doc.getAtPath(path);
-  if (isWritethroughEmbed(destValue)) {
-    const ref = followWritethroughs(destValue, doc, log);
+  if (isWriteRedirectLink(destValue)) {
+    const ref = followWriteRedirects(destValue, doc, log);
     return setNestedValue(ref.cell, ref.path, value, log);
   }
 
@@ -195,11 +183,11 @@ export function normalizeAndDiff(
   const currentValue = current.cell.getAtPath(current.path);
 
   // A new alias can overwrite a previous alias. No-op if the same.
-  if (isWritethroughEmbed(newValue)) {
+  if (isWriteRedirectLink(newValue)) {
     const newLink = parseLink(newValue, current.cell.asCell())!;
     const currentLink = parseLink(currentValue, current.cell.asCell());
     if (
-      isWritethroughEmbed(currentValue) &&
+      isWriteRedirectLink(currentValue) &&
       currentLink !== undefined &&
       newLink.id === currentLink.id &&
       arrayEqual(newLink.path, currentLink.path)
@@ -212,10 +200,10 @@ export function normalizeAndDiff(
   }
 
   // Handle alias in current value (at this point: if newValue is not an alias)
-  if (isWritethroughEmbed(currentValue)) {
+  if (isWriteRedirectLink(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
     log?.reads.push({ ...current });
-    const ref = followWritethroughs(currentValue, current.cell, log);
+    const ref = followWriteRedirects(currentValue, current.cell, log);
     return normalizeAndDiff(ref, newValue, log, context);
   }
 

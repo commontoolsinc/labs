@@ -1,27 +1,24 @@
 import {
-  Classification,
-  isWritethroughEmbed,
-  JSONSchema,
-  Module,
-  NAME,
-  Recipe,
-  Schema,
-  TYPE,
-  UI,
-} from "@commontools/runner";
-import {
   type Cell,
-  createRef,
+  Classification,
   EntityId,
-  followWritethroughs,
+  followWriteRedirects,
   getEntityId,
   isCell,
   isCellLink,
   isDoc,
+  isWriteRedirectLink,
+  JSONSchema,
   type MemorySpace,
+  Module,
+  NAME,
   parseLink,
   parseToLegacyCellLink,
+  Recipe,
   Runtime,
+  Schema,
+  TYPE,
+  UI,
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObject } from "@commontools/utils/types";
@@ -595,10 +592,10 @@ export class CharmManager {
           }
 
           // Process writethroughs - follow them to their sources
-          if (isWritethroughEmbed(value)) {
+          if (isWriteRedirectLink(value)) {
             try {
               // Use followWritethroughs, which is safer than manual traversal
-              const cellLink = followWritethroughs(value, parent.getDoc());
+              const cellLink = followWriteRedirects(value, parent.getDoc());
               if (cellLink && cellLink.cell) {
                 const cellId = getEntityId(cellLink.cell);
                 if (cellId) addMatchingCharm(cellId);
@@ -932,11 +929,11 @@ export class CharmManager {
           return false; // Don't process cell link contents
         }
 
-        // Use isWritethroughEmbed and followWritethroughs for writethroughs
-        if (isWritethroughEmbed(value)) {
+        // Use isWriteRedirectLink and followWritethroughs for writethroughs
+        if (isWriteRedirectLink(value)) {
           try {
             // Follow all aliases to their source
-            const cellLink = followWritethroughs(value, parent.getDoc());
+            const cellLink = followWriteRedirects(value, parent.getDoc());
             if (cellLink && cellLink.cell) {
               // Check if the aliased doc is our target
               const cellId = getEntityId(cellLink.cell);

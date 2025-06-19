@@ -1,6 +1,6 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import {
-  type CellLink,
+  type CellLink,isWriteRedirectLink
   isCell,
   isCellLink,
   type LegacyAlias,
@@ -149,7 +149,7 @@ export function createJsonSchema(
     }
 
     if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
-
+isWriteRedirectLink
     if (isCellLink(value)) {
       value = value.cell.getAtPath(value.path);
       return analyzeType(value);

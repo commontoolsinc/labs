@@ -6,12 +6,12 @@ import {
   type CellLink,
   createCell,
   type LegacyAlias,
-  type SigilWritethroughEmbed,
+  type SigilWriteRedirectLink,
 } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { arrayEqual } from "./type-utils.ts";
 import {
-  isWritethroughEmbed,
+  isWriteRedirectLink,
   parseLink,
   parseToLegacyCellLink,
 } from "./link-utils.ts";
@@ -204,7 +204,7 @@ export function followLinks(
 
     const target = result.cell.getAtPath(result.path);
 
-    nextRef = !onlyAliases || isWritethroughEmbed(target)
+    nextRef = !onlyAliases || isWriteRedirectLink(target)
       ? parseToLegacyCellLink(
         target,
         createCell(
@@ -256,12 +256,12 @@ export function followLinks(
 
 // Follows aliases and returns cell reference describing the last alias.
 // Only logs interim aliases, not the first one, and not the non-alias value.
-export function followWritethroughs<T = any>(
-  alias: LegacyAlias | SigilWritethroughEmbed,
+export function followWriteRedirects<T = any>(
+  alias: LegacyAlias | SigilWriteRedirectLink,
   docOrCell: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
 ): CellLink {
-  if (isWritethroughEmbed(alias)) {
+  if (isWriteRedirectLink(alias)) {
     const cell = isDoc(docOrCell) ? docOrCell.asCell() : docOrCell as Cell<T>;
     const link = parseLink(alias, cell)!;
     return followLinks(

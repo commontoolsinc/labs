@@ -1,7 +1,7 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { isWritethroughEmbed } from "./link-utils.ts";
+import { isWriteRedirectLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
 import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
@@ -330,7 +330,7 @@ export function validateAndTransform(
     // the top of the current doc is already a reference.
     for (let i = -1; i < path.length; i++) {
       const value = doc.getAtPath(path.slice(0, i + 1));
-      if (isWritethroughEmbed(value)) {
+      if (isWriteRedirectLink(value)) {
         throw new Error(
           "Unexpected alias in path, should have been handled by resolvePath",
         );

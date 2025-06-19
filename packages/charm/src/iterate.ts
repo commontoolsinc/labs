@@ -271,7 +271,7 @@ export function scrub(data: any): any {
  */
 function turnCellsIntoAliases(data: any, baseSpace?: MemorySpace): any {
   if (isCell(data)) {
-    return data.getAsWritethroughEmbed(baseSpace ? { baseSpace } : undefined);
+    return data.getAsWriteRedirectLink(baseSpace ? { baseSpace } : undefined);
   } else if (Array.isArray(data)) {
     return data.map((value) => turnCellsIntoAliases(value, baseSpace));
   } else if (isObject(data)) {
