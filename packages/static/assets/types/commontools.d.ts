@@ -132,6 +132,7 @@ export interface BuiltInLLMState<T> {
     error: unknown;
 }
 export interface BuiltInGenerateObjectParams {
+    model?: string;
     prompt?: string;
     schema?: JSONSchema;
     system?: string;

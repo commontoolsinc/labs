@@ -49,6 +49,7 @@ export interface BuiltInLLMState<T> {
 }
 
 export interface BuiltInGenerateObjectParams {
+  model?: string;
   prompt?: string;
   schema?: JSONSchema;
   system?: string;
