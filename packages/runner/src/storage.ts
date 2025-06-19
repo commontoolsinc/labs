@@ -199,7 +199,6 @@ export class Storage implements IStorage {
       doc.ephemeral = true;
       doc.freeze("loading error");
     } else {
-      console.log("result.ok", result.ok);
       await this._integrateResult(doc, storageProvider, schemaContext);
     }
     this.loadingResolves.get(syncKey)?.(doc);
@@ -223,7 +222,7 @@ export class Storage implements IStorage {
       storageProvider,
       schemaContext,
     );
-    console.log("missing", missing);
+    if (missing.length > 0) console.warn("missing", missing);
     // Ignore any entries that aren't json. We typically have the
     // per-space transaction entry, and may have labels.
     // We'll also ensure we're only dealing with the entity ids that will
@@ -234,7 +233,6 @@ export class Storage implements IStorage {
       ).map((docAddr) => {
         return { "/": docAddr.of.slice(3) };
       }).toArray();
-    console.log("Entity ids:", entityIds);
 
     const docMap = this.runtime.documentMap;
     // First, make sure we have all these docs in the runtime document map
@@ -261,13 +259,11 @@ export class Storage implements IStorage {
       // retractions right now.
       if (storageValue !== undefined) {
         // The object exists on the server, so push its value to the doc
-        console.log("value", storageValue);
         const newValue = Storage._cellLinkFromJSON(
           newDoc,
           storageValue,
           this.runtime.documentMap,
         );
-        console.log("newvalue", newValue);
         newDoc.send(newValue.value);
         if (storageValue.source !== undefined) {
           newDoc.sourceCell = this.runtime.documentMap.getDocByEntityId(
@@ -276,7 +272,7 @@ export class Storage implements IStorage {
             false,
           );
           if (newDoc.sourceCell === undefined) {
-            console.error("Failed to set source cell");
+            console.warn("Failed to set source cell");
           }
         }
       } else {
@@ -295,7 +291,7 @@ export class Storage implements IStorage {
       // Don't worry about redundant sends, since the provider handles that.
       const result = await storageProvider.send(valuesToSend);
       if (result.error) {
-        console.log("Failed to write objects");
+        console.warn("Failed to write objects");
         return [];
       }
     }
@@ -325,14 +321,13 @@ export class Storage implements IStorage {
           // Any dependent docs that we expected should already be loaded,
           // so we can just grab them from the runtime's document map.
           // If they aren't available, then leave the link in its raw form.
-          console.log(value.cell);
           const dependency = documentMap.getDocByEntityId(
             doc.space,
             value.cell as { "/": string },
             false,
           );
           if (dependency === undefined) {
-            console.log(
+            console.warn(
               "No match found for",
               value.cell,
               "; leaving cell unchanged",
@@ -438,9 +433,7 @@ export class Storage implements IStorage {
       Storage._cellLinkToJSON,
     );
     const idString = entityIdStr(entityId);
-    console.log("running local query on", idString);
     const docAddress = manager.toAddress(idString);
-    console.log("Calling query local on", docAddress);
     const selector = { path: [], schemaContext: schemaContext };
     return querySchema(selector, [], docAddress, manager);
   }
@@ -449,9 +442,10 @@ export class Storage implements IStorage {
     log(() => ["subscribe to changes", JSON.stringify(doc.entityId)]);
 
     const docId = entityIdStr(doc.entityId);
-    console.log("subscribing to changes", docId);
 
-    // Clear any existing subscriptions first
+    // Clear any existing subscriptions first - we only want one callback
+    // and otherwise if we call syncCell multiple times, we'll end up
+    // with multiple subscriptions.
     if (this.docToStorageSubs.has(docId)) {
       // Cancel any existing subscription
       this.docToStorageSubs.get(docId)?.();
@@ -462,12 +456,6 @@ export class Storage implements IStorage {
       this.storageToDocSubs.get(docId)?.();
       this.storageToDocSubs.delete(docId);
     }
-
-    // Avoid loops.
-    // When we're updating docs with content from storage, don't update storage
-    // Ween we're updating storage with content from docs, don't update docs
-    let updatingDocs = false;
-    let updatingStorage = false;
 
     // Subscribe to doc changes, send updates to storage
     const docToStorage = doc.updates((value, _path, labels) => {
@@ -485,30 +473,12 @@ export class Storage implements IStorage {
         doc.entityId,
       );
       if (deepEqual(storageValue, existingValue)) {
-        console.log("Skipping redundant storage update");
         return;
       }
-      console.log("Sending to storage:", storageValue);
-      console.log(
-        "storageValue ",
-        JSON.stringify(storageValue),
-        "==>",
-        storageValue,
-      );
-      console.log(
-        "existingValue",
-        JSON.stringify(existingValue),
-        "==>",
-        existingValue,
-      );
-      if (!updatingDocs) {
-        updatingStorage = true;
-        this._getStorageProviderForSpace(doc.space).send([{
-          entityId: doc.entityId,
-          value: storageValue,
-        }]);
-        updatingStorage = false;
-      }
+      this._getStorageProviderForSpace(doc.space).send([{
+        entityId: doc.entityId,
+        value: storageValue,
+      }]);
     });
     this.addCancel(docToStorage);
     this.docToStorageSubs.set(docId, docToStorage);
@@ -523,6 +493,10 @@ export class Storage implements IStorage {
           storageValue,
           this.runtime.documentMap,
         );
+        if (!deepEqual(newValue.value, doc.get())) {
+          // values differ
+          doc.send(newValue.value);
+        }
         const newSourceCell = (newValue.source !== undefined)
           ? this.runtime.documentMap.getDocByEntityId(
             doc.space,
@@ -530,31 +504,10 @@ export class Storage implements IStorage {
             false,
           )
           : undefined;
-        if (deepEqual(newValue.value, doc.get())) {
-          if (deepEqual(doc.sourceCell, newSourceCell)) {
-            console.log("Skipping redundant doc update");
-            return;
-          } else {
-            doc.sourceCell = newSourceCell;
-          }
-        } else {
-          // values differ
-          if (deepEqual(doc.sourceCell, newSourceCell)) {
-            console.log("Sending to doc:", newValue);
-            if (!updatingStorage) {
-              updatingDocs = true;
-              doc.send(newValue.value);
-              updatingDocs = false;
-            }
-          } else {
-            console.log("Sending to doc:", newValue);
-            if (!updatingStorage) {
-              updatingDocs = true;
-              doc.send(newValue.value);
-              doc.sourceCell = newSourceCell;
-              updatingDocs = false;
-            }
-          }
+        // TODO(@ubik2): i see an undefined newSourceCell here sometimes,
+        // even though the doc's sourceCell is set.
+        if (doc.sourceCell !== newSourceCell) {
+          doc.sourceCell = newSourceCell;
         }
       },
     );
