@@ -278,11 +278,11 @@ export type LinkV1 = {
     space?: MemorySpace;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
-    replace?: "destination";
+    overwrite?: "redirect" | "this"; // default is "this"
   };
 };
 
-export type AliasV1 = LinkV1 & { [LINK_V1_TAG]: { replace: "destination" } };
+export type AliasV1 = LinkV1 & { [LINK_V1_TAG]: { overwrite: "redirect" } };
 
 /**
  * Sigil link type
@@ -313,7 +313,7 @@ function createSigilLink(
     base?: Cell<any>;
     baseSpace?: MemorySpace;
     includeSchema?: boolean;
-    replace?: "destination";
+    overwrite?: "redirect" | "this"; // default is "this"
   },
 ): SigilLink {
   // Create the base structure
@@ -348,8 +348,8 @@ function createSigilLink(
   // Include schema if requested
   if (options?.includeSchema && schema) reference.schema = schema;
 
-  // Include replace if requested
-  if (options?.replace) reference.replace = options.replace;
+  // Include overwrite if requested
+  if (options?.overwrite) reference.overwrite = options.overwrite;
 
   return sigil;
 }
@@ -626,7 +626,7 @@ function createRegularCell<T>(
         doc,
         path,
         schema,
-        { ...options, replace: "destination" },
+        { ...options, overwrite: "redirect" },
       ) as SigilWriteRedirectLink;
     },
     getDoc: () => doc,
@@ -787,7 +787,7 @@ export function isSigilWriteRedirectLink(
   value: any,
 ): value is SigilWriteRedirectLink {
   return isSigilLink(value) &&
-    value["/"][LINK_V1_TAG].replace === "destination";
+    value["/"][LINK_V1_TAG].overwrite === "redirect";
 }
 
 /**

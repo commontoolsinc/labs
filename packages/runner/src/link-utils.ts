@@ -34,7 +34,7 @@ export type NormalizedLink = {
   space?: MemorySpace;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
-  replace?: "destination";
+  overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
 /**
@@ -61,9 +61,9 @@ export function isWriteRedirectLink(
     return true;
   }
 
-  // Check new sigil format (link@1 with replace field)
+  // Check new sigil format (link@1 with overwrite field)
   if (isSigilLink(value)) {
-    return value["/"][LINK_V1_TAG].replace === "destination";
+    return value["/"][LINK_V1_TAG].overwrite === "redirect";
   }
 
   return false;
@@ -127,7 +127,7 @@ export function parseLink(
       space: resolvedSpace,
       schema: link.schema,
       rootSchema: link.rootSchema,
-      replace: link.replace,
+      overwrite: link.overwrite !== "redirect" ? "redirect" : undefined,
     };
   }
 
