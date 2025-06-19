@@ -38,7 +38,7 @@ describe("utility functions", () => {
     expect(
       isWriteRedirectLink({
         "/": {
-          [LINK_V1_TAG]: { id: "path/to/value", replace: "destination" },
+          [LINK_V1_TAG]: { id: "path/to/value", overwrite: "redirect" },
         },
       }),
     ).toBe(

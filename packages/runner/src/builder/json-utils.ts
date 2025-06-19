@@ -1,15 +1,12 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import {
-  type CellLink,isWriteRedirectLink
+  type CellLink,
   isCell,
   isCellLink,
+  isSigilWriteRedirectLink,
   type LegacyAlias,
 } from "../cell.ts";
-import {
-  isLegacyAlias,
-  isWritethroughEmbed,
-  parseToLegacyCellLink,
-} from "../link-utils.ts";
+import { isLegacyAlias, parseToLegacyCellLink } from "../link-utils.ts";
 import { isDoc } from "../doc.ts";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
@@ -149,13 +146,13 @@ export function createJsonSchema(
     }
 
     if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
-isWriteRedirectLink
+
     if (isCellLink(value)) {
       value = value.cell.getAtPath(value.path);
       return analyzeType(value);
     }
 
-    if (isWritethroughEmbed(value)) {
+    if (isSigilWriteRedirectLink(value)) {
       const link = parseToLegacyCellLink(value);
       if (link && isDoc(link.cell)) {
         value = link.cell.getAtPath(link.path);
