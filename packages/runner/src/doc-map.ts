@@ -14,6 +14,15 @@ export type EntityId = {
   toJSON?: () => { "/": string };
 };
 
+export function entityIdStr(entityId: EntityId) {
+  const slashVal = entityId["/"];
+  if (typeof slashVal === "string") {
+    return slashVal;
+  } else {
+    return entityId.toJSON!()["/"];
+  }
+}
+
 /**
  * Generates an entity ID.
  *
@@ -185,6 +194,7 @@ export class DocumentMap implements IDocumentMap {
     let doc = this.entityIdToDocMap.get(space, id);
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
+    console.log("Creating entry with entityId", entityId);
 
     if (typeof entityId === "string") {
       entityId = JSON.parse(entityId) as EntityId;

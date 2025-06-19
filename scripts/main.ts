@@ -3,6 +3,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
+  entityIdStr,
   getEntityId,
   isStream,
   type MemorySpace,
@@ -105,7 +106,11 @@ async function main() {
   charms.sink((charms) => {
     console.log(
       "all charms:",
-      charms.map((c) => getEntityId(c)?.["/"]),
+      charms.map((c) =>
+        getEntityId(c) === undefined
+          ? "<undefined>"
+          : entityIdStr(getEntityId(c)!)
+      ),
     );
   });
 

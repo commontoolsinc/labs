@@ -1,5 +1,15 @@
+import type {
+  FactAddress,
+  MemorySpace,
+  Revision,
+  SchemaPathSelector,
+  State,
+} from "@commontools/memory/interface";
 import type { JSONObject, JSONValue } from "../builder/types.ts";
-import { IDocumentMap, IRuntime, IStorageProvider } from "../runtime.ts";
+import type { DocImpl } from "../doc.ts";
+import { entityIdStr } from "../doc-map.ts";
+import type { StorageValue } from "./interface.ts";
+import type { IDocumentMap, IStorageProvider } from "../runtime.ts";
 import {
   BaseObjectManager,
   type CellTarget,
@@ -11,16 +21,6 @@ import {
   SchemaObjectTraverser,
   type ValueEntry,
 } from "../traverse.ts";
-import { Storage } from "../storage.ts";
-import type {
-  FactAddress,
-  MemorySpace,
-  Revision,
-  SchemaPathSelector,
-  State,
-} from "@commontools/memory/interface";
-import { DocImpl } from "../doc.ts";
-import { StorageValue } from "./interface.ts";
 
 export abstract class ClientObjectManager extends BaseObjectManager<
   FactAddress,
@@ -131,7 +131,7 @@ export class DocObjectManager extends ClientObjectManager {
         value: storageValue.value,
       };
       if (storageValue.source !== undefined) {
-        docMapValue.source = storageValue.source.toJSON!()["/"];
+        docMapValue.source = entityIdStr(storageValue.source);
       }
       const rv: ValueEntry<FactAddress, JSONValue> = {
         source: doc,
@@ -181,10 +181,6 @@ export function querySchema(
     rv.add(valueEntry);
     return { missing: [], loaded: rv, selected: schemaTracker };
   }
-  console.log(
-    "Got past the basic checks in query",
-    [...manager.getReadDocs()].map((item) => item.source),
-  );
   schemaTracker.add(manager.toKey(factAddress), selector);
   // Also load any source links
   loadSource(
@@ -227,7 +223,10 @@ export function querySchema(
   // We don't actually use the return value here, but we've built up
   // a list of all the documents we read.
   traverser.traverse(newDoc);
-  console.log("read docs", [...manager.getReadDocs()]);
+  console.log(
+    "read docs",
+    [...manager.getReadDocs()].map((ve) => manager.toKey(ve.source)),
+  );
   for (const item of manager.getReadDocs()) {
     rv.add(item);
   }
