@@ -16,7 +16,7 @@ import type {
 import { deepEqual } from "./path-utils.ts";
 import { isLegacyAlias, type NormalizedLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
-import { isSigilEmbed, type JSONCellLink } from "./cell.ts";
+import { isSigilLink, type JSONCellLink } from "./cell.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -465,7 +465,7 @@ export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
 }
 
 export function isPointer(value: unknown): boolean {
-  return (isSigilEmbed(value) || isJSONCellLink(value) || isLegacyAlias(value));
+  return (isSigilLink(value) || isJSONCellLink(value) || isLegacyAlias(value));
 }
 
 /**

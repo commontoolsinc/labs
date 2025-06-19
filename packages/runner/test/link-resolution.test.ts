@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { followWritethroughs } from "../src/link-resolution.ts";
+import { followWriteRedirects } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -36,7 +36,7 @@ describe("link-resolution", () => {
       );
       testCell.set({ value: 42 });
       const binding = { $alias: { path: ["value"] } };
-      const result = followWritethroughs(binding, testCell);
+      const result = followWriteRedirects(binding, testCell);
       expect(result.cell.getAtPath(result.path)).toBe(42);
     });
 
@@ -54,7 +54,7 @@ describe("link-resolution", () => {
         outer: { $alias: innerCell.key("inner").getAsCellLink() },
       });
       const binding = { $alias: { path: ["outer"] } };
-      const result = followWritethroughs(binding, outerCell);
+      const result = followWriteRedirects(binding, outerCell);
       expectCellLinksEqual(result).toEqual(
         innerCell.key("inner").getAsCellLink(),
       );
@@ -75,7 +75,7 @@ describe("link-resolution", () => {
       cellA.setRaw({ alias: { $alias: cellB.key("alias").getAsCellLink() } });
       cellB.setRaw({ alias: { $alias: cellA.key("alias").getAsCellLink() } });
       const binding = { $alias: { path: ["alias"] } };
-      expect(() => followWritethroughs(binding, cellA)).toThrow(
+      expect(() => followWriteRedirects(binding, cellA)).toThrow(
         "cycle detected",
       );
     });
@@ -89,7 +89,7 @@ describe("link-resolution", () => {
         a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
       });
       const binding = { $alias: { path: ["a", "a", "c"] } };
-      const result = followWritethroughs(binding, testCell);
+      const result = followWriteRedirects(binding, testCell);
       expectCellLinksEqual(result).toEqual(
         testCell.key("a").key("b").key("c").getAsCellLink(),
       );

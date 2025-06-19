@@ -4,18 +4,17 @@ import { isDoc } from "./doc.ts";
 import {
   type Cell,
   type CellLink,
-  EMBED_V1_TAG,
   isAnyCellLink,
   isCell,
   isCellLink,
   isJSONCellLink,
-  isSigilEmbed,
-  isSigilValue,
+  isSigilLink,
   type JSONCellLink,
   type LegacyAlias,
+  LINK_V1_TAG,
   type MemorySpace,
-  type SigilEmbed,
-  type SigilWritethroughEmbed,
+  type SigilLink,
+  type SigilWriteRedirectLink,
 } from "./cell.ts";
 import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./type-utils.ts";
@@ -46,7 +45,7 @@ export function isLink(value: any): boolean {
     isAnyCellLink(value) ||
     isCell(value) ||
     isDoc(value) ||
-    isWritethroughEmbed(value) ||
+    isWriteRedirectLink(value) ||
     (isRecord(value) && "/" in value) // EntityId format
   );
 }
@@ -54,22 +53,17 @@ export function isLink(value: any): boolean {
 /**
  * Check if value is an alias in any format (old $alias or new sigil)
  */
-export function isWritethroughEmbed(
+export function isWriteRedirectLink(
   value: any,
-): value is LegacyAlias | SigilWritethroughEmbed {
+): value is LegacyAlias | SigilWriteRedirectLink {
   // Check legacy $alias format
   if (isLegacyAlias(value)) {
     return true;
   }
 
-  // Check new sigil format (embed@1 with replace field)
-  if (
-    isSigilValue(value) && EMBED_V1_TAG in value["/"] &&
-    isRecord(value["/"][EMBED_V1_TAG])
-  ) {
-    const embed = value["/"][EMBED_V1_TAG];
-    return (typeof embed.id === "string" || Array.isArray(embed.path)) &&
-      embed.replace === "destination";
+  // Check new sigil format (link@1 with replace field)
+  if (isSigilLink(value)) {
+    return value["/"][LINK_V1_TAG].replace === "destination";
   }
 
   return false;
@@ -109,9 +103,9 @@ export function parseLink(
   }
 
   // Handle new sigil format
-  if (isSigilEmbed(value)) {
-    const sigilLink = value as SigilEmbed;
-    const link = sigilLink["/"][EMBED_V1_TAG];
+  if (isSigilLink(value)) {
+    const sigilLink = value as SigilLink;
+    const link = sigilLink["/"][LINK_V1_TAG];
 
     // Resolve relative references
     let id = link.id;

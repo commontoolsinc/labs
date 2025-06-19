@@ -81,7 +81,7 @@ import { isLegacyAlias } from "./link-utils.ts";
  * @returns {CellLink}
  *
  * @method getAsLink Returns a cell link for the cell (new sigil format).
- * @returns {SigilEmbed}
+ * @returns {SigilLink}
  *
  * @method getRaw Raw access method, without following aliases (which would
  * write to the destination instead of the cell itself).
@@ -163,14 +163,14 @@ declare module "@commontools/api" {
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilEmbed;
-    getAsWritethroughEmbed(
+    ): SigilLink;
+    getAsWriteRedirectLink(
       options?: {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilWritethroughEmbed;
+    ): SigilWriteRedirectLink;
     getDoc(): DocImpl<any>;
     getRaw(): any;
     setRaw(value: any): boolean;
@@ -267,12 +267,12 @@ export type LegacyAlias = {
 export type SigilValue<T> = { "/": T };
 
 /**
- * Embed sigil value v1
+ * Link sigil value v1
  */
-export const EMBED_V1_TAG = "embed@1" as const;
+export const LINK_V1_TAG = "link@1" as const;
 
-export type EmbedV1 = {
-  [EMBED_V1_TAG]: {
+export type LinkV1 = {
+  [LINK_V1_TAG]: {
     id?: string;
     path?: string[];
     space?: MemorySpace;
@@ -282,18 +282,17 @@ export type EmbedV1 = {
   };
 };
 
-export type AliasV1 = EmbedV1 & { [EMBED_V1_TAG]: { replace: "destination" } };
+export type AliasV1 = LinkV1 & { [LINK_V1_TAG]: { replace: "destination" } };
 
 /**
- * Sigil link type (now using embed)
+ * Sigil link type
  */
-export type SigilEmbed = SigilValue<EmbedV1>;
-export type SigilEmbedTag = typeof EMBED_V1_TAG;
+export type SigilLink = SigilValue<LinkV1>;
 
 /**
- * Sigil alias type - uses EmbedV1 with replace field
+ * Sigil alias type - uses LinkV1 with overwrite field
  */
-export type SigilWritethroughEmbed = SigilValue<AliasV1>;
+export type SigilWriteRedirectLink = SigilValue<AliasV1>;
 
 /**
  * JSON cell link format used in storage
@@ -306,7 +305,7 @@ export type JSONCellLink = {
 /**
  * Creates a sigil reference (link or alias) with shared logic
  */
-function createSigilEmbed(
+function createSigilLink(
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema?: JSONSchema,
@@ -316,17 +315,17 @@ function createSigilEmbed(
     includeSchema?: boolean;
     replace?: "destination";
   },
-): SigilEmbed {
+): SigilLink {
   // Create the base structure
-  const sigil: SigilEmbed = {
+  const sigil: SigilLink = {
     "/": {
-      [EMBED_V1_TAG]: {
+      [LINK_V1_TAG]: {
         path: path.map((p) => p.toString()),
       },
     },
   };
 
-  const reference = sigil["/"][EMBED_V1_TAG];
+  const reference = sigil["/"][LINK_V1_TAG];
 
   // Handle base cell for relative references
   if (options?.base) {
@@ -608,28 +607,27 @@ function createRegularCell<T>(
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilEmbed => {
-      return createSigilEmbed(
+    ): SigilLink => {
+      return createSigilLink(
         doc,
         path,
         schema,
         options,
-      ) as SigilEmbed;
+      ) as SigilLink;
     },
-    getAsWritethroughEmbed: (
+    getAsWriteRedirectLink: (
       options?: {
         base?: Cell<any>;
         baseSpace?: MemorySpace;
         includeSchema?: boolean;
       },
-    ): SigilWritethroughEmbed => {
-      // Create using embed@1 tag with replace field
-      return createSigilEmbed(
+    ): SigilWriteRedirectLink => {
+      return createSigilLink(
         doc,
         path,
         schema,
         { ...options, replace: "destination" },
-      ) as SigilWritethroughEmbed;
+      ) as SigilWriteRedirectLink;
     },
     getDoc: () => doc,
     getRaw: () => doc.getAtPath(path),
@@ -776,20 +774,20 @@ export function isJSONCellLink(value: any): value is JSONCellLink {
 }
 
 /**
- * Check if value is a sigil link (embed without replace field).
+ * Check if value is a sigil link.
  */
-export function isSigilEmbed(value: any): value is SigilEmbed {
-  return (isSigilValue(value) && EMBED_V1_TAG in value["/"]);
+export function isSigilLink(value: any): value is SigilLink {
+  return (isSigilValue(value) && LINK_V1_TAG in value["/"]);
 }
 
 /**
- * Check if value is a sigil alias (embed with replace field).
+ * Check if value is a sigil alias (link with overwrite field).
  */
-export function isSigilWritethroughEmbed(
+export function isSigilWriteRedirectLink(
   value: any,
-): value is SigilWritethroughEmbed {
-  return isSigilEmbed(value) &&
-    value["/"][EMBED_V1_TAG].replace === "destination";
+): value is SigilWriteRedirectLink {
+  return isSigilLink(value) &&
+    value["/"][LINK_V1_TAG].replace === "destination";
 }
 
 /**
@@ -797,7 +795,7 @@ export function isSigilWritethroughEmbed(
  */
 export function isAnyCellLink(
   value: any,
-): value is CellLink | SigilEmbed | JSONCellLink | LegacyAlias {
-  return isCellLink(value) || isJSONCellLink(value) || isSigilEmbed(value) ||
+): value is CellLink | SigilLink | JSONCellLink | LegacyAlias {
+  return isCellLink(value) || isJSONCellLink(value) || isSigilLink(value) ||
     isLegacyAlias(value);
 }

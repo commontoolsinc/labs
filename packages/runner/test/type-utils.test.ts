@@ -1,8 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isModule, isRecipe, type Opaque } from "../src/builder/types.ts";
-import { isWritethroughEmbed } from "../src/link-utils.ts";
-import { EMBED_V1_TAG } from "../src/cell.ts";
+import { isWriteRedirectLink } from "../src/link-utils.ts";
+import { LINK_V1_TAG } from "../src/cell.ts";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -33,18 +33,18 @@ describe("value type", () => {
 
 describe("utility functions", () => {
   it("isWritethroughEmbed correctly identifies writethrough embeds", () => {
-    expect(isWritethroughEmbed({ $alias: { path: ["path", "to", "value"] } }))
+    expect(isWriteRedirectLink({ $alias: { path: ["path", "to", "value"] } }))
       .toBe(true);
     expect(
-      isWritethroughEmbed({
+      isWriteRedirectLink({
         "/": {
-          [EMBED_V1_TAG]: { id: "path/to/value", replace: "destination" },
+          [LINK_V1_TAG]: { id: "path/to/value", replace: "destination" },
         },
       }),
     ).toBe(
       true,
     );
-    expect(isWritethroughEmbed({ notAlias: "something" })).toBe(false);
+    expect(isWriteRedirectLink({ notAlias: "something" })).toBe(false);
   });
 
   it("isModule correctly identifies modules", () => {
