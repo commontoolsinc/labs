@@ -120,6 +120,7 @@ function createOpaqueRefTransformer(
   return (context) => {
     return (sourceFile) => {
       let needsIfElseImport = false;
+      let needsDeriveImport = false;
       let hasTransformed = false;
 
       const visit: ts.Visitor = (node) => {
@@ -138,19 +139,303 @@ function createOpaqueRefTransformer(
           }
         }
 
+        // Check if it's a JSX expression that contains OpaqueRef values
+        if (ts.isJsxExpression(node) && node.expression) {
+          const transformedExpression = transformExpressionWithOpaqueRef(
+            node.expression,
+            checker,
+            context.factory,
+            sourceFile,
+            context,
+          );
+          if (transformedExpression !== node.expression) {
+            hasTransformed = true;
+            if (!hasDeriveImport(sourceFile)) {
+              needsDeriveImport = true;
+            }
+            return context.factory.updateJsxExpression(
+              node,
+              transformedExpression,
+            );
+          }
+        }
+
+        // Check if it's a binary expression with OpaqueRef values
+        if (ts.isBinaryExpression(node) && containsOpaqueRef(node, checker)) {
+          const transformed = transformExpressionWithOpaqueRef(node, checker, context.factory, sourceFile, context);
+          if (transformed !== node) {
+            hasTransformed = true;
+            if (!hasDeriveImport(sourceFile)) {
+              needsDeriveImport = true;
+            }
+            return transformed;
+          }
+        }
+
         return ts.visitEachChild(node, visit, context);
       };
 
       const visited = ts.visitNode(sourceFile, visit) as ts.SourceFile;
 
-      // If we transformed something and need to add ifElse import
-      if (hasTransformed && needsIfElseImport) {
-        return addIfElseImport(visited, context.factory);
+      // Add necessary imports
+      let result = visited;
+      if (hasTransformed) {
+        if (needsIfElseImport) {
+          result = addIfElseImport(result, context.factory);
+        }
+        if (needsDeriveImport) {
+          result = addDeriveImport(result, context.factory);
+        }
+        
+        // Log the transformed source
+        const printer = ts.createPrinter();
+        const transformedSource = printer.printFile(result);
+        console.log("\n=== TRANSFORMED SOURCE ===");
+        console.log(transformedSource);
+        console.log("=== END TRANSFORMED SOURCE ===\n");
       }
 
-      return visited;
+      return result;
     };
   };
+}
+
+function transformExpressionWithOpaqueRef(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  factory: ts.NodeFactory,
+  sourceFile: ts.SourceFile,
+  context: ts.TransformationContext,
+): ts.Expression {
+  // Only transform binary expressions (e.g., cell.value + 1, cell.value * 2)
+  if (ts.isBinaryExpression(expression) && containsOpaqueRef(expression, checker)) {
+    // Get unique variable name
+    const varName = "_v";
+    
+    // Get all OpaqueRef identifiers in the expression
+    const opaqueRefs = collectOpaqueRefs(expression, checker);
+    
+    if (opaqueRefs.length === 0) {
+      return expression;
+    }
+
+    // For now, support single OpaqueRef expressions
+    // TODO: Handle multiple OpaqueRefs in one expression
+    const opaqueRef = opaqueRefs[0];
+    
+    // Create the lambda body by replacing the OpaqueRef with the parameter
+    const lambdaBody = replaceOpaqueRefWithParam(expression, opaqueRef, varName, factory, context);
+    
+    // Create arrow function: (_v) => expression
+    const arrowFunction = factory.createArrowFunction(
+      undefined,
+      undefined,
+      [factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        factory.createIdentifier(varName),
+        undefined,
+        undefined,
+        undefined,
+      )],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      lambdaBody,
+    );
+    
+    // Create derive call
+    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+    const deriveIdentifier = moduleAlias
+      ? factory.createPropertyAccessExpression(
+        factory.createIdentifier(moduleAlias),
+        factory.createIdentifier("derive"),
+      )
+      : factory.createIdentifier("derive");
+    
+    return factory.createCallExpression(
+      deriveIdentifier,
+      undefined,
+      [opaqueRef, arrowFunction],
+    );
+  }
+  
+  return expression;
+}
+
+function isSimpleOpaqueRefAccess(expression: ts.Expression, checker: ts.TypeChecker): boolean {
+  // Check if the expression is just a simple identifier or property access
+  // that is an OpaqueRef, without any operations on it
+  if (ts.isIdentifier(expression) || ts.isPropertyAccessExpression(expression)) {
+    const type = checker.getTypeAtLocation(expression);
+    return isOpaqueRefType(type, checker);
+  }
+  return false;
+}
+
+function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boolean {
+  let found = false;
+  
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    
+    // Check if this node is an OpaqueRef
+    if (ts.isIdentifier(n) || ts.isPropertyAccessExpression(n)) {
+      const type = checker.getTypeAtLocation(n);
+      if (isOpaqueRefType(type, checker)) {
+        found = true;
+        return;
+      }
+    }
+    
+    ts.forEachChild(n, visit);
+  };
+  
+  visit(node);
+  return found;
+}
+
+function collectOpaqueRefs(node: ts.Node, checker: ts.TypeChecker): ts.Expression[] {
+  const refs: ts.Expression[] = [];
+  
+  const visit = (n: ts.Node): void => {
+    // Check identifiers and property accesses
+    if ((ts.isIdentifier(n) || ts.isPropertyAccessExpression(n)) && ts.isExpression(n)) {
+      const type = checker.getTypeAtLocation(n);
+      if (isOpaqueRefType(type, checker)) {
+        refs.push(n);
+      }
+    }
+    
+    ts.forEachChild(n, visit);
+  };
+  
+  visit(node);
+  return refs;
+}
+
+function replaceOpaqueRefWithParam(
+  expression: ts.Expression,
+  opaqueRef: ts.Expression,
+  paramName: string,
+  factory: ts.NodeFactory,
+  context: ts.TransformationContext,
+): ts.Expression {
+  const visit = (node: ts.Node): ts.Node => {
+    // If this is the OpaqueRef we're replacing, return the parameter
+    if (node === opaqueRef) {
+      return factory.createIdentifier(paramName);
+    }
+    
+    return ts.visitEachChild(node, visit, context);
+  };
+  
+  return visit(expression) as ts.Expression;
+}
+
+function hasDeriveImport(sourceFile: ts.SourceFile): boolean {
+  // Check if derive is imported from commontools
+  for (const statement of sourceFile.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        moduleSpecifier.text === "commontools"
+      ) {
+        // Check if derive is in the import clause
+        if (statement.importClause && statement.importClause.namedBindings) {
+          if (ts.isNamedImports(statement.importClause.namedBindings)) {
+            for (
+              const element of statement.importClause.namedBindings.elements
+            ) {
+              if (element.name.text === "derive") {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function addDeriveImport(
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.SourceFile {
+  let existingImport: ts.ImportDeclaration | undefined;
+  let existingImportIndex: number = -1;
+
+  // Find existing commontools import
+  sourceFile.statements.forEach((statement, index) => {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        moduleSpecifier.text === "commontools"
+      ) {
+        existingImport = statement;
+        existingImportIndex = index;
+      }
+    }
+  });
+
+  let newImport: ts.ImportDeclaration;
+
+  if (
+    existingImport && existingImport.importClause &&
+    existingImport.importClause.namedBindings &&
+    ts.isNamedImports(existingImport.importClause.namedBindings)
+  ) {
+    // Add derive to existing import if not already present
+    const existingElements =
+      existingImport.importClause.namedBindings.elements;
+    const hasDerive = existingElements.some((element) =>
+      element.name.text === "derive"
+    );
+
+    if (hasDerive) {
+      return sourceFile;
+    }
+
+    const newElements = [
+      ...existingElements,
+      factory.createImportSpecifier(
+        false,
+        undefined,
+        factory.createIdentifier("derive"),
+      ),
+    ];
+
+    newImport = factory.updateImportDeclaration(
+      existingImport,
+      undefined,
+      factory.createImportClause(
+        false,
+        existingImport.importClause.name,
+        factory.createNamedImports(newElements),
+      ),
+      existingImport.moduleSpecifier,
+      undefined,
+    );
+  } else {
+    // This shouldn't happen if we're already importing from commontools
+    return sourceFile;
+  }
+
+  // Reconstruct statements with the new import
+  const newStatements = [...sourceFile.statements];
+  newStatements[existingImportIndex] = newImport;
+
+  return factory.updateSourceFile(
+    sourceFile,
+    newStatements,
+    sourceFile.isDeclarationFile,
+    sourceFile.referencedFiles,
+    sourceFile.typeReferenceDirectives,
+    sourceFile.hasNoDefaultLib,
+    sourceFile.libReferenceDirectives,
+  );
 }
 
 function hasIfElseImport(sourceFile: ts.SourceFile): boolean {
