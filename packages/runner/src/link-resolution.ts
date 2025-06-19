@@ -1,11 +1,10 @@
 import { type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type DocImpl } from "./doc.ts";
+import { type DocImpl, isDoc } from "./doc.ts";
 import {
   type Cell,
   type CellLink,
   createCell,
-  isCell,
   type LegacyAlias,
   type SigilWritethroughEmbed,
 } from "./cell.ts";
@@ -263,11 +262,11 @@ export function followWritethroughs<T = any>(
   log?: ReactivityLog,
 ): CellLink {
   if (isWritethroughEmbed(alias)) {
-    const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
-    const link = parseLink(alias, doc.asCell())!;
+    const cell = isDoc(docOrCell) ? docOrCell.asCell() : docOrCell as Cell<T>;
+    const link = parseLink(alias, cell)!;
     return followLinks(
       {
-        cell: doc.runtime.documentMap.getDocByEntityId(
+        cell: cell.getDoc().runtime.documentMap.getDocByEntityId(
           link.space!,
           link.id,
         ),
