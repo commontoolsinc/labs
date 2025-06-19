@@ -194,6 +194,8 @@ This plan should be entirely incremental and can be rolled out step by step.
         and `.updates()` calls on `DocImpl`.
   - [ ] `Cell.sink()` creates a (read-only) transaction, which might be nested.
         Very similar to the current `ReactivityLog`.
+  - [ ] `Cell.freeze()` makes cell read-only
+  - [ ] `Cell.ephemeral` whether cell is persisted
   - [ ] When cells are being created, active transactions are being passed in,
         just like `log` now. Change `withLog()` to `withTX()` or so. When there
         is no TX associated on a read, create one. Don't allow writes without a
