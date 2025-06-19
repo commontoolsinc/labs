@@ -90,15 +90,10 @@ export function parseLink(
   if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);
 
   if (isCell(value)) {
-    // Extract from Cell using its entityId and internal path
-    const link = value.getAsLink({
-      base: isCell(base) ? base : undefined,
-      baseSpace: base?.space,
-    })["/"][EMBED_V1_TAG];
     return {
-      id: link.id!,
-      path: link.path!,
-      space: link.space,
+      id: toURI(value.entityId),
+      path: value.path.map((p) => p.toString()),
+      space: value.space,
       schema: value.schema,
       rootSchema: value.rootSchema,
     };
@@ -165,13 +160,8 @@ export function parseLink(
   }
 
   // Handle legacy alias format
-  if (
-    isRecord(value) &&
-    "$alias" in value &&
-    isRecord(value.$alias) &&
-    Array.isArray(value.$alias.path)
-  ) {
-    const alias = value.$alias as LegacyAlias["$alias"];
+  if (isLegacyAlias(value)) {
+    const alias = value.$alias;
     let id: string | undefined;
     let resolvedSpace = base?.space;
 
