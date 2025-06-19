@@ -6863,7 +6863,6 @@
           "npm:@uiw/react-json-view@2.0.0-alpha.30",
           "npm:@use-gesture/react@^10.3.1",
           "npm:@vitejs/plugin-react@^4.3.4",
-          "npm:ajv@^8.17.1",
           "npm:cmdk@^1.0.4",
           "npm:csstype@^3.1.3",
           "npm:emoji-picker-react@^4.12.0",
@@ -6883,7 +6882,6 @@
       },
       "packages/llm": {
         "dependencies": [
-          "npm:ajv@^8.17.1",
           "npm:json5@^2.2.3"
         ]
       },

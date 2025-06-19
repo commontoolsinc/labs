@@ -8,7 +8,6 @@
     "./types": "./src/types.ts"
   },
   "imports": {
-    "ajv": "npm:ajv@^8.17.1",
     "json5": "npm:json5@^2.2.3"
   }
 }
