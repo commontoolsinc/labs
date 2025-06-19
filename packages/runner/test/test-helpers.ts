@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import { AssertionError } from "@std/assert";
 import { isAlias } from "../src/builder/types.ts";
 import { isCellLink } from "../src/cell.ts";
+import type { EntityId } from "../src/doc-map.ts";
 
 /**
  * Normalizes CellLinks by keeping only cell and path properties
@@ -76,4 +77,24 @@ export function expectCellLinksEqual(actual: unknown) {
       }
     }
   };
+}
+
+/**
+ * Helper to convert objects with toJSON methods to plain objects
+ * Useful for test expectations that need to compare serialized forms
+ */
+export function toPlainObject<T>(obj: T): any {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+/**
+ * Helper to convert EntityId to JSON representation
+ * Handles EntityId objects that may or may not have toJSON method
+ */
+export function entityIdToJSON(entityId: EntityId): { "/": string } {
+  if (entityId.toJSON) {
+    return entityId.toJSON();
+  }
+  // Fallback: construct the object manually
+  return { "/": entityId["/"].toString() };
 }

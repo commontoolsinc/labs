@@ -13,23 +13,14 @@ import type {
   State,
 } from "@commontools/memory/interface";
 import type { Entity } from "@commontools/memory/interface";
-import type { EntityId } from "../src/doc-map.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { ClientObjectManager } from "../src/storage/query.ts";
+import { entityIdToJSON } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
-
-// Helper to convert EntityId to JSON representation for use in CellLinks
-function entityIdToJSON(entityId: EntityId): { "/": string } {
-  if (entityId.toJSON) {
-    return entityId.toJSON();
-  }
-  // Fallback: construct the object manually
-  return { "/": entityId["/"].toString() };
-}
 
 describe("Query", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
