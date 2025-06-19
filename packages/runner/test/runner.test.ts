@@ -279,7 +279,7 @@ describe("runRecipe", () => {
       space,
       "should allow passing a cell as a binding: input cell",
     );
-    inputCell.setRaw({ input: 10, output: 0 });
+    inputCell.set({ input: 10, output: 0 });
     const resultCell = runtime.getCell(
       space,
       "should allow passing a cell as a binding",
@@ -320,7 +320,7 @@ describe("runRecipe", () => {
       space,
       "should allow stopping a recipe: input cell",
     );
-    inputCell.setRaw({ input: 10, output: 0 });
+    inputCell.set({ input: 10, output: 0 });
     const resultCell = runtime.getCell(space, "should allow stopping a recipe");
     const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
