@@ -7,5 +7,6 @@ SOURCE=../api/index.ts
 OUT=../api/index.d.ts
 STATIC=./assets/types/commontools.d.ts
 
-deno run -A npm:typescript/tsc $SOURCE --declaration --emitDeclarationOnly
+# When running in CI, we need to specific libs
+deno run -A npm:typescript/tsc $SOURCE --declaration --emitDeclarationOnly --lib esnext,dom
 mv $OUT $STATIC
