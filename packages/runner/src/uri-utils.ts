@@ -28,10 +28,8 @@ export function toURI(value: unknown): string {
 export function fromURI(uri: string): string {
   if (!uri.includes(":")) {
     return uri;
-  }
-  const [prefix, ...rest] = uri.split(":");
-  if (prefix === "of") {
-    return rest.join(":");
+  } else if (uri.startsWith("of:")) {
+    return uri.slice(3);
   } else throw new Error(`Invalid URI: ${uri}`);
 }
 
