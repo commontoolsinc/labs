@@ -5,9 +5,19 @@ import { isCellLink } from "../src/cell.ts";
 
 /**
  * Normalizes CellLinks by keeping only cell and path properties
+ * Also normalizes path elements so numeric strings and numbers are equivalent
  */
 function normalizeCellLink(link: any): any {
-  return { cell: link.cell, path: link.path };
+  // Normalize path elements: convert numeric strings to numbers for comparison
+  const normalizedPath = link.path.map((element: any) => {
+    // If it's a string that represents a valid array index, convert to number
+    if (typeof element === 'string' && /^\d+$/.test(element)) {
+      return parseInt(element, 10);
+    }
+    return element;
+  });
+  
+  return { cell: link.cell, path: normalizedPath };
 }
 
 /**
