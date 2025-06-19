@@ -112,6 +112,274 @@ class VirtualFs implements ModuleResolutionHost {
   }
 }
 
+function createOpaqueRefTransformer(
+  program: ts.Program,
+): ts.TransformerFactory<ts.SourceFile> {
+  const checker = program.getTypeChecker();
+
+  return (context) => {
+    return (sourceFile) => {
+      let needsIfElseImport = false;
+      let hasTransformed = false;
+
+      const visit: ts.Visitor = (node) => {
+        // Check if it's a conditional expression
+        if (ts.isConditionalExpression(node)) {
+          const conditionType = checker.getTypeAtLocation(node.condition);
+
+          // Check if the type is OpaqueRef<T>
+          if (isOpaqueRefType(conditionType, checker)) {
+            // Transform ternary to ifElse() call
+            hasTransformed = true;
+            if (!hasIfElseImport(sourceFile)) {
+              needsIfElseImport = true;
+            }
+            return createIfElseCall(node, context.factory, sourceFile);
+          }
+        }
+
+        return ts.visitEachChild(node, visit, context);
+      };
+
+      const visited = ts.visitNode(sourceFile, visit) as ts.SourceFile;
+
+      // If we transformed something and need to add ifElse import
+      if (hasTransformed && needsIfElseImport) {
+        return addIfElseImport(visited, context.factory);
+      }
+
+      return visited;
+    };
+  };
+}
+
+function hasIfElseImport(sourceFile: ts.SourceFile): boolean {
+  // Check if ifElse is imported from @commontools/builder or commontools
+  for (const statement of sourceFile.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        (moduleSpecifier.text === "commontools")
+      ) {
+        // Check if ifElse is in the import clause
+        if (statement.importClause && statement.importClause.namedBindings) {
+          if (ts.isNamedImports(statement.importClause.namedBindings)) {
+            for (
+              const element of statement.importClause.namedBindings.elements
+            ) {
+              if (element.name.text === "ifElse") {
+                return true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function addIfElseImport(
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+): ts.SourceFile {
+  let existingBuilderImport: ts.ImportDeclaration | undefined;
+  let existingImportIndex: number = -1;
+  let importSource: string = "commontools"; // default
+
+  // Find existing @commontools/builder or commontools import
+  sourceFile.statements.forEach((statement, index) => {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        moduleSpecifier.text === "commontools"
+      ) {
+        existingBuilderImport = statement;
+        existingImportIndex = index;
+        importSource = moduleSpecifier.text; // use the same import source
+      }
+    }
+  });
+
+  let newImport: ts.ImportDeclaration;
+
+  if (
+    existingBuilderImport && existingBuilderImport.importClause &&
+    existingBuilderImport.importClause.namedBindings &&
+    ts.isNamedImports(existingBuilderImport.importClause.namedBindings)
+  ) {
+    // Add ifElse to existing import if not already present
+    const existingElements =
+      existingBuilderImport.importClause.namedBindings.elements;
+    const hasIfElse = existingElements.some((element) =>
+      element.name.text === "ifElse"
+    );
+
+    if (hasIfElse) {
+      // ifElse is already imported, no need to modify
+      return sourceFile;
+    }
+
+    const newElements = [
+      ...existingElements,
+      factory.createImportSpecifier(
+        false,
+        undefined,
+        factory.createIdentifier("ifElse"),
+      ),
+    ];
+
+    newImport = factory.updateImportDeclaration(
+      existingBuilderImport,
+      undefined,
+      factory.createImportClause(
+        false,
+        existingBuilderImport.importClause.name,
+        factory.createNamedImports(newElements),
+      ),
+      existingBuilderImport.moduleSpecifier,
+      undefined,
+    );
+  } else {
+    // Create new import
+    newImport = factory.createImportDeclaration(
+      undefined,
+      factory.createImportClause(
+        false,
+        undefined,
+        factory.createNamedImports([
+          factory.createImportSpecifier(
+            false,
+            undefined,
+            factory.createIdentifier("ifElse"),
+          ),
+        ]),
+      ),
+      factory.createStringLiteral(importSource),
+      undefined,
+    );
+  }
+
+  // Reconstruct statements with the new import
+  const newStatements = [...sourceFile.statements];
+  if (existingBuilderImport && existingImportIndex >= 0) {
+    // Replace the existing import with the updated one
+    newStatements[existingImportIndex] = newImport;
+  } else {
+    // Add new import at the beginning
+    newStatements.unshift(newImport);
+  }
+
+  return factory.updateSourceFile(
+    sourceFile,
+    newStatements,
+    sourceFile.isDeclarationFile,
+    sourceFile.referencedFiles,
+    sourceFile.typeReferenceDirectives,
+    sourceFile.hasNoDefaultLib,
+    sourceFile.libReferenceDirectives,
+  );
+}
+
+function isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  // Handle intersection types (OpaqueRef<T> is defined as an intersection)
+  if (type.flags & ts.TypeFlags.Intersection) {
+    const intersectionType = type as ts.IntersectionType;
+    // Check if any of the constituent types is OpaqueRef
+    return intersectionType.types.some((t) => isOpaqueRefType(t, checker));
+  }
+
+  // Check if it's a type reference
+  if (type.flags & ts.TypeFlags.Object) {
+    const objectType = type as ts.ObjectType;
+
+    // Check if it's a reference to a generic type
+    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+      const typeRef = objectType as ts.TypeReference;
+      const target = typeRef.target;
+
+      if (target && target.symbol) {
+        const symbolName = target.symbol.getName();
+        if (symbolName === "OpaqueRef") return true;
+
+        // Also check the fully qualified name
+        const fullyQualifiedName = checker.getFullyQualifiedName(target.symbol);
+        if (fullyQualifiedName.includes("OpaqueRef")) return true;
+      }
+    }
+
+    // Also check the type's symbol directly
+    const symbol = type.getSymbol();
+    if (symbol) {
+      if (symbol.name === "OpaqueRef" || symbol.name === "OpaqueRefMethods") {
+        return true;
+      }
+
+      const fullyQualifiedName = checker.getFullyQualifiedName(symbol);
+      if (fullyQualifiedName.includes("OpaqueRef")) return true;
+    }
+  }
+
+  // Check type alias
+  if (type.aliasSymbol) {
+    const aliasName = type.aliasSymbol.getName();
+    if (aliasName === "OpaqueRef" || aliasName === "Opaque") return true;
+
+    const fullyQualifiedName = checker.getFullyQualifiedName(type.aliasSymbol);
+    if (fullyQualifiedName.includes("OpaqueRef")) return true;
+  }
+
+  return false;
+}
+
+function createIfElseCall(
+  ternary: ts.ConditionalExpression,
+  factory: ts.NodeFactory,
+  sourceFile: ts.SourceFile,
+): ts.CallExpression {
+  // For AMD output, TypeScript transforms imports into module parameters
+  // e.g., import { ifElse } from "commontools" becomes a parameter commontools_1
+  // We need to use the transformed module name pattern
+  const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+
+  const ifElseIdentifier = moduleAlias
+    ? factory.createPropertyAccessExpression(
+      factory.createIdentifier(moduleAlias),
+      factory.createIdentifier("ifElse"),
+    )
+    : factory.createIdentifier("ifElse");
+
+  return factory.createCallExpression(
+    ifElseIdentifier,
+    undefined,
+    [ternary.condition, ternary.whenTrue, ternary.whenFalse],
+  );
+}
+
+function getCommonToolsModuleAlias(sourceFile: ts.SourceFile): string | null {
+  // In AMD output, TypeScript transforms module imports to parameters
+  // For imports from "commontools", it typically becomes "commontools_1"
+  // We need to check if there's an import from commontools
+  for (const statement of sourceFile.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        moduleSpecifier.text === "commontools"
+      ) {
+        // For named imports in AMD, TypeScript generates a module parameter
+        // like "commontools_1". Since we're working at the AST level before
+        // AMD transformation, we need to anticipate this pattern.
+        // Return the expected AMD module alias
+        return "commontools_1";
+      }
+    }
+  }
+  return null;
+}
+
 class TypeScriptHost extends VirtualFs implements CompilerHost {
   private allowedRuntimeModules: string[];
   constructor(
@@ -302,6 +570,12 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
 
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       mainSource,
+      undefined,
+      undefined,
+      undefined,
+      {
+        before: [createOpaqueRefTransformer(tsProgram)],
+      },
     );
     checker.check(diagnostics);
 
