@@ -14,7 +14,7 @@ import type {
   SchemaContext,
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
-import { type NormalizedLink, parseLink } from "./link-utils.ts";
+import { isLegacyAlias, type NormalizedLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
 import { isSigilEmbed, type JSONCellLink } from "./cell.ts";
 
@@ -458,11 +458,14 @@ function narrowSchema(
 export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
   const link = parseLink(value, {} as NormalizedLink);
   if (!link) return { path: [], cellTarget: undefined };
-  return { path: link.path, cellTarget: fromURI(link.id) };
+  return {
+    path: link.path,
+    cellTarget: link.id ? fromURI(link.id) : undefined,
+  };
 }
 
 export function isPointer(value: unknown): boolean {
-  return (isSigilEmbed(value) || isJSONCellLink(value));
+  return (isSigilEmbed(value) || isJSONCellLink(value) || isLegacyAlias(value));
 }
 
 /**
