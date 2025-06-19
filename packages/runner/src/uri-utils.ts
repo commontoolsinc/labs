@@ -1,36 +1,20 @@
+import { isRecord } from "@commontools/utils/types";
 import type { EntityId } from "./doc-map.ts";
 
 /**
  * Convert an entity ID to URI format with "of:" prefix
  */
 export function toURI(value: unknown): string {
-  // Handle EntityId with toJSON method
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "toJSON" in value &&
-    typeof value.toJSON === "function"
-  ) {
-    const json = value.toJSON();
-    if (typeof json === "object" && json !== null && "/" in json) {
-      return `of:${json["/"]}`;
-    }
-  }
+  if (isRecord(value)) {
+    // Converts EntityId to JSON
+    const parsed = JSON.parse(JSON.stringify(value)) as { "/": string };
 
-  // Handle direct EntityId object
-  if (typeof value === "object" && value !== null && "/" in value) {
-    const id = (value as EntityId)["/"];
-    if (typeof id === "string") {
-      return `of:${id}`;
-    }
-  }
-
-  // Handle string
-  if (typeof value === "string") {
+    // Handle EntityId object
+    if (typeof parsed["/"] === "string") return `of:${parsed["/"]}`;
+  } else if (typeof value === "string") {
     // Already has prefix with colon
-    if (value.includes(":")) {
-      return value;
-    }
+    if (value.includes(":")) return value;
+
     // Add "of:" prefix
     return `of:${value}`;
   }
