@@ -106,11 +106,7 @@ async function main() {
   charms.sink((charms) => {
     console.log(
       "all charms:",
-      charms.map((c) =>
-        getEntityId(c) === undefined
-          ? "<undefined>"
-          : entityIdStr(getEntityId(c)!)
-      ),
+      charms.map((c) => getEntityId(c)?.["/"]),
     );
   });
 

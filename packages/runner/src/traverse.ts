@@ -119,26 +119,20 @@ export abstract class BaseObjectManager<K, S, V>
   constructor(
     protected readValues = new Map<string, ValueEntry<S, V>>(),
     protected writeValues = new Map<string, ValueEntry<S, V>>(),
-    protected readDependentDocs = new Map<string, Set<S>>(),
-    protected writeDependentDocs = new Map<string, Set<S>>(),
   ) {}
 
   addRead(doc: K, value: V, source: S) {
     const key = this.toKey(doc);
-    const dependencies = this.readDependentDocs.get(key) ?? new Set<S>();
-    dependencies.add(source);
-    this.readDependentDocs.set(key, dependencies);
     this.readValues.set(key, { value: value, source: source });
   }
 
   addWrite(doc: K, value: V, source: S) {
     const key = this.toKey(doc);
-    const dependencies = this.writeDependentDocs.get(key) ?? new Set<S>();
-    dependencies.add(source);
-    this.writeDependentDocs.set(key, dependencies);
     this.writeValues.set(key, { value: value, source: source });
   }
   abstract getTarget(value: CellTarget): K;
+  // load the doc from the underlying system.
+  // implementations are responsible for adding this to the readValues
   abstract load(doc: K): ValueEntry<S, V | undefined> | null;
   // get a string version of a key
   abstract toKey(doc: K): string;
@@ -362,12 +356,6 @@ function followPointer<K, S>(
       if (valueEntry === null) {
         return [{ ...doc, path: [], value: undefined }, selector];
       }
-      if (
-        valueEntry !== null && valueEntry.value !== undefined &&
-        valueEntry.source && valueEntry.value !== doc.docRoot
-      ) {
-        manager.addRead(target, valueEntry.value, valueEntry.source);
-      }
       if (schemaTracker !== undefined && selector !== undefined) {
         schemaTracker.add(manager.toKey(target), selector);
       }
@@ -388,7 +376,6 @@ function followPointer<K, S>(
       // Load any sources (recursively) if they exist
       loadSource(
         manager,
-        doc.doc,
         valueEntry,
         new Set<string>(),
         schemaTracker,
@@ -418,7 +405,6 @@ function followPointer<K, S>(
 // Recursively load the source from the doc ()
 export function loadSource<K, S>(
   manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
-  doc: K,
   valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker?: MapSet<string, SchemaPathSelector>,
@@ -445,11 +431,10 @@ export function loadSource<K, S>(
   if (entry === null || entry.value === undefined || !entry.source) {
     return;
   }
-  manager.addRead(entryDoc, entry.value, entry.source);
   if (schemaTracker !== undefined) {
     schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
   }
-  loadSource(manager, entryDoc, entry, cycleCheck, schemaTracker);
+  loadSource(manager, entry, cycleCheck, schemaTracker);
 }
 
 // docPath is where we found the pointer and are doing this work

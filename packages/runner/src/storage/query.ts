@@ -109,10 +109,6 @@ export class DocObjectManager extends ClientObjectManager {
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
-    const factSelector: FactAddress = {
-      of: doc.of,
-      the: doc.the,
-    };
     // strip off the leading "of:"
     const entityId = { "/": doc.of.slice(3) };
     // First, check the document map
@@ -185,7 +181,6 @@ export function querySchema(
   // Also load any source links
   loadSource(
     manager,
-    factAddress,
     valueEntry,
     new Set<string>(),
     schemaTracker,
@@ -223,10 +218,6 @@ export function querySchema(
   // We don't actually use the return value here, but we've built up
   // a list of all the documents we read.
   traverser.traverse(newDoc);
-  console.log(
-    "read docs",
-    [...manager.getReadDocs()].map((ve) => manager.toKey(ve.source)),
-  );
   for (const item of manager.getReadDocs()) {
     rv.add(item);
   }

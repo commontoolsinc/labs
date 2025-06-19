@@ -602,9 +602,7 @@ export class Replica {
     const schemaless = need
       .filter(([_addr, schema]) => schema === undefined)
       .map(([addr, _schema]) => addr);
-    console.log("Schemaless", schemaless);
     const { ok: pulled, error } = await this.cache.pull(schemaless);
-    console.log("pulled1:", pulled);
 
     if (error) {
       return { error };
@@ -617,9 +615,7 @@ export class Replica {
       // have to wait until fetch is complete.
       // TODO(@ubik2) still need to add since field
       if (pulled.size < need.length) {
-        const pullResult = await this.pull(need);
-        console.log("pulled2:", pullResult);
-        return pullResult;
+        return await this.pull(need);
       } //
       // Otherwise we are able to complete checkout and we schedule a pull in
       // the background so we can get latest entries if there are some available.
@@ -1146,7 +1142,7 @@ export class Provider implements IStorageProvider {
       return replica;
     } else {
       const session = this.session.mount(space);
-      // FIXME: Temporarily disabling the cache while I ensure things work correctly
+      // FIXME(@ubik2): Disabling the cache while I ensure things work correctly
       const replica = new Replica(space, session, new NoCache());
       replica.useSchemaQueries = this.settings.useSchemaQueries;
       replica.poll();
@@ -1165,7 +1161,6 @@ export class Provider implements IStorageProvider {
     // will unsubscribe with the same object.
     const { workspace } = this;
     const address = { the, of };
-    console.log("Called sink for", JSON.stringify(entityId));
     const subscriber = (revision?: Revision<State>) => {
       if (revision) {
         // ⚠️ We may not have a value because fact was retracted or

@@ -274,12 +274,12 @@ function loadFactsForDoc(
       traverser.traverse(newDoc);
 
       // Also load any source links
-      loadSource(manager, factAddress, fact, new Set<string>(), schemaTracker);
+      loadSource(manager, fact, new Set<string>(), schemaTracker);
     } else {
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(factAddress);
-      loadSource(manager, factAddress, fact, new Set<string>(), schemaTracker);
+      loadSource(manager, fact, new Set<string>(), schemaTracker);
     }
   }
 }
