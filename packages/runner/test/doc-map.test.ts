@@ -59,7 +59,6 @@ describe("cell-map", () => {
       const id = getEntityId(cell);
       
       expect(getEntityId(cell)).toEqual(id);
-      expect(getEntityId(cell.getDoc())).toEqual(id);
       expect(getEntityId(cell.getAsQueryResult())).toEqual(id);
       expect(getEntityId(cell.getAsCellLink())).toEqual(id);
     });
@@ -101,8 +100,8 @@ describe("cell-map", () => {
       expect(retrievedCell.entityId).toEqual(c.entityId);
       expect(retrievedCell.get()).toEqual({ value: 42 });
       
-      // Also verify the underlying docs are the same
-      expect(retrievedCell.getDoc()).toBe(c.getDoc());
+      // Also verify the cells are equal
+      expect(retrievedCell.equals(c)).toBe(true);
     });
 
     it("should return undefined for non-existent entity ID", () => {
@@ -118,7 +117,12 @@ describe("cell-map", () => {
     it("should serialize the entity ID", () => {
       const c = runtime.getCell<{ value: number }>(space, "test-json");
       c.set({ value: 42 });
-      expect(JSON.stringify(c.getDoc())).toEqual(JSON.stringify(c.getDoc().entityId));
+      
+      const expected = JSON.stringify({
+        cell: c.entityId,
+        path: []
+      });
+      expect(JSON.stringify(c)).toEqual(expected);
     });
   });
 });

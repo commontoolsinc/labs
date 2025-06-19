@@ -364,7 +364,7 @@ describe("data-updating", () => {
 
       // Should create an entity and return changes to that entity
       expect(changes.length).toBe(3);
-      expect(changes[0].location.cell).toBe(testCell.getDoc());
+      expect(changes[0].location.cell.asCell().equals(testCell)).toBe(true);
       expect(changes[0].location.path).toEqual(["items", 0]);
       expect(changes[1].location.cell).not.toBe(changes[0].location.cell);
       expect(changes[1].location.path).toEqual([]);
@@ -546,7 +546,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expect(changes[0].value).toEqual({ cell: cellA.getDoc(), path: [] });
+      expectCellLinksEqual(changes[0].value).toEqual(cellA.getAsCellLink());
     });
 
     it("should handle doc and cell references that don't change", () => {
@@ -566,7 +566,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expect(changes[0].value).toEqual({ cell: cellA.getDoc(), path: [] });
+      expectCellLinksEqual(changes[0].value).toEqual(cellA.getAsCellLink());
 
       applyChangeSet(changes);
 
@@ -594,7 +594,7 @@ describe("data-updating", () => {
         space,
         "addCommonIDfromObjectID arrays",
       );
-      testCell.setRaw({ items: [{ cell: itemCell.getDoc(), path: [] }] });
+      testCell.setRaw({ items: [itemCell.getAsCellLink()] });
 
       const data = {
         items: [{ id: "item1", name: "New Item" }, itemCell],
