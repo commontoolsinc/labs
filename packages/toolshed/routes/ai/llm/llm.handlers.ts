@@ -278,8 +278,7 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
     if (cachedResult) {
       return c.json({
         object: cachedResult.object,
-        id: cachedResult.id,
-      });
+      }, HttpStatusCodes.OK);
     }
   }
 
@@ -292,14 +291,13 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
         await saveToCache(cacheKey, {
           ...removeNonCacheableFields(payload),
           object: result.object,
-          id: result.id,
         });
       } catch (e) {
         console.error("Error saving generateObject response to cache:", e);
       }
     }
 
-    return c.json(result);
+    return c.json(result, HttpStatusCodes.OK);
   } catch (error) {
     console.error("Error in generateObject:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
