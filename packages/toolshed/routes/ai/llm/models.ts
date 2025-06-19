@@ -4,6 +4,7 @@ import { createGroq, groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
 import { createXai, xai } from "@ai-sdk/xai";
+import type { LanguageModelV1 } from "ai";
 
 import env from "@/env.ts";
 
@@ -20,7 +21,7 @@ export type Capabilities = {
 };
 
 type ModelConfig = {
-  model: string; // FIXME(ja): this type is wrong! it isn't a string
+  model: LanguageModelV1;
   name: string;
   capabilities: Capabilities;
   aliases: string[];
@@ -77,7 +78,7 @@ const addModel = ({
     : provider(modelName);
 
   const config: ModelConfig = {
-    model: model as unknown as string, // FIXME(ja): this type is wrong! it isn't a string
+    model,
     name,
     capabilities,
     aliases,
