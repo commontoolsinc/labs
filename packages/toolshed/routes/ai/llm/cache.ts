@@ -6,6 +6,7 @@ export const CACHE_DIR = `${env.CACHE_DIR}/llm-api-cache`;
 
 interface CacheItem {
   messages: Array<{ role: string; content: string }>;
+  object?: Record<string, unknown>;
   model?: string;
   system?: string;
   stopSequences?: string[];

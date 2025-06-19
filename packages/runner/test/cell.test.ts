@@ -10,6 +10,7 @@ import { Runtime } from "../src/runtime.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { expectCellLinksEqual } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -277,14 +278,14 @@ describe("createProxy", () => {
   });
 
   it("should handle aliases when writing", () => {
-    const c = runtime.getCell(
+    const c = runtime.getCell<{ x: number; y: number }>(
       space,
       "should handle aliases when writing",
     );
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = c.getAsQueryResult();
     proxy.x = 100;
-    expect((c.get() as any).y).toBe(100);
+    expect(c.get().y).toBe(100);
   });
 
   it("should handle nested cells", () => {
@@ -518,11 +519,10 @@ describe("createProxy", () => {
     const proxy = c.getAsQueryResult([], log);
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
-    expect(log.writes.length).toBe(2);
-    expect(log.writes[0].cell).toBe(c.getDoc());
-    expect(log.writes[0].path).toEqual(["length"]);
-    expect(log.writes[1].cell).toBe(c.getDoc());
-    expect(log.writes[1].path).toEqual([2]);
+    expectCellLinksEqual(log.writes).toEqual([
+      c.key("length").getAsCellLink(),
+      c.key(2).getAsCellLink(),
+    ]);
     proxy.length = 4;
     expect(c.get()).toEqual([1, 2, undefined, undefined]);
     expect(log.writes.length).toBe(5);
@@ -629,7 +629,7 @@ describe("asCell", () => {
     expect(streamCell).not.toHaveProperty("set");
     expect(streamCell).not.toHaveProperty("key");
 
-    let lastEventSeen = "";
+    let lastEventSeen: any = null;
     let eventCount = 0;
 
     runtime.scheduler.addEventHandler(
@@ -640,12 +640,12 @@ describe("asCell", () => {
       { cell: c.getDoc(), path: ["stream"] },
     );
 
-    (streamCell as any).send("event");
+    streamCell.send({ $stream: true });
     await runtime.idle();
 
     expect(c.get()).toStrictEqual({ stream: { $stream: true } });
     expect(eventCount).toBe(1);
-    expect(lastEventSeen).toBe("event");
+    expect(lastEventSeen).toEqual({ $stream: true });
   });
 
   it("should call sink only when the cell changes on the subpath", async () => {

@@ -131,6 +131,15 @@ export interface BuiltInLLMState<T> {
     partial?: string;
     error: unknown;
 }
+export interface BuiltInGenerateObjectParams {
+    model?: string;
+    prompt?: string;
+    schema?: JSONSchema;
+    system?: string;
+    cache?: boolean;
+    maxTokens?: number;
+    metadata?: Record<string, string | undefined | object>;
+}
 export interface BuiltInCompileAndRunParams<T> {
     files: Record<string, string>;
     main: string;
@@ -166,6 +175,7 @@ export type RenderFunction = <T>(fn: () => T) => OpaqueRef<T>;
 export type StrFunction = (strings: TemplateStringsArray, ...values: any[]) => OpaqueRef<string>;
 export type IfElseFunction = <T = any, U = any, V = any>(condition: Opaque<T>, ifTrue: Opaque<U>, ifFalse: Opaque<V>) => OpaqueRef<U | V>;
 export type LLMFunction = <T = string>(params: Opaque<BuiltInLLMParams>) => OpaqueRef<BuiltInLLMState<T>>;
+export type GenerateObjectFunction = <T = any>(params: Opaque<BuiltInGenerateObjectParams>) => OpaqueRef<BuiltInLLMState<T>>;
 export type FetchDataFunction = <T>(params: Opaque<{
     url: string;
     mode?: "json" | "text";
@@ -208,6 +218,7 @@ export declare const render: RenderFunction;
 export declare const str: StrFunction;
 export declare const ifElse: IfElseFunction;
 export declare const llm: LLMFunction;
+export declare const generateObject: GenerateObjectFunction;
 export declare const fetchData: FetchDataFunction;
 export declare const streamData: StreamDataFunction;
 export declare const compileAndRun: CompileAndRunFunction;

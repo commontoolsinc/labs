@@ -9,6 +9,7 @@ import type {
   CreateCellFunction,
   DeriveFunction,
   FetchDataFunction,
+  GenerateObjectFunction,
   GetRecipeEnvironmentFunction,
   HandlerFunction,
   IfElseFunction,
@@ -270,6 +271,7 @@ export interface BuilderFunctionsAndConstants {
   str: StrFunction;
   ifElse: IfElseFunction;
   llm: LLMFunction;
+  generateObject: GenerateObjectFunction;
   fetchData: FetchDataFunction;
   streamData: StreamDataFunction;
   compileAndRun: CompileAndRunFunction;

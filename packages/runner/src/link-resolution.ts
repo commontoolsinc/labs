@@ -5,7 +5,7 @@ import {
 } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { type Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import {
   getCellLinkOrThrow,
@@ -263,10 +263,11 @@ export function maybeGetCellLink<T>(
 // Only logs interim aliases, not the first one, and not the non-alias value.
 export function followAliases<T = any>(
   alias: Alias,
-  doc: DocImpl<T>,
+  docOrCell: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
 ): CellLink {
   if (isAlias(alias)) {
+    const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
     return followLinks(
       { cell: doc, ...alias.$alias } as CellLink,
       log,
