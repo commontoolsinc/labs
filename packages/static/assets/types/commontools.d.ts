@@ -102,6 +102,10 @@ export type JSONSchema = {
     readonly minProperties?: number;
     readonly required?: readonly string[];
     readonly dependentRequired?: Readonly<Record<string, readonly string[]>>;
+    readonly format?: string;
+    readonly contentEncoding?: string;
+    readonly contentMediaType?: string;
+    readonly contentSchema?: JSONSchema | boolean;
     readonly title?: string;
     readonly description?: string;
     readonly default?: Readonly<JSONValue>;
