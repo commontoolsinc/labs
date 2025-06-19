@@ -39,7 +39,6 @@ export {
   areLinksSame,
   isLink,
   isWritethroughEmbed,
-  parseAlias,
   parseLink,
   parseLinkOrThrow,
   parseToLegacyCellLink,
