@@ -24,6 +24,7 @@ import {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { type IRuntime } from "./runtime.ts";
+import { cell } from "@commontools/api";
 
 /**
  * Normalized link structure returned by parsers
@@ -90,12 +91,14 @@ export function parseLink(
 
   if (isCell(value)) {
     // Extract from Cell using its entityId and internal path
-    const entityId = value.entityId;
-    if (!entityId) return undefined;
+    const link = value.getAsLink({
+      base: isCell(base) ? base : undefined,
+      baseSpace: base?.space,
+    })["/"][EMBED_V1_TAG];
     return {
-      id: toURI(entityId),
-      path: [], // Cells represent the root of their document
-      space: value.getDoc().space,
+      id: link.id!,
+      path: link.path!,
+      space: link.space,
       schema: value.schema,
       rootSchema: value.rootSchema,
     };

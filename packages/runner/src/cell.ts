@@ -272,7 +272,7 @@ export const EMBED_V1_TAG = "embed@1" as const;
 export type EmbedV1 = {
   [EMBED_V1_TAG]: {
     id?: string;
-    path?: (string | number)[];
+    path?: string[];
     space?: MemorySpace;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
