@@ -26,7 +26,7 @@ export class CommonGoogleOauthElement extends LitElement {
     scopes: { type: Array },
   };
 
-  declare auth: Cell<AuthData> | undefined;
+  declare auth: Cell<AuthData>;
   declare authStatus: string;
   declare isLoading: boolean;
   declare authResult: Record<string, unknown> | null;
@@ -52,7 +52,7 @@ export class CommonGoogleOauthElement extends LitElement {
     this.authStatus = "Initiating OAuth flow...";
     this.authResult = null;
 
-    const authCellId = JSON.stringify(this.auth?.getAsLink());
+    const authCellId = JSON.stringify(this.auth.getAsLink());
 
     // `ct://${spaceDid}/${cellId}`
 
@@ -134,7 +134,7 @@ export class CommonGoogleOauthElement extends LitElement {
   }
 
   async handleLogout() {
-    await this.auth?.set({
+    await this.auth.set({
       token: "",
       tokenType: "",
       scope: [],
@@ -154,20 +154,20 @@ export class CommonGoogleOauthElement extends LitElement {
     return html`
       <div class="oauth-wrapper">
         <div class="profile-section">
-          ${this.auth?.get()?.user?.email && this.auth?.get()?.token
+          ${this.auth.get()?.user?.email && this.auth.get()?.token
         ? html`
-          <img class="profile-picture" src="${this.auth?.get()?.user
+          <img class="profile-picture" src="${this.auth.get()?.user
             ?.picture}" alt="User profile picture" />
           <div class="user-info">
-            <h2 class="user-name">${this.auth?.get()?.user?.name}</h2>
-            <p class="user-email">${this.auth?.get()?.user?.email}</p>
+            <h2 class="user-name">${this.auth.get()?.user?.name}</h2>
+            <p class="user-email">${this.auth.get()?.user?.email}</p>
           </div>
         `
         : ""}
         </div>
 
         <div class="action-section">
-          ${this.auth?.get()?.token
+          ${this.auth.get()?.token
         ? html`
           <button @click="${this.handleLogout}" class="oauth-button logout">
             Logout
