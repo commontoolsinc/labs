@@ -184,6 +184,8 @@ export interface IStorageTransaction {
    * in (local) memory.
    *
    * Read will fail with `INotFoundError` record in the given address does not exist
+   * but `Read` operation is still added to the transaction invariants as transactor
+   * assumes non existence of the record.
    *
    * ```ts
    *  const w = tx.write({ the, of, at: [] }, {
