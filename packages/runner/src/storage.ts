@@ -342,8 +342,7 @@ export class Storage implements IStorage {
       if (typeof value !== "object" || value === null) {
         return value;
       } else if ("cell" in value && "path" in value) {
-        // If we see a doc link with just an id, then we replace it with
-        // the actual doc:
+        // If we see a doc link an id, then we sync the mentioned doc.
         if (
           isRecord(value.cell) &&
           "/" in value.cell &&
