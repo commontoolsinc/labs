@@ -18,10 +18,6 @@ export {
   getCommonToolsModuleAlias,
   hasCommonToolsImport,
   addCommonToolsImport,
-  hasDeriveImport,
-  hasIfElseImport,
-  addDeriveImport,
-  addIfElseImport,
 } from "./imports.ts";
 
 // Transformation utilities

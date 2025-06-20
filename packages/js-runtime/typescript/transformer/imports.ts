@@ -140,36 +140,3 @@ export function addCommonToolsImport(
   );
 }
 
-/**
- * Shorthand for checking if derive is imported.
- */
-export function hasDeriveImport(sourceFile: ts.SourceFile): boolean {
-  return hasCommonToolsImport(sourceFile, "derive");
-}
-
-/**
- * Shorthand for checking if ifElse is imported.
- */
-export function hasIfElseImport(sourceFile: ts.SourceFile): boolean {
-  return hasCommonToolsImport(sourceFile, "ifElse");
-}
-
-/**
- * Shorthand for adding derive import.
- */
-export function addDeriveImport(
-  sourceFile: ts.SourceFile,
-  factory: ts.NodeFactory,
-): ts.SourceFile {
-  return addCommonToolsImport(sourceFile, factory, "derive");
-}
-
-/**
- * Shorthand for adding ifElse import.
- */
-export function addIfElseImport(
-  sourceFile: ts.SourceFile,
-  factory: ts.NodeFactory,
-): ts.SourceFile {
-  return addCommonToolsImport(sourceFile, factory, "ifElse");
-}
