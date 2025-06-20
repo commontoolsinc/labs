@@ -19,7 +19,8 @@ import {
   recipeFromFrame,
 } from "./builder/recipe.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, type LegacyAlias } from "./cell.ts";
+import { type Cell } from "./cell.ts";
+import { type LegacyAlias } from "./sigil-types.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
 import { containsOpaqueRef, deepCopy } from "./type-utils.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -38,7 +39,8 @@ import {
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { isCell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";

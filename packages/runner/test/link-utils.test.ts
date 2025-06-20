@@ -11,7 +11,7 @@ import {
   parseLinkOrThrow,
   parseToLegacyCellLink,
 } from "../src/link-utils.ts";
-import { LINK_V1_TAG } from "../src/cell.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";

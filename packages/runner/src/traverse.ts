@@ -16,7 +16,8 @@ import type {
 import { deepEqual } from "./path-utils.ts";
 import { isLegacyAlias, type NormalizedLink, parseLink } from "./link-utils.ts";
 import { fromURI } from "./uri-utils.ts";
-import { isSigilLink, type JSONCellLink } from "./cell.ts";
+import { isSigilLink } from "./cell.ts";
+import { type JSONCellLink } from "./sigil-types.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];

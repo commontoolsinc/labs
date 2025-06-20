@@ -1,13 +1,12 @@
 import { type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
+import { type Cell, createCell } from "./cell.ts";
 import {
-  type Cell,
   type CellLink,
-  createCell,
   type LegacyAlias,
   type SigilWriteRedirectLink,
-} from "./cell.ts";
+} from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { arrayEqual } from "./type-utils.ts";
 import {

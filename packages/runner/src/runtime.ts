@@ -16,7 +16,8 @@ import type {
 } from "./storage/interface.ts";
 
 export type { IStorageManager, IStorageProvider, MemorySpace };
-import { type Cell, type CellLink, isCellLink } from "./cell.ts";
+import { type Cell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
 import { type EntityId, getEntityId } from "./doc-map.ts";

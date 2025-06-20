@@ -3,19 +3,21 @@ import { type JSONSchema } from "./builder/types.ts";
 import { isDoc } from "./doc.ts";
 import {
   type Cell,
-  type CellLink,
   isAnyCellLink,
   isCell,
   isCellLink,
   isJSONCellLink,
   isSigilLink,
+  type MemorySpace,
+} from "./cell.ts";
+import {
+  type CellLink,
   type JSONCellLink,
   type LegacyAlias,
   LINK_V1_TAG,
-  type MemorySpace,
   type SigilLink,
   type SigilWriteRedirectLink,
-} from "./cell.ts";
+} from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./type-utils.ts";
 import {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Cell, CellLink, isCell, isStream } from "../src/cell.ts";
+import { type Cell, isCell, isStream } from "../src/cell.ts";
+import { CellLink } from "../src/sigil-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -115,7 +116,7 @@ describe("Schema Support", () => {
         "should support nested sinks 1",
       );
       innerCell.set({ label: "first" });
-      
+
       const c = runtime.getCell<{
         value: string;
         current: CellLink;
@@ -235,14 +236,14 @@ describe("Schema Support", () => {
       );
       initial.set({ foo: { label: "first" } });
       const initialEntityId = initial.entityId!;
-      
+
       const linkCell = runtime.getCell<any>(
         space,
         "should support nested sinks via asCell with aliases 2",
       );
       linkCell.setRaw(initial.getAsCellLink());
       const linkEntityId = linkCell.entityId!;
-      
+
       const docCell = runtime.getCell<{
         value: string;
         current: any;
@@ -723,9 +724,11 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("nested").key("items").key(0).key("value").setRaw(c.getAsCellLink());
+      c.key("nested").key("items").key(0).key("value").setRaw(
+        c.getAsCellLink(),
+      );
       c.key("nested").key("items").key(1).key("value").setRaw(
-        c.key("nested").getAsCellLink()
+        c.key("nested").getAsCellLink(),
       );
 
       const schema = {

@@ -2,7 +2,7 @@ import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
-import { type CellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,

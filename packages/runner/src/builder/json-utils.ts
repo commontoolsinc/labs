@@ -1,11 +1,6 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import {
-  type CellLink,
-  isCell,
-  isCellLink,
-  isSigilWriteRedirectLink,
-  type LegacyAlias,
-} from "../cell.ts";
+import { isCell, isCellLink, isSigilWriteRedirectLink } from "../cell.ts";
+import { type CellLink, type LegacyAlias } from "../sigil-types.ts";
 import { isLegacyAlias, parseToLegacyCellLink } from "../link-utils.ts";
 import { isDoc } from "../doc.ts";
 import { createShadowRef } from "./opaque-ref.ts";
