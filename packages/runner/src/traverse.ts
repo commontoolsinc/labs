@@ -459,7 +459,7 @@ function loadLinkedRecipe<K, S>(
     return;
   }
   const recipeId = value["$TYPE"];
-  const entityId = refer({ recipeId, type: "recipe" });
+  const entityId = refer({ causal: { recipeId, type: "recipe" } });
   const entryDoc = manager.toAddress(entityId.toJSON()["/"]);
   const entry = manager.load(entryDoc);
   if (entry === null || entry.value === undefined || !entry.source) {
