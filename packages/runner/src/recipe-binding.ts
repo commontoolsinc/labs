@@ -8,7 +8,8 @@ import {
 } from "./builder/types.ts";
 import { isLegacyAlias } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
+import { type Cell, isCell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";

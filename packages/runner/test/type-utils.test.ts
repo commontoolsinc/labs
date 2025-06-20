@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { isModule, isRecipe, type Opaque } from "../src/builder/types.ts";
 import { isWriteRedirectLink } from "../src/link-utils.ts";
-import { LINK_V1_TAG } from "../src/cell.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {

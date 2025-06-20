@@ -3,7 +3,8 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { isWriteRedirectLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
-import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
+import { createCell, isCell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./link-resolution.ts";
 

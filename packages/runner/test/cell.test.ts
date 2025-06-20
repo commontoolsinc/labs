@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type DocImpl } from "../src/doc.ts";
-import { isCell, isCellLink, LINK_V1_TAG } from "../src/cell.ts";
+import { isCell, isCellLink } from "../src/cell.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { ID, JSONSchema } from "../src/builder/types.ts";
@@ -1278,15 +1279,15 @@ describe("asCell with schema", () => {
     expect(value.context.nested.get().value).toBe(42);
 
     // Check that 4 unique documents were read (by entity ID)
-    const readEntityIds = new Set(log.reads.map(r => r.cell.entityId));
+    const readEntityIds = new Set(log.reads.map((r) => r.cell.entityId));
     expect(readEntityIds.size).toBe(4);
-    
+
     // Verify each cell was read using equals()
-    const readCells = log.reads.map(r => r.cell.asCell());
-    expect(readCells.some(cell => cell.equals(c))).toBe(true);
-    expect(readCells.some(cell => cell.equals(ref3Cell))).toBe(true);
-    expect(readCells.some(cell => cell.equals(ref2Cell))).toBe(true);
-    expect(readCells.some(cell => cell.equals(innerCell))).toBe(true);
+    const readCells = log.reads.map((r) => r.cell.asCell());
+    expect(readCells.some((cell) => cell.equals(c))).toBe(true);
+    expect(readCells.some((cell) => cell.equals(ref3Cell))).toBe(true);
+    expect(readCells.some((cell) => cell.equals(ref2Cell))).toBe(true);
+    expect(readCells.some((cell) => cell.equals(innerCell))).toBe(true);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });
@@ -2078,14 +2079,20 @@ describe("JSON.stringify bug", () => {
       space,
       "json-test2",
     );
-    d.setRaw({ internal: { "__#2": normalizeCellLink(c.key("result").getAsCellLink()) } });
+    d.setRaw({
+      internal: { "__#2": normalizeCellLink(c.key("result").getAsCellLink()) },
+    });
     const e = runtime.getCell<{ internal: { a: any } }>(
       space,
       "json-test3",
     );
     e.setRaw({
       internal: {
-        a: { $alias: normalizeCellLink(d.key("internal").key("__#2").key("data").getAsCellLink()) },
+        a: {
+          $alias: normalizeCellLink(
+            d.key("internal").key("__#2").key("data").getAsCellLink(),
+          ),
+        },
       },
     });
     const proxy = e.getAsQueryResult();

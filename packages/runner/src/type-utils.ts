@@ -1,7 +1,8 @@
 import { isRecord, type Mutable } from "@commontools/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import { isDoc } from "./doc.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { isCell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,

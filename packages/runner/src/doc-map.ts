@@ -6,7 +6,8 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { isCell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
 import { fromURI, normalizeEntityId } from "./uri-utils.ts";
 
