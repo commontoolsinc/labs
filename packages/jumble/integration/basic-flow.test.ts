@@ -17,7 +17,7 @@ const TAKE_SNAPSHOTS = false;
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
-const HEADLESS = true;
+const HEADLESS = !Deno.env.get("RUN_IN_BROWSER");
 const ASTRAL_TIMEOUT = 60_000;
 const RECIPE_PATH = "../../recipes/simpleValue.tsx";
 const COMMON_CLI_PATH = path.join(
