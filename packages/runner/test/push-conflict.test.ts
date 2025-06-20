@@ -110,7 +110,7 @@ describe("Push conflict", () => {
       "name",
     );
     name.set(undefined);
-    
+
     const list = runtime.getCell<any[]>(
       signer.did(),
       "list 2",
@@ -175,7 +175,7 @@ describe("Push conflict", () => {
       "name 2",
     );
     name.set(undefined);
-    
+
     const list = runtime.getCell<any[]>(
       signer.did(),
       "list 3",
@@ -239,6 +239,6 @@ describe("Push conflict", () => {
     expect(!!listDoc.retry?.length).toBe(false);
 
     // Check that the ID is still there
-    expect(entry.equals(list.getRaw()[3].cell.asCell())).toBe(true);
+    expect(JSON.stringify(entry)).toEqual(JSON.stringify(list.getRaw()[3]));
   });
 });
