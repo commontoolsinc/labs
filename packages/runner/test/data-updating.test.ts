@@ -10,8 +10,7 @@ import {
 } from "../src/data-updating.ts";
 import { isEqualCellLink } from "../src/type-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { CellLink, isAnyCellLink, isCellLink } from "../src/cell.ts";
-import { areLinksSame } from "../src/link-utils.ts";
+import { isAnyCellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
