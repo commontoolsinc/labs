@@ -10,7 +10,7 @@ import { Runtime } from "../src/runtime.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { expectCellLinksEqual } from "./test-helpers.ts";
+import { expectCellLinksEqual, normalizeCellLink } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -526,11 +526,11 @@ describe("createProxy", () => {
     proxy.length = 4;
     expect(c.get()).toEqual([1, 2, undefined, undefined]);
     expect(log.writes.length).toBe(5);
-    expect(log.writes[2].cell).toBe(c.getDoc());
+    expect(log.writes[2].cell.asCell().equals(c)).toBe(true);
     expect(log.writes[2].path).toEqual(["length"]);
-    expect(log.writes[3].cell).toBe(c.getDoc());
+    expect(log.writes[3].cell.asCell().equals(c)).toBe(true);
     expect(log.writes[3].path).toEqual([2]);
-    expect(log.writes[4].cell).toBe(c.getDoc());
+    expect(log.writes[4].cell.asCell().equals(c)).toBe(true);
     expect(log.writes[4].path).toEqual([3]);
   });
 
@@ -545,11 +545,11 @@ describe("createProxy", () => {
     proxy.splice(1, 1, 4, 5);
     expect(c.get()).toEqual([1, 4, 5, 3]);
     expect(log.writes.length).toBe(3);
-    expect(log.writes[0].cell).toBe(c.getDoc());
+    expect(log.writes[0].cell.asCell().equals(c)).toBe(true);
     expect(log.writes[0].path).toEqual(["1"]);
-    expect(log.writes[1].cell).toBe(c.getDoc());
+    expect(log.writes[1].cell.asCell().equals(c)).toBe(true);
     expect(log.writes[1].path).toEqual(["2"]);
-    expect(log.writes[2].cell).toBe(c.getDoc());
+    expect(log.writes[2].cell.asCell().equals(c)).toBe(true);
     expect(log.writes[2].path).toEqual(["3"]);
   });
 });
@@ -1274,12 +1274,16 @@ describe("asCell with schema", () => {
     expect(isCell(value.context.nested)).toBe(true);
     expect(value.context.nested.get().value).toBe(42);
 
-    const readDocs = new Set<DocImpl<any>>(log.reads.map((r) => r.cell));
-    expect(readDocs.size).toBe(4);
-    expect(readDocs.has(c.getDoc())).toBe(true);
-    expect(readDocs.has(ref3Cell.getDoc())).toBe(true);
-    expect(readDocs.has(ref2Cell.getDoc())).toBe(true);
-    expect(readDocs.has(innerCell.getDoc())).toBe(true);
+    // Check that 4 unique documents were read (by entity ID)
+    const readEntityIds = new Set(log.reads.map(r => r.cell.entityId));
+    expect(readEntityIds.size).toBe(4);
+    
+    // Verify each cell was read using equals()
+    const readCells = log.reads.map(r => r.cell.asCell());
+    expect(readCells.some(cell => cell.equals(c))).toBe(true);
+    expect(readCells.some(cell => cell.equals(ref3Cell))).toBe(true);
+    expect(readCells.some(cell => cell.equals(ref2Cell))).toBe(true);
+    expect(readCells.some(cell => cell.equals(innerCell))).toBe(true);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });
@@ -1695,23 +1699,23 @@ describe("JSON.stringify bug", () => {
   });
 
   it("should not modify the value of the cell", () => {
-    const c = runtime.getCell(
+    const c = runtime.getCell<{ result: { data: number } }>(
       space,
       "json-test",
     );
     c.setRaw({ result: { data: 1 } });
-    const d = runtime.getCell(
+    const d = runtime.getCell<{ internal: { "__#2": any } }>(
       space,
       "json-test2",
     );
-    d.setRaw({ internal: { "__#2": { cell: c.getDoc(), path: ["result"] } } });
-    const e = runtime.getCell(
+    d.setRaw({ internal: { "__#2": normalizeCellLink(c.key("result").getAsCellLink()) } });
+    const e = runtime.getCell<{ internal: { a: any } }>(
       space,
       "json-test3",
     );
     e.setRaw({
       internal: {
-        a: { $alias: { cell: d.getDoc(), path: ["internal", "__#2", "data"] } },
+        a: { $alias: normalizeCellLink(d.key("internal").key("__#2").key("data").getAsCellLink()) },
       },
     });
     const proxy = e.getAsQueryResult();

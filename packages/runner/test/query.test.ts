@@ -17,6 +17,7 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { ClientObjectManager } from "../src/storage/query.ts";
+import { entityIdToJSON } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -52,39 +53,39 @@ describe("Query", () => {
     const docValue1 = {
       employees: [{ fulllName: { first: "Bob", last: "Hope" } }],
     };
-    const testDoc1 = runtime.documentMap.getDoc<
+    const testCell1 = runtime.getCell<
       { employees: { fulllName: { first: string } }[] }
     >(
-      docValue1,
-      `query test cell 1`,
       space,
+      `query test cell 1`,
     );
-    const entityId1 = testDoc1.entityId.toJSON!();
+    testCell1.set(docValue1);
+    const entityId1 = testCell1.entityId!;
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
-      is: { value: testDoc1.value },
+      is: { value: testCell1.get() },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
     };
     const docValue2 = {
       name: {
-        cell: entityId1,
+        cell: entityIdToJSON(entityId1),
         path: ["employees", "0", "fullName"],
       },
     };
-    const testDoc2 = runtime.documentMap.getDoc<
+    const testCell2 = runtime.getCell<
       { name: { cell: { ["/"]: string }; path: string[] } }
     >(
-      docValue2,
-      `query test cell 2`,
       space,
+      `query test cell 2`,
     );
-    const entityId2 = testDoc2.entityId.toJSON!();
+    testCell2.setRaw(docValue2);
+    const entityId2 = testCell2.entityId!;
     const assert2 = {
       the: "application/json",
       of: `of:${entityId2["/"]}` as Entity,
-      is: { value: testDoc2.value },
+      is: { value: testCell2.getRaw() },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };
@@ -143,38 +144,38 @@ describe("Query", () => {
   });
 
   it("should handle true schema", () => {
-    const testDoc1 = runtime.documentMap.getDoc<
+    const testCell1 = runtime.getCell<
       { employees: { name: { first: string } }[] }
     >(
-      { employees: [{ name: { first: "Bob" } }] },
-      `query test cell 1`,
       space,
+      `query test cell 1`,
     );
-    const entityId1 = testDoc1.entityId.toJSON!();
+    testCell1.set({ employees: [{ name: { first: "Bob" } }] });
+    const entityId1 = testCell1.entityId!;
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
-      is: { value: testDoc1.value },
+      is: { value: testCell1.get() },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
     };
-    const testDoc2 = runtime.documentMap.getDoc<
+    const testCell2 = runtime.getCell<
       { name: { cell: { ["/"]: string }; path: string[] } }
     >(
-      {
-        name: {
-          cell: entityId1,
-          path: ["employees", "0", "name"],
-        },
-      },
-      `query test cell 2`,
       space,
+      `query test cell 2`,
     );
-    const entityId2 = testDoc2.entityId.toJSON!();
+    testCell2.setRaw({
+      name: {
+        cell: entityIdToJSON(entityId1),
+        path: ["employees", "0", "name"],
+      },
+    });
+    const entityId2 = testCell2.entityId!;
     const assert2 = {
       the: "application/json",
       of: `of:${entityId2["/"]}` as Entity,
-      is: { value: testDoc2.value },
+      is: { value: testCell2.getRaw() },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };
@@ -236,26 +237,26 @@ describe("Query", () => {
       },
     } as const satisfies JSONSchema;
     // Now we make the doc with the cycle
-    const testDoc1 = runtime.documentMap.getDoc<
+    const testCell1 = runtime.getCell<
       { name: { cell: { ["/"]: string }; path: string[] } }
     >(
-      {
-        name: {
-          cell: { "/": "<placeholder>" },
-          path: ["name"],
-        },
-      },
-      `query test cell 1`,
       space,
+      `query test cell 1`,
     );
-    const entityId1 = testDoc1.entityId.toJSON!();
+    testCell1.setRaw({
+      name: {
+        cell: { "/": "<placeholder>" },
+        path: ["name"],
+      },
+    });
+    const entityId1 = testCell1.entityId!;
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
       is: {
         value: {
           name: {
-            cell: entityId1,
+            cell: entityIdToJSON(entityId1),
             path: ["name"],
           },
         },
@@ -300,30 +301,30 @@ describe("Query", () => {
 
   it("should handle paths in schema and cell links", () => {
     const docValue1 = { home: { street: "1 Infinite Loop" } };
-    const testDoc1 = runtime.documentMap.getDoc<
+    const testCell1 = runtime.getCell<
       { home: { street: string } }
     >(
-      docValue1,
-      `query test cell 1`,
       space,
+      `query test cell 1`,
     );
-    const entityId1 = testDoc1.entityId.toJSON!();
+    testCell1.set(docValue1);
+    const entityId1 = testCell1.entityId!;
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
-      is: { value: testDoc1.value },
+      is: { value: testCell1.get() },
       cause: refer({ the: "application/json", of: `of:${entityId1["/"]}` }),
       since: 1,
     };
 
     const docValue2 = {
-      employees: [{ address: { cell: entityId1, path: ["home"] } }],
+      employees: [{ address: { cell: entityIdToJSON(entityId1), path: ["home"] } }],
     };
-    const testDoc2 = runtime.documentMap.getDoc<any>(
-      docValue2,
-      `query test cell 2`,
+    const testCell2 = runtime.getCell<any>(
       space,
+      `query test cell 2`,
     );
+    testCell2.setRaw(docValue2);
 
     const schema = { "type": "string" } as const satisfies JSONSchema;
     const selector = {
@@ -334,11 +335,11 @@ describe("Query", () => {
       },
     };
 
-    const entityId2 = testDoc2.entityId.toJSON!();
+    const entityId2 = testCell2.entityId!;
     const assert2 = {
       the: "application/json",
       of: `of:${entityId2["/"]}` as Entity,
-      is: { value: testDoc2.value },
+      is: { value: testCell2.getRaw() },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };
