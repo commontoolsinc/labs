@@ -1,14 +1,12 @@
-import { RunCommand } from "../interface.ts";
-import { type Source } from "@commontools/js-runtime";
+import { JsScript, type Source } from "@commontools/js-runtime";
+import { Identity } from "@commontools/identity";
 import { Engine, EngineProgramResolver, Runtime } from "@commontools/runner";
 import { basename, dirname, join } from "@std/path";
 
 async function createRuntime() {
-  const { Runtime } = await import("@commontools/runner");
   const { StorageManager } = await import(
     "@commontools/runner/storage/cache.deno"
   );
-  const { Identity } = await import("@commontools/identity");
   const storageManager = StorageManager.emulate({
     as: await Identity.fromPassphrase("builder"),
   });
@@ -49,24 +47,32 @@ class CliProgram extends EngineProgramResolver {
   }
 }
 
-export class Processor {
-  async run(command: RunCommand): Promise<any> {
-    const filename = command.filename
-      ? basename(command.filename)
-      : command.output
-      ? basename(command.output)
-      : undefined;
-    const program = new CliProgram(command.entry);
-    const engine = new Engine(await createRuntime());
-    const { output, exports } = await engine.process(program, {
-      noCheck: command.noCheck,
-      noRun: command.noRun,
-      filename,
-    });
+export interface ProcessOptions {
+  entry: string;
+  run: boolean;
+  check: boolean;
+  output?: string;
+  filename?: string;
+}
 
-    if (command.output) {
-      await Deno.writeTextFile(command.output, output.js);
-    }
-    return command.noRun ? undefined : exports;
+export async function process(
+  options: ProcessOptions,
+): Promise<{ output: JsScript; exports: any }> {
+  const filename = options.filename
+    ? basename(options.filename)
+    : options.output
+    ? basename(options.output)
+    : undefined;
+  const program = new CliProgram(options.entry);
+  const engine = new Engine(await createRuntime());
+  const { output, exports } = await engine.process(program, {
+    noCheck: !options.check,
+    noRun: !options.run,
+    filename,
+  });
+
+  if (options.output) {
+    await Deno.writeTextFile(options.output, output.js);
   }
+  return { output, exports };
 }

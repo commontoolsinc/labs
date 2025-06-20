@@ -178,7 +178,7 @@ export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
   generateRecipeId(recipe: any, src?: string): string;
-  loadRecipe(id: string, space?: string): Promise<any>;
+  loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
   getRecipeMeta(input: any): any;
   registerRecipe(
     params: {

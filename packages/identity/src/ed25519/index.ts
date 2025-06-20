@@ -12,6 +12,7 @@ import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.ts";
 import * as bip39 from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import {
+  ed25519RawToPkcs8,
   fromPEM,
   generateEd25519Pkcs8,
   isNativeEd25519Supported,
@@ -55,6 +56,21 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
 
   sign<T>(payload: AsBytes<T>) {
     return this.#impl.sign(payload);
+  }
+
+  // Only "noble" implementations can be converted to PKCS8
+  // since we need the raw material.
+  toPkcs8() {
+    const serialized = this.serialize();
+    if (
+      "privateKey" in serialized &&
+      serialized.privateKey instanceof Uint8Array
+    ) {
+      return toPEM(ed25519RawToPkcs8(serialized.privateKey));
+    }
+    throw new Error(
+      'Cannot convert identity to PKCS8 format: requires "noble" implementation.',
+    );
   }
 
   static async fromRaw<ID extends DIDKey>(

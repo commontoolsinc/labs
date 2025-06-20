@@ -56,6 +56,13 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return await Identity.fromRaw(new Uint8Array(signedHash));
   }
 
+  // Derive PKCS8/PEM bytes from this identity.
+  // Implementations other than "noble" throw as private key
+  // material is needed to create the PKCS8/PEM bytes.
+  toPkcs8(): Uint8Array {
+    return this.#keypair.toPkcs8();
+  }
+
   // Generate a new identity from raw ed25519 key material.
   static async fromRaw<ID extends DIDKey>(
     rawPrivateKey: Uint8Array,
