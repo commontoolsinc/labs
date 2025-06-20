@@ -52,7 +52,7 @@ const ResultSchema = {
       properties: {
         title: { type: "string" },
       },
-      example: { title: "New item" },
+      examples: [{ title: "New item" }],
       required: ["title"],
     },
   },

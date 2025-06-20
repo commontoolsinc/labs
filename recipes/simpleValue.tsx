@@ -1,6 +1,6 @@
 import {
-  h,
   derive,
+  h,
   handler,
   type JSONSchema,
   NAME,
@@ -17,7 +17,7 @@ const updaterSchema = {
   },
   title: "Update Values",
   description: "Append `newValues` to the list.",
-  example: { newValues: ["foo", "bar"] },
+  examples: [{ newValues: ["foo", "bar"] }],
   default: { newValues: [] },
 } as const satisfies JSONSchema;
 

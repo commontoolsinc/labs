@@ -148,8 +148,6 @@ export type JSONSchemaTypes =
 export type JSONSchema = {
   readonly $ref?: string;
   readonly $defs?: Readonly<Record<string, JSONSchema>>;
-  // TODO(@ubik2): I think this should be removed (use "examples")
-  readonly example?: Readonly<JSONValue>;
 
   // Subschema logic
   readonly allOf?: readonly (JSONSchema | boolean)[]; // not validated
