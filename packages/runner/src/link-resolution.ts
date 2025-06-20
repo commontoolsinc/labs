@@ -268,7 +268,7 @@ export function followWriteRedirects<T = any>(
       {
         cell: cell.getDoc().runtime.documentMap.getDocByEntityId(
           link.space!,
-          link.id,
+          link.id!,
         ),
         path: link.path,
         space: link.space,

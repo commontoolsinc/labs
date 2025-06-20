@@ -29,8 +29,8 @@ import { cell } from "@commontools/api";
  * Normalized link structure returned by parsers
  */
 export type NormalizedLink = {
-  id: string; // URI format with "of:" prefix
-  path: string[];
+  id?: string; // URI format with "of:" prefix
+  path?: string[];
   space?: MemorySpace;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
@@ -42,10 +42,10 @@ export type NormalizedLink = {
  */
 export function isLink(value: any): boolean {
   return (
+    isQueryResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
     isDoc(value) ||
-    isWriteRedirectLink(value) ||
     (isRecord(value) && "/" in value) // EntityId format
   );
 }
@@ -115,12 +115,6 @@ export function parseLink(
     // If no id provided, use base cell's document
     if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.id;
 
-    if (!id) {
-      throw new Error(
-        "Cannot resolve cell link: neither id nor base provided",
-      );
-    }
-
     return {
       id,
       path: path.map((p) => p.toString()),
@@ -173,7 +167,7 @@ export function parseLink(
     if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.id;
 
     return {
-      id: id!, // We allow undefined id for legacy aliases for now
+      id,
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
@@ -230,10 +224,10 @@ export function parseToLegacyCellLink(
   return {
     cell: doc ?? baseCell!.getDoc().runtime!.documentMap.getDocByEntityId(
       link.space ?? baseCell!.space!,
-      link.id,
+      link.id!,
       true,
     )!,
-    path: link.path,
+    path: link.path ?? [],
     space: link.space,
     schema: link.schema,
     rootSchema: link.rootSchema,
@@ -267,4 +261,39 @@ export function areLinksSame(
     link1.space === link2.space &&
     arrayEqual(link1.path, link2.path)
   );
+}
+
+export function createSigilLinkFromParsedLink(
+  link: NormalizedLink,
+  base?: Cell | NormalizedLink,
+): SigilLink {
+  const sigilLink: SigilLink = {
+    "/": {
+      [LINK_V1_TAG]: {
+        path: link.path,
+        schema: link.schema,
+        rootSchema: link.rootSchema,
+      },
+    },
+  };
+
+  // Only add space if different from base
+  if (link.space !== base?.space) {
+    sigilLink["/"][LINK_V1_TAG].space = link.space;
+  }
+
+  // Only add id if different from base
+  const baseId = base
+    ? (isCell(base) ? toURI(base.entityId) : base.id)
+    : undefined;
+  if (link.id !== baseId) {
+    sigilLink["/"][LINK_V1_TAG].id = link.id;
+  }
+
+  // Only add overwrite if it's a redirect
+  if (link.overwrite === "redirect") {
+    sigilLink["/"][LINK_V1_TAG].overwrite = link.overwrite;
+  }
+
+  return sigilLink;
 }

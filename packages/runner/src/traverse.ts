@@ -459,7 +459,7 @@ export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
   const link = parseLink(value, {} as NormalizedLink);
   if (!link) return { path: [], cellTarget: undefined };
   return {
-    path: link.path,
+    path: link.path ?? [],
     cellTarget: link.id ? fromURI(link.id) : undefined,
   };
 }
