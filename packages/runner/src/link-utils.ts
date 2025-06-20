@@ -86,7 +86,7 @@ export function parseLink(
 
   if (isCell(value)) {
     return {
-      source: toURI(value.entityId),
+      source: toURI(value.getDoc().entityId),
       path: value.path.map((p) => p.toString()),
       space: value.space,
       schema: value.schema,
@@ -105,8 +105,7 @@ export function parseLink(
 
   // Handle new sigil format
   if (isSigilLink(value)) {
-    const sigilLink = value as SigilLink;
-    const link = sigilLink["/"][LINK_V1_TAG];
+    const link = value["/"][LINK_V1_TAG];
 
     // Resolve relative references
     let id = link.source;
@@ -128,22 +127,20 @@ export function parseLink(
 
   // Handle legacy CellLink format (runtime format with DocImpl)
   if (isCellLink(value)) {
-    const cellLink = value as CellLink;
     return {
-      source: toURI(cellLink.cell.entityId),
-      path: cellLink.path.map((p) => p.toString()),
-      space: cellLink.cell.space,
-      schema: cellLink.schema,
-      rootSchema: cellLink.rootSchema,
+      source: toURI(value.cell.entityId),
+      path: value.path.map((p) => p.toString()),
+      space: value.cell.space,
+      schema: value.schema,
+      rootSchema: value.rootSchema,
     };
   }
 
   // Handle JSON CellLink format (storage format with { "/": string })
   if (isJSONCellLink(value)) {
-    const jsonLink = value as JSONCellLink;
     return {
-      source: toURI(jsonLink.cell["/"]),
-      path: jsonLink.path.map((p) => p.toString()),
+      source: toURI(value.cell["/"]),
+      path: value.path.map((p) => p.toString()),
       space: base?.space, // Space must come from context for JSON links
     };
   }
