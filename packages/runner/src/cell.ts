@@ -76,13 +76,13 @@ import { validateAndTransform } from "./schema.ts";
  * @method getAsCellLink Returns a cell link for the cell.
  * @returns {CellLink}
  *
- * @method getRaw Raw access method, without following aliases (which would 
- * write to the destination instead of the cell itself). 
+ * @method getRaw Raw access method, without following aliases (which would
+ * write to the destination instead of the cell itself).
  * @returns {any} - Raw document data
  *
- * @method setRaw Raw write method that bypasses Cell validation, 
- * transformation, and alias resolution. Writes directly to the cell without 
- * following aliases. 
+ * @method setRaw Raw write method that bypasses Cell validation,
+ * transformation, and alias resolution. Writes directly to the cell without
+ * following aliases.
  * @param {any} value - Raw value to write directly to document
  * @returns {boolean} - Result from underlying doc.send()
  *
@@ -327,7 +327,8 @@ function createRegularCell<T>(
       if (currentValue === undefined) {
         if (schema) {
           // Check if schema allows objects
-          const allowsObject = schema.type === "object" || (Array.isArray(schema.type) && schema.type.includes("object")) ||
+          const allowsObject = schema.type === "object" ||
+            (Array.isArray(schema.type) && schema.type.includes("object")) ||
             (schema.anyOf &&
               schema.anyOf.some((s) =>
                 typeof s === "object" && s.type === "object"

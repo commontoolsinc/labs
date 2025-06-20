@@ -10,7 +10,7 @@ export { raw } from "./module.ts";
 export type { DocImpl } from "./doc.ts";
 export type { Cell, CellLink, Stream } from "./cell.ts";
 export type { EntityId } from "./doc-map.ts";
-export { createRef, getEntityId } from "./doc-map.ts";
+export { createRef, entityIdStr, getEntityId } from "./doc-map.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";

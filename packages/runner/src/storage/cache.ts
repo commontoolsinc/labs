@@ -1,10 +1,6 @@
 import { fromString, refer } from "merkle-reference";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
-import { type JSONSchema } from "../builder/types.ts";
-import { ContextualFlowControl } from "../cfc.ts";
-import { deepEqual } from "../path-utils.ts";
-import { MapSet } from "../traverse.ts";
 import type {
   AuthorizationError,
   Changes,
@@ -19,7 +15,6 @@ import type {
   MemorySpace,
   Protocol,
   ProviderCommand,
-  ProviderSession,
   QueryError,
   Result,
   Revision,
@@ -40,14 +35,18 @@ import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
+import { SchemaNone } from "@commontools/memory/schema";
 import { type Cancel, type EntityId } from "@commontools/runner";
-import { type IStorageProvider, type StorageValue } from "./interface.ts";
+import { type JSONSchema } from "../builder/types.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { deepEqual } from "../path-utils.ts";
+import { MapSet } from "../traverse.ts";
+import type { IStorageProvider, StorageValue } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
-export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
-import { SchemaNone } from "@commontools/memory/schema";
 
+export * from "@commontools/memory/interface";
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
 }
@@ -1104,6 +1103,11 @@ export class Provider implements IStorageProvider {
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
+  // TODO(@ubik2): Keep track of our server subs, so we can re-establish them
+  // after we lose and re-establish a connection.
+  // We already track the per-doc selectors in Replica, but this version is
+  // useful to re-issue them
+  private serverSubscriptions = new SelectorTracker();
 
   static open(options: RemoteStorageProviderOptions) {
     return new this(options);
@@ -1140,7 +1144,8 @@ export class Provider implements IStorageProvider {
       return replica;
     } else {
       const session = this.session.mount(space);
-      const replica = new Replica(space, session);
+      // FIXME(@ubik2): Disabling the cache while I ensure things work correctly
+      const replica = new Replica(space, session, new NoCache());
       replica.useSchemaQueries = this.settings.useSchemaQueries;
       replica.poll();
       this.spaces.set(space, replica);
@@ -1154,6 +1159,8 @@ export class Provider implements IStorageProvider {
   ): Cancel {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
+    // Capture workspace locally, so that if it changes later, our cancel
+    // will unsubscribe with the same object.
     const { workspace } = this;
     const address = { the, of };
     const subscriber = (revision?: Revision<State>) => {
@@ -1168,7 +1175,7 @@ export class Provider implements IStorageProvider {
     };
 
     workspace.subscribe(address, subscriber);
-    this.workspace.load([[address, undefined]]);
+    workspace.load([[address, undefined]]);
 
     return () => workspace.unsubscribe(address, subscriber);
   }
@@ -1180,7 +1187,18 @@ export class Provider implements IStorageProvider {
   ) {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
-    return this.workspace.load([[{ the, of }, schemaContext]]);
+    const factAddress = { the, of };
+
+    // Track this server subscription, and don't re-issue it
+    if (schemaContext) {
+      const selector = { path: [], schemaContext: schemaContext };
+      if (this.serverSubscriptions.hasSelector(factAddress, selector)) {
+        return Promise.resolve({ ok: {} });
+      }
+      this.serverSubscriptions.add(factAddress, selector);
+    }
+
+    return this.workspace.load([[factAddress, schemaContext]]);
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
@@ -1191,6 +1209,7 @@ export class Provider implements IStorageProvider {
 
     return entity?.is as StorageValue<T> | undefined;
   }
+
   async send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
   ): Promise<

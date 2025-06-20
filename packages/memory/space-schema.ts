@@ -5,6 +5,7 @@ import {
   CycleTracker,
   DefaultSchemaSelector,
   getAtPath,
+  loadSource,
   MapSet,
   type PointerCycleTracker,
   SchemaObjectTraverser,
@@ -74,11 +75,13 @@ export class ServerObjectManager extends BaseObjectManager<
     return `${doc.of}/${doc.the}`;
   }
 
+  override toAddress(str: string): FactAddress {
+    const entity: Entity = `of:${str}`;
+    return { of: entity, the: "application/json" };
+  }
+
   override getTarget(target: CellTarget): FactAddress {
-    return {
-      the: "application/json",
-      of: `of:${target.cellTarget}`,
-    } as FactAddress;
+    return this.toAddress(target.cellTarget!);
   }
 
   /**
@@ -274,6 +277,8 @@ function loadFactsForDoc(
       // object in our manager, so load it directly.
       manager.load(factAddress);
     }
+    // Also load any source links and recipes
+    loadSource(manager, fact, new Set<string>(), schemaTracker);
   }
 }
 

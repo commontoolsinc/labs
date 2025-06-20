@@ -22,6 +22,8 @@ export abstract class BaseStorageProvider implements IStorageProvider {
     expectedInStorage: boolean,
     schemaContext?: SchemaContext,
   ): Promise<Result<Unit, Error>>;
+  // TODO(@ubik2)
+  //): Promise<Result<Selection<FactAddress, Revision<State>>, Error>>;
 
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 

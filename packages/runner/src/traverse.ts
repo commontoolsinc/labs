@@ -1,10 +1,10 @@
+import { refer } from "merkle-reference";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
   type Immutable,
   isNumber,
   isObject,
-  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -119,29 +119,24 @@ export abstract class BaseObjectManager<K, S, V>
   constructor(
     protected readValues = new Map<string, ValueEntry<S, V>>(),
     protected writeValues = new Map<string, ValueEntry<S, V>>(),
-    protected readDependentDocs = new Map<string, Set<S>>(),
-    protected writeDependentDocs = new Map<string, Set<S>>(),
   ) {}
 
   addRead(doc: K, value: V, source: S) {
     const key = this.toKey(doc);
-    const dependencies = this.readDependentDocs.get(key) ?? new Set<S>();
-    dependencies.add(source);
-    this.readDependentDocs.set(key, dependencies);
     this.readValues.set(key, { value: value, source: source });
   }
 
   addWrite(doc: K, value: V, source: S) {
     const key = this.toKey(doc);
-    const dependencies = this.writeDependentDocs.get(key) ?? new Set<S>();
-    dependencies.add(source);
-    this.writeDependentDocs.set(key, dependencies);
     this.writeValues.set(key, { value: value, source: source });
   }
   abstract getTarget(value: CellTarget): K;
+  // load the doc from the underlying system.
+  // implementations are responsible for adding this to the readValues
   abstract load(doc: K): ValueEntry<S, V | undefined> | null;
   // get a string version of a key
   abstract toKey(doc: K): string;
+  abstract toAddress(str: string): K;
 }
 
 export type OptJSONValue =
@@ -361,12 +356,6 @@ function followPointer<K, S>(
       if (valueEntry === null) {
         return [{ ...doc, path: [], value: undefined }, selector];
       }
-      if (
-        valueEntry !== null && valueEntry.value !== undefined &&
-        valueEntry.source && valueEntry.value !== doc.docRoot
-      ) {
-        manager.addRead(doc.doc, valueEntry.value, valueEntry.source);
-      }
       if (schemaTracker !== undefined && selector !== undefined) {
         schemaTracker.add(manager.toKey(target), selector);
       }
@@ -382,8 +371,17 @@ function followPointer<K, S>(
       // an assertion fact.is will be an object with a value property, and
       // that's what our schema is relative to.
       targetDoc = target;
-      targetDocRoot = (valueEntry.value as Immutable<JSONObject>)["value"];
+      const targetObj = valueEntry.value as Immutable<JSONObject>;
+      targetDocRoot = targetObj["value"];
+      // Load any sources (recursively) if they exist and any linked recipes
+      loadSource(
+        manager,
+        valueEntry,
+        new Set<string>(),
+        schemaTracker,
+      );
     }
+
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
     // then the provided path from the arguments.
     return getAtPath(
@@ -401,6 +399,74 @@ function followPointer<K, S>(
     );
   } finally {
     tracker.exit(doc.value!);
+  }
+}
+
+// Recursively load the source from the doc ()
+// This will also load any recipes linked by the doc.
+export function loadSource<K, S>(
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
+  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+  cycleCheck: Set<string> = new Set<string>(),
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+) {
+  loadLinkedRecipe(manager, valueEntry, schemaTracker);
+  if (!isObject(valueEntry.value)) {
+    return;
+  }
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!(isObject(targetObj) || !("source" in targetObj))) {
+    return;
+  }
+  // We also want to include the source cells
+  const source = targetObj["source"];
+  if (!isObject(source) || !("/" in source) || !isString(source["/"])) {
+    return;
+  }
+  const of: string = source["/"];
+  if (cycleCheck.has(of)) {
+    return;
+  }
+  cycleCheck.add(of);
+  const entryDoc = manager.toAddress(of);
+  const entry = manager.load(entryDoc);
+  if (entry === null || entry.value === undefined || !entry.source) {
+    return;
+  }
+  if (schemaTracker !== undefined) {
+    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+  }
+  loadSource(manager, entry, cycleCheck, schemaTracker);
+}
+
+// Load the linked recipe from the doc ()
+// We don't recurse, since that's not required for recipe links
+function loadLinkedRecipe<K, S>(
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
+  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+) {
+  if (!isObject(valueEntry.value)) {
+    return;
+  }
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!(isObject(targetObj) || !("value" in targetObj))) {
+    return;
+  }
+  // We also want to include the source cells
+  const value = targetObj["value"];
+  if (!isObject(value) || !("$TYPE" in value) || !isString(value["$TYPE"])) {
+    return;
+  }
+  const recipeId = value["$TYPE"];
+  const entityId = refer({ causal: { recipeId, type: "recipe" } });
+  const entryDoc = manager.toAddress(entityId.toJSON()["/"]);
+  const entry = manager.load(entryDoc);
+  if (entry === null || entry.value === undefined || !entry.source) {
+    return;
+  }
+  if (schemaTracker !== undefined) {
+    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
   }
 }
 
