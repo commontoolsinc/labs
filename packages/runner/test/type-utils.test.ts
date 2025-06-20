@@ -32,7 +32,7 @@ describe("value type", () => {
 });
 
 describe("utility functions", () => {
-  it("isWritethroughEmbed correctly identifies writethrough embeds", () => {
+  it("isWriteRedirectLink correctly identifies write redirects", () => {
     expect(isWriteRedirectLink({ $alias: { path: ["path", "to", "value"] } }))
       .toBe(true);
     expect(

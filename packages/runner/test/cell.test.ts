@@ -1920,7 +1920,7 @@ describe("getAsLink method", () => {
   });
 });
 
-describe("getAsAlias method", () => {
+describe("getAsWriteRedirectLink method", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -1941,7 +1941,7 @@ describe("getAsAlias method", () => {
   it("should return new sigil alias format", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
-      "getAsAlias-test",
+      "getAsWriteRedirectLink-test",
       space,
     );
     const cell = c.asCell();
@@ -1969,7 +1969,7 @@ describe("getAsAlias method", () => {
   it("should return correct path for nested cells", () => {
     const c = runtime.documentMap.getDoc(
       { nested: { value: 42 } },
-      "getAsAlias-nested-test",
+      "getAsWriteRedirectLink-nested-test",
       space,
     );
     const nestedCell = c.asCell(["nested", "value"]);
@@ -1982,7 +1982,7 @@ describe("getAsAlias method", () => {
   it("should omit space when baseSpace matches", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
-      "getAsAlias-baseSpace-test",
+      "getAsWriteRedirectLink-baseSpace-test",
       space,
     );
     const cell = c.asCell();
@@ -1998,7 +1998,7 @@ describe("getAsAlias method", () => {
   it("should include space when baseSpace differs", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
-      "getAsAlias-different-baseSpace-test",
+      "getAsWriteRedirectLink-different-baseSpace-test",
       space2,
     );
     const cell = c.asCell();
@@ -2014,7 +2014,7 @@ describe("getAsAlias method", () => {
   it("should include schema when includeSchema is true", () => {
     const c = runtime.documentMap.getDoc(
       { value: 42 },
-      "getAsAlias-schema-test",
+      "getAsWriteRedirectLink-schema-test",
       space,
     );
     const schema = { type: "number", minimum: 0 } as const;
@@ -2029,12 +2029,12 @@ describe("getAsAlias method", () => {
   it("should handle base cell for relative aliases", () => {
     const c1 = runtime.documentMap.getDoc(
       { value: 42 },
-      "getAsAlias-base-test-1",
+      "getAsWriteRedirectLink-base-test-1",
       space,
     );
     const c2 = runtime.documentMap.getDoc(
       { other: "test" },
-      "getAsAlias-base-test-2",
+      "getAsWriteRedirectLink-base-test-2",
       space,
     );
     const cell = c1.asCell(["value"]);
