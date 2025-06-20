@@ -1,8 +1,16 @@
 // deno-lint-ignore-file jsx-no-useless-fragment
-import { derive, h, handler, NAME, recipe, schema, str, UI } from "commontools";
+import {
+  derive,
+  h,
+  handler,
+  ifElse,
+  NAME,
+  recipe,
+  schema,
+  str,
+  UI,
+} from "commontools";
 
-// Different way to define the same schema, using 'schema' helper function,
-// let's as leave off `as const satisfies JSONSchema`.
 const model = schema({
   type: "object",
   properties: {
@@ -20,15 +28,29 @@ const decrement = handler({}, model, (_, state) => {
 });
 
 export default recipe(model, model, (cell) => {
+  const odd = derive(cell.value, (value) => value % 2);
+  derive(odd, (odd) => {
+    console.log("odd", odd);
+  });
+  const und = derive(cell.value, (value) => {
+    if (value % 2) {
+      return undefined;
+    }
+    return value + 1;
+  });
+
   return {
     [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
     [UI]: (
       <div>
         <ct-button onClick={decrement(cell)}>-</ct-button>
-        {/* use html fragment to test that it works  */}
-        <>
-          <b>{cell.value}</b>
-        </>
+        <ul>
+          <li>Ternary: {odd ? "odd" : "even"}</li>
+          <li>IfElse: {ifElse(odd, "odd", "even")}</li>
+          <li>next number: {cell.value + 1}</li>
+          <li>
+          </li>
+        </ul>
         <ct-button onClick={increment(cell)}>+</ct-button>
       </div>
     ),
