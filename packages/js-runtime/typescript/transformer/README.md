@@ -68,7 +68,7 @@ The transformer is split into focused modules:
 - `opaque-ref.ts` - Main transformer with configuration
 - `types.ts` - Type checking utilities for OpaqueRef detection
 - `transforms.ts` - Individual transformation functions
-- `imports.ts` - Import management utilities
+- `imports.ts` - Import management utilities (generic import helpers)
 - `test-utils.ts` - Testing utilities
 - `mod.ts` - Public exports
 
