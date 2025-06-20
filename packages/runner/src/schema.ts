@@ -332,7 +332,7 @@ export function validateAndTransform(
       const value = doc.getAtPath(path.slice(0, i + 1));
       if (isWriteRedirectLink(value)) {
         throw new Error(
-          "Unexpected alias in path, should have been handled by resolvePath",
+          "Unexpected write redirect in path, should have been handled by resolvePath",
         );
       }
       if (isCellLink(value)) {
