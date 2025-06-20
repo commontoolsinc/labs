@@ -9,7 +9,7 @@ import {
 import { isCell } from "./cell.ts";
 import { parseLink } from "./link-utils.ts";
 import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
-import { fromURI, normalizeEntityId } from "./uri-utils.ts";
+import { fromURI } from "./uri-utils.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -180,14 +180,13 @@ export class DocumentMap implements IDocumentMap {
     createIfNotFound = true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined {
-    // Normalize entity ID for consistent key generation
-    const normalizedId = { "/": normalizeEntityId(entityId) };
+    const normalizedId = normalizeEntityId(entityId);
 
     let doc = this.entityIdToDocMap.get(space, JSON.stringify(normalizedId));
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
 
-    doc = createDoc<T>(undefined as T, normalizedId, space, this.runtime);
+    doc = this.createDoc<T>(undefined as T, normalizedId, space);
     doc.sourceCell = sourceIfCreated;
     return doc;
   }
@@ -197,22 +196,16 @@ export class DocumentMap implements IDocumentMap {
     entityId: EntityId,
     doc: DocImpl<any>,
   ): void {
-    // Normalize entity ID for consistent key generation
-    const normalizedId = { "/": normalizeEntityId(entityId) };
-    const id = JSON.stringify(normalizedId);
-
     // throw if doc already exists
-    if (this.entityIdToDocMap.get(space, id)) {
+    if (this.entityIdToDocMap.get(space, JSON.stringify(entityId))) {
       throw new Error("Doc already exists");
     }
 
-    this.entityIdToDocMap.set(space, id, doc);
+    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
   }
 
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
-    // Normalize entity ID for consistent key generation
-    const normalizedId = { "/": normalizeEntityId(entityId) };
-    this.entityIdToDocMap.set(space, JSON.stringify(normalizedId), doc);
+    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
   }
 
   cleanup(): void {
@@ -248,7 +241,19 @@ export class DocumentMap implements IDocumentMap {
     space: MemorySpace,
   ): DocImpl<T> {
     // Use the full createDoc implementation with runtime parameter
-    const doc = createDoc(value, entityId, space, this.runtime);
-    return doc;
+    return createDoc(value, entityId, space, this.runtime);
+  }
+}
+
+function normalizeEntityId(entityId: EntityId | string): EntityId {
+  if (typeof entityId === "string") {
+    if (entityId.startsWith("of:")) {
+      return { "/": fromURI(entityId) };
+    }
+    return JSON.parse(entityId) as EntityId;
+  } else if (isRecord(entityId) && "/" in entityId) {
+    return entityId;
+  } else {
+    throw new Error("Invalid entity ID: " + JSON.stringify(entityId));
   }
 }

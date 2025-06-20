@@ -43,16 +43,3 @@ export function fromURI(uri: URI | string): string {
     throw new Error(`Invalid URI: ${uri}`);
   }
 }
-
-/**
- * Normalize an entity ID to ensure consistent format for comparisons
- */
-export function normalizeEntityId(id: EntityId | string): string {
-  if (typeof id === "string") {
-    return fromURI(id);
-  }
-  if (typeof id === "object" && id !== null && "/" in id) {
-    return JSON.parse(JSON.stringify(id))["/"];
-  }
-  throw new Error(`Invalid entity ID: ${JSON.stringify(id)}`);
-}
