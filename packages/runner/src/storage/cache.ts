@@ -1105,7 +1105,9 @@ export class Provider implements IStorageProvider {
     new Map();
   // TODO(@ubik2): Keep track of our server subs, so we can re-establish them
   // after we lose and re-establish a connection.
-  //serverSubscriptions: Map<string, Set<SchemaPathSelector>>
+  // We already track the per-doc selectors in Replica, but this version is
+  // useful to re-issue them
+  private serverSubscriptions = new SelectorTracker();
 
   static open(options: RemoteStorageProviderOptions) {
     return new this(options);
@@ -1143,9 +1145,10 @@ export class Provider implements IStorageProvider {
     } else {
       const session = this.session.mount(space);
       // FIXME(@ubik2): Disabling the cache while I ensure things work correctly
+      // I also remove the poll below, in this case
       const replica = new Replica(space, session, new NoCache());
       replica.useSchemaQueries = this.settings.useSchemaQueries;
-      replica.poll();
+      // replica.poll();
       this.spaces.set(space, replica);
       return replica;
     }
@@ -1185,7 +1188,18 @@ export class Provider implements IStorageProvider {
   ) {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
-    return this.workspace.load([[{ the, of }, schemaContext]]);
+    const factAddress = { the, of };
+
+    // Track this server subscription, and don't re-issue it
+    if (schemaContext) {
+      const selector = { path: [], schemaContext: schemaContext };
+      if (this.serverSubscriptions.hasSelector(factAddress, selector)) {
+        return Promise.resolve({ ok: {} });
+      }
+      this.serverSubscriptions.add(factAddress, selector);
+    }
+
+    return this.workspace.load([[factAddress, schemaContext]]);
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {

@@ -1,10 +1,10 @@
+import { refer } from "merkle-reference";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
   type Immutable,
   isNumber,
   isObject,
-  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
@@ -373,7 +373,7 @@ function followPointer<K, S>(
       targetDoc = target;
       const targetObj = valueEntry.value as Immutable<JSONObject>;
       targetDocRoot = targetObj["value"];
-      // Load any sources (recursively) if they exist
+      // Load any sources (recursively) if they exist and any linked recipes
       loadSource(
         manager,
         valueEntry,
@@ -403,12 +403,14 @@ function followPointer<K, S>(
 }
 
 // Recursively load the source from the doc ()
+// This will also load any recipes linked by the doc.
 export function loadSource<K, S>(
   manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
   valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
+  loadLinkedRecipe(manager, valueEntry, schemaTracker);
   if (!isObject(valueEntry.value)) {
     return;
   }
@@ -435,6 +437,37 @@ export function loadSource<K, S>(
     schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
   }
   loadSource(manager, entry, cycleCheck, schemaTracker);
+}
+
+// Load the linked recipe from the doc ()
+// We don't recurse, since that's not required for recipe links
+function loadLinkedRecipe<K, S>(
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
+  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+) {
+  if (!isObject(valueEntry.value)) {
+    return;
+  }
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!(isObject(targetObj) || !("value" in targetObj))) {
+    return;
+  }
+  // We also want to include the source cells
+  const value = targetObj["value"];
+  if (!isObject(value) || !("$TYPE" in value) || !isString(value["$TYPE"])) {
+    return;
+  }
+  const recipeId = value["$TYPE"];
+  const entityId = refer({ recipeId, type: "recipe" });
+  const entryDoc = manager.toAddress(entityId.toJSON()["/"]);
+  const entry = manager.load(entryDoc);
+  if (entry === null || entry.value === undefined || !entry.source) {
+    return;
+  }
+  if (schemaTracker !== undefined) {
+    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+  }
 }
 
 // docPath is where we found the pointer and are doing this work
