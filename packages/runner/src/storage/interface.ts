@@ -182,6 +182,26 @@ export interface IStorageTransaction {
    * Read will fail with `IStorageTransactionClosed` if transaction is done.
    * Read will fail with `INotFoundError` record in the given address does not exist
    * in (local) memory.
+   *
+   * Read will fail with `INotFoundError` record in the given address does not exist
+   *
+   * ```ts
+   *  const w = tx.write({ the, of, at: [] }, {
+   *    title: "Hello world",
+   *    content: [
+   *       { text: "Beautiful day", format: "bold" }
+   *    ]
+   *  })
+   *  assert(w.ok)
+   *
+   *  assert(tx.read({ the, of, at: ['author'] }).ok === undefined)
+   *  assert(tx.read({ the, of, at: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  // JS specific getters are not supported
+   *  assert(tx.read({ the, of, at: ['content', 'length'] }).ok.is === undefined)
+   *  assert(tx.read({ the, of, at: ['title'] }).ok.is === "Hello world")
+   *  // Referencing non-existing facts produces errors
+   *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
+   * ```
    */
   read(
     address: IStorageAddress,
