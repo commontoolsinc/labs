@@ -686,7 +686,7 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private renderNodes(nodes: OutlineNode[]) {
+  private renderNodes(nodes: OutlineNode[]): unknown {
     return repeat(
       nodes,
       node => node.id,
@@ -694,7 +694,7 @@ export class CTOutliner extends BaseElement {
     );
   }
 
-  private renderNode(node: OutlineNode) {
+  private renderNode(node: OutlineNode): unknown {
     const hasChildren = node.children.length > 0;
     const isEditing = this.editingNodeId === node.id;
     const isFocused = this.focusedNodeId === node.id;
