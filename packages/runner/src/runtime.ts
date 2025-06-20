@@ -456,7 +456,7 @@ export class Runtime implements IRuntime {
     } else {
       doc = this.documentMap.getDocByEntityId(
         cellLink.space as MemorySpace,
-        getEntityId((cellLink as NormalizedLink).id)!,
+        getEntityId((cellLink as NormalizedLink).source)!,
         true,
       )!;
     }

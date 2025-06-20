@@ -461,7 +461,7 @@ export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
   if (!link) return { path: [], cellTarget: undefined };
   return {
     path: link.path ?? [],
-    cellTarget: link.id ? fromURI(link.id) : undefined,
+    cellTarget: link.source ? fromURI(link.source) : undefined,
   };
 }
 
