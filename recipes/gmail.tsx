@@ -1,8 +1,9 @@
 import {
-  h,
+  Cell,
   cell,
   derive,
   getRecipeEnvironment,
+  h,
   handler,
   ID,
   JSONSchema,
@@ -12,7 +13,6 @@ import {
   Schema,
   str,
   UI,
-  Cell,
 } from "commontools";
 import TurndownService from "turndown";
 
@@ -154,8 +154,13 @@ const GmailImporterInputs = {
           description: "number of emails to import",
           default: 100,
         },
+        historyId: {
+          type: "string",
+          description: "Gmail history ID for incremental sync",
+          default: "",
+        },
       },
-      required: ["gmailFilterQuery", "limit"],
+      required: ["gmailFilterQuery", "limit", "historyId"],
     },
     auth: AuthSchema,
   },
@@ -239,6 +244,58 @@ class GmailClient {
     const json = await res.json();
     const authData = json.tokenInfo as Auth;
     this.auth.update(authData);
+  }
+
+  async getProfile(): Promise<{
+    emailAddress: string;
+    messagesTotal: number;
+    threadsTotal: number;
+    historyId: string;
+  }> {
+    const url = new URL(
+      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+    );
+    const res = await this.googleRequest(url);
+    const json = await res.json();
+    return json;
+  }
+
+  async fetchHistory(
+    startHistoryId: string,
+    labelId?: string,
+    maxResults: number = 100,
+  ): Promise<{
+    history?: Array<{
+      id: string;
+      messages?: Array<{ id: string; threadId: string }>;
+      messagesAdded?: Array<{
+        message: { id: string; threadId: string; labelIds: string[] };
+      }>;
+      messagesDeleted?: Array<{ message: { id: string; threadId: string } }>;
+      labelsAdded?: Array<{ message: { id: string }; labelIds: string[] }>;
+      labelsRemoved?: Array<{ message: { id: string }; labelIds: string[] }>;
+    }>;
+    historyId: string;
+    nextPageToken?: string;
+  }> {
+    const url = new URL(
+      "https://gmail.googleapis.com/gmail/v1/users/me/history",
+    );
+    url.searchParams.set("startHistoryId", startHistoryId);
+    url.searchParams.set("maxResults", maxResults.toString());
+    if (labelId) {
+      url.searchParams.set("labelId", labelId);
+    }
+
+    console.log("[GmailClient] Fetching history from:", url.toString());
+    const res = await this.googleRequest(url);
+    const json = await res.json();
+    console.log("[GmailClient] History API returned:", {
+      historyId: json.historyId,
+      historyCount: json.history?.length || 0,
+      hasNextPageToken: !!json.nextPageToken,
+    });
+    return json;
   }
 
   async fetchEmail(
@@ -340,6 +397,13 @@ Accept: application/json
     return parts;
   }
 
+  async fetchMessagesByIds(messageIds: string[]): Promise<any[]> {
+    if (messageIds.length === 0) return [];
+
+    // Use batch API for efficiency
+    return await this.fetchBatch(messageIds.map((id) => ({ id })));
+  }
+
   private async googleRequest(
     url: URL,
     _options?: RequestInit,
@@ -416,11 +480,11 @@ const googleUpdater = handler(
     properties: {
       emails: { type: "array", items: EmailSchema, default: [], asCell: true },
       auth: { ...AuthSchema, asCell: true },
-      settings: GmailImporterInputs.properties.settings,
+      settings: { ...GmailImporterInputs.properties.settings, asCell: true },
     },
     required: ["emails", "auth", "settings"],
   } as const satisfies JSONSchema,
-  (_event, state) => {
+  async (_event, state) => {
     console.log("googleUpdater!");
 
     if (!state.auth.get().token) {
@@ -428,16 +492,50 @@ const googleUpdater = handler(
       return;
     }
 
-    const gmailFilterQuery = state.settings.gmailFilterQuery;
+    const settings = state.settings.get();
+    const gmailFilterQuery = settings.gmailFilterQuery;
 
     console.log("gmailFilterQuery", gmailFilterQuery);
 
-    return process(
+    const result = await process(
       state.auth,
-      state.settings.limit,
+      settings.limit,
       gmailFilterQuery,
-      state,
+      { emails: state.emails, settings: state.settings },
     );
+
+    if (!result) return;
+
+    // Handle deleted emails
+    if (result.deletedEmailIds && result.deletedEmailIds.length > 0) {
+      console.log(`Removing ${result.deletedEmailIds.length} deleted messages`);
+      const deleteSet = new Set(result.deletedEmailIds);
+      const currentEmails = state.emails.get();
+      const remainingEmails = currentEmails.filter((email) =>
+        !deleteSet.has(email.id)
+      );
+      state.emails.set(remainingEmails);
+    }
+
+    // Add new emails
+    if (result.newEmails && result.newEmails.length > 0) {
+      console.log(`Adding ${result.newEmails.length} new emails`);
+      state.emails.push(...result.newEmails);
+    }
+
+    // Update historyId
+    if (result.newHistoryId) {
+      const currentSettings = state.settings.get();
+      console.log("=== UPDATING HISTORY ID ===");
+      console.log("Previous historyId:", currentSettings.historyId || "none");
+      console.log("New historyId:", result.newHistoryId);
+      state.settings.set({
+        ...currentSettings,
+        historyId: result.newHistoryId,
+      });
+      console.log("HistoryId updated successfully");
+      console.log("==========================");
+    }
   },
 );
 
@@ -573,74 +671,243 @@ export async function process(
   gmailFilterQuery: string = "in:INBOX",
   state: {
     emails: Cell<Email[]>;
+    settings: Cell<
+      { gmailFilterQuery: string; limit: number; historyId: string }
+    >;
   },
-) {
+): Promise<
+  | { newHistoryId?: string; newEmails?: Email[]; deletedEmailIds?: string[] }
+  | void
+> {
   if (!auth.get()) {
     console.warn("no token");
     return;
   }
 
-  const existingEmailIds = new Set(
-    state.emails.get().map((email) => email.id),
-  );
-
   const client = new GmailClient(auth);
-  const messages = await client.fetchEmail(maxResults, gmailFilterQuery);
+  const currentHistoryId = state.settings.get().historyId;
 
-  // Filter out existing messages
-  const newMessages = messages.filter(
-    (message: { id: string }) => !existingEmailIds.has(message.id),
-  );
+  let newHistoryId: string | null = null;
+  let messagesToFetch: string[] = [];
+  const messagesToDelete: string[] = [];
+  let useFullSync = false;
 
-  if (newMessages.length === 0) {
-    console.log("No new messages to fetch");
-    return;
-  }
+  // Get existing email IDs and create a map for efficient updates
+  const existingEmails = state.emails.get();
+  const existingEmailIds = new Set(existingEmails.map((email) => email.id));
+  const emailMap = new Map(existingEmails.map((email) => [email.id, email]));
 
-  const batchSize = 100;
-
-  // Process messages in batches with delay
-  for (let i = 0; i < newMessages.length; i += batchSize) {
-    const batchMessages = newMessages.slice(i, i + batchSize);
-    console.log(
-      `Processing batch ${i / batchSize + 1} of ${
-        Math.ceil(newMessages.length / batchSize)
-      }`,
-    );
+  // Try incremental sync if we have a historyId
+  if (currentHistoryId) {
+    console.log("=== INCREMENTAL SYNC MODE ===");
+    console.log("Current historyId:", currentHistoryId);
+    console.log("Existing emails count:", existingEmails.length);
 
     try {
-      await sleep(1000);
-      const fetched = await client.fetchBatch(batchMessages);
-      const emails = messageToEmail(fetched);
-
-      // Filter out any duplicates by ID
-      const newEmails = emails.filter((email) =>
-        !existingEmailIds.has(email.id)
+      console.log("Calling Gmail History API...");
+      const historyResponse = await client.fetchHistory(
+        currentHistoryId,
+        undefined,
+        maxResults,
       );
 
-      if (newEmails.length > 0) {
-        console.log(`Adding ${newEmails.length} new emails`);
-        newEmails.forEach((email) => {
-          email[ID] = email.id;
-        });
-        state.emails.push(...newEmails);
+      console.log("History API Response:");
+      console.log("- New historyId:", historyResponse.historyId);
+      console.log("- Has history records:", !!historyResponse.history);
+      console.log(
+        "- History records count:",
+        historyResponse.history?.length || 0,
+      );
+
+      if (historyResponse.history) {
+        console.log(
+          `Processing ${historyResponse.history.length} history records`,
+        );
+
+        // Process history records
+        for (let i = 0; i < historyResponse.history.length; i++) {
+          const record = historyResponse.history[i];
+          console.log(`\nHistory Record ${i + 1}:`);
+          console.log("- History ID:", record.id);
+          console.log("- Messages added:", record.messagesAdded?.length || 0);
+          console.log(
+            "- Messages deleted:",
+            record.messagesDeleted?.length || 0,
+          );
+          console.log("- Labels added:", record.labelsAdded?.length || 0);
+          console.log("- Labels removed:", record.labelsRemoved?.length || 0);
+
+          // Handle added messages
+          if (record.messagesAdded) {
+            console.log(
+              `  Processing ${record.messagesAdded.length} added messages`,
+            );
+            for (const item of record.messagesAdded) {
+              if (!existingEmailIds.has(item.message.id)) {
+                console.log(`    - New message to fetch: ${item.message.id}`);
+                messagesToFetch.push(item.message.id);
+              } else {
+                console.log(`    - Message already exists: ${item.message.id}`);
+              }
+            }
+          }
+
+          // Handle deleted messages
+          if (record.messagesDeleted) {
+            console.log(
+              `  Processing ${record.messagesDeleted.length} deleted messages`,
+            );
+            for (const item of record.messagesDeleted) {
+              console.log(`    - Message to delete: ${item.message.id}`);
+              messagesToDelete.push(item.message.id);
+            }
+          }
+
+          // Handle label changes
+          if (record.labelsAdded) {
+            console.log(
+              `  Processing ${record.labelsAdded.length} label additions`,
+            );
+            for (const item of record.labelsAdded) {
+              const email = emailMap.get(item.message.id);
+              if (email) {
+                console.log(
+                  `    - Adding labels to ${item.message.id}:`,
+                  item.labelIds,
+                );
+                // Add new labels
+                const newLabels = new Set(email.labelIds);
+                item.labelIds.forEach((label) => newLabels.add(label));
+                email.labelIds = Array.from(newLabels);
+              }
+            }
+          }
+
+          if (record.labelsRemoved) {
+            console.log(
+              `  Processing ${record.labelsRemoved.length} label removals`,
+            );
+            for (const item of record.labelsRemoved) {
+              const email = emailMap.get(item.message.id);
+              if (email) {
+                console.log(
+                  `    - Removing labels from ${item.message.id}:`,
+                  item.labelIds,
+                );
+                // Remove labels
+                const labelSet = new Set(email.labelIds);
+                item.labelIds.forEach((label) => labelSet.delete(label));
+                email.labelIds = Array.from(labelSet);
+              }
+            }
+          }
+        }
+
+        newHistoryId = historyResponse.historyId;
+        console.log("\n=== INCREMENTAL SYNC SUMMARY ===");
+        console.log(`Messages to fetch: ${messagesToFetch.length}`);
+        console.log(`Messages to delete: ${messagesToDelete.length}`);
+        console.log(`Old historyId: ${currentHistoryId}`);
+        console.log(`New historyId: ${newHistoryId}`);
+        console.log("================================\n");
       } else {
-        console.log("No new emails found");
+        console.log("No history changes found");
+        console.log(
+          `Updating historyId from ${currentHistoryId} to ${historyResponse.historyId}`,
+        );
+        newHistoryId = historyResponse.historyId;
       }
     } catch (error: any) {
-      console.error(
-        "Error processing batch:",
-        "message" in error ? error.message : error,
+      if (
+        error.message &&
+        (error.message.includes("404") || error.message.includes("410"))
+      ) {
+        console.log("History ID expired, falling back to full sync");
+        useFullSync = true;
+      } else {
+        console.error("Error fetching history:", error);
+        throw error;
+      }
+    }
+  } else {
+    console.log("=== FULL SYNC MODE ===");
+    console.log("No historyId found, performing full sync");
+    useFullSync = true;
+  }
+
+  // Perform full sync if needed
+  if (useFullSync) {
+    console.log("Getting user profile to obtain current historyId...");
+    // Get current profile to get latest historyId
+    const profile = await client.getProfile();
+    newHistoryId = profile.historyId;
+    console.log("Profile received:");
+    console.log("- Email:", profile.emailAddress);
+    console.log("- Current historyId:", profile.historyId);
+    console.log("- Total messages:", profile.messagesTotal);
+    console.log("- Total threads:", profile.threadsTotal);
+
+    console.log(
+      `\nFetching messages with query: "${gmailFilterQuery}", limit: ${maxResults}`,
+    );
+    const messages = await client.fetchEmail(maxResults, gmailFilterQuery);
+    console.log(`Received ${messages.length} messages from API`);
+
+    messagesToFetch = messages
+      .filter((message: { id: string }) => !existingEmailIds.has(message.id))
+      .map((message: { id: string }) => message.id);
+
+    console.log(
+      `After filtering existing: ${messagesToFetch.length} new messages to fetch`,
+    );
+    console.log("======================\n");
+  }
+
+  // Collect all new emails to return
+  const allNewEmails: Email[] = [];
+
+  // Fetch new messages in batches
+  if (messagesToFetch.length > 0) {
+    console.log(`Fetching ${messagesToFetch.length} new messages`);
+    const batchSize = 100;
+
+    for (let i = 0; i < messagesToFetch.length; i += batchSize) {
+      const batchIds = messagesToFetch.slice(i, i + batchSize);
+      console.log(
+        `Processing batch ${i / batchSize + 1} of ${
+          Math.ceil(messagesToFetch.length / batchSize)
+        }`,
       );
-      // Optional: add longer delay and retry logic here if needed
+
+      try {
+        await sleep(1000);
+        const fetched = await client.fetchMessagesByIds(batchIds);
+        const emails = messageToEmail(fetched);
+
+        if (emails.length > 0) {
+          console.log(`Adding ${emails.length} new emails`);
+          emails.forEach((email) => {
+            email[ID] = email.id;
+          });
+          allNewEmails.push(...emails);
+        }
+      } catch (error: any) {
+        console.error(
+          "Error processing batch:",
+          "message" in error ? error.message : error,
+        );
+      }
     }
   }
 
-  console.log(
-    "Successfully parsed",
-    newMessages.length,
-    "messages total",
-  );
+  console.log("Sync completed successfully");
+
+  // Return the results instead of directly updating cells
+  return {
+    newHistoryId: newHistoryId || undefined,
+    newEmails: allNewEmails.length > 0 ? allNewEmails : undefined,
+    deletedEmailIds: messagesToDelete.length > 0 ? messagesToDelete : undefined,
+  };
 }
 
 const updateGmailFilterQuery = handler<
@@ -674,6 +941,8 @@ export default recipe(
           <h2 style="font-size: 20px; font-weight: bold;">
             Imported email count: {derive(emails, (emails) => emails.length)}
           </h2>
+
+          <h2>historyId: {settings.historyId}</h2>
 
           <common-hstack gap="sm">
             <common-vstack gap="sm">
@@ -710,12 +979,12 @@ export default recipe(
               </button>
             </common-vstack>
           </common-hstack>
-          <common-google-oauth 
+          <common-google-oauth
             $auth={auth}
             scopes={[
               "email",
               "profile",
-              "https://www.googleapis.com/auth/gmail.readonly"
+              "https://www.googleapis.com/auth/gmail.readonly",
             ]}
           />
           <div>
