@@ -1145,10 +1145,9 @@ export class Provider implements IStorageProvider {
     } else {
       const session = this.session.mount(space);
       // FIXME(@ubik2): Disabling the cache while I ensure things work correctly
-      // I also remove the poll below, in this case
       const replica = new Replica(space, session, new NoCache());
       replica.useSchemaQueries = this.settings.useSchemaQueries;
-      // replica.poll();
+      replica.poll();
       this.spaces.set(space, replica);
       return replica;
     }

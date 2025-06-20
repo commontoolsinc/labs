@@ -117,6 +117,9 @@ export class DocObjectManager extends ClientObjectManager {
       entityId,
       false,
     );
+    // I exclude entries where the value is undefined. While that could be
+    // used to represent a retraction, it's much more likely to mean that
+    // the object is being created, and we should use the value from storage.
     if (docMapEntry !== undefined && docMapEntry.value !== undefined) {
       // Use the storage class to convert this doc to json
       const storageValue = this.cellLinkToJSON(
