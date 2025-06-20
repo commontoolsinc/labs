@@ -51,12 +51,12 @@ describe("Push conflict", () => {
   });
 
   it("should resolve push conflicts", async () => {
-    const listDoc = runtime.documentMap.getDoc<any[]>(
-      [],
-      "list",
+    const list = runtime.getCell<any[]>(
       signer.did(),
+      "list",
     );
-    const list = listDoc.asCell();
+    list.set([]);
+    const listDoc = list.getDoc();
     await storage.syncCell(list);
 
     const source = session.clone();
@@ -72,15 +72,15 @@ describe("Push conflict", () => {
     });
 
     // Update memory without notifying main storage
-    await memory.sync(listDoc.entityId, true); // Get current value
-    expect(memory.get(listDoc.entityId)).toEqual({ value: [] });
+    await memory.sync(list.entityId!, true); // Get current value
+    expect(memory.get(list.entityId!)).toEqual({ value: [] });
 
     await memory.send([{
-      entityId: listDoc.entityId,
+      entityId: list.entityId!,
       value: { value: [1, 2, 3] },
     }]);
 
-    expect(memory.get(listDoc.entityId)).toEqual({ value: [1, 2, 3] });
+    expect(memory.get(list.entityId!)).toEqual({ value: [1, 2, 3] });
 
     let retryCalled = false;
     listDoc.retry = [(value) => {
@@ -105,19 +105,18 @@ describe("Push conflict", () => {
   });
 
   it("should resolve push conflicts among other conflicts", async () => {
-    const nameDoc = runtime.documentMap.getDoc<string | undefined>(
-      undefined,
+    const name = runtime.getCell<string | undefined>(
+      signer.did(),
       "name",
-      signer.did(),
     );
-    const listDoc = runtime.documentMap.getDoc<any[]>(
-      [],
+    name.set(undefined);
+    
+    const list = runtime.getCell<any[]>(
+      signer.did(),
       "list 2",
-      signer.did(),
     );
-
-    const name = nameDoc.asCell();
-    const list = listDoc.asCell();
+    list.set([]);
+    const listDoc = list.getDoc();
 
     await storage.syncCell(name);
     await storage.syncCell(list);
@@ -135,13 +134,13 @@ describe("Push conflict", () => {
     });
 
     // Update memory without notifying main storage
-    await memory.sync(nameDoc.entityId, true); // Get current value
-    await memory.sync(listDoc.entityId, true); // Get current value
+    await memory.sync(name.entityId!, true); // Get current value
+    await memory.sync(list.entityId!, true); // Get current value
     await memory.send<any>([{
-      entityId: nameDoc.entityId,
+      entityId: name.entityId!,
       value: { value: "foo" },
     }, {
-      entityId: listDoc.entityId,
+      entityId: list.entityId!,
       value: { value: [1, 2, 3] },
     }]);
 
@@ -171,19 +170,18 @@ describe("Push conflict", () => {
   });
 
   it("should resolve push conflicts with ID among other conflicts", async () => {
-    const nameDoc = runtime.documentMap.getDoc<string | undefined>(
-      undefined,
+    const name = runtime.getCell<string | undefined>(
+      signer.did(),
       "name 2",
-      signer.did(),
     );
-    const listDoc = runtime.documentMap.getDoc<any[]>(
-      [],
+    name.set(undefined);
+    
+    const list = runtime.getCell<any[]>(
+      signer.did(),
       "list 3",
-      signer.did(),
     );
-
-    const name = nameDoc.asCell();
-    const list = listDoc.asCell();
+    list.set([]);
+    const listDoc = list.getDoc();
 
     await storage.syncCell(name);
     await storage.syncCell(list);
@@ -201,13 +199,13 @@ describe("Push conflict", () => {
     });
 
     // Update memory without notifying main storage
-    await memory.sync(nameDoc.entityId, true); // Get current value
-    await memory.sync(listDoc.entityId, true); // Get current value
+    await memory.sync(name.entityId!, true); // Get current value
+    await memory.sync(list.entityId!, true); // Get current value
     await memory.send<any>([{
-      entityId: nameDoc.entityId,
+      entityId: name.entityId!,
       value: { value: "foo" },
     }, {
-      entityId: listDoc.entityId,
+      entityId: list.entityId!,
       value: { value: [{ n: 1 }, { n: 2 }, { n: 3 }] },
     }]);
 
@@ -223,8 +221,8 @@ describe("Push conflict", () => {
     // This is locally ahead of the db, and retry wasn't called yet.
     expect(name.get()).toEqual("bar");
     expect(list.get()).toEqual([{ n: 4 }]);
-    expect(isCellLink(listDoc.get()?.[0])).toBe(true);
-    const entry = listDoc.get()[0].cell?.asCell();
+    expect(isCellLink(list.getRaw()?.[0])).toBe(true);
+    const entry = list.getRaw()[0].cell?.asCell();
     expect(retryCalled).toEqual(0);
 
     await storage.synced();
@@ -241,6 +239,6 @@ describe("Push conflict", () => {
     expect(!!listDoc.retry?.length).toBe(false);
 
     // Check that the ID is still there
-    expect(entry.equals(listDoc.get()[3])).toBe(true);
+    expect(entry.equals(list.getRaw()[3].cell.asCell())).toBe(true);
   });
 });

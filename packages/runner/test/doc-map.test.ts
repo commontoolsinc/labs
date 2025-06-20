@@ -54,51 +54,60 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const c = runtime.documentMap.getDoc({}, undefined, space);
-      const id = getEntityId(c);
-
-      expect(getEntityId(c)).toEqual(id);
-      expect(getEntityId(c.getAsQueryResult())).toEqual(id);
-      expect(getEntityId(c.asCell())).toEqual(id);
-      expect(getEntityId({ cell: c, path: [] })).toEqual(id);
+      const cell = runtime.getCell(space, "test-cell");
+      cell.set({});
+      const id = getEntityId(cell);
+      
+      expect(getEntityId(cell)).toEqual(id);
+      expect(getEntityId(cell.getAsQueryResult())).toEqual(id);
+      expect(getEntityId(cell.getAsCellLink())).toEqual(id);
     });
 
     it("should return a different entity ID for reference with paths", () => {
-      const c = runtime.documentMap.getDoc(
-        { foo: { bar: 42 } },
-        undefined,
+      const c = runtime.getCell<{ foo: { bar: number } }>(
         space,
+        "test-with-paths",
       );
+      c.set({ foo: { bar: 42 } });
       const id = getEntityId(c);
 
       expect(getEntityId(c.getAsQueryResult())).toEqual(id);
       expect(getEntityId(c.getAsQueryResult(["foo"]))).not.toEqual(id);
-      expect(getEntityId(c.asCell(["foo"]))).not.toEqual(id);
-      expect(getEntityId({ cell: c, path: ["foo"] })).not.toEqual(id);
+      expect(getEntityId(c.key("foo"))).not.toEqual(id);
+      expect(getEntityId(c.key("foo").getAsCellLink())).not.toEqual(id);
 
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
-        getEntityId(c.asCell(["foo"])),
+        getEntityId(c.key("foo")),
       );
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
-        getEntityId({ cell: c, path: ["foo"] }),
+        getEntityId(c.key("foo").getAsCellLink()),
       );
     });
   });
 
   describe("getCellByEntityId and setCellByEntityId", () => {
     it("should set and get a cell by entity ID", () => {
-      const c = runtime.documentMap.getDoc({ value: 42 }, undefined, space);
+      const c = runtime.getCell<{ value: number }>(space, "test-by-entity-id");
+      c.set({ value: 42 });
 
-      const retrievedCell = runtime.documentMap.getDocByEntityId(
-        c.space,
+      // Use Cell API to retrieve by entity ID
+      const retrievedCell = runtime.getCellFromEntityId<{ value: number }>(
+        space,
         c.entityId!,
       );
 
-      expect(retrievedCell).toBe(c);
+      // Verify we got the same cell
+      expect(retrievedCell.entityId).toEqual(c.entityId);
+      expect(retrievedCell.get()).toEqual({ value: 42 });
+      
+      // Also verify the cells are equal
+      expect(retrievedCell.equals(c)).toBe(true);
     });
 
     it("should return undefined for non-existent entity ID", () => {
       const nonExistentId = createRef() as EntityId;
+      // Note: We must use getDocByEntityId directly here because getCellFromEntityId
+      // always creates a new doc if not found (createIfNotFound: true)
       expect(runtime.documentMap.getDocByEntityId(space, nonExistentId, false))
         .toBeUndefined();
     });
@@ -106,8 +115,14 @@ describe("cell-map", () => {
 
   describe("cells as JSON", () => {
     it("should serialize the entity ID", () => {
-      const c = runtime.documentMap.getDoc({ value: 42 }, "cause", space);
-      expect(JSON.stringify(c)).toEqual(JSON.stringify(c.entityId));
+      const c = runtime.getCell<{ value: number }>(space, "test-json");
+      c.set({ value: 42 });
+      
+      const expected = JSON.stringify({
+        cell: c.entityId,
+        path: []
+      });
+      expect(JSON.stringify(c)).toEqual(expected);
     });
   });
 });

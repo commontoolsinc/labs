@@ -35,12 +35,12 @@ describe("Schema Lineage", () => {
 
   describe("Schema Propagation through Aliases", () => {
     it("should propagate schema from aliases to cells", () => {
-      // Create a doc with an alias that has schema information
-      const targetDoc = runtime.documentMap.getDoc(
-        { count: 42, label: "test" },
-        "schema-lineage-target",
+      // Create a cell with data that will be referenced by an alias
+      const targetCell = runtime.getCell<{ count: number; label: string }>(
         space,
+        "schema-lineage-target",
       );
+      targetCell.set({ count: 42, label: "test" });
 
       // Create a schema for our alias
       const schema = {
@@ -51,23 +51,22 @@ describe("Schema Lineage", () => {
         },
       } as const satisfies JSONSchema;
 
-      // Create a doc with an alias that includes schema information
-      const sourceDoc = runtime.documentMap.getDoc(
-        {
-          $alias: {
-            cell: targetDoc,
-            path: [],
-            schema,
-            rootSchema: schema,
-          },
-        },
-        "schema-lineage-source",
+      // Create a cell with an alias that includes schema information
+      const sourceCell = runtime.getCell<any>(
         space,
+        "schema-lineage-source",
       );
+      sourceCell.setRaw({
+        $alias: {
+          ...targetCell.getAsCellLink(),
+          schema,
+          rootSchema: schema,
+        },
+      });
 
-      // Access the doc without providing a schema
+      // Access the cell without providing a schema
       // (Type script type is just to avoid compiler errors)
-      const cell: Cell<{ count: number; label: string }> = sourceDoc.asCell();
+      const cell: Cell<{ count: number; label: string }> = sourceCell.asSchema();
 
       // The cell should have picked up the schema from the alias
       expect(cell.schema).toBeDefined();
@@ -80,12 +79,12 @@ describe("Schema Lineage", () => {
     });
 
     it("should respect explicitly provided schema over alias schema", () => {
-      // Create a doc with an alias that has schema information
-      const targetDoc = runtime.documentMap.getDoc(
-        { count: 42, label: "test" },
-        "schema-lineage-target-explicit",
+      // Create a cell with data that will be referenced by an alias
+      const targetCell = runtime.getCell<{ count: number; label: string }>(
         space,
+        "schema-lineage-target-explicit",
       );
+      targetCell.set({ count: 42, label: "test" });
 
       // Create schemas with different types
       const aliasSchema = {
@@ -104,22 +103,21 @@ describe("Schema Lineage", () => {
         },
       } as const satisfies JSONSchema;
 
-      // Create a doc with an alias that includes schema information
-      const sourceDoc = runtime.documentMap.getDoc(
-        {
-          $alias: {
-            cell: targetDoc,
-            path: [],
-            schema: aliasSchema,
-            rootSchema: aliasSchema,
-          },
-        },
-        "schema-lineage-source-explicit",
+      // Create a cell with an alias that includes schema information
+      const sourceCell = runtime.getCell<any>(
         space,
+        "schema-lineage-source-explicit",
       );
+      sourceCell.setRaw({
+        $alias: {
+          ...targetCell.getAsCellLink(),
+          schema: aliasSchema,
+          rootSchema: aliasSchema,
+        },
+      });
 
-      // Access the doc with explicit schema
-      const cell = sourceDoc.asCell([], undefined, explicitSchema);
+      // Access the cell with explicit schema
+      const cell = sourceCell.asSchema(explicitSchema);
 
       // The cell should have the explicit schema, not the alias schema
       expect(cell.schema).toBeDefined();
@@ -135,43 +133,39 @@ describe("Schema Lineage", () => {
   describe("Schema Propagation from Aliases (without Recipes)", () => {
     it("should track schema through deep aliases", () => {
       // Create a series of nested aliases with schemas
-      const valueDoc = runtime.documentMap.getDoc(
-        { count: 5, name: "test" },
-        "deep-alias-value",
+      const valueCell = runtime.getCell<{ count: number; name: string }>(
         space,
+        "deep-alias-value",
       );
+      valueCell.set({ count: 5, name: "test" });
 
       // Create a schema for our first level alias
       const numberSchema = { type: "number" };
 
-      // Create a doc with an alias specifically for the count field
-      const countDoc = runtime.documentMap.getDoc(
-        {
-          $alias: {
-            cell: valueDoc,
-            path: ["count"],
-            schema: numberSchema,
-            rootSchema: numberSchema,
-          },
-        },
-        "count-alias",
+      // Create a cell with an alias specifically for the count field
+      const countCell = runtime.getCell<any>(
         space,
+        "count-alias",
       );
+      countCell.setRaw({
+        $alias: {
+          ...valueCell.key("count").getAsCellLink(),
+          schema: numberSchema,
+          rootSchema: numberSchema,
+        },
+      });
 
       // Create a third level of aliasing
-      const finalDoc = runtime.documentMap.getDoc(
-        {
-          $alias: {
-            cell: countDoc,
-            path: [],
-          },
-        },
-        "final-alias",
+      const finalCell = runtime.getCell<any>(
         space,
+        "final-alias",
       );
+      finalCell.setRaw({
+        $alias: countCell.getAsCellLink(),
+      });
 
-      // Access the doc without providing a schema
-      const cell = finalDoc.asCell();
+      // Access the cell without providing a schema
+      const cell = finalCell.asSchema();
 
       // The cell should have picked up the schema from the alias chain
       expect(cell.schema).toBeDefined();
@@ -180,17 +174,19 @@ describe("Schema Lineage", () => {
     });
 
     it("should correctly handle aliases with asCell:true in schema", () => {
-      // Create a document with nested objects that will be accessed with asCell
-      const nestedDoc = runtime.documentMap.getDoc(
-        {
-          items: [
-            { id: 1, name: "Item 1" },
-            { id: 2, name: "Item 2" },
-          ],
-        },
-        "nested-doc-with-alias",
+      // Create a cell with nested objects that will be accessed with asCell
+      const nestedCell = runtime.getCell<{
+        items: Array<{ id: number; name: string }>;
+      }>(
         space,
+        "nested-doc-with-alias",
       );
+      nestedCell.set({
+        items: [
+          { id: 1, name: "Item 1" },
+          { id: 2, name: "Item 2" },
+        ],
+      });
 
       // Define schemas for the nested objects
       const arraySchema = {
@@ -205,28 +201,23 @@ describe("Schema Lineage", () => {
       } as const satisfies JSONSchema;
 
       // Create an alias to the items array with schema information
-      const itemsDoc = runtime.documentMap.getDoc(
-        {
-          $alias: {
-            cell: nestedDoc,
-            path: ["items"],
-            schema: arraySchema,
-          },
-        },
-        "items-alias",
+      const itemsCell = runtime.getCell<any>(
         space,
+        "items-alias",
       );
+      itemsCell.setRaw({
+        $alias: {
+          ...nestedCell.key("items").getAsCellLink(),
+          schema: arraySchema,
+        },
+      });
 
       // Access the items with a schema that specifies array items should be cells
-      const itemsCell = itemsDoc.asCell(
-        [],
-        undefined,
-        {
-          asCell: true,
-        } as const satisfies JSONSchema,
-      );
+      const itemsCellWithSchema = itemsCell.asSchema({
+        asCell: true,
+      } as const satisfies JSONSchema);
 
-      const value = itemsCell.get();
+      const value = itemsCellWithSchema.get() as any;
       expect(isCell(value)).toBe(true);
       expect(value.schema).toEqual(arraySchema);
 
@@ -288,10 +279,9 @@ describe("Schema propagation end-to-end example", () => {
       },
     }));
 
-    const result = runtime.documentMap.getDoc(
-      undefined,
-      "should propagate schema through a recipe",
+    const result = runtime.getCell<any>(
       space,
+      "should propagate schema through a recipe",
     );
     runtime.run(
       testRecipe,
@@ -299,28 +289,25 @@ describe("Schema propagation end-to-end example", () => {
       result,
     );
 
-    const c = result.asCell(
-      [UI],
-      undefined,
-      {
-        type: "object",
-        properties: {
-          type: { type: "string" },
-          name: { type: "string" },
-          props: {
-            type: "object",
-            additionalProperties: { asCell: true },
-          },
+    const c = result.key(UI).asSchema({
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        name: { type: "string" },
+        props: {
+          type: "object",
+          additionalProperties: { asCell: true },
         },
-      } as const satisfies JSONSchema,
-    );
+      },
+    } as const satisfies JSONSchema);
 
-    expect(isCell(c.get().props.value)).toBe(true);
-    expect(c.get().props.value.schema).toEqual({
+    const cValue = c.get() as any;
+    expect(isCell(cValue.props.value)).toBe(true);
+    expect(cValue.props.value.schema).toEqual({
       type: "object",
       properties: { name: { type: "string" } },
       additionalProperties: false,
     });
-    expect(c.get().props.value.get()).toEqual({ name: "hello" });
+    expect(cValue.props.value.get()).toEqual({ name: "hello" });
   });
 });
