@@ -78,7 +78,8 @@
     "proseWrap": "always",
     "exclude": [
       "packages/jumble/integration/cache/llm-api-cache/",
-      "packages/seeder/templates/"
+      "packages/seeder/templates/",
+      "packages/static/assets/"
     ]
   },
   "imports": {
