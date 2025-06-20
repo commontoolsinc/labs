@@ -113,7 +113,9 @@ export function parseLink(
     const resolvedSpace = link.space || base?.space;
 
     // If no id provided, use base cell's document
-    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.source;
+    if (!id && base) {
+      id = isCell(base) ? toURI(base.getDoc().entityId) : base.source;
+    }
 
     return {
       source: id,
@@ -162,7 +164,9 @@ export function parseLink(
     }
 
     // If no cell provided, use base cell's document
-    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.source;
+    if (!id && base) {
+      id = isCell(base) ? toURI(base.getDoc().entityId) : base.source;
+    }
 
     return {
       source: id,
@@ -282,7 +286,7 @@ export function createSigilLinkFromParsedLink(
 
   // Only add id if different from base
   const baseId = base
-    ? (isCell(base) ? toURI(base.entityId) : base.source)
+    ? (isCell(base) ? toURI(base.getDoc().entityId) : base.source)
     : undefined;
   if (link.source !== baseId) {
     sigilLink["/"][LINK_V1_TAG].source = link.source;
