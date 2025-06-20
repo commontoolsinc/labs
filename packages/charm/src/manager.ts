@@ -506,8 +506,8 @@ export class CharmManager {
 
               // If we've reached the end and have a resultRef, return it
               if (value.resultRef) {
-                const { id } = parseLink(value.resultRef, cell)!;
-                if (id) return getEntityId(id);
+                const { source } = parseLink(value.resultRef, cell)!;
+                if (source) return getEntityId(source);
               }
             }
           } catch (err) {

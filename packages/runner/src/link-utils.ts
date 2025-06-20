@@ -17,6 +17,7 @@ import {
   LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
+  type URI,
 } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./type-utils.ts";
@@ -24,14 +25,12 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { type IRuntime } from "./runtime.ts";
-import { cell } from "@commontools/api";
 
 /**
  * Normalized link structure returned by parsers
  */
 export type NormalizedLink = {
-  id?: string; // URI format with "of:" prefix
+  source?: URI; // URI format with "of:" prefix
   path?: string[];
   space?: MemorySpace;
   schema?: JSONSchema;
@@ -87,7 +86,7 @@ export function parseLink(
 
   if (isCell(value)) {
     return {
-      id: toURI(value.entityId),
+      source: toURI(value.entityId),
       path: value.path.map((p) => p.toString()),
       space: value.space,
       schema: value.schema,
@@ -98,7 +97,7 @@ export function parseLink(
   if (isDoc(value)) {
     // Extract from DocImpl
     return {
-      id: toURI(value.entityId),
+      source: toURI(value.entityId),
       path: [],
       space: value.space,
     };
@@ -110,15 +109,15 @@ export function parseLink(
     const link = sigilLink["/"][LINK_V1_TAG];
 
     // Resolve relative references
-    let id = link.id;
+    let id = link.source;
     const path = link.path || [];
     const resolvedSpace = link.space || base?.space;
 
     // If no id provided, use base cell's document
-    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.id;
+    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.source;
 
     return {
-      id,
+      source: id,
       path: path.map((p) => p.toString()),
       space: resolvedSpace,
       schema: link.schema,
@@ -131,7 +130,7 @@ export function parseLink(
   if (isCellLink(value)) {
     const cellLink = value as CellLink;
     return {
-      id: toURI(cellLink.cell.entityId),
+      source: toURI(cellLink.cell.entityId),
       path: cellLink.path.map((p) => p.toString()),
       space: cellLink.cell.space,
       schema: cellLink.schema,
@@ -143,7 +142,7 @@ export function parseLink(
   if (isJSONCellLink(value)) {
     const jsonLink = value as JSONCellLink;
     return {
-      id: toURI(jsonLink.cell["/"]),
+      source: toURI(jsonLink.cell["/"]),
       path: jsonLink.path.map((p) => p.toString()),
       space: base?.space, // Space must come from context for JSON links
     };
@@ -152,7 +151,7 @@ export function parseLink(
   // Handle legacy alias format
   if (isLegacyAlias(value)) {
     const alias = value.$alias;
-    let id: string | undefined;
+    let id: URI | undefined;
     let resolvedSpace = base?.space;
 
     // If cell is provided, convert to URI
@@ -166,10 +165,10 @@ export function parseLink(
     }
 
     // If no cell provided, use base cell's document
-    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.id;
+    if (!id && base) id = isCell(base) ? toURI(base.entityId) : base.source;
 
     return {
-      id,
+      source: id,
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
@@ -226,7 +225,7 @@ export function parseToLegacyCellLink(
   return {
     cell: doc ?? baseCell!.getDoc().runtime!.documentMap.getDocByEntityId(
       link.space ?? baseCell!.space!,
-      link.id!,
+      link.source!,
       true,
     )!,
     path: link.path ?? [],
@@ -259,7 +258,7 @@ export function areLinksSame(
 
   // Compare normalized links
   return (
-    link1.id === link2.id &&
+    link1.source === link2.source &&
     link1.space === link2.space &&
     arrayEqual(link1.path, link2.path)
   );
@@ -286,10 +285,10 @@ export function createSigilLinkFromParsedLink(
 
   // Only add id if different from base
   const baseId = base
-    ? (isCell(base) ? toURI(base.entityId) : base.id)
+    ? (isCell(base) ? toURI(base.entityId) : base.source)
     : undefined;
-  if (link.id !== baseId) {
-    sigilLink["/"][LINK_V1_TAG].id = link.id;
+  if (link.source !== baseId) {
+    sigilLink["/"][LINK_V1_TAG].source = link.source;
   }
 
   // Only add overwrite if it's a redirect

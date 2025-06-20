@@ -2,12 +2,15 @@ import type { JSONSchema } from "@commontools/api";
 import type { MemorySpace } from "@commontools/memory/interface";
 import type { ShadowRef } from "./builder/types.ts";
 import type { DocImpl } from "./doc.ts";
+import type { URI } from "@commontools/memory/interface";
+
+export type { URI } from "@commontools/memory/interface";
 
 /**
  * Generic sigil value type for future extensions
  */
-
 export type SigilValue<T> = { "/": T };
+
 /**
  * Link sigil value v1
  */
@@ -16,7 +19,7 @@ export const LINK_V1_TAG = "link@1" as const;
 
 export type LinkV1 = {
   [LINK_V1_TAG]: {
-    id?: string;
+    source?: URI;
     path?: string[];
     space?: MemorySpace;
     schema?: JSONSchema;

@@ -84,7 +84,7 @@ describe("link-utils", () => {
     it("should identify sigil links with overwrite redirect as write redirect links", () => {
       const sigilLink = {
         "/": {
-          [LINK_V1_TAG]: { id: "test", overwrite: "redirect" },
+          [LINK_V1_TAG]: { source: "test", overwrite: "redirect" },
         },
       };
       expect(isWriteRedirectLink(sigilLink)).toBe(true);
@@ -93,7 +93,7 @@ describe("link-utils", () => {
     it("should not identify regular sigil links as write redirect links", () => {
       const sigilLink = {
         "/": {
-          [LINK_V1_TAG]: { id: "test" },
+          [LINK_V1_TAG]: { source: "test" },
         },
       };
       expect(isWriteRedirectLink(sigilLink)).toBe(false);
@@ -131,7 +131,7 @@ describe("link-utils", () => {
       const result = parseLink(cell);
 
       expect(result).toEqual({
-        id: expect.stringContaining("of:"),
+        source: expect.stringContaining("of:"),
         path: [],
         space: space,
         schema: undefined,
@@ -146,7 +146,7 @@ describe("link-utils", () => {
       const result = parseLink(nestedCell);
 
       expect(result).toEqual({
-        id: expect.stringContaining("of:"),
+        source: expect.stringContaining("of:"),
         path: ["nested"],
         space: space,
         schema: undefined,
@@ -160,7 +160,7 @@ describe("link-utils", () => {
       const result = parseLink(doc);
 
       expect(result).toEqual({
-        id: expect.stringContaining("of:"),
+        source: expect.stringContaining("of:"),
         path: [],
         space: space,
       });
@@ -170,7 +170,7 @@ describe("link-utils", () => {
       const sigilLink = {
         "/": {
           [LINK_V1_TAG]: {
-            id: "of:test",
+            source: "of:test",
             path: ["nested", "value"],
             space: space,
             schema: { type: "number" },
@@ -182,7 +182,7 @@ describe("link-utils", () => {
       const result = parseLink(sigilLink);
 
       expect(result).toEqual({
-        id: "of:test",
+        source: "of:test",
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
@@ -205,7 +205,7 @@ describe("link-utils", () => {
       const result = parseLink(sigilLink, baseCell);
 
       expect(result).toEqual({
-        id: expect.stringContaining("of:"),
+        source: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
         schema: undefined,
@@ -220,7 +220,7 @@ describe("link-utils", () => {
       const result = parseLink(cellLink);
 
       expect(result).toEqual({
-        id: expect.stringContaining("of:"),
+        source: expect.stringContaining("of:"),
         path: [],
         space: space,
         schema: undefined,
@@ -237,7 +237,7 @@ describe("link-utils", () => {
       const result = parseLink(jsonLink, baseCell);
 
       expect(result).toEqual({
-        id: "of:test",
+        source: "of:test",
         path: ["nested", "value"],
         space: space,
       });
@@ -256,7 +256,7 @@ describe("link-utils", () => {
       const result = parseLink(legacyAlias);
 
       expect(result).toEqual({
-        id: expect.stringContaining("of:"),
+        source: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
@@ -274,7 +274,7 @@ describe("link-utils", () => {
       const result = parseLink(legacyAlias, baseCell);
 
       expect(result).toEqual({
-        id: expect.stringContaining("of:"),
+        source: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
         schema: undefined,
@@ -294,7 +294,7 @@ describe("link-utils", () => {
       const cell = runtime.getCell(space, "test");
       const result = parseLinkOrThrow(cell);
       expect(result).toBeDefined();
-      expect(result.id).toBeDefined();
+      expect(result.source).toBeDefined();
     });
 
     it("should throw error for non-link values", () => {
@@ -399,7 +399,7 @@ describe("link-utils", () => {
   describe("createSigilLinkFromParsedLink", () => {
     it("should create sigil link from normalized link", () => {
       const normalizedLink: NormalizedLink = {
-        id: "of:test",
+        source: "of:test",
         path: ["nested", "value"],
         space: space,
         schema: { type: "number" },
@@ -411,7 +411,7 @@ describe("link-utils", () => {
       expect(result).toEqual({
         "/": {
           [LINK_V1_TAG]: {
-            id: "of:test",
+            source: "of:test",
             path: ["nested", "value"],
             space: space,
             schema: { type: "number" },
@@ -424,7 +424,7 @@ describe("link-utils", () => {
     it("should omit space when same as base", () => {
       const baseCell = runtime.getCell(space, "base");
       const normalizedLink: NormalizedLink = {
-        id: "of:test",
+        source: "of:test",
         path: ["nested", "value"],
         space: space,
       };
@@ -438,18 +438,18 @@ describe("link-utils", () => {
       const baseCell = runtime.getCell(space, "base");
       const baseId = baseCell.getDoc().entityId;
       const normalizedLink: NormalizedLink = {
-        id: `of:${baseId}`,
+        source: `of:${baseId}`,
         path: ["nested", "value"],
       };
 
       const result = createSigilLinkFromParsedLink(normalizedLink, baseCell);
 
-      expect(result["/"][LINK_V1_TAG].id).toBe(`of:${baseId}`);
+      expect(result["/"][LINK_V1_TAG].source).toBe(`of:${baseId}`);
     });
 
     it("should include overwrite field when present", () => {
       const normalizedLink: NormalizedLink = {
-        id: "of:test",
+        source: "of:test",
         path: ["nested", "value"],
         overwrite: "redirect",
       };
