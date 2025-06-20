@@ -173,10 +173,15 @@ export interface IStorageTransaction {
   >;
 
   /**
-   * Reads a value from the the storage and captures it in the transaction
-   * invariants. Read will fail with `IStorageTransactionError` if transaction
-   * has an error state. Read will fail with `IStorageTransactionClosed` if
-   * transaction is done.
+   * Reads a value from a (local) memory address and captures corresponding
+   * `Read` in the the transaction invariants. If value was written in read memory
+   * address in this transaction read will return value that was written as opposed
+   * to value stored.
+   *
+   * Read will fail with `IStorageTransactionError` if transaction has an error state.
+   * Read will fail with `IStorageTransactionClosed` if transaction is done.
+   * Read will fail with `INotFoundError` record in the given address does not exist
+   * in (local) memory.
    */
   read(
     address: IStorageAddress,
@@ -238,7 +243,7 @@ export type IStorageTransactionError =
   | AuthorizationError;
 
 export interface IStorageTransactionClosed extends Error {}
-
+export interface INotFoundError extends Error {}
 export type IStorageTransactionProgress = Variant<{
   open: IStorageTransactionLog;
   pending: IStorageTransactionLog;
