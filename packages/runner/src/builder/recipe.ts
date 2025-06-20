@@ -33,7 +33,7 @@ import {
   toJSONWithAliases,
 } from "./json-utils.ts";
 import { setValueAtPath } from "../path-utils.ts";
-import { traverseValue } from "../traverse-utils.ts";
+import { traverseValue } from "./traverse-utils.ts";
 
 /** Declare a recipe
  *

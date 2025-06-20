@@ -34,7 +34,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const runtime = new Runtime({
   storageManager: new StorageManager({
     address: "https://example.com/storage",
-    signer: myIdentitySigner
+    signer: myIdentitySigner,
   }),
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
@@ -178,6 +178,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Create a cell with schema and default values
 const settingsCell = runtime.getCell(
   "my-space", // The space this cell belongs to
@@ -234,7 +235,6 @@ const cleanup = settingsCell.sink((value) => {
 
 // Clean up subscription when done
 cleanup();
-
 ```
 
 ### Cells with Type-Safe Schemas
@@ -260,6 +260,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Define a schema with type assertions for TypeScript inference
 const userSchema = {
   type: "object",
@@ -312,7 +313,6 @@ settingsCell.set({ theme: "dark", notifications: false });
 // Key navigation preserves schema
 const nameCell = userCell.key("name");
 console.log(nameCell.get()); // "Alice"
-
 ```
 
 ### Running Recipes
@@ -338,6 +338,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Define a recipe with input and output schemas
 const doubleNumberRecipe = recipe(
   // Input schema
@@ -386,7 +387,6 @@ console.log(result.get()); // { result: 20 }
 
 // Stop recipe execution when no longer needed
 runtime.runner.stop(result);
-
 ```
 
 ### Storage
@@ -405,7 +405,7 @@ const signer = await Identity.fromPassphrase("my-passphrase");
 // Create storage manager (for production, use StorageManager.open() with remote storage)
 const storageManager = StorageManager.open({
   as: signer,
-  address: new URL("https://example.com/api")
+  address: new URL("https://example.com/api"),
 });
 
 // Create a runtime instance with configuration
@@ -419,6 +419,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Sync a cell with storage
 await runtime.storage.syncCell(userCell);
 
@@ -430,7 +431,6 @@ await runtime.storage.synced();
 
 // When cells with the same causal ID are synced across instances,
 // they will automatically be kept in sync with the latest value
-
 ```
 
 ## Advanced Features
@@ -456,6 +456,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Original data source cell
 const sourceCell = runtime.getCell(
   "my-space",
@@ -524,7 +525,6 @@ console.log(result);
 //   kind: "user",
 //   firstTag: "tag1"
 // }
-
 ```
 
 ### Nested Reactivity
@@ -547,6 +547,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 const rootCell = runtime.getCell(
   "my-space",
   "nested-example",
@@ -604,7 +605,6 @@ rootCell.key("current").key("label").set("updated");
 // "Label value: updated"
 // "Nested value: { label: 'updated' }"
 // "Root changed: { value: 'root', current: { label: 'updated' } }"
-
 ```
 
 ## Migration from Singleton Pattern
@@ -663,7 +663,8 @@ interface RuntimeOptions {
 
 ### Storage Manager
 
-Storage manager is used by runtime to open storage providers when reading or writing documents into a corresponding space.
+Storage manager is used by runtime to open storage providers when reading or
+writing documents into a corresponding space.
 
 ```ts
 export interface IStorageManager {
@@ -671,7 +672,8 @@ export interface IStorageManager {
 }
 ```
 
-The storage manager opens storage providers for different memory spaces. The StorageManager provides convenient factory methods:
+The storage manager opens storage providers for different memory spaces. The
+StorageManager provides convenient factory methods:
 
 ```ts
 import { StorageManager } from "@commontools/runner/storage/cache ";
@@ -689,7 +691,8 @@ const storageManager = StorageManager.open({
 });
 ```
 
-The `@commontools/storage/cache` provides  a default implementation of the `IStorageManager` interface.
+The `@commontools/storage/cache` provides a default implementation of the
+`IStorageManager` interface.
 
 - `"volatile://"` - In-memory storage (for testing)
 - `"https://example.com/storage"` - Remote storage with schema queries

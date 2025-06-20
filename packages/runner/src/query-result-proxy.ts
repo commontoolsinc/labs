@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
 import { toOpaqueRef } from "./builder/types.ts";
 import { type DocImpl, makeOpaqueRef } from "./doc.ts";
-import { type CellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
 import { resolveLinkToValue } from "./link-resolution.ts";

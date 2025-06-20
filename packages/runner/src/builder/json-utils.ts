@@ -1,10 +1,11 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { type CellLink, isCell, isCellLink, isDoc } from "../index.ts";
+import { isCell, isCellLink, isSigilWriteRedirectLink } from "../cell.ts";
+import { type CellLink, type LegacyAlias } from "../sigil-types.ts";
+import { isLegacyAlias, parseToLegacyCellLink } from "../link-utils.ts";
+import { isDoc } from "../doc.ts";
 import { createShadowRef } from "./opaque-ref.ts";
 import {
-  type Alias,
   canBeOpaqueRef,
-  isAlias,
   isOpaqueRef,
   isRecipe,
   isShadowRef,
@@ -55,12 +56,12 @@ export function toJSONWithAliases(
           ...(exported?.schema ? { schema: exported.schema } : {}),
           ...(exported?.rootSchema ? { rootSchema: exported.rootSchema } : {}),
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else throw new Error(`Cell not found in paths`);
   }
 
-  if (isAlias(value)) {
-    const alias = (value as Alias).$alias;
+  if (isLegacyAlias(value)) {
+    const alias = (value as LegacyAlias).$alias;
     if (isShadowRef(alias.cell)) {
       const cell = alias.cell.shadowOf;
       if (cell.export().frame !== getTopFrame()) {
@@ -80,14 +81,14 @@ export function toJSONWithAliases(
         $alias: {
           path: [...paths.get(cell)!, ...alias.path] as (string | number)[],
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else if (!("cell" in alias) || typeof alias.cell === "number") {
       return {
         $alias: {
           cell: ((alias.cell as number) ?? 0) + 1,
           path: alias.path as (string | number)[],
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else {
       throw new Error(`Invalid alias cell`);
     }
@@ -143,11 +144,10 @@ export function createJsonSchema(
       return analyzeType(value);
     }
 
-    if (isAlias(value)) {
-      if (isDoc(value.$alias.cell)) {
-        value = value.$alias.cell.getAtPath(value.$alias.path);
-      } else {
-        value = getValueAtPath(example, value.$alias.path);
+    if (isSigilWriteRedirectLink(value)) {
+      const link = parseToLegacyCellLink(value);
+      if (link && isDoc(link.cell)) {
+        value = link.cell.getAtPath(link.path);
       }
       return analyzeType(value);
     }

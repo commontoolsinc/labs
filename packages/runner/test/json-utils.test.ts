@@ -10,13 +10,12 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("createJsonSchema", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    // Create runtime with the shared storage provider
-    // We need to bypass the URL-based configuration for this test
+
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
@@ -188,7 +187,10 @@ describe("createJsonSchema", () => {
   });
 
   it("should handle array cell without schema", () => {
-    const arrayCell = runtime.getImmutableCell(space, [1, 2, 3, 4]);
+    const arrayCell = runtime.getImmutableCell(
+      space,
+      [1, 2, 3, 4],
+    );
 
     const schema = createJsonSchema(arrayCell);
 
@@ -201,7 +203,10 @@ describe("createJsonSchema", () => {
   });
 
   it("should handle nested cells with and without schema", () => {
-    const userCell = runtime.getImmutableCell(space, { id: 1, name: "Alice" });
+    const userCell = runtime.getImmutableCell(
+      space,
+      { id: 1, name: "Alice" },
+    );
 
     const prefsSchema = {
       type: "object",

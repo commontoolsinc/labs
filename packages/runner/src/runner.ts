@@ -1,10 +1,8 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
-  type Alias,
-  isAlias,
   isModule,
   isRecipe,
-  isStreamAlias,
+  isStreamValue,
   type JSONSchema,
   type JSONValue,
   type Module,
@@ -22,6 +20,7 @@ import {
 } from "./builder/recipe.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
+import { type LegacyAlias } from "./sigil-types.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
 import { containsOpaqueRef, deepCopy } from "./type-utils.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -30,11 +29,18 @@ import {
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
-import { followAliases, maybeGetCellLink } from "./link-resolution.ts";
+import { followWriteRedirects } from "./link-resolution.ts";
+import {
+  areLinksSame,
+  isWriteRedirectLink,
+  type NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { isCell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import { getCellLinkOrThrow } from "./query-result-proxy.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
@@ -96,10 +102,10 @@ export class Runner implements IRunner {
       this.run(recipeOrModule, argument, resultCell.getDoc());
       return resultCell;
     }
-    
+
     // Otherwise run existing DocImpl logic
     const resultDoc = resultCell as DocImpl<R>;
-    
+
     let processCell: DocImpl<{
       [TYPE]: string;
       argument?: T;
@@ -305,10 +311,12 @@ export class Runner implements IRunner {
       if (seen.has(value)) return;
       seen.add(value);
 
-      const link = maybeGetCellLink(value);
+      const link = parseLink(value, resultCell);
 
-      if (link && link.cell) {
-        const maybePromise = this.runtime.storage.syncCell(link.cell);
+      if (link) {
+        const maybePromise = this.runtime.storage.syncCell(
+          this.runtime.getCellFromLink(link),
+        );
         if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (isRecord(value)) {
         for (const key in value) syncAllMentionedCells(value[key]);
@@ -369,7 +377,9 @@ export class Runner implements IRunner {
    * @param resultCell - The result doc or cell to stop.
    */
   stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
-    const doc = isDoc(resultCell) ? resultCell : (resultCell as Cell<T>).getDoc();
+    const doc = isDoc(resultCell)
+      ? resultCell
+      : (resultCell as Cell<T>).getDoc();
     this.cancels.get(doc)?.();
     this.cancels.delete(doc);
   }
@@ -387,7 +397,7 @@ export class Runner implements IRunner {
   }
 
   private instantiateNode(
-    module: Module | Alias,
+    module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
     processCell: DocImpl<any>,
@@ -451,7 +461,7 @@ export class Runner implements IRunner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isAlias(module)) {
+    } else if (isWriteRedirectLink(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
       throw new Error(`Unknown module: ${JSON.stringify(module)}`);
@@ -492,14 +502,14 @@ export class Runner implements IRunner {
       let doc = processCell;
       let path: PropertyKey[] = [key];
       let value = inputs[key];
-      while (isAlias(value)) {
-        const ref = followAliases(value, processCell);
+      while (isWriteRedirectLink(value)) {
+        const ref = followWriteRedirects(value, processCell);
         doc = ref.cell;
         path = ref.path;
         value = doc.getAtPath(path);
       }
-      if (isStreamAlias(value)) {
-        streamRef = { cell: doc, path };
+      if (isStreamValue(value)) {
+        streamRef = { cell: doc, path } satisfies CellLink;
         break;
       }
     }
@@ -513,17 +523,20 @@ export class Runner implements IRunner {
         const eventInputs = { ...inputs };
         const cause = { ...inputs };
         for (const key in eventInputs) {
-          if (
-            isAlias(eventInputs[key]) &&
-            eventInputs[key].$alias.cell === stream.cell &&
-            eventInputs[key].$alias.path.length === stream.path.length &&
-            eventInputs[key].$alias.path.every(
-              (value: PropertyKey, index: number) =>
-                value === stream.path[index],
-            )
-          ) {
-            eventInputs[key] = event;
-            cause[key] = crypto.randomUUID();
+          if (isWriteRedirectLink(eventInputs[key])) {
+            // Use format-agnostic comparison for aliases
+            const alias = eventInputs[key];
+
+            if (
+              areLinksSame(
+                alias,
+                streamRef,
+                processCell.asCell(),
+              )
+            ) {
+              eventInputs[key] = event;
+              cause[key] = crypto.randomUUID();
+            }
           }
         }
 
@@ -830,7 +843,7 @@ export function mergeObjects<T>(
       typeof obj !== "object" ||
       obj === null ||
       Array.isArray(obj) ||
-      isAlias(obj) ||
+      isWriteRedirectLink(obj) ||
       isCellLink(obj) ||
       isDoc(obj) ||
       isCell(obj)

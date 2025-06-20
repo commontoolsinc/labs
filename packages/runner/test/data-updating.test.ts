@@ -10,7 +10,7 @@ import {
 } from "../src/data-updating.ts";
 import { isEqualCellLink } from "../src/type-utils.ts";
 import { Runtime } from "../src/runtime.ts";
-import { CellLink, isCellLink } from "../src/cell.ts";
+import { isAnyCellLink, isCellLink } from "../src/cell.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -51,7 +51,9 @@ describe("data-updating", () => {
     });
 
     it("should delete no longer used fields when setting a nested value", () => {
-      const testCell = runtime.getCell<{ a: number; b: { c: number; d?: number } }>(
+      const testCell = runtime.getCell<
+        { a: number; b: { c: number; d?: number } }
+      >(
         space,
         "should delete no longer used fields 1",
       );
@@ -68,7 +70,10 @@ describe("data-updating", () => {
       );
       testCell.set({ a: 1, b: { c: 2 } });
       const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], { a: 1, b: { c: 2 } }, log);
+      const success = setNestedValue(testCell.getDoc(), [], {
+        a: 1,
+        b: { c: 2 },
+      }, log);
       expect(success).toBe(true); // No changes is still a success
       expect(testCell.get()).toEqual({ a: 1, b: { c: 2 } });
       expect(log.writes).toEqual([]);
@@ -81,7 +86,10 @@ describe("data-updating", () => {
       );
       testCell.set({ a: 1, b: { c: 2 } });
       const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], { a: 1, b: { c: 3 } }, log);
+      const success = setNestedValue(testCell.getDoc(), [], {
+        a: 1,
+        b: { c: 3 },
+      }, log);
       expect(success).toBe(true);
       expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
       expect(log.writes.length).toEqual(1);
@@ -96,7 +104,10 @@ describe("data-updating", () => {
       testCell.set({ a: 1, b: { c: 2 } });
       testCell.getDoc().freeze("test");
       const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], { a: 1, b: { c: 3 } }, log);
+      const success = setNestedValue(testCell.getDoc(), [], {
+        a: 1,
+        b: { c: 3 },
+      }, log);
       expect(success).toBe(false);
     });
 
@@ -162,13 +173,15 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("name").getAsCellLink()
+        testCell.key("user").key("name").getAsCellLink(),
       );
       expect(changes[0].value).toBe("Jane");
     });
 
     it("should detect added object properties", () => {
-      const testCell = runtime.getCell<{ user: { name: string; age?: number } }>(
+      const testCell = runtime.getCell<
+        { user: { name: string; age?: number } }
+      >(
         space,
         "normalizeAndDiff added object properties",
       );
@@ -178,7 +191,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("age").getAsCellLink()
+        testCell.key("user").key("age").getAsCellLink(),
       );
       expect(changes[0].value).toBe(30);
     });
@@ -194,7 +207,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("age").getAsCellLink()
+        testCell.key("user").key("age").getAsCellLink(),
       );
       expect(changes[0].value).toBe(undefined);
     });
@@ -210,7 +223,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("items").key("length").getAsCellLink()
+        testCell.key("items").key("length").getAsCellLink(),
       );
       expect(changes[0].value).toBe(2);
     });
@@ -226,7 +239,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("items").key(1).getAsCellLink()
+        testCell.key("items").key(1).getAsCellLink(),
       );
       expect(changes[0].value).toBe(5);
     });
@@ -249,7 +262,7 @@ describe("data-updating", () => {
       // Should follow alias to value and change it there
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("value").getAsCellLink()
+        testCell.key("value").getAsCellLink(),
       );
       expect(changes[0].value).toBe(100);
     });
@@ -274,7 +287,7 @@ describe("data-updating", () => {
       // Should follow alias to value and change it there
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("value").getAsCellLink()
+        testCell.key("value").getAsCellLink(),
       );
       expect(changes[0].value).toBe(100);
 
@@ -288,7 +301,7 @@ describe("data-updating", () => {
 
       expect(changes2.length).toBe(1);
       expectCellLinksEqual(changes2[0].location).toEqual(
-        testCell.key("alias").getAsCellLink()
+        testCell.key("alias").getAsCellLink(),
       );
       expect(changes2[0].value).toEqual({ $alias: { path: ["value2"] } });
 
@@ -296,7 +309,7 @@ describe("data-updating", () => {
 
       expect(changes3.length).toBe(1);
       expectCellLinksEqual(changes3[0].location).toEqual(
-        testCell.key("value2").getAsCellLink()
+        testCell.key("value2").getAsCellLink(),
       );
       expect(changes3[0].value).toBe(300);
     });
@@ -341,7 +354,9 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("profile").key("details").key("address").key("city").getAsCellLink()
+        testCell.key("user").key("profile").key("details").key("address").key(
+          "city",
+        ).getAsCellLink(),
       );
       expect(changes[0].value).toBe("Boston");
     });
@@ -402,13 +417,17 @@ describe("data-updating", () => {
         undefined,
         "should update the same document with ID-based entity objects",
       );
-      
+
       expect(isCellLink(testCell.getRaw().items[0])).toBe(true);
       expect(isCellLink(testCell.getRaw().items[1])).toBe(true);
       expect(testCell.getRaw().items[0].cell).not.toBe(newDoc);
-      expect(testCell.getRaw().items[0].cell.get().name).toEqual("Inserted before");
+      expect(testCell.getRaw().items[0].cell.get().name).toEqual(
+        "Inserted before",
+      );
       expect(testCell.getRaw().items[1].cell).toBe(newDoc);
-      expect(testCell.getRaw().items[1].cell.get().name).toEqual("Second Value");
+      expect(testCell.getRaw().items[1].cell.get().name).toEqual(
+        "Second Value",
+      );
     });
 
     it("should update the same document with numeric ID-based entity objects", () => {
@@ -443,9 +462,13 @@ describe("data-updating", () => {
       );
 
       expect(testCell.getRaw().items[0].cell).not.toBe(newDoc);
-      expect(testCell.getRaw().items[0].cell.get().name).toEqual("Inserted before");
+      expect(testCell.getRaw().items[0].cell.get().name).toEqual(
+        "Inserted before",
+      );
       expect(testCell.getRaw().items[1].cell).toBe(newDoc);
-      expect(testCell.getRaw().items[1].cell.get().name).toEqual("Second Value");
+      expect(testCell.getRaw().items[1].cell.get().name).toEqual(
+        "Second Value",
+      );
     });
 
     it("should handle ID_FIELD redirects and reuse existing documents", () => {
@@ -487,7 +510,9 @@ describe("data-updating", () => {
       expect(isCellLink(testCell.getRaw().items[0])).toBe(true);
       expect(isCellLink(testCell.getRaw().items[1])).toBe(true);
       expect(testCell.getRaw().items[1].cell).toBe(initialDoc);
-      expect(testCell.getRaw().items[1].cell.get().name).toEqual("Updated Item");
+      expect(testCell.getRaw().items[1].cell.get().name).toEqual(
+        "Updated Item",
+      );
       expect(testCell.getRaw().items[0].cell.get().name).toEqual("New Item");
     });
 
@@ -589,7 +614,7 @@ describe("data-updating", () => {
         "addCommonIDfromObjectID reuse items",
       );
       itemCell.set({ id: "item1", name: "Original Item" });
-      
+
       const testCell = runtime.getCell<{ items: any[] }>(
         space,
         "addCommonIDfromObjectID arrays",
@@ -608,12 +633,10 @@ describe("data-updating", () => {
       );
 
       const result = testCell.getRaw();
-      expect(isCellLink(result.items[0])).toBe(true);
-      expect(isCellLink(result.items[1])).toBe(true);
+      expect(isAnyCellLink(result.items[0])).toBe(true);
+      expect(isAnyCellLink(result.items[1])).toBe(true);
       expect(isEqualCellLink(result.items[0] as any, result.items[1] as any))
-        .toBe(
-          true,
-        );
+        .toBe(true);
       expect(result.items[1].cell.get().name).toBe("New Item");
     });
   });

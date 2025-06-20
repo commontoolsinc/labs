@@ -1,5 +1,9 @@
-import { JSONSchema } from "@commontools/runner";
-import { Cell, getEntityId, type Runtime } from "@commontools/runner";
+import {
+  Cell,
+  getEntityId,
+  type JSONSchema,
+  type Runtime,
+} from "@commontools/runner";
 import { Charm, getRecipeIdFromCharm } from "../manager.ts";
 
 export type IFrameRecipe = {

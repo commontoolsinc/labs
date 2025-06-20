@@ -1,11 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  isAlias,
-  isModule,
-  isRecipe,
-  type Opaque,
-} from "../src/builder/types.ts";
+import { isModule, isRecipe, type Opaque } from "../src/builder/types.ts";
+import { isWriteRedirectLink } from "../src/link-utils.ts";
+import { LINK_V1_TAG } from "../src/sigil-types.ts";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -35,9 +32,19 @@ describe("value type", () => {
 });
 
 describe("utility functions", () => {
-  it("isAlias correctly identifies aliases", () => {
-    expect(isAlias({ $alias: { path: ["path", "to", "value"] } })).toBe(true);
-    expect(isAlias({ notAlias: "something" })).toBe(false);
+  it("isWriteRedirectLink correctly identifies write redirects", () => {
+    expect(isWriteRedirectLink({ $alias: { path: ["path", "to", "value"] } }))
+      .toBe(true);
+    expect(
+      isWriteRedirectLink({
+        "/": {
+          [LINK_V1_TAG]: { id: "path/to/value", overwrite: "redirect" },
+        },
+      }),
+    ).toBe(
+      true,
+    );
+    expect(isWriteRedirectLink({ notAlias: "something" })).toBe(false);
   });
 
   it("isModule correctly identifies modules", () => {

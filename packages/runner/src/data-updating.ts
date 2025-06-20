@@ -1,19 +1,19 @@
 import { isRecord } from "@commontools/utils/types";
-import {
-  type Alias,
-  ID,
-  ID_FIELD,
-  isAlias,
-  type JSONSchema,
-  type JSONValue,
-} from "./builder/types.ts";
+import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { isAnyCellLink, isCell, isCellLink } from "./cell.ts";
+import { type CellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { followAliases } from "./link-resolution.ts";
-import { maybeUnwrapProxy, arrayEqual } from "./type-utils.ts";
+import { followWriteRedirects } from "./link-resolution.ts";
+import { arrayEqual, maybeUnwrapProxy } from "./type-utils.ts";
+import {
+  areLinksSame,
+  isLink,
+  isWriteRedirectLink,
+  parseLink,
+} from "./link-utils.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -25,8 +25,8 @@ export function setNestedValue<T>(
   log?: ReactivityLog,
 ): boolean {
   const destValue = doc.getAtPath(path);
-  if (isAlias(destValue)) {
-    const ref = followAliases(destValue, doc, log);
+  if (isWriteRedirectLink(destValue)) {
+    const ref = followWriteRedirects(destValue, doc, log);
     return setNestedValue(ref.cell, ref.path, value, log);
   }
 
@@ -37,7 +37,7 @@ export function setNestedValue<T>(
     isRecord(value) &&
     Array.isArray(value) === Array.isArray(destValue) &&
     !isDoc(value) &&
-    !isCellLink(value) &&
+    !isAnyCellLink(value) &&
     !isCell(value)
   ) {
     let success = true;
@@ -62,10 +62,9 @@ export function setNestedValue<T>(
     }
 
     return success;
-  } else if (isCellLink(value) && isCellLink(destValue)) {
-    if (
-      value.cell !== destValue.cell || !arrayEqual(value.path, destValue.path)
-    ) {
+  } else if (isLink(value) && isLink(destValue)) {
+    // Use the new link comparison function that supports all formats
+    if (!areLinksSame(value, destValue, doc.asCell())) {
       doc.setAtPath(path, value, log);
     }
     return true;
@@ -185,11 +184,14 @@ export function normalizeAndDiff(
   const currentValue = current.cell.getAtPath(current.path);
 
   // A new alias can overwrite a previous alias. No-op if the same.
-  if (isAlias(newValue)) {
+  if (isWriteRedirectLink(newValue)) {
+    const newLink = parseLink(newValue, current.cell.asCell())!;
+    const currentLink = parseLink(currentValue, current.cell.asCell());
     if (
-      isAlias(currentValue) &&
-      newValue.$alias.cell === currentValue.$alias.cell &&
-      arrayEqual(newValue.$alias.path, currentValue.$alias.path)
+      isWriteRedirectLink(currentValue) &&
+      currentLink !== undefined &&
+      newLink.source === currentLink.source &&
+      arrayEqual(newLink.path, currentLink.path)
     ) {
       return [];
     } else {
@@ -199,18 +201,17 @@ export function normalizeAndDiff(
   }
 
   // Handle alias in current value (at this point: if newValue is not an alias)
-  if (isAlias(currentValue)) {
+  if (isWriteRedirectLink(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
     log?.reads.push({ ...current });
-    const ref = followAliases(currentValue, current.cell, log);
+    const ref = followWriteRedirects(currentValue, current.cell, log);
     return normalizeAndDiff(ref, newValue, log, context);
   }
 
-  if (isCellLink(newValue)) {
+  if (isAnyCellLink(newValue)) {
     if (
-      isCellLink(currentValue) &&
-      currentValue.cell === newValue.cell &&
-      arrayEqual(currentValue.path, newValue.path)
+      isAnyCellLink(currentValue) &&
+      areLinksSame(newValue, currentValue, current.cell.asCell())
     ) {
       return [];
     } else {
@@ -321,7 +322,7 @@ export function normalizeAndDiff(
     // Note that the alias case is handled above
     if (
       typeof currentValue !== "object" || currentValue === null ||
-      isCellLink(currentValue)
+      isAnyCellLink(currentValue)
     ) {
       changes.push({ location: current, value: {} });
     }
@@ -420,7 +421,7 @@ export function addCommonIDfromObjectID(
 
     if (
       isRecord(obj) && !isCell(obj) &&
-      !isCellLink(obj) && !isDoc(obj)
+      !isAnyCellLink(obj) && !isDoc(obj)
     ) {
       Object.values(obj).forEach((v) => traverse(v));
     }

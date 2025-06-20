@@ -1,26 +1,24 @@
 import {
-  Classification,
-  isAlias,
-  JSONSchema,
-  Module,
-  NAME,
-  Recipe,
-  Schema,
-  TYPE,
-  UI,
-} from "@commontools/runner";
-import {
   type Cell,
-  createRef,
+  Classification,
   EntityId,
-  followAliases,
+  followWriteRedirects,
   getEntityId,
   isCell,
   isCellLink,
   isDoc,
-  maybeGetCellLink,
+  isWriteRedirectLink,
+  JSONSchema,
   type MemorySpace,
+  Module,
+  NAME,
+  parseLink,
+  parseToLegacyCellLink,
+  Recipe,
   Runtime,
+  Schema,
+  TYPE,
+  UI,
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
 import { isObject } from "@commontools/utils/types";
@@ -508,11 +506,8 @@ export class CharmManager {
 
               // If we've reached the end and have a resultRef, return it
               if (value.resultRef) {
-                // Use maybeGetCellLink for safer access to resultRef
-                const resultLink = maybeGetCellLink(value.resultRef);
-                if (resultLink) {
-                  return getEntityId(resultLink.cell);
-                }
+                const { source } = parseLink(value.resultRef, cell)!;
+                if (source) return getEntityId(source);
               }
             }
           } catch (err) {
@@ -596,11 +591,11 @@ export class CharmManager {
             return; // Don't process contents of cell links
           }
 
-          // Process aliases - follow them to their sources
-          if (isAlias(value)) {
+          // Process writethroughs - follow them to their sources
+          if (isWriteRedirectLink(value)) {
             try {
-              // Use followAliases, which is safer than manual traversal
-              const cellLink = followAliases(value, parent.getDoc());
+              // Use followWritethroughs, which is safer than manual traversal
+              const cellLink = followWriteRedirects(value, parent.getDoc());
               if (cellLink && cellLink.cell) {
                 const cellId = getEntityId(cellLink.cell);
                 if (cellId) addMatchingCharm(cellId);
@@ -613,13 +608,13 @@ export class CharmManager {
                 if (sourceRefId) addMatchingCharm(sourceRefId);
               }
             } catch (err) {
-              console.debug("Error following aliases:", err);
+              console.debug("Error following writethroughs:", err);
             }
-            return; // Aliases have been fully handled
+            return; // Writethroughs have been fully handled
           }
 
           // Try to get a cell link from various types of values
-          const cellLink = maybeGetCellLink(value, parent.getDoc());
+          const cellLink = parseToLegacyCellLink(value, parent);
           if (cellLink) {
             try {
               const cellId = getEntityId(cellLink.cell);
@@ -637,18 +632,22 @@ export class CharmManager {
             return; // Direct cell references fully handled
           }
 
-          // Direct $alias handling (for cases not caught by isAlias)
-          if (value.$alias && value.$alias.cell) {
+          // Handle $alias and other link formats not caught by maybeGetCellLink
+          if (value.$alias) {
             try {
-              const aliasId = getEntityId(value.$alias.cell);
-              if (aliasId) addMatchingCharm(aliasId);
+              // Use maybeGetCellLink to handle all formats including new sigil format
+              const aliasLink = parseToLegacyCellLink(value.$alias, parent);
+              if (aliasLink) {
+                const aliasId = getEntityId(aliasLink.cell);
+                if (aliasId) addMatchingCharm(aliasId);
 
-              const sourceRefId = followSourceToResultRef(
-                value.$alias.cell.asCell(),
-                new Set(),
-                0,
-              );
-              if (sourceRefId) addMatchingCharm(sourceRefId);
+                const sourceRefId = followSourceToResultRef(
+                  aliasLink.cell.asCell(),
+                  new Set(),
+                  0,
+                );
+                if (sourceRefId) addMatchingCharm(sourceRefId);
+              }
             } catch (err) {
               console.debug("Error handling alias reference:", err);
             }
@@ -678,10 +677,7 @@ export class CharmManager {
               if (value[i] == null) continue;
 
               // Skip items that might be cells to avoid Copy trap
-              if (
-                typeof value[i] === "object" &&
-                (isCell(value[i]) || isDoc(value[i]) || isCellLink(value[i]))
-              ) {
+              if (isCell(value[i]) || isDoc(value[i]) || isCellLink(value[i])) {
                 try {
                   // Process each cell directly
                   processValue(
@@ -933,11 +929,11 @@ export class CharmManager {
           return false; // Don't process cell link contents
         }
 
-        // Use isAlias and followAliases for aliases
-        if (isAlias(value)) {
+        // Use isWriteRedirectLink and followWritethroughs for writethroughs
+        if (isWriteRedirectLink(value)) {
           try {
             // Follow all aliases to their source
-            const cellLink = followAliases(value, parent.getDoc());
+            const cellLink = followWriteRedirects(value, parent.getDoc());
             if (cellLink && cellLink.cell) {
               // Check if the aliased doc is our target
               const cellId = getEntityId(cellLink.cell);
@@ -961,11 +957,11 @@ export class CharmManager {
               err,
             );
           }
-          return false; // Aliases have been fully handled
+          return false; // Writethroughs have been fully handled
         }
 
         // Use maybeGetCellLink to handle various reference types
-        const cellLink = maybeGetCellLink(value, parent.getDoc());
+        const cellLink = parseToLegacyCellLink(value, parent);
         if (cellLink) {
           try {
             // Check if the linked doc is our target
@@ -992,23 +988,27 @@ export class CharmManager {
           return false; // Cell link has been fully handled
         }
 
-        // Direct $alias handling (for cases not caught by isAlias)
-        if (value.$alias && value.$alias.cell) {
+        // Handle $alias and other link formats not caught by maybeGetCellLink
+        if (value.$alias) {
           try {
-            // Check if the alias points to our target
-            const aliasId = getEntityId(value.$alias.cell);
-            if (aliasId && aliasId["/"] === charmId["/"]) {
-              return true;
-            }
+            // Use maybeGetCellLink to handle all formats including new sigil format
+            const aliasLink = parseToLegacyCellLink(value.$alias, parent);
+            if (aliasLink) {
+              // Check if the alias points to our target
+              const aliasId = getEntityId(aliasLink.cell);
+              if (aliasId && aliasId["/"] === charmId["/"]) {
+                return true;
+              }
 
-            // Check if source chain leads to our target
-            const sourceRefId = followSourceToResultRef(
-              value.$alias.cell,
-              new Set(),
-              0,
-            );
-            if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-              return true;
+              // Check if source chain leads to our target
+              const sourceRefId = followSourceToResultRef(
+                aliasLink.cell.asCell(),
+                new Set(),
+                0,
+              );
+              if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
+                return true;
+              }
             }
           } catch (err) {
             console.debug(

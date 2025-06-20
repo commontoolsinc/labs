@@ -296,7 +296,9 @@ export function createDoc<T>(
 
       let changed = false;
       if (path.length > 0) {
-        if (value === undefined) value = (typeof path[0] === "number" ? [] : {}) as T;
+        if (value === undefined) {
+          value = (typeof path[0] === "number" ? [] : {}) as T;
+        }
         changed = setValueAtPath(value, path, newValue);
       } else if (!deepEqual(value, newValue)) {
         changed = true;
@@ -351,7 +353,7 @@ export function createDoc<T>(
       return sourceCell;
     },
     set sourceCell(cell: DocImpl<any> | undefined) {
-      if (sourceCell && sourceCell !== cell) {
+      if (sourceCell && JSON.stringify(sourceCell) !== JSON.stringify(cell)) {
         throw new Error(
           `Source cell already set: ${JSON.stringify(sourceCell)} -> ${
             JSON.stringify(cell)

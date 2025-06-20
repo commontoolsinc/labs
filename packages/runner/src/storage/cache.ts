@@ -1,7 +1,11 @@
 import { fromString, refer } from "merkle-reference";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
-import { type JSONSchema } from "../builder/types.ts";
+import {
+  type JSONSchema,
+  type JSONValue,
+  type SchemaContext,
+} from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
 import { MapSet } from "../traverse.ts";
@@ -15,15 +19,12 @@ import type {
   Entity,
   Fact,
   FactAddress,
-  JSONValue,
   MemorySpace,
   Protocol,
   ProviderCommand,
-  ProviderSession,
   QueryError,
   Result,
   Revision,
-  SchemaContext,
   SchemaPathSelector,
   SchemaQueryArgs,
   Signer,

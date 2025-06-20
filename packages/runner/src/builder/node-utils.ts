@@ -10,7 +10,7 @@ import {
   type OpaqueRef,
 } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
-import { traverseValue } from "../traverse-utils.ts";
+import { traverseValue } from "./traverse-utils.ts";
 
 export function connectInputAndOutputs(node: NodeRef) {
   function connect(value: any): any {

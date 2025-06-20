@@ -66,7 +66,7 @@ export class CommonUpdaterElement extends LitElement {
       throw new Error("No <common-charm> container.");
     }
     const { charmId } = container;
-    const space = this.state.getAsCellLink().space;
+    const space = this.state.space;
     const payload = {
       charmId,
       space,
