@@ -3,7 +3,6 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 import {
-  entityIdStr,
   getEntityId,
   isStream,
   type MemorySpace,

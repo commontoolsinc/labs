@@ -272,15 +272,13 @@ function loadFactsForDoc(
       // We don't actually use the return value here, but we've built up
       // a list of all the documents we need to watch.
       traverser.traverse(newDoc);
-
-      // Also load any source links
-      loadSource(manager, fact, new Set<string>(), schemaTracker);
     } else {
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
       manager.load(factAddress);
-      loadSource(manager, fact, new Set<string>(), schemaTracker);
     }
+    // Also load any source links and recipes
+    loadSource(manager, fact, new Set<string>(), schemaTracker);
   }
 }
 
