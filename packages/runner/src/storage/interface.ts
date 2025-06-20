@@ -187,7 +187,7 @@ export interface IStorageTransaction {
     address: IStorageAddress,
   ): Result<
     Read,
-    IStorageTransactionError | IStorageTransactionClosed
+    INotFoundError | IStorageTransactionError | IStorageTransactionClosed
   >;
 
   /**
