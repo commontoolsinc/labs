@@ -365,11 +365,10 @@ export class Storage implements IStorage {
               : undefined,
           );
           dependencies.add(dependency);
-          return { ...value, cell: dependency };
         } else {
           console.warn("unexpected doc link", value);
-          return value;
         }
+        return value;
       } else if (Array.isArray(value)) {
         return value.map(traverse);
       } else {
