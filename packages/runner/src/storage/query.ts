@@ -117,7 +117,7 @@ export class DocObjectManager extends ClientObjectManager {
       entityId,
       false,
     );
-    if (docMapEntry !== undefined) {
+    if (docMapEntry !== undefined && docMapEntry.value !== undefined) {
       // Use the storage class to convert this doc to json
       const storageValue = this.cellLinkToJSON(
         docMapEntry,

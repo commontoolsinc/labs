@@ -222,7 +222,6 @@ export class Storage implements IStorage {
       storageProvider,
       schemaContext,
     );
-    if (missing.length > 0) console.warn("missing", missing);
     // Ignore any entries that aren't json. We typically have the
     // per-space transaction entry, and may have labels.
     // We'll also ensure we're only dealing with the entity ids that will
@@ -233,6 +232,17 @@ export class Storage implements IStorage {
       ).map((docAddr) => {
         return { "/": docAddr.of.slice(3) };
       }).toArray();
+
+    // It's ok to be missing the primary record (this is the case when we are
+    // creating it for the first time).
+    if (
+      missing.length === 1 &&
+      missing[0].of === `of:${entityIdStr(doc.entityId)}`
+    ) {
+      entityIds.push({ "/": missing[0].of.slice(3) });
+    } else if (missing.length > 1) {
+      console.warn("missing", missing);
+    }
 
     const docMap = this.runtime.documentMap;
     // First, make sure we have all these docs in the runtime document map
