@@ -1,10 +1,8 @@
 import ts from "typescript";
 import { isOpaqueRefType } from "./types.ts";
 import { 
-  addDeriveImport, 
-  addIfElseImport, 
-  hasDeriveImport, 
-  hasIfElseImport 
+  addCommonToolsImport, 
+  hasCommonToolsImport 
 } from "./imports.ts";
 import { 
   checkTransformation, 
@@ -113,7 +111,7 @@ export function createOpaqueRefTransformer(
           
           switch (result.type) {
             case 'ternary': {
-              if (!hasIfElseImport(sourceFile)) {
+              if (!hasCommonToolsImport(sourceFile, "ifElse")) {
                 needsIfElseImport = true;
               }
               return createIfElseCall(
@@ -133,7 +131,7 @@ export function createOpaqueRefTransformer(
                 context,
               );
               if (transformedExpression !== jsxNode.expression) {
-                if (!hasDeriveImport(sourceFile)) {
+                if (!hasCommonToolsImport(sourceFile, "derive")) {
                   needsDeriveImport = true;
                 }
                 return context.factory.updateJsxExpression(
@@ -153,7 +151,7 @@ export function createOpaqueRefTransformer(
                 context
               );
               if (transformed !== node) {
-                if (!hasDeriveImport(sourceFile)) {
+                if (!hasCommonToolsImport(sourceFile, "derive")) {
                   needsDeriveImport = true;
                 }
                 return transformed;
@@ -180,10 +178,10 @@ export function createOpaqueRefTransformer(
       let result = visited;
       if (hasTransformed && mode === 'transform') {
         if (needsIfElseImport) {
-          result = addIfElseImport(result, context.factory);
+          result = addCommonToolsImport(result, context.factory, "ifElse");
         }
         if (needsDeriveImport) {
-          result = addDeriveImport(result, context.factory);
+          result = addCommonToolsImport(result, context.factory, "derive");
         }
         
         // Log the transformed source if debug is enabled
