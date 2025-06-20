@@ -1,8 +1,10 @@
 import {
   Charm,
   charmId,
+  compileAndRunRecipe,
   extractVersionTag,
   getIframeRecipe,
+  getRecipeIdFromCharm,
   modifyCharm,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
@@ -712,8 +714,43 @@ const OperationTab = () => {
 const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const { charmManager } = useCharmManager();
+  const runtime = useRuntime();
   const [showFullCode, setShowFullCode] = useState(false);
-  const { loading } = useCharmOperationContext();
+  const { loading, setLoading } = useCharmOperationContext();
+  const [regularRecipeSource, setRegularRecipeSource] = useState<string>("");
+  const [workingRegularRecipeSource, setWorkingRegularRecipeSource] = useState<string>("");
+  const [isRegularRecipe, setIsRegularRecipe] = useState(false);
+  const navigate = useNavigate();
+  const { replicaName } = useParams<CharmRouteParams>();
+
+  // Load regular recipe source if not an iframe recipe
+  useEffect(() => {
+    function loadRegularRecipeSource() {
+      if (!charm || iframeRecipe) {
+        setIsRegularRecipe(false);
+        return;
+      }
+      
+      // This is a regular recipe
+      setIsRegularRecipe(true);
+      
+      try {
+        const recipeId = getRecipeIdFromCharm(charm);
+        if (recipeId) {
+          const recipeMeta = runtime.recipeManager.getRecipeMeta({ recipeId });
+          if (recipeMeta?.src) {
+            setRegularRecipeSource(recipeMeta.src);
+            setWorkingRegularRecipeSource(recipeMeta.src);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading regular recipe source:", error);
+      }
+    }
+    
+    loadRegularRecipeSource();
+  }, [charm, iframeRecipe, runtime]);
 
   const {
     fullSrc,
@@ -786,6 +823,91 @@ const CodeTab = () => {
     return activeSchema === "argument" ? "argumentSchema" : "resultSchema";
   };
 
+  // For regular recipes, just show a full code editor
+  if (isRegularRecipe) {
+    return (
+      <div className="h-full flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between p-4 pb-2">
+          <div className="text-sm font-semibold">Recipe Code</div>
+          {/* Save button for regular recipes */}
+          {workingRegularRecipeSource !== regularRecipeSource && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!charm) return;
+                setLoading(true);
+                try {
+                  // Get the recipe spec and argument from the current charm
+                  const recipeId = getRecipeIdFromCharm(charm);
+                  const recipeMeta = runtime.recipeManager.getRecipeMeta({ recipeId });
+                  const spec = recipeMeta?.spec || "";
+                  const argument = charmManager.getArgument(charm);
+                  
+                  // Compile and run the updated recipe
+                  const newCharm = await compileAndRunRecipe(
+                    charmManager,
+                    workingRegularRecipeSource,
+                    spec,
+                    argument,
+                    recipeId ? [recipeId] : undefined,
+                  );
+                  
+                  if (newCharm && replicaName) {
+                    navigate(
+                      createPath("charmShow", { charmId: charmId(newCharm)!, replicaName }),
+                    );
+                  }
+                } catch (error) {
+                  console.error("Error saving regular recipe:", error);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+              className="px-3 py-1 text-sm bg-black text-white border border-black disabled:opacity-50 flex items-center gap-1"
+            >
+              {loading
+                ? (
+                  <>
+                    <span className="inline-block w-3 h-3">
+                      <DitheredCube
+                        width={12}
+                        height={12}
+                        animate
+                        cameraZoom={6}
+                      />
+                    </span>
+                    <span>Processing...</span>
+                  </>
+                )
+                : (
+                  "Save Changes"
+                )}
+            </button>
+          )}
+        </div>
+        
+        <div className="px-4 flex-grow flex flex-col overflow-hidden">
+          <CharmCodeEditor
+            docs={[
+              {
+                key: "code",
+                label: "Recipe Code",
+                value: workingRegularRecipeSource,
+                onChange: setWorkingRegularRecipeSource,
+                language: "javascript" as const,
+                readOnly: false,
+              },
+            ]}
+            activeKey="code"
+            loading={false}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Original iframe recipe editor
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center justify-between p-4 pb-2">
@@ -924,7 +1046,7 @@ const DataTab = () => {
 
   const lineage = charmManager.getLineage(charm);
 
-  const Lineage = (item: typeof lineage[number]) => (
+  const Lineage = (item: typeof lineage[number]): JSX.Element => (
     <div
       key={`lineage-${charmId(item.charm) || ""}`}
     >
@@ -1091,7 +1213,6 @@ const DataTab = () => {
                         <div className="flex flex-wrap gap-1">
                           {readingFrom.map((
                             charm: Cell<Charm>,
-                            index: number,
                           ) => (
                             <div
                               key={`read-from-${charmId(charm)}`}
@@ -1122,7 +1243,7 @@ const DataTab = () => {
                     {readBy.length > 0
                       ? (
                         <div className="flex flex-wrap gap-1">
-                          {readBy.map((charm: Cell<Charm>, index: number) => (
+                          {readBy.map((charm: Cell<Charm>) => (
                             <div
                               key={`read-by-${charmId(charm)}`}
                               className="bg-green-100 border border-green-300 px-2 py-1"
