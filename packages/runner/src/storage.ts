@@ -10,13 +10,14 @@ import {
 } from "@commontools/memory/interface";
 import { SchemaNone } from "@commontools/memory/schema";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
+import { Cell, isCell, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type EntityId } from "./doc-map.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
+import { type EntityId } from "./doc-map.ts";
+import { isLink, parseLink } from "./link-utils.ts";
 import type {
   IStorageManager,
   IStorageProvider,
@@ -265,31 +266,28 @@ export class Storage implements IStorage {
 
     // Traverse the value and for each doc reference, make sure it's persisted.
     // This is done recursively.
-    const traverse = (
-      value: Readonly<any>,
-      path: PropertyKey[],
-    ): any => {
-      // If it's a doc, make it a doc link
-      if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
+    const traverse = (value: Readonly<any>): any => {
+      // If it's a link, add it as dependency and convert it to a sigil link
+      if (isLink(value)) {
+        const link = parseLink(value, doc.asCell())!;
+        const cell = this.runtime.getCellFromLink(link);
+        dependencies.add(this._ensureIsSynced(cell));
 
-      // If it's a query result proxy, make it a doc link
-      if (isQueryResultForDereferencing(value)) {
-        value = getCellLinkOrThrow(value);
-      }
-
-      // If it's a doc link, convert it to a doc link with an id
-      if (isCellLink(value)) {
-        dependencies.add(this._ensureIsSynced(value.cell));
-        return { ...value, cell: value.cell.toJSON() /* = the id */ };
+        // Don't convert to sigil link here, as we plan to remove this whole
+        // transformation soon. So return value instead of creating a sigil
+        // link. Roundtripping through JSON converts all Cells and Docs to a
+        // serializable format.
+        if (isQueryResultForDereferencing(value)) {
+          value = getCellLinkOrThrow(value);
+        }
+        return JSON.parse(JSON.stringify(value));
       } else if (isRecord(value)) {
         if (Array.isArray(value)) {
-          return value.map((value, index) => traverse(value, [...path, index]));
+          return value.map(traverse);
         } else {
           return Object.fromEntries(
-            Object.entries(value).map(([key, value]: [PropertyKey, any]) => [
-              key,
-              traverse(value, [...path, key]),
-            ]),
+            Object.entries(value as Record<string, any>)
+              .map(([key, value]) => [key, traverse(value)]),
           );
         }
       } else return value;
@@ -300,7 +298,7 @@ export class Storage implements IStorage {
 
     // Convert all doc references to ids and remember as dependent docs
     const value: StorageValue = {
-      value: traverse(doc.get(), []),
+      value: traverse(doc.get()),
       source: doc.sourceCell?.entityId,
       ...(labels !== undefined) ? { labels: labels } : {},
     };
@@ -341,6 +339,18 @@ export class Storage implements IStorage {
     const traverse = (value: any): any => {
       if (typeof value !== "object" || value === null) {
         return value;
+      } else if (isLink(value)) {
+        const link = parseLink(value, doc.asCell())!;
+        const cell = this.runtime.getCellFromLink(link);
+
+        // If the doc is not yet loaded, load it. As it's referenced in
+        // something that came from storage, the id is known in storage and so
+        // we have to wait for it to load. Hence true as second parameter.
+        dependencies.add(this._ensureIsSynced(cell));
+
+        // We don't convert here as we plan to remove this whole transformation
+        // soon. So return value instead of creating a sigil link.
+        return value;
       } else if ("cell" in value && "path" in value) {
         // If we see a doc link an id, then we sync the mentioned doc.
         if (
@@ -352,9 +362,6 @@ export class Storage implements IStorage {
           const valueSchema = (label !== undefined)
             ? this.runtime.cfc.schemaWithLub(value.schema ?? {}, label)
             : value.schema;
-          // If the doc is not yet loaded, load it. As it's referenced in
-          // something that came from storage, the id is known in storage and so
-          // we have to wait for it to load. Hence true as second parameter.
           const dependency = this._ensureIsSyncedById(
             doc.space,
             value.cell,
