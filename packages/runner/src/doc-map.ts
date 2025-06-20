@@ -6,8 +6,8 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { isCell, isCellLink } from "./cell.ts";
-import { type CellLink } from "./sigil-types.ts";
+import { isCell } from "./cell.ts";
+import { parseLink } from "./link-utils.ts";
 import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
 import { fromURI, normalizeEntityId } from "./uri-utils.ts";
 
@@ -81,30 +81,24 @@ export function createRef(
 export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
     // Handle URI format with "of:" prefix
-    const normalizedId = fromURI(value);
-    return value.startsWith("{") ? JSON.parse(value) : { "/": normalizedId };
+    if (value.startsWith("of:")) value = fromURI(value);
+    return value.startsWith("{") ? JSON.parse(value) : { "/": value };
   }
   if (isRecord(value) && "/" in value) {
-    // Normalize the ID to remove "of:" prefix if present
-    const id = value["/"];
-    const normalizedId = typeof id === "string" ? fromURI(id) : id;
-    return { "/": normalizedId as string };
+    return JSON.parse(JSON.stringify(value));
   }
 
-  let ref: CellLink | undefined = undefined;
+  const link = parseLink(value);
 
-  if (isQueryResultForDereferencing(value)) ref = getCellLinkOrThrow(value);
-  else if (isCellLink(value)) ref = value;
-  else if (isCell(value)) ref = value.getAsCellLink();
-  else if (isDoc(value)) ref = { cell: value, path: [] };
+  if (!link || !link.source) return undefined;
 
-  if (!ref?.cell.entityId) return undefined;
+  const entityId = { "/": fromURI(link.source) };
 
-  if (ref.path.length > 0) {
+  if (link.path && link.path.length > 0) {
     return JSON.parse(
-      JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)),
+      JSON.stringify(createRef({ path: link.path }, entityId)),
     );
-  } else return JSON.parse(JSON.stringify(ref.cell.entityId));
+  } else return entityId;
 }
 
 /**
@@ -187,23 +181,13 @@ export class DocumentMap implements IDocumentMap {
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined {
     // Normalize entity ID for consistent key generation
-    const normalizedId = typeof entityId === "string"
-      ? fromURI(entityId)
-      : normalizeEntityId(entityId);
+    const normalizedId = { "/": normalizeEntityId(entityId) };
 
-    const id = typeof entityId === "string"
-      ? JSON.stringify({ "/": normalizedId })
-      : JSON.stringify({ "/": normalizedId });
-
-    let doc = this.entityIdToDocMap.get(space, id);
+    let doc = this.entityIdToDocMap.get(space, JSON.stringify(normalizedId));
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
 
-    const finalEntityId = typeof entityId === "string"
-      ? ({ "/": normalizedId } as EntityId)
-      : ({ "/": normalizedId } as EntityId);
-
-    doc = createDoc<T>(undefined as T, finalEntityId, space, this.runtime);
+    doc = createDoc<T>(undefined as T, normalizedId, space, this.runtime);
     doc.sourceCell = sourceIfCreated;
     return doc;
   }
@@ -214,8 +198,8 @@ export class DocumentMap implements IDocumentMap {
     doc: DocImpl<any>,
   ): void {
     // Normalize entity ID for consistent key generation
-    const normalizedId = normalizeEntityId(entityId);
-    const id = JSON.stringify({ "/": normalizedId });
+    const normalizedId = { "/": normalizeEntityId(entityId) };
+    const id = JSON.stringify(normalizedId);
 
     // throw if doc already exists
     if (this.entityIdToDocMap.get(space, id)) {
@@ -227,9 +211,8 @@ export class DocumentMap implements IDocumentMap {
 
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
     // Normalize entity ID for consistent key generation
-    const normalizedId = normalizeEntityId(entityId);
-    const id = JSON.stringify({ "/": normalizedId });
-    this.entityIdToDocMap.set(space, id, doc);
+    const normalizedId = { "/": normalizeEntityId(entityId) };
+    this.entityIdToDocMap.set(space, JSON.stringify(normalizedId), doc);
   }
 
   cleanup(): void {
