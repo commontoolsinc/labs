@@ -94,7 +94,6 @@ export const charm = new Command()
         await newCharm(
           parseSpaceOptions(options),
           absPath(entryPath),
-          await drainStdin(),
         ),
       ),
   )
