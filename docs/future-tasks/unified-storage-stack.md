@@ -150,7 +150,7 @@ This plan should be entirely incremental and can be rolled out step by step.
 - [ ] Add path-dependent listeners to memory: A helper on `Storage`, that given
       a `TX` calls a callback _once_ on future changes on what was read during
       the transaction (observing only changes affecting the read path). Make it
-      canceallable (the scheduler will e.g. cancel this before executing the
+      cancelable (the scheduler will e.g. cancel this before executing the
       action again). First design the API.
 - [ ] Shim the API above and switch scheduler to use it
   - [ ] The current reads and writes from a TX can be read out, which scheduler
@@ -159,7 +159,7 @@ This plan should be entirely incremental and can be rolled out step by step.
         It does so to not miss any updates.
 - [ ] Implement new TX over memory CT-487
   - [ ] The user of the TX shall observe a consistent state during the lifetime
-        of the transaction. All it's writes are only committed to the nursery
+        of the transaction. All its writes are only committed to the nursery
         after `tx.commit()` is called. If the transaction attempts to read a
         value that has changed since the start of the transaction, the
         transaction is aborted.
