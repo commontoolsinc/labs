@@ -25,6 +25,29 @@ export function replaceOpaqueRefWithParam(
 }
 
 /**
+ * Replaces multiple OpaqueRef expressions with their corresponding parameters.
+ */
+export function replaceOpaqueRefsWithParams(
+  expression: ts.Expression,
+  refToParamName: Map<ts.Expression, string>,
+  factory: ts.NodeFactory,
+  context: ts.TransformationContext,
+): ts.Expression {
+  const visit = (node: ts.Node): ts.Node => {
+    // Check if this node is one of the OpaqueRefs we're replacing
+    for (const [ref, paramName] of refToParamName) {
+      if (node === ref) {
+        return factory.createIdentifier(paramName);
+      }
+    }
+    
+    return ts.visitEachChild(node, visit, context);
+  };
+  
+  return visit(expression) as ts.Expression;
+}
+
+/**
  * Creates an ifElse call from a ternary expression.
  */
 export function createIfElseCall(
@@ -74,21 +97,131 @@ export function transformExpressionWithOpaqueRef(
       return expression;
     }
 
-    // For now, support single OpaqueRef expressions
-    // TODO: Handle multiple OpaqueRefs in one expression
-    const opaqueRef = opaqueRefs[0];
+    // Deduplicate OpaqueRefs (same ref might appear multiple times)
+    const uniqueRefs = new Map<string, ts.Expression>();
+    const refToParamName = new Map<ts.Expression, string>();
     
-    // Create the lambda body by replacing the OpaqueRef with the parameter
-    const lambdaBody = replaceOpaqueRefWithParam(expression, opaqueRef, varName, factory, context);
+    opaqueRefs.forEach(ref => {
+      const refText = ref.getText();
+      if (!uniqueRefs.has(refText)) {
+        const paramName = `_v${uniqueRefs.size + 1}`;
+        uniqueRefs.set(refText, ref);
+        refToParamName.set(ref, paramName);
+      } else {
+        // Map this ref to the same parameter name as the first occurrence
+        const firstRef = uniqueRefs.get(refText)!;
+        refToParamName.set(ref, refToParamName.get(firstRef)!);
+      }
+    });
     
-    // Create arrow function: (_v) => expression
+    const uniqueRefArray = Array.from(uniqueRefs.values());
+    
+    // If there's only one unique ref, use the simple form: derive(ref, _v => ...)
+    if (uniqueRefArray.length === 1) {
+      const ref = uniqueRefArray[0];
+      const paramName = refToParamName.get(ref)!;
+      
+      // Replace all occurrences of this ref with the parameter
+      const lambdaBody = replaceOpaqueRefsWithParams(expression, refToParamName, factory, context);
+      
+      const arrowFunction = factory.createArrowFunction(
+        undefined,
+        undefined,
+        [factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          factory.createIdentifier(paramName),
+          undefined,
+          undefined,
+          undefined,
+        )],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        lambdaBody,
+      );
+      
+      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+      const deriveIdentifier = moduleAlias
+        ? factory.createPropertyAccessExpression(
+          factory.createIdentifier(moduleAlias),
+          factory.createIdentifier("derive"),
+        )
+        : factory.createIdentifier("derive");
+      
+      return factory.createCallExpression(
+        deriveIdentifier,
+        undefined,
+        [ref, arrowFunction],
+      );
+    }
+    
+    // Multiple unique refs: use object form derive({a, b}, ({a: _v1, b: _v2}) => ...)
+    const paramNames = uniqueRefArray.map(ref => refToParamName.get(ref)!);
+    
+    // Create object literal for refs: {a, b, c}
+    const refProperties = uniqueRefArray.map((ref) => {
+      // For simple identifiers, use shorthand: {a, b}
+      if (ts.isIdentifier(ref)) {
+        return factory.createShorthandPropertyAssignment(
+          ref,
+          undefined
+        );
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        // For property access, use the full property path as the key
+        // e.g., state.count becomes "state.count": state.count
+        const propName = ref.getText().replace(/\./g, '_'); // Replace dots with underscores for valid identifiers
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref
+        );
+      } else {
+        // Fallback to generic name
+        const propName = `ref${uniqueRefArray.indexOf(ref) + 1}`;
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref
+        );
+      }
+    });
+    
+    const refObject = factory.createObjectLiteralExpression(refProperties, false);
+    
+    // Create object pattern for parameters: {a: _v1, b: _v2}
+    const paramProperties = uniqueRefArray.map((ref, index) => {
+      const paramName = paramNames[index];
+      
+      // Determine the property name to use in the binding pattern
+      let propName: string;
+      if (ts.isIdentifier(ref)) {
+        propName = ref.text;
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        // Use the same naming scheme as above
+        propName = ref.getText().replace(/\./g, '_');
+      } else {
+        propName = `ref${index + 1}`;
+      }
+      
+      return factory.createBindingElement(
+        undefined,
+        factory.createIdentifier(propName),
+        factory.createIdentifier(paramName),
+        undefined
+      );
+    });
+    
+    const paramPattern = factory.createObjectBindingPattern(paramProperties);
+    
+    // Replace all refs in the expression with their corresponding parameters
+    const lambdaBody = replaceOpaqueRefsWithParams(expression, refToParamName, factory, context);
+    
+    // Create arrow function: ({_v1, _v2}) => expression
     const arrowFunction = factory.createArrowFunction(
       undefined,
       undefined,
       [factory.createParameterDeclaration(
         undefined,
         undefined,
-        factory.createIdentifier(varName),
+        paramPattern,
         undefined,
         undefined,
         undefined,
@@ -110,7 +243,7 @@ export function transformExpressionWithOpaqueRef(
     return factory.createCallExpression(
       deriveIdentifier,
       undefined,
-      [opaqueRef, arrowFunction],
+      [refObject, arrowFunction],
     );
   }
   
