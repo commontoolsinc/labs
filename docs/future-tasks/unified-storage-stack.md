@@ -146,12 +146,7 @@ This plan should be entirely incremental and can be rolled out step by step.
     - [ ] `Cell.freeze()` makes cell read-only
     - [ ] `Cell.ephemeral` whether cell is persisted
 - [ ] Switch all reading & writing over to this new TX API CT-486
-- [ ] Implement new TX over memory CT-487
-  - [ ] The user of the TX shall observe a consistent state during the lifetime
-        of the transaction. All it's writes are only committed to the nursery
-        after `tx.commit()` is called. If the transaction attempts to read a
-        value that has changed since the start of the transaction, the
-        transaction is aborted.
+- [ ] Add `Cell.sync` call that does what `Storage.syncCell` does today.
 - [ ] Add path-dependent listeners to memory: A helper on `Storage`, that given
       a `TX` calls a callback _once_ on future changes on what was read during
       the transaction (observing only changes affecting the read path). Make it
@@ -162,7 +157,14 @@ This plan should be entirely incremental and can be rolled out step by step.
         will use to update the dependency graph. In fact scheduler will inside
         the callback do both this and adding the callback just before returning.
         It does so to not miss any updates.
-- Implement new listener API.
+- [ ] Implement new TX over memory CT-487
+  - [ ] The user of the TX shall observe a consistent state during the lifetime
+        of the transaction. All it's writes are only committed to the nursery
+        after `tx.commit()` is called. If the transaction attempts to read a
+        value that has changed since the start of the transaction, the
+        transaction is aborted.
+- [ ] Shift `Cell.sync()` to make schema queries on memory directly.
+- [ ] Implement new listener API.
   - [ ] Path-dependent means that we diff updates and compute what paths have
         changed. Callback gets called if any paths overlap, i.e. one is a subset
         of the other. See `compactifyPath` and `pathAffected` for current
@@ -182,10 +184,6 @@ This plan should be entirely incremental and can be rolled out step by step.
 - [ ] On conflicts add data that changed unless it was already sent to the
       client by a query. CT-452
 - [ ] Remove `storage.ts` and `DocImpl`, they are now skipped CT-453
-  - storage.ts has 1000+ lines of complex batching logic to remove
-  - DocImpl in doc.ts is ~300 lines
-  - Also removed Cell.push conflict logic (line 922) since the corresponding
-    parts are also being removed.
 - [x] Memory layer with pending changes after a conflicted write: rollback to
       heap and notify that as changes where it changed things
 - [ ] Sanitize React at least a bit by implement CT-320
