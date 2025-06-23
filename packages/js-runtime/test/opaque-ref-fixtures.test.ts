@@ -44,6 +44,16 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       
       expect(result.matches).toBe(true);
     });
+
+    it("handles binary expression with ternary using OpaqueRef", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/binary-with-ternary.input.ts",
+        "opaque-refs/binary-with-ternary.expected.ts",
+        { types }
+      );
+      
+      expect(result.matches).toBe(true);
+    });
   });
 
   describe("Using fixtures with custom assertions", () => {
