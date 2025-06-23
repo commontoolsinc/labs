@@ -2,6 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import {
   type Alias,
   isAlias,
+  isShadowRef,
   type Recipe,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
@@ -87,6 +88,9 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   function convert(binding: unknown): unknown {
     if (isAlias(binding)) {
       const alias = { ...binding.$alias };
+      if (isShadowRef(alias.cell)) {
+        debugger;
+      }
       if (typeof alias.cell === "number") {
         if (alias.cell === 1) {
           // Moved to the next-to-top level. Don't assign a doc, so that on
