@@ -61,8 +61,8 @@ export default recipe(model, model, (cell) => {
     console.log(mainModule);
     
     // Check that JSX expressions were transformed to derive calls
-    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v => _v + 1)');
-    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v => _v * 2)');
+    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 + 1)');
+    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 * 2)');
     
     // The simple reference should NOT be wrapped in derive
     expect(compiled.js).not.toContain('commontools_1.derive(cell.value, _v => _v)');
