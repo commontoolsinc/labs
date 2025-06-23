@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { createOpaqueRefTransformer } from "../typescript/transformer/mod.ts";
 import { getTypeScriptEnvironmentTypes } from "../mod.ts";
+import { join } from "@std/path";
 
 // Cache environment types
 let envTypesCache: Record<string, string> | undefined;
@@ -150,4 +151,57 @@ export async function checkWouldTransform(
   } catch (e) {
     return true; // Error means transformation would occur
   }
+}
+
+/**
+ * Load a fixture file from the fixtures directory
+ */
+export async function loadFixture(path: string): Promise<string> {
+  const fixturesDir = join(import.meta.dirname!, "fixtures");
+  const fullPath = join(fixturesDir, path);
+  return await Deno.readTextFile(fullPath);
+}
+
+/**
+ * Load multiple fixtures as a record
+ */
+export async function loadFixtures(
+  paths: string[]
+): Promise<Record<string, string>> {
+  const fixtures: Record<string, string> = {};
+  for (const path of paths) {
+    fixtures[path] = await loadFixture(path);
+  }
+  return fixtures;
+}
+
+/**
+ * Transform a fixture file
+ */
+export async function transformFixture(
+  fixturePath: string,
+  options?: Parameters<typeof transformSource>[1]
+): Promise<string> {
+  const source = await loadFixture(fixturePath);
+  return transformSource(source, options);
+}
+
+/**
+ * Compare fixture transformations
+ */
+export async function compareFixtureTransformation(
+  inputPath: string,
+  expectedPath: string,
+  options?: Parameters<typeof transformSource>[1]
+): Promise<{ actual: string; expected: string; matches: boolean }> {
+  const [actual, expected] = await Promise.all([
+    transformFixture(inputPath, options),
+    loadFixture(expectedPath),
+  ]);
+  
+  return {
+    actual,
+    expected,
+    matches: actual.trim() === expected.trim(),
+  };
 }
