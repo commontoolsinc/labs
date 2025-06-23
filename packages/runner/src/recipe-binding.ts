@@ -1,6 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import {
   type JSONValue,
+  isShadowRef,
   type Recipe,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
@@ -91,6 +92,9 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   function convert(binding: unknown): unknown {
     if (isLegacyAlias(binding)) {
       const alias = { ...binding.$alias };
+      if (isShadowRef(alias.cell)) {
+        debugger;
+      }
       if (typeof alias.cell === "number") {
         if (alias.cell === 1) {
           // Moved to the next-to-top level. Don't assign a doc, so that on

@@ -1,5 +1,5 @@
 // Main exports
-export { 
+export {
   createOpaqueRefTransformer,
   type OpaqueRefTransformerOptions,
   type TransformationError,
@@ -7,30 +7,24 @@ export {
 
 // Type checking utilities
 export {
-  isOpaqueRefType,
-  containsOpaqueRef,
   collectOpaqueRefs,
+  containsOpaqueRef,
+  isOpaqueRefType,
   isSimpleOpaqueRefAccess,
 } from "./types.ts";
 
 // Import management utilities
 export {
+  addCommonToolsImport,
   getCommonToolsModuleAlias,
   hasCommonToolsImport,
-  addCommonToolsImport,
 } from "./imports.ts";
 
 // Transformation utilities
 export {
-  replaceOpaqueRefWithParam,
-  createIfElseCall,
-  transformExpressionWithOpaqueRef,
   checkTransformation,
+  createIfElseCall,
+  replaceOpaqueRefWithParam,
   type TransformationResult,
+  transformExpressionWithOpaqueRef,
 } from "./transforms.ts";
-
-// Test utilities
-export {
-  transformSource,
-  checkWouldTransform,
-} from "./test-utils.ts";
