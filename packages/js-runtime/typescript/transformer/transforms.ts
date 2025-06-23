@@ -67,10 +67,22 @@ export function createIfElseCall(
     )
     : factory.createIdentifier("ifElse");
 
+  // Strip parentheses from whenTrue and whenFalse if they are ParenthesizedExpressions
+  let whenTrue = ternary.whenTrue;
+  let whenFalse = ternary.whenFalse;
+  
+  while (ts.isParenthesizedExpression(whenTrue)) {
+    whenTrue = whenTrue.expression;
+  }
+  
+  while (ts.isParenthesizedExpression(whenFalse)) {
+    whenFalse = whenFalse.expression;
+  }
+
   return factory.createCallExpression(
     ifElseIdentifier,
     undefined,
-    [ternary.condition, ternary.whenTrue, ternary.whenFalse],
+    [ternary.condition, whenTrue, whenFalse],
   );
 }
 
