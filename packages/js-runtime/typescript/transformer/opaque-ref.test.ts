@@ -3,9 +3,17 @@ import { expect } from "@std/expect";
 import { transformSource, checkWouldTransform } from "./test-utils.ts";
 
 const commonToolsTypes = `
-export interface OpaqueRef<T> {
+// Base interface for OpaqueRef
+export interface OpaqueRefBase<T> {
   readonly value: T;
 }
+
+// OpaqueRef type with mapped properties for objects
+export type OpaqueRef<T> = OpaqueRefBase<T> & (
+  T extends object ? {
+    readonly [K in keyof T]: OpaqueRef<T[K]>;
+  } : {}
+);
 
 export declare function derive<T, U>(
   ref: OpaqueRef<T>,
@@ -64,7 +72,7 @@ const count: OpaqueRef<number> = {} as any;
 const result = count + 1;
 `;
       const transformed = transformSource(source, { types });
-      expect(transformed).toContain('commontools_1.derive(count, _v => _v + 1)');
+      expect(transformed).toContain('commontools_1.derive(count, _v1 => _v1 + 1)');
       expect(transformed).not.toContain('count + 1');
     });
 
@@ -79,11 +87,11 @@ const d = num / 2;
 const e = num % 3;
 `;
       const transformed = transformSource(source, { types });
-      expect(transformed).toContain('commontools_1.derive(num, _v => _v + 1)');
-      expect(transformed).toContain('commontools_1.derive(num, _v => _v - 1)');
-      expect(transformed).toContain('commontools_1.derive(num, _v => _v * 2)');
-      expect(transformed).toContain('commontools_1.derive(num, _v => _v / 2)');
-      expect(transformed).toContain('commontools_1.derive(num, _v => _v % 3)');
+      expect(transformed).toContain('commontools_1.derive(num, _v1 => _v1 + 1)');
+      expect(transformed).toContain('commontools_1.derive(num, _v1 => _v1 - 1)');
+      expect(transformed).toContain('commontools_1.derive(num, _v1 => _v1 * 2)');
+      expect(transformed).toContain('commontools_1.derive(num, _v1 => _v1 / 2)');
+      expect(transformed).toContain('commontools_1.derive(num, _v1 => _v1 % 3)');
     });
 
     it("does not transform binary expressions without OpaqueRef", () => {
@@ -105,7 +113,7 @@ const count: OpaqueRef<number> = {} as any;
 const element = <div>{count + 1}</div>;
 `;
       const transformed = transformSource(source, { types });
-      expect(transformed).toContain('{commontools_1.derive(count, _v => _v + 1)}');
+      expect(transformed).toContain('{commontools_1.derive(count, _v1 => _v1 + 1)}');
     });
 
     it("does not transform simple OpaqueRef references in JSX", () => {
@@ -133,8 +141,8 @@ const element = (
 `;
       const transformed = transformSource(source, { types });
       expect(transformed).toContain('{price}');
-      expect(transformed).toContain('{commontools_1.derive(price, _v => _v * 1.1)}');
-      expect(transformed).toContain('{commontools_1.derive(price, _v => _v - 10)}');
+      expect(transformed).toContain('{commontools_1.derive(price, _v1 => _v1 * 1.1)}');
+      expect(transformed).toContain('{commontools_1.derive(price, _v1 => _v1 - 10)}');
     });
   });
 
@@ -254,9 +262,8 @@ const user: OpaqueRef<User> = {} as any;
 const result = user.age + 1;
 `;
       const transformed = transformSource(source, { types });
-      // The entire user object is an OpaqueRef, so we derive from user
-      // and then access .age on the derived value
-      expect(transformed).toContain('commontools_1.derive(user, _v => _v.age + 1)');
+      // With our updated type definition, user.age is recognized as OpaqueRef<number>
+      expect(transformed).toContain('commontools_1.derive(user.age, _v1 => _v1 + 1)');
     });
 
     it("handles string concatenation with OpaqueRef", () => {
@@ -266,7 +273,53 @@ const name: OpaqueRef<string> = {} as any;
 const greeting = "Hello, " + name;
 `;
       const transformed = transformSource(source, { types });
-      expect(transformed).toContain('commontools_1.derive(name, _v => "Hello, " + _v)');
+      expect(transformed).toContain('commontools_1.derive(name, _v1 => "Hello, " + _v1)');
+    });
+
+    it("handles multiple different OpaqueRefs in one expression", () => {
+      const source = `
+import { OpaqueRef, derive } from "commontools";
+const count1: OpaqueRef<number> = {} as any;
+const count2: OpaqueRef<number> = {} as any;
+const sum = count1 + count2;
+`;
+      const transformed = transformSource(source, { types });
+      // Should use object form: derive({count1, count2}, ({count1: _v1, count2: _v2}) => _v1 + _v2)
+      expect(transformed).toContain('commontools_1.derive({ count1, count2 }, ({ count1: _v1, count2: _v2 }) => _v1 + _v2)');
+    });
+
+    it("handles multiple same OpaqueRefs in one expression", () => {
+      const source = `
+import { OpaqueRef, derive } from "commontools";
+const count: OpaqueRef<number> = {} as any;
+const double = count + count;
+`;
+      const transformed = transformSource(source, { types });
+      // Should only pass count once: derive(count, _v1 => _v1 + _v1)
+      expect(transformed).toContain('commontools_1.derive(count, _v1 => _v1 + _v1)');
+    });
+
+    it("handles complex expressions with multiple OpaqueRefs", () => {
+      const source = `
+import { OpaqueRef, derive } from "commontools";
+const a: OpaqueRef<number> = {} as any;
+const b: OpaqueRef<number> = {} as any;
+const c: OpaqueRef<number> = {} as any;
+const result = (a + b) * c;
+`;
+      const transformed = transformSource(source, { types });
+      // Should handle all three refs
+      expect(transformed).toContain('commontools_1.derive({ a, b, c }, ({ a: _v1, b: _v2, c: _v3 }) => (_v1 + _v2) * _v3)');
+    });
+
+    it("handles mixed OpaqueRef and regular values", () => {
+      const source = `
+import { OpaqueRef, derive } from "commontools";
+const count: OpaqueRef<number> = {} as any;
+const result = count + 10;
+`;
+      const transformed = transformSource(source, { types });
+      expect(transformed).toContain('commontools_1.derive(count, _v1 => _v1 + 10)');
     });
   });
 });
