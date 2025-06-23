@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { isOpaqueRefType } from "./types.ts";
+import { isOpaqueRefType, containsOpaqueRef } from "./types.ts";
 import { 
   addCommonToolsImport, 
   hasCommonToolsImport 
@@ -7,7 +7,7 @@ import {
 import { 
   checkTransformation, 
   createIfElseCall, 
-  transformExpressionWithOpaqueRef 
+  transformExpressionWithOpaqueRef
 } from "./transforms.ts";
 
 /**
@@ -83,6 +83,49 @@ export function createOpaqueRefTransformer(
       };
 
       const visit: ts.Visitor = (node) => {
+        // Special handling for ternary expressions
+        if (ts.isConditionalExpression(node)) {
+          // Check if condition contains OpaqueRef (before transformation)
+          const originalConditionType = checker.getTypeAtLocation(node.condition);
+          const conditionContainsOpaqueRef = containsOpaqueRef(node.condition, checker);
+          const conditionIsOpaqueRef = isOpaqueRefType(originalConditionType, checker);
+          
+          // First, visit all children to transform them
+          const visitedCondition = ts.visitNode(node.condition, visit) as ts.Expression;
+          const visitedWhenTrue = ts.visitNode(node.whenTrue, visit) as ts.Expression;
+          const visitedWhenFalse = ts.visitNode(node.whenFalse, visit) as ts.Expression;
+          
+          // Create updated node with transformed children
+          const updatedNode = context.factory.updateConditionalExpression(
+            node,
+            visitedCondition,
+            node.questionToken,
+            visitedWhenTrue,
+            node.colonToken,
+            visitedWhenFalse
+          );
+          
+          // If the condition was/contained an OpaqueRef, or if it got transformed to a derive call
+          if (conditionIsOpaqueRef || conditionContainsOpaqueRef || visitedCondition !== node.condition) {
+            log(`Found ternary transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            
+            if (mode === 'error') {
+              reportError(node, 'ternary', 'Ternary operator with OpaqueRef condition should use ifElse()');
+              return updatedNode;
+            }
+            
+            hasTransformed = true;
+            if (!hasCommonToolsImport(sourceFile, "ifElse")) {
+              needsIfElseImport = true;
+            }
+            
+            return createIfElseCall(updatedNode, context.factory, sourceFile);
+          }
+          
+          return updatedNode;
+        }
+        
+        // For other node types, check transformation first
         const result = checkTransformation(node, checker);
         
         if (result.transformed) {
@@ -92,9 +135,6 @@ export function createOpaqueRefTransformer(
             // In error mode, report the error but don't transform
             let message = '';
             switch (result.type) {
-              case 'ternary':
-                message = 'Ternary operator with OpaqueRef condition should use ifElse()';
-                break;
               case 'jsx':
                 message = 'JSX expression with OpaqueRef computation should use derive()';
                 break;
@@ -110,32 +150,6 @@ export function createOpaqueRefTransformer(
           hasTransformed = true;
           
           switch (result.type) {
-            case 'ternary': {
-              if (!hasCommonToolsImport(sourceFile, "ifElse")) {
-                needsIfElseImport = true;
-              }
-              const ternaryNode = node as ts.ConditionalExpression;
-              // Recursively visit the whenTrue and whenFalse expressions
-              const visitedWhenTrue = ts.visitNode(ternaryNode.whenTrue, visit) as ts.Expression;
-              const visitedWhenFalse = ts.visitNode(ternaryNode.whenFalse, visit) as ts.Expression;
-              
-              // Create a new conditional expression with visited branches
-              const updatedTernary = context.factory.updateConditionalExpression(
-                ternaryNode,
-                ternaryNode.condition,
-                ternaryNode.questionToken,
-                visitedWhenTrue,
-                ternaryNode.colonToken,
-                visitedWhenFalse
-              );
-              
-              return createIfElseCall(
-                updatedTernary, 
-                context.factory, 
-                sourceFile
-              );
-            }
-            
             case 'jsx': {
               const jsxNode = node as ts.JsxExpression;
               const transformedExpression = transformExpressionWithOpaqueRef(

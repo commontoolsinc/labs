@@ -78,6 +78,17 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       
       expect(result.matches).toBe(true);
     });
+
+    it("transforms ternary with comparison operation", async () => {
+      // Tests that (opaque > 5 ? 1 : 2) becomes ifElse(derive(opaque, _v1 => _v1 > 5), 1, 2)
+      const result = await compareFixtureTransformation(
+        "opaque-refs/ternary-with-comparison.input.ts",
+        "opaque-refs/ternary-with-comparison.expected.ts",
+        { types }
+      );
+      
+      expect(result.matches).toBe(true);
+    });
   });
 
   describe("Using fixtures with custom assertions", () => {
