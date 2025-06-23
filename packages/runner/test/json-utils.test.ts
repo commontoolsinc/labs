@@ -49,16 +49,28 @@ describe("createJsonSchema", () => {
       name: "item2",
       value: 42,
     }]);
-    expect(mixedArraySchema).toEqual({
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          value: { type: "integer" },
+    expect(mixedArraySchema).toEqual(
+      {
+        type: "array",
+        items: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+              },
+            },
+            {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                value: { type: "integer" },
+              },
+            },
+          ],
         },
-      },
-    });
+      } satisfies JSONSchema,
+    );
   });
 
   it("should create schema for objects", () => {
@@ -161,7 +173,7 @@ describe("createJsonSchema", () => {
       { type: "string", format: "email" },
     );
 
-    const schema = createJsonSchema(cellWithSchema);
+    const schema = createJsonSchema(cellWithSchema, false, runtime);
     expect(schema).toEqual({ type: "string", format: "email" });
   });
 
@@ -175,7 +187,7 @@ describe("createJsonSchema", () => {
       },
     );
 
-    const schema = createJsonSchema(cellWithoutSchema);
+    const schema = createJsonSchema(cellWithoutSchema, false, runtime);
     expect(schema).toEqual({
       type: "object",
       properties: {
@@ -192,7 +204,7 @@ describe("createJsonSchema", () => {
       [1, 2, 3, 4],
     );
 
-    const schema = createJsonSchema(arrayCell);
+    const schema = createJsonSchema(arrayCell, false, runtime);
 
     expect(schema).toEqual({
       type: "array",
@@ -227,7 +239,7 @@ describe("createJsonSchema", () => {
       preferences: prefsCell,
     };
 
-    const schema = createJsonSchema(nestedObject);
+    const schema = createJsonSchema(nestedObject, false, runtime);
     expect(schema).toEqual({
       type: "object",
       properties: {

@@ -480,7 +480,11 @@ export async function castNewRecipe(
   const scrubbed = scrub(form.input.references);
 
   // First, extract any existing schema if we have data
-  const existingSchema = createJsonSchema(scrubbed);
+  const existingSchema = createJsonSchema(
+    scrubbed,
+    false,
+    charmManager.runtime,
+  );
 
   // Prototype workflow: combine steps
   const { newSpec, newRecipeSrc, llmRequestId } =

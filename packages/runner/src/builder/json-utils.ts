@@ -1,9 +1,7 @@
 import { isObject, isRecord } from "@commontools/utils/types";
-import { isCell, isLegacyCellLink, isSigilWriteRedirectLink } from "../cell.ts";
-import { type LegacyAlias, type LegacyCellLink } from "../sigil-types.ts";
-import { isLegacyAlias, parseToLegacyCellLink } from "../link-utils.ts";
-import { isDoc } from "../doc.ts";
-import { createShadowRef } from "./opaque-ref.ts";
+import { isCell } from "../cell.ts";
+import { type LegacyAlias } from "../sigil-types.ts";
+import { isLegacyAlias, isLink } from "../link-utils.ts";
 import {
   canBeOpaqueRef,
   isOpaqueRef,
@@ -21,7 +19,9 @@ import {
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import { deepEqual, getValueAtPath } from "../path-utils.ts";
+import { deepEqual } from "../path-utils.ts";
+import { IRuntime } from "../runtime.ts";
+import { parseLink } from "../link-utils.ts";
 
 export function toJSONWithAliases(
   value: Opaque<any>,
@@ -130,31 +130,31 @@ export function toJSONWithAliases(
 export function createJsonSchema(
   example: any,
   addDefaults = false,
+  runtime?: IRuntime,
 ): JSONSchemaMutable {
+  const seen = new Map<string, JSONSchemaMutable>();
+
   function analyzeType(value: any): JSONSchema {
-    if (isCell(value)) {
-      if (value.schema) {
-        return value.schema;
-      } else {
-        value = value.get();
+    if (isLink(value)) {
+      const link = parseLink(value);
+      const linkAsStr = JSON.stringify(link);
+      if (seen.has(linkAsStr)) {
+        // Return a copy of the schema to avoid mutating the original.
+        return JSON.parse(JSON.stringify(seen.get(linkAsStr)!));
       }
-    }
 
-    if (isDoc(value)) {
-      value = { cell: value, path: [] } satisfies LegacyCellLink;
-    }
+      const cell = runtime?.getCellFromLink(link);
+      if (!cell) return {}; // TODO(seefeld): Should be `true`
 
-    if (isLegacyCellLink(value)) {
-      value = value.cell.getAtPath(value.path);
-      return analyzeType(value);
-    }
-
-    if (isSigilWriteRedirectLink(value)) {
-      const link = parseToLegacyCellLink(value);
-      if (link && isDoc(link.cell)) {
-        value = link.cell.getAtPath(link.path);
+      let schema = cell.schema;
+      if (!schema) {
+        // If we find pointing back here, assume an empty schema. This is
+        // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
+        seen.set(linkAsStr, {} as JSONSchemaMutable);
+        schema = analyzeType(cell.getRaw());
       }
-      return analyzeType(value);
+      seen.set(linkAsStr, schema as JSONSchemaMutable);
+      return schema;
     }
 
     const type = typeof value;
@@ -164,33 +164,19 @@ export function createJsonSchema(
       case "object":
         if (Array.isArray(value)) {
           schema.type = "array";
-          // Check the array type. The array type is determined by the first element
-          // of the array, or if objects, a superset of all properties of the object elements.
-          // If array is empty, `items` is `{}`.
           if (value.length === 0) {
-            schema.items = {};
+            schema.items = {}; // TODO(seefeld): Should be `true`
           } else {
-            const first = value[0];
-            if (isObject(first)) {
-              const properties: { [key: string]: any } = {};
-              for (let i = 0; i < value.length; i++) {
-                const item = value?.[i];
-                if (isRecord(item)) {
-                  Object.keys(item).forEach((key) => {
-                    if (!(key in properties)) {
-                      properties[key] = analyzeType(
-                        value?.[i]?.[key],
-                      );
-                    }
-                  });
-                }
-              }
-              schema.items = {
-                type: "object",
-                properties,
-              };
+            const schemas = value.map((v) => analyzeType(v)).map((s) =>
+              JSON.stringify(s)
+            );
+            const uniqueSchemas = [...new Set(schemas)].map((s) =>
+              JSON.parse(s)
+            );
+            if (uniqueSchemas.length === 1) {
+              schema.items = uniqueSchemas[0];
             } else {
-              schema.items = analyzeType(first) as JSONSchemaMutable;
+              schema.items = { anyOf: uniqueSchemas };
             }
           }
         } else if (value !== null) {
