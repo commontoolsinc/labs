@@ -520,7 +520,7 @@ export class Replica {
     // `unclaimed` revisions for those that we store. By doing this we can avoid
     // network round trips if such are pulled again in the future.
     const notFound = [];
-    const revisions = new Map();
+    const revisions = new Map<FactAddress, Revision<State>>();
     if (fetched.length < entries.length) {
       for (const [entry, _schema] of entries) {
         if (!this.get(entry)) {
@@ -1164,10 +1164,11 @@ export class Provider implements IStorageProvider {
     const { workspace } = this;
     const address = { the, of };
     const subscriber = (revision?: Revision<State>) => {
-      if (revision) {
+      // If since is -1, this is not a real revision, so don't notify subscribers
+      if (revision && revision.since !== -1) {
         // ⚠️ We may not have a value because fact was retracted or
         // (less likely) deleted altogether. We still need to notify sink
-        // but we do is empty object per
+        // but we do this with the empty object per
         // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
         // TODO(@seefeldb): Make compatible `sink` API change
         callback((revision?.is ?? {}) as unknown as StorageValue<T>);

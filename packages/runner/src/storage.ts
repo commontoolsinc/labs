@@ -74,6 +74,9 @@ export class Storage implements IStorage {
   private storageToDocSubs = new Map<string, Cancel>();
   private docToStorageSubs = new Map<string, Cancel>();
 
+  // Tracks promises returned by storage updates.
+  private docToStoragePromises = new Set<Promise<any>>();
+
   private cancel: Cancel;
   private addCancel: AddCancel;
 
@@ -113,7 +116,10 @@ export class Storage implements IStorage {
   }
 
   synced(): Promise<void> {
-    return Promise.all(this.loadingPromises.values()).then(() => {
+    return Promise.all([
+      ...this.loadingPromises.values(),
+      ...this.docToStoragePromises.values(),
+    ]).then(() => {
       return;
     });
   }
@@ -128,6 +134,7 @@ export class Storage implements IStorage {
     this.loadingResolves.clear();
     this.storageToDocSubs.clear();
     this.docToStorageSubs.clear();
+    this.docToStoragePromises.clear();
     this.cancel();
   }
 
@@ -384,7 +391,6 @@ export class Storage implements IStorage {
     // converted to JSON. This is done recursively.
     const traverse = (
       value: Readonly<any>,
-      path: PropertyKey[],
     ): JSONValue => {
       // If it's a doc, make it a doc link -- we'll swap this for json below
       if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
@@ -403,12 +409,12 @@ export class Storage implements IStorage {
         };
       } else if (isRecord(value)) {
         if (Array.isArray(value)) {
-          return value.map((val, index) => traverse(val, [...path, index]));
+          return value.map((val, _index) => traverse(val));
         } else {
           return Object.fromEntries(
             Object.entries(value).map(([key, val]: [PropertyKey, any]) => [
               key.toString(),
-              traverse(val, [...path, key]),
+              traverse(val),
             ]),
           );
         }
@@ -417,7 +423,7 @@ export class Storage implements IStorage {
 
     // Convert all doc references to ids and remember as dependent docs
     const newValue: StorageValue<JSONValue> = {
-      value: traverse(doc.get() as Readonly<any>, []),
+      value: traverse(doc.get() as Readonly<any>),
       ...(doc.sourceCell !== undefined)
         ? { source: doc.sourceCell.toJSON() }
         : {},
@@ -485,14 +491,22 @@ export class Storage implements IStorage {
       if (deepEqual(storageValue, existingValue)) {
         return;
       }
-      this._getStorageProviderForSpace(doc.space).send([{
-        entityId: doc.entityId,
-        value: storageValue,
-      }]);
+      // Track these promises for our synced call.
+      const docToStoragePromise = this._getStorageProviderForSpace(doc.space)
+        .send([{
+          entityId: doc.entityId,
+          value: storageValue,
+        }]);
+      this.docToStoragePromises.add(docToStoragePromise);
+      docToStoragePromise.finally(() =>
+        this.docToStoragePromises.delete(docToStoragePromise)
+      );
     });
     this.addCancel(docToStorage);
     this.docToStorageSubs.set(docId, docToStorage);
 
+    // This will be called when we get an update from the server,
+    // and merge the changes into the heap.
     const storageToDoc = this._getStorageProviderForSpace(doc.space).sink<
       JSONValue
     >(
@@ -514,8 +528,6 @@ export class Storage implements IStorage {
             false,
           )
           : undefined;
-        // TODO(@ubik2): i see an undefined newSourceCell here sometimes,
-        // even though the doc's sourceCell is set.
         if (doc.sourceCell !== newSourceCell) {
           doc.sourceCell = newSourceCell;
         }
