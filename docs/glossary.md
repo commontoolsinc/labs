@@ -20,13 +20,41 @@ Charm is a [spell] invocation binding set of [cell]s as inputs and set of [cell]
 
 A data structure that can resolve conflicts automatically in distributed systems. Used selectively, e.g. for collaborative text editing.
 
+## Space
+
+Space is primarily a sharing boundary, designed to enforce access control. Spaces are identified by unique [did:key] identifiers.
+
+> ℹ️ Currently each space has a corresponding sqlite database to store all of its state.
+
+Space can be queried and updated using [memory protocol], which describes state in terms of [fact](#fact)s.
+
+## Fact
+
+Is a record of state in time represented using `{ the, of, is, cause }` tuples. E.g consider following fact: _The_ **color** _of_ **sky** _is_ **blue** it would directly translated to
+`{ the: "color", of: "object:sky", is: "blue" }`.
+
+> ℹ️ The `cause` filed is used to establis causal references, it effectively represents a logical time per fact as opposed to global time.
+
+In practice we use `the` field to describe kind of the information value (`is` field) is provided about subject entity (`of` field). Predominantly `the` is `"application/json"` as we store [cell] contents as JSON values and consequently `is` field is a JSON value [cell]s hold at discrete points in time.
+
+The `of` field is a unique identifier represented via URI. In practice it usually a [merkle-reference] derived from some seed data with `of:` scheme prefix.
+
+## Memory
+
+Memory is an abstraction over [space] and an information system adhering to [The Value of Values] design principles. Abstraction provides efficient way to access current state - current facts about various entities, while still providing a way to recall facts that had being succeeded by the new ones.
+
+Memory also provides interface for accreting new information through an interface with [compare and swap (CAS)][CAS] semantics.
+
+> ℹ️ Please note that layers above [memory] do not follow same principals or operate at the level of [fact]s, instead they use more traditional document-oriented semantics and reference state by the address inside the mutable memory space.
+
+
 ## Deno
 
 A JavaScript/TypeScript runtime used on the server side of Open Ocean.
 
-## did:key
+## [did:key]
 
-A decentralized identifier derived from a keypair. Used to uniquely identify and control a Space.
+A decentralized identifier derived from a keypair. Used to uniquely identify and control a [Space].
 
 ## Event Handler
 
@@ -35,10 +63,6 @@ Code that reacts to events and may update other cells or trigger further actions
 ## LLM (Large Language Model)
 
 AI models such as Claude or ChatGPT that can be called from recipes for AI-generated outputs.
-
-## Memory
-
-The document-oriented storage system used by Open Ocean, organized into Spaces. Provides syncing, schema enforcement, and verifiability.
 
 ## Reactive Framework
 
@@ -54,7 +78,7 @@ The secure, isolated rendering of recipe-generated UI, considered part of the Tr
 
 ## Space
 
-A namespace for user data, identified by a did:key. Users control access and permissions via UCANs and ACLs.
+A namespace for user data, identified by a [did:key]. Users control access and permissions via [UCAN]s and ACLs.
 
 ## Spell
 
@@ -92,3 +116,8 @@ A data representation of UI elements returned by recipes, which the runtime turn
 [tcb]:#tcb-trusted-computing-base
 [ucan]:#ucan-user-controlled-authorization-network
 [vdom]:#vdom-virtual-dom
+[memory protocol]:https://github.com/commontoolsinc/RFC/blob/main/rfc/memory.md
+[The Value of Values]:https://www.youtube.com/watch?v=-I-VpPMzG7c
+[merkle-reference]:https://github.com/Gozala/merkle-reference/blob/main/docs/spec.md
+[CAS]:https://en.wikipedia.org/wiki/Compare-and-swap
+[did:key]:https://w3c-ccg.github.io/did-key-spec
