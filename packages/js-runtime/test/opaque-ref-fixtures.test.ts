@@ -54,6 +54,20 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       
       expect(result.matches).toBe(true);
     });
+
+    it("transforms array elements with OpaqueRef operations independently", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/array-with-opaque-operations.input.ts",
+        "opaque-refs/array-with-opaque-operations.expected.ts",
+        { types }
+      );
+      
+      expect(result.matches).toBe(true);
+      if (!result.matches) {
+        console.log("Expected:", result.expected);
+        console.log("Actual:", result.actual);
+      }
+    });
   });
 
   describe("Using fixtures with custom assertions", () => {
