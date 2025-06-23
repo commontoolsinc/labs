@@ -68,6 +68,16 @@ describe("OpaqueRef Transformer with Fixtures", () => {
         console.log("Actual:", result.actual);
       }
     });
+
+    it("transforms object literal properties with OpaqueRef operations independently", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/object-literal-operations.input.ts",
+        "opaque-refs/object-literal-operations.expected.ts",
+        { types }
+      );
+      
+      expect(result.matches).toBe(true);
+    });
   });
 
   describe("Using fixtures with custom assertions", () => {
