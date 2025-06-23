@@ -5,6 +5,16 @@ import ts from "typescript";
  * Handles intersection types, type references, and type aliases.
  */
 export function isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean {
+  // Debug logging
+  const debugType = false; // Set to true to debug type checking
+  if (debugType) {
+    console.log(`[isOpaqueRefType] Checking type: ${checker.typeToString(type)}`);
+    console.log(`[isOpaqueRefType] Type flags: ${type.flags}`);
+    if (type.aliasSymbol) {
+      console.log(`[isOpaqueRefType] Alias symbol: ${type.aliasSymbol.getName()}`);
+    }
+  }
+
   // Handle intersection types (OpaqueRef<T> is defined as an intersection)
   if (type.flags & ts.TypeFlags.Intersection) {
     const intersectionType = type as ts.IntersectionType;
@@ -34,7 +44,7 @@ export function isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean
     // Also check the type's symbol directly
     const symbol = type.getSymbol();
     if (symbol) {
-      if (symbol.name === "OpaqueRef" || symbol.name === "OpaqueRefMethods") {
+      if (symbol.name === "OpaqueRef" || symbol.name === "OpaqueRefMethods" || symbol.name === "OpaqueRefBase") {
         return true;
       }
 
@@ -64,8 +74,24 @@ export function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boole
   const visit = (n: ts.Node): void => {
     if (found) return;
     
-    // Check if this node is an OpaqueRef
-    if (ts.isIdentifier(n) || ts.isPropertyAccessExpression(n)) {
+    // For property access expressions, check if the result is an OpaqueRef
+    if (ts.isPropertyAccessExpression(n)) {
+      const type = checker.getTypeAtLocation(n);
+      if (isOpaqueRefType(type, checker)) {
+        found = true;
+        return;
+      }
+    }
+    
+    // Check standalone identifiers
+    if (ts.isIdentifier(n)) {
+      // Skip if this identifier is the name part of a property access
+      const parent = n.parent;
+      if (ts.isPropertyAccessExpression(parent) && parent.name === n) {
+        // This is the property name in a property access (e.g., 'count' in 'state.count')
+        return;
+      }
+      
       const type = checker.getTypeAtLocation(n);
       if (isOpaqueRefType(type, checker)) {
         found = true;
@@ -85,10 +111,33 @@ export function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boole
  */
 export function collectOpaqueRefs(node: ts.Node, checker: ts.TypeChecker): ts.Expression[] {
   const refs: ts.Expression[] = [];
+  const processedNodes = new Set<ts.Node>();
   
   const visit = (n: ts.Node): void => {
-    // Check identifiers and property accesses
-    if ((ts.isIdentifier(n) || ts.isPropertyAccessExpression(n)) && ts.isExpression(n)) {
+    // Skip if already processed
+    if (processedNodes.has(n)) return;
+    processedNodes.add(n);
+    
+    // For property access expressions, check if the result is an OpaqueRef
+    if (ts.isPropertyAccessExpression(n) && ts.isExpression(n)) {
+      // Check if the result of the property access is an OpaqueRef
+      const type = checker.getTypeAtLocation(n);
+      if (isOpaqueRefType(type, checker)) {
+        refs.push(n);
+        return; // Don't visit children
+      }
+      
+    }
+    
+    // Check standalone identifiers (not part of property access)
+    if (ts.isIdentifier(n) && ts.isExpression(n)) {
+      // Skip if this identifier is the name part of a property access
+      const parent = n.parent;
+      if (ts.isPropertyAccessExpression(parent) && parent.name === n) {
+        // This is the property name in a property access (e.g., 'count' in 'state.count')
+        return;
+      }
+      
       const type = checker.getTypeAtLocation(n);
       if (isOpaqueRefType(type, checker)) {
         refs.push(n);
