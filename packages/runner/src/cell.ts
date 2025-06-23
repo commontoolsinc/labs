@@ -651,13 +651,13 @@ function createSigilLink(
 
     // Only include id if it's different from base
     if (getEntityId(doc)!["/"] !== getEntityId(baseDoc)?.["/"]) {
-      reference.source = toURI(doc.entityId);
+      reference.id = toURI(doc.entityId);
     }
 
     // Only include space if it's different from base
     if (doc.space && doc.space !== baseDoc.space) reference.space = doc.space;
   } else {
-    reference.source = toURI(doc.entityId);
+    reference.id = toURI(doc.entityId);
 
     // Handle baseSpace option - only include space if different from baseSpace
     if (doc.space !== options?.baseSpace) reference.space = doc.space;

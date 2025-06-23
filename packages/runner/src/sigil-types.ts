@@ -19,7 +19,7 @@ export const LINK_V1_TAG = "link@1" as const;
 
 export type LinkV1 = {
   [LINK_V1_TAG]: {
-    source?: URI;
+    id?: URI;
     path?: string[];
     space?: MemorySpace;
     schema?: JSONSchema;

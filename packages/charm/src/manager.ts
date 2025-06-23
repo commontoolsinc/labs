@@ -503,7 +503,7 @@ export class CharmManager {
 
               // If we've reached the end and have a resultRef, return it
               if (value.resultRef) {
-                const { source } = parseLink(value.resultRef, cell)!;
+                const { id: source } = parseLink(value.resultRef, cell)!;
                 if (source) return getEntityId(source);
               }
             }
@@ -536,8 +536,8 @@ export class CharmManager {
           // Handle values that are themselves cells, docs, or cell links
           if (isLink(value)) {
             const link = parseLink(value, parent);
-            if (link.source) {
-              addMatchingCharm(getEntityId(link.source)!);
+            if (link.id) {
+              addMatchingCharm(getEntityId(link.id)!);
             }
 
             const sourceRefId = followSourceToResultRef(
@@ -673,7 +673,7 @@ export class CharmManager {
 
       // If we've reached the end and have a resultRef, return it
       if (value && typeof value === "object" && value.resultRef) {
-        return parseLink(value.resultRef, cell)?.source;
+        return parseLink(value.resultRef, cell)?.id;
       }
 
       return cellURI; // Return the current document's ID if no further references
@@ -698,7 +698,7 @@ export class CharmManager {
             const link = parseLink(value, parent);
 
             // Check if the cell link's doc is our target
-            if (link.source === charm.sourceURI) return true;
+            if (link.id === charm.sourceURI) return true;
 
             // Check if cell link's source chain leads to our target
             const sourceResultRefURI = followSourceToResultRef(

@@ -31,7 +31,7 @@ import {
  * Normalized link structure returned by parsers
  */
 export type NormalizedLink = {
-  source?: URI; // URI format with "of:" prefix
+  id?: URI; // URI format with "of:" prefix
   path?: string[];
   space?: MemorySpace;
   schema?: JSONSchema;
@@ -115,7 +115,7 @@ export function parseLink(
 
   if (isCell(value)) {
     return {
-      source: toURI(value.getDoc().entityId),
+      id: toURI(value.getDoc().entityId),
       path: value.path.map((p) => p.toString()),
       space: value.space,
       schema: value.schema,
@@ -126,7 +126,7 @@ export function parseLink(
   if (isDoc(value)) {
     // Extract from DocImpl
     return {
-      source: toURI(value.entityId),
+      id: toURI(value.entityId),
       path: [],
       space: value.space,
     };
@@ -137,17 +137,17 @@ export function parseLink(
     const link = value["/"][LINK_V1_TAG];
 
     // Resolve relative references
-    let id = link.source;
+    let id = link.id;
     const path = link.path || [];
     const resolvedSpace = link.space || base?.space;
 
     // If no id provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.getDoc().entityId) : base.source;
+      id = isCell(base) ? toURI(base.getDoc().entityId) : base.id;
     }
 
     return {
-      source: id,
+      id: id,
       path: path.map((p) => p.toString()),
       space: resolvedSpace,
       schema: link.schema,
@@ -159,7 +159,7 @@ export function parseLink(
   // Handle legacy CellLink format (runtime format with DocImpl)
   if (isLegacyCellLink(value)) {
     return {
-      source: toURI(value.cell.entityId),
+      id: toURI(value.cell.entityId),
       path: value.path.map((p) => p.toString()),
       space: value.cell.space,
       schema: value.schema,
@@ -170,7 +170,7 @@ export function parseLink(
   // Handle JSON CellLink format (storage format with { "/": string })
   if (isJSONCellLink(value)) {
     return {
-      source: toURI(value.cell["/"]),
+      id: toURI(value.cell["/"]),
       path: value.path.map((p) => p.toString()),
       space: base?.space, // Space must come from context for JSON links
     };
@@ -178,7 +178,7 @@ export function parseLink(
 
   if (isRecord(value) && "/" in value) {
     return {
-      source: toURI(value["/"]),
+      id: toURI(value["/"]),
       path: [],
       space: base?.space, // Space must come from context for JSON links
     };
@@ -202,11 +202,11 @@ export function parseLink(
 
     // If no cell provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.getDoc().entityId) : base.source;
+      id = isCell(base) ? toURI(base.getDoc().entityId) : base.id;
     }
 
     return {
-      source: id,
+      id: id,
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
@@ -316,10 +316,10 @@ function parseToLegacyCellLinkWithMaybeACell(
   if (!link) return undefined;
 
   const cellValue = doc ??
-    (link.source && baseCell
+    (link.id && baseCell
       ? baseCell.getDoc().runtime!.documentMap.getDocByEntityId(
         link.space ?? baseCell!.space!,
-        link.source!,
+        link.id!,
         true,
       )
       : undefined);
@@ -356,7 +356,7 @@ export function areLinksSame(
 
   // Compare normalized links
   return (
-    link1.source === link2.source &&
+    link1.id === link2.id &&
     link1.space === link2.space &&
     arrayEqual(link1.path, link2.path)
   );
@@ -383,10 +383,10 @@ export function createSigilLinkFromParsedLink(
 
   // Only add id if different from base
   const baseId = base
-    ? (isCell(base) ? toURI(base.getDoc().entityId) : base.source)
+    ? (isCell(base) ? toURI(base.getDoc().entityId) : base.id)
     : undefined;
-  if (link.source !== baseId) {
-    sigilLink["/"][LINK_V1_TAG].source = link.source;
+  if (link.id !== baseId) {
+    sigilLink["/"][LINK_V1_TAG].id = link.id;
   }
 
   // Only add overwrite if it's a redirect

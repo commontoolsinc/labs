@@ -90,9 +90,9 @@ export function getEntityId(value: any): { "/": string } | undefined {
 
   const link = parseLink(value);
 
-  if (!link || !link.source) return undefined;
+  if (!link || !link.id) return undefined;
 
-  const entityId = { "/": fromURI(link.source) };
+  const entityId = { "/": fromURI(link.id) };
 
   if (link.path && link.path.length > 0) {
     return JSON.parse(

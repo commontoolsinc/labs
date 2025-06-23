@@ -1716,11 +1716,11 @@ describe("getAsLink method", () => {
     // Verify structure
     expect(link["/"]).toBeDefined();
     expect(link["/"][LINK_V1_TAG]).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].source).toBeDefined();
+    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
     expect(link["/"][LINK_V1_TAG].path).toBeDefined();
 
     // Verify id has of: prefix
-    expect(link["/"][LINK_V1_TAG].source).toMatch(/^of:/);
+    expect(link["/"][LINK_V1_TAG].id).toMatch(/^of:/);
 
     // Verify path is empty array
     expect(link["/"][LINK_V1_TAG].path).toEqual([]);
@@ -1781,7 +1781,7 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell });
 
     // Should omit id and space since they're the same
-    expect(link["/"][LINK_V1_TAG].source).toBeUndefined();
+    expect(link["/"][LINK_V1_TAG].id).toBeUndefined();
     expect(link["/"][LINK_V1_TAG].space).toBeUndefined();
     expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
   });
@@ -1804,8 +1804,8 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell });
 
     // Should include id but not space since space is the same
-    expect(link["/"][LINK_V1_TAG].source).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].source).toMatch(/^of:/);
+    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
+    expect(link["/"][LINK_V1_TAG].id).toMatch(/^of:/);
     expect(link["/"][LINK_V1_TAG].space).toBeUndefined();
     expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
   });
@@ -1828,8 +1828,8 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell });
 
     // Should include both id and space since they're different
-    expect(link["/"][LINK_V1_TAG].source).toBeDefined();
-    expect(link["/"][LINK_V1_TAG].source).toMatch(/^of:/);
+    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
+    expect(link["/"][LINK_V1_TAG].id).toMatch(/^of:/);
     expect(link["/"][LINK_V1_TAG].space).toBe(space);
     expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
   });
@@ -1847,7 +1847,7 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ includeSchema: true });
 
     expect(link["/"][LINK_V1_TAG].schema).toEqual(schema);
-    expect(link["/"][LINK_V1_TAG].source).toBeDefined();
+    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
     expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
   });
 
@@ -1900,7 +1900,7 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink({ base: baseCell, includeSchema: true });
 
     // Should include id (different docs) but not space (same space)
-    expect(link["/"][LINK_V1_TAG].source).toBeDefined();
+    expect(link["/"][LINK_V1_TAG].id).toBeDefined();
     expect(link["/"][LINK_V1_TAG].space).toBeUndefined();
     expect(link["/"][LINK_V1_TAG].path).toEqual(["value"]);
     expect(link["/"][LINK_V1_TAG].schema).toEqual(schema);
@@ -1953,12 +1953,12 @@ describe("getAsWriteRedirectLink method", () => {
     // Verify structure
     expect(alias["/"]).toBeDefined();
     expect(alias["/"][LINK_V1_TAG]).toBeDefined();
-    expect(alias["/"][LINK_V1_TAG].source).toBeDefined();
+    expect(alias["/"][LINK_V1_TAG].id).toBeDefined();
     expect(alias["/"][LINK_V1_TAG].path).toBeDefined();
     expect(alias["/"][LINK_V1_TAG].overwrite).toBe("redirect");
 
     // Verify id has of: prefix
-    expect(alias["/"][LINK_V1_TAG].source).toMatch(/^of:/);
+    expect(alias["/"][LINK_V1_TAG].id).toMatch(/^of:/);
 
     // Verify path is empty array
     expect(alias["/"][LINK_V1_TAG].path).toEqual([]);
@@ -1991,7 +1991,7 @@ describe("getAsWriteRedirectLink method", () => {
     // Alias with same baseSpace should omit space
     const alias = cell.getAsWriteRedirectLink({ baseSpace: space });
 
-    expect(alias["/"][LINK_V1_TAG].source).toBeDefined();
+    expect(alias["/"][LINK_V1_TAG].id).toBeDefined();
     expect(alias["/"][LINK_V1_TAG].space).toBeUndefined();
     expect(alias["/"][LINK_V1_TAG].path).toEqual([]);
   });
@@ -2007,7 +2007,7 @@ describe("getAsWriteRedirectLink method", () => {
     // Alias with different baseSpace should include space
     const alias = cell.getAsWriteRedirectLink({ baseSpace: space });
 
-    expect(alias["/"][LINK_V1_TAG].source).toBeDefined();
+    expect(alias["/"][LINK_V1_TAG].id).toBeDefined();
     expect(alias["/"][LINK_V1_TAG].space).toBe(space2);
     expect(alias["/"][LINK_V1_TAG].path).toEqual([]);
   });
@@ -2045,7 +2045,7 @@ describe("getAsWriteRedirectLink method", () => {
     const alias = cell.getAsWriteRedirectLink({ base: baseCell });
 
     // Should include id (different docs) but not space (same space)
-    expect(alias["/"][LINK_V1_TAG].source).toBeDefined();
+    expect(alias["/"][LINK_V1_TAG].id).toBeDefined();
     expect(alias["/"][LINK_V1_TAG].space).toBeUndefined();
     expect(alias["/"][LINK_V1_TAG].path).toEqual(["value"]);
   });

@@ -197,7 +197,7 @@ export function normalizeAndDiff(
     if (
       isWriteRedirectLink(currentValue) &&
       currentLink !== undefined &&
-      newLink.source === currentLink.source &&
+      newLink.id === currentLink.id &&
       arrayEqual(newLink.path, currentLink.path)
     ) {
       return [];
