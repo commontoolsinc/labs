@@ -8,7 +8,7 @@ import {
   type SigilWriteRedirectLink,
 } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { arrayEqual } from "./type-utils.ts";
+import { arrayEqual } from "./path-utils.ts";
 import {
   isWriteRedirectLink,
   parseLink,

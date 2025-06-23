@@ -7,7 +7,7 @@ import { isAnyCellLink, isCell, isLegacyCellLink } from "./cell.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
-import { arrayEqual } from "./type-utils.ts";
+import { arrayEqual } from "./path-utils.ts";
 import {
   areLinksSame,
   isLink,

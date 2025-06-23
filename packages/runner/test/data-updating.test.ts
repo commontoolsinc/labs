@@ -10,7 +10,7 @@ import {
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import { isAnyCellLink, isCellLink } from "../src/cell.ts";
-import { arrayEqual } from "../src/type-utils.ts";
+import { arrayEqual } from "../src/path-utils.ts";
 import type { LegacyCellLink } from "../src/sigil-types.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";

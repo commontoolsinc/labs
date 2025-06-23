@@ -1,6 +1,7 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import {
   isModule,
+  isOpaqueRef,
   isRecipe,
   isStreamValue,
   type JSONSchema,
@@ -21,7 +22,6 @@ import {
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
-import { containsOpaqueRef, deepCopy } from "./type-utils.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAllAliasedCells,
@@ -192,8 +192,10 @@ export class Runner implements IRunner {
     const previousInternal = processCell.get()?.internal;
     const internal: JSONValue = Object.assign(
       {},
-      deepCopy((defaults as unknown as { internal: JSONValue })?.internal),
-      deepCopy(
+      cellAwareDeepCopy(
+        (defaults as unknown as { internal: JSONValue })?.internal,
+      ),
+      cellAwareDeepCopy(
         isRecord(recipe.initial) && isRecord(recipe.initial.internal)
           ? recipe.initial.internal
           : {},
@@ -782,6 +784,29 @@ export class Runner implements IRunner {
   }
 }
 
+function containsOpaqueRef(value: unknown): boolean {
+  if (isOpaqueRef(value)) return true;
+  if (isLink(value)) return false;
+  if (isRecord(value)) {
+    return Object.values(value).some(containsOpaqueRef);
+  }
+  return false;
+}
+
+export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
+  if (isLink(value)) return value as Mutable<T>;
+  if (isRecord(value)) {
+    return Array.isArray(value)
+      ? value.map(cellAwareDeepCopy) as unknown as Mutable<T>
+      : Object.fromEntries(
+        Object.entries(value).map((
+          [key, value],
+        ) => [key, cellAwareDeepCopy(value)]),
+      ) as unknown as Mutable<T>;
+    // Literal value:
+  } else return value as Mutable<T>;
+}
+
 /**
  * Extracts default values from a JSON schema object.
  * @param schema - The JSON schema to extract defaults from
@@ -797,7 +822,9 @@ export function extractDefaultValues(
   ) {
     // Ignore the schema.default if it's not an object, since it's not a valid
     // default value for an object.
-    const obj = deepCopy(isRecord(schema.default) ? schema.default : {});
+    const obj = cellAwareDeepCopy(
+      isRecord(schema.default) ? schema.default : {},
+    );
     for (const [propKey, propSchema] of Object.entries(schema.properties)) {
       const value = extractDefaultValues(propSchema);
       if (value !== undefined) {

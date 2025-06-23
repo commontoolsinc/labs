@@ -19,9 +19,7 @@ import type { IRuntime } from "./runtime.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { Labels, MemorySpace } from "./storage.ts";
-import { arrayEqual } from "./type-utils.ts";
-
-// Remove the arrayEqual function since we import it now
+import { arrayEqual } from "./path-utils.ts";
 
 /**
  * Lowest level cell implementation.

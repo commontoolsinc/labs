@@ -20,7 +20,7 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
-import { arrayEqual } from "./type-utils.ts";
+import { arrayEqual } from "./path-utils.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
@@ -109,6 +109,8 @@ export function parseLink(
   value: any,
   base?: Cell | NormalizedLink,
 ): NormalizedLink | undefined {
+  // Has to be first, since below we check for "/" in value and we don't want to
+  // see userland "/".
   if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);
 
   if (isCell(value)) {
