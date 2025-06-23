@@ -1,21 +1,14 @@
 import { isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import {
-  type Cell,
-  isAnyCellLink,
-  isCell,
-  isJSONCellLink,
-  isLegacyCellLink,
-  isSigilLink,
-  type MemorySpace,
-} from "./cell.ts";
+import { type Cell, isCell, type MemorySpace } from "./cell.ts";
 import {
   type JSONCellLink,
   type LegacyAlias,
   type LegacyCellLink,
   LINK_V1_TAG,
   type SigilLink,
+  type SigilValue,
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
@@ -38,6 +31,74 @@ export type NormalizedLink = {
   rootSchema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
+
+/**
+ * Check if value is a sigil value with any type
+ */
+export function isSigilValue(value: any): value is SigilValue<any> {
+  return isRecord(value) && "/" in value && isRecord(value["/"]);
+}
+
+/**
+ * Check if value is a legacy cell link.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+export function isCellLink(value: any): value is LegacyCellLink | JSONCellLink {
+  return isLegacyCellLink(value) || isJSONCellLink(value);
+}
+
+/**
+ * Check if value is a legacy cell link.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+export function isLegacyCellLink(value: any): value is LegacyCellLink {
+  return (
+    isRecord(value) && isDoc(value.cell) && Array.isArray(value.path)
+  );
+}
+
+/**
+ * Check if value is a JSON cell link (storage format).
+ */
+export function isJSONCellLink(value: any): value is JSONCellLink {
+  return (
+    isRecord(value) &&
+    isRecord(value.cell) &&
+    typeof value.cell["/"] === "string" &&
+    Array.isArray(value.path)
+  );
+}
+
+/**
+ * Check if value is a sigil link.
+ */
+export function isSigilLink(value: any): value is SigilLink {
+  return (isSigilValue(value) && LINK_V1_TAG in value["/"]);
+}
+
+/**
+ * Check if value is a sigil alias (link with overwrite field).
+ */
+export function isSigilWriteRedirectLink(
+  value: any,
+): value is SigilWriteRedirectLink {
+  return isSigilLink(value) &&
+    value["/"][LINK_V1_TAG].overwrite === "redirect";
+}
+
+/**
+ * Check if value is any kind of cell link format.
+ */
+export function isAnyCellLink(
+  value: any,
+): value is LegacyCellLink | SigilLink | JSONCellLink | LegacyAlias {
+  return isCellLink(value) || isJSONCellLink(value) || isSigilLink(value) ||
+    isLegacyAlias(value);
+}
 
 /**
  * Check if value is any kind of link or linkable entity

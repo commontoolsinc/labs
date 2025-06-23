@@ -6,9 +6,9 @@ import {
   unsafe_parentRecipe,
   type UnsafeBinding,
 } from "./builder/types.ts";
-import { isLegacyAlias, isLink } from "./link-utils.ts";
+import { isCellLink, isLegacyAlias, isLink } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, isCell, isCellLink } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";

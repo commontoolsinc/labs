@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { ID } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
 import { type IStorage, Runtime } from "../src/runtime.ts";
-import { isAnyCellLink } from "../src/cell.ts";
+import { isAnyCellLink } from "../src/link-utils.ts";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import { Provider } from "../src/storage/cache.ts";

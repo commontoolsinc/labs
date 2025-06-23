@@ -13,7 +13,7 @@ import type {
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
-import { type Cell, isCellLink } from "./cell.ts";
+import { type Cell } from "./cell.ts";
 import { type JSONCellLink, type LegacyCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
@@ -23,7 +23,7 @@ import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
-import type { NormalizedLink } from "./link-utils.ts";
+import { isCellLink, type NormalizedLink } from "./link-utils.ts";
 
 export type { IStorageManager, IStorageProvider, MemorySpace };
 

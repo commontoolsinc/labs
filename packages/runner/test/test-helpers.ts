@@ -1,7 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { AssertionError } from "@std/assert";
-import { isLegacyAlias } from "../src/link-utils.ts";
-import { isLegacyCellLink } from "../src/cell.ts";
+import { isLegacyAlias, isLegacyCellLink } from "../src/link-utils.ts";
 import type { EntityId } from "../src/doc-map.ts";
 
 /**

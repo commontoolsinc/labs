@@ -31,6 +31,7 @@ import {
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
+  isCellLink,
   isLink,
   isWriteRedirectLink,
   parseLink,
@@ -39,7 +40,7 @@ import {
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { isCell, isCellLink } from "./cell.ts";
+import { isCell } from "./cell.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 

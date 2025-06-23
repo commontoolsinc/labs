@@ -1,9 +1,9 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { isWriteRedirectLink } from "./link-utils.ts";
+import { isLegacyCellLink, isWriteRedirectLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
-import { createCell, isCell, isLegacyCellLink } from "./cell.ts";
+import { createCell, isCell } from "./cell.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./link-resolution.ts";

@@ -16,7 +16,7 @@ export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
 export { isDoc } from "./doc.ts";
-export { isCell, isCellLink, isStream } from "./cell.ts";
+export { isCell, isStream } from "./cell.ts";
 export {
   getCellLinkOrThrow,
   getCellLinkOrValue,
@@ -38,6 +38,7 @@ export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { followWriteRedirects } from "./link-resolution.ts";
 export {
   areLinksSame,
+  isCellLink,
   isLink,
   isWriteRedirectLink,
   parseLink,

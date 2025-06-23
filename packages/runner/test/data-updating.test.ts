@@ -9,7 +9,7 @@ import {
   setNestedValue,
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
-import { isAnyCellLink, isCellLink } from "../src/cell.ts";
+import { isAnyCellLink, isCellLink } from "../src/link-utils.ts";
 import { arrayEqual } from "../src/path-utils.ts";
 import type { LegacyCellLink } from "../src/sigil-types.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
