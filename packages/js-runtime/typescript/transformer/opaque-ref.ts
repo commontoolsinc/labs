@@ -114,8 +114,23 @@ export function createOpaqueRefTransformer(
               if (!hasCommonToolsImport(sourceFile, "ifElse")) {
                 needsIfElseImport = true;
               }
+              const ternaryNode = node as ts.ConditionalExpression;
+              // Recursively visit the whenTrue and whenFalse expressions
+              const visitedWhenTrue = ts.visitNode(ternaryNode.whenTrue, visit) as ts.Expression;
+              const visitedWhenFalse = ts.visitNode(ternaryNode.whenFalse, visit) as ts.Expression;
+              
+              // Create a new conditional expression with visited branches
+              const updatedTernary = context.factory.updateConditionalExpression(
+                ternaryNode,
+                ternaryNode.condition,
+                ternaryNode.questionToken,
+                visitedWhenTrue,
+                ternaryNode.colonToken,
+                visitedWhenFalse
+              );
+              
               return createIfElseCall(
-                node as ts.ConditionalExpression, 
+                updatedTernary, 
                 context.factory, 
                 sourceFile
               );
