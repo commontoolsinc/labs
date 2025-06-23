@@ -5,14 +5,14 @@ import type {
   Commit,
   ConflictError,
   ConnectionError,
-  Entity,
+  Entity as URI,
   JSONValue,
   MemorySpace,
   Reference,
   Result,
   SchemaContext,
   State,
-  The,
+  The as MediaType,
   TransactionError,
   Unit,
   Variant,
@@ -217,7 +217,7 @@ export interface ITransactionReader {
    * ```
    */
   read(
-    address: IStorageAddress,
+    address: IMemoryAddress,
   ): Result<
     Read,
     INotFoundError | InactiveTransactionError
@@ -232,7 +232,7 @@ export interface ITransactionWriter extends ITransactionReader {
    * `IStorageTransactionClosed` if transaction is done.
    */
   write(
-    address: IStorageAddress,
+    address: IMemoryAddress,
     value?: JSONValue,
   ): Result<Write, InactiveTransactionError>;
 }
@@ -314,15 +314,32 @@ export type IStorageTransactionProgress = Variant<{
   done: IStorageTransactionLog;
 }>;
 
-export interface IStorageAddress {
-  the: The;
-  of: Entity;
-  at: string[];
+/**
+ * Represents adddress within the memory space which is like pointer inside the
+ * fact value in the memory.
+ */
+export interface IMemoryAddress {
+  /**
+   * URI to an entitiy. It corresponds to `of` field in the memory protocol.
+   */
+  id: URI;
+  /**
+   * Media type under which data is stored. It corresponds to `the` field in the
+   * memory protocol.
+   */
+  type: MediaType;
+  /**
+   * Path to the {@link JSONValue} being reference by this address. It is path
+   * within the `is` field of the fact in memory protocol.
+   */
+  path: MemoryAddressPathComponent[];
 }
+
+export type MemoryAddressPathComponent = string | number;
 
 export interface IStorageTransactionLog
   extends Iterable<IStorageTransactionInvariant> {
-  get(address: IStorageAddress): IStorageTransactionInvariant;
+  get(address: IMemoryAddress): IStorageTransactionInvariant;
 }
 
 export type IStorageTransactionInvariant = Variant<{
@@ -352,10 +369,8 @@ export interface IStorageTransactionWriteIsolationError extends Error {
  * Describes read invariant of the underlaying  transaction.
  */
 export interface Read {
-  readonly the: The;
-  readonly of: Entity;
-  readonly at: string[];
-  readonly is?: JSONValue;
+  readonly address: IMemoryAddress;
+  readonly value?: JSONValue;
   readonly cause: Reference;
 }
 
@@ -363,9 +378,7 @@ export interface Read {
  * Describes write invariant of the underlaying transaction.
  */
 export interface Write {
-  readonly the: The;
-  readonly of: Entity;
-  readonly at: string[];
-  readonly is?: JSONValue;
+  readonly address: IMemoryAddress;
+  readonly value?: JSONValue;
   readonly cause: Reference;
 }
