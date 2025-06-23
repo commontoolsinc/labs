@@ -1,10 +1,21 @@
 import type { EntityId } from "../doc-map.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
+  AuthorizationError,
+  Commit,
+  ConflictError,
+  ConnectionError,
+  Entity,
+  JSONValue,
   MemorySpace,
+  Reference,
   Result,
   SchemaContext,
+  State,
+  The,
+  TransactionError,
   Unit,
+  Variant,
 } from "@commontools/memory/interface";
 
 export type { MemorySpace, Result, SchemaContext, Unit };
@@ -87,4 +98,208 @@ export interface IStorageProvider {
    * @returns The storage provider's replica.
    */
   getReplica(): string | undefined;
+}
+
+/**
+ * This is successor to the current `IStorageProvider` which provides a
+ * transactional interface.
+ */
+export interface IStorageProviderV2 {
+  /**
+   * Creates a new transaction that can be used to build up a change set that
+   * can be committed transactionally. It ensures that all reads are consistent
+   * and no affecting changes takes place until the transaction is committed. If
+   * upstream changes are made since transaction is created that updates any of
+   * the read values transaction will fail on commit.
+   */
+  fork(): IStorageTransaction;
+}
+
+/**
+ * Representation of a storage transaction, which can be used to query facts and
+ * assert / retract while maintaining consistency guarantees. Storage ensures
+ * that transactions retain consistent view of the whole storage through it's
+ * lifetime by notifying pending transaction of every change that is integrated
+ * into the storage, if changes affect any data read through a transaction
+ * lifecycle it can not be committed because it would violate consistency. If
+ * no change occurs or changes do not affect any data read it would not affect
+ * transaction consistency guarantees and therefor committing transaction will
+ * be send to the upstream storage provider which will either accept if no
+ * invariants have being invalidated in the meantime or rejected and fail commit.
+ */
+export interface IStorageTransaction {
+  /**
+   * Transaction can be cancelled which causes storage provider to stop keeping
+   * it up to date with incoming changes. Cancelled transactions will produce
+   * {@link IStorageTransactionAbortedIStorageTransactionAborted} on commit. Cancelling transaction
+   * may produce an error if transaction has already being committed. If reason
+   * is omitted `Unit` will be used.
+   */
+  abort(reason?: Unit): Result<Unit, IStorageTransactionClosed>;
+
+  /**
+   * Commit the transaction. If the transaction has been aborted, this will
+   * produce `IStorageTransactionAborted`. If transaction has being
+   * invalidated while it was in progress, this will produce `IStorageConsistencyError`.
+   * If state has changed upstream `ConflictError` will be produced. If signing
+   * authority has no necessary permissions `UnauthorizedError` will be produced.
+   * If connection with remote can not be reastablished `ConnectionError` is
+   * produced. If remote can not perform transaction for any other reason like
+   * underlying DB problem `TransactionError` will be produced.
+   *
+   * Commiting failed transaction will have no effect and same return will be
+   * produced. This is not an ideal especially in the case of `ConnectionError`
+   * or `TransactionError`, however it is pragmatic choice allowing storage to
+   * drop transactions as opposed to keeping them around indefinitely.
+   */
+  commit(): Promise<Result<Unit, IStorageTransactionError>>;
+
+  /**
+   * Describes current status of the transaction. If transaction has failed
+   * or was cancelled result will be an error with a corresponding error variant.
+   * If transaction is being built it will have `open` status, if commit was
+   * called but promise has not resolved yet it will be `pending`. If commit
+   * successfully completed it will be `done`.
+   *
+   * Please note that if storage was updated since transaction was created such
+   * that any of the invariants have changed status will be change to
+   * `IStorageConsistencyError` even though transaction has not being commited.
+   * This allows transactor to cancel and recreate transaction with a current
+   * state without having to build up a whole transaction and commiting it.
+   */
+  status(): Result<
+    IStorageTransactionProgress,
+    IStorageTransactionError
+  >;
+
+  /**
+   * Reads a value from a (local) memory address and captures corresponding
+   * `Read` in the the transaction invariants. If value was written in read memory
+   * address in this transaction read will return value that was written as opposed
+   * to value stored.
+   *
+   * Read will fail with `IStorageTransactionError` if transaction has an error state.
+   * Read will fail with `IStorageTransactionClosed` if transaction is done.
+   * Read will fail with `INotFoundError` record in the given address does not exist
+   * in (local) memory.
+   *
+   * Read will fail with `INotFoundError` record in the given address does not exist
+   * but `Read` operation is still added to the transaction invariants as transactor
+   * assumes non existence of the record.
+   *
+   * ```ts
+   *  const w = tx.write({ the, of, at: [] }, {
+   *    title: "Hello world",
+   *    content: [
+   *       { text: "Beautiful day", format: "bold" }
+   *    ]
+   *  })
+   *  assert(w.ok)
+   *
+   *  assert(tx.read({ the, of, at: ['author'] }).ok === undefined)
+   *  assert(tx.read({ the, of, at: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  // JS specific getters are not supported
+   *  assert(tx.read({ the, of, at: ['content', 'length'] }).ok.is === undefined)
+   *  assert(tx.read({ the, of, at: ['title'] }).ok.is === "Hello world")
+   *  // Referencing non-existing facts produces errors
+   *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
+   * ```
+   */
+  read(
+    address: IStorageAddress,
+  ): Result<
+    Read,
+    INotFoundError | IStorageTransactionError | IStorageTransactionClosed
+  >;
+
+  /**
+   * Write a value into a storage at a given address & captures it in the
+   * transaction invariants. Write will fail with `IStorageTransactionError`
+   * if transaction has an error state. Write will fail with
+   * `IStorageTransactionClosed` if transaction is done.
+   */
+  write(
+    address: IStorageAddress,
+    value?: JSONValue,
+  ): Result<Write, IStorageTransactionError | IStorageTransactionClosed>;
+}
+
+/**
+ * This is transaction representation from the storage perpective. It will not
+ * be exposed outside of the storage provider intenals and is designed to allow
+ * storage provider to maintain consistency guarantees.
+ */
+export interface IStorageOpenTransaction {
+  /**
+   * This is an internal method called by a storage provider that lets
+   * transaction know about potential invariant changes. Transaction can track
+   * of all the changes internally and if any of the changes affect any of it's
+   * invariants it can transition transaction state from `Open` to failed with
+   * `IStorageConsistencyError`.
+   */
+  merge(changes: Iterable<State>): void;
+}
+
+/**
+ * Error that is produced when transaction is being updated after it was already
+ * aborted.
+ */
+export interface IStorageTransactionAborted extends Error {
+  /**
+   * Reason provided when transaction was aborted.
+   */
+  reason: unknown;
+}
+
+/**
+ * Error indicates that transaction consistency guarantees have being
+ * invalidated - some fact has changed while transaction was in progress.
+ */
+export interface IStorageConsistencyError extends Error {}
+
+export type IStorageTransactionError =
+  | IStorageTransactionAborted
+  | ConflictError
+  | TransactionError
+  | ConnectionError
+  | AuthorizationError;
+
+export interface IStorageTransactionClosed extends Error {}
+export interface INotFoundError extends Error {}
+export type IStorageTransactionProgress = Variant<{
+  open: IStorageTransactionLog;
+  pending: IStorageTransactionLog;
+  done: IStorageTransactionLog;
+}>;
+
+export interface IStorageAddress {
+  the: The;
+  of: Entity;
+  at: string[];
+}
+
+export interface IStorageTransactionLog
+  extends Iterable<IStorageTransactionInvariant> {
+  get(address: IStorageAddress): IStorageTransactionInvariant;
+}
+
+export type IStorageTransactionInvariant = Variant<{
+  read: Read;
+  write: Write;
+}>;
+
+export interface Read {
+  readonly the: The;
+  readonly of: Entity;
+  readonly at: string[];
+  readonly is?: JSONValue;
+  readonly cause: Reference;
+}
+
+export interface Write {
+  readonly the: The;
+  readonly of: Entity;
+  readonly at: string[];
+  readonly is?: JSONValue;
+  readonly cause: Reference;
 }
