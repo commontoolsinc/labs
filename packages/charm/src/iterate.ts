@@ -24,6 +24,7 @@ import {
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
+import { console } from "./conditional-console.ts";
 
 const llm = new LLMClient();
 

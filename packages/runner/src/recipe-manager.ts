@@ -52,7 +52,6 @@ export class RecipeManager implements IRecipeManager {
   generateRecipeId(recipe: Recipe | Module, src?: string): string {
     const id = this.recipeMetaMap.get(recipe as Recipe)?.get()?.id;
     if (id) {
-      console.log("generateRecipeId: existing recipe id", id);
       return id;
     }
 
@@ -71,15 +70,9 @@ export class RecipeManager implements IRecipeManager {
       recipeMeta: RecipeMeta;
     },
   ): Promise<boolean> {
-    console.log("registerRecipe", recipeId, space);
-
     // FIXME(ja): is there a reason to save if we don't have src?
     // mostly wondering about modules...
     if (!recipeMeta.src) {
-      console.error(
-        "registerRecipe: no reason to save recipe, missing src",
-        recipeId,
-      );
       return false;
     }
 
