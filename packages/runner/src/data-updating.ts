@@ -8,12 +8,11 @@ import { isAnyCellLink, isLegacyCellLink } from "./link-utils.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
-import { arrayEqual } from "./path-utils.ts";
 import {
   areLinksSame,
   isLink,
   isWriteRedirectLink,
-  parseLink,
+  parseToLegacyCellLink,
 } from "./link-utils.ts";
 import {
   getCellLinkOrThrow,
@@ -68,7 +67,6 @@ export function setNestedValue<T>(
 
     return success;
   } else if (isLink(value) && isLink(destValue)) {
-    // Use the new link comparison function that supports all formats
     if (!areLinksSame(value, destValue, doc.asCell())) {
       doc.setAtPath(path, value, log);
     }
@@ -157,19 +155,22 @@ export function normalizeAndDiff(
     if (current.path.length > 1) {
       const parent = current.cell.getAtPath(current.path.slice(0, -1));
       if (Array.isArray(parent)) {
+        const base = current.cell.asCell(current.path);
         for (const v of parent) {
-          if (isLegacyCellLink(v)) {
-            const sibling = v.cell.getAtPath(v.path);
+          if (isLink(v)) {
+            const sibling = parseToLegacyCellLink(v, base);
             if (
-              isRecord(sibling) &&
-              sibling[fieldName as PropertyKey] === id
+              sibling.cell.getAtPath([
+                ...sibling.path,
+                fieldName as PropertyKey,
+              ]) === id
             ) {
               // We found a sibling with the same id, so ...
               return [
                 // ... reuse the existing document
                 ...normalizeAndDiff(current, v, log, context),
                 // ... and update it to the new value
-                ...normalizeAndDiff(v, rest, log, context),
+                ...normalizeAndDiff(sibling, rest, log, context),
               ];
             }
           }
@@ -185,7 +186,9 @@ export function normalizeAndDiff(
     newValue = getCellLinkOrThrow(newValue);
   }
 
-  if (isDoc(newValue)) newValue = { cell: newValue, path: [] };
+  if (isDoc(newValue)) {
+    newValue = { cell: newValue, path: [] } satisfies LegacyCellLink;
+  }
   if (isCell(newValue)) newValue = newValue.getAsLegacyCellLink();
 
   // Get current value to compare against
@@ -193,13 +196,9 @@ export function normalizeAndDiff(
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
-    const newLink = parseLink(newValue, current.cell.asCell())!;
-    const currentLink = parseLink(currentValue, current.cell.asCell());
     if (
       isWriteRedirectLink(currentValue) &&
-      currentLink !== undefined &&
-      newLink.id === currentLink.id &&
-      arrayEqual(newLink.path, currentLink.path)
+      areLinksSame(currentValue, newValue, current.cell.asCell())
     ) {
       return [];
     } else {
@@ -230,10 +229,7 @@ export function normalizeAndDiff(
   }
 
   // Handle ID-based object (convert to entity)
-  if (
-    isRecord(newValue) &&
-    newValue[ID] !== undefined
-  ) {
+  if (isRecord(newValue) && newValue[ID] !== undefined) {
     const { [ID]: id, ...rest } = newValue;
     let path = current.path;
 
@@ -328,10 +324,7 @@ export function normalizeAndDiff(
   if (isRecord(newValue)) {
     // If the current value is not a (regular) object, set it to an empty object
     // Note that the alias case is handled above
-    if (
-      typeof currentValue !== "object" || currentValue === null ||
-      isAnyCellLink(currentValue)
-    ) {
+    if (!isRecord(currentValue) || isAnyCellLink(currentValue)) {
       changes.push({ location: current, value: {} });
     }
 
@@ -378,7 +371,7 @@ export function normalizeAndDiff(
     return changes;
   }
 
-  // Handle primitive values and other cases
+  // Handle primitive values and other cases (Object.is handles NaN and -0)
   if (!Object.is(currentValue, newValue)) {
     changes.push({ location: current, value: newValue });
   }
