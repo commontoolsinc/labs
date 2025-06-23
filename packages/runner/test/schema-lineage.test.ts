@@ -58,7 +58,7 @@ describe("Schema Lineage", () => {
       );
       sourceCell.setRaw({
         $alias: {
-          ...targetCell.getAsCellLink(),
+          ...targetCell.getAsLegacyCellLink(),
           schema,
           rootSchema: schema,
         },
@@ -66,7 +66,8 @@ describe("Schema Lineage", () => {
 
       // Access the cell without providing a schema
       // (Type script type is just to avoid compiler errors)
-      const cell: Cell<{ count: number; label: string }> = sourceCell.asSchema();
+      const cell: Cell<{ count: number; label: string }> = sourceCell
+        .asSchema();
 
       // The cell should have picked up the schema from the alias
       expect(cell.schema).toBeDefined();
@@ -110,7 +111,7 @@ describe("Schema Lineage", () => {
       );
       sourceCell.setRaw({
         $alias: {
-          ...targetCell.getAsCellLink(),
+          ...targetCell.getAsLegacyCellLink(),
           schema: aliasSchema,
           rootSchema: aliasSchema,
         },
@@ -149,7 +150,7 @@ describe("Schema Lineage", () => {
       );
       countCell.setRaw({
         $alias: {
-          ...valueCell.key("count").getAsCellLink(),
+          ...valueCell.key("count").getAsLegacyCellLink(),
           schema: numberSchema,
           rootSchema: numberSchema,
         },
@@ -161,7 +162,7 @@ describe("Schema Lineage", () => {
         "final-alias",
       );
       finalCell.setRaw({
-        $alias: countCell.getAsCellLink(),
+        $alias: countCell.getAsLegacyCellLink(),
       });
 
       // Access the cell without providing a schema
@@ -207,15 +208,17 @@ describe("Schema Lineage", () => {
       );
       itemsCell.setRaw({
         $alias: {
-          ...nestedCell.key("items").getAsCellLink(),
+          ...nestedCell.key("items").getAsLegacyCellLink(),
           schema: arraySchema,
         },
       });
 
       // Access the items with a schema that specifies array items should be cells
-      const itemsCellWithSchema = itemsCell.asSchema({
-        asCell: true,
-      } as const satisfies JSONSchema);
+      const itemsCellWithSchema = itemsCell.asSchema(
+        {
+          asCell: true,
+        } as const satisfies JSONSchema,
+      );
 
       const value = itemsCellWithSchema.get() as any;
       expect(isCell(value)).toBe(true);
@@ -289,17 +292,19 @@ describe("Schema propagation end-to-end example", () => {
       result,
     );
 
-    const c = result.key(UI).asSchema({
-      type: "object",
-      properties: {
-        type: { type: "string" },
-        name: { type: "string" },
-        props: {
-          type: "object",
-          additionalProperties: { asCell: true },
+    const c = result.key(UI).asSchema(
+      {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          name: { type: "string" },
+          props: {
+            type: "object",
+            additionalProperties: { asCell: true },
+          },
         },
-      },
-    } as const satisfies JSONSchema);
+      } as const satisfies JSONSchema,
+    );
 
     const cValue = c.get() as any;
     expect(isCell(cValue.props.value)).toBe(true);

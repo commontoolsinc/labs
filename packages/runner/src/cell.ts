@@ -24,13 +24,14 @@ import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import { isLegacyAlias } from "./link-utils.ts";
 import {
-  CellLink,
   JSONCellLink,
   LegacyAlias,
+  LegacyCellLink,
   LINK_V1_TAG,
   SigilLink,
   SigilValue,
   SigilWriteRedirectLink,
+  URI,
 } from "./sigil-types.ts";
 
 /**
@@ -54,8 +55,8 @@ import {
  * @returns {void}
  *
  * @method push Adds an item to the end of an array cell.
- * @param {U | DocImpl<U> | CellLink} value - The value to add, where U is the
- * array element type.
+ * @param {U | DocImpl<U> | LegacyCellLink} value - The value to add, where U is
+ * the array element type.
  * @returns {void}
  *
  * @method equals Compares two cells for equality.
@@ -85,8 +86,8 @@ import {
  * @param {ReactivityLog} log - Optional reactivity log.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
- * @method getAsCellLink Returns a cell link for the cell (legacy format).
- * @returns {CellLink}
+ * @method getAsLegacyCellLink Returns a cell link for the cell (legacy format).
+ * @returns {LegacyCellLink}
  *
  * @method getAsLink Returns a cell link for the cell (new sigil format).
  * @returns {SigilLink}
@@ -112,7 +113,10 @@ import {
  * @returns {{cell: {"/": string} | undefined, path: PropertyKey[]}}
  *
  * @property entityId Returns the current entity ID of the cell.
- * @returns {EntityId | undefined}
+ * @returns {EntityId}
+ *
+ * @property sourceURI Returns the source URI of the cell.
+ * @returns {URI}
  *
  * @property schema Optional schema for the cell.
  * @returns {JSONSchema | undefined}
@@ -129,7 +133,7 @@ import {
  * @returns {T}
  *
  * @property cellLink The cell link representing this cell.
- * @returns {CellLink}
+ * @returns {LegacyCellLink}
  */
 declare module "@commontools/api" {
   interface Cell<T> {
@@ -142,7 +146,7 @@ declare module "@commontools/api" {
     push(
       ...value: Array<
         | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
-        | CellLink
+        | LegacyCellLink
       >
     ): void;
     equals(other: any): boolean;
@@ -164,7 +168,7 @@ declare module "@commontools/api" {
       path?: Path,
       log?: ReactivityLog,
     ): QueryResult<DeepKeyLookup<T, Path>>;
-    getAsCellLink(): CellLink;
+    getAsLegacyCellLink(): LegacyCellLink;
     getAsLink(
       options?: {
         base?: Cell<any>;
@@ -205,9 +209,10 @@ declare module "@commontools/api" {
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
     value: T;
-    cellLink: CellLink;
+    cellLink: LegacyCellLink;
     space: MemorySpace;
-    entityId: EntityId | undefined;
+    entityId: EntityId;
+    sourceURI: URI;
     path: PropertyKey[];
     [isCellMarker]: true;
     copyTrap: boolean;
@@ -375,7 +380,7 @@ function createRegularCell<T>(
     push: (
       ...values: Array<
         | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
-        | CellLink
+        | LegacyCellLink
       >
     ) => {
       // Follow aliases and references, since we want to get to an assumed
@@ -452,7 +457,7 @@ function createRegularCell<T>(
       // If it's a CellLink, compare with our CellLink representation
       if (isCellLink(other)) {
         return (
-          doc === other.cell &&
+          JSON.stringify(doc) === JSON.stringify(other.cell) &&
           JSON.stringify(path) === JSON.stringify(other.path)
         );
       }
@@ -485,7 +490,7 @@ function createRegularCell<T>(
       subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
-    getAsCellLink: (): CellLink => {
+    getAsLegacyCellLink: (): LegacyCellLink => {
       // Deprecation warning for old format
       console.warn(
         "DEPRECATED: getAsCellLink() is deprecated. Use getAsLink() for the new sigil format. " +
@@ -532,7 +537,7 @@ function createRegularCell<T>(
     get value(): T {
       return self.get();
     },
-    get cellLink(): CellLink {
+    get cellLink(): LegacyCellLink {
       return { space: doc.space, cell: doc, path, schema, rootSchema };
     },
     get space(): MemorySpace {
@@ -540,6 +545,9 @@ function createRegularCell<T>(
     },
     get entityId(): EntityId | undefined {
       return getEntityId({ cell: doc, path });
+    },
+    get sourceURI(): URI {
+      return toURI(doc.entityId);
     },
     get path(): PropertyKey[] {
       return path;
@@ -700,7 +708,17 @@ export function isSigilValue(value: any): value is SigilValue<any> {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCellLink(value: any): value is CellLink {
+export function isCellLink(value: any): value is LegacyCellLink | JSONCellLink {
+  return isLegacyCellLink(value) || isJSONCellLink(value);
+}
+
+/**
+ * Check if value is a legacy cell link.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+export function isLegacyCellLink(value: any): value is LegacyCellLink {
   return (
     isRecord(value) && isDoc(value.cell) && Array.isArray(value.path)
   );
@@ -740,7 +758,7 @@ export function isSigilWriteRedirectLink(
  */
 export function isAnyCellLink(
   value: any,
-): value is CellLink | SigilLink | JSONCellLink | LegacyAlias {
+): value is LegacyCellLink | SigilLink | JSONCellLink | LegacyAlias {
   return isCellLink(value) || isJSONCellLink(value) || isSigilLink(value) ||
     isLegacyAlias(value);
 }

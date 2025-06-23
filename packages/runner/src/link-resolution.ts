@@ -3,8 +3,8 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
-  type CellLink,
   type LegacyAlias,
+  type LegacyCellLink,
   type SigilWriteRedirectLink,
 } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
@@ -21,11 +21,11 @@ import {
  */
 interface Visits {
   /** Tracks visited cell links to detect cycles */
-  seen: CellLink[];
+  seen: LegacyCellLink[];
   /** Cache for resolvePath results */
-  resolvePathCache: Map<string, CellLink>;
+  resolvePathCache: Map<string, LegacyCellLink>;
   /** Cache for followLinks results */
-  followLinksCache: Map<string, CellLink>;
+  followLinksCache: Map<string, LegacyCellLink>;
 }
 
 /**
@@ -56,7 +56,7 @@ export function resolveLinkToValue<T>(
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
-): CellLink {
+): LegacyCellLink {
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits);
@@ -68,13 +68,16 @@ export function resolveLinkToAlias<T>(
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
-): CellLink {
+): LegacyCellLink {
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits, true);
 }
 
-export function resolveLinks(ref: CellLink, log?: ReactivityLog): CellLink {
+export function resolveLinks(
+  ref: LegacyCellLink,
+  log?: ReactivityLog,
+): LegacyCellLink {
   const visits = createVisits();
   return followLinks(ref, log, visits);
 }
@@ -86,7 +89,7 @@ function resolvePath<T>(
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
   visits: Visits = createVisits(),
-): CellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
+): LegacyCellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
   // doc, meaning the one that contains the value we want to access without any
   // redirects in between.
   //
@@ -110,7 +113,7 @@ function resolvePath<T>(
   }
 
   // Try to find a cached result for a shorter path
-  let startRef: CellLink = { cell: doc, path: [] };
+  let startRef: LegacyCellLink = { cell: doc, path: [] };
   let keys = [...path];
 
   // Look for the longest matching prefix path in the cache
@@ -168,11 +171,11 @@ function resolvePath<T>(
 // log all taken links, so not the returned one, and thus nothing if the ref
 // already pointed to a value.
 export function followLinks(
-  ref: CellLink,
+  ref: LegacyCellLink,
   log: ReactivityLog | undefined,
   visits: Visits,
   onlyAliases = false,
-): CellLink {
+): LegacyCellLink {
   // Check if we already followed these links
   const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyAliases);
   const cached = visits.followLinksCache.get(cacheKey);
@@ -180,7 +183,7 @@ export function followLinks(
     return cached;
   }
 
-  let nextRef: CellLink | undefined;
+  let nextRef: LegacyCellLink | undefined;
   let result = ref;
 
   do {
@@ -259,7 +262,7 @@ export function followWriteRedirects<T = any>(
   alias: LegacyAlias | SigilWriteRedirectLink,
   docOrCell: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
-): CellLink {
+): LegacyCellLink {
   if (isWriteRedirectLink(alias)) {
     const cell = isDoc(docOrCell) ? docOrCell.asCell() : docOrCell as Cell<T>;
     const link = parseLink(alias, cell)!;
@@ -273,7 +276,7 @@ export function followWriteRedirects<T = any>(
         space: link.space,
         schema: link.schema,
         rootSchema: link.rootSchema,
-      } as CellLink,
+      } as LegacyCellLink,
       log,
       createVisits(),
       true,

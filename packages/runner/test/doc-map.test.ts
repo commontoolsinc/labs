@@ -57,10 +57,10 @@ describe("cell-map", () => {
       const cell = runtime.getCell(space, "test-cell");
       cell.set({});
       const id = getEntityId(cell);
-      
+
       expect(getEntityId(cell)).toEqual(id);
       expect(getEntityId(cell.getAsQueryResult())).toEqual(id);
-      expect(getEntityId(cell.getAsCellLink())).toEqual(id);
+      expect(getEntityId(cell.getAsLegacyCellLink())).toEqual(id);
     });
 
     it("should return a different entity ID for reference with paths", () => {
@@ -74,13 +74,13 @@ describe("cell-map", () => {
       expect(getEntityId(c.getAsQueryResult())).toEqual(id);
       expect(getEntityId(c.getAsQueryResult(["foo"]))).not.toEqual(id);
       expect(getEntityId(c.key("foo"))).not.toEqual(id);
-      expect(getEntityId(c.key("foo").getAsCellLink())).not.toEqual(id);
+      expect(getEntityId(c.key("foo").getAsLegacyCellLink())).not.toEqual(id);
 
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
         getEntityId(c.key("foo")),
       );
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
-        getEntityId(c.key("foo").getAsCellLink()),
+        getEntityId(c.key("foo").getAsLegacyCellLink()),
       );
     });
   });
@@ -99,7 +99,7 @@ describe("cell-map", () => {
       // Verify we got the same cell
       expect(retrievedCell.entityId).toEqual(c.entityId);
       expect(retrievedCell.get()).toEqual({ value: 42 });
-      
+
       // Also verify the cells are equal
       expect(retrievedCell.equals(c)).toBe(true);
     });
@@ -117,10 +117,10 @@ describe("cell-map", () => {
     it("should serialize the entity ID", () => {
       const c = runtime.getCell<{ value: number }>(space, "test-json");
       c.set({ value: 42 });
-      
+
       const expected = JSON.stringify({
         cell: c.entityId,
-        path: []
+        path: [],
       });
       expect(JSON.stringify(c)).toEqual(expected);
     });

@@ -47,7 +47,7 @@ describe("link-utils", () => {
 
     it("should identify cell links as links", () => {
       const cell = runtime.getCell(space, "test");
-      const cellLink = cell.getAsCellLink();
+      const cellLink = cell.getAsLegacyCellLink();
       expect(isLink(cellLink)).toBe(true);
     });
 
@@ -216,7 +216,7 @@ describe("link-utils", () => {
 
     it("should parse cell links to normalized links", () => {
       const cell = runtime.getCell(space, "test");
-      const cellLink = cell.getAsCellLink();
+      const cellLink = cell.getAsLegacyCellLink();
       const result = parseLink(cellLink);
 
       expect(result).toEqual({
@@ -350,7 +350,9 @@ describe("link-utils", () => {
         cell: { "/": "of:test" },
         path: ["nested", "value"],
       };
-      expect(() => parseToLegacyCellLink(jsonLink)).toThrow("No base cell");
+      expect(() => parseToLegacyCellLink(jsonLink)).toThrow(
+        "No id or base cell provided",
+      );
     });
   });
 
@@ -362,14 +364,14 @@ describe("link-utils", () => {
 
     it("should return true for equivalent links", () => {
       const cell = runtime.getCell(space, "test");
-      const cellLink1 = cell.getAsCellLink();
-      const cellLink2 = cell.getAsCellLink();
+      const cellLink1 = cell.getAsLegacyCellLink();
+      const cellLink2 = cell.getAsLegacyCellLink();
       expect(areLinksSame(cellLink1, cellLink2)).toBe(true);
     });
 
     it("should return true for different link formats pointing to same location", () => {
       const cell = runtime.getCell(space, "test");
-      const cellLink = cell.getAsCellLink();
+      const cellLink = cell.getAsLegacyCellLink();
       const sigilLink = cell.getAsLink();
       expect(areLinksSame(cellLink, sigilLink)).toBe(true);
     });

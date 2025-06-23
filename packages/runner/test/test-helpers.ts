@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { AssertionError } from "@std/assert";
 import { isLegacyAlias } from "../src/link-utils.ts";
-import { isCellLink } from "../src/cell.ts";
+import { isLegacyCellLink } from "../src/cell.ts";
 import type { EntityId } from "../src/doc-map.ts";
 
 /**
@@ -31,7 +31,7 @@ function deepNormalizeCellLinks(obj: any): any {
   }
 
   // Handle bare CellLinks
-  if (isCellLink(obj)) {
+  if (isLegacyCellLink(obj)) {
     return normalizeCellLink(obj);
   }
 

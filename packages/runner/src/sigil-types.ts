@@ -49,7 +49,7 @@ export type SigilWriteRedirectLink = SigilValue<AliasV1>;
  *
  * A cell link is a doc and a path within that doc.
  */
-export type CellLink = {
+export type LegacyCellLink = {
   space?: MemorySpace;
   cell: DocImpl<any>;
   path: PropertyKey[];

@@ -128,8 +128,8 @@ describe("recipe-binding", () => {
 
       const result = unwrapOneLevelAndBindtoDoc(binding, testCell);
       expectCellLinksEqual(result).toEqual({
-        x: { $alias: testCell.key("a").getAsCellLink() },
-        y: { $alias: testCell.key("b").key("c").getAsCellLink() },
+        x: { $alias: testCell.key("a").getAsLegacyCellLink() },
+        y: { $alias: testCell.key("b").key("c").getAsLegacyCellLink() },
         z: 3,
       });
     });

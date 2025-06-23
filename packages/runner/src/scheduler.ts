@@ -2,7 +2,7 @@ import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
-import { type CellLink } from "./sigil-types.ts";
+import { type LegacyCellLink } from "./sigil-types.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
@@ -30,8 +30,8 @@ export type EventHandler = (event: any) => any;
  * dependencies and to topologically sort pending actions before executing them.
  */
 export type ReactivityLog = {
-  reads: CellLink[];
-  writes: CellLink[];
+  reads: LegacyCellLink[];
+  writes: LegacyCellLink[];
 };
 
 const MAX_ITERATIONS_PER_RUN = 100;
@@ -39,7 +39,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
   private eventQueue: (() => void)[] = [];
-  private eventHandlers: [CellLink, EventHandler][] = [];
+  private eventHandlers: [LegacyCellLink, EventHandler][] = [];
   private dirty = new Set<DocImpl<any>>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel[]>();
@@ -179,7 +179,7 @@ export class Scheduler implements IScheduler {
     });
   }
 
-  queueEvent(eventRef: CellLink, event: any): void {
+  queueEvent(eventRef: LegacyCellLink, event: any): void {
     for (const [ref, handler] of this.eventHandlers) {
       if (
         ref.cell === eventRef.cell &&
@@ -192,7 +192,7 @@ export class Scheduler implements IScheduler {
     }
   }
 
-  addEventHandler(handler: EventHandler, ref: CellLink): Cancel {
+  addEventHandler(handler: EventHandler, ref: LegacyCellLink): Cancel {
     this.eventHandlers.push([ref, handler]);
     return () => {
       const index = this.eventHandlers.findIndex(([r, h]) =>
@@ -216,7 +216,10 @@ export class Scheduler implements IScheduler {
     this.scheduled = true;
   }
 
-  private setDependencies(action: Action, log: ReactivityLog): CellLink[] {
+  private setDependencies(
+    action: Action,
+    log: ReactivityLog,
+  ): LegacyCellLink[] {
     const reads = compactifyPaths(log.reads);
     const writes = compactifyPaths(log.writes);
     this.dependencies.set(action, { reads, writes });
@@ -423,7 +426,7 @@ function topologicalSort(
 }
 
 // Remove longer paths already covered by shorter paths
-export function compactifyPaths(entries: CellLink[]): CellLink[] {
+export function compactifyPaths(entries: LegacyCellLink[]): LegacyCellLink[] {
   // First group by doc via a Map
   const docToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
   for (const { cell: doc, path } of entries) {
@@ -434,7 +437,7 @@ export function compactifyPaths(entries: CellLink[]): CellLink[] {
 
   // For each cell, sort the paths by length, then only return those that don't
   // have a prefix earlier in the list
-  const result: CellLink[] = [];
+  const result: LegacyCellLink[] = [];
   for (const [doc, paths] of docToPaths.entries()) {
     paths.sort((a, b) => a.length - b.length);
     for (let i = 0; i < paths.length; i++) {

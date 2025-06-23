@@ -251,7 +251,7 @@ export const setupIframe = (runtime: Runtime) =>
       };
 
       // Schedule the action with appropriate reactivity log
-      const reads = isCell(context) ? [context.getAsCellLink()] : [];
+      const reads = isCell(context) ? [context.getAsLegacyCellLink()] : [];
       const cancel = runtime.scheduler.schedule(action, { reads, writes: [] });
       return { action, cancel };
     },

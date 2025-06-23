@@ -2,28 +2,16 @@ import { isRecord, type Mutable } from "@commontools/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import { isDoc } from "./doc.ts";
 import { isCell, isCellLink } from "./cell.ts";
-import { type CellLink } from "./sigil-types.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-
-export function maybeUnwrapProxy(value: unknown): unknown {
-  return isQueryResultForDereferencing(value)
-    ? getCellLinkOrThrow(value)
-    : value;
-}
 
 export function arrayEqual(a?: PropertyKey[], b?: PropertyKey[]): boolean {
   if (!a || !b) return a === b;
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
-}
-
-export function isEqualCellLink(a: CellLink, b: CellLink): boolean {
-  return isCellLink(a) && isCellLink(b) && a.cell === b.cell &&
-    arrayEqual(a.path, b.path);
 }
 
 export function containsOpaqueRef(value: unknown): boolean {

@@ -3,8 +3,8 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { isWriteRedirectLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
-import { createCell, isCell, isCellLink } from "./cell.ts";
-import { type CellLink } from "./sigil-types.ts";
+import { createCell, isCell, isLegacyCellLink } from "./cell.ts";
+import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToAlias } from "./link-resolution.ts";
 
@@ -336,7 +336,7 @@ export function validateAndTransform(
           "Unexpected write redirect in path, should have been handled by resolvePath",
         );
       }
-      if (isCellLink(value)) {
+      if (isLegacyCellLink(value)) {
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         const extraPath = [...path.slice(i + 1)];
         const newPath = [...value.path, ...extraPath];
@@ -507,7 +507,7 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: CellLink[] = [];
+      const extraReads: LegacyCellLink[] = [];
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
           merged = result;

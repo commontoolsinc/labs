@@ -51,12 +51,12 @@ describe("link-resolution", () => {
         "should follow nested aliases 2",
       );
       outerCell.setRaw({
-        outer: { $alias: innerCell.key("inner").getAsCellLink() },
+        outer: { $alias: innerCell.key("inner").getAsLegacyCellLink() },
       });
       const binding = { $alias: { path: ["outer"] } };
       const result = followWriteRedirects(binding, outerCell);
       expectCellLinksEqual(result).toEqual(
-        innerCell.key("inner").getAsCellLink(),
+        innerCell.key("inner").getAsLegacyCellLink(),
       );
       expect(result.cell.getAtPath(result.path)).toBe(10);
     });
@@ -72,8 +72,12 @@ describe("link-resolution", () => {
         "should throw an error on circular aliases 2",
       );
       cellB.set({});
-      cellA.setRaw({ alias: { $alias: cellB.key("alias").getAsCellLink() } });
-      cellB.setRaw({ alias: { $alias: cellA.key("alias").getAsCellLink() } });
+      cellA.setRaw({
+        alias: { $alias: cellB.key("alias").getAsLegacyCellLink() },
+      });
+      cellB.setRaw({
+        alias: { $alias: cellA.key("alias").getAsLegacyCellLink() },
+      });
       const binding = { $alias: { path: ["alias"] } };
       expect(() => followWriteRedirects(binding, cellA)).toThrow(
         "cycle detected",
@@ -91,7 +95,7 @@ describe("link-resolution", () => {
       const binding = { $alias: { path: ["a", "a", "c"] } };
       const result = followWriteRedirects(binding, testCell);
       expectCellLinksEqual(result).toEqual(
-        testCell.key("a").key("b").key("c").getAsCellLink(),
+        testCell.key("a").key("b").key("c").getAsLegacyCellLink(),
       );
       expect(result.cell.getAtPath(result.path)).toBe(1);
     });

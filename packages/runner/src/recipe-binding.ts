@@ -6,10 +6,10 @@ import {
   unsafe_parentRecipe,
   type UnsafeBinding,
 } from "./builder/types.ts";
-import { isLegacyAlias } from "./link-utils.ts";
+import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell, isCellLink } from "./cell.ts";
-import { type CellLink } from "./sigil-types.ts";
+import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -148,8 +148,8 @@ export function unsafe_createParentBindings(
 export function findAllAliasedCells<T>(
   binding: unknown,
   doc: DocImpl<T>,
-): CellLink[] {
-  const docs: CellLink[] = [];
+): LegacyCellLink[] {
+  const docs: LegacyCellLink[] = [];
   function find(binding: unknown, origDoc: DocImpl<T>): void {
     if (isLegacyAlias(binding)) {
       // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
@@ -161,13 +161,7 @@ export function findAllAliasedCells<T>(
       find(doc.getAtPath(path), doc);
     } else if (Array.isArray(binding)) {
       for (const value of binding) find(value, origDoc);
-    } else if (
-      typeof binding === "object" &&
-      binding !== null &&
-      !isCellLink(binding) &&
-      !isDoc(binding) &&
-      !isCell(binding)
-    ) {
+    } else if (isRecord(binding) && !isLink(binding)) {
       for (const value of Object.values(binding)) find(value, origDoc);
     }
   }

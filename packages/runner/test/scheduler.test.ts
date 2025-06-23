@@ -87,10 +87,10 @@ describe("scheduler", () => {
     };
     runtime.scheduler.schedule(adder, {
       reads: [
-        a.getAsCellLink(),
-        b.getAsCellLink(),
+        a.getAsLegacyCellLink(),
+        b.getAsLegacyCellLink(),
       ],
-      writes: [c.getAsCellLink()],
+      writes: [c.getAsLegacyCellLink()],
     });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -155,10 +155,10 @@ describe("scheduler", () => {
     };
     const cancel = runtime.scheduler.schedule(adder, {
       reads: [
-        a.getAsCellLink(),
-        b.getAsCellLink(),
+        a.getAsLegacyCellLink(),
+        b.getAsLegacyCellLink(),
       ],
-      writes: [c.getAsCellLink()],
+      writes: [c.getAsLegacyCellLink()],
     });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -371,10 +371,13 @@ describe("event handling", () => {
       eventResultCell.send(event);
     };
 
-    runtime.scheduler.addEventHandler(eventHandler, eventCell.getAsCellLink());
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsLegacyCellLink(),
+    );
 
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 1);
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
 
     await runtime.idle();
 
@@ -398,10 +401,10 @@ describe("event handling", () => {
 
     const removeHandler = runtime.scheduler.addEventHandler(
       eventHandler,
-      eventCell.getAsCellLink(),
+      eventCell.getAsLegacyCellLink(),
     );
 
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
     await runtime.idle();
 
     expect(eventCount).toBe(1);
@@ -409,7 +412,7 @@ describe("event handling", () => {
 
     removeHandler();
 
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
     await runtime.idle();
 
     expect(eventCount).toBe(1);
@@ -430,11 +433,11 @@ describe("event handling", () => {
 
     runtime.scheduler.addEventHandler(
       eventHandler,
-      parentCell.key("child").key("value").getAsCellLink(),
+      parentCell.key("child").key("value").getAsLegacyCellLink(),
     );
 
     runtime.scheduler.queueEvent(
-      parentCell.key("child").key("value").getAsCellLink(),
+      parentCell.key("child").key("value").getAsLegacyCellLink(),
       42,
     );
     await runtime.idle();
@@ -454,11 +457,14 @@ describe("event handling", () => {
       events.push(event);
     };
 
-    runtime.scheduler.addEventHandler(eventHandler, eventCell.getAsCellLink());
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsLegacyCellLink(),
+    );
 
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 1);
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 2);
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 3);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 3);
 
     await runtime.idle();
 
@@ -491,11 +497,14 @@ describe("event handling", () => {
     };
     await runtime.scheduler.run(action);
 
-    runtime.scheduler.addEventHandler(eventHandler, eventCell.getAsCellLink());
+    runtime.scheduler.addEventHandler(
+      eventHandler,
+      eventCell.getAsLegacyCellLink(),
+    );
 
     expect(actionCount).toBe(1);
 
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
     await runtime.idle();
 
     expect(eventCount).toBe(1);
@@ -503,7 +512,7 @@ describe("event handling", () => {
 
     expect(actionCount).toBe(2);
 
-    runtime.scheduler.queueEvent(eventCell.getAsCellLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
     await runtime.idle();
 
     expect(eventCount).toBe(2);
@@ -546,14 +555,14 @@ describe("compactifyPaths", () => {
     );
     testCell.set({});
     const paths = [
-      testCell.key("a").key("b").getAsCellLink(),
-      testCell.key("a").getAsCellLink(),
-      testCell.key("c").getAsCellLink(),
+      testCell.key("a").key("b").getAsLegacyCellLink(),
+      testCell.key("a").getAsLegacyCellLink(),
+      testCell.key("c").getAsLegacyCellLink(),
     ];
     const result = compactifyPaths(paths);
     const expected = [
-      testCell.key("a").getAsCellLink(),
-      testCell.key("c").getAsCellLink(),
+      testCell.key("a").getAsLegacyCellLink(),
+      testCell.key("c").getAsLegacyCellLink(),
     ];
     expect(result.map(normalizeCellLink)).toEqual(
       expected.map(normalizeCellLink),
@@ -567,11 +576,11 @@ describe("compactifyPaths", () => {
     );
     testCell.set({});
     const paths = [
-      testCell.key("a").key("b").getAsCellLink(),
-      testCell.key("a").key("b").getAsCellLink(),
+      testCell.key("a").key("b").getAsLegacyCellLink(),
+      testCell.key("a").key("b").getAsLegacyCellLink(),
     ];
     const result = compactifyPaths(paths);
-    const expected = [testCell.key("a").key("b").getAsCellLink()];
+    const expected = [testCell.key("a").key("b").getAsLegacyCellLink()];
     expect(result.map(normalizeCellLink)).toEqual(
       expected.map(normalizeCellLink),
     );
@@ -589,8 +598,8 @@ describe("compactifyPaths", () => {
     );
     cellB.set({});
     const paths = [
-      cellA.key("a").key("b").getAsCellLink(),
-      cellB.key("a").key("b").getAsCellLink(),
+      cellA.key("a").key("b").getAsLegacyCellLink(),
+      cellB.key("a").key("b").getAsLegacyCellLink(),
     ];
     const result = compactifyPaths(paths);
     expect(result.map(normalizeCellLink)).toEqual(paths.map(normalizeCellLink));
@@ -603,11 +612,11 @@ describe("compactifyPaths", () => {
     );
     cellA.set({});
 
-    const expectedResult = cellA.getAsCellLink();
+    const expectedResult = cellA.getAsLegacyCellLink();
     const paths = [
-      cellA.key("a").key("b").getAsCellLink(),
-      cellA.key("c").getAsCellLink(),
-      cellA.key("d").getAsCellLink(),
+      cellA.key("a").key("b").getAsLegacyCellLink(),
+      cellA.key("c").getAsLegacyCellLink(),
+      cellA.key("d").getAsLegacyCellLink(),
       expectedResult,
     ];
     const result = compactifyPaths(paths);

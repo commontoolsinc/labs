@@ -215,7 +215,7 @@ describe("Cell utility functions", () => {
       "should identify a cell reference",
     );
     c.set({ x: 10 });
-    const ref = c.key("x").getAsCellLink();
+    const ref = c.key("x").getAsLegacyCellLink();
     expect(isCellLink(ref)).toBe(true);
     expect(isCellLink({})).toBe(false);
   });
@@ -313,7 +313,7 @@ describe("createProxy", () => {
       "should handle cell references",
     );
     c.set({ x: 42 });
-    const ref = c.key("x").getAsCellLink();
+    const ref = c.key("x").getAsLegacyCellLink();
     const proxy = c.getAsQueryResult();
     proxy.y = ref;
     expect(proxy.y).toBe(42);
@@ -325,7 +325,7 @@ describe("createProxy", () => {
       "should handle infinite loops in cell references",
     );
     c.set({ x: 42 });
-    const ref = c.key("x").getAsCellLink();
+    const ref = c.key("x").getAsLegacyCellLink();
     const proxy = c.getAsQueryResult();
     proxy.x = ref;
     expect(() => proxy.x).toThrow();
@@ -524,8 +524,8 @@ describe("createProxy", () => {
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
     expectCellLinksEqual(log.writes).toEqual([
-      c.key("length").getAsCellLink(),
-      c.key(2).getAsCellLink(),
+      c.key("length").getAsLegacyCellLink(),
+      c.key(2).getAsLegacyCellLink(),
     ]);
     proxy.length = 4;
     expect(c.get()).toEqual([1, 2, undefined, undefined]);
@@ -1167,8 +1167,8 @@ describe("asCell with schema", () => {
       "should handle all types of references in underlying cell: inner",
     );
     innerCell.set({ value: 42 });
-    const cellRef = innerCell.getAsCellLink();
-    const aliasRef = { $alias: innerCell.getAsCellLink() };
+    const cellRef = innerCell.getAsLegacyCellLink();
+    const aliasRef = { $alias: innerCell.getAsLegacyCellLink() };
 
     // Create a cell that uses all reference types
     const c = runtime.getCell<{
@@ -1228,21 +1228,21 @@ describe("asCell with schema", () => {
     );
     innerCell.set({ value: 42 });
 
-    const ref1 = innerCell.getAsCellLink();
+    const ref1 = innerCell.getAsLegacyCellLink();
 
     const ref2Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref2",
     );
     ref2Cell.set({ ref: ref1 });
-    const ref2 = ref2Cell.key("ref").getAsCellLink();
+    const ref2 = ref2Cell.key("ref").getAsLegacyCellLink();
 
     const ref3Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref3",
     );
     ref3Cell.setRaw({ ref: ref2 });
-    const ref3 = ref3Cell.key("ref").getAsCellLink();
+    const ref3 = ref3Cell.key("ref").getAsLegacyCellLink();
 
     // Create a cell that uses the nested reference
     const c = runtime.getCell<{
@@ -1637,7 +1637,7 @@ describe("asCell with schema", () => {
     arrayCell.push(d);
     arrayCell.push(dCell);
     arrayCell.push(d.getAsQueryResult());
-    arrayCell.push(d.getAsCellLink());
+    arrayCell.push(d.getAsLegacyCellLink());
 
     // helper to normalize CellLinks because different push operations
     // may result in CellLinks with different extra properties (ex: space)
@@ -1647,7 +1647,7 @@ describe("asCell with schema", () => {
     });
 
     const rawItems = c.getRaw().items;
-    const expectedCellLink = normalizeCellLink(d.getAsCellLink());
+    const expectedCellLink = normalizeCellLink(d.getAsLegacyCellLink());
 
     expect(rawItems.map(normalizeCellLink)).toEqual([
       expectedCellLink,
@@ -2080,7 +2080,9 @@ describe("JSON.stringify bug", () => {
       "json-test2",
     );
     d.setRaw({
-      internal: { "__#2": normalizeCellLink(c.key("result").getAsCellLink()) },
+      internal: {
+        "__#2": normalizeCellLink(c.key("result").getAsLegacyCellLink()),
+      },
     });
     const e = runtime.getCell<{ internal: { a: any } }>(
       space,
@@ -2090,7 +2092,7 @@ describe("JSON.stringify bug", () => {
       internal: {
         a: {
           $alias: normalizeCellLink(
-            d.key("internal").key("__#2").key("data").getAsCellLink(),
+            d.key("internal").key("__#2").key("data").getAsLegacyCellLink(),
           ),
         },
       },

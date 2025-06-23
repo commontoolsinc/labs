@@ -20,7 +20,6 @@ import {
 } from "./builder/recipe.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
-import { type LegacyAlias } from "./sigil-types.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
 import { containsOpaqueRef, deepCopy } from "./type-utils.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -32,17 +31,16 @@ import {
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
+  isLink,
   isWriteRedirectLink,
-  type NormalizedLink,
   parseLink,
+  parseToLegacyAlias,
 } from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
 import { isCell, isCellLink } from "./cell.ts";
-import { type CellLink } from "./sigil-types.ts";
-import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
-import { getCellLinkOrThrow } from "./query-result-proxy.ts";
+import { type LegacyCellLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 
 export class Runner implements IRunner {
@@ -183,21 +181,8 @@ export class Runner implements IRunner {
     this.allCancels.add(cancel);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
-    if (
-      isDoc(argument) ||
-      isCellLink(argument) ||
-      isCell(argument) ||
-      isQueryResultForDereferencing(argument)
-    ) {
-      const ref = isCellLink(argument)
-        ? argument
-        : isCell(argument)
-        ? argument.getAsCellLink()
-        : isQueryResultForDereferencing(argument)
-        ? getCellLinkOrThrow(argument)
-        : ({ cell: argument, path: [] } satisfies CellLink);
-
-      argument = { $alias: ref } as T;
+    if (isLink(argument)) {
+      argument = parseToLegacyAlias(argument) as T;
     }
 
     // Walk the recipe's schema and extract all default values
@@ -497,7 +482,7 @@ export class Runner implements IRunner {
     }
 
     // Check if any of the read cells is a stream alias
-    let streamRef: CellLink | undefined = undefined;
+    let streamRef: LegacyCellLink | undefined = undefined;
     if (isRecord(inputs)) {
       for (const key in inputs) {
         let doc = processCell;
@@ -510,7 +495,7 @@ export class Runner implements IRunner {
           value = doc.getAtPath(path);
         }
         if (isStreamValue(value)) {
-          streamRef = { cell: doc, path } satisfies CellLink;
+          streamRef = { cell: doc, path } satisfies LegacyCellLink;
           break;
         }
       }
@@ -847,15 +832,7 @@ export function mergeObjects<T>(
     // If we have a literal value, return it. Same for arrays, since we wouldn't
     // know how to merge them. Note that earlier objects take precedence, so if
     // an earlier was e.g. an object, we'll return that instead of the literal.
-    if (
-      typeof obj !== "object" ||
-      obj === null ||
-      Array.isArray(obj) ||
-      isWriteRedirectLink(obj) ||
-      isCellLink(obj) ||
-      isDoc(obj) ||
-      isCell(obj)
-    ) {
+    if (!isObject(obj) || isLink(obj)) {
       return obj as T;
     }
 

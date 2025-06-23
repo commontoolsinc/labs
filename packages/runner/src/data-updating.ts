@@ -3,17 +3,21 @@ import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import { isAnyCellLink, isCell, isCellLink } from "./cell.ts";
-import { type CellLink } from "./sigil-types.ts";
+import { isAnyCellLink, isCell, isLegacyCellLink } from "./cell.ts";
+import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
-import { arrayEqual, maybeUnwrapProxy } from "./type-utils.ts";
+import { arrayEqual } from "./type-utils.ts";
 import {
   areLinksSame,
   isLink,
   isWriteRedirectLink,
   parseLink,
 } from "./link-utils.ts";
+import {
+  getCellLinkOrThrow,
+  isQueryResultForDereferencing,
+} from "./query-result-proxy.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -94,7 +98,7 @@ export function setNestedValue<T>(
  * @returns Whether any changes were made.
  */
 export function diffAndUpdate(
-  current: CellLink,
+  current: LegacyCellLink,
   newValue: unknown,
   log?: ReactivityLog,
   context?: unknown,
@@ -104,7 +108,7 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
-type ChangeSet = { location: CellLink; value: unknown }[];
+type ChangeSet = { location: LegacyCellLink; value: unknown }[];
 
 /**
  * Traverses objects and returns an array of changes that should be written. An
@@ -128,7 +132,7 @@ type ChangeSet = { location: CellLink; value: unknown }[];
  * @returns An array of changes that should be written.
  */
 export function normalizeAndDiff(
-  current: CellLink,
+  current: LegacyCellLink,
   newValue: unknown,
   log?: ReactivityLog,
   context?: unknown,
@@ -153,7 +157,7 @@ export function normalizeAndDiff(
       const parent = current.cell.getAtPath(current.path.slice(0, -1));
       if (Array.isArray(parent)) {
         for (const v of parent) {
-          if (isCellLink(v)) {
+          if (isLegacyCellLink(v)) {
             const sibling = v.cell.getAtPath(v.path);
             if (
               isRecord(sibling) &&
@@ -176,9 +180,12 @@ export function normalizeAndDiff(
   }
 
   // Unwrap proxies and handle special types
-  newValue = maybeUnwrapProxy(newValue);
+  if (isQueryResultForDereferencing(newValue)) {
+    newValue = getCellLinkOrThrow(newValue);
+  }
+
   if (isDoc(newValue)) newValue = { cell: newValue, path: [] };
-  if (isCell(newValue)) newValue = newValue.getAsCellLink();
+  if (isCell(newValue)) newValue = newValue.getAsLegacyCellLink();
 
   // Get current value to compare against
   const currentValue = current.cell.getAtPath(current.path);

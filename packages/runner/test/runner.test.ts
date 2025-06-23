@@ -711,16 +711,16 @@ describe("runner utils", () => {
         "should treat cell aliases and references as values 1",
       );
       const obj1 = { a: { $alias: { path: [] } } };
-      const obj2 = { a: 2, b: { c: testCell.getAsCellLink() } };
+      const obj2 = { a: 2, b: { c: testCell.getAsLegacyCellLink() } };
       const obj3 = {
-        a: { $alias: testCell.key("a").getAsCellLink() },
+        a: { $alias: testCell.key("a").getAsLegacyCellLink() },
         b: { c: 4 },
       };
 
       const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({
         a: { $alias: { path: [] } },
-        b: { c: testCell.getAsCellLink() },
+        b: { c: testCell.getAsLegacyCellLink() },
       });
     });
   });

@@ -25,7 +25,7 @@ import {
   tokenToAuthData,
 } from "./google-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
-import { type CellLink, parseLink } from "@commontools/runner";
+import { parseLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Tokens } from "@cmd-johnson/oauth2-client";
 
