@@ -309,7 +309,8 @@ export function parseToLegacyCellLink(
     | SigilLink
     | JSONCellLink
     | LegacyAlias
-    | QueryResultInternals,
+    | QueryResultInternals
+    | { "/": string },
   baseCell?: Cell,
 ): LegacyCellLink;
 export function parseToLegacyCellLink(
@@ -341,7 +342,8 @@ export function parseToLegacyAlias(
     | SigilLink
     | JSONCellLink
     | LegacyAlias
-    | QueryResultInternals,
+    | QueryResultInternals
+    | { "/": string },
 ): LegacyAlias;
 export function parseToLegacyAlias(value: any): LegacyAlias | undefined;
 export function parseToLegacyAlias(value: any): LegacyAlias | undefined {
@@ -354,8 +356,6 @@ function parseToLegacyCellLinkWithMaybeACell(
   value: any,
   baseCell?: Cell,
 ): Partial<LegacyCellLink> | undefined {
-  if (!value) return undefined;
-
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
   if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);

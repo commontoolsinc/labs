@@ -260,15 +260,17 @@ export function followLinks(
 // Only logs interim aliases, not the first one, and not the non-alias value.
 export function followWriteRedirects<T = any>(
   alias: LegacyAlias | SigilWriteRedirectLink,
-  docOrCell: DocImpl<T> | Cell<T>,
+  base: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
 ): LegacyCellLink {
+  if (isDoc(base)) base = base.asCell();
+  else base = base as Cell<T>; // Makes TS happy
+
   if (isWriteRedirectLink(alias)) {
-    const cell = isDoc(docOrCell) ? docOrCell.asCell() : docOrCell as Cell<T>;
-    const link = parseLink(alias, cell)!;
+    const link = parseLink(alias, base)!;
     return followLinks(
       {
-        cell: cell.getDoc().runtime.documentMap.getDocByEntityId(
+        cell: base.getDoc().runtime.documentMap.getDocByEntityId(
           link.space!,
           link.id!,
         ),
