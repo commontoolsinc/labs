@@ -31,7 +31,7 @@ if [ "$(ct charm ls $SPACE_ARGS)" != "" ]; then
 fi
 
 # Create a new charm with {value:5} as input
-CHARM_ID=$(echo '{"value":5}' | ct charm new $SPACE_ARGS $RECIPE_SRC)
+CHARM_ID=$(ct charm new $SPACE_ARGS $RECIPE_SRC)
 echo "Created charm: $CHARM_ID"
 
 # Retrieve the source code for $CHARM_ID to $WORK_DIR
@@ -55,6 +55,9 @@ grep -q "Simple counter 2" "$WORK_DIR/main.tsx"
 if [ $? -ne 0 ]; then
   error "Retrieved source code was not modified"
 fi
+
+# Apply new input to charm
+echo '{"value":5}' | ct charm apply $SPACE_ARGS --charm $CHARM_ID
 
 # Check space has new charm with correct inputs and title
 TITLE="Simple counter 2: 5"

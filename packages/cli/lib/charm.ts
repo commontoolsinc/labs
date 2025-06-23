@@ -163,11 +163,10 @@ export async function listCharms(
 export async function newCharm(
   config: SpaceConfig,
   entryPath: string,
-  input: object | undefined,
 ): Promise<string> {
   const manager = await loadManager(config);
   const recipe = await getRecipeFromFile(manager, entryPath);
-  const charm = await exec({ manager, recipe, input });
+  const charm = await exec({ manager, recipe });
   return getCharmId(charm);
 }
 
