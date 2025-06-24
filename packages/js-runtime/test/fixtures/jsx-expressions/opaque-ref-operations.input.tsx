@@ -1,6 +1,6 @@
-import { OpaqueRef, derive, h } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const price: OpaqueRef<number> = {} as any;
+import { cell, h } from "commontools";
+const count = cell(10);
+const price = cell(10);
 
 const element = (
   <div>
