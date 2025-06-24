@@ -168,4 +168,20 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       expect(result.matches).toBe(true);
     });
   });
+
+  describe("Multiple OpaqueRef Operations", () => {
+    it("handles string concatenation with multiple OpaqueRefs (fullName example)", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/multiple-refs-operations.input.ts",
+        "opaque-refs/multiple-refs-operations.expected.ts",
+        { types }
+      );
+      
+      if (!result.matches) {
+        console.log("Expected:", result.expected);
+        console.log("Actual:", result.actual);
+      }
+      expect(result.matches).toBe(true);
+    });
+  });
 });

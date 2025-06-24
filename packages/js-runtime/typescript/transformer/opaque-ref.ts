@@ -170,33 +170,26 @@ export function createOpaqueRefTransformer(
         
         // Handle template expressions
         if (ts.isTemplateExpression(node)) {
-          let hasTransformedSpans = false;
-          const transformedSpans = node.templateSpans.map(span => {
-            if (containsOpaqueRef(span.expression, checker)) {
-              hasTransformedSpans = true;
-              const transformedExpression = addGetCallsToOpaqueRefs(
-                span.expression,
-                checker,
-                context.factory,
-                context
-              ) as ts.Expression;
-              return context.factory.updateTemplateSpan(
-                span,
-                transformedExpression,
-                span.literal
-              );
-            }
-            return span;
-          });
-          
-          if (hasTransformedSpans) {
+          // Check if any template span contains OpaqueRef
+          if (containsOpaqueRef(node, checker)) {
             log(`Found template expression transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
-            return context.factory.updateTemplateExpression(
+            
+            // Transform the entire template expression using derive
+            const transformedExpression = transformExpressionWithOpaqueRef(
               node,
-              node.head,
-              transformedSpans
+              checker,
+              context.factory,
+              sourceFile,
+              context
             );
+            
+            if (transformedExpression !== node) {
+              if (!hasCommonToolsImport(sourceFile, "derive")) {
+                needsDeriveImport = true;
+              }
+              return transformedExpression;
+            }
           }
         }
         
