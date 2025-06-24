@@ -108,6 +108,27 @@ export async function transformSource(
             isExternalLibraryImport: false,
           };
         }
+        if (name === "@commontools/common" && types["commontools.d.ts"]) {
+          return {
+            resolvedFileName: "commontools.d.ts",
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
+        return undefined;
+      });
+    },
+    resolveTypeReferenceDirectives: (typeDirectiveNames, containingFile, redirectedReference, options) => {
+      return typeDirectiveNames.map((directive) => {
+        const name = typeof directive === 'string' ? directive : directive.fileName;
+        if (allTypes[name]) {
+          return {
+            primary: true,
+            resolvedFileName: name,
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: false,
+          };
+        }
         return undefined;
       });
     },
@@ -115,6 +136,19 @@ export async function transformSource(
 
   // Create the program
   const program = ts.createProgram([fileName], compilerOptions, host);
+  
+  // Debug: Check for errors
+  if (debug && logger) {
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    if (diagnostics.length > 0) {
+      logger("=== TypeScript Diagnostics ===");
+      diagnostics.forEach(diagnostic => {
+        const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
+        logger(`${diagnostic.file?.fileName || "unknown"}: ${message}`);
+      });
+      logger("=== End Diagnostics ===");
+    }
+  }
 
   // Create the transformer
   const transformer = createOpaqueRefTransformer(program, {
@@ -127,8 +161,11 @@ export async function transformSource(
   const sourceFile = program.getSourceFile(fileName)!;
   const result = ts.transform(sourceFile, [transformer]);
 
-  // Print the result
-  const printer = ts.createPrinter();
+  // Print the result with 2-space indentation to match Deno style
+  const printer = ts.createPrinter({
+    newLine: ts.NewLineKind.LineFeed,
+    removeComments: false,
+  });
   const output = printer.printFile(result.transformed[0]);
   
   if (debug && logger) {
