@@ -52,10 +52,10 @@ export default recipe(model, model, (cell) => {
       runtimeModules: ["commontools"],
     });
     
-    // Recipe call wrapped in derive due to OpaqueRef usage
-    expect(compiled.js).toContain('commontools_1.derive({ cell, odd, cell_value: cell.value, value }');
+    // Recipe call should NOT be wrapped in derive
+    expect(compiled.js).toContain('exports.default = (0, commontools_1.recipe)(model, model, (cell)');
     
-    // Ternary remains unchanged because _v2 is not an OpaqueRef
-    expect(compiled.js).toContain('_v2 ? "odd" : "even"');
+    // Ternary should be transformed to ifElse
+    expect(compiled.js).toContain('commontools_1.ifElse(odd, "odd", "even")');
   });
 });
