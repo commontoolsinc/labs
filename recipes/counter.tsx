@@ -1,5 +1,6 @@
 // deno-lint-ignore-file jsx-no-useless-fragment
 import {
+  Cell,
   derive,
   h,
   handler,
@@ -13,7 +14,7 @@ import {
 
 // Define type using TypeScript interface
 interface CounterState {
-  value: number; // @asCell
+  value: Cell<number>;
 }
 
 // Transform to schema at compile time

@@ -158,28 +158,40 @@ function typeToJsonSchema(
         required.push(propName);
       }
 
-      // Get property schema
-      let propSchema = typeToJsonSchema(propType, checker);
-
-      // Check for special comments (@asCell, @asStream)
-      if (prop.valueDeclaration) {
-        const sourceFile = prop.valueDeclaration.getSourceFile();
-        const start = prop.valueDeclaration.getStart();
-        const end = prop.valueDeclaration.getEnd();
-
-        // Look for comments on the same line
-        const lineEnd = sourceFile.text.indexOf("\n", end);
-        const lineText = sourceFile.text.substring(
-          start,
-          lineEnd > 0 ? lineEnd : sourceFile.text.length,
-        );
-
-        if (lineText.includes("@asCell")) {
-          propSchema.asCell = true;
+      // Check if the property type is Cell<T> or Stream<T>
+      const propTypeString = checker.typeToString(propType);
+      let actualPropType = propType;
+      let isCell = false;
+      let isStream = false;
+      
+      // Check if this is a Cell<T> type
+      if (propTypeString.startsWith('Cell<') && propTypeString.endsWith('>')) {
+        isCell = true;
+        // Extract the inner type
+        const typeRef = propType as ts.TypeReference;
+        if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+          actualPropType = typeRef.typeArguments[0];
         }
-        if (lineText.includes("@asStream")) {
-          propSchema.asStream = true;
+      }
+      // Check if this is a Stream<T> type
+      else if (propTypeString.startsWith('Stream<') && propTypeString.endsWith('>')) {
+        isStream = true;
+        // Extract the inner type
+        const typeRef = propType as ts.TypeReference;
+        if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+          actualPropType = typeRef.typeArguments[0];
         }
+      }
+      
+      // Get property schema for the actual type (unwrapped if it was Cell/Stream)
+      let propSchema = typeToJsonSchema(actualPropType, checker);
+      
+      // Add asCell/asStream flags
+      if (isCell) {
+        propSchema.asCell = true;
+      }
+      if (isStream) {
+        propSchema.asStream = true;
       }
 
       properties[propName] = propSchema;
