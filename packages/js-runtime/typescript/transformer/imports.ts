@@ -8,7 +8,7 @@ import ts from "typescript";
 export function getCommonToolsModuleAlias(sourceFile: ts.SourceFile): string | null {
   // In AMD output, TypeScript transforms module imports to parameters
   // For imports from "commontools", it typically becomes "commontools_1"
-  // We need to check if there's an import from commontools
+  // We only need this for the old "commontools" import, not "@commontools/common"
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement)) {
       const moduleSpecifier = statement.moduleSpecifier;
@@ -36,7 +36,7 @@ export function hasCommonToolsImport(sourceFile: ts.SourceFile, importName: stri
       const moduleSpecifier = statement.moduleSpecifier;
       if (
         ts.isStringLiteral(moduleSpecifier) &&
-        moduleSpecifier.text === "commontools"
+        (moduleSpecifier.text === "@commontools/common" || moduleSpecifier.text === "commontools")
       ) {
         // Check if the specific import is in the import clause
         if (statement.importClause && statement.importClause.namedBindings) {
@@ -66,6 +66,7 @@ export function addCommonToolsImport(
 ): ts.SourceFile {
   let existingImport: ts.ImportDeclaration | undefined;
   let existingImportIndex: number = -1;
+  let moduleSpecifierText: string = "";
 
   // Find existing commontools import
   sourceFile.statements.forEach((statement, index) => {
@@ -73,10 +74,11 @@ export function addCommonToolsImport(
       const moduleSpecifier = statement.moduleSpecifier;
       if (
         ts.isStringLiteral(moduleSpecifier) &&
-        moduleSpecifier.text === "commontools"
+        (moduleSpecifier.text === "@commontools/common" || moduleSpecifier.text === "commontools")
       ) {
         existingImport = statement;
         existingImportIndex = index;
+        moduleSpecifierText = moduleSpecifier.text;
       }
     }
   });
@@ -120,9 +122,69 @@ export function addCommonToolsImport(
       undefined,
     );
   } else {
-    // This shouldn't happen if we're already importing from commontools
-    // but handle it gracefully
-    return sourceFile;
+    // Only create new import for @commontools/common, not for old "commontools"
+    // Check if we have any commontools import
+    let hasAnyCommonToolsImport = false;
+    for (const statement of sourceFile.statements) {
+      if (ts.isImportDeclaration(statement)) {
+        const moduleSpecifier = statement.moduleSpecifier;
+        if (
+          ts.isStringLiteral(moduleSpecifier) &&
+          (moduleSpecifier.text === "@commontools/common" || moduleSpecifier.text === "commontools")
+        ) {
+          hasAnyCommonToolsImport = true;
+          break;
+        }
+      }
+    }
+    
+    // If we have "commontools" import, don't add anything new
+    if (hasAnyCommonToolsImport) {
+      return sourceFile;
+    }
+    
+    // Create new import declaration for @commontools/common
+    newImport = factory.createImportDeclaration(
+      undefined,
+      factory.createImportClause(
+        false,
+        undefined,
+        factory.createNamedImports([
+          factory.createImportSpecifier(
+            false,
+            undefined,
+            factory.createIdentifier(importName),
+          ),
+        ]),
+      ),
+      factory.createStringLiteral("@commontools/common"),
+      undefined,
+    );
+    
+    // Add as first statement or after existing imports
+    const newStatements = [...sourceFile.statements];
+    let insertIndex = 0;
+    
+    // Find the position after all import declarations
+    for (let i = 0; i < newStatements.length; i++) {
+      if (ts.isImportDeclaration(newStatements[i])) {
+        insertIndex = i + 1;
+      } else {
+        break;
+      }
+    }
+    
+    newStatements.splice(insertIndex, 0, newImport);
+    
+    return factory.updateSourceFile(
+      sourceFile,
+      newStatements,
+      sourceFile.isDeclarationFile,
+      sourceFile.referencedFiles,
+      sourceFile.typeReferenceDirectives,
+      sourceFile.hasNoDefaultLib,
+      sourceFile.libReferenceDirectives,
+    );
   }
 
   // Reconstruct statements with the new import
