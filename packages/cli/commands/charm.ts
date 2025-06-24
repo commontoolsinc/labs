@@ -158,6 +158,7 @@ export const charm = new Command()
     `View detailed information about charm "${RAW_EX_COMP.charm!}".`,
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--verbose", "Show full UI and other large objects")
   .arguments("[charmId:string]")
   .action(async (options, charmId) => {
     let charmConfig;
@@ -187,7 +188,18 @@ export const charm = new Command()
     
     console.log(`\n--- Result ---`);
     if (charmData.result) {
-      console.log(JSON.stringify(charmData.result, null, 2));
+      if (options.verbose) {
+        // In verbose mode, write directly to stdout to avoid render() limits
+        const resultJson = JSON.stringify(charmData.result, null, 2);
+        Deno.stdout.writeSync(new TextEncoder().encode(resultJson + '\n'));
+      } else {
+        // Filter out large UI objects that clutter the output
+        const filteredResult = { ...charmData.result };
+        if (filteredResult.$UI && typeof filteredResult.$UI === 'object') {
+          filteredResult.$UI = '<large UI object - use --verbose to see full UI>';
+        }
+        console.log(JSON.stringify(filteredResult, null, 2));
+      }
     } else {
       console.log('<no result data>');
     }
