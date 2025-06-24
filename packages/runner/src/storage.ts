@@ -274,15 +274,24 @@ export class Storage implements IStorage {
       // We may still be doing the "value" wrapping in the network protocol, even though
       // that's not what they look like on the server. Not urgent, since we don't do
       // retractions right now.
+      // TODO(@ubik2): this shares too much logic with the functions in
+      // _subscribeToChanges
+      const docValue = Storage._cellLinkToJSON(newDoc);
       if (storageValue !== undefined) {
         // The object exists on the server, so push its value to the doc
-        const newValue = Storage._cellLinkFromJSON(
-          newDoc,
-          storageValue,
-          this.runtime.documentMap,
-        );
-        newDoc.send(newValue.value);
-        if (storageValue.source !== undefined) {
+        // unless we already have the same contents.
+        if (!deepEqual(storageValue.value, docValue.value)) {
+          const newValue = Storage._cellLinkFromJSON(
+            newDoc,
+            storageValue,
+            this.runtime.documentMap,
+          );
+          newDoc.send(newValue.value);
+        }
+        // We can only set the source if it hasn't been set
+        if (
+          storageValue.source !== undefined && newDoc.sourceCell === undefined
+        ) {
           newDoc.sourceCell = this.runtime.documentMap.getDocByEntityId(
             doc.space,
             storageValue.source,
@@ -295,9 +304,8 @@ export class Storage implements IStorage {
       } else {
         // The object doesn't exist in storage, but it does in the doc map
         // TODO(@ubik2): investigate labels
-        const newValue = Storage._cellLinkToJSON(newDoc);
         // Add to the set of writes
-        valuesToSend.push({ entityId: entityId, value: newValue });
+        valuesToSend.push({ entityId: entityId, value: docValue });
       }
 
       // Any updates to these docs should be sent to storage, and any update
