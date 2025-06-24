@@ -3,6 +3,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  linkCharms,
   listCharms,
   newCharm,
   saveCharmRecipe,
@@ -143,7 +144,48 @@ export const charm = new Command()
   .arguments("<entry:string>")
   .action((options, entryPath) =>
     setCharmRecipe(parseCharmOptions(options), absPath(entryPath))
-  );
+  )
+  /* charm link */
+  .command("link", "Link a field from one charm to another")
+  .usage(spaceUsage)
+  .example(
+    `ct charm link ${EX_ID} ${EX_COMP} bafycharm1/outputEmails bafycharm2/emails`,
+    `Link outputEmails field from charm "bafycharm1" to emails field in charm "bafycharm2".`,
+  )
+  .arguments("<source:string> <target:string>")
+  .action(async (options, sourceRef, targetRef) => {
+    const spaceConfig = parseSpaceOptions(options);
+    
+    // Parse source reference (charmId/field)
+    const sourceParts = sourceRef.split("/");
+    if (sourceParts.length !== 2) {
+      throw new ValidationError(
+        `Invalid source reference format. Expected: charmId/fieldName`,
+        { exitCode: 1 },
+      );
+    }
+    const [sourceCharmId, sourceField] = sourceParts;
+    
+    // Parse target reference (charmId/field)
+    const targetParts = targetRef.split("/");
+    if (targetParts.length !== 2) {
+      throw new ValidationError(
+        `Invalid target reference format. Expected: charmId/fieldName`,
+        { exitCode: 1 },
+      );
+    }
+    const [targetCharmId, targetField] = targetParts;
+    
+    await linkCharms(
+      spaceConfig,
+      sourceCharmId,
+      sourceField,
+      targetCharmId,
+      targetField,
+    );
+    
+    render(`Linked ${sourceRef} to ${targetRef}`);
+  });
 
 interface CharmCLIOptions {
   charm?: string;

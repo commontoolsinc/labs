@@ -206,3 +206,30 @@ export async function applyCharmInput(
   const recipe = await getRecipeFromService(manager, config.charm);
   await exec({ manager, recipe, charmId: config.charm, input });
 }
+
+export async function linkCharms(
+  config: SpaceConfig,
+  sourceCharmId: string,
+  sourceField: string,
+  targetCharmId: string,
+  targetField: string,
+): Promise<void> {
+  const manager = await loadManager(config);
+  
+  const sourceCharm = await manager.get(sourceCharmId, false);
+  if (!sourceCharm) {
+    throw new Error(`Source charm "${sourceCharmId}" not found`);
+  }
+  
+  const targetCharm = await manager.get(targetCharmId, false);
+  if (!targetCharm) {
+    throw new Error(`Target charm "${targetCharmId}" not found`);
+  }
+  
+  const sourceCellLink = sourceCharm.key(sourceField).getAsCellLink();
+  
+  targetCharm.key(targetField).set(sourceCellLink);
+  
+  await manager.runtime.idle();
+  await manager.synced();
+}
