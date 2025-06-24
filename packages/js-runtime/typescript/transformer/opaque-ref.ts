@@ -116,6 +116,7 @@ export function createOpaqueRefTransformer(
         // Handle property access expressions (e.g., person.name.length)
         // Skip if it's part of a larger expression that will handle it
         if (ts.isPropertyAccessExpression(node) && 
+            node.parent &&
             !ts.isCallExpression(node.parent) &&
             !ts.isPropertyAccessExpression(node.parent)) {
           
