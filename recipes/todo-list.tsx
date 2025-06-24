@@ -1,100 +1,116 @@
-import {
-  derive,
-  h,
-  handler,
-  JSONSchema,
-  NAME,
-  recipe,
-  Schema,
-  UI,
-} from "commontools";
+import { derive, h, handler, NAME, recipe, toSchema, UI } from "commontools";
 
-const TodoItemSchema = {
-  type: "object",
+// Define types using TypeScript interfaces
+export interface TodoItem {
+  title: string;
+  done: boolean;
+}
+
+interface TodoListInput {
+  title: string;
+  items: TodoItem[];
+}
+
+interface TodoResult {
+  items: TodoItem[];
+  addItem: {
+    title: string;
+  }; // @asStream
+  "/action/drop/schema": object;
+  "/action/drop/handler": string; // @asStream
+}
+
+// Transform to schemas at compile time
+const TodoItemSchema = toSchema<TodoItem>();
+
+const TodoListSchema = toSchema<TodoListInput>({
+  default: { title: "untitled", items: [] },
+});
+
+const ResultSchema = toSchema<TodoResult>({
   properties: {
-    title: { type: "string" },
-    done: { type: "boolean" },
-  },
-  required: ["title", "done"],
-} as const satisfies JSONSchema;
-
-export type TodoItem = Schema<typeof TodoItemSchema>;
-
-const TodoListSchema = {
-  type: "object",
-  properties: {
-    title: {
-      type: "string",
-      default: "untitled",
-    },
-    items: {
-      type: "array",
-      items: TodoItemSchema,
-      default: [],
-    },
-  },
-  required: ["title", "items"],
-} as const satisfies JSONSchema;
-
-const ResultSchema = {
-  type: "object",
-  properties: {
-    items: { type: "array", items: TodoItemSchema },
     addItem: {
       asStream: true,
-      type: "object",
-      properties: {
-        title: { type: "string" },
-      },
-      examples: [{ title: "New item" }],
-      required: ["title"],
+      example: { title: "New item" },
     },
-    "/action/drop/schema": { type: "object" },
-    "/action/drop/handler": { asStream: true, type: "string" },
   },
-  required: ["items", "/action/drop/schema", "/action/drop/handler"],
-} as const satisfies JSONSchema;
+});
 
-const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
+interface AddTaskEvent {
+  detail: {
+    message: string;
+  };
+}
+
+interface ItemsState {
+  items: TodoItem[];
+}
+
+const addTask = handler<AddTaskEvent, ItemsState>(
   (event, { items }) => {
     const task = event.detail?.message?.trim();
     if (task) items.push({ title: task, done: false });
   },
 );
 
+interface AddItemEvent {
+  title: string;
+}
+
+interface AddItemState {
+  items: TodoItem[]; // @asCell
+}
+
 const addItem = handler(
-  {
-    type: "object",
-    properties: { title: { type: "string" } },
-    required: ["title"],
-  },
-  {
-    type: "object",
-    properties: {
-      items: { asCell: true, ...TodoListSchema.properties.items },
-    },
+  toSchema<AddItemEvent>(),
+  toSchema<AddItemState>({
     default: { items: [] },
-  },
+  }),
   ({ title }, { items }) => {
     items.push({ title, done: false });
   },
 );
 
-const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
+interface UpdateTitleEvent {
+  detail: {
+    value: string;
+  };
+}
+
+interface TitleState {
+  title: string;
+}
+
+const updateTitle = handler<UpdateTitleEvent, TitleState>(
   ({ detail }, state) => {
     state.title = detail?.value ?? "untitled";
   },
 );
 
-const updateItem = handler<
-  { detail: { checked: boolean; value: string } },
-  { item: TodoItem }
->(({ detail }, { item }) => {
-  (item as any).done = detail.checked;
-  (item as any).title = detail.value;
-});
+interface UpdateItemEvent {
+  detail: {
+    checked: boolean;
+    value: string;
+  };
+}
 
-const deleteItem = handler<never, { items: TodoItem[]; item: TodoItem }>(
+interface ItemState {
+  item: TodoItem;
+}
+
+const updateItem = handler<UpdateItemEvent, ItemState>(
+  ({ detail }, { item }) => {
+    (item as any).done = detail.checked;
+    (item as any).title = detail.value;
+  },
+);
+
+interface DeleteItemState {
+  items: TodoItem[];
+  item: TodoItem;
+}
+
+const deleteItem = handler<never, DeleteItemState>(
   (_, { item, items }) => {
     const idx = items.findIndex((i) => i.title === item.title);
     if (idx !== -1) items.splice(idx, 1);
@@ -161,7 +177,7 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
     items,
     addItem: addItem({ items }),
     "action/drop/schema": { type: "string" },
-    "action/drop/handler": handler<any[], { items: TodoItem[] }>(
+    "action/drop/handler": handler<any[], ItemsState>(
       (event, { items }) => {
         console.log("todo drag handler", event);
         event.forEach((item) => {

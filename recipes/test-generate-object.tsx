@@ -4,39 +4,39 @@ import {
   h,
   handler,
   ifElse,
-  type JSONSchema,
   lift,
   NAME,
   recipe,
-  Schema,
-  schema,
   str,
+  toSchema,
   UI,
 } from "commontools";
 
-// Input schema with a number that can be incremented
-const inputSchema = schema({
-  type: "object",
-  properties: {
-    number: { type: "number", default: 0, asCell: true },
-  },
+// Define types using TypeScript interfaces
+interface InputState {
+  number: number; // @asCell
+}
+
+interface OutputState {
+  number: number;
+  story: string;
+  title: string;
+  storyOrigin: string;
+  seeAlso: number[];
+  imagePrompt: string;
+}
+
+interface SetNumberEvent {
+  number: number; // @asCell
+  n: number;
+}
+
+// Transform to schemas at compile time
+const inputSchema = toSchema<InputState>({
   default: { number: 0 },
 });
 
-// Output schema for the generated object
-const outputSchema = {
-  type: "object",
-  properties: {
-    number: { type: "number" },
-    story: { type: "string" },
-    title: { type: "string" },
-    storyOrigin: { type: "string" },
-    seeAlso: { type: "array", items: { type: "number" } },
-    imagePrompt: { type: "string" },
-  },
-} as const satisfies JSONSchema;
-
-type OutputSchema = Schema<typeof outputSchema>;
+const outputSchema = toSchema<OutputState>();
 
 // Handler to increment the number
 const adder = handler({}, inputSchema, (_, state) => {
@@ -44,20 +44,17 @@ const adder = handler({}, inputSchema, (_, state) => {
 });
 
 // Handler to set a specific number
-const setNumber = handler({}, {
-  type: "object",
-  properties: {
-    number: { type: "number", asCell: true },
-    n: { type: "number" },
+const setNumber = handler(
+  toSchema<SetNumberEvent>(),
+  (_, state) => {
+    if (state.number && state.n) {
+      state.number.set(state.n);
+    }
   },
-}, (_, state) => {
-  if (state.number && state.n) {
-    state.number.set(state.n);
-  }
-});
+);
 
 // Generate the prompt for the LLM
-const generatePrompt = lift(({ number: number }) => {
+const generatePrompt = lift(({ number }: { number: number }) => {
   return {
     prompt:
       `You are the parent of a young child who loves to learn about numbers. Luckily for your child, you are a historian of numbers and when the child says a number you make up an interesting story about it, including the history of the number. The child is currently at ${number}. Also return a recommendation for other numbers that might be interesting to the child to learn about next.`,
@@ -66,13 +63,13 @@ const generatePrompt = lift(({ number: number }) => {
 });
 
 // Generate an image URL from the prompt
-const generateImageUrl = lift(({ imagePrompt }) => {
+const generateImageUrl = lift(({ imagePrompt }: { imagePrompt: string }) => {
   return `/api/ai/img?prompt=${encodeURIComponent(imagePrompt)}`;
 });
 
 export default recipe(inputSchema, outputSchema, (cell) => {
   // Use generateObject to get structured data from the LLM
-  const { result: object, pending } = generateObject<OutputSchema>(
+  const { result: object, pending } = generateObject<OutputState>(
     generatePrompt({ number: cell.number }),
   );
 

@@ -1,6 +1,9 @@
 # Schema Transformer
 
-The schema transformer allows you to write TypeScript interfaces and automatically transform them into JSONSchema objects at compile time. This provides a more compact and type-safe way to define schemas for CommonTools recipes.
+The schema transformer allows you to write TypeScript interfaces and
+automatically transform them into JSONSchema objects at compile time. This
+provides a more compact and type-safe way to define schemas for CommonTools
+recipes.
 
 ## Usage
 
@@ -12,9 +15,9 @@ const userSchema = {
   properties: {
     name: { type: "string" },
     age: { type: "number" },
-    email: { type: "string" }
+    email: { type: "string" },
   },
-  required: ["name", "age"]
+  required: ["name", "age"],
 } as const satisfies JSONSchema;
 ```
 
@@ -33,6 +36,7 @@ const userSchema = toSchema<User>();
 ## Features
 
 ### Type Support
+
 - Primitive types: `string`, `number`, `boolean`
 - Arrays: `string[]`, `User[]`
 - Objects and nested interfaces
@@ -40,16 +44,18 @@ const userSchema = toSchema<User>();
 - Date types (converted to `{ type: "string", format: "date-time" }`)
 
 ### Special Comments
+
 Add special behaviors with comments:
 
 ```typescript
 interface RecipeInput {
-  values: string[];    // @asCell - makes this a reactive cell
-  events: Event[];     // @asStream - makes this a stream
+  values: string[]; // @asCell - makes this a reactive cell
+  events: Event[]; // @asStream - makes this a stream
 }
 ```
 
 ### Options
+
 Pass additional schema properties:
 
 ```typescript
@@ -57,14 +63,14 @@ const schema = toSchema<User>({
   title: "User Schema",
   description: "A user in the system",
   default: { name: "Anonymous" },
-  example: { name: "John", age: 30 }
+  example: { name: "John", age: 30 },
 });
 ```
 
 ### Full Example
 
 ```typescript
-import { recipe, handler, toSchema } from "commontools";
+import { handler, recipe, toSchema } from "commontools";
 
 interface TodoItem {
   id: string;
@@ -82,12 +88,12 @@ interface AddTodoEvent {
 
 // Schemas are generated at compile time
 const inputSchema = toSchema<TodoInput>({
-  default: { todos: [] }
+  default: { todos: [] },
 });
 
 const addTodoSchema = toSchema<AddTodoEvent>({
   title: "Add Todo",
-  description: "Add a new todo item"
+  description: "Add a new todo item",
 });
 
 // Type-safe handlers
@@ -98,9 +104,9 @@ const addTodo = handler(
     state.todos.push({
       id: Date.now().toString(),
       text: event.text,
-      completed: false
+      completed: false,
     });
-  }
+  },
 );
 ```
 
