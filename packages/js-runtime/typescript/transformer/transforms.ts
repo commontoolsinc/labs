@@ -297,6 +297,152 @@ export function transformExpressionWithOpaqueRef(
     );
   }
   
+  // Handle template expressions (e.g., `Hello ${firstName} ${lastName}`)
+  if (ts.isTemplateExpression(expression)) {
+    // Get all OpaqueRef identifiers in the template expression
+    const opaqueRefs = collectOpaqueRefs(expression, checker);
+    
+    if (opaqueRefs.length === 0) {
+      return expression;
+    }
+    
+    // Deduplicate OpaqueRefs
+    const uniqueRefs = new Map<string, ts.Expression>();
+    const refToParamName = new Map<ts.Expression, string>();
+    
+    opaqueRefs.forEach(ref => {
+      const refText = ref.getText();
+      if (!uniqueRefs.has(refText)) {
+        const paramName = `_v${uniqueRefs.size + 1}`;
+        uniqueRefs.set(refText, ref);
+        refToParamName.set(ref, paramName);
+      } else {
+        // Map this ref to the same parameter name as the first occurrence
+        const firstRef = uniqueRefs.get(refText)!;
+        refToParamName.set(ref, refToParamName.get(firstRef)!);
+      }
+    });
+    
+    const uniqueRefArray = Array.from(uniqueRefs.values());
+    
+    // Replace all occurrences of refs with their parameters in the template
+    const lambdaBody = replaceOpaqueRefsWithParams(expression, refToParamName, factory, context);
+    
+    // Create derive call based on number of unique refs
+    if (uniqueRefArray.length === 1) {
+      const ref = uniqueRefArray[0];
+      const paramName = refToParamName.get(ref)!;
+      
+      const arrowFunction = factory.createArrowFunction(
+        undefined,
+        undefined,
+        [factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          factory.createIdentifier(paramName),
+          undefined,
+          undefined,
+          undefined,
+        )],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        lambdaBody,
+      );
+      
+      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+      const deriveIdentifier = moduleAlias
+        ? factory.createPropertyAccessExpression(
+          factory.createIdentifier(moduleAlias),
+          factory.createIdentifier("derive"),
+        )
+        : factory.createIdentifier("derive");
+      
+      return factory.createCallExpression(
+        deriveIdentifier,
+        undefined,
+        [ref, arrowFunction],
+      );
+    }
+    
+    // Multiple unique refs: use object form
+    const paramNames = uniqueRefArray.map(ref => refToParamName.get(ref)!);
+    
+    // Create object literal for refs
+    const refProperties = uniqueRefArray.map((ref) => {
+      if (ts.isIdentifier(ref)) {
+        return factory.createShorthandPropertyAssignment(ref, undefined);
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        const propName = ref.getText().replace(/\./g, '_');
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref
+        );
+      } else {
+        const propName = `ref${uniqueRefArray.indexOf(ref) + 1}`;
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref
+        );
+      }
+    });
+    
+    const refObject = factory.createObjectLiteralExpression(refProperties, false);
+    
+    // Create object pattern for parameters
+    const paramProperties = uniqueRefArray.map((ref, index) => {
+      const paramName = paramNames[index];
+      let propName: string;
+      if (ts.isIdentifier(ref)) {
+        propName = ref.text;
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        propName = ref.getText().replace(/\./g, '_');
+      } else {
+        propName = `ref${index + 1}`;
+      }
+      
+      return factory.createBindingElement(
+        undefined,
+        factory.createIdentifier(propName),
+        factory.createIdentifier(paramName),
+        undefined
+      );
+    });
+    
+    const paramPattern = factory.createObjectBindingPattern(paramProperties);
+    
+    // Create arrow function
+    const arrowFunction = factory.createArrowFunction(
+      undefined,
+      undefined,
+      [factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        paramPattern,
+        undefined,
+        undefined,
+        undefined,
+      )],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      lambdaBody,
+    );
+    
+    // Create derive call
+    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+    const deriveIdentifier = moduleAlias
+      ? factory.createPropertyAccessExpression(
+        factory.createIdentifier(moduleAlias),
+        factory.createIdentifier("derive"),
+      )
+      : factory.createIdentifier("derive");
+    
+    return factory.createCallExpression(
+      deriveIdentifier,
+      undefined,
+      [refObject, arrowFunction],
+    );
+  }
+  
   // Handle binary expressions (e.g., cell.value + 1, cell.value * 2)
   if (ts.isBinaryExpression(expression)) {
     // Get unique variable name
