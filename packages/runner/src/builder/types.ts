@@ -29,7 +29,16 @@ import type {
   StreamFunction,
   StrFunction,
 } from "@commontools/api";
-import { h, ID, ID_FIELD, NAME, schema, TYPE, UI } from "@commontools/api";
+import {
+  h,
+  ID,
+  ID_FIELD,
+  NAME,
+  schema,
+  toSchema,
+  TYPE,
+  UI,
+} from "@commontools/api";
 import { AuthSchema } from "./schema-lib.ts";
 export { AuthSchema } from "./schema-lib.ts";
 export {
@@ -39,6 +48,7 @@ export {
   type Schema,
   schema,
   type SchemaWithoutCell,
+  toSchema,
   TYPE,
   UI,
 } from "@commontools/api";
@@ -282,6 +292,7 @@ export interface BuilderFunctionsAndConstants {
 
   // Schema utilities
   schema: typeof schema;
+  toSchema: typeof toSchema;
   AuthSchema: typeof AuthSchema;
 
   // Render utils

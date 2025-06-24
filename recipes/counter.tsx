@@ -6,16 +6,18 @@ import {
   ifElse,
   NAME,
   recipe,
-  schema,
   str,
+  toSchema,
   UI,
 } from "commontools";
 
-const model = schema({
-  type: "object",
-  properties: {
-    value: { type: "number", default: 0, asCell: true },
-  },
+// Define type using TypeScript interface
+interface CounterState {
+  value: number; // @asCell
+}
+
+// Transform to schema at compile time
+const model = toSchema<CounterState>({
   default: { value: 0 },
 });
 
