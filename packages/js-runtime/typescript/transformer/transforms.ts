@@ -55,11 +55,8 @@ export function createIfElseCall(
   factory: ts.NodeFactory,
   sourceFile: ts.SourceFile,
 ): ts.CallExpression {
-  // For AMD output, TypeScript transforms imports into module parameters
-  // e.g., import { ifElse } from "commontools" becomes a parameter commontools_1
-  // We need to use the transformed module name pattern
+  // Check if we're using the old "commontools" import which needs AMD-style module reference
   const moduleAlias = getCommonToolsModuleAlias(sourceFile);
-
   const ifElseIdentifier = moduleAlias
     ? factory.createPropertyAccessExpression(
       factory.createIdentifier(moduleAlias),

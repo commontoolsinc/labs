@@ -84,22 +84,18 @@ export function createOpaqueRefTransformer(
       };
 
       const visit: ts.Visitor = (node) => {
-        // Handle function calls with OpaqueRef expressions in arguments
+        // Handle function calls with OpaqueRef arguments
         if (ts.isCallExpression(node)) {
-          // Check if any argument contains OpaqueRef expressions (not just simple refs)
-          let hasOpaqueRefExpressions = false;
+          // Check if any argument contains OpaqueRef values
+          let hasOpaqueRef = false;
           for (const arg of node.arguments) {
-            // Skip simple OpaqueRef identifiers or property accesses
-            if (isSimpleOpaqueRefAccess(arg, checker)) {
-              continue;
-            }
             if (containsOpaqueRef(arg, checker)) {
-              hasOpaqueRefExpressions = true;
+              hasOpaqueRef = true;
               break;
             }
           }
           
-          if (hasOpaqueRefExpressions) {
+          if (hasOpaqueRef) {
             // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
             
