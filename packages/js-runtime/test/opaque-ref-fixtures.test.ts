@@ -152,4 +152,20 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       }
     });
   });
+
+  describe("Property Access and Method Calls", () => {
+    it("handles property access and method calls on OpaqueRef objects", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/property-access-and-methods.input.ts",
+        "opaque-refs/property-access-and-methods.expected.ts",
+        { types }
+      );
+      
+      if (!result.matches) {
+        console.log("Expected:", result.expected);
+        console.log("Actual:", result.actual);
+      }
+      expect(result.matches).toBe(true);
+    });
+  });
 });
