@@ -210,9 +210,9 @@ export async function applyCharmInput(
 export async function linkCharms(
   config: SpaceConfig,
   sourceCharmId: string,
-  sourceField: string,
+  sourcePath: (string | number)[],
   targetCharmId: string,
-  targetField: string,
+  targetPath: (string | number)[],
 ): Promise<void> {
   const manager = await loadManager(config);
   
@@ -226,9 +226,25 @@ export async function linkCharms(
     throw new Error(`Target charm "${targetCharmId}" not found`);
   }
   
-  const sourceCellLink = sourceCharm.key(sourceField).getAsCellLink();
+  // Navigate to the source path
+  let sourceCell: Cell<any> = sourceCharm;
+  for (const segment of sourcePath) {
+    sourceCell = sourceCell.key(segment);
+  }
+  const sourceCellLink = sourceCell.getAsCellLink();
   
-  targetCharm.key(targetField).set(sourceCellLink);
+  // Navigate to the parent of the target path
+  let targetCell: Cell<any> = targetCharm;
+  const targetKey = targetPath.pop();
+  if (!targetKey) {
+    throw new Error("Target path cannot be empty");
+  }
+  
+  for (const segment of targetPath) {
+    targetCell = targetCell.key(segment);
+  }
+  
+  targetCell.key(targetKey).set(sourceCellLink);
   
   await manager.runtime.idle();
   await manager.synced();

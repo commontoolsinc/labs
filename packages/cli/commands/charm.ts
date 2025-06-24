@@ -152,36 +152,50 @@ export const charm = new Command()
     `ct charm link ${EX_ID} ${EX_COMP} bafycharm1/outputEmails bafycharm2/emails`,
     `Link outputEmails field from charm "bafycharm1" to emails field in charm "bafycharm2".`,
   )
+  .example(
+    `ct charm link ${EX_ID} ${EX_COMP} bafycharm1/data/users/0/email bafycharm2/config/primaryEmail`,
+    `Link deep nested field including array access.`,
+  )
   .arguments("<source:string> <target:string>")
   .action(async (options, sourceRef, targetRef) => {
     const spaceConfig = parseSpaceOptions(options);
     
-    // Parse source reference (charmId/field)
+    // Parse source reference (charmId/path/to/field)
     const sourceParts = sourceRef.split("/");
-    if (sourceParts.length !== 2) {
+    if (sourceParts.length < 2) {
       throw new ValidationError(
-        `Invalid source reference format. Expected: charmId/fieldName`,
+        `Invalid source reference format. Expected: charmId/path/to/field`,
         { exitCode: 1 },
       );
     }
-    const [sourceCharmId, sourceField] = sourceParts;
+    const sourceCharmId = sourceParts[0];
+    const sourcePath = sourceParts.slice(1).map(segment => {
+      // Check if segment is a number (array index)
+      const index = parseInt(segment, 10);
+      return isNaN(index) ? segment : index;
+    });
     
-    // Parse target reference (charmId/field)
+    // Parse target reference (charmId/path/to/field)
     const targetParts = targetRef.split("/");
-    if (targetParts.length !== 2) {
+    if (targetParts.length < 2) {
       throw new ValidationError(
-        `Invalid target reference format. Expected: charmId/fieldName`,
+        `Invalid target reference format. Expected: charmId/path/to/field`,
         { exitCode: 1 },
       );
     }
-    const [targetCharmId, targetField] = targetParts;
+    const targetCharmId = targetParts[0];
+    const targetPath = targetParts.slice(1).map(segment => {
+      // Check if segment is a number (array index)
+      const index = parseInt(segment, 10);
+      return isNaN(index) ? segment : index;
+    });
     
     await linkCharms(
       spaceConfig,
       sourceCharmId,
-      sourceField,
+      sourcePath,
       targetCharmId,
-      targetField,
+      targetPath,
     );
     
     render(`Linked ${sourceRef} to ${targetRef}`);
