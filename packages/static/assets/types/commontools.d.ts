@@ -66,7 +66,6 @@ export type JSONSchemaTypes = "object" | "array" | "string" | "integer" | "numbe
 export type JSONSchema = {
     readonly $ref?: string;
     readonly $defs?: Readonly<Record<string, JSONSchema>>;
-    readonly example?: Readonly<JSONValue>;
     readonly allOf?: readonly (JSONSchema | boolean)[];
     readonly anyOf?: readonly JSONSchema[];
     readonly oneOf?: readonly (JSONSchema | boolean)[];
