@@ -489,12 +489,6 @@ function createRegularCell<T>(
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsLegacyCellLink: (): LegacyCellLink => {
-      // Deprecation warning for old format
-      console.warn(
-        "DEPRECATED: getAsCellLink() is deprecated. Use getAsLink() for the new sigil format. " +
-          "The old CellLink format will be removed in a future version. " +
-          "See migration guide for details.",
-      );
       return { space: doc.space, cell: doc, path, schema, rootSchema };
     },
     getAsLink: (
