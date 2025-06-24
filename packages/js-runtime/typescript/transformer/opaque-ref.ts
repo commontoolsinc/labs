@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { isOpaqueRefType, containsOpaqueRef } from "./types.ts";
+import { isOpaqueRefType, containsOpaqueRef, isSimpleOpaqueRefAccess } from "./types.ts";
 import { 
   addCommonToolsImport, 
   hasCommonToolsImport 
@@ -7,7 +7,8 @@ import {
 import { 
   checkTransformation, 
   createIfElseCall, 
-  transformExpressionWithOpaqueRef
+  transformExpressionWithOpaqueRef,
+  addGetCallsToOpaqueRefs
 } from "./transforms.ts";
 
 /**
@@ -40,7 +41,7 @@ export interface TransformationError {
   line: number;
   column: number;
   message: string;
-  type: 'ternary' | 'jsx' | 'binary';
+  type: 'ternary' | 'jsx' | 'binary' | 'call' | 'element-access' | 'template';
 }
 
 /**
@@ -71,7 +72,7 @@ export function createOpaqueRefTransformer(
         }
       };
 
-      const reportError = (node: ts.Node, type: 'ternary' | 'jsx' | 'binary', message: string) => {
+      const reportError = (node: ts.Node, type: 'ternary' | 'jsx' | 'binary' | 'call' | 'element-access' | 'template', message: string) => {
         const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
         errors.push({
           file: sourceFile.fileName,
@@ -83,6 +84,97 @@ export function createOpaqueRefTransformer(
       };
 
       const visit: ts.Visitor = (node) => {
+        // Handle function calls with OpaqueRef expressions in arguments
+        if (ts.isCallExpression(node)) {
+          // Check if any argument contains OpaqueRef expressions (not just simple refs)
+          let hasOpaqueRefExpressions = false;
+          for (const arg of node.arguments) {
+            // Skip simple OpaqueRef identifiers or property accesses
+            if (isSimpleOpaqueRefAccess(arg, checker)) {
+              continue;
+            }
+            if (containsOpaqueRef(arg, checker)) {
+              hasOpaqueRefExpressions = true;
+              break;
+            }
+          }
+          
+          if (hasOpaqueRefExpressions) {
+            log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            hasTransformed = true;
+            
+            // Wrap the entire function call in derive
+            const transformedCall = transformExpressionWithOpaqueRef(
+              node,
+              checker,
+              context.factory,
+              sourceFile,
+              context
+            );
+            
+            if (transformedCall !== node) {
+              if (!hasCommonToolsImport(sourceFile, "derive")) {
+                needsDeriveImport = true;
+              }
+              return transformedCall;
+            }
+          }
+          
+          // Otherwise, just visit children normally
+          return ts.visitEachChild(node, visit, context);
+        }
+        
+        // Handle element access (array indexing)
+        if (ts.isElementAccessExpression(node) && node.argumentExpression) {
+          if (containsOpaqueRef(node.argumentExpression, checker)) {
+            log(`Found element access transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            hasTransformed = true;
+            const transformedArgument = addGetCallsToOpaqueRefs(
+              node.argumentExpression,
+              checker,
+              context.factory,
+              context
+            ) as ts.Expression;
+            return context.factory.updateElementAccessExpression(
+              node,
+              ts.visitNode(node.expression, visit) as ts.Expression,
+              transformedArgument
+            );
+          }
+        }
+        
+        // Handle template expressions
+        if (ts.isTemplateExpression(node)) {
+          let hasTransformedSpans = false;
+          const transformedSpans = node.templateSpans.map(span => {
+            if (containsOpaqueRef(span.expression, checker)) {
+              hasTransformedSpans = true;
+              const transformedExpression = addGetCallsToOpaqueRefs(
+                span.expression,
+                checker,
+                context.factory,
+                context
+              ) as ts.Expression;
+              return context.factory.updateTemplateSpan(
+                span,
+                transformedExpression,
+                span.literal
+              );
+            }
+            return span;
+          });
+          
+          if (hasTransformedSpans) {
+            log(`Found template expression transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            hasTransformed = true;
+            return context.factory.updateTemplateExpression(
+              node,
+              node.head,
+              transformedSpans
+            );
+          }
+        }
+        
         // Special handling for ternary expressions
         if (ts.isConditionalExpression(node)) {
           // Check if condition contains OpaqueRef (before transformation)
@@ -141,6 +233,15 @@ export function createOpaqueRefTransformer(
               case 'binary':
                 message = 'Binary expression with OpaqueRef should use derive()';
                 break;
+              case 'call':
+                message = 'Function call with OpaqueRef arguments should use .get()';
+                break;
+              case 'element-access':
+                message = 'Array/object access with OpaqueRef index should use .get()';
+                break;
+              case 'template':
+                message = 'Template literal with OpaqueRef should use .get()';
+                break;
             }
             reportError(node, result.type!, message);
             return ts.visitEachChild(node, visit, context);
@@ -187,6 +288,7 @@ export function createOpaqueRefTransformer(
               }
               break;
             }
+            
           }
         }
 
