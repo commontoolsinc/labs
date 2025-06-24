@@ -9,6 +9,7 @@ import {
   saveCharmRecipe,
   setCharmRecipe,
   SpaceConfig,
+  viewCharm,
 } from "../lib/charm.ts";
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
@@ -145,6 +146,70 @@ export const charm = new Command()
   .action((options, entryPath) =>
     setCharmRecipe(parseCharmOptions(options), absPath(entryPath))
   )
+  /* charm view */
+  .command("view", "View detailed information about a charm")
+  .usage(charmUsage)
+  .example(
+    `ct charm view ${EX_ID} ${EX_COMP_CHARM}`,
+    `View detailed information about charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `ct charm view ${EX_ID} ${EX_URL}`,
+    `View detailed information about charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .arguments("[charmId:string]")
+  .action(async (options, charmId) => {
+    let charmConfig;
+    
+    // If charmId is provided as argument, use it
+    if (charmId) {
+      const spaceConfig = parseSpaceOptions(options);
+      charmConfig = { ...spaceConfig, charm: charmId };
+    } else {
+      // Otherwise parse from options (which may include --url)
+      charmConfig = parseCharmOptions(options);
+    }
+    
+    const charmData = await viewCharm(charmConfig);
+    
+    // Format output - be very resilient to missing data
+    console.log(`\n=== Charm: ${charmData.id || 'unknown'} ===`);
+    console.log(`Name: ${charmData.name || '<no name>'}`);
+    console.log(`Recipe: ${charmData.recipeName || '<no recipe name>'}`);
+    
+    console.log(`\n--- Source (Inputs) ---`);
+    if (charmData.source) {
+      console.log(JSON.stringify(charmData.source, null, 2));
+    } else {
+      console.log('<no source data>');
+    }
+    
+    console.log(`\n--- Result ---`);
+    if (charmData.result) {
+      console.log(JSON.stringify(charmData.result, null, 2));
+    } else {
+      console.log('<no result data>');
+    }
+    
+    console.log(`\n--- Reading From ---`);
+    if (charmData.readingFrom && charmData.readingFrom.length > 0) {
+      charmData.readingFrom.forEach(ref => {
+        console.log(`  - ${ref.id || 'unknown'}${ref.name ? ` (${ref.name})` : ''}`);
+      });
+    } else {
+      console.log(`  (none)`);
+    }
+    
+    console.log(`\n--- Read By ---`);
+    if (charmData.readBy && charmData.readBy.length > 0) {
+      charmData.readBy.forEach(ref => {
+        console.log(`  - ${ref.id || 'unknown'}${ref.name ? ` (${ref.name})` : ''}`);
+      });
+    } else {
+      console.log(`  (none)`);
+    }
+  })
   /* charm link */
   .command("link", "Link a field from one charm to another")
   .usage(spaceUsage)

@@ -12,6 +12,7 @@ import {
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
   Charm,
+  charmId,
   CharmManager,
   compileRecipe,
   getRecipeIdFromCharm,
@@ -44,8 +45,8 @@ function parseSpace(
   return space;
 }
 
-function getCharmId(charm: Cell<Charm>): string {
-  const id = getEntityId(charm)?.["/"];
+function getCharmIdSafe(charm: Cell<Charm>): string {
+  const id = charmId(charm);
   if (!id) {
     throw new Error("Could not get an ID from a Cell<Charm>");
   }
@@ -153,7 +154,7 @@ export async function listCharms(
   const charms = manager.getCharms().get();
   return Promise.all(charms.map(async (charm) => {
     const name = charm.get()[NAME];
-    const id = getCharmId(charm);
+    const id = getCharmIdSafe(charm);
     const recipeName = (await getRecipeMeta(manager, id)).recipeName;
     return { id, name, recipeName };
   }));
@@ -167,7 +168,7 @@ export async function newCharm(
   const manager = await loadManager(config);
   const recipe = await getRecipeFromFile(manager, entryPath);
   const charm = await exec({ manager, recipe });
-  return getCharmId(charm);
+  return getCharmIdSafe(charm);
 }
 
 export async function setCharmRecipe(
@@ -248,4 +249,66 @@ export async function linkCharms(
   
   await manager.runtime.idle();
   await manager.synced();
+}
+
+export async function viewCharm(
+  config: CharmConfig,
+): Promise<{
+  id: string;
+  name?: string;
+  recipeName?: string;
+  source: any;
+  result: any;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
+}> {
+  const manager = await loadManager(config);
+  
+  const charm = await manager.get(config.charm, false);
+  if (!charm) {
+    throw new Error(`Charm "${config.charm}" not found`);
+  }
+  
+  const id = getCharmIdSafe(charm);
+  const name = charm.get()[NAME];
+  
+  // Get recipe metadata
+  const recipeMeta = await getRecipeMeta(manager, config.charm);
+  const recipeName = recipeMeta.recipeName;
+  
+  // Get source (arguments/inputs)
+  let source: any;
+  try {
+    const argumentCell = manager.getArgument(charm);
+    source = argumentCell.get();
+  } catch (err) {
+    source = { error: "Unable to get source/arguments", details: err instanceof Error ? err.message : String(err) };
+  }
+  
+  // Get result (charm data)
+  const result = charm.get();
+  
+  // Get charms this one reads from
+  const readingFromCharms = manager.getReadingFrom(charm);
+  const readingFrom = readingFromCharms.map(c => ({
+    id: getCharmIdSafe(c),
+    name: c.get()[NAME],
+  }));
+  
+  // Get charms that read from this one
+  const readByCharms = manager.getReadByCharms(charm);
+  const readBy = readByCharms.map(c => ({
+    id: getCharmIdSafe(c),
+    name: c.get()[NAME],
+  }));
+  
+  return {
+    id,
+    name,
+    recipeName,
+    source,
+    result,
+    readingFrom,
+    readBy,
+  };
 }
