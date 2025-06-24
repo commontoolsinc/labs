@@ -9,6 +9,7 @@ import {
   saveCharmRecipe,
   setCharmRecipe,
   SpaceConfig,
+  viewCharm,
 } from "../lib/charm.ts";
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
@@ -145,6 +146,91 @@ export const charm = new Command()
   .action((options, entryPath) =>
     setCharmRecipe(parseCharmOptions(options), absPath(entryPath))
   )
+  /* charm view */
+  .command("view", "View detailed information about a charm")
+  .usage(charmUsage)
+  .example(
+    `ct charm view ${EX_ID} ${EX_COMP_CHARM}`,
+    `View detailed information about charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `ct charm view ${EX_ID} ${EX_URL}`,
+    `View detailed information about charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--verbose", "Show full UI and other large objects")
+  .arguments("[charmId:string]")
+  .action(async (options, charmId) => {
+    let charmConfig;
+
+    // If charmId is provided as argument, use it
+    if (charmId) {
+      const spaceConfig = parseSpaceOptions(options);
+      charmConfig = { ...spaceConfig, charm: charmId };
+    } else {
+      // Otherwise parse from options (which may include --url)
+      charmConfig = parseCharmOptions(options);
+    }
+
+    const charmData = await viewCharm(charmConfig);
+
+    if (options.verbose) {
+      // In verbose mode, write directly to stdout to avoid render() limits
+      const fullOutput = JSON.stringify(charmData, null, 2);
+      Deno.stdout.writeSync(new TextEncoder().encode(fullOutput + "\n"));
+      return;
+    }
+
+    // Build formatted output as template
+    let output = `
+=== Charm: ${charmData.id || "unknown"} ===
+Name: ${charmData.name || "<no name>"}
+Recipe: ${charmData.recipeName || "<no recipe name>"}
+
+--- Source (Inputs) ---`;
+
+    if (charmData.source) {
+      output += `\n${JSON.stringify(charmData.source, null, 2)}`;
+    } else {
+      output += "\n<no source data>";
+    }
+
+    output += "\n\n--- Result ---";
+    if (charmData.result) {
+      // Filter out large UI objects that clutter the output
+      const filteredResult = { ...charmData.result };
+      if (filteredResult.$UI && typeof filteredResult.$UI === "object") {
+        filteredResult.$UI = "<large UI object - use --verbose to see full UI>";
+      }
+      output += `\n${JSON.stringify(filteredResult, null, 2)}`;
+    } else {
+      output += "\n<no result data>";
+    }
+
+    output += "\n\n--- Reading From ---";
+    if (charmData.readingFrom && charmData.readingFrom.length > 0) {
+      charmData.readingFrom.forEach((ref) => {
+        output += `\n  - ${ref.id || "unknown"}${
+          ref.name ? ` (${ref.name})` : ""
+        }`;
+      });
+    } else {
+      output += "\n  (none)";
+    }
+
+    output += "\n\n--- Read By ---";
+    if (charmData.readBy && charmData.readBy.length > 0) {
+      charmData.readBy.forEach((ref) => {
+        output += `\n  - ${ref.id || "unknown"}${
+          ref.name ? ` (${ref.name})` : ""
+        }`;
+      });
+    } else {
+      output += "\n  (none)";
+    }
+
+    render(output);
+  })
   /* charm link */
   .command("link", "Link a field from one charm to another")
   .usage(spaceUsage)

@@ -216,37 +216,99 @@ export async function linkCharms(
   targetPath: (string | number)[],
 ): Promise<void> {
   const manager = await loadManager(config);
-
+  
   const sourceCharm = await manager.get(sourceCharmId, false);
   if (!sourceCharm) {
     throw new Error(`Source charm "${sourceCharmId}" not found`);
   }
-
+  
   const targetCharm = await manager.get(targetCharmId, false);
   if (!targetCharm) {
     throw new Error(`Target charm "${targetCharmId}" not found`);
   }
-
+  
   // Navigate to the source path
   let sourceCell: Cell<any> = sourceCharm;
   for (const segment of sourcePath) {
     sourceCell = sourceCell.key(segment);
   }
   const sourceCellLink = sourceCell.getAsCellLink();
-
+  
   // Navigate to the parent of the target path
   let targetCell: Cell<any> = targetCharm;
   const targetKey = targetPath.pop();
   if (!targetKey) {
     throw new Error("Target path cannot be empty");
   }
-
+  
   for (const segment of targetPath) {
     targetCell = targetCell.key(segment);
   }
-
+  
   targetCell.key(targetKey).set(sourceCellLink);
-
+  
   await manager.runtime.idle();
   await manager.synced();
+}
+
+export async function viewCharm(
+  config: CharmConfig,
+): Promise<{
+  id: string;
+  name?: string;
+  recipeName?: string;
+  source: any;
+  result: any;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
+}> {
+  const manager = await loadManager(config);
+  
+  const charm = await manager.get(config.charm, false);
+  if (!charm) {
+    throw new Error(`Charm "${config.charm}" not found`);
+  }
+  
+  const id = getCharmIdSafe(charm);
+  const name = charm.get()[NAME];
+  
+  // Get recipe metadata
+  const recipeMeta = await getRecipeMeta(manager, config.charm);
+  const recipeName = recipeMeta.recipeName;
+  
+  // Get source (arguments/inputs)
+  let source: any;
+  try {
+    const argumentCell = manager.getArgument(charm);
+    source = argumentCell.get();
+  } catch (err) {
+    source = { error: "Unable to get source/arguments", details: err instanceof Error ? err.message : String(err) };
+  }
+  
+  // Get result (charm data)
+  const result = charm.get();
+  
+  // Get charms this one reads from
+  const readingFromCharms = manager.getReadingFrom(charm);
+  const readingFrom = readingFromCharms.map(c => ({
+    id: getCharmIdSafe(c),
+    name: c.get()[NAME],
+  }));
+  
+  // Get charms that read from this one
+  const readByCharms = manager.getReadByCharms(charm);
+  const readBy = readByCharms.map(c => ({
+    id: getCharmIdSafe(c),
+    name: c.get()[NAME],
+  }));
+  
+  return {
+    id,
+    name,
+    recipeName,
+    source,
+    result,
+    readingFrom,
+    readBy,
+  };
 }
