@@ -48,6 +48,15 @@ export class MapSet<K, V> {
   public has(key: K): boolean {
     return this.map.has(key);
   }
+
+  /**
+   * iterable
+   */
+  *[Symbol.iterator](): IterableIterator<[K, Set<V>]> {
+    for (const [key, values] of this.map) {
+      yield [key, values];
+    }
+  }
 }
 
 export const DefaultSchemaSelector = {
@@ -119,7 +128,7 @@ export abstract class BaseObjectManager<K, S, V>
   constructor(
     protected readValues = new Map<string, ValueEntry<S, V>>(),
     protected writeValues = new Map<string, ValueEntry<S, V>>(),
-  ) {}
+  ) { }
 
   addRead(doc: K, value: V, source: S) {
     const key = this.toKey(doc);
@@ -144,7 +153,7 @@ export type OptJSONValue =
   | JSONValue
   | OptJSONArray
   | OptJSONObject;
-interface OptJSONArray extends Array<OptJSONValue> {}
+interface OptJSONArray extends Array<OptJSONValue> { }
 interface OptJSONObject {
   [key: string]: OptJSONValue;
 }
@@ -158,7 +167,7 @@ export abstract class BaseObjectTraverser<K, S> {
       S,
       Immutable<JSONValue> | undefined
     >,
-  ) {}
+  ) { }
   abstract traverse(doc: ValueAtPath<K>): Immutable<OptJSONValue>;
 
   /**
@@ -215,17 +224,17 @@ export abstract class BaseObjectTraverser<K, S> {
               Object.entries(doc.value).map((
                 [k, value],
               ) => [
-                k,
-                this.traverseDAG(
-                  {
-                    ...doc,
-                    path: [...doc.path, k],
-                    value: value,
-                  },
-                  tracker,
-                  schemaTracker,
-                ),
-              ]),
+                  k,
+                  this.traverseDAG(
+                    {
+                      ...doc,
+                      path: [...doc.path, k],
+                      value: value,
+                    },
+                    tracker,
+                    schemaTracker,
+                  ),
+                ]),
             ) as Immutable<JSONValue>;
           } finally {
             tracker.exit(doc.value);
@@ -745,8 +754,8 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       const itemSchema = isObject(schema["items"])
         ? schema["items"] as JSONSchema
         : typeof (schema["items"]) === "boolean"
-        ? schema["items"]
-        : true;
+          ? schema["items"]
+          : true;
       const curDoc = {
         ...doc,
         path: [...doc.path, index.toString()],
@@ -780,15 +789,15 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         | Record<string, JSONSchema | boolean>
         | undefined;
       const propSchema = (
-          isObject(schemaProperties) &&
-          schemaProperties !== undefined &&
-          propKey in schemaProperties
-        )
+        isObject(schemaProperties) &&
+        schemaProperties !== undefined &&
+        propKey in schemaProperties
+      )
         ? schemaProperties[propKey]
         : (isObject(schema["additionalProperties"]) ||
-            schema["additionalProperties"] === false)
-        ? schema["additionalProperties"] as JSONSchema | boolean
-        : true;
+          schema["additionalProperties"] === false)
+          ? schema["additionalProperties"] as JSONSchema | boolean
+          : true;
       const val = this.traverseWithSchemaContext({
         ...doc,
         path: [...doc.path, propKey],

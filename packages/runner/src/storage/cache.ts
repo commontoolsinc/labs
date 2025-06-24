@@ -19,7 +19,6 @@ import type {
   Result,
   Revision,
   SchemaContext,
-  SchemaPathSelector,
   SchemaQueryArgs,
   Signer,
   State,
@@ -40,7 +39,7 @@ import { type Cancel, type EntityId } from "@commontools/runner";
 import { type JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
-import { MapSet } from "../traverse.ts";
+import { MapSet, type SchemaPathSelector } from "../traverse.ts";
 import type { IStorageProvider, StorageValue } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
@@ -126,6 +125,10 @@ export interface Retract {
 }
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
+const fromKey = (key: string): FactAddress => {
+  const [of, the] = key.split('/');
+  return { of: of as Entity, the };
+};
 
 export class NoCache<Model extends object, Address>
   implements AsyncStore<Model, Address> {
@@ -253,8 +256,8 @@ class RevisionCodec {
     return cause == null
       ? { the, of, since }
       : is === undefined
-      ? { the, of, since, cause: fromString(cause) } as Revision<Fact>
-      : { the, of, is, since, cause: fromString(cause) } as Revision<Fact>;
+        ? { the, of, since, cause: fromString(cause) } as Revision<Fact>
+        : { the, of, is, since, cause: fromString(cause) } as Revision<Fact>;
   }
 
   static encode(
@@ -263,8 +266,8 @@ class RevisionCodec {
     return cause == null
       ? { the, of, since }
       : is === undefined
-      ? { the, of, since, cause: cause.toString() }
-      : { the, of, is, since, cause: cause.toString() };
+        ? { the, of, since, cause: cause.toString() }
+        : { the, of, is, since, cause: cause.toString() };
   }
 }
 
@@ -325,6 +328,23 @@ class SelectorTracker {
     return selectorRefs.values().map((selectorRef) =>
       this.selectors.get(selectorRef)!
     );
+  }
+
+  /**
+   * Return all tracked subscriptions as an array of {factAddress, selector} pairs
+   */
+  getAllSubscriptions(): Array<{ factAddress: FactAddress; selector: SchemaPathSelector }> {
+    const subscriptions: Array<{ factAddress: FactAddress; selector: SchemaPathSelector }> = [];
+    for (const [factKey, selectorRefs] of this.refTracker) {
+      const factAddress = fromKey(factKey);
+      for (const selectorRef of selectorRefs) {
+        const selector = this.selectors.get(selectorRef);
+        if (selector) {
+          subscriptions.push({ factAddress, selector });
+        }
+      }
+    }
+    return subscriptions;
   }
 }
 
@@ -937,6 +957,7 @@ class ProviderConnection implements IStorageProvider {
     // If we did have connection
     if (this.connectionCount > 1) {
       this.provider.poll();
+      await this.provider.reestablishSubscriptions();
     }
 
     while (this.connection === socket) {
@@ -1103,10 +1124,7 @@ export class Provider implements IStorageProvider {
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
-  // TODO(@ubik2): Keep track of our server subs, so we can re-establish them
-  // after we lose and re-establish a connection.
-  // We already track the per-doc selectors in Replica, but this version is
-  // useful to re-issue them
+  // Tracks server-side subscriptions so we can re-establish them after reconnection
   private serverSubscriptions = new SelectorTracker();
 
   static open(options: RemoteStorageProviderOptions) {
@@ -1270,6 +1288,28 @@ export class Provider implements IStorageProvider {
   poll() {
     for (const space of this.spaces.values()) {
       space.poll();
+    }
+  }
+
+  /**
+   * Re-establishes all tracked schema query subscriptions.
+   * Called after WebSocket reconnection
+   * See `ProviderConnection.onOpen()`
+   */
+  async reestablishSubscriptions(): Promise<void> {
+    const subscriptions = this.serverSubscriptions.getAllSubscriptions();
+
+    // Re-establish each subscription
+    for (const { factAddress, selector } of subscriptions) {
+      if (selector.schemaContext) {
+        const entityId: EntityId = { "/": factAddress.of.replace('of:', '') };
+        try {
+          await this.sync(entityId, true, selector.schemaContext);
+        } catch (error) {
+          // catch error so we can continue with other subscriptions
+          console.error(`Failed to re-establish subscription for ${entityId["/"]}:`, error);
+        }
+      }
     }
   }
 
