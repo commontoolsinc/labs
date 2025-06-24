@@ -28,7 +28,7 @@ interface OutputState {
 }
 
 interface SetNumberEvent {
-  number: number; // @asCell
+  number: Cell<number>;
   n: number;
 }
 
