@@ -411,7 +411,7 @@ jobs:
       - name: 🧪 Run CLI integration tests
         working-directory: packages/cli
         run: |
-          deno task integration http://localhost:8000
+          ./integration/integration.sh http://localhost:8000
 
   seeder-integration-test:
     name: "Seeder Integration Tests"
