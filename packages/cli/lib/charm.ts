@@ -267,7 +267,6 @@ export async function linkCharms(
     sourceResultCell = sourceResultCell.key(segment);
   }
   
-  
   const sourceCellLink = sourceResultCell.getAsCellLink();
 
   // Navigate to the target path
