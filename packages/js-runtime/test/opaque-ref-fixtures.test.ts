@@ -136,4 +136,20 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       expect(transformed).not.toContain("count + 1");
     });
   });
+
+  describe("JSX Expression Transformations", () => {
+    it("transforms JSX expressions with OpaqueRef operations", async () => {
+      const result = await compareFixtureTransformation(
+        "jsx-expressions/opaque-ref-operations.input.tsx",
+        "jsx-expressions/opaque-ref-operations.expected.tsx",
+        { types }
+      );
+      
+      expect(result.matches).toBe(true);
+      if (!result.matches) {
+        console.log("Expected:", result.expected);
+        console.log("Actual:", result.actual);
+      }
+    });
+  });
 });

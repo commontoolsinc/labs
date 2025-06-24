@@ -1,9 +1,9 @@
-import { cell } from "@commontools/common";
+import { cell, derive } from "@commontools/common";
 const a = cell(5);
 const b = cell(10);
 // Function calls with OpaqueRef arguments
-const max1 = Math.max(a, 10);
-const max2 = Math.max(a, b);
+const max1 = derive(a, _v1 => Math.max(_v1, 10));
+const max2 = derive({ a, b }, ({ a: _v1, b: _v2 }) => Math.max(_v1, _v2));
 const max3 = Math.max(a.get(), 20);
 // Custom function calls
 function someFunction(x: number, prefix: string): string {
@@ -22,11 +22,11 @@ derive({ b_get: b.get, a }, ({ b_get: _v1, a: _v2 }) => complexFunction(_v1(), `
 const arr = [1, 2, 3];
 const index = cell(1);
 const element = arr[index.get()];
-const sliced = arr.slice(0, a);
+const sliced = derive(a, _v1 => arr.slice(0, _v1));
 // Object method calls
 const obj = {
     method(x: number): number {
         return x * 2;
     }
 };
-const methodResult = obj.method(a);
+const methodResult = derive(a, _v1 => obj.method(_v1));

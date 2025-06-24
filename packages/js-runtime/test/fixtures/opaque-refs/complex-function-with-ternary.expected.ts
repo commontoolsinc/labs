@@ -1,4 +1,4 @@
-import { cell } from "@commontools/common";
+import { cell, derive } from "@commontools/common";
 const price = cell(100);
 const discount = cell(20);
 const pitance = cell(5);
