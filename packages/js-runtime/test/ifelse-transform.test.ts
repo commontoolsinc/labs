@@ -52,14 +52,10 @@ export default recipe(model, model, (cell) => {
       runtimeModules: ["commontools"],
     });
     
-    console.log("=== COMPILED OUTPUT ===");
-    console.log(compiled.js);
-    
-    // The recipe call is wrapped in derive due to OpaqueRef usage
+    // Recipe call wrapped in derive due to OpaqueRef usage
     expect(compiled.js).toContain('commontools_1.derive({ cell, odd, cell_value: cell.value, value }');
     
-    // The ternary remains unchanged because _v2 is not an OpaqueRef
-    const hasTernary = compiled.js.includes('_v2 ? "odd" : "even"');
-    expect(hasTernary).toBe(true);
+    // Ternary remains unchanged because _v2 is not an OpaqueRef
+    expect(compiled.js).toContain('_v2 ? "odd" : "even"');
   });
 });
