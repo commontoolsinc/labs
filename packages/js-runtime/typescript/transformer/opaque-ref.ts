@@ -10,6 +10,7 @@ import {
   transformExpressionWithOpaqueRef,
   addGetCallsToOpaqueRefs
 } from "./transforms.ts";
+import { conditionalConsole } from "../conditional-console.ts";
 
 /**
  * Options for the OpaqueRef transformer.
@@ -57,7 +58,7 @@ export function createOpaqueRefTransformer(
   options: OpaqueRefTransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
   const checker = program.getTypeChecker();
-  const { mode = 'transform', debug = false, logger = console.log } = options;
+  const { mode = 'transform', debug = false, logger = conditionalConsole.log } = options;
   const errors: TransformationError[] = [];
 
   return (context) => {
