@@ -41,7 +41,7 @@ export interface TransformationError {
   line: number;
   column: number;
   message: string;
-  type: 'ternary' | 'jsx' | 'binary' | 'call' | 'element-access' | 'template';
+  type: 'ternary' | 'jsx' | 'binary' | 'call' | 'element-access' | 'template' | 'spread';
 }
 
 /**
@@ -315,6 +315,91 @@ export function createOpaqueRefTransformer(
               }
               return transformedExpression;
             }
+          }
+        }
+        
+        // Handle object literal expressions with spread properties
+        if (ts.isObjectLiteralExpression(node)) {
+          // Check if any spread property contains OpaqueRef
+          const spreadProperties = node.properties.filter(ts.isSpreadAssignment);
+          let needsTransformation = false;
+          
+          for (const spread of spreadProperties) {
+            const spreadType = checker.getTypeAtLocation(spread.expression);
+            if (isOpaqueRefType(spreadType, checker)) {
+              needsTransformation = true;
+              break;
+            }
+          }
+          
+          if (needsTransformation) {
+            log(`Found object spread transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            hasTransformed = true;
+            
+            // Transform spread properties to individual properties
+            const newProperties: ts.ObjectLiteralElementLike[] = [];
+            
+            for (const prop of node.properties) {
+              if (ts.isSpreadAssignment(prop)) {
+                const spreadType = checker.getTypeAtLocation(prop.expression);
+                if (isOpaqueRefType(spreadType, checker)) {
+                  // Handle union types (e.g., OpaqueRef<T> | undefined)
+                  let opaqueRefType = spreadType;
+                  if (spreadType.flags & ts.TypeFlags.Union) {
+                    const unionType = spreadType as ts.UnionType;
+                    // Find the OpaqueRef type in the union
+                    opaqueRefType = unionType.types.find(t => isOpaqueRefType(t, checker)) || spreadType;
+                  }
+                  
+                  // For intersection types (which OpaqueRef is), we need to find the part with properties
+                  if (opaqueRefType.flags & ts.TypeFlags.Intersection) {
+                    const intersectionType = opaqueRefType as ts.IntersectionType;
+                    
+                    // Find the object type with properties in the intersection
+                    for (const type of intersectionType.types) {
+                      if (type.flags & ts.TypeFlags.Object) {
+                        const properties = type.getProperties();
+                        
+                        // Create individual property assignments
+                        for (const property of properties) {
+                          const propName = property.getName();
+                          // Skip internal OpaqueRef methods
+                          if (propName === 'get' || propName === 'set' || propName === 'key' || propName === 'map' || 
+                              propName === 'setDefault' || propName === 'setName' || propName === 'setSchema' || 
+                              propName === 'equals' || propName === 'update' || propName === 'push' || propName === 'send') {
+                            continue;
+                          }
+                          
+                          // Create property access expression
+                          const propertyAccess = context.factory.createPropertyAccessExpression(
+                            prop.expression,
+                            propName
+                          );
+                          
+                          newProperties.push(
+                            context.factory.createPropertyAssignment(
+                              propName,
+                              propertyAccess
+                            )
+                          );
+                        }
+                      }
+                    }
+                  }
+                } else {
+                  // Keep non-OpaqueRef spreads as-is
+                  newProperties.push(prop);
+                }
+              } else {
+                // Keep non-spread properties as-is
+                newProperties.push(prop);
+              }
+            }
+            
+            return context.factory.updateObjectLiteralExpression(
+              node,
+              newProperties
+            );
           }
         }
         
