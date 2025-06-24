@@ -131,7 +131,7 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
           oncommon-input={updateTitle({ title })}
         />
         <common-vstack gap="sm">
-          {items.map((item: TodoItem) => (
+          {items.map((item: any) => (
             <common-draggable
               $entity={item}
               spell={JSON.stringify(
@@ -140,8 +140,8 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
                     <common-todo
                       checked={item.done}
                       value={item.title}
-                      ontodo-checked={updateItem({ item })}
-                      ontodo-input={updateItem({ item })}
+                      ontodo-checked={updateItem({ item: item as any })}
+                      ontodo-input={updateItem({ item: item as any })}
                     />
                   ),
                 })),
@@ -151,8 +151,8 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
                 <common-todo
                   checked={item.done}
                   value={item.title}
-                  ontodo-checked={updateItem({ item })}
-                  ontodo-input={updateItem({ item })}
+                  ontodo-checked={updateItem({ item: item as any })}
+                  ontodo-input={updateItem({ item: item as any })}
                 />
                 <sl-button
                   outline
