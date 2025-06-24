@@ -60,13 +60,15 @@ export default recipe(model, model, (cell) => {
     const mainModule = compiled.js.match(/define\("main"[\s\S]*?\n\}\);/)?.[0];
     console.log(mainModule);
     
-    // Check that JSX expressions were transformed to derive calls
-    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 + 1)');
-    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 * 2)');
+    // Check that the recipe call is wrapped in derive due to OpaqueRef usage
+    expect(compiled.js).toContain('commontools_1.derive({ cell, cell_value: cell.value, value }');
     
-    // The simple reference should NOT be wrapped in derive
-    expect(compiled.js).not.toContain('commontools_1.derive(cell.value, _v => _v)');
-    // Instead it should remain as just cell.value
-    expect(compiled.js).toContain('"Current value: ",\n                    cell.value)');
+    // Check that JSX expressions use the pre-extracted values
+    expect(compiled.js).toContain('_v2 + 1');
+    expect(compiled.js).toContain('_v2 * 2');
+    
+    // The simple reference uses the pre-extracted value
+    expect(compiled.js).toContain('"Current value: ",');
+    expect(compiled.js).toContain('_v2),');
   });
 });

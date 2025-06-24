@@ -252,9 +252,8 @@ const b: OpaqueRef<boolean> = {} as any;
 const result = a ? (b ? 1 : 2) : 3;
 `;
       const transformed = await transformSource(source, { types });
-      // The inner ternary is not transformed because it's not a direct child
-      // It's inside the whenTrue parameter of the outer ifElse
-      expect(transformed).toContain("commontools_1.ifElse(a, (b ? 1 : 2), 3)");
+      // Both ternaries are transformed because both a and b are OpaqueRefs
+      expect(transformed).toContain("commontools_1.ifElse(a, commontools_1.ifElse(b, 1, 2), 3)");
     });
 
     it("handles property access on OpaqueRef", async () => {
