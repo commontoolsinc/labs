@@ -154,4 +154,40 @@ describe("cli charm parsing", () => {
       })
     ).toThrow();
   });
+
+  describe("path parsing for link command", () => {
+    it("should parse simple paths correctly", () => {
+      const sourceParts = "charm1/field".split("/");
+      const sourceCharmId = sourceParts[0];
+      const sourcePath = sourceParts.slice(1).map(segment => {
+        const index = parseInt(segment, 10);
+        return isNaN(index) ? segment : index;
+      });
+      
+      expect(sourceCharmId).toBe("charm1");
+      expect(sourcePath).toEqual(["field"]);
+    });
+
+    it("should parse deep paths with array indices", () => {
+      const targetParts = "charm2/data/items/0/title".split("/");
+      const targetCharmId = targetParts[0];
+      const targetPath = targetParts.slice(1).map(segment => {
+        const index = parseInt(segment, 10);
+        return isNaN(index) ? segment : index;
+      });
+      
+      expect(targetCharmId).toBe("charm2");
+      expect(targetPath).toEqual(["data", "items", 0, "title"]);
+    });
+
+    it("should handle mixed string and numeric paths", () => {
+      const parts = "charm/users/5/profile/settings/2".split("/");
+      const path = parts.slice(1).map(segment => {
+        const index = parseInt(segment, 10);
+        return isNaN(index) ? segment : index;
+      });
+      
+      expect(path).toEqual(["users", 5, "profile", "settings", 2]);
+    });
+  });
 });
