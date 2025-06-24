@@ -6,6 +6,15 @@ error () {
   exit 1
 }
 
+# Use e.g. CT_BINARY="deno task cli" to run from repo without building binaries
+if [ "$CT_BINARY" != "" ]; then
+  echo "ct=$CT_BINARY"
+  ct() {
+    $CT_BINARY "$@"
+  }
+fi
+
+
 if [ "$#" -eq 0 ]; then
   error "Missing required argument: API_URL"
 fi
