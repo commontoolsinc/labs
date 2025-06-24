@@ -28,7 +28,7 @@ export type Opaque<T> = OpaqueRef<T> | (T extends Array<infer U> ? Array<Opaque<
     [K in keyof T]: Opaque<T[K]>;
 } : T);
 export interface OpaqueRefMethods<T> {
-    get(): OpaqueRef<T>;
+    get(): T;
     set(value: Opaque<T> | T): void;
     key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
     setDefault(value: Opaque<T> | T): void;

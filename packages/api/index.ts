@@ -51,7 +51,7 @@ export type Opaque<T> =
 
 // OpaqueRefMethods type with only public methods
 export interface OpaqueRefMethods<T> {
-  get(): OpaqueRef<T>;
+  get(): T;
   set(value: Opaque<T> | T): void;
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
   setDefault(value: Opaque<T> | T): void;
