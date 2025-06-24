@@ -55,11 +55,11 @@ export default recipe(model, model, (cell) => {
       runtimeModules: ["commontools"],
     });
     
-    // Recipe call wrapped in derive due to OpaqueRef usage
-    expect(compiled.js).toContain('commontools_1.derive({ cell, cell_value: cell.value, value }');
+    // Recipe call should NOT be wrapped in derive
+    expect(compiled.js).toContain('exports.default = (0, commontools_1.recipe)(model, model, (cell)');
     
-    // JSX expressions use pre-extracted values
-    expect(compiled.js).toContain('_v2 + 1');
-    expect(compiled.js).toContain('_v2 * 2');
+    // JSX expressions should be wrapped in derive
+    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 + 1)');
+    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 * 2)');
   });
 });
