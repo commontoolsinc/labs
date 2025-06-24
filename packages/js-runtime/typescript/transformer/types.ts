@@ -112,7 +112,7 @@ export function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boole
     if (ts.isIdentifier(n)) {
       // Skip if this identifier is the name part of a property access
       const parent = n.parent;
-      if (ts.isPropertyAccessExpression(parent) && parent.name === n) {
+      if (parent && ts.isPropertyAccessExpression(parent) && parent.name === n) {
         // This is the property name in a property access (e.g., 'count' in 'state.count')
         return;
       }
