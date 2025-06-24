@@ -174,53 +174,58 @@ export const charm = new Command()
     
     const charmData = await viewCharm(charmConfig);
     
-    // Format output - be very resilient to missing data
-    console.log(`\n=== Charm: ${charmData.id || 'unknown'} ===`);
-    console.log(`Name: ${charmData.name || '<no name>'}`);
-    console.log(`Recipe: ${charmData.recipeName || '<no recipe name>'}`);
+    if (options.verbose) {
+      // In verbose mode, write directly to stdout to avoid render() limits
+      const fullOutput = JSON.stringify(charmData, null, 2);
+      Deno.stdout.writeSync(new TextEncoder().encode(fullOutput + '\n'));
+      return;
+    }
     
-    console.log(`\n--- Source (Inputs) ---`);
+    // Build formatted output as template
+    let output = `
+=== Charm: ${charmData.id || 'unknown'} ===
+Name: ${charmData.name || '<no name>'}
+Recipe: ${charmData.recipeName || '<no recipe name>'}
+
+--- Source (Inputs) ---`;
+    
     if (charmData.source) {
-      console.log(JSON.stringify(charmData.source, null, 2));
+      output += `\n${JSON.stringify(charmData.source, null, 2)}`;
     } else {
-      console.log('<no source data>');
+      output += '\n<no source data>';
     }
     
-    console.log(`\n--- Result ---`);
+    output += '\n\n--- Result ---';
     if (charmData.result) {
-      if (options.verbose) {
-        // In verbose mode, write directly to stdout to avoid render() limits
-        const resultJson = JSON.stringify(charmData.result, null, 2);
-        Deno.stdout.writeSync(new TextEncoder().encode(resultJson + '\n'));
-      } else {
-        // Filter out large UI objects that clutter the output
-        const filteredResult = { ...charmData.result };
-        if (filteredResult.$UI && typeof filteredResult.$UI === 'object') {
-          filteredResult.$UI = '<large UI object - use --verbose to see full UI>';
-        }
-        console.log(JSON.stringify(filteredResult, null, 2));
+      // Filter out large UI objects that clutter the output
+      const filteredResult = { ...charmData.result };
+      if (filteredResult.$UI && typeof filteredResult.$UI === 'object') {
+        filteredResult.$UI = '<large UI object - use --verbose to see full UI>';
       }
+      output += `\n${JSON.stringify(filteredResult, null, 2)}`;
     } else {
-      console.log('<no result data>');
+      output += '\n<no result data>';
     }
     
-    console.log(`\n--- Reading From ---`);
+    output += '\n\n--- Reading From ---';
     if (charmData.readingFrom && charmData.readingFrom.length > 0) {
       charmData.readingFrom.forEach(ref => {
-        console.log(`  - ${ref.id || 'unknown'}${ref.name ? ` (${ref.name})` : ''}`);
+        output += `\n  - ${ref.id || 'unknown'}${ref.name ? ` (${ref.name})` : ''}`;
       });
     } else {
-      console.log(`  (none)`);
+      output += '\n  (none)';
     }
     
-    console.log(`\n--- Read By ---`);
+    output += '\n\n--- Read By ---';
     if (charmData.readBy && charmData.readBy.length > 0) {
       charmData.readBy.forEach(ref => {
-        console.log(`  - ${ref.id || 'unknown'}${ref.name ? ` (${ref.name})` : ''}`);
+        output += `\n  - ${ref.id || 'unknown'}${ref.name ? ` (${ref.name})` : ''}`;
       });
     } else {
-      console.log(`  (none)`);
+      output += '\n  (none)';
     }
+    
+    render(output);
   })
   /* charm link */
   .command("link", "Link a field from one charm to another")
