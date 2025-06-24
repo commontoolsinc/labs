@@ -24,6 +24,13 @@ export function isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean
     }
   }
 
+  // Handle union types (e.g., OpaqueRef<T> | undefined)
+  if (type.flags & ts.TypeFlags.Union) {
+    const unionType = type as ts.UnionType;
+    // Check if any of the constituent types is OpaqueRef
+    return unionType.types.some((t) => isOpaqueRefType(t, checker));
+  }
+
   // Handle intersection types (OpaqueRef<T> is defined as an intersection)
   if (type.flags & ts.TypeFlags.Intersection) {
     const intersectionType = type as ts.IntersectionType;
