@@ -18,6 +18,37 @@ import {
 
 const client = new LLMClient();
 
+class ConcurrencyLimiter {
+  private queue: Array<() => void> = [];
+  private activeRequests = 0;
+  private readonly maxConcurrent: number;
+
+  constructor(maxConcurrent: number) {
+    this.maxConcurrent = maxConcurrent;
+  }
+
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.activeRequests >= this.maxConcurrent) {
+      await new Promise<void>((resolve) => {
+        this.queue.push(resolve);
+      });
+    }
+
+    this.activeRequests++;
+    try {
+      return await fn();
+    } finally {
+      this.activeRequests--;
+      const next = this.queue.shift();
+      if (next) {
+        next();
+      }
+    }
+  }
+}
+
+const llmLimiter = new ConcurrencyLimiter(10);
+
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 
@@ -126,7 +157,9 @@ export function llm(
       partial.setAtPath([], text, log);
     };
 
-    const resultPromise = client.sendRequest(llmParams, updatePartial);
+    const resultPromise = llmLimiter.execute(() =>
+      client.sendRequest(llmParams, updatePartial)
+    );
 
     resultPromise
       .then(async (llmResult) => {
@@ -263,8 +296,8 @@ export function generateObject<T extends Record<string, unknown>>(
     partial.setAtPath([], undefined, log);
     pending.setAtPath([], true, log);
 
-    const resultPromise = client.generateObject(
-      generateObjectParams,
+    const resultPromise = llmLimiter.execute(() =>
+      client.generateObject(generateObjectParams)
     ) as Promise<{
       object: T;
     }>;
