@@ -86,6 +86,14 @@ export function createOpaqueRefTransformer(
       const visit: ts.Visitor = (node) => {
         // Handle function calls with OpaqueRef arguments or method calls on OpaqueRef
         if (ts.isCallExpression(node)) {
+          // Check if this is a builder function call - these should not be transformed
+          const functionName = getFunctionName(node);
+          const builderFunctions = ['recipe', 'lift', 'handler', 'derive', 'compute', 'render'];
+          if (functionName && builderFunctions.includes(functionName)) {
+            // Just visit children normally for builder function calls
+            return ts.visitEachChild(node, visit, context);
+          }
+          
           // Check if the entire call expression contains OpaqueRef values
           // This handles both arguments and method calls on OpaqueRef objects
           if (containsOpaqueRef(node, checker)) {
@@ -345,6 +353,23 @@ export function createOpaqueRefTransformer(
       return result;
     };
   };
+}
+
+/**
+ * Get the name of the function being called in a CallExpression
+ */
+function getFunctionName(node: ts.CallExpression): string | undefined {
+  const expr = node.expression;
+  
+  if (ts.isIdentifier(expr)) {
+    return expr.text;
+  }
+  
+  if (ts.isPropertyAccessExpression(expr)) {
+    return expr.name.text;
+  }
+  
+  return undefined;
 }
 
 /**
