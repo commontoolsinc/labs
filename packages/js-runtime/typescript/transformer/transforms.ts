@@ -3,6 +3,23 @@ import { getCommonToolsModuleAlias } from "./imports.ts";
 import { collectOpaqueRefs, containsOpaqueRef, isOpaqueRefType, isSimpleOpaqueRefAccess } from "./types.ts";
 
 /**
+ * Get the name of the function being called in a CallExpression
+ */
+function getFunctionName(node: ts.CallExpression): string | undefined {
+  const expr = node.expression;
+  
+  if (ts.isIdentifier(expr)) {
+    return expr.text;
+  }
+  
+  if (ts.isPropertyAccessExpression(expr)) {
+    return expr.name.text;
+  }
+  
+  return undefined;
+}
+
+/**
  * Replaces an OpaqueRef expression with a parameter in a larger expression.
  */
 export function replaceOpaqueRefWithParam(
@@ -693,6 +710,35 @@ export function checkTransformation(
 
   // Check if it's a JSX expression that contains OpaqueRef values
   if (ts.isJsxExpression(node) && node.expression) {
+    // Check if this JSX expression is in an event handler attribute
+    const parent = node.parent;
+    if (parent && ts.isJsxAttribute(parent)) {
+      const attrName = parent.name.getText();
+      // Event handlers like onClick expect functions, not derived values
+      if (attrName.startsWith('on')) {
+        // Don't transform event handlers
+        return {
+          transformed: false,
+          node,
+          type: null,
+        };
+      }
+    }
+    
+    // Check if the expression is a call to a builder function
+    if (ts.isCallExpression(node.expression)) {
+      const functionName = getFunctionName(node.expression);
+      const builderFunctions = ['recipe', 'lift', 'handler', 'derive', 'compute', 'render', 'ifElse', 'str'];
+      if (functionName && builderFunctions.includes(functionName)) {
+        // Don't transform calls to builder functions
+        return {
+          transformed: false,
+          node,
+          type: null,
+        };
+      }
+    }
+    
     // Skip simple OpaqueRef accesses
     if (!isSimpleOpaqueRefAccess(node.expression, checker) && 
         containsOpaqueRef(node.expression, checker)) {
