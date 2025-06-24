@@ -94,6 +94,53 @@ export function transformExpressionWithOpaqueRef(
   sourceFile: ts.SourceFile,
   context: ts.TransformationContext,
 ): ts.Expression {
+  // Handle property access expressions (e.g., person.name.length)
+  if (ts.isPropertyAccessExpression(expression)) {
+    // Get the OpaqueRef being accessed
+    const opaqueRefs = collectOpaqueRefs(expression, checker);
+    
+    if (opaqueRefs.length === 0) {
+      return expression;
+    }
+    
+    // For property access, we should have exactly one OpaqueRef (the object)
+    const ref = opaqueRefs[0];
+    const paramName = "_v1";
+    
+    // Replace the OpaqueRef with the parameter in the expression
+    const lambdaBody = replaceOpaqueRefWithParam(expression, ref, paramName, factory, context);
+    
+    const arrowFunction = factory.createArrowFunction(
+      undefined,
+      undefined,
+      [factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        factory.createIdentifier(paramName),
+        undefined,
+        undefined,
+        undefined,
+      )],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      lambdaBody,
+    );
+    
+    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+    const deriveIdentifier = moduleAlias
+      ? factory.createPropertyAccessExpression(
+        factory.createIdentifier(moduleAlias),
+        factory.createIdentifier("derive"),
+      )
+      : factory.createIdentifier("derive");
+    
+    return factory.createCallExpression(
+      deriveIdentifier,
+      undefined,
+      [ref, arrowFunction],
+    );
+  }
+  
   // Handle call expressions (e.g., someFunction(a + 1, "prefix"))
   if (ts.isCallExpression(expression)) {
     // Get all OpaqueRef identifiers in the entire call expression

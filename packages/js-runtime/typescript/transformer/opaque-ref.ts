@@ -84,18 +84,11 @@ export function createOpaqueRefTransformer(
       };
 
       const visit: ts.Visitor = (node) => {
-        // Handle function calls with OpaqueRef arguments
+        // Handle function calls with OpaqueRef arguments or method calls on OpaqueRef
         if (ts.isCallExpression(node)) {
-          // Check if any argument contains OpaqueRef values
-          let hasOpaqueRef = false;
-          for (const arg of node.arguments) {
-            if (containsOpaqueRef(arg, checker)) {
-              hasOpaqueRef = true;
-              break;
-            }
-          }
-          
-          if (hasOpaqueRef) {
+          // Check if the entire call expression contains OpaqueRef values
+          // This handles both arguments and method calls on OpaqueRef objects
+          if (containsOpaqueRef(node, checker)) {
             // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
             
@@ -118,6 +111,42 @@ export function createOpaqueRefTransformer(
           
           // Otherwise, just visit children normally
           return ts.visitEachChild(node, visit, context);
+        }
+        
+        // Handle property access expressions (e.g., person.name.length)
+        // Skip if it's part of a larger expression that will handle it
+        if (ts.isPropertyAccessExpression(node) && 
+            !ts.isCallExpression(node.parent) &&
+            !ts.isPropertyAccessExpression(node.parent)) {
+          
+          // Check if we're accessing a property on an OpaqueRef
+          // For example: person.name is OpaqueRef<string>, and we're accessing .length
+          const objectType = checker.getTypeAtLocation(node.expression);
+          if (isOpaqueRefType(objectType, checker)) {
+            // Check if this is just passing through the OpaqueRef (e.g., const x = person.name)
+            // vs accessing a property on it (e.g., const x = person.name.length)
+            const resultType = checker.getTypeAtLocation(node);
+            const isPassThrough = isOpaqueRefType(resultType, checker);
+            
+            if (!isPassThrough) {
+              // This is accessing a property on an OpaqueRef, transform it
+              hasTransformed = true;
+              const transformedExpression = transformExpressionWithOpaqueRef(
+                node,
+                checker,
+                context.factory,
+                sourceFile,
+                context
+              );
+              
+              if (transformedExpression !== node) {
+                if (!hasCommonToolsImport(sourceFile, "derive")) {
+                  needsDeriveImport = true;
+                }
+                return transformedExpression;
+              }
+            }
+          }
         }
         
         // Handle element access (array indexing)
