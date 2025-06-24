@@ -105,6 +105,20 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       }
       expect(result.matches).toBe(true);
     });
+
+    it("transforms complex expression with ternary in subtraction", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/complex-function-with-ternary.input.ts",
+        "opaque-refs/complex-function-with-ternary.expected.ts",
+        { types }
+      );
+      
+      if (!result.matches) {
+        console.log("Expected:", result.expected);
+        console.log("Actual:", result.actual);
+      }
+      expect(result.matches).toBe(true);
+    });
   });
 
   describe("Using fixtures with custom assertions", () => {
