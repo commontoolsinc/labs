@@ -100,7 +100,7 @@ export function createOpaqueRefTransformer(
           }
           
           if (hasOpaqueRefExpressions) {
-            log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
             
             // Wrap the entire function call in derive
