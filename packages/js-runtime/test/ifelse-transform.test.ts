@@ -55,12 +55,11 @@ export default recipe(model, model, (cell) => {
     console.log("=== COMPILED OUTPUT ===");
     console.log(compiled.js);
     
-    // The output uses AMD format, not ES6 imports
-    // Check that the ternary was transformed and uses the correct syntax
-    expect(compiled.js).toContain('commontools_1.ifElse(odd, "odd", "even")');
+    // The recipe call is wrapped in derive due to OpaqueRef usage
+    expect(compiled.js).toContain('commontools_1.derive({ cell, odd, cell_value: cell.value, value }');
     
-    // The original ternary should be gone
-    const hasOriginalTernary = compiled.js.includes('odd ? "odd" : "even"');
-    expect(hasOriginalTernary).toBe(false);
+    // The ternary remains unchanged because _v2 is not an OpaqueRef
+    const hasTernary = compiled.js.includes('_v2 ? "odd" : "even"');
+    expect(hasTernary).toBe(true);
   });
 });
