@@ -248,6 +248,51 @@ export function createOpaqueRefTransformer(
           }
         }
         
+        // Handle tagged template expressions (e.g., str`...`)
+        if (ts.isTaggedTemplateExpression(node)) {
+          // Check if this is the 'str' tagged template
+          const tag = node.tag;
+          if (ts.isIdentifier(tag) && tag.text === 'str') {
+            // str is a builder function, don't transform it
+            // Just visit children of the tag, not the template
+            const visitedTag = ts.visitNode(node.tag, visit) as ts.Expression;
+            return context.factory.updateTaggedTemplateExpression(
+              node,
+              visitedTag,
+              node.typeArguments,
+              node.template
+            );
+          }
+          
+          // For other tagged templates, check if they contain OpaqueRef
+          const template = node.template;
+          if (ts.isTemplateExpression(template) && containsOpaqueRef(template, checker)) {
+            log(`Found tagged template expression transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            hasTransformed = true;
+            
+            // Transform the template part
+            const transformedTemplate = transformExpressionWithOpaqueRef(
+              template,
+              checker,
+              context.factory,
+              sourceFile,
+              context
+            );
+            
+            if (transformedTemplate !== template) {
+              if (!hasCommonToolsImport(sourceFile, "derive")) {
+                needsDeriveImport = true;
+              }
+              return context.factory.updateTaggedTemplateExpression(
+                node,
+                node.tag,
+                node.typeArguments,
+                transformedTemplate as ts.TemplateLiteral
+              );
+            }
+          }
+        }
+        
         // Handle template expressions
         if (ts.isTemplateExpression(node)) {
           // Check if any template span contains OpaqueRef

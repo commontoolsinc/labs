@@ -1,4 +1,5 @@
 import {
+  Cell,
   derive,
   generateObject,
   h,
@@ -14,7 +15,7 @@ import {
 
 // Define types using TypeScript interfaces
 interface InputState {
-  number: number; // @asCell
+  number: Cell<number>;
 }
 
 interface OutputState {
