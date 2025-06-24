@@ -88,9 +88,80 @@ export function createOpaqueRefTransformer(
         if (ts.isCallExpression(node)) {
           // Check if this is a builder function call - these should not be transformed
           const functionName = getFunctionName(node);
-          const builderFunctions = ['recipe', 'lift', 'handler', 'derive', 'compute', 'render'];
+          const builderFunctions = ['recipe', 'lift', 'handler', 'derive', 'compute', 'render', 'ifElse', 'str'];
           if (functionName && builderFunctions.includes(functionName)) {
             // Just visit children normally for builder function calls
+            return ts.visitEachChild(node, visit, context);
+          }
+          
+          // Check if this is a call to a ModuleFactory/HandlerFactory/RecipeFactory
+          // These are functions returned by lift, handler, recipe, etc.
+          const expressionType = checker.getTypeAtLocation(node.expression);
+          const expressionTypeString = checker.typeToString(expressionType);
+          
+          if (debug) {
+            log(`Call expression's function type: ${expressionTypeString}`);
+          }
+          
+          // If we're calling a ModuleFactory, HandlerFactory, or RecipeFactory
+          // these expect Opaque parameters
+          if (expressionTypeString.includes('ModuleFactory<') || 
+              expressionTypeString.includes('HandlerFactory<') ||
+              expressionTypeString.includes('RecipeFactory<')) {
+            if (debug) {
+              log(`Calling a factory function that expects Opaque parameters, skipping transformation`);
+            }
+            return ts.visitEachChild(node, visit, context);
+          }
+          
+          // Check if the function expects OpaqueRef parameters
+          // If it does, we don't need to transform the arguments
+          const functionSymbol = checker.getSymbolAtLocation(node.expression);
+          if (functionSymbol) {
+            const functionType = checker.getTypeOfSymbolAtLocation(functionSymbol, node.expression);
+            const signatures = checker.getSignaturesOfType(functionType, ts.SignatureKind.Call);
+            
+            if (signatures.length > 0) {
+              // Check the first signature (could be improved to check all overloads)
+              const signature = signatures[0];
+              const parameters = signature.getParameters();
+              
+              if (parameters.length > 0) {
+                // Check if the first parameter expects an OpaqueRef or Opaque type
+                const paramType = checker.getTypeOfSymbolAtLocation(parameters[0], node);
+                const paramTypeString = checker.typeToString(paramType);
+                
+                if (debug) {
+                  log(`Function ${getFunctionName(node)} parameter type: ${paramTypeString}`);
+                }
+                
+                // If the function expects Opaque or OpaqueRef parameters, don't transform
+                if (paramTypeString.includes('Opaque<') || paramTypeString.includes('OpaqueRef<')) {
+                  if (debug) {
+                    log(`Function expects Opaque/OpaqueRef parameters, skipping transformation`);
+                  }
+                  return ts.visitEachChild(node, visit, context);
+                }
+              }
+            }
+          }
+          
+          // Also check what the function call returns
+          // If it returns a Stream or OpaqueRef, we shouldn't transform it
+          const callType = checker.getTypeAtLocation(node);
+          const callTypeString = checker.typeToString(callType);
+          
+          if (debug) {
+            log(`Call expression type: ${callTypeString}`);
+          }
+          
+          // If this call returns a Stream or OpaqueRef, don't transform it
+          if (callTypeString.includes('Stream<') || 
+              callTypeString.includes('OpaqueRef<') ||
+              callTypeString.includes('ModuleFactory<')) {
+            if (debug) {
+              log(`Call returns Stream/OpaqueRef/ModuleFactory, skipping transformation`);
+            }
             return ts.visitEachChild(node, visit, context);
           }
           
@@ -280,6 +351,18 @@ export function createOpaqueRefTransformer(
           switch (result.type) {
             case 'jsx': {
               const jsxNode = node as ts.JsxExpression;
+              
+              // Check if this JSX expression is in an event handler attribute
+              const parent = jsxNode.parent;
+              if (parent && ts.isJsxAttribute(parent)) {
+                const attrName = parent.name.getText();
+                // Event handlers like onClick expect functions, not derived values
+                if (attrName.startsWith('on')) {
+                  // Just visit children normally for event handlers
+                  return ts.visitEachChild(node, visit, context);
+                }
+              }
+              
               const transformedExpression = transformExpressionWithOpaqueRef(
                 jsxNode.expression!,
                 checker,
