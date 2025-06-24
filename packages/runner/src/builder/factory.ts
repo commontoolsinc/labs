@@ -34,6 +34,15 @@ import {
 } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
 
+// Runtime implementation of toSchema - this should never be called
+// The TypeScript transformer should replace all calls at compile time
+const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
+  throw new Error(
+    "toSchema() should be transformed at compile time. " +
+      "Make sure the TypeScript transformer is configured correctly.",
+  );
+};
+
 /**
  * Creates a set of builder functions with the given runtime
  * @param runtime - The runtime instance to use for cell creation
@@ -118,6 +127,7 @@ export const createBuilder = (
 
     // Schema utilities
     schema,
+    toSchema,
     AuthSchema,
 
     // Render utils

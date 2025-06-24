@@ -24,7 +24,10 @@ import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
-import { createOpaqueRefTransformer } from "./transformer/mod.ts";
+import {
+  createOpaqueRefTransformer,
+  createSchemaTransformer,
+} from "./transformer/mod.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -290,7 +293,10 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       undefined,
       undefined,
       {
-        before: [createOpaqueRefTransformer(tsProgram, { debug: true })],
+        before: [
+          createSchemaTransformer(tsProgram, { debug: true }),
+          createOpaqueRefTransformer(tsProgram, { debug: true }),
+        ],
       },
     );
     checker.check(diagnostics);

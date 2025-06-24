@@ -6,7 +6,7 @@ import ts from "typescript";
  */
 export function createSchemaTransformer(
   program: ts.Program,
-  options: { debug?: boolean } = {}
+  options: { debug?: boolean } = {},
 ): ts.TransformerFactory<ts.SourceFile> {
   const { debug = false } = options;
   const checker = program.getTypeChecker();
@@ -24,9 +24,11 @@ export function createSchemaTransformer(
         ) {
           const typeArg = node.typeArguments[0];
           const type = checker.getTypeFromTypeNode(typeArg);
-          
+
           if (debug) {
-            console.log(`[SchemaTransformer] Found toSchema<${typeArg.getText()}>() call`);
+            console.log(
+              `[SchemaTransformer] Found toSchema<${typeArg.getText()}>() call`,
+            );
           }
 
           // Extract options from the call arguments
@@ -38,28 +40,28 @@ export function createSchemaTransformer(
 
           // Generate JSONSchema from the type
           const schema = typeToJsonSchema(type, checker, typeArg);
-          
+
           // Merge with options
           const finalSchema = { ...schema, ...optionsObj };
 
           // Create the AST for the schema object
           const schemaAst = createSchemaAst(finalSchema, context.factory);
-          
+
           // Add type assertion: as const satisfies JSONSchema
           const constAssertion = context.factory.createAsExpression(
             schemaAst,
             context.factory.createTypeReferenceNode(
               context.factory.createIdentifier("const"),
-              undefined
-            )
+              undefined,
+            ),
           );
-          
+
           const satisfiesExpression = context.factory.createSatisfiesExpression(
             constAssertion,
             context.factory.createTypeReferenceNode(
               context.factory.createIdentifier("JSONSchema"),
-              undefined
-            )
+              undefined,
+            ),
           );
 
           return satisfiesExpression;
@@ -79,7 +81,7 @@ export function createSchemaTransformer(
 function typeToJsonSchema(
   type: ts.Type,
   checker: ts.TypeChecker,
-  typeNode?: ts.TypeNode
+  typeNode?: ts.TypeNode,
 ): any {
   // Handle primitive types
   if (type.flags & ts.TypeFlags.String) {
@@ -104,12 +106,12 @@ function typeToJsonSchema(
     if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
       return {
         type: "array",
-        items: typeToJsonSchema(typeRef.typeArguments[0], checker)
+        items: typeToJsonSchema(typeRef.typeArguments[0], checker),
       };
     }
     return { type: "array" };
   }
-  
+
   // Also check if it's an array type using the checker
   const typeString = checker.typeToString(type);
   if (typeString.endsWith("[]")) {
@@ -141,12 +143,15 @@ function typeToJsonSchema(
     const props = type.getProperties();
     for (const prop of props) {
       const propName = prop.getName();
-      
+
       // Skip symbol properties
       if (propName.startsWith("__")) continue;
-      
-      const propType = checker.getTypeOfSymbolAtLocation(prop, typeNode || prop.valueDeclaration!);
-      
+
+      const propType = checker.getTypeOfSymbolAtLocation(
+        prop,
+        typeNode || prop.valueDeclaration!,
+      );
+
       // Check if property is optional
       const isOptional = prop.flags & ts.SymbolFlags.Optional;
       if (!isOptional) {
@@ -161,11 +166,14 @@ function typeToJsonSchema(
         const sourceFile = prop.valueDeclaration.getSourceFile();
         const start = prop.valueDeclaration.getStart();
         const end = prop.valueDeclaration.getEnd();
-        
+
         // Look for comments on the same line
-        const lineEnd = sourceFile.text.indexOf('\n', end);
-        const lineText = sourceFile.text.substring(start, lineEnd > 0 ? lineEnd : sourceFile.text.length);
-        
+        const lineEnd = sourceFile.text.indexOf("\n", end);
+        const lineText = sourceFile.text.substring(
+          start,
+          lineEnd > 0 ? lineEnd : sourceFile.text.length,
+        );
+
         if (lineText.includes("@asCell")) {
           propSchema.asCell = true;
         }
@@ -179,7 +187,7 @@ function typeToJsonSchema(
 
     const schema: any = {
       type: "object",
-      properties
+      properties,
     };
 
     if (required.length > 0) {
@@ -193,14 +201,16 @@ function typeToJsonSchema(
   if (type.isUnion()) {
     const unionTypes = (type as ts.UnionType).types;
     // Check if it's a nullable type (T | undefined)
-    const nonNullTypes = unionTypes.filter(t => !(t.flags & ts.TypeFlags.Undefined));
+    const nonNullTypes = unionTypes.filter((t) =>
+      !(t.flags & ts.TypeFlags.Undefined)
+    );
     if (nonNullTypes.length === 1 && unionTypes.length === 2) {
       // This is an optional type, just return the non-null type schema
       return typeToJsonSchema(nonNullTypes[0], checker);
     }
     // Otherwise, use oneOf
     return {
-      oneOf: unionTypes.map(t => typeToJsonSchema(t, checker))
+      oneOf: unionTypes.map((t) => typeToJsonSchema(t, checker)),
     };
   }
 
@@ -215,68 +225,71 @@ function createSchemaAst(schema: any, factory: ts.NodeFactory): ts.Expression {
   if (schema === null) {
     return factory.createNull();
   }
-  
+
   if (typeof schema === "string") {
     return factory.createStringLiteral(schema);
   }
-  
+
   if (typeof schema === "number") {
     return factory.createNumericLiteral(schema);
   }
-  
+
   if (typeof schema === "boolean") {
     return schema ? factory.createTrue() : factory.createFalse();
   }
-  
+
   if (Array.isArray(schema)) {
     return factory.createArrayLiteralExpression(
-      schema.map(item => createSchemaAst(item, factory))
+      schema.map((item) => createSchemaAst(item, factory)),
     );
   }
-  
+
   if (typeof schema === "object") {
     const properties: ts.PropertyAssignment[] = [];
-    
+
     for (const [key, value] of Object.entries(schema)) {
       // Handle nested schemas that might be references
       if (key === "asStream" && value === true && schema.type) {
         // For asStream properties, we need to spread the base schema
         const baseSchema = { ...schema };
         delete baseSchema.asStream;
-        
+
         return factory.createObjectLiteralExpression([
           factory.createSpreadAssignment(createSchemaAst(baseSchema, factory)),
           factory.createPropertyAssignment(
             factory.createIdentifier("asStream"),
-            factory.createTrue()
-          )
+            factory.createTrue(),
+          ),
         ]);
       }
-      
+
       properties.push(
         factory.createPropertyAssignment(
           factory.createIdentifier(key),
-          createSchemaAst(value, factory)
-        )
+          createSchemaAst(value, factory),
+        ),
       );
     }
-    
+
     return factory.createObjectLiteralExpression(properties, true);
   }
-  
+
   return factory.createIdentifier("undefined");
 }
 
 /**
  * Evaluate an object literal to extract its values
  */
-function evaluateObjectLiteral(node: ts.ObjectLiteralExpression, checker: ts.TypeChecker): any {
+function evaluateObjectLiteral(
+  node: ts.ObjectLiteralExpression,
+  checker: ts.TypeChecker,
+): any {
   const result: any = {};
-  
+
   for (const prop of node.properties) {
     if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
       const key = prop.name.text;
-      
+
       if (ts.isStringLiteral(prop.initializer)) {
         result[key] = prop.initializer.text;
       } else if (ts.isNumericLiteral(prop.initializer)) {
@@ -288,15 +301,17 @@ function evaluateObjectLiteral(node: ts.ObjectLiteralExpression, checker: ts.Typ
       } else if (ts.isObjectLiteralExpression(prop.initializer)) {
         result[key] = evaluateObjectLiteral(prop.initializer, checker);
       } else if (ts.isArrayLiteralExpression(prop.initializer)) {
-        result[key] = prop.initializer.elements.map(elem => {
+        result[key] = prop.initializer.elements.map((elem) => {
           if (ts.isStringLiteral(elem)) return elem.text;
           if (ts.isNumericLiteral(elem)) return Number(elem.text);
-          if (ts.isObjectLiteralExpression(elem)) return evaluateObjectLiteral(elem, checker);
+          if (ts.isObjectLiteralExpression(elem)) {
+            return evaluateObjectLiteral(elem, checker);
+          }
           return undefined;
-        }).filter(x => x !== undefined);
+        }).filter((x) => x !== undefined);
       }
     }
   }
-  
+
   return result;
 }

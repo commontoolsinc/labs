@@ -452,6 +452,10 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 
 export const schema = <T extends JSONSchema>(schema: T) => schema;
 
+// toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
+// The actual implementation is done by the TypeScript transformer
+export declare function toSchema<T>(options?: Partial<JSONSchema>): JSONSchema;
+
 export type Schema<
   T extends JSONSchema,
   Root extends JSONSchema = T,
