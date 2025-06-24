@@ -30,9 +30,12 @@ export function toJSONWithAliases(
 ): JSONValue | undefined {
   // Convert regular cells to opaque refs
   if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-  // Convert parent opaque refs to shadow refs
-  else if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
-    value = createShadowRef(value);
+
+  // Verify that opaque refs are not in a parent frame
+  if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
+    throw new Error(
+      `Opaque ref with parent cell not found in current frame. Should have been converted to a shadow ref.`,
+    );
   }
 
   // If this is an external reference, just copy the reference as is.
