@@ -8,7 +8,6 @@ import ts from "typescript";
 export function getCommonToolsModuleAlias(sourceFile: ts.SourceFile): string | null {
   // In AMD output, TypeScript transforms module imports to parameters
   // For imports from "commontools", it typically becomes "commontools_1"
-  // We only need this for the old "commontools" import, not "@commontools/common"
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement)) {
       const moduleSpecifier = statement.moduleSpecifier;
@@ -36,7 +35,7 @@ export function hasCommonToolsImport(sourceFile: ts.SourceFile, importName: stri
       const moduleSpecifier = statement.moduleSpecifier;
       if (
         ts.isStringLiteral(moduleSpecifier) &&
-        (moduleSpecifier.text === "@commontools/common" || moduleSpecifier.text === "commontools")
+        moduleSpecifier.text === "commontools"
       ) {
         // Check if the specific import is in the import clause
         if (statement.importClause && statement.importClause.namedBindings) {
@@ -74,7 +73,7 @@ export function addCommonToolsImport(
       const moduleSpecifier = statement.moduleSpecifier;
       if (
         ts.isStringLiteral(moduleSpecifier) &&
-        (moduleSpecifier.text === "@commontools/common" || moduleSpecifier.text === "commontools")
+        moduleSpecifier.text === "commontools"
       ) {
         existingImport = statement;
         existingImportIndex = index;
@@ -122,28 +121,7 @@ export function addCommonToolsImport(
       undefined,
     );
   } else {
-    // Only create new import for @commontools/common, not for old "commontools"
-    // Check if we have any commontools import
-    let hasAnyCommonToolsImport = false;
-    for (const statement of sourceFile.statements) {
-      if (ts.isImportDeclaration(statement)) {
-        const moduleSpecifier = statement.moduleSpecifier;
-        if (
-          ts.isStringLiteral(moduleSpecifier) &&
-          (moduleSpecifier.text === "@commontools/common" || moduleSpecifier.text === "commontools")
-        ) {
-          hasAnyCommonToolsImport = true;
-          break;
-        }
-      }
-    }
-    
-    // If we have "commontools" import, don't add anything new
-    if (hasAnyCommonToolsImport) {
-      return sourceFile;
-    }
-    
-    // Create new import declaration for @commontools/common
+    // Create new import declaration for commontools
     newImport = factory.createImportDeclaration(
       undefined,
       factory.createImportClause(
@@ -157,7 +135,7 @@ export function addCommonToolsImport(
           ),
         ]),
       ),
-      factory.createStringLiteral("@commontools/common"),
+      factory.createStringLiteral("commontools"),
       undefined,
     );
     
