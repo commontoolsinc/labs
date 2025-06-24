@@ -5,6 +5,11 @@ export {
   type TransformationError,
 } from "./opaque-ref.ts";
 
+// Schema transformer
+export {
+  createSchemaTransformer,
+} from "./schema.ts";
+
 // Type checking utilities
 export {
   collectOpaqueRefs,
