@@ -88,7 +88,7 @@ export function createIfElseCall(
 
 /**
  * Transforms an expression containing OpaqueRef values.
- * Currently only handles binary expressions.
+ * Handles binary expressions and call expressions.
  */
 export function transformExpressionWithOpaqueRef(
   expression: ts.Expression,
@@ -97,7 +97,163 @@ export function transformExpressionWithOpaqueRef(
   sourceFile: ts.SourceFile,
   context: ts.TransformationContext,
 ): ts.Expression {
-  // Only transform binary expressions (e.g., cell.value + 1, cell.value * 2)
+  // Handle call expressions (e.g., someFunction(a + 1, "prefix"))
+  if (ts.isCallExpression(expression)) {
+    // Get all OpaqueRef identifiers in the entire call expression
+    const opaqueRefs = collectOpaqueRefs(expression, checker);
+    
+    if (opaqueRefs.length === 0) {
+      return expression;
+    }
+
+    // Deduplicate OpaqueRefs (same ref might appear multiple times)
+    const uniqueRefs = new Map<string, ts.Expression>();
+    const refToParamName = new Map<ts.Expression, string>();
+    
+    opaqueRefs.forEach(ref => {
+      const refText = ref.getText();
+      if (!uniqueRefs.has(refText)) {
+        const paramName = `_v${uniqueRefs.size + 1}`;
+        uniqueRefs.set(refText, ref);
+        refToParamName.set(ref, paramName);
+      } else {
+        // Map this ref to the same parameter name as the first occurrence
+        const firstRef = uniqueRefs.get(refText)!;
+        refToParamName.set(ref, refToParamName.get(firstRef)!);
+      }
+    });
+    
+    const uniqueRefArray = Array.from(uniqueRefs.values());
+    
+    // Replace all occurrences of refs with their parameters in the entire call
+    const lambdaBody = replaceOpaqueRefsWithParams(expression, refToParamName, factory, context);
+    
+    // If there's only one unique ref, use the simple form: derive(ref, _v => ...)
+    if (uniqueRefArray.length === 1) {
+      const ref = uniqueRefArray[0];
+      const paramName = refToParamName.get(ref)!;
+      
+      const arrowFunction = factory.createArrowFunction(
+        undefined,
+        undefined,
+        [factory.createParameterDeclaration(
+          undefined,
+          undefined,
+          factory.createIdentifier(paramName),
+          undefined,
+          undefined,
+          undefined,
+        )],
+        undefined,
+        factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+        lambdaBody,
+      );
+      
+      const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+      const deriveIdentifier = moduleAlias
+        ? factory.createPropertyAccessExpression(
+          factory.createIdentifier(moduleAlias),
+          factory.createIdentifier("derive"),
+        )
+        : factory.createIdentifier("derive");
+      
+      return factory.createCallExpression(
+        deriveIdentifier,
+        undefined,
+        [ref, arrowFunction],
+      );
+    }
+    
+    // Multiple unique refs: use object form derive({a, b}, ({a: _v1, b: _v2}) => ...)
+    const paramNames = uniqueRefArray.map(ref => refToParamName.get(ref)!);
+    
+    // Create object literal for refs: {a, b, c}
+    const refProperties = uniqueRefArray.map((ref) => {
+      // For simple identifiers, use shorthand: {a, b}
+      if (ts.isIdentifier(ref)) {
+        return factory.createShorthandPropertyAssignment(
+          ref,
+          undefined
+        );
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        // For property access, use the full property path as the key
+        // e.g., state.count becomes "state.count": state.count
+        const propName = ref.getText().replace(/\./g, '_'); // Replace dots with underscores for valid identifiers
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref
+        );
+      } else {
+        // Fallback to generic name
+        const propName = `ref${uniqueRefArray.indexOf(ref) + 1}`;
+        return factory.createPropertyAssignment(
+          factory.createIdentifier(propName),
+          ref
+        );
+      }
+    });
+    
+    const refObject = factory.createObjectLiteralExpression(refProperties, false);
+    
+    // Create object pattern for parameters: {a: _v1, b: _v2}
+    const paramProperties = uniqueRefArray.map((ref, index) => {
+      const paramName = paramNames[index];
+      
+      // Determine the property name to use in the binding pattern
+      let propName: string;
+      if (ts.isIdentifier(ref)) {
+        propName = ref.text;
+      } else if (ts.isPropertyAccessExpression(ref)) {
+        // Use the same naming scheme as above
+        propName = ref.getText().replace(/\./g, '_');
+      } else {
+        propName = `ref${index + 1}`;
+      }
+      
+      return factory.createBindingElement(
+        undefined,
+        factory.createIdentifier(propName),
+        factory.createIdentifier(paramName),
+        undefined
+      );
+    });
+    
+    const paramPattern = factory.createObjectBindingPattern(paramProperties);
+    
+    // Create arrow function: ({_v1, _v2}) => expression
+    const arrowFunction = factory.createArrowFunction(
+      undefined,
+      undefined,
+      [factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        paramPattern,
+        undefined,
+        undefined,
+        undefined,
+      )],
+      undefined,
+      factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
+      lambdaBody,
+    );
+    
+    // Create derive call
+    const moduleAlias = getCommonToolsModuleAlias(sourceFile);
+    const deriveIdentifier = moduleAlias
+      ? factory.createPropertyAccessExpression(
+        factory.createIdentifier(moduleAlias),
+        factory.createIdentifier("derive"),
+      )
+      : factory.createIdentifier("derive");
+    
+    return factory.createCallExpression(
+      deriveIdentifier,
+      undefined,
+      [refObject, arrowFunction],
+    );
+  }
+  
+  // Handle binary expressions (e.g., cell.value + 1, cell.value * 2)
   if (ts.isBinaryExpression(expression)) {
     // Get unique variable name
     const varName = "_v";
@@ -263,12 +419,64 @@ export function transformExpressionWithOpaqueRef(
 }
 
 /**
+ * Transforms OpaqueRef values to add .get() calls.
+ * This is used for function calls, array indexing, and template literals.
+ */
+export function addGetCallsToOpaqueRefs(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  factory: ts.NodeFactory,
+  context: ts.TransformationContext,
+): ts.Node {
+  const visit = (n: ts.Node): ts.Node => {
+    // Check if this node is an OpaqueRef that needs .get()
+    if (ts.isExpression(n)) {
+      // Skip if this is already a .get() call
+      if (ts.isCallExpression(n) && 
+          ts.isPropertyAccessExpression(n.expression) &&
+          n.expression.name.text === "get" &&
+          n.arguments.length === 0) {
+        // This is already a .get() call, just transform its object
+        const transformedObject = visit(n.expression.expression) as ts.Expression;
+        return factory.updateCallExpression(
+          n,
+          factory.updatePropertyAccessExpression(
+            n.expression,
+            transformedObject,
+            n.expression.name
+          ),
+          n.typeArguments,
+          n.arguments
+        );
+      }
+      
+      const type = checker.getTypeAtLocation(n);
+      if (isOpaqueRefType(type, checker)) {
+        // Create a .get() call
+        return factory.createCallExpression(
+          factory.createPropertyAccessExpression(
+            n,
+            factory.createIdentifier("get")
+          ),
+          undefined,
+          []
+        );
+      }
+    }
+    
+    return ts.visitEachChild(n, visit, context);
+  };
+  
+  return visit(node);
+}
+
+/**
  * Result of a transformation check.
  */
 export interface TransformationResult {
   transformed: boolean;
   node: ts.Node;
-  type: 'ternary' | 'jsx' | 'binary' | null;
+  type: 'ternary' | 'jsx' | 'binary' | 'call' | 'element-access' | 'template' | null;
   error?: string;
 }
 
@@ -313,6 +521,32 @@ export function checkTransformation(
       node,
       type: 'binary',
     };
+  }
+
+
+  // Check if it's an element access expression (array indexing) with OpaqueRef
+  if (ts.isElementAccessExpression(node) && node.argumentExpression) {
+    if (containsOpaqueRef(node.argumentExpression, checker)) {
+      return {
+        transformed: true,
+        node,
+        type: 'element-access',
+      };
+    }
+  }
+
+  // Check if it's a template expression with OpaqueRef
+  if (ts.isTemplateExpression(node)) {
+    const hasOpaqueRefSpans = node.templateSpans.some(span => 
+      containsOpaqueRef(span.expression, checker)
+    );
+    if (hasOpaqueRefSpans) {
+      return {
+        transformed: true,
+        node,
+        type: 'template',
+      };
+    }
   }
 
   return {
