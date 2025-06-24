@@ -13,6 +13,15 @@ export function isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean
     if (type.aliasSymbol) {
       console.log(`[isOpaqueRefType] Alias symbol: ${type.aliasSymbol.getName()}`);
     }
+    // Additional debug info
+    const symbol = type.getSymbol();
+    if (symbol) {
+      console.log(`[isOpaqueRefType] Symbol name: ${symbol.getName()}`);
+      const declarations = symbol.getDeclarations();
+      if (declarations && declarations.length > 0) {
+        console.log(`[isOpaqueRefType] Symbol declared in: ${declarations[0].getSourceFile().fileName}`);
+      }
+    }
   }
 
   // Handle intersection types (OpaqueRef<T> is defined as an intersection)
@@ -70,6 +79,7 @@ export function isOpaqueRefType(type: ts.Type, checker: ts.TypeChecker): boolean
  */
 export function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boolean {
   let found = false;
+  const debugContains = false; // Enable debug logging
   
   const visit = (n: ts.Node): void => {
     if (found) return;
@@ -77,10 +87,25 @@ export function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boole
     // For property access expressions, check if the result is an OpaqueRef
     if (ts.isPropertyAccessExpression(n)) {
       const type = checker.getTypeAtLocation(n);
+      if (debugContains) {
+        console.log(`[containsOpaqueRef] Checking PropertyAccess: ${n.getText()}`);
+      }
       if (isOpaqueRefType(type, checker)) {
+        if (debugContains) {
+          console.log(`[containsOpaqueRef] Found OpaqueRef in PropertyAccess: ${n.getText()}`);
+        }
         found = true;
         return;
       }
+    }
+    
+    // Skip call expressions with .get() - they return T, not OpaqueRef
+    if (ts.isCallExpression(n) && 
+        ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === "get" &&
+        n.arguments.length === 0) {
+      // This is a .get() call, skip checking its children
+      return;
     }
     
     // Check standalone identifiers
@@ -93,7 +118,13 @@ export function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boole
       }
       
       const type = checker.getTypeAtLocation(n);
+      if (debugContains) {
+        console.log(`[containsOpaqueRef] Checking Identifier: ${n.getText()}`);
+      }
       if (isOpaqueRefType(type, checker)) {
+        if (debugContains) {
+          console.log(`[containsOpaqueRef] Found OpaqueRef in Identifier: ${n.getText()}`);
+        }
         found = true;
         return;
       }
@@ -102,7 +133,13 @@ export function containsOpaqueRef(node: ts.Node, checker: ts.TypeChecker): boole
     ts.forEachChild(n, visit);
   };
   
+  if (debugContains) {
+    console.log(`[containsOpaqueRef] Starting check for node: ${node.getText()}`);
+  }
   visit(node);
+  if (debugContains) {
+    console.log(`[containsOpaqueRef] Result: ${found}`);
+  }
   return found;
 }
 
