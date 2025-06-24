@@ -1,7 +1,7 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { isLegacyCellLink, isWriteRedirectLink } from "./link-utils.ts";
+import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
 import { createCell, isCell } from "./cell.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
@@ -336,15 +336,16 @@ export function validateAndTransform(
           "Unexpected write redirect in path, should have been handled by resolvePath",
         );
       }
-      if (isLegacyCellLink(value)) {
+      if (isAnyCellLink(value)) {
+        const link = parseLink(value, doc.asCell());
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         const extraPath = [...path.slice(i + 1)];
-        const newPath = [...value.path, ...extraPath];
+        const newPath = [...link.path, ...extraPath];
         const cfc = doc.runtime.cfc;
         let newSchema;
-        if (value.schema !== undefined) {
+        if (link.schema !== undefined) {
           newSchema = cfc.getSchemaAtPath(
-            value.schema,
+            link.schema,
             extraPath.map((key) => key.toString()),
             rootSchema,
           );
@@ -355,7 +356,7 @@ export function validateAndTransform(
           newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
         }
         return createCell(
-          value.cell,
+          doc.runtime.documentMap.getDocByEntityId(link.space, link.id, true),
           newPath,
           log,
           newSchema,
