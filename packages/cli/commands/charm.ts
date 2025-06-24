@@ -156,21 +156,29 @@ export const charm = new Command()
     `ct charm link ${EX_ID} ${EX_COMP} bafycharm1/data/users/0/email bafycharm2/config/primaryEmail`,
     `Link deep nested field including array access.`,
   )
+  .example(
+    `ct charm link ${EX_ID} ${EX_COMP} baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye bafycharm1/allCharms`,
+    `Link well-known charms list to charm field.`,
+  )
   .arguments("<source:string> <target:string>")
   .action(async (options, sourceRef, targetRef) => {
     const spaceConfig = parseSpaceOptions(options);
 
-    // Parse source and target references
-    const source = parseLink(sourceRef);
+    // Parse source and target references - handle both charmId/path and well-known IDs
+    const source = parseLink(sourceRef, { allowWellKnown: true });
     const target = parseLink(targetRef);
 
-    // Validate that paths are provided for linking
-    if (!source.path) {
+    // For linking, we need paths unless source is a well-known ID
+    // Well-known IDs can be linked without a path (linking the entire cell)
+    const isWellKnownSource = !sourceRef.includes("/");
+    
+    if (!isWellKnownSource && !source.path) {
       throw new ValidationError(
         `Source reference must include a path. Expected: charmId/path/to/field`,
         { exitCode: 1 },
       );
     }
+    
     if (!target.path) {
       throw new ValidationError(
         `Target reference must include a path. Expected: charmId/path/to/field`,
@@ -181,7 +189,7 @@ export const charm = new Command()
     await linkCharms(
       spaceConfig,
       source.charmId,
-      source.path,
+      source.path || [],  // Empty path for well-known IDs
       target.charmId,
       target.path,
     );
@@ -274,6 +282,7 @@ export function parseSpaceOptions(
 
 export function parseLink(
   ref: string,
+  options?: { allowWellKnown?: boolean },
 ): { charmId: string; path?: (string | number)[] } {
   const parts = ref.split("/");
   if (parts.length < 1) {
@@ -286,6 +295,8 @@ export function parseLink(
   const charmId = parts[0];
 
   if (parts.length === 1) {
+    // If this is a well-known ID (no path) and allowWellKnown is not explicitly true,
+    // we might want to handle it differently in the future
     return { charmId };
   }
 
