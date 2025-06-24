@@ -44,14 +44,11 @@ const adder = handler({}, inputSchema, (_, state) => {
 });
 
 // Handler to set a specific number
-const setNumber = handler(
-  toSchema<SetNumberEvent>(),
-  (_, state) => {
-    if (state.number && state.n) {
-      state.number.set(state.n);
-    }
-  },
-);
+const setNumber = handler({}, toSchema<SetNumberEvent>(), (_, state) => {
+  if (state.number && state.n) {
+    state.number.set(state.n);
+  }
+});
 
 // Generate the prompt for the LLM
 const generatePrompt = lift(({ number }: { number: number }) => {
@@ -73,6 +70,10 @@ export default recipe(inputSchema, outputSchema, (cell) => {
     generatePrompt({ number: cell.number }),
   );
 
+  const imageUrl = generateImageUrl({
+    imagePrompt: object?.imagePrompt || "robot thinking",
+  });
+
   return {
     [NAME]: str`Number Story: ${object?.title || "Loading..."}`,
     [UI]: (
@@ -87,7 +88,7 @@ export default recipe(inputSchema, outputSchema, (cell) => {
             <h1>{object?.title}</h1>
             <p>
               <img
-                src={generateImageUrl({ imagePrompt: object?.imagePrompt })}
+                src={imageUrl}
               />
             </p>
             <p>{object?.story}</p>
