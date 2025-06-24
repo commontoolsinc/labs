@@ -204,7 +204,13 @@ export interface IDocumentMap {
   getDocByEntityId<T = any>(
     space: MemorySpace,
     entityId: EntityId | string,
-    createIfNotFound?: boolean,
+    createIfNotFound?: true,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T>;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
+    createIfNotFound: false,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: MemorySpace): void;

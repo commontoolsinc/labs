@@ -25,8 +25,20 @@ import {
  */
 export type NormalizedLink = {
   id?: URI; // URI format with "of:" prefix
-  path?: string[];
+  path: string[];
   space?: MemorySpace;
+  schema?: JSONSchema;
+  rootSchema?: JSONSchema;
+  overwrite?: "redirect"; // "this" gets normalized away to undefined
+};
+
+/**
+ * Normalized link with required id and space (when base Cell is provided)
+ */
+export type NormalizedFullLink = {
+  id: URI; // URI format with "of:" prefix
+  path: string[];
+  space: MemorySpace;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
@@ -149,7 +161,28 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
 
 /**
  * Parse any link-like value to normalized format
+ *
+ * Overloads just help make fields non-optional that can be guaranteed to exist
+ * in various combinations.
  */
+export function parseLink(
+  value:
+    | Cell<any>
+    | DocImpl<any>,
+  base?: Cell | NormalizedLink,
+): NormalizedFullLink;
+export function parseLink(
+  value:
+    | Cell<any>
+    | DocImpl<any>
+    | LegacyCellLink
+    | SigilLink
+    | JSONCellLink
+    | LegacyAlias
+    | QueryResultInternals
+    | { "/": string },
+  base: Cell | NormalizedFullLink,
+): NormalizedFullLink;
 export function parseLink(
   value:
     | Cell<any>

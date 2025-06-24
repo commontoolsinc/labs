@@ -177,6 +177,18 @@ export class DocumentMap implements IDocumentMap {
   getDocByEntityId<T = any>(
     space: MemorySpace,
     entityId: EntityId | string,
+    createIfNotFound?: true,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T>;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
+    createIfNotFound: false,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T> | undefined;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
     createIfNotFound = true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined {
