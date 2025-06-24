@@ -1,4 +1,4 @@
-import { cell } from "@commontools/common";
+import { cell } from "commontools";
 
 const a = cell(5);
 const b = cell(10);
