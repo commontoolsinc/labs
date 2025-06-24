@@ -91,6 +91,22 @@ describe("OpaqueRef Transformer with Fixtures", () => {
     });
   });
 
+  describe("Function Call Transformations", () => {
+    it("transforms function calls with OpaqueRef arguments", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/function-calls-with-opaque.input.ts",
+        "opaque-refs/function-calls-with-opaque.expected.ts",
+        { types }
+      );
+      
+      if (!result.matches) {
+        console.log("Expected:", result.expected);
+        console.log("Actual:", result.actual);
+      }
+      expect(result.matches).toBe(true);
+    });
+  });
+
   describe("Using fixtures with custom assertions", () => {
     it("transforms binary expressions correctly", async () => {
       const transformed = await transformFixture(
