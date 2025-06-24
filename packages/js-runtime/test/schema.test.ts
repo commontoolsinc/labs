@@ -53,17 +53,17 @@ export { userSchema };
     expect(compiled.js).toContain('required: ["name", "age"]');
   });
 
-  it("transforms toSchema<T>() with asCell comment", () => {
+  it("transforms toSchema<T>() with Stream<T> type", () => {
     const program = {
       entry: "/main.ts",
       files: [
         {
           name: "/main.ts",
           contents: `
-import { toSchema } from "commontools";
+import { Stream, toSchema } from "commontools";
 
 interface State {
-  count: number; // @asCell
+  events: Stream<string>;
   label: string;
 }
 
@@ -82,10 +82,10 @@ export { stateSchema };
       runtimeModules: ["commontools"],
     });
     
-    // Check that asCell was detected
-    expect(compiled.js).toContain('asCell: true');
-    expect(compiled.js).toContain('count:');
-    expect(compiled.js).not.toContain('@asCell');
+    // Check that Stream<T> was detected
+    expect(compiled.js).toContain('asStream: true');
+    expect(compiled.js).toContain('events:');
+    expect(compiled.js).toContain('type: "string"');
   });
 
   it("transforms toSchema<T>() with options", () => {
@@ -166,6 +166,49 @@ export { todoSchema };
     expect(compiled.js).toContain('"tags"');
   });
 
+  it("transforms toSchema<T>() with Cell<T> type", () => {
+    const program = {
+      entry: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: `
+import { Cell, toSchema } from "commontools";
+
+interface State {
+  count: Cell<number>;
+  name: Cell<string>;
+  enabled: boolean;
+}
+
+const stateSchema = toSchema<State>({
+  default: { count: 0, name: "test", enabled: true }
+});
+export { stateSchema };
+`,
+        },
+        {
+          name: "commontools.d.ts",
+          contents: commontools,
+        },
+      ],
+    };
+
+    const compiled = compiler.compile(program, {
+      runtimeModules: ["commontools"],
+    });
+    
+    // Check that Cell<T> types are detected and asCell is added
+    expect(compiled.js).toContain('asCell: true');
+    expect(compiled.js).toContain('count: {');
+    expect(compiled.js).toContain('type: "number"');
+    expect(compiled.js).toContain('name: {');
+    expect(compiled.js).toContain('type: "string"');
+    // enabled should not have asCell
+    expect(compiled.js).toContain('enabled: {');
+    expect(compiled.js).not.toContain('enabled: {\n            type: "boolean",\n            asCell: true');
+  });
+
   it("works with OpaqueRef transformer", () => {
     const program = {
       entry: "/main.tsx",
@@ -173,10 +216,10 @@ export { todoSchema };
         {
           name: "/main.tsx",
           contents: `
-import { derive, h, recipe, toSchema, UI } from "commontools";
+import { Cell, derive, h, recipe, toSchema, UI } from "commontools";
 
 interface State {
-  value: number; // @asCell
+  value: Cell<number>;
 }
 
 const model = toSchema<State>({
