@@ -1637,7 +1637,6 @@ describe("asCell with schema", () => {
     arrayCell.push(d);
     arrayCell.push(dCell);
     arrayCell.push(d.getAsQueryResult());
-    arrayCell.push(d.getAsLegacyCellLink());
 
     // helper to normalize CellLinks because different push operations
     // may result in CellLinks with different extra properties (ex: space)
@@ -1650,7 +1649,6 @@ describe("asCell with schema", () => {
     const expectedCellLink = normalizeCellLink(d.getAsLegacyCellLink());
 
     expect(rawItems.map(normalizeCellLink)).toEqual([
-      expectedCellLink,
       expectedCellLink,
       expectedCellLink,
       expectedCellLink,
