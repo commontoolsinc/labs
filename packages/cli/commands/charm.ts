@@ -3,13 +3,13 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  inspectCharm,
   linkCharms,
   listCharms,
   newCharm,
   saveCharmRecipe,
   setCharmRecipe,
   SpaceConfig,
-  inspectCharm,
 } from "../lib/charm.ts";
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
@@ -161,11 +161,9 @@ export const charm = new Command()
   .option("--json", "Output raw JSON data")
   .arguments("[charmId:string]")
   .action(async (options, charmId) => {
-    let charmConfig;
-
     // Merge charmId argument into options if provided
     options.charm = charmId ?? options.charm;
-    charmConfig = parseCharmOptions(options);
+    const charmConfig = parseCharmOptions(options);
 
     const charmData = await inspectCharm(charmConfig);
 
