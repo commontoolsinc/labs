@@ -62,7 +62,7 @@ This script guides Claude through setting up a complete space with the `ct` util
 - Verify recipe exists: `ls -la [recipe-path]/email-list.tsx`
 - Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/email-list.tsx`
 - Record EMAIL_LIST_CHARM_ID
-- Link: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [GMAIL_CHARM_ID]/emails [EMAIL_LIST_CHARM_ID]/emails`
+- Link gmail results to email-list input: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [GMAIL_CHARM_ID]/emails [EMAIL_LIST_CHARM_ID]/emails`
 
 **Create all-lists charm:**
 - Verify recipe exists: `ls -la [recipe-path]/all-lists.tsx`
@@ -150,9 +150,31 @@ This script guides Claude through setting up a complete space with the `ct` util
 
 ### Key Commands Claude Will Use:
 - `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]` - Create charm
-- `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source]/[field] [target]/[field]` - Link charms
+- `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source] [target]/[field]` - Link data
 - `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]` - List charms
 - `./dist/ct charm view --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - View charm details
+
+### Understanding Linking with `ct charm link`:
+
+**Basic Syntax:** `ct charm link [source] [target]/[field]`
+
+**Charm-to-Charm Linking:**
+- `ct charm link charmA/fieldName charmB/inputField` means `charmB.input.inputField = charmA.result.fieldName`
+- The source reads from the charm's computed result/output
+- The target writes to the charm's input parameters
+
+**Well-Known ID Linking:**
+- `ct charm link wellKnownCellId charmB/inputField` links a well-known cell directly to a charm's input
+- Well-known IDs don't need field paths since they reference specific cells
+
+**Examples:**
+- `ct charm link gmail123/emails emailList456/emails` - Links email results from gmail charm to email list input
+- `ct charm link baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye allLists789/allCharms` - Links well-known charms list to allCharms input
+
+**Important:**
+- Source can be either `charmId/fieldName` (reads from charm result) or just `wellKnownId` (reads entire cell)
+- Target is always `charmId/fieldName` (writes to charm input)
+- The link creates live data flow - when source updates, target receives new data
 
 ### Expected Workflow:
 1. Gmail charm → extract emails field
