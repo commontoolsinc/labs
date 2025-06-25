@@ -217,7 +217,7 @@ Deno.test({
 
           await sleep(500);
           await page.keyboard.type("show the data from @v");
-          await sleep(1000);
+          await sleep(500);
           await page.keyboard.press("Tab");
           await sleep(500);
           await page.keyboard.press("Enter");
