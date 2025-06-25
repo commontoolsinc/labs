@@ -2,18 +2,18 @@ import { ProgramResolver, Source } from "./interface.ts";
 
 export class InMemoryProgram implements ProgramResolver {
   private modules: Record<string, string>;
-  private entryName: string;
-  constructor(entryName: string, modules: Record<string, string>) {
+  private _main: string;
+  constructor(main: string, modules: Record<string, string>) {
     this.modules = modules;
-    this.entryName = entryName;
+    this._main = main;
   }
 
-  entry(): Source {
-    const entry = this.modules[this.entryName];
-    if (!entry) {
-      throw new Error(`${this.entryName} not in modules.`);
+  main(): Source {
+    const main = this.modules[this._main];
+    if (!main) {
+      throw new Error(`${this._main} not in modules.`);
     }
-    return { name: this.entryName, contents: entry };
+    return { name: this._main, contents: main };
   }
 
   resolveSource(identifier: string): Promise<Source | undefined> {

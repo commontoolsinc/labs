@@ -2,15 +2,35 @@ import { JSONSchema, Module, Recipe, Schema } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
+import { Program } from "@commontools/js-runtime";
 
 export const recipeMetaSchema = {
   type: "object",
   properties: {
     id: { type: "string" },
+    // @deprecated Represents a recipe with a single source file
     src: { type: "string" },
     spec: { type: "string" },
     parents: { type: "array", items: { type: "string" } },
     recipeName: { type: "string" },
+    program: {
+      type: "object",
+      properties: {
+        main: { type: "string" },
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              contents: { type: "string" },
+            },
+            required: ["name", "contents"],
+          },
+        },
+      },
+      required: ["main", "files"],
+    },
   },
   required: ["id"],
 } as const satisfies JSONSchema;
@@ -49,7 +69,7 @@ export class RecipeManager implements IRecipeManager {
     return this.recipeMetaMap.get(input as Recipe)?.get()!;
   }
 
-  generateRecipeId(recipe: Recipe | Module, src?: string): string {
+  generateRecipeId(recipe: Recipe | Module, src?: string | Program): string {
     const id = this.recipeMetaMap.get(recipe as Recipe)?.get()?.id;
     if (id) {
       return id;
@@ -70,9 +90,7 @@ export class RecipeManager implements IRecipeManager {
       recipeMeta: RecipeMeta;
     },
   ): Promise<boolean> {
-    // FIXME(ja): is there a reason to save if we don't have src?
-    // mostly wondering about modules...
-    if (!recipeMeta.src) {
+    if (!recipeMeta.src && !recipeMeta.program) {
       return false;
     }
 
@@ -88,17 +106,25 @@ export class RecipeManager implements IRecipeManager {
 
     this.recipeIdMap.set(recipeId, recipe as Recipe);
     this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
-
-    // FIXME(ja): in a week we should remove auto-publishing to blobby
-    // if this patch doesn't need to be reverted
-    await this.publishToBlobby(recipeId);
-
     return true;
   }
 
   // returns a recipe already loaded
   recipeById(recipeId: string): Recipe | undefined {
     return this.recipeIdMap.get(recipeId);
+  }
+
+  async compileRecipe(input: string | Program): Promise<Recipe> {
+    let program: Program | undefined;
+    if (typeof input === "string") {
+      program = {
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: input }],
+      };
+    } else {
+      program = input;
+    }
+    return await this.runtime.harness.run(program);
   }
 
   // we need to ensure we only compile once otherwise we get ~12 +/- 4
@@ -108,26 +134,16 @@ export class RecipeManager implements IRecipeManager {
     space: MemorySpace,
   ): Promise<Recipe> {
     const metaCell = await this.getRecipeMetaCell({ recipeId, space });
-    let recipeMeta = metaCell.get();
+    const recipeMeta = metaCell.get();
 
-    // 1. Fallback to Blobby if cell missing or stale
-    if (recipeMeta?.id !== recipeId) {
-      const imported = await this.importFromBlobby({ recipeId });
-      recipeMeta = imported.recipeMeta;
-      metaCell.set(recipeMeta);
-      await this.runtime.storage.syncCell(metaCell);
-      await this.runtime.storage.synced();
-      this.recipeIdMap.set(recipeId, imported.recipe);
-      this.recipeMetaMap.set(imported.recipe, metaCell);
-      return imported.recipe;
-    }
-
-    // 2. Compile from stored source
-    if (!recipeMeta.src) {
+    if (!recipeMeta.src && !recipeMeta.program) {
       throw new Error(`Recipe ${recipeId} has no stored source`);
     }
-    const recipe = await this.runtime.harness.runSingle(recipeMeta.src);
 
+    const source = recipeMeta.program
+      ? (recipeMeta.program as Program)
+      : recipeMeta.src!;
+    const recipe = await this.compileRecipe(source);
     this.recipeIdMap.set(recipeId, recipe);
     this.recipeMetaMap.set(recipe, metaCell);
     return recipe;
@@ -150,95 +166,5 @@ export class RecipeManager implements IRecipeManager {
     this.inProgressCompilations.set(id, compilationPromise);
 
     return await compilationPromise;
-  }
-
-  /**
-   * Load a recipe from Blobby, returning the recipe and recipeMeta
-   */
-  // FIXME(ja): move this back to blobby!
-  private async importFromBlobby(
-    { recipeId }: { recipeId: string },
-  ): Promise<{ recipe: Recipe; recipeMeta: RecipeMeta }> {
-    const response = await fetch(
-      `${this.runtime.blobbyServerUrl}/spell-${recipeId}`,
-    );
-    if (!response.ok) {
-      throw new Error(`Failed to fetch recipe ${recipeId} from blobby`);
-    }
-
-    let recipeJson:
-      | { src: string; spec?: string; parents?: string[] }
-      | undefined;
-    try {
-      recipeJson = await response.json() as {
-        src: string;
-        spec?: string;
-        parents?: string[];
-      };
-    } catch (error) {
-      console.error(
-        "Failed to fetch recipe from blobby",
-        error,
-        await response.text(),
-      );
-      throw error;
-    }
-
-    const recipe = await this.runtime.harness.runSingle(recipeJson.src!);
-
-    return {
-      recipe,
-      recipeMeta: {
-        id: recipeId,
-        src: recipeJson.src,
-        spec: recipeJson.spec,
-        parents: recipeJson.parents,
-      },
-    };
-  }
-
-  async publishToBlobby(
-    recipeId: string,
-  ): Promise<void> {
-    try {
-      const recipe = this.recipeIdMap.get(recipeId);
-      if (!recipe) {
-        throw new Error(`Recipe ${recipeId} not found for publishing`);
-      }
-
-      const meta = this.getRecipeMeta({ recipeId });
-      if (!meta?.src) {
-        throw new Error(`Recipe ${recipeId} has no source for publishing`);
-      }
-
-      const data = {
-        src: meta.src,
-        recipe: JSON.parse(JSON.stringify(recipe)),
-        spec: meta.spec,
-        parents: meta.parents,
-        recipeName: meta.recipeName,
-      };
-
-      const response = await fetch(
-        `${this.runtime.blobbyServerUrl}/spell-${recipeId}`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(data),
-        },
-      );
-
-      if (!response.ok) {
-        console.warn(
-          `Failed to publish recipe to blobby: ${response.statusText}`,
-        );
-        return;
-      }
-    } catch (error) {
-      console.warn("Failed to publish recipe to blobby:", error);
-      // Don't throw - this is optional functionality
-    }
   }
 }

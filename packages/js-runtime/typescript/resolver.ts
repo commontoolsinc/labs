@@ -18,9 +18,9 @@ export async function resolveProgram(
   { unresolvedModules, target, resolveUnresolvedModuleTypes }:
     ResolveModuleConfig,
 ): Promise<Program> {
-  const entry = graph.entry();
-  const sources = new Map([[entry.name, entry]]);
-  const toProcess = [entry.name];
+  const main = graph.main();
+  const sources = new Map([[main.name, main]]);
+  const toProcess = [main.name];
   const processed: string[] = [];
 
   while (toProcess.length > 0) {
@@ -53,7 +53,7 @@ export async function resolveProgram(
   }
 
   return {
-    entry: entry.name,
+    main: main.name,
     files: [...sources.values()],
   };
 }
@@ -80,7 +80,9 @@ function isUnresolvedModuleOk(
 }
 
 function resolveSpecifier(specifier: string, from: Source): string {
-  if (specifier[0] === "." || specifier[1] === "/") {
+  if (
+    specifier.substring(0, 2) === "./" || specifier.substring(0, 3) === "../"
+  ) {
     return join(dirname(from.name), specifier);
   }
   return specifier;

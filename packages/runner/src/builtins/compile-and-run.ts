@@ -85,7 +85,7 @@ export function compileAndRun(
     // Now we're sure that we have a new file to compile
     compiling.setAtPath([], true, log);
 
-    const compilePromise = runtime.harness.runSingle(
+    const compilePromise = runtime.harness.run(
       files[main],
     )
       .catch(
@@ -104,7 +104,9 @@ export function compileAndRun(
 
     compilePromise.then(async (recipe) => {
       if (thisRun !== currentRun) return;
-      if (recipe) await runtime.runSynced(result.asCell(), recipe, input);
+      if (recipe) {
+        await runtime.runSynced(result.asCell(), recipe, input);
+      }
       // TODO(seefeld): Add capturing runtime errors.
     });
   };

@@ -48,19 +48,19 @@ export interface Compiler<T> {
 // A program's entry point with a resolver to
 // resolve other sources used in the program.
 export interface ProgramResolver {
-  entry(): Source;
+  main(): Source;
   resolveSource(identifier: string): Promise<Source | undefined>;
 }
 
 // An entry point and its sources for a program.
 export interface Program {
-  entry: string;
+  main: string;
   files: Source[];
 }
 
 export function isProgram(value: unknown): value is Program {
-  return !!value && typeof value === "object" && "entry" in value &&
-    typeof value.entry === "string" && "files" in value &&
+  return !!value && typeof value === "object" && "main" in value &&
+    typeof value.main === "string" && "files" in value &&
     Array.isArray(value.files);
 }
 

@@ -177,18 +177,18 @@ export interface IStorage {
 export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
-  generateRecipeId(recipe: any, src?: string): string;
+  generateRecipeId(recipe: any, src?: string | Program): string;
   loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
-  getRecipeMeta(input: any): any;
+  compileRecipe(input: string | Program): Promise<Recipe>;
+  getRecipeMeta(input: any): RecipeMeta;
   registerRecipe(
     params: {
       recipeId: string;
       space: MemorySpace;
       recipe: Recipe | Module;
-      recipeMeta: any;
+      recipeMeta: RecipeMeta;
     },
   ): Promise<boolean>;
-  publishToBlobby(recipeId: string): Promise<void>;
 }
 
 export interface IModuleRegistry {
@@ -246,11 +246,12 @@ export interface IRunner {
 
 import { Scheduler } from "./scheduler.ts";
 import { Storage } from "./storage.ts";
-import { RecipeManager } from "./recipe-manager.ts";
+import { RecipeManager, RecipeMeta } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { Program } from "@commontools/js-runtime";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.

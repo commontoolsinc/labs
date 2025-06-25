@@ -3,9 +3,10 @@ import {
   isCell,
   isStream,
   type MemorySpace,
+  RecipeMeta,
   type Runtime,
 } from "@commontools/runner";
-import { isObject } from "@commontools/utils/types";
+import { isObject, Mutable } from "@commontools/utils/types";
 import {
   createJsonSchema,
   JSONSchema,
@@ -25,6 +26,7 @@ import {
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
 import { console } from "./conditional-console.ts";
+import { Program } from "@commontools/js-runtime";
 
 const llm = new LLMClient();
 
@@ -510,13 +512,14 @@ export async function castNewRecipe(
 }
 
 export async function compileRecipe(
-  recipeSrc: string,
+  recipeSrc: string | Program,
   spec: string,
   runtime: Runtime,
   space: MemorySpace,
   parents?: string[],
 ) {
-  const recipe = await runtime.harness.runSingle(recipeSrc);
+  const recipe = await runtime.recipeManager.compileRecipe(recipeSrc);
+
   if (!recipe) {
     throw new Error("No default recipe found in the compiled exports.");
   }
@@ -525,17 +528,25 @@ export async function compileRecipe(
     recipe,
     recipeSrc,
   );
+
+  const recipeMeta: Partial<Mutable<RecipeMeta>> = {
+    id: recipeId,
+    spec,
+    parents: parentsIds,
+  };
+
+  if (typeof recipeSrc === "string") {
+    recipeMeta.src = recipeSrc;
+  } else {
+    recipeMeta.program = recipeSrc;
+  }
   await runtime.recipeManager.registerRecipe({
     recipeId,
     space,
     recipe,
-    recipeMeta: {
-      id: recipeId,
-      src: recipeSrc,
-      spec,
-      parents: parentsIds,
-    },
+    recipeMeta: recipeMeta as RecipeMeta,
   });
+
   return recipe;
 }
 

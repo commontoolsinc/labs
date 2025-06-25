@@ -2,7 +2,7 @@ import { SourceMap } from "../../interface.ts";
 import { getAMDLoader } from "./amd-loader.ts";
 import { encode } from "@commontools/utils/encoding";
 
-const ENTRY = "$ENTRY";
+const MAIN = "$MAIN";
 const BUNDLE_PRE = stripNewLines(`
 ((runtimeDeps={}) => {
   const { define, require } = (${getAMDLoader.toString()})();
@@ -10,7 +10,7 @@ const BUNDLE_PRE = stripNewLines(`
     define(name, ["exports"], exports => Object.assign(exports, dep));
   }`);
 const BUNDLE_POST = stripNewLines(`
-  return require("$ENTRY");
+  return require("$MAIN");
 });
 `);
 
@@ -18,7 +18,7 @@ export interface BundleAMDOutputConfig {
   // The AMD module to require and return in
   // the enclosing bundle. TypeScript's compiler
   // sets a filename of "/main.tsx" to "main".
-  entryModule: string;
+  mainModule: string;
   // The concatenated source of multiple AMD "defines".
   source: string;
   // `source`'s source map.
@@ -37,7 +37,7 @@ export function bundleAMDOutput(config: BundleAMDOutputConfig): string {
   output += BUNDLE_PRE;
   if (config.injectedScript) output += stripNewLines(config.injectedScript);
   output += stripSourceMappingUrl(config.source) + "\n";
-  output += BUNDLE_POST.replace(ENTRY, config.entryModule) + "\n";
+  output += BUNDLE_POST.replace(MAIN, config.mainModule) + "\n";
   output += sourceMappingUrl(config.sourceMap);
   output += sourceUrl(config.filename);
   return output;

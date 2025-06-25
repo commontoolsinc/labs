@@ -28,10 +28,10 @@ export const dev = new Command()
     "--filename <value:string>",
     "The filename used when compiling the recipe, used in source maps.",
   )
-  .arguments("<entry:string>")
-  .action(async (options, entry) => {
+  .arguments("<main:string>")
+  .action(async (options, main) => {
     const { exports } = await process({
-      entry: join(Deno.cwd(), entry),
+      main: join(Deno.cwd(), main),
       check: options.check,
       run: options.run,
       output: options.output,
