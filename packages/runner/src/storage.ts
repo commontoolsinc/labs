@@ -490,25 +490,28 @@ export class Storage implements IStorage {
           JSON.stringify(value),
         ],
       );
-      const storageValue = Storage._cellLinkToJSON(doc, labels);
-      const existingValue = this._getStorageProviderForSpace(doc.space).get<
-        JSONValue
-      >(
-        doc.entityId,
-      );
-      if (deepEqual(storageValue, existingValue)) {
-        return;
-      }
-      // Track these promises for our synced call.
-      const docToStoragePromise = this._getStorageProviderForSpace(doc.space)
-        .send([{
-          entityId: doc.entityId,
-          value: storageValue,
-        }]);
-      this.docToStoragePromises.add(docToStoragePromise);
-      docToStoragePromise.finally(() =>
-        this.docToStoragePromises.delete(docToStoragePromise)
-      );
+      // Using setTimeout to batch updates
+      setTimeout(() => {
+        const storageValue = Storage._cellLinkToJSON(doc, labels);
+        const existingValue = this._getStorageProviderForSpace(doc.space).get<
+          JSONValue
+        >(
+          doc.entityId,
+        );
+        if (deepEqual(storageValue, existingValue)) {
+          return;
+        }
+        // Track these promises for our synced call.
+        const docToStoragePromise = this._getStorageProviderForSpace(doc.space)
+          .send([{
+            entityId: doc.entityId,
+            value: storageValue,
+          }]);
+        this.docToStoragePromises.add(docToStoragePromise);
+        docToStoragePromise.finally(() =>
+          this.docToStoragePromises.delete(docToStoragePromise)
+        );
+      }, 100);
     });
     this.addCancel(docToStorage);
     this.docToStorageSubs.set(docId, docToStorage);
