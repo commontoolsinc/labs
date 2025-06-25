@@ -159,10 +159,7 @@ export const charm = new Command()
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .option("--json", "Output raw JSON data")
-  .arguments("[charmId:string]")
-  .action(async (options, charmId) => {
-    // Merge charmId argument into options if provided
-    options.charm = charmId ?? options.charm;
+  .action(async (options) => {
     const charmConfig = parseCharmOptions(options);
 
     const charmData = await inspectCharm(charmConfig);
