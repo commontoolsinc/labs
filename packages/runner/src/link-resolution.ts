@@ -62,7 +62,7 @@ export function resolveLinkToValue<T>(
   return followLinks(ref, log, visits);
 }
 
-export function resolveLinkToAlias<T>(
+export function resolveLinkToWriteRedirect<T>(
   doc: DocImpl<T>,
   path: PropertyKey[],
   log?: ReactivityLog,
@@ -174,10 +174,10 @@ export function followLinks(
   ref: LegacyCellLink,
   log: ReactivityLog | undefined,
   visits: Visits,
-  onlyAliases = false,
+  onlyWriteRedirects = false,
 ): LegacyCellLink {
   // Check if we already followed these links
-  const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyAliases);
+  const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyWriteRedirects);
   const cached = visits.followLinksCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -206,7 +206,7 @@ export function followLinks(
 
     const target = result.cell.getAtPath(result.path);
 
-    nextRef = !onlyAliases || isWriteRedirectLink(target)
+    nextRef = !onlyWriteRedirects || isWriteRedirectLink(target)
       ? parseToLegacyCellLink(
         target,
         createCell(
@@ -259,15 +259,15 @@ export function followLinks(
 // Follows aliases and returns cell reference describing the last alias.
 // Only logs interim aliases, not the first one, and not the non-alias value.
 export function followWriteRedirects<T = any>(
-  alias: LegacyAlias | SigilWriteRedirectLink,
+  writeRedirect: LegacyAlias | SigilWriteRedirectLink,
   base: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
 ): LegacyCellLink {
   if (isDoc(base)) base = base.asCell();
   else base = base as Cell<T>; // Makes TS happy
 
-  if (isWriteRedirectLink(alias)) {
-    const link = parseLink(alias, base);
+  if (isWriteRedirectLink(writeRedirect)) {
+    const link = parseLink(writeRedirect, base);
     return followLinks(
       {
         cell: base.getDoc().runtime.documentMap.getDocByEntityId(
@@ -284,6 +284,8 @@ export function followWriteRedirects<T = any>(
       true,
     );
   } else {
-    throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
+    throw new Error(
+      `Write redirect expected: ${JSON.stringify(writeRedirect)}`,
+    );
   }
 }

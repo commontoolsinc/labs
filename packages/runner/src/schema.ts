@@ -6,7 +6,7 @@ import { type DocImpl } from "./doc.ts";
 import { createCell, isCell } from "./cell.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { resolveLinks, resolveLinkToAlias } from "./link-resolution.ts";
+import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -279,7 +279,7 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedRef = resolveLinkToAlias(
+  const resolvedRef = resolveLinkToWriteRedirect(
     doc,
     path,
     log,

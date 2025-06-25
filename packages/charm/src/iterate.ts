@@ -264,21 +264,21 @@ export function scrub(data: any): any {
 }
 
 /**
- * Turn cells references into aliases, this forces writes to go back
- * to the original cell.
+ * Turn cells references into writes redirects, this forces writes to go back to
+ * the original cell.
  * @param data The data to process
  * @param baseSpace Optional base space DID to make links relative to
  */
-function turnCellsIntoAliases(data: any, baseSpace?: MemorySpace): any {
+function turnCellsIntoWriteRedirects(data: any, baseSpace?: MemorySpace): any {
   if (isCell(data)) {
     return data.getAsWriteRedirectLink(baseSpace ? { baseSpace } : undefined);
   } else if (Array.isArray(data)) {
-    return data.map((value) => turnCellsIntoAliases(value, baseSpace));
+    return data.map((value) => turnCellsIntoWriteRedirects(value, baseSpace));
   } else if (isObject(data)) {
     return Object.fromEntries(
       Object.entries(data).map((
         [key, value],
-      ) => [key, turnCellsIntoAliases(value, baseSpace)]),
+      ) => [key, turnCellsIntoWriteRedirects(value, baseSpace)]),
     );
   } else return data;
 }
@@ -492,7 +492,7 @@ export async function castNewRecipe(
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
 
-  const input = turnCellsIntoAliases(scrubbed, charmManager.getSpace());
+  const input = turnCellsIntoWriteRedirects(scrubbed, charmManager.getSpace());
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {

@@ -23,7 +23,7 @@ import { deepEqual } from "../path-utils.ts";
 import { IRuntime } from "../runtime.ts";
 import { parseLink } from "../link-utils.ts";
 
-export function toJSONWithAliases(
+export function toJSONWithLegacyAliases(
   value: Opaque<any>,
   paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
@@ -99,7 +99,7 @@ export function toJSONWithAliases(
 
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
+      toJSONWithLegacyAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
   }
 
@@ -107,7 +107,7 @@ export function toJSONWithAliases(
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {
-      const jsonValue = toJSONWithAliases(
+      const jsonValue = toJSONWithLegacyAliases(
         value[key],
         paths,
         ignoreSelfAliases,

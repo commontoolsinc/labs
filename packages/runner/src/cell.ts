@@ -16,7 +16,10 @@ import {
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLinkToAlias, resolveLinkToValue } from "./link-resolution.ts";
+import {
+  resolveLinkToValue,
+  resolveLinkToWriteRedirect,
+} from "./link-resolution.ts";
 import type { ReactivityLog } from "./scheduler.ts";
 import { type EntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
@@ -335,7 +338,7 @@ function createRegularCell<T>(
     set: (newValue: Cellify<T>) =>
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
       diffAndUpdate(
-        resolveLinkToAlias(doc, path, log, schema, rootSchema),
+        resolveLinkToWriteRedirect(doc, path, log, schema, rootSchema),
         newValue,
         log,
         getTopFrame()?.cause,

@@ -24,7 +24,7 @@ import { type Cell } from "./cell.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
-  findAllAliasedCells,
+  findAllLegacyAliasedCells,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
@@ -334,8 +334,8 @@ export class Runner implements IRunner {
 
     for (const node of recipe.nodes) {
       const sourceDoc = sourceCell.getDoc();
-      const inputs = findAllAliasedCells(node.inputs, sourceDoc);
-      const outputs = findAllAliasedCells(node.outputs, sourceDoc);
+      const inputs = findAllLegacyAliasedCells(node.inputs, sourceDoc);
+      const outputs = findAllLegacyAliasedCells(node.outputs, sourceDoc);
 
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
@@ -469,10 +469,10 @@ export class Runner implements IRunner {
       processCell,
     );
 
-    const reads = findAllAliasedCells(inputs, processCell);
+    const reads = findAllLegacyAliasedCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllAliasedCells(outputs, processCell);
+    const writes = findAllLegacyAliasedCells(outputs, processCell);
 
     let fn = (
       typeof module.implementation === "string"
@@ -694,8 +694,14 @@ export class Runner implements IRunner {
     // note the parent recipe on the closure recipes.
     unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
 
-    const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
-    const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
+    const inputCells = findAllLegacyAliasedCells(
+      mappedInputBindings,
+      processCell,
+    );
+    const outputCells = findAllLegacyAliasedCells(
+      mappedOutputBindings,
+      processCell,
+    );
 
     const action = module.implementation(
       processCell.runtime!.documentMap.getDoc(
@@ -731,10 +737,10 @@ export class Runner implements IRunner {
     const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, {
       immutable: inputs,
     }, processCell.space);
-    const reads = findAllAliasedCells(inputs, processCell);
+    const reads = findAllLegacyAliasedCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllAliasedCells(outputs, processCell);
+    const writes = findAllLegacyAliasedCells(outputs, processCell);
 
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsQueryResult([], log);

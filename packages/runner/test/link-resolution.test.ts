@@ -28,7 +28,7 @@ describe("link-resolution", () => {
     await storageManager?.close();
   });
 
-  describe("followAliases", () => {
+  describe("followWriteRedirects", () => {
     it("should follow a simple alias", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,

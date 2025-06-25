@@ -144,8 +144,9 @@ export function unsafe_createParentBindings(
   }
 }
 
-// Traverses binding and returns all docs reacheable through aliases.
-export function findAllAliasedCells<T>(
+// Traverses binding and returns all docs reacheable through legacy aliases.
+// TODO(seefeld): Transition to all write redirects once recipes use those.
+export function findAllLegacyAliasedCells<T>(
   binding: unknown,
   doc: DocImpl<T>,
 ): LegacyCellLink[] {

@@ -28,7 +28,9 @@ export type LinkV1 = {
   };
 };
 
-export type AliasV1 = LinkV1 & { [LINK_V1_TAG]: { overwrite: "redirect" } };
+export type WriteRedirectV1 = LinkV1 & {
+  [LINK_V1_TAG]: { overwrite: "redirect" };
+};
 /**
  * Sigil link type
  */
@@ -38,7 +40,7 @@ export type SigilLink = SigilValue<LinkV1>;
  * Sigil alias type - uses LinkV1 with overwrite field
  */
 
-export type SigilWriteRedirectLink = SigilValue<AliasV1>;
+export type SigilWriteRedirectLink = SigilValue<WriteRedirectV1>;
 
 /****************
  * Legacy types *
