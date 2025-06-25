@@ -160,42 +160,30 @@ export const charm = new Command()
   .action(async (options, sourceRef, targetRef) => {
     const spaceConfig = parseSpaceOptions(options);
 
-    // Parse source reference (charmId/path/to/field)
-    const sourceParts = sourceRef.split("/");
-    if (sourceParts.length < 2) {
-      throw new ValidationError(
-        `Invalid source reference format. Expected: charmId/path/to/field`,
-        { exitCode: 1 },
-      );
-    }
-    const sourceCharmId = sourceParts[0];
-    const sourcePath = sourceParts.slice(1).map((segment) => {
-      // Check if segment is a number (array index)
-      const index = parseInt(segment, 10);
-      return isNaN(index) ? segment : index;
-    });
+    // Parse source and target references
+    const source = parseLink(sourceRef);
+    const target = parseLink(targetRef);
 
-    // Parse target reference (charmId/path/to/field)
-    const targetParts = targetRef.split("/");
-    if (targetParts.length < 2) {
+    // Validate that paths are provided for linking
+    if (!source.path) {
       throw new ValidationError(
-        `Invalid target reference format. Expected: charmId/path/to/field`,
+        `Source reference must include a path. Expected: charmId/path/to/field`,
         { exitCode: 1 },
       );
     }
-    const targetCharmId = targetParts[0];
-    const targetPath = targetParts.slice(1).map((segment) => {
-      // Check if segment is a number (array index)
-      const index = parseInt(segment, 10);
-      return isNaN(index) ? segment : index;
-    });
+    if (!target.path) {
+      throw new ValidationError(
+        `Target reference must include a path. Expected: charmId/path/to/field`,
+        { exitCode: 1 },
+      );
+    }
 
     await linkCharms(
       spaceConfig,
-      sourceCharmId,
-      sourcePath,
-      targetCharmId,
-      targetPath,
+      source.charmId,
+      source.path,
+      target.charmId,
+      target.path,
     );
 
     render(`Linked ${sourceRef} to ${targetRef}`);
@@ -282,6 +270,32 @@ export function parseSpaceOptions(
     );
   }
   return output as CharmConfig;
+}
+
+export function parseLink(
+  ref: string,
+): { charmId: string; path?: (string | number)[] } {
+  const parts = ref.split("/");
+  if (parts.length < 1) {
+    throw new ValidationError(
+      `Invalid reference format. Expected: charmId or charmId/path/to/field`,
+      { exitCode: 1 },
+    );
+  }
+
+  const charmId = parts[0];
+
+  if (parts.length === 1) {
+    return { charmId };
+  }
+
+  const path = parts.slice(1).map((segment) => {
+    // Check if segment is a number (array index)
+    const index = parseInt(segment, 10);
+    return isNaN(index) ? segment : index;
+  });
+
+  return { charmId, path };
 }
 
 function parseUrl(
