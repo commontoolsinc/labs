@@ -110,7 +110,7 @@ This plan should be entirely incremental and can be rolled out step by step.
   - Key areas: loading promises map (line 84), dependency tracking, and batch
     processing
   - Watch for the FIXME at line 84 about keying by doc+schema combination
-- [ ] When connection is dropped, re-establish all schema queries again
+- [x] When connection is dropped, re-establish all schema queries again
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now) CT-446
@@ -126,10 +126,10 @@ This plan should be entirely incremental and can be rolled out step by step.
       don't want to carry this logic over to this new state. See `isCellLink`,
       which might not be universally used, but should be. Maybe add a
       `readCellLink` function to parse these. CT-447
-  - [ ] Also change schema queries on the serverside
-  - [ ] Remove that translation in storage.ts and make sure everything still
+  - [x] Also change schema queries on the serverside
+  - [x] Remove that translation in storage.ts and make sure everything still
         works.
-- [ ] Create a new transaction API: Get a `tx` object from memory, which exposes
+- [x] Create a new transaction API: Get a `tx` object from memory, which exposes
       `tx.read(entity, path)`, `tx.write(entity, path, value)` (and/or other
       mutation functions), etc., and `tx.commit()`, `tx.abort(reason?: Error)`
       and a few more (see below). CT-449
@@ -146,7 +146,14 @@ This plan should be entirely incremental and can be rolled out step by step.
     - [ ] `Cell.freeze()` makes cell read-only
     - [ ] `Cell.ephemeral` whether cell is persisted
 - [ ] Switch all reading & writing over to this new TX API CT-486
-- [ ] Add `Cell.sync` call that does what `Storage.syncCell` does today.
+- [ ] Add a `VirtualCell` that is used in runner to construct inputs, which is
+      read-only, has no id or space and isn't synced to storage. It should throw
+      if used in any way that indicates it is being linked to or written to.
+      CT-493
+- [ ] Add `Cell.sync` call that does what `Storage.syncCell` does today. CT-494
+  - [ ] In fact automatically start syncing already, as this will be the future
+        behavior. This is just for await.
+  - [ ] Add option to only await a locally cached version if available.
 - [ ] Add path-dependent listeners to memory: A helper on `Storage`, that given
       a `TX` calls a callback _once_ on future changes on what was read during
       the transaction (observing only changes affecting the read path). Make it
