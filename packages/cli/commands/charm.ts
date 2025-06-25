@@ -158,7 +158,7 @@ export const charm = new Command()
     `Inspect detailed information about charm "${RAW_EX_COMP.charm!}".`,
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
-  .option("--verbose", "Show full UI and other large objects")
+  .option("--json", "Output raw JSON data")
   .arguments("[charmId:string]")
   .action(async (options, charmId) => {
     let charmConfig;
@@ -169,8 +169,8 @@ export const charm = new Command()
 
     const charmData = await inspectCharm(charmConfig);
 
-    if (options.verbose) {
-      // In verbose mode, use render with JSON output
+    if (options.json) {
+      // In JSON mode, use render with JSON output
       render(charmData, { json: true });
       return;
     }
@@ -194,7 +194,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
       // Filter out large UI objects that clutter the output
       const filteredResult = { ...charmData.result };
       if (filteredResult.$UI && typeof filteredResult.$UI === "object") {
-        filteredResult.$UI = "<large UI object - use --verbose to see full UI>";
+        filteredResult.$UI = "<large UI object - use --json to see full UI>";
       }
       output += `\n${JSON.stringify(filteredResult, null, 2)}`;
     } else {
