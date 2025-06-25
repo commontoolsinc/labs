@@ -44,6 +44,16 @@ export type NormalizedFullLink = {
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
+export type CellLink =
+  | Cell<any>
+  | DocImpl<any>
+  | LegacyCellLink
+  | SigilLink
+  | JSONCellLink
+  | LegacyAlias
+  | QueryResultInternals
+  | { "/": string };
+
 /**
  * Check if value is a sigil value with any type
  *
@@ -122,15 +132,7 @@ export function isAnyCellLink(
  */
 export function isLink(
   value: any,
-): value is
-  | Cell<any>
-  | DocImpl<any>
-  | LegacyCellLink
-  | SigilLink
-  | JSONCellLink
-  | LegacyAlias
-  | QueryResultInternals
-  | { "/": string } {
+): value is CellLink {
   return (
     isQueryResultForDereferencing(value) ||
     isAnyCellLink(value) ||
@@ -177,27 +179,11 @@ export function parseLink(
   base?: Cell | NormalizedLink,
 ): NormalizedFullLink;
 export function parseLink(
-  value:
-    | Cell<any>
-    | DocImpl<any>
-    | LegacyCellLink
-    | SigilLink
-    | JSONCellLink
-    | LegacyAlias
-    | QueryResultInternals
-    | { "/": string },
+  value: CellLink,
   base: Cell | NormalizedFullLink,
 ): NormalizedFullLink;
 export function parseLink(
-  value:
-    | Cell<any>
-    | DocImpl<any>
-    | LegacyCellLink
-    | SigilLink
-    | JSONCellLink
-    | LegacyAlias
-    | QueryResultInternals
-    | { "/": string },
+  value: CellLink,
   base?: Cell | NormalizedLink,
 ): NormalizedLink;
 export function parseLink(
@@ -340,15 +326,7 @@ export function parseLinkOrThrow(
  * @returns The parsed cell link, or undefined if the value cannot be parsed
  */
 export function parseToLegacyCellLink(
-  value:
-    | Cell<any>
-    | DocImpl<any>
-    | LegacyCellLink
-    | SigilLink
-    | JSONCellLink
-    | LegacyAlias
-    | QueryResultInternals
-    | { "/": string },
+  value: CellLink,
   baseCell?: Cell,
 ): LegacyCellLink;
 export function parseToLegacyCellLink(
@@ -373,15 +351,7 @@ export function parseToLegacyCellLink(
  * @returns The parsed alias, or undefined if the value cannot be parsed
  */
 export function parseToLegacyAlias(
-  value:
-    | Cell<any>
-    | DocImpl<any>
-    | LegacyCellLink
-    | SigilLink
-    | JSONCellLink
-    | LegacyAlias
-    | QueryResultInternals
-    | { "/": string },
+  value: CellLink,
 ): LegacyAlias;
 export function parseToLegacyAlias(value: any): LegacyAlias | undefined;
 export function parseToLegacyAlias(value: any): LegacyAlias | undefined {
