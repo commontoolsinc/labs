@@ -148,12 +148,39 @@ export interface IStorageTransaction {
   reader(space: MemorySpace): Result<ITransactionReader, IReaderError>;
 
   /**
+   * Helper that is the same as `reader().read()` but more convenient, as it
+   * combines error capturing in one call.
+   *
+   * Reads a value from a (local) memory address and captures corresponding
+   * `Read` in the transaction invariants. If value was written in read memory
+   * address in this transaction read will return value that was written as
+   * opposed to value stored.
+   *
+   * @param address - Memory address to read from.
+   * @returns Result containing the read value or an error.
+   */
+  read(address: IMemoryAddress): Result<Read, IReaderError>;
+
+  /**
    * Creates a memory space writer for this transaction. Fails if transaction is
    * no longer in progress or if writer for the different space was already open
    * on this transaction. Requesting a writer for the same memory space will
    * return same writer instance.
    */
   writer(space: MemorySpace): Result<ITransactionWriter, IWriterError>;
+
+  /**
+   * Helper that is the same as `writer().write()` but more convenient, as it
+   * combines error capturing in one call.
+   *
+   * Writes a value into a storage at a given address & captures it in the
+   * transaction invariants.
+   *
+   * @param address - Memory address to write to.
+   * @param value - Value to write.
+   * @returns Result containing the written value or an error.
+   */
+  write(address: IMemoryAddress, value: JSONValue): Result<Write, IWriterError>;
 
   /**
    * Transaction can be cancelled which causes storage provider to stop keeping
@@ -319,6 +346,10 @@ export type IStorageTransactionProgress = Variant<{
  * fact value in the memory.
  */
 export interface IMemoryAddress {
+  /**
+   * Memory space to read from.
+   */
+  space: MemorySpace;
   /**
    * URI to an entitiy. It corresponds to `of` field in the memory protocol.
    */
