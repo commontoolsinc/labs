@@ -469,7 +469,7 @@ export class Runner implements IRunner {
     recipe: Recipe,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(
-      inputBindings as { [key: string]: any },
+      inputBindings,
       processCell,
     );
 
@@ -490,19 +490,21 @@ export class Runner implements IRunner {
 
     // Check if any of the read cells is a stream alias
     let streamRef: CellLink | undefined = undefined;
-    for (const key in inputs) {
-      let doc = processCell;
-      let path: PropertyKey[] = [key];
-      let value = inputs[key];
-      while (isAlias(value)) {
-        const ref = followAliases(value, processCell);
-        doc = ref.cell;
-        path = ref.path;
-        value = doc.getAtPath(path);
-      }
-      if (isStreamAlias(value)) {
-        streamRef = { cell: doc, path };
-        break;
+    if (isRecord(inputs)) {
+      for (const key in inputs) {
+        let doc = processCell;
+        let path: PropertyKey[] = [key];
+        let value = inputs[key];
+        while (isAlias(value)) {
+          const ref = followAliases(value, processCell);
+          doc = ref.cell;
+          path = ref.path;
+          value = doc.getAtPath(path);
+        }
+        if (isStreamAlias(value)) {
+          streamRef = { cell: doc, path };
+          break;
+        }
       }
     }
 
@@ -512,8 +514,8 @@ export class Runner implements IRunner {
 
       const handler = (event: any) => {
         if (event.preventDefault) event.preventDefault();
-        const eventInputs = { ...inputs };
-        const cause = { ...inputs };
+        const eventInputs = { ...(inputs as Record<string, any>) };
+        const cause = { ...(inputs as Record<string, any>) };
         for (const key in eventInputs) {
           if (
             isAlias(eventInputs[key]) &&
@@ -578,6 +580,12 @@ export class Runner implements IRunner {
 
       addCancel(this.runtime.scheduler.addEventHandler(handler, stream));
     } else {
+      if (isRecord(inputs) && "$event" in inputs) {
+        throw new Error(
+          "Handler used as lift, because $stream: true was overwritten",
+        );
+      }
+
       // Schedule the action to run when the inputs change
       const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, {
         immutable: inputs,

@@ -1297,6 +1297,26 @@ export class CharmManager {
     return charm;
   }
 
+  // Consistently return the `Cell<Charm>` of charm with
+  // id `charmId`, applies the provided `recipe` (which may be 
+  // its current recipe -- useful when we are only updating inputs),
+  // and optionally applies `inputs` if provided.
+  async runWithRecipe(
+    recipe: Recipe | Module,
+    charmId: string,
+    inputs?: object,
+  ): Promise<Cell<Charm>> {
+    const charm = this.runtime.getCellFromEntityId<Charm>(this.space, {
+      "/": charmId,
+    });
+    await this.runtime.storage.syncCell(charm);
+    await this.runtime.runSynced(charm, recipe, inputs);
+    await this.syncRecipe(charm);
+    await this.add([charm]);
+
+    return charm;
+  }
+
   // FIXME(JA): this really really really needs to be revisited
   async syncRecipe(charm: Cell<Charm>) {
     await this.runtime.storage.syncCell(charm);

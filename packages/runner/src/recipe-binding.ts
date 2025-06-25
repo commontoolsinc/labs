@@ -52,7 +52,7 @@ export function sendValueToBinding<T>(
         );
       }
     }
-  } else {
+  } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {
     if (binding !== value) {
       throw new Error(`Got ${value} instead of ${binding}`);
     }

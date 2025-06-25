@@ -182,7 +182,7 @@ async function handleExecuteCharmAction(ctx: CommandContext) {
 
     // Create options for the select menu with key as the action name
     const actionOptions = actions.map(([key, stream]) => {
-      const example = JSON.stringify(charm.key(key).schema?.example);
+      const [example] = JSON.stringify(charm.key(key).schema?.examples) ?? [];
       return {
         id: key,
         title: key,

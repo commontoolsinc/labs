@@ -110,7 +110,7 @@ This plan should be entirely incremental and can be rolled out step by step.
   - Key areas: loading promises map (line 84), dependency tracking, and batch
     processing
   - Watch for the FIXME at line 84 about keying by doc+schema combination
-- [ ] When connection is dropped, re-establish all schema queries again
+- [x] When connection is dropped, re-establish all schema queries again
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now) CT-446
@@ -126,90 +126,56 @@ This plan should be entirely incremental and can be rolled out step by step.
       don't want to carry this logic over to this new state. See `isCellLink`,
       which might not be universally used, but should be. Maybe add a
       `readCellLink` function to parse these. CT-447
-  - [ ] Also change schema queries on the serverside
-  - [ ] Remove that translation in storage.ts and make sure everything still
+  - [x] Also change schema queries on the serverside
+  - [x] Remove that translation in storage.ts and make sure everything still
         works.
-- [ ] Create a new transaction API: Get a `tx` object from memory, which exposes
+- [x] Create a new transaction API: Get a `tx` object from memory, which exposes
       `tx.read(entity, path)`, `tx.write(entity, path, value)` (and/or other
       mutation functions), etc., and `tx.commit()`, `tx.abort(reason?: Error)`
       and a few more (see below). CT-449
-  - [ ] The heap and nursery shall not change while this function is running,
-        i.e. the function can read from memory and gets the state as of the
-        beginning of the function call and what it updated itself. Only once the
-        transaction is committed do we update the nursery.
-  - [ ] Add path-dependent listeners to memory: During a transaction reads are
-        logged with path. And there is a `tx.updates(callback)` or so function
-        that registers a listener to any writes to any of the read paths (and
-        only changes to these paths). Make it canceallable (the scheduler will
-        e.g. cancel this before executing the action again). Current need would
-        be satisfied if this is called once on the first change and then not
-        again. If reads and writes are overlapping, i.e. the function wrote to
-        what it reads, then notifications start after applying those writes.
-    - [ ] Path-dependent means that we diff updates and compute what paths have
-          changed. Callback gets called if any paths overlap, i.e. one is a
-          subset of the other. See `compactifyPath` and `pathAffected` for
-          current implementation.
-    - [ ] The current reads and writes can also be read out, which scheduler
-          will use to update the dependency graph. In fact scheduler will inside
-          the callback do both this and adding the callback just before
-          returning. It does so to not miss any updates.
-  - [ ] `tx.abort(reason extends Error)` aborts a transaction. Listeners per
-        above should still be installed, even if the transaction is aborted.
-        Scheduler will use this if the action throws, so it can still update
-        scheduling information.
-- [ ] Memory schedules a task with the scheduler to update heap. Scheduler will
-      run this as soon as possible, but outside running network of reactive
-      functions. For example memory could get a `nextWriteWindow` callback on
-      construction that creates a promise that is resolved when it is safe to
-      write. Then we can queue up messages from the socket and process them all
-      at once. E.g.
-
-      ```typescript
-      const eventQueue = [];
-
-      function queueEvent(event) {
-        if (eventQueue.length === 0)
-          nextWriteWindow().then(() => processEvents());
-        eventQueue.push(event);
-      }
-
-      function processEvents() {
-        // synchronously process events and update heap
-        ...
-        eventQueue.length = 0;
-      }
-      ```
-
-      This is I think functionally equivalent to processing events right away
-      and building up a changelist.
-- [ ] Directly read & write to memory layer & wrap action calls in a transaction
-      CT-450
-  - [ ] Use the new transaction API above to do all reads and writes.
-  - [ ] Currently Cell.push() has retry logic (cell.ts:366-381) that can be
-        removed. It's subsumed by the next point.
-  - [ ] Scheduler creates a transaction that wraps calling an action. Before
-        calling `.commit()` or `.abort()` it'll subscribe to all changes to read
-        values (see above) and it'll update the dependencies based on the reads
-        and writes retrieved from the `tx` object. This replaces `ReactivityLog`
-        and `.updates()` calls on `DocImpl`.
-  - [ ] `Cell.sink()` creates a (read-only) transaction, which might be nested.
-        Very similar to the current `ReactivityLog`.
-  - [ ] `Cell.freeze()` makes cell read-only
-  - [ ] `Cell.ephemeral` whether cell is persisted
-  - [ ] When cells are being created, active transactions are being passed in,
-        just like `log` now. Change `withLog()` to `withTX()` or so. When there
-        is no TX associated on a read, create one. Don't allow writes without a
-        TX.
-  - [ ] In Runner, use TX associated with passed in result cell to create
-        process cell if needed.
-  - [ ] `QueryResultProxy` will have to keep re-reading from memory, so it gets
-        the latest state from the nursery.
-  - [ ] Writes: `Cell` and `QueryResultProxy` directly write to memory, building
-        up the current transaction. This mostly boils down to changing
-        `applyChangeSet`.
-  - [ ] Scheduler: When listening to changes on entities, directly talk to
-        memory (currently goes through storage.ts listeners). This happens just
-        before returning the transaction. See above.
+- [ ] Implement a shim of the new TX API using `DocImpl`, etc. CT-485
+  - [ ] Wherever `log` get created, switch to new API. So at least
+    - [ ] scheduler
+    - [ ] Cell.sink
+  - Need to call .commit() when done (TBD: Even on read-only?)
+  - Change read/write
+    - [ ] `diffAndNormalize` and `applyChangeSet`
+    - [ ] remaining `Cell.*` (e.g. `getRaw`, `setRaw`)
+    - [ ] `QueryResultProxy`
+  - [ ] Move ephemeral and frozen concept into Cell
+    - [ ] `Cell.freeze()` makes cell read-only
+    - [ ] `Cell.ephemeral` whether cell is persisted
+- [ ] Switch all reading & writing over to this new TX API CT-486
+- [ ] Add a `VirtualCell` that is used in runner to construct inputs, which is
+      read-only, has no id or space and isn't synced to storage. It should throw
+      if used in any way that indicates it is being linked to or written to.
+      CT-493
+- [ ] Add `Cell.sync` call that does what `Storage.syncCell` does today. CT-494
+  - [ ] In fact automatically start syncing already, as this will be the future
+        behavior. This is just for await.
+  - [ ] Add option to only await a locally cached version if available.
+- [ ] Add path-dependent listeners to memory: A helper on `Storage`, that given
+      a `TX` calls a callback _once_ on future changes on what was read during
+      the transaction (observing only changes affecting the read path). Make it
+      cancelable (the scheduler will e.g. cancel this before executing the
+      action again). First design the API.
+- [ ] Shim the API above and switch scheduler to use it
+  - [ ] The current reads and writes from a TX can be read out, which scheduler
+        will use to update the dependency graph. In fact scheduler will inside
+        the callback do both this and adding the callback just before returning.
+        It does so to not miss any updates.
+- [ ] Implement new TX over memory CT-487
+  - [ ] The user of the TX shall observe a consistent state during the lifetime
+        of the transaction. All its writes are only committed to the nursery
+        after `tx.commit()` is called. If the transaction attempts to read a
+        value that has changed since the start of the transaction, the
+        transaction is aborted.
+- [ ] Shift `Cell.sync()` to make schema queries on memory directly.
+- [ ] Implement new listener API.
+  - [ ] Path-dependent means that we diff updates and compute what paths have
+        changed. Callback gets called if any paths overlap, i.e. one is a subset
+        of the other. See `compactifyPath` and `pathAffected` for current
+        implementation.
 - [ ] Scheduler retries events whose transaction failed. It does so up to N
       times and calls a callback after the last retry (both configurable via
       `Runtime` constructor). Events are retried after all read cells are fully
@@ -225,10 +191,6 @@ This plan should be entirely incremental and can be rolled out step by step.
 - [ ] On conflicts add data that changed unless it was already sent to the
       client by a query. CT-452
 - [ ] Remove `storage.ts` and `DocImpl`, they are now skipped CT-453
-  - storage.ts has 1000+ lines of complex batching logic to remove
-  - DocImpl in doc.ts is ~300 lines
-  - Also removed Cell.push conflict logic (line 922) since the corresponding
-    parts are also being removed.
 - [x] Memory layer with pending changes after a conflicted write: rollback to
       heap and notify that as changes where it changed things
 - [ ] Sanitize React at least a bit by implement CT-320

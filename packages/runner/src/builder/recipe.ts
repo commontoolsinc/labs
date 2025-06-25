@@ -233,10 +233,20 @@ function factoryFromRecipe<T, R>(
   let count = 0;
   cells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
-    const { cell: top, path, name, external } = cell.export();
+    const { cell: top, path, value, name, external } = cell.export();
     if (!external) {
       if (!paths.has(top)) {
-        paths.set(top, ["internal", name ?? `__#${count++}`]);
+        // HACK(seefeld): For unnamed cells, we've run into an issue when the
+        // order changes that a stream might clobber a previously used
+        // non-stream, which means the default value won't be assigned and the
+        // cell won't be treated as stream. So we'll namespace those separately.
+        const streamMarker = isRecord(value) && value.$stream === true
+          ? "stream"
+          : "";
+        paths.set(top, [
+          "internal",
+          name ?? `__#${count++}${streamMarker}`,
+        ]);
       }
       if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
     }
