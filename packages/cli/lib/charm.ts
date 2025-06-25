@@ -12,6 +12,7 @@ import {
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
   Charm,
+  charmId,
   CharmManager,
   compileRecipe,
   getRecipeIdFromCharm,
@@ -44,8 +45,8 @@ function parseSpace(
   return space;
 }
 
-function getCharmId(charm: Cell<Charm>): string {
-  const id = getEntityId(charm)?.["/"];
+function getCharmIdSafe(charm: Cell<Charm>): string {
+  const id = charmId(charm);
   if (!id) {
     throw new Error("Could not get an ID from a Cell<Charm>");
   }
@@ -153,7 +154,7 @@ export async function listCharms(
   const charms = manager.getCharms().get();
   return Promise.all(charms.map(async (charm) => {
     const name = charm.get()[NAME];
-    const id = getCharmId(charm);
+    const id = getCharmIdSafe(charm);
     const recipeName = (await getRecipeMeta(manager, id)).recipeName;
     return { id, name, recipeName };
   }));
@@ -167,7 +168,7 @@ export async function newCharm(
   const manager = await loadManager(config);
   const recipe = await getRecipeFromFile(manager, entryPath);
   const charm = await exec({ manager, recipe });
-  return getCharmId(charm);
+  return getCharmIdSafe(charm);
 }
 
 export async function setCharmRecipe(
@@ -205,4 +206,47 @@ export async function applyCharmInput(
   const manager = await loadManager(config);
   const recipe = await getRecipeFromService(manager, config.charm);
   await exec({ manager, recipe, charmId: config.charm, input });
+}
+
+export async function linkCharms(
+  config: SpaceConfig,
+  sourceCharmId: string,
+  sourcePath: (string | number)[],
+  targetCharmId: string,
+  targetPath: (string | number)[],
+): Promise<void> {
+  const manager = await loadManager(config);
+
+  const sourceCharm = await manager.get(sourceCharmId, false);
+  if (!sourceCharm) {
+    throw new Error(`Source charm "${sourceCharmId}" not found`);
+  }
+
+  const targetCharm = await manager.get(targetCharmId, false);
+  if (!targetCharm) {
+    throw new Error(`Target charm "${targetCharmId}" not found`);
+  }
+
+  // Navigate to the source path
+  let sourceCell: Cell<any> = sourceCharm;
+  for (const segment of sourcePath) {
+    sourceCell = sourceCell.key(segment);
+  }
+  const sourceCellLink = sourceCell.getAsCellLink();
+
+  // Navigate to the parent of the target path
+  let targetCell: Cell<any> = targetCharm;
+  const targetKey = targetPath.pop();
+  if (!targetKey) {
+    throw new Error("Target path cannot be empty");
+  }
+
+  for (const segment of targetPath) {
+    targetCell = targetCell.key(segment);
+  }
+
+  targetCell.key(targetKey).set(sourceCellLink);
+
+  await manager.runtime.idle();
+  await manager.synced();
 }

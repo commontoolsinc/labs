@@ -3,6 +3,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  linkCharms,
   listCharms,
   newCharm,
   saveCharmRecipe,
@@ -143,7 +144,50 @@ export const charm = new Command()
   .arguments("<entry:string>")
   .action((options, entryPath) =>
     setCharmRecipe(parseCharmOptions(options), absPath(entryPath))
-  );
+  )
+  /* charm link */
+  .command("link", "Link a field from one charm to another")
+  .usage(spaceUsage)
+  .example(
+    `ct charm link ${EX_ID} ${EX_COMP} bafycharm1/outputEmails bafycharm2/emails`,
+    `Link outputEmails field from charm "bafycharm1" to emails field in charm "bafycharm2".`,
+  )
+  .example(
+    `ct charm link ${EX_ID} ${EX_COMP} bafycharm1/data/users/0/email bafycharm2/config/primaryEmail`,
+    `Link deep nested field including array access.`,
+  )
+  .arguments("<source:string> <target:string>")
+  .action(async (options, sourceRef, targetRef) => {
+    const spaceConfig = parseSpaceOptions(options);
+
+    // Parse source and target references
+    const source = parseLink(sourceRef);
+    const target = parseLink(targetRef);
+
+    // Validate that paths are provided for linking
+    if (!source.path) {
+      throw new ValidationError(
+        `Source reference must include a path. Expected: charmId/path/to/field`,
+        { exitCode: 1 },
+      );
+    }
+    if (!target.path) {
+      throw new ValidationError(
+        `Target reference must include a path. Expected: charmId/path/to/field`,
+        { exitCode: 1 },
+      );
+    }
+
+    await linkCharms(
+      spaceConfig,
+      source.charmId,
+      source.path,
+      target.charmId,
+      target.path,
+    );
+
+    render(`Linked ${sourceRef} to ${targetRef}`);
+  });
 
 interface CharmCLIOptions {
   charm?: string;
@@ -226,6 +270,32 @@ export function parseSpaceOptions(
     );
   }
   return output as CharmConfig;
+}
+
+export function parseLink(
+  ref: string,
+): { charmId: string; path?: (string | number)[] } {
+  const parts = ref.split("/");
+  if (parts.length < 1) {
+    throw new ValidationError(
+      `Invalid reference format. Expected: charmId or charmId/path/to/field`,
+      { exitCode: 1 },
+    );
+  }
+
+  const charmId = parts[0];
+
+  if (parts.length === 1) {
+    return { charmId };
+  }
+
+  const path = parts.slice(1).map((segment) => {
+    // Check if segment is a number (array index)
+    const index = parseInt(segment, 10);
+    return isNaN(index) ? segment : index;
+  });
+
+  return { charmId, path };
 }
 
 function parseUrl(
