@@ -277,30 +277,20 @@ export async function inspectCharm(
   const recipeName = recipeMeta.recipeName;
 
   // Get source (arguments/inputs)
-  let source: any;
-  try {
-    const argumentCell = manager.getArgument(charm);
-    source = argumentCell.get();
-  } catch (err) {
-    source = {
-      error: "Unable to get source/arguments",
-      details: err instanceof Error ? err.message : String(err),
-    };
-  }
+  const argumentCell = manager.getArgument(charm);
+  const source = argumentCell.get();
 
   // Get result (charm data)
   const result = charm.get();
 
   // Get charms this one reads from
-  const readingFromCharms = manager.getReadingFrom(charm);
-  const readingFrom = readingFromCharms.map((c) => ({
+  const readingFrom = manager.getReadingFrom(charm).map((c) => ({
     id: getCharmIdSafe(c),
     name: c.get()[NAME],
   }));
 
   // Get charms that read from this one
-  const readByCharms = manager.getReadByCharms(charm);
-  const readBy = readByCharms.map((c) => ({
+  const readBy = manager.getReadByCharms(charm).map((c) => ({
     id: getCharmIdSafe(c),
     name: c.get()[NAME],
   }));
