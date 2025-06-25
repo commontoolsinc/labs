@@ -4,7 +4,7 @@ import { isLegacyAlias, isLegacyCellLink } from "../src/link-utils.ts";
 import type { EntityId } from "../src/doc-map.ts";
 
 /**
- * Normalizes CellLinks by keeping only cell and path properties
+ * Normalizes LegacyCellLinks by keeping only cell and path properties
  * Also normalizes path elements so numeric strings and numbers are equivalent
  */
 export function normalizeCellLink(link: any): any {
@@ -21,15 +21,15 @@ export function normalizeCellLink(link: any): any {
 }
 
 /**
- * Deep normalizes an object, handling CellLinks and aliases
- * Strips out extra properties like space, schema, rootSchema from CellLinks
+ * Deep normalizes an object, handling LegacyCellLinks and aliases
+ * Strips out extra properties like space, schema, rootSchema from LegacyCellLinks
  */
 function deepNormalizeCellLinks(obj: any): any {
   if (!obj || typeof obj !== "object") {
     return obj;
   }
 
-  // Handle bare CellLinks
+  // Handle bare LegacyCellLinks
   if (isLegacyCellLink(obj)) {
     return normalizeCellLink(obj);
   }
@@ -55,9 +55,9 @@ function deepNormalizeCellLinks(obj: any): any {
 }
 
 /**
- * Custom expect-style matcher for CellLink equality
+ * Custom expect-style matcher for LegacyCellLink equality
  * Usage: expectCellLinksEqual(actual).toEqual(expected)
- * Works with bare CellLinks, CellLinks in aliases, and nested structures
+ * Works with bare LegacyCellLinks, LegacyCellLinks in aliases, and nested structures
  */
 export function expectCellLinksEqual(actual: unknown) {
   return {
@@ -69,8 +69,8 @@ export function expectCellLinksEqual(actual: unknown) {
         assertEquals(normalizedActual, normalizedExpected, msg);
       } catch (error) {
         if (error instanceof AssertionError) {
-          error.message =
-            `CellLinks are not equal (after normalization).\n${error.message}`;
+          error.message = `LegacyCellLinks are not equal (after normalization).
+${error.message}`;
           throw error;
         }
         throw error;

@@ -9,9 +9,13 @@ import {
   setNestedValue,
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
-import { isAnyCellLink, isCellLink } from "../src/link-utils.ts";
-import { arrayEqual } from "../src/path-utils.ts";
+import {
+  isAnyCellLink,
+  isCellLink,
+  isLegacyCellLink,
+} from "../src/link-utils.ts";
 import type { LegacyCellLink } from "../src/sigil-types.ts";
+import { arrayEqual } from "../src/path-utils.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -615,7 +619,8 @@ describe("data-updating", () => {
 
     it("should reuse items", () => {
       function isEqualCellLink(a: LegacyCellLink, b: LegacyCellLink): boolean {
-        return isCellLink(a) && isCellLink(b) && a.cell === b.cell &&
+        return isLegacyCellLink(a) && isLegacyCellLink(b) &&
+          a.cell === b.cell &&
           arrayEqual(a.path, b.path);
       }
 

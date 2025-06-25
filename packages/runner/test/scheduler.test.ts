@@ -541,8 +541,8 @@ describe("compactifyPaths", () => {
     await storageManager?.close();
   });
 
-  // helper to normalize CellLinks because compactifyPaths() does not preserve
-  // the extra properties added by cell.getAsCellLink()
+  // helper to normalize LegacyCellLinks because compactifyPaths() does not preserve
+  // the extra properties added by cell.getAsLegacyCellLink()
   const normalizeCellLink = (link: any) => ({
     cell: link.cell,
     path: link.path,
