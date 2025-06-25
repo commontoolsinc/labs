@@ -1287,7 +1287,6 @@ export class Provider implements IStorageProvider {
       }
       this.serverSubscriptions.add(factAddress, selector);
     }
-
     return this.workspace.load([[factAddress, schemaContext]]);
   }
 

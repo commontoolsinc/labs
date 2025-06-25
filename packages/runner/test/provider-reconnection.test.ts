@@ -4,7 +4,7 @@ import { Identity } from "@commontools/identity";
 import { Provider } from "../src/storage/cache.ts";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
-import type { SchemaContext, Entity } from "@commontools/memory/interface";
+import type { Entity, SchemaContext } from "@commontools/memory/interface";
 import type { EntityId } from "@commontools/runner";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -38,12 +38,15 @@ describe("Provider Reconnection", () => {
     it("should re-issue sync for all tracked subscriptions", async () => {
       const schema1: SchemaContext = {
         schema: { type: "object", properties: { name: { type: "string" } } },
-        rootSchema: { type: "object", properties: { name: { type: "string" } } }
+        rootSchema: {
+          type: "object",
+          properties: { name: { type: "string" } },
+        },
       };
 
       const schema2: SchemaContext = {
         schema: { type: "object", properties: { age: { type: "number" } } },
-        rootSchema: { type: "object", properties: { age: { type: "number" } } }
+        rootSchema: { type: "object", properties: { age: { type: "number" } } },
       };
 
       const entityId1: EntityId = { "/": "user-1" };
@@ -54,9 +57,15 @@ describe("Provider Reconnection", () => {
       await provider.sync(entityId2, true, schema2);
 
       // Override the provider's sync function to our version that also tracks the documents that its sync'ing on
-      const syncCalls: Array<{ entityId: EntityId; schemaContext?: SchemaContext }> = [];
+      const syncCalls: Array<
+        { entityId: EntityId; schemaContext?: SchemaContext }
+      > = [];
       const originalSync = provider.sync.bind(provider);
-      (provider as any).sync = async function(entityId: EntityId, expectedInStorage?: boolean, schemaContext?: SchemaContext) {
+      (provider as any).sync = async function (
+        entityId: EntityId,
+        expectedInStorage?: boolean,
+        schemaContext?: SchemaContext,
+      ) {
         syncCalls.push({ entityId, schemaContext });
         return originalSync(entityId, expectedInStorage, schemaContext);
       };
@@ -68,12 +77,12 @@ describe("Provider Reconnection", () => {
       expect(syncCalls.length).toBe(2);
 
       // Check first subscription
-      const call1 = syncCalls.find(c => c.entityId["/"] === "user-1");
+      const call1 = syncCalls.find((c) => c.entityId["/"] === "user-1");
       expect(call1).toBeDefined();
       expect(call1?.schemaContext).toEqual(schema1);
 
       // Check second subscription
-      const call2 = syncCalls.find(c => c.entityId["/"] === "user-2");
+      const call2 = syncCalls.find((c) => c.entityId["/"] === "user-2");
       expect(call2).toBeDefined();
       expect(call2?.schemaContext).toEqual(schema2);
     });
@@ -81,7 +90,7 @@ describe("Provider Reconnection", () => {
     it("should handle sync failures gracefully", async () => {
       const schema: SchemaContext = {
         schema: { type: "object" },
-        rootSchema: { type: "object" }
+        rootSchema: { type: "object" },
       };
 
       await provider.sync({ "/": "good-entity" }, true, schema);
@@ -90,7 +99,11 @@ describe("Provider Reconnection", () => {
       // Make sync fail for one entity
       const originalSync = provider.sync.bind(provider);
       let callCount = 0;
-      (provider as any).sync = async function(entityId: EntityId, expectedInStorage?: boolean, schemaContext?: SchemaContext) {
+      (provider as any).sync = async function (
+        entityId: EntityId,
+        expectedInStorage?: boolean,
+        schemaContext?: SchemaContext,
+      ) {
         if (entityId["/"] === "bad-entity") {
           throw new Error("Network error");
         }
@@ -109,7 +122,9 @@ describe("Provider Reconnection", () => {
 
       expect(callCount).toBe(1); // Only "good-entity" succeeded
       expect(errors.length).toBe(1);
-      expect(errors[0]).toContain("Failed to re-establish subscription for bad-entity");
+      expect(errors[0]).toContain(
+        "Failed to re-establish subscription for bad-entity",
+      );
     });
   });
 });

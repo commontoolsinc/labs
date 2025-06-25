@@ -9,8 +9,11 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.ts";
 import type { SchemaContext } from "@commontools/memory/interface";
 
-const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") || "http://localhost:8000";
-const MEMORY_WS_URL = `${TOOLSHED_URL.replace("http://", "ws://")}/api/storage/memory`;
+const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ||
+  "http://localhost:8000";
+const MEMORY_WS_URL = `${
+  TOOLSHED_URL.replace("http://", "ws://")
+}/api/storage/memory`;
 const TEST_DOC_ID = "test-reconnection-counter";
 
 console.log("Schema Query Reconnection Integration Test");
@@ -78,13 +81,13 @@ await provider.send([{
   value: {
     value: {
       value: 1,
-      timestamp: new Date().toISOString()
-    }
-  }
+      timestamp: new Date().toISOString(),
+    },
+  },
 }]);
 
 // Wait to give server time to send us back the update
-await new Promise(resolve => setTimeout(resolve, 1000));
+await new Promise((resolve) => setTimeout(resolve, 1000));
 
 // Check if our listener was called via the subscription
 if (updateCount === 0) {
@@ -97,7 +100,7 @@ console.log("Initial update received");
 // Test reconnection behavior
 console.log("\nTesting reconnection behavior...");
 
-// Access the WebSocket connection 
+// Access the WebSocket connection
 const providerConnection = provider as any; // its private so we use any
 console.log("WebSocket state:", providerConnection.connection?.readyState);
 
@@ -116,7 +119,7 @@ let testValue = 100; // Use values over 100 to show the value happens after reco
 const preDisconnectCount = updateCount;
 
 // Give it a moment to reconnect
-await new Promise(resolve => setTimeout(resolve, 2000));
+await new Promise((resolve) => setTimeout(resolve, 2000));
 
 // Send test updates and check if subscription still works
 console.log("Sending test updates after disconnection...");
@@ -129,13 +132,13 @@ const intervalId = setInterval(async () => {
       value: {
         value: {
           value: testValue++,
-          timestamp: new Date().toISOString()
-        }
-      }
+          timestamp: new Date().toISOString(),
+        },
+      },
     }]);
 
     // Check if we've received updates with value >= 100 (post-reconnection)
-    const postReconnectUpdates = updates.filter(u => u.value >= 100);
+    const postReconnectUpdates = updates.filter((u) => u.value >= 100);
 
     if (postReconnectUpdates.length >= 3) {
       console.log("RECONNECTED! Subscription is working again.");
@@ -149,7 +152,10 @@ const intervalId = setInterval(async () => {
       Deno.exit(0);
     }
   } catch (error) {
-    console.log("Error sending update:", error instanceof Error ? error.message : String(error));
+    console.log(
+      "Error sending update:",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }, 1000);
 
@@ -162,4 +168,4 @@ setTimeout(() => {
 }, 30000);
 
 // Keep the process running
-await new Promise(() => { });
+await new Promise(() => {});
