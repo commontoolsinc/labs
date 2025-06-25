@@ -374,6 +374,13 @@ jobs:
           FRONTEND_URL=http://localhost:8000/ \
           deno task integration
 
+      - name: Run runner integration tests
+        if: github.ref == 'refs/heads/main'
+        run: |
+          cd packages/runner
+          TOOLSHED_API_URL=http://localhost:8000/ \
+          deno task integration
+
   seeder-integration-test:
     name: "Seeder Integration Tests"
     runs-on: ubuntu-latest

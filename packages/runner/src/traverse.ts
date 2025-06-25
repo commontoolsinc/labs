@@ -65,6 +65,14 @@ export class MapSet<K, V> {
   public delete(key: K) {
     this.map.delete(key);
   }
+  /**
+   * iterable
+   */
+  *[Symbol.iterator](): IterableIterator<[K, Set<V>]> {
+    for (const [key, values] of this.map) {
+      yield [key, values];
+    }
+  }
 }
 
 export const DefaultSchemaSelector = {
