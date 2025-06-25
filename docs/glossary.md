@@ -48,10 +48,6 @@ Memory also provides interface for accreting new information through an interfac
 > ℹ️ Please note that layers above [memory] do not follow same principals or operate at the level of [fact]s, instead they use more traditional document-oriented semantics and reference state by the address inside the mutable memory space.
 
 
-## Deno
-
-A JavaScript/TypeScript runtime used on the server side of Open Ocean.
-
 ## [did:key]
 
 A decentralized identifier derived from a keypair. Used to uniquely identify and control a [Space].
@@ -88,7 +84,7 @@ It is worth pointing out that while typescript function is used it does not actu
 
 ## TCB (Trusted Computing Base)
 
-The minimal set of components that must be trusted to enforce security. In Open Ocean, this includes rendering infrastructure (e.g. web components), and excludes user-authored recipes, which are sandboxed.
+The minimal set of components that must be trusted to enforce security. This includes rendering infrastructure (e.g. web components), and excludes user-authored recipes, which are sandboxed.
 
 ## UCAN (User Controlled Authorization Network)
 
