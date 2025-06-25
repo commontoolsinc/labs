@@ -1,7 +1,7 @@
 {
   "name": "@commontools/runner",
   "tasks": {
-    "test": "deno test --allow-ffi --allow-env --allow-read",
+    "test": "deno test --allow-ffi --allow-env --allow-read test/*.test.ts",
     "integration": "deno test -A ./integration/*.test.ts"
   },
   "exports": {
