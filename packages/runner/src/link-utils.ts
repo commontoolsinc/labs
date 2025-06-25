@@ -1,4 +1,4 @@
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell, type MemorySpace } from "./cell.ts";
@@ -46,9 +46,14 @@ export type NormalizedFullLink = {
 
 /**
  * Check if value is a sigil value with any type
+ *
+ * Any object that is strictly `{ "/": Record<string, any> }`, no other props
  */
 export function isSigilValue(value: any): value is SigilValue<any> {
-  return isRecord(value) && "/" in value && isRecord(value["/"]);
+  return isRecord(value) &&
+    "/" in value &&
+    Object.keys(value).length === 1 &&
+    isObject(value["/"]);
 }
 
 /**

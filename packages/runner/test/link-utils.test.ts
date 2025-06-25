@@ -5,6 +5,7 @@ import {
   createSigilLinkFromParsedLink,
   isLegacyAlias,
   isLink,
+  isSigilValue,
   isWriteRedirectLink,
   type NormalizedLink,
   parseLink,
@@ -34,6 +35,83 @@ describe("link-utils", () => {
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  describe("isSigilValue", () => {
+    it("should identify valid sigil values", () => {
+      const validSigil = { "/": { someKey: "someValue" } };
+      expect(isSigilValue(validSigil)).toBe(true);
+    });
+
+    it("should identify sigil values with empty record", () => {
+      const emptySigil = { "/": {} };
+      expect(isSigilValue(emptySigil)).toBe(true);
+    });
+
+    it("should identify sigil values with nested objects", () => {
+      const nestedSigil = { "/": { nested: { deep: "value" } } };
+      expect(isSigilValue(nestedSigil)).toBe(true);
+    });
+
+    it("should not identify objects with / and other properties", () => {
+      const invalidSigil1 = { "/": { key: "value" }, otherProp: "value" };
+      expect(isSigilValue(invalidSigil1)).toBe(false);
+
+      const invalidSigil2 = { "/": { key: "value" }, extra: 123 };
+      expect(isSigilValue(invalidSigil2)).toBe(false);
+
+      const invalidSigil3 = {
+        "/": { key: "value" },
+        nested: { prop: "value" },
+      };
+      expect(isSigilValue(invalidSigil3)).toBe(false);
+    });
+
+    it("should not identify objects without / property", () => {
+      const noSlash = { otherProp: "value" };
+      expect(isSigilValue(noSlash)).toBe(false);
+
+      const emptyObject = {};
+      expect(isSigilValue(emptyObject)).toBe(false);
+    });
+
+    it("should not identify objects where / is not a record", () => {
+      const stringSlash = { "/": "not a record" };
+      expect(isSigilValue(stringSlash)).toBe(false);
+
+      const numberSlash = { "/": 123 };
+      expect(isSigilValue(numberSlash)).toBe(false);
+
+      const arraySlash = { "/": ["not", "a", "record"] };
+      expect(isSigilValue(arraySlash)).toBe(false);
+
+      const nullSlash = { "/": null };
+      expect(isSigilValue(nullSlash)).toBe(false);
+
+      const undefinedSlash = { "/": undefined };
+      expect(isSigilValue(undefinedSlash)).toBe(false);
+    });
+
+    it("should not identify non-objects", () => {
+      expect(isSigilValue("string")).toBe(false);
+      expect(isSigilValue(123)).toBe(false);
+      expect(isSigilValue(true)).toBe(false);
+      expect(isSigilValue(null)).toBe(false);
+      expect(isSigilValue(undefined)).toBe(false);
+      expect(isSigilValue([])).toBe(false);
+    });
+
+    it("should handle edge cases with multiple properties", () => {
+      const multipleProps = {
+        "/": { key: "value" },
+        prop1: "value1",
+        prop2: "value2",
+      };
+      expect(isSigilValue(multipleProps)).toBe(false);
+
+      const onlySlashButMultiple = { "/": { key: "value" }, "/extra": "value" };
+      expect(isSigilValue(onlySlashButMultiple)).toBe(false);
+    });
   });
 
   describe("isLink", () => {
