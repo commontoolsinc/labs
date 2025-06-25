@@ -30,20 +30,14 @@ export interface CharmConfig extends SpaceConfig {
   charm: string;
 }
 
-function parseSpace(
-  space: string,
-): string {
-  if (space.startsWith("did:key:")) {
-    // Need to be able to resolve a did key to a name, based
-    // on current Session requirements.
-    throw new Error("`space` as a DID key is not yet supported.");
-  }
-  if (space.startsWith("~")) {
-    // Need to be able to resolve a private space to a did key, based
-    // on current Session requirements.
-    throw new Error("`space` must not be a private space.");
-  }
-  return space;
+export interface CharmData {
+  id: string;
+  name?: string;
+  recipeName?: string;
+  source: any;
+  result: any;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
 }
 
 function getCharmIdSafe(charm: Cell<Charm>): string {
@@ -72,7 +66,6 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
 }
 
 async function loadManager(config: SpaceConfig): Promise<CharmManager> {
-  const spaceName = parseSpace(config.space);
   const session = await makeSession(config);
   const runtime = new Runtime({
     storageManager: StorageManager.open({
@@ -306,15 +299,7 @@ export async function linkCharms(
 
 export async function inspectCharm(
   config: CharmConfig,
-): Promise<{
-  id: string;
-  name?: string;
-  recipeName?: string;
-  source: any;
-  result: any;
-  readingFrom: Array<{ id: string; name?: string }>;
-  readBy: Array<{ id: string; name?: string }>;
-}> {
+): Promise<CharmData> {
   const manager = await loadManager(config);
 
   const charm = await manager.get(config.charm, false);

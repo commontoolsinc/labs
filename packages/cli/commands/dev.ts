@@ -1,6 +1,6 @@
 import { Command } from "@cliffy/command";
 import { join } from "@std/path";
-import { render } from "../lib/render.ts";
+import { handleCommand } from "../lib/handler.ts";
 import { process } from "../lib/dev.ts";
 
 export const dev = new Command()
@@ -28,23 +28,37 @@ export const dev = new Command()
     "--filename <value:string>",
     "The filename used when compiling the recipe, used in source maps.",
   )
+  .option(
+    "-v,--verbose",
+    "Enable verbose output.",
+  )
   .arguments("<entry:string>")
-  .action(async (options, entry) => {
-    const { exports } = await process({
-      entry: join(Deno.cwd(), entry),
-      check: options.check,
-      run: options.run,
-      output: options.output,
-      filename: options.filename,
-    });
-    if (exports) {
-      const mainExport = "default" in exports ? exports.default : exports;
-      try {
-        // Stringify before rendering, as the exported
-        // recipe is a function with extra properties via Object.assign
-        render(JSON.stringify(mainExport, null, 2));
-      } catch (_) {
-        render(mainExport.toString());
-      }
-    }
+  .action(async (options, entry) =>
+    await handleCommand(devCommand(options, entry), options)
+  );
+
+async function devCommand(
+  options: {
+    run: boolean;
+    check: boolean;
+    filename?: string;
+    output?: string;
+    verbose?: true;
+  },
+  entry: string,
+): Promise<string | undefined> {
+  const { exports } = await process({
+    entry: join(Deno.cwd(), entry),
+    check: options.check,
+    run: options.run,
+    output: options.output,
+    filename: options.filename,
+    verbose: options.verbose,
   });
+  if (exports) {
+    const mainExport = "default" in exports ? exports.default : exports;
+    // Stringify before handleCommanding, as the exported
+    // recipe is a function with extra properties via Object.assign
+    return JSON.stringify(mainExport, null, 2);
+  }
+}

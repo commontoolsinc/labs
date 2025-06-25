@@ -348,7 +348,10 @@ export class CharmManager {
     await this.runtime.storage.syncCell(charm);
 
     const recipeId = getRecipeIdFromCharm(charm);
-    if (!recipeId) throw new Error("recipeId is required");
+    if (!recipeId) {
+      const id = charmId(charm) ?? "<unknown>";
+      throw new Error(`Recipe for charm "${id}" not found in the system.`);
+    }
 
     // Make sure we have the recipe so we can run it!
     let recipe: Recipe | Module | undefined;

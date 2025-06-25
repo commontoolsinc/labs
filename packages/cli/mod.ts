@@ -1,13 +1,8 @@
 import { parse } from "./commands/mod.ts";
 
 export async function main(args: string[]) {
-  try {
-    await parse(args);
-    Deno.exit(0);
-  } catch (e) {
-    console.error(e);
-    Deno.exit(1);
-  }
+  // Harness handling in lib/handler.ts
+  await parse(args);
 }
 
 if (import.meta.main) {

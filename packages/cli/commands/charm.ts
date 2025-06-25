@@ -3,6 +3,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  CharmData,
   inspectCharm,
   linkCharms,
   listCharms,
@@ -11,7 +12,7 @@ import {
   setCharmRecipe,
   SpaceConfig,
 } from "../lib/charm.ts";
-import { render } from "../lib/render.ts";
+import { handleCommand } from "../lib/handler.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
 
@@ -20,7 +21,7 @@ const spaceUsage =
   `--identity <identity> --url <url> --api-url <api-url> --space <space>`;
 const charmUsage = `${spaceUsage} --charm <charm>`;
 
-// Render out args for the examples for both `--url`,
+// handleCommand out args for the examples for both `--url`,
 // and for the individual components (`--api-url`, `--charm`, `--space`)
 const RAW_EX_URL = "https://ct.dev/personal-notes/baed..43mi";
 const RAW_EX_COMP = parseUrl(RAW_EX_URL);
@@ -45,7 +46,11 @@ export const charm = new Command()
     prefix: "CT_",
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
-  .globalOption("-s,--space <space:string>", "The space name or DID")
+  .globalOption("-s,--space <space:string>", "The space name or DID.")
+  .globalOption(
+    "-v,--verbose",
+    "Enable verbose output.",
+  )
   /* charm ls */
   .command("ls", "List charms in space.")
   .usage(spaceUsage)
@@ -58,24 +63,26 @@ export const charm = new Command()
     `Display a list of all charms in "${RAW_EX_COMP.space}".`,
   )
   .action(async (options) => {
-    const charmsData = [
-      ["ID", "NAME", "RECIPE"],
-      ...((await listCharms(parseSpaceOptions(options))).map(
-        (
-          data,
-        ) => [
-          data.id,
-          data.name ?? "<unnamed>",
-          data.recipeName ?? "<unnamed>",
-        ],
-      )),
-    ];
-    if (charmsData.length === 1) {
-      // Only header fields -- render nothing.
-      return;
-    }
-    render(
-      Table.from(charmsData).toString(),
+    await handleCommand(
+      listCharms(parseSpaceOptions(options))
+        .then(
+          (charmData) => {
+            if (!charmData.length) {
+              return;
+            }
+            return Table.from([
+              ["ID", "NAME", "RECIPE"],
+              ...charmData.map(
+                (data) => [
+                  data.id,
+                  data.name ?? "<unnamed>",
+                  data.recipeName ?? "<unnamed>",
+                ],
+              ),
+            ]).toString();
+          },
+        ),
+      options,
     );
   })
   /* charm new */
@@ -92,11 +99,12 @@ export const charm = new Command()
   .arguments("<entry:string>")
   .action(
     async (options, entryPath) =>
-      render(
-        await newCharm(
+      await handleCommand(
+        newCharm(
           parseSpaceOptions(options),
           absPath(entryPath),
         ),
+        options,
       ),
   )
   /* charm apply */
@@ -112,7 +120,10 @@ export const charm = new Command()
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .action(async (options) =>
-    applyCharmInput(parseCharmOptions(options), await drainStdin())
+    await handleCommand(
+      applyCharmInput(parseCharmOptions(options), await drainStdin()),
+      options,
+    )
   )
   /* charm getsrc */
   .command("getsrc", "Retrieve the recipe source for the given charm.")
@@ -127,8 +138,11 @@ export const charm = new Command()
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .arguments("<outpath:string>")
-  .action((options, outPath) =>
-    saveCharmRecipe(parseCharmOptions(options), absPath(outPath))
+  .action(async (options, outPath) =>
+    await handleCommand(
+      saveCharmRecipe(parseCharmOptions(options), absPath(outPath)),
+      options,
+    )
   )
   /* charm setsrc */
   .command("setsrc", "Update the recipe source for the given charm.")
@@ -143,8 +157,17 @@ export const charm = new Command()
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .arguments("<entry:string>")
-  .action((options, entryPath) =>
-    setCharmRecipe(parseCharmOptions(options), absPath(entryPath))
+  .action(async (options, entryPath) =>
+    await handleCommand(
+      setCharmRecipe(parseCharmOptions(options), absPath(entryPath)),
+      options,
+    )
+  )
+  .action(async (options, entryPath) =>
+    await handleCommand(
+      setCharmRecipe(parseCharmOptions(options), absPath(entryPath)),
+      options,
+    )
   )
   /* charm inspect */
   .command("inspect", "Inspect detailed information about a charm")
@@ -159,63 +182,12 @@ export const charm = new Command()
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .option("--json", "Output raw JSON data")
-  .action(async (options) => {
-    const charmConfig = parseCharmOptions(options);
-
-    const charmData = await inspectCharm(charmConfig);
-
-    if (options.json) {
-      // In JSON mode, use render with JSON output
-      render(charmData, { json: true });
-      return;
-    }
-
-    // Build formatted output as template
-    let output = `
-=== Charm: ${charmData.id} ===
-Name: ${charmData.name || "<no name>"}
-Recipe: ${charmData.recipeName || "<no recipe name>"}
-
---- Source (Inputs) ---`;
-
-    if (charmData.source) {
-      output += `\n${JSON.stringify(charmData.source, null, 2)}`;
-    } else {
-      output += "\n<no source data>";
-    }
-
-    output += "\n\n--- Result ---";
-    if (charmData.result) {
-      // Filter out large UI objects that clutter the output
-      const filteredResult = { ...charmData.result };
-      if (filteredResult.$UI && typeof filteredResult.$UI === "object") {
-        filteredResult.$UI = "<large UI object - use --json to see full UI>";
-      }
-      output += `\n${JSON.stringify(filteredResult, null, 2)}`;
-    } else {
-      output += "\n<no result data>";
-    }
-
-    output += "\n\n--- Reading From ---";
-    if (charmData.readingFrom.length > 0) {
-      charmData.readingFrom.forEach((ref) => {
-        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
-      });
-    } else {
-      output += "\n  (none)";
-    }
-
-    output += "\n\n--- Read By ---";
-    if (charmData.readBy.length > 0) {
-      charmData.readBy.forEach((ref) => {
-        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
-      });
-    } else {
-      output += "\n  (none)";
-    }
-
-    render(output);
-  })
+  .action(async (options) =>
+    await handleCommand(
+      prettyCharmData(await inspectCharm(parseCharmOptions(options)), options),
+      options,
+    )
+  )
   /* charm link */
   .command("link", "Link a field from one charm to another")
   .usage(spaceUsage)
@@ -232,41 +204,11 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     `Link well-known charms list to charm field.`,
   )
   .arguments("<source:string> <target:string>")
-  .action(async (options, sourceRef, targetRef) => {
-    const spaceConfig = parseSpaceOptions(options);
-
-    // Parse source and target references - handle both charmId/path and well-known IDs
-    const source = parseLink(sourceRef, { allowWellKnown: true });
-    const target = parseLink(targetRef);
-
-    // For linking, we need paths unless source is a well-known ID
-    // Well-known IDs can be linked without a path (linking the entire cell)
-    const isWellKnownSource = !sourceRef.includes("/");
-
-    if (!isWellKnownSource && !source.path) {
-      throw new ValidationError(
-        `Source reference must include a path. Expected: charmId/path/to/field`,
-        { exitCode: 1 },
-      );
-    }
-
-    if (!target.path) {
-      throw new ValidationError(
-        `Target reference must include a path. Expected: charmId/path/to/field`,
-        { exitCode: 1 },
-      );
-    }
-
-    await linkCharms(
-      spaceConfig,
-      source.charmId,
-      source.path || [], // Empty path for well-known IDs
-      target.charmId,
-      target.path,
-    );
-
-    render(`Linked ${sourceRef} to ${targetRef}`);
-  });
+  .action(async (options, sourceRef, targetRef) =>
+    await handleCommand(
+      handleLinkCommand(parseSpaceOptions(options), sourceRef, targetRef),
+    )
+  );
 
 interface CharmCLIOptions {
   charm?: string;
@@ -417,4 +359,97 @@ async function drainStdin(): Promise<object | undefined> {
   } catch (e) {
     throw new Error(`Could not parse STDIN as JSON: "${out}".`);
   }
+}
+
+function prettyCharmData(
+  charmData: CharmData,
+  options: { json?: true },
+): string | object {
+  if (options.json) {
+    return Promise.resolve(charmData);
+  }
+
+  // Build formatted output as template
+  let output = `
+=== Charm: ${charmData.id} ===
+Name: ${charmData.name || "<no name>"}
+Recipe: ${charmData.recipeName || "<no recipe name>"}
+
+--- Source (Inputs) ---`;
+
+  if (charmData.source) {
+    output += `\n${JSON.stringify(charmData.source, null, 2)}`;
+  } else {
+    output += "\n<no source data>";
+  }
+
+  output += "\n\n--- Result ---";
+  if (charmData.result) {
+    // Filter out large UI objects that clutter the output
+    const filteredResult = { ...charmData.result };
+    if (filteredResult.$UI && typeof filteredResult.$UI === "object") {
+      filteredResult.$UI = "<large UI object - use --json to see full UI>";
+    }
+    output += `\n${JSON.stringify(filteredResult, null, 2)}`;
+  } else {
+    output += "\n<no result data>";
+  }
+
+  output += "\n\n--- Reading From ---";
+  if (charmData.readingFrom.length > 0) {
+    charmData.readingFrom.forEach((ref) => {
+      output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+    });
+  } else {
+    output += "\n  (none)";
+  }
+
+  output += "\n\n--- Read By ---";
+  if (charmData.readBy.length > 0) {
+    charmData.readBy.forEach((ref) => {
+      output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+    });
+  } else {
+    output += "\n  (none)";
+  }
+
+  return output;
+}
+
+async function handleLinkCommand(
+  spaceConfig: SpaceConfig,
+  sourceRef: string,
+  targetRef: string,
+): Promise<string> {
+  // Parse source and target references - handle both charmId/path and well-known IDs
+  const source = parseLink(sourceRef, { allowWellKnown: true });
+  const target = parseLink(targetRef);
+
+  // For linking, we need paths unless source is a well-known ID
+  // Well-known IDs can be linked without a path (linking the entire cell)
+  const isWellKnownSource = !sourceRef.includes("/");
+
+  if (!isWellKnownSource && !source.path) {
+    throw new ValidationError(
+      `Source reference must include a path. Expected: charmId/path/to/field`,
+      { exitCode: 1 },
+    );
+  }
+
+  if (!target.path) {
+    throw new ValidationError(
+      `Target reference must include a path. Expected: charmId/path/to/field`,
+      { exitCode: 1 },
+    );
+  }
+
+  await linkCharms(
+    spaceConfig,
+    source.charmId,
+    source.path || [], // Empty path for well-known IDs
+    target.charmId,
+    target.path,
+  );
+
+  return `Linked ${sourceRef} to ${targetRef}`;
 }

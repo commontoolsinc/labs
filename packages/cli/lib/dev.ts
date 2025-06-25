@@ -2,6 +2,8 @@ import { JsScript, type Source } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
 import { Engine, EngineProgramResolver, Runtime } from "@commontools/runner";
 import { basename, dirname, join } from "@std/path";
+import { render } from "@commontools/api";
+import { verboseLog } from "./handler.ts";
 
 async function createRuntime() {
   const { StorageManager } = await import(
@@ -53,6 +55,7 @@ export interface ProcessOptions {
   check: boolean;
   output?: string;
   filename?: string;
+  verbose?: true;
 }
 
 export async function process(
@@ -63,6 +66,7 @@ export async function process(
     : options.output
     ? basename(options.output)
     : undefined;
+
   const program = new CliProgram(options.entry);
   const engine = new Engine(await createRuntime());
   const { output, exports } = await engine.process(program, {
@@ -72,6 +76,7 @@ export async function process(
   });
 
   if (options.output) {
+    verboseLog(`Writing compiled JavaScript to ${options.output}`, options);
     await Deno.writeTextFile(options.output, output.js);
   }
   return { output, exports };

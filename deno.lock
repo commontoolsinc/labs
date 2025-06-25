@@ -32,6 +32,7 @@
     "jsr:@std/expect@1": "1.0.13",
     "jsr:@std/fmt@0.221": "0.221.0",
     "jsr:@std/fmt@1.0.3": "1.0.3",
+    "jsr:@std/fmt@^1.0.3": "1.0.5",
     "jsr:@std/fmt@^1.0.5": "1.0.5",
     "jsr:@std/fmt@~1.0.2": "1.0.5",
     "jsr:@std/fs@0.221": "0.221.0",
@@ -6853,7 +6854,8 @@
       "packages/cli": {
         "dependencies": [
           "jsr:@cliffy/command@^1.0.0-rc.7",
-          "jsr:@cliffy/table@^1.0.0-rc.7"
+          "jsr:@cliffy/table@^1.0.0-rc.7",
+          "jsr:@std/fmt@^1.0.3"
         ]
       },
       "packages/deno-vite-plugin": {

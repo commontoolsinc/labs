@@ -1,5 +1,5 @@
 import { Command } from "@cliffy/command";
-import { render } from "../lib/render.ts";
+import { handleCommand } from "../lib/handler.ts";
 import {
   getDidFromFile,
   pkcs8FromEntropy,
@@ -13,11 +13,13 @@ export const identity = new Command()
   /* id new */
   .command("new", "Output a new identity keyfile to stdout.")
   .example("ct id create > ./my.key", "Create and store a keyfile at ./my.key")
-  .action(createIdentity)
+  .action(async () => await handleCommand(pkcs8FromEntropy()))
   /* id did */
   .command("did <keypath:string>", "Output the DID of a keyfile to stdout.")
   .example("ct id did ./my.key", "Outputs the DID of ./my.key to stdout.")
-  .action(getDid)
+  .action(async (_, keypath: string) =>
+    await handleCommand(getDidFromFile(keypath))
+  )
   /* id derive */
   .command("derive", "Derives a keyfile from the provided passphrase.")
   .example(
@@ -25,19 +27,6 @@ export const identity = new Command()
     'Create and store a keyfile at ./my.key derived from the string "common user".',
   )
   .arguments("<passphrase:string>")
-  .action(deriveIdentity);
-
-async function createIdentity() {
-  const pkcs8Material = await pkcs8FromEntropy();
-  render(pkcs8Material);
-}
-
-async function getDid(_: void, keypath: string) {
-  const did = await getDidFromFile(keypath);
-  render(did);
-}
-
-async function deriveIdentity(_: void, passphrase: string) {
-  const pkcs8Material = await pkcs8FromPassphrase(passphrase);
-  render(pkcs8Material);
-}
+  .action(async (_, passphrase: string) =>
+    await handleCommand(pkcs8FromPassphrase(passphrase))
+  );
