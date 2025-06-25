@@ -88,7 +88,7 @@ relationship between documents and cells:
 
 - **Cell**: The user-facing abstraction that provides a reactive view over one
   or more documents. Cells are defined by schemas and can traverse document
-  relationships through cell links and aliases.
+  relationships through sigil-based links.
 
 While DocImpl handles the low-level storage concerns, Cells provide the
 higher-level programming model with schema validation, reactivity, and
@@ -105,13 +105,11 @@ storage:
 - Schemas can define nested cells with `asCell: true`
 - Schema validation happens automatically when setting values
 
-### CellLink and Aliases
+### Sigil-based Links
 
-Cells can reference other cells through links and aliases:
+Cells can reference other cells through a unified sigil-based linking system. This approach replaces the previous distinction between CellLinks and Aliases.
 
-- **CellLink**: A reference to another cell, containing a space ID and document
-  ID
-- **Aliases**: Named references within documents that point to other documents
+- **Sigil Links**: A flexible, JSON-based format for representing references to other cells. They can be simple links to other documents or write-redirects (previously aliases).
 - These mechanisms allow building complex, interconnected data structures
 - The system automatically traverses links when needed
 
@@ -504,14 +502,14 @@ const mappingCell = runtime.getCell(
       firstTag: { type: "string" },
     },
     default: {
-      // References to source cell values
-      id: { cell: sourceCell, path: ["id"] },
+      // References to source cell values using sigil links
+      id: sourceCell.key("id").getAsLink(),
       // Turn single value to array
-      changes: [{ cell: sourceCell, path: ["metadata", "createdAt"] }],
+      changes: [sourceCell.key("metadata").key("createdAt").getAsLink()],
       // Rename field and uplift from nested element
-      kind: { cell: sourceCell, path: ["metadata", "type"] },
+      kind: sourceCell.key("metadata").key("type").getAsLink(),
       // Reference to first array element
-      firstTag: { cell: sourceCell, path: ["tags", 0] },
+      firstTag: sourceCell.key("tags").key(0).getAsLink(),
     },
   },
 );
@@ -712,7 +710,7 @@ components interact:
 2. **Validation** → Schema validation ensures data conforms to expected
    structure (so far only on get, not yet on write)
 3. **Processing** → Recipes transform data according to their logic
-4. **Reactivity** → Changes propagate to dependent cells and recipes
+4. **Reactivity** → Changes propagate to dependent cells and recipes through the unified sigil-based linking system
 5. **Storage** → Updated data is persisted to storage if configured
 6. **Synchronization** → Changes are synchronized across clients if enabled
 
