@@ -152,7 +152,9 @@ This script guides Claude through setting up a complete space with the `ct` util
 - `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]` - Create charm
 - `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source]/[field] [target]/[field]` - Link charms
 - `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]` - List charms
-- `./dist/ct charm view --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - View charm details
+- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Inspect charm details
+- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] [charmId]` - Inspect charm details (alternative syntax)
+- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] [charmId] --json` - Output raw JSON data
 
 ### Expected Workflow:
 1. Gmail charm → extract emails field
