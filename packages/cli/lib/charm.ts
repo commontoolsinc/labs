@@ -209,6 +209,42 @@ export async function applyCharmInput(
   await exec({ manager, recipe, charmId: config.charm, input });
 }
 
+async function getCellByIdOrCharm(
+  manager: CharmManager,
+  cellId: string,
+  label: string,
+): Promise<{ cell: Cell<any>; isCharm: boolean }> {
+  try {
+    // Try to get as a charm first
+    const charm = await manager.get(cellId, true);
+    if (!charm) {
+      throw new Error(`Charm ${cellId} not found`);
+    }
+    return { cell: charm, isCharm: true };
+  } catch (error) {
+    // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
+    try {
+      const cell = await manager.getCellById({ "/": cellId });
+
+      // Check if this cell is actually a charm by looking at the charms list
+      const charms = manager.getCharms().get();
+      const isActuallyCharm = charms.some((charm) => {
+        try {
+          const id = getCharmIdSafe(charm);
+          return id === cellId;
+        } catch {
+          // If we can't get the charm ID, it's not a valid charm
+          return false;
+        }
+      });
+
+      return { cell, isCharm: isActuallyCharm };
+    } catch (cellError) {
+      throw new Error(`${label} "${cellId}" not found as charm or cell`);
+    }
+  }
+}
+
 export async function linkCharms(
   config: SpaceConfig,
   sourceCharmId: string,
@@ -218,55 +254,28 @@ export async function linkCharms(
 ): Promise<void> {
   const manager = await loadManager(config);
 
-  // Try to get source as a charm first, then as an arbitrary cell ID
-  let sourceCell: Cell<any>;
-  let sourceIsCharm = false;
-  try {
-    const sourceCharm = await manager.get(sourceCharmId, true); // Run the charm to ensure it has results
-    sourceCell = sourceCharm;
-    sourceIsCharm = true;
-    
-  } catch (error) {
-    // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
-    try {
-      sourceCell = await manager.getCellById({ "/": sourceCharmId });
-      sourceIsCharm = false;
-    } catch (cellError) {
-      throw new Error(`Source "${sourceCharmId}" not found as charm or cell`);
-    }
-  }
+  // Get source cell (charm or arbitrary cell)
+  const { cell: sourceCell, isCharm: sourceIsCharm } = await getCellByIdOrCharm(
+    manager,
+    sourceCharmId,
+    "Source",
+  );
 
-  // Try to get target as a charm first, then as an arbitrary cell ID
-  let targetCell: Cell<any>;
-  let targetIsCharm = false;
-  try {
-    const targetCharm = await manager.get(targetCharmId, true); // Run the charm to ensure it exists
-    targetCell = targetCharm;
-    targetIsCharm = true;
-  } catch (error) {
-    // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
-    try {
-      targetCell = await manager.getCellById({ "/": targetCharmId });
-      // Check if this cell is actually a charm by looking at the charms list
-      const charms = manager.getCharms().get();
-      const isActuallyCharm = charms.some(charm => {
-        const id = charmId(charm);
-        return id === targetCharmId;
-      });
-      targetIsCharm = isActuallyCharm;
-    } catch (cellError) {
-      throw new Error(`Target "${targetCharmId}" not found as charm or cell`);
-    }
-  }
+  // Get target cell (charm or arbitrary cell)
+  const { cell: targetCell, isCharm: targetIsCharm } = await getCellByIdOrCharm(
+    manager,
+    targetCharmId,
+    "Target",
+  );
 
   // Navigate to the source path
   let sourceResultCell = sourceCell;
   // For charms, manager.get() already returns the result cell, so no need to add "result"
-  
+
   for (const segment of sourcePath) {
     sourceResultCell = sourceResultCell.key(segment);
   }
-  
+
   const sourceCellLink = sourceResultCell.getAsCellLink();
 
   // Navigate to the target path

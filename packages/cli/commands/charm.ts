@@ -171,14 +171,14 @@ export const charm = new Command()
     // For linking, we need paths unless source is a well-known ID
     // Well-known IDs can be linked without a path (linking the entire cell)
     const isWellKnownSource = !sourceRef.includes("/");
-    
+
     if (!isWellKnownSource && !source.path) {
       throw new ValidationError(
         `Source reference must include a path. Expected: charmId/path/to/field`,
         { exitCode: 1 },
       );
     }
-    
+
     if (!target.path) {
       throw new ValidationError(
         `Target reference must include a path. Expected: charmId/path/to/field`,
@@ -189,7 +189,7 @@ export const charm = new Command()
     await linkCharms(
       spaceConfig,
       source.charmId,
-      source.path || [],  // Empty path for well-known IDs
+      source.path || [], // Empty path for well-known IDs
       target.charmId,
       target.path,
     );
