@@ -152,7 +152,9 @@ This script guides Claude through setting up a complete space with the `ct` util
 - `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]` - Create charm
 - `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source] [target]/[field]` - Link data
 - `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]` - List charms
-- `./dist/ct charm view --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - View charm details
+- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Inspect charm details
+- `./dist/ct charm inspect --identity [keyfile] --url [full-url-with-charm-id]` - Inspect charm details (URL syntax)
+- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] --json` - Output raw JSON data
 
 ### Understanding Linking with `ct charm link`:
 

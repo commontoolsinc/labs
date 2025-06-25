@@ -3,6 +3,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  inspectCharm,
   linkCharms,
   listCharms,
   newCharm,
@@ -145,6 +146,76 @@ export const charm = new Command()
   .action((options, entryPath) =>
     setCharmRecipe(parseCharmOptions(options), absPath(entryPath))
   )
+  /* charm inspect */
+  .command("inspect", "Inspect detailed information about a charm")
+  .usage(charmUsage)
+  .example(
+    `ct charm inspect ${EX_ID} ${EX_COMP_CHARM}`,
+    `Inspect detailed information about charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `ct charm inspect ${EX_ID} ${EX_URL}`,
+    `Inspect detailed information about charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--json", "Output raw JSON data")
+  .action(async (options) => {
+    const charmConfig = parseCharmOptions(options);
+
+    const charmData = await inspectCharm(charmConfig);
+
+    if (options.json) {
+      // In JSON mode, use render with JSON output
+      render(charmData, { json: true });
+      return;
+    }
+
+    // Build formatted output as template
+    let output = `
+=== Charm: ${charmData.id} ===
+Name: ${charmData.name || "<no name>"}
+Recipe: ${charmData.recipeName || "<no recipe name>"}
+
+--- Source (Inputs) ---`;
+
+    if (charmData.source) {
+      output += `\n${JSON.stringify(charmData.source, null, 2)}`;
+    } else {
+      output += "\n<no source data>";
+    }
+
+    output += "\n\n--- Result ---";
+    if (charmData.result) {
+      // Filter out large UI objects that clutter the output
+      const filteredResult = { ...charmData.result };
+      if (filteredResult.$UI && typeof filteredResult.$UI === "object") {
+        filteredResult.$UI = "<large UI object - use --json to see full UI>";
+      }
+      output += `\n${JSON.stringify(filteredResult, null, 2)}`;
+    } else {
+      output += "\n<no result data>";
+    }
+
+    output += "\n\n--- Reading From ---";
+    if (charmData.readingFrom.length > 0) {
+      charmData.readingFrom.forEach((ref) => {
+        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+      });
+    } else {
+      output += "\n  (none)";
+    }
+
+    output += "\n\n--- Read By ---";
+    if (charmData.readBy.length > 0) {
+      charmData.readBy.forEach((ref) => {
+        output += `\n  - ${ref.id}${ref.name ? ` (${ref.name})` : ""}`;
+      });
+    } else {
+      output += "\n  (none)";
+    }
+
+    render(output);
+  })
   /* charm link */
   .command("link", "Link a field from one charm to another")
   .usage(spaceUsage)

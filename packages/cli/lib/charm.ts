@@ -303,3 +303,58 @@ export async function linkCharms(
   await manager.runtime.idle();
   await manager.synced();
 }
+
+export async function inspectCharm(
+  config: CharmConfig,
+): Promise<{
+  id: string;
+  name?: string;
+  recipeName?: string;
+  source: any;
+  result: any;
+  readingFrom: Array<{ id: string; name?: string }>;
+  readBy: Array<{ id: string; name?: string }>;
+}> {
+  const manager = await loadManager(config);
+
+  const charm = await manager.get(config.charm, false);
+  if (!charm) {
+    throw new Error(`Charm "${config.charm}" not found`);
+  }
+
+  const id = getCharmIdSafe(charm);
+  const name = charm.get()[NAME];
+
+  // Get recipe metadata
+  const recipeMeta = await getRecipeMeta(manager, config.charm);
+  const recipeName = recipeMeta.recipeName;
+
+  // Get source (arguments/inputs)
+  const argumentCell = manager.getArgument(charm);
+  const source = argumentCell.get();
+
+  // Get result (charm data)
+  const result = charm.get();
+
+  // Get charms this one reads from
+  const readingFrom = manager.getReadingFrom(charm).map((c) => ({
+    id: getCharmIdSafe(c),
+    name: c.get()[NAME],
+  }));
+
+  // Get charms that read from this one
+  const readBy = manager.getReadByCharms(charm).map((c) => ({
+    id: getCharmIdSafe(c),
+    name: c.get()[NAME],
+  }));
+
+  return {
+    id,
+    name,
+    recipeName,
+    source,
+    result,
+    readingFrom,
+    readBy,
+  };
+}

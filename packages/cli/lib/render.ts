@@ -33,7 +33,10 @@ function stringify(value: unknown): string {
 
 export function render(value: unknown, { json }: { json?: boolean } = {}) {
   if (json) {
-    throw new Error("JSON mode not yet supported.");
+    // For JSON mode, output raw JSON without additional formatting
+    const jsonValue = `${JSON.stringify(value, null, 2)}\n`;
+    Deno.stdout.write(encode(jsonValue));
+    return;
   }
   // Append a `\n` to the stdout for TTY legibility and
   // unix file compatibility.
