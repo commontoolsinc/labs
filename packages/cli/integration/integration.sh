@@ -5,7 +5,13 @@ error () {
   >&2 echo $1
   exit 1
 }
-
+replace () {
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i ' ' "$1" "$2"
+  else
+    sed -i "$1" "$2"
+  fi 
+}
 
 CT="$([[ -n "$CT_CLI_INTEGRATION_USE_LOCAL" ]] && echo "deno task cli" || echo "ct")"
 if [ "$#" -eq 0 ]; then
@@ -44,7 +50,7 @@ if [ ! -f "$WORK_DIR/main.tsx" ]; then
 fi
 
 # Update the charm's source code
-sed -i 's/Simple counter:/Simple counter 2:/g' "$WORK_DIR/main.tsx"
+replace 's/Simple counter:/Simple counter 2:/g' "$WORK_DIR/main.tsx"
 $CT charm setsrc $SPACE_ARGS --charm $CHARM_ID $WORK_DIR/main.tsx
 
 # (Again) Retrieve the source code for $CHARM_ID to $WORK_DIR
