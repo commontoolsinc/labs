@@ -187,9 +187,9 @@ export interface IStorageTransaction {
 export interface ITransactionReader {
   /**
    * Reads a value from a (local) memory address and captures corresponding
-   * `Read` in the the transaction invariants. If value was written in read
-   * memory address in this transaction read will return value that was written
-   * as opposed to value stored.
+   * `Read` in the transaction invariants. If value was written in read memory
+   * address in this transaction read will return value that was written as
+   * opposed to value stored.
    *
    * Read will fail with `InactiveTransactionError` if transaction is no longer
    * active.
@@ -199,7 +199,7 @@ export interface ITransactionReader {
    * captured however to ensure that assumption about non existence is upheld.
    *
    * ```ts
-   *  const w = tx.write({ the, of, at: [] }, {
+   *  const w = tx.write({ type, id, path: [] }, {
    *    title: "Hello world",
    *    content: [
    *       { text: "Beautiful day", format: "bold" }
@@ -207,13 +207,13 @@ export interface ITransactionReader {
    *  })
    *  assert(w.ok)
    *
-   *  assert(tx.read({ the, of, at: ['author'] }).ok === undefined)
-   *  assert(tx.read({ the, of, at: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type, id, path: ['author'] }).ok === undefined)
+   *  assert(tx.read({ type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
    *  // JS specific getters are not supported
-   *  assert(tx.read({ the, of, at: ['content', 'length'] }).ok.is === undefined)
-   *  assert(tx.read({ the, of, at: ['title'] }).ok.is === "Hello world")
+   *  assert(tx.read({ type, id, path: ['content', 'length'] }).ok.is === undefined)
+   *  assert(tx.read({ type, id, path: ['title'] }).ok.is === "Hello world")
    *  // Referencing non-existing facts produces errors
-   *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type: 'bad/mime' , id, path: ['author'] }).error.name === 'NotFoundError')
    * ```
    */
   read(
