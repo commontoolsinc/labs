@@ -239,7 +239,7 @@ function factoryFromRecipe<T, R>(
         // HACK(seefeld): For unnamed cells, we've run into an issue when the
         // order changes that a stream might clobber a previously used
         // non-stream, which means the default value won't be assigned and the
-        // cell won't be treated as recipe. So we'll namespace those separately.
+        // cell won't be treated as stream. So we'll namespace those separately.
         const streamMarker = isRecord(value) && value.$stream === true
           ? "stream"
           : "";
