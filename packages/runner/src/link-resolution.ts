@@ -267,7 +267,7 @@ export function followWriteRedirects<T = any>(
   else base = base as Cell<T>; // Makes TS happy
 
   if (isWriteRedirectLink(alias)) {
-    const link = parseLink(alias, base)!;
+    const link = parseLink(alias, base);
     return followLinks(
       {
         cell: base.getDoc().runtime.documentMap.getDocByEntityId(

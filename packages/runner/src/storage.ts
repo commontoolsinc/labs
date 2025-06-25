@@ -269,7 +269,7 @@ export class Storage implements IStorage {
     const traverse = (value: Readonly<any>): any => {
       // If it's a link, add it as dependency and convert it to a sigil link
       if (isLink(value)) {
-        const link = parseLink(value, doc.asCell())!;
+        const link = parseLink(value, doc.asCell());
         const cell = this.runtime.getCellFromLink(link);
         dependencies.add(this._ensureIsSynced(cell));
 
@@ -340,7 +340,7 @@ export class Storage implements IStorage {
       if (typeof value !== "object" || value === null) {
         return value;
       } else if (isLink(value)) {
-        const link = parseLink(value, doc.asCell())!;
+        const link = parseLink(value, doc.asCell());
         const cell = this.runtime.getCellFromLink(link);
 
         // If the doc is not yet loaded, load it. As it's referenced in
