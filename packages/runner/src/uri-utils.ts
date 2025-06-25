@@ -1,5 +1,4 @@
 import { isRecord } from "@commontools/utils/types";
-import type { EntityId } from "./doc-map.ts";
 import type { URI } from "./sigil-types.ts";
 
 /**

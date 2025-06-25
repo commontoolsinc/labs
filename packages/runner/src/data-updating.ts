@@ -4,7 +4,7 @@ import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { isCell } from "./cell.ts";
-import { isAnyCellLink, isLegacyCellLink } from "./link-utils.ts";
+import { isAnyCellLink } from "./link-utils.ts";
 import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";

@@ -31,7 +31,6 @@ import {
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
-  isCellLink,
   isLink,
   isWriteRedirectLink,
   parseLink,

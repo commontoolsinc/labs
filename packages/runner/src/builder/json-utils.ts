@@ -1,5 +1,4 @@
-import { isObject, isRecord } from "@commontools/utils/types";
-import { isCell } from "../cell.ts";
+import { isRecord } from "@commontools/utils/types";
 import { type LegacyAlias } from "../sigil-types.ts";
 import { isLegacyAlias, isLink } from "../link-utils.ts";
 import {
