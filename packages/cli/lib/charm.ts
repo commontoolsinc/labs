@@ -288,8 +288,6 @@ export async function linkCharms(
     sourceResultCell = sourceResultCell.key(segment);
   }
 
-  const sourceCellLink = sourceResultCell.getAsCellLink();
-
   // Navigate to the target path
   const targetKey = targetPath.pop();
   if (!targetKey) {
@@ -310,7 +308,7 @@ export async function linkCharms(
     targetInputCell = targetInputCell.key(segment);
   }
 
-  targetInputCell.key(targetKey).set(sourceCellLink);
+  targetInputCell.key(targetKey).set(sourceResultCell);
 
   await manager.runtime.idle();
   await manager.synced();
