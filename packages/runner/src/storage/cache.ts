@@ -187,7 +187,11 @@ class Heap implements SyncPush<Revision<State>> {
     return this.store.get(toKey(entry));
   }
 
-  merge(entries: Iterable<Revision<State>>, merge: Merge<Revision<State>>) {
+  merge(
+    entries: Iterable<Revision<State>>,
+    merge: Merge<Revision<State>>,
+    notifyFilter?: (state: Revision<State> | undefined) => boolean,
+  ) {
     const updated = new Set<string>();
     for (const entry of entries) {
       const key = toKey(entry);
@@ -204,8 +208,10 @@ class Heap implements SyncPush<Revision<State>> {
 
     // Notify all the subscribers
     for (const key of updated) {
-      for (const subscriber of this.subscribers.get(key) ?? []) {
-        subscriber(this.store.get(key));
+      if (notifyFilter === undefined || notifyFilter(this.store.get(key))) {
+        for (const subscriber of this.subscribers.get(key) ?? []) {
+          subscriber(this.store.get(key));
+        }
       }
     }
 
@@ -361,6 +367,9 @@ export class Replica {
   static open() {
   }
 
+  // Track the causes of pending nursery changes
+  private pendingNurseryChanges = new MapSet<string, string>();
+
   constructor(
     /**
      * DID of the memory space this is a replica of.
@@ -438,7 +447,7 @@ export class Replica {
   /**
    * Pulls requested entries from the remote source and updates both in memory
    * cache and local store so they will be available for future reads. If
-   * entries are not provided it will pull entries that have being loaded from
+   * entries are not provided it will pull entries that have been loaded from
    * local store in this session.
    */
   async pull(
@@ -498,9 +507,10 @@ export class Replica {
         return { error };
       }
       fetchedEntries = query.schemaFacts;
-      // TODO(@ubik2) verify that we're dealing with this subscription
-      // I know we're sending updates over from the provider, but make sure
-      // we're incorporating those in the cache.
+      // FIXME(@ubik2) we're not actually handling the data from this
+      // subscription properly. We get the data through the commit changes,
+      // because the server knows we're watching, but we should be able
+      // to use the data from the subscription instead.
     }
     // Now run our regular queries (this will include our commit+json)
     if (Object.entries(querySelector).length > 0) {
@@ -542,7 +552,8 @@ export class Replica {
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
-    this.heap.merge(notFound, Replica.put);
+    // Don't notify subscribers as if this were a server update.
+    this.heap.merge(notFound, Replica.put, (val) => false);
     const result = await this.cache.merge(revisions.values(), Replica.put);
 
     if (result.error) {
@@ -695,6 +706,10 @@ export class Replica {
       // Store facts in a nursery so that subsequent changes will be build
       // optimistically assuming that push will succeed.
       this.nursery.merge(facts, Nursery.put);
+      // Track all our pending changes
+      facts.map((fact) =>
+        this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
+      );
 
       // These push transaction that will commit desired state to a remote.
       const result = await this.remote.transact({
@@ -705,6 +720,9 @@ export class Replica {
       // changes will not build upon rejected state. If there are other inflight
       // transactions that already were built upon our facts they will also fail.
       if (result.error) {
+        for (const fact of facts) {
+          this.pendingNurseryChanges.delete(toKey(fact));
+        }
         this.nursery.merge(facts, Nursery.delete);
         const fact = result.error.name === "ConflictError" &&
           result.error.conflict.actual;
@@ -717,14 +735,32 @@ export class Replica {
       else {
         const commit = toRevision(result.ok);
         const { since } = commit.is;
+        // Turn facts into revisions corresponding with the commit.
         const revisions = [
           ...facts.map((fact) => ({ ...fact, since })),
           // We strip transaction info so we don't duplicate same data
           { ...commit, is: { since: commit.is.since } },
         ];
-        // Turn facts into revisions corresponding with the commit.
-        this.heap.merge(revisions, Replica.put);
-        this.nursery.merge(facts, Nursery.delete);
+        // Avoid sending out updates to subscribers if it's a fact we already
+        // know about in the nursery.
+        const resolvedFacts = this.updatePendingNurseryFacts(revisions);
+        this.heap.merge(
+          revisions,
+          Replica.put,
+          (revision) => !resolvedFacts.has(revision),
+        );
+        // We only delete from the nursery when we receive fresh facts.
+        // Stale facts may have newer nursery changes that we want to keep.
+        // The nursery can't do this itself, since it doesn't have `since`
+        const freshFacts = revisions.filter((revision) => {
+          const heapRevision = this.heap.get(revision);
+          return heapRevision === undefined ||
+            revision.since > heapRevision.since;
+        });
+        this.nursery.merge(freshFacts, Nursery.delete);
+        for (const fact of freshFacts) {
+          this.pendingNurseryChanges.delete(toKey(fact));
+        }
       }
 
       return result;
@@ -749,7 +785,12 @@ export class Replica {
     ];
 
     // Store newer revisions into the heap,
-    this.heap.merge(revisions, Replica.update);
+    const resolvedFacts = this.updatePendingNurseryFacts(revisions);
+    this.heap.merge(
+      revisions,
+      Replica.update,
+      (state) => !resolvedFacts.has(state),
+    );
     return this.cache.merge(revisions, Replica.update);
   }
 
@@ -759,6 +800,30 @@ export class Replica {
    */
   get(entry: FactAddress) {
     return this.nursery.get(entry) ?? this.heap.get(entry);
+  }
+
+  /**
+   * Updates our pending nursery facts, removing them as they're seen
+   *
+   * @param revisions the facts we received from the server
+   * @returns the set of facts that we've resolved (removed)
+   */
+  private updatePendingNurseryFacts(
+    revisions: (Revision<State> | undefined)[],
+  ) {
+    const resolvedFacts = new Set<Revision<State> | undefined>();
+    for (const revision of revisions) {
+      if (revision === undefined || revision.cause === undefined) {
+        continue;
+      }
+      const factKey = toKey(revision);
+      const factCause = revision.cause.toString();
+      if (this.pendingNurseryChanges.hasValue(factKey, factCause)) {
+        this.pendingNurseryChanges.deleteValue(factKey, factCause);
+        resolvedFacts.add(revision);
+      }
+    }
+    return resolvedFacts;
   }
 }
 

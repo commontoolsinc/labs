@@ -96,10 +96,10 @@ export class Runner implements IRunner {
       this.run(recipeOrModule, argument, resultCell.getDoc());
       return resultCell;
     }
-    
+
     // Otherwise run existing DocImpl logic
     const resultDoc = resultCell as DocImpl<R>;
-    
+
     let processCell: DocImpl<{
       [TYPE]: string;
       argument?: T;
@@ -369,7 +369,9 @@ export class Runner implements IRunner {
    * @param resultCell - The result doc or cell to stop.
    */
   stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
-    const doc = isDoc(resultCell) ? resultCell : (resultCell as Cell<T>).getDoc();
+    const doc = isDoc(resultCell)
+      ? resultCell
+      : (resultCell as Cell<T>).getDoc();
     this.cancels.get(doc)?.();
     this.cancels.delete(doc);
   }

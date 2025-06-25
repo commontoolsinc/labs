@@ -48,6 +48,23 @@ export class MapSet<K, V> {
   public has(key: K): boolean {
     return this.map.has(key);
   }
+
+  public hasValue(key: K, value: V): boolean {
+    const values = this.map.get(key);
+    return (values !== undefined && values.has(value));
+  }
+
+  public deleteValue(key: K, value: V): boolean {
+    if (!this.map.has(key)) {
+      return false;
+    } else {
+      return this.map.get(key)!.delete(value);
+    }
+  }
+
+  public delete(key: K) {
+    this.map.delete(key);
+  }
 }
 
 export const DefaultSchemaSelector = {

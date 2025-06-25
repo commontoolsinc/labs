@@ -247,8 +247,8 @@ export class Storage implements IStorage {
       missing[0].of === `of:${entityIdStr(doc.entityId)}`
     ) {
       entityIds.push({ "/": missing[0].of.slice(3) });
-    } else if (missing.length > 1) {
-      console.warn("missing", missing);
+      // } else if (missing.length > 1) {
+      //   console.debug("missing", missing);
     }
 
     const docMap = this.runtime.documentMap;
@@ -468,7 +468,7 @@ export class Storage implements IStorage {
     const docId = entityIdStr(doc.entityId);
 
     // Clear any existing subscriptions first - we only want one callback
-    // and otherwise if we call syncCell multiple times, we'll end up
+    // and if we call syncCell multiple times, we would end up
     // with multiple subscriptions.
     if (this.docToStorageSubs.has(docId)) {
       // Cancel any existing subscription
