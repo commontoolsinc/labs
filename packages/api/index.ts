@@ -51,7 +51,7 @@ export type Opaque<T> =
 
 // OpaqueRefMethods type with only public methods
 export interface OpaqueRefMethods<T> {
-  get(): OpaqueRef<T>;
+  get(): T;
   set(value: Opaque<T> | T): void;
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
   setDefault(value: Opaque<T> | T): void;
@@ -451,6 +451,12 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T;
 
 export const schema = <T extends JSONSchema>(schema: T) => schema;
+
+// toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
+// The actual implementation is done by the TypeScript transformer
+export const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
+  return {} as JSONSchema;
+};
 
 export type Schema<
   T extends JSONSchema,

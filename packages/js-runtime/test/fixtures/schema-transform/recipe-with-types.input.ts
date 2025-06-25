@@ -1,0 +1,125 @@
+import { recipe, handler, toSchema, h, UI, NAME, str } from "commontools";
+
+// Define types using TypeScript interfaces
+interface TodoItem {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdAt: Date;
+}
+
+interface TodoInput {
+  todos: TodoItem[]; // @asCell
+}
+
+interface TodoOutput extends TodoInput {
+  completedCount: number;
+  pendingCount: number;
+}
+
+interface AddTodoEvent {
+  text: string;
+}
+
+interface ToggleTodoEvent {
+  id: string;
+}
+
+// Transform to schemas at compile time
+const inputSchema = toSchema<TodoInput>({
+  default: { todos: [] }
+});
+
+const outputSchema = toSchema<TodoOutput>();
+
+const addTodoSchema = toSchema<AddTodoEvent>({
+  title: "Add Todo",
+  description: "Add a new todo item",
+  example: { text: "Buy groceries" }
+});
+
+const toggleTodoSchema = toSchema<ToggleTodoEvent>({
+  title: "Toggle Todo",
+  description: "Toggle the completion status of a todo"
+});
+
+// Handlers with full type safety
+const addTodo = handler(
+  addTodoSchema,
+  inputSchema,
+  (event: AddTodoEvent, state: TodoInput) => {
+    state.todos.push({
+      id: Date.now().toString(),
+      text: event.text,
+      completed: false,
+      createdAt: new Date()
+    });
+  }
+);
+
+const toggleTodo = handler(
+  toggleTodoSchema,
+  inputSchema,
+  (event: ToggleTodoEvent, state: TodoInput) => {
+    const todo = state.todos.find(t => t.id === event.id);
+    if (todo) {
+      todo.completed = !todo.completed;
+    }
+  }
+);
+
+// Recipe with derived values
+export default recipe(inputSchema, outputSchema, ({ todos }) => {
+  const completedCount = derive(todos, todos => 
+    todos.filter(t => t.completed).length
+  );
+  
+  const pendingCount = derive(todos, todos => 
+    todos.filter(t => !t.completed).length
+  );
+
+  return {
+    [NAME]: str`Todo List (${pendingCount} pending)`,
+    [UI]: (
+      <div>
+        <form onSubmit={e => {
+          e.preventDefault();
+          const input = e.target.text;
+          if (input.value) {
+            addTodo({ text: input.value });
+            input.value = '';
+          }
+        }}>
+          <input name="text" placeholder="Add todo..." />
+          <button type="submit">Add</button>
+        </form>
+        
+        <ul>
+          {todos.map(todo => (
+            <li key={todo.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={todo.completed}
+                  onChange={() => toggleTodo({ id: todo.id })}
+                />
+                <span style={{
+                  textDecoration: todo.completed ? 'line-through' : 'none'
+                }}>
+                  {todo.text}
+                </span>
+              </label>
+            </li>
+          ))}
+        </ul>
+        
+        <div>
+          Completed: {completedCount} | Pending: {pendingCount}
+        </div>
+      </div>
+    ),
+    todos,
+    completedCount,
+    pendingCount
+  };
+});
