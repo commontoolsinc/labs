@@ -4,7 +4,7 @@ import { followWriteRedirects } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { expectCellLinksEqual } from "./test-helpers.ts";
+import { areLinksSame } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -55,9 +55,7 @@ describe("link-resolution", () => {
       });
       const binding = { $alias: { path: ["outer"] } };
       const result = followWriteRedirects(binding, outerCell);
-      expectCellLinksEqual(result).toEqual(
-        innerCell.key("inner").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(result, innerCell.key("inner"))).toBe(true);
       expect(result.cell.getAtPath(result.path)).toBe(10);
     });
 
@@ -94,8 +92,8 @@ describe("link-resolution", () => {
       });
       const binding = { $alias: { path: ["a", "a", "c"] } };
       const result = followWriteRedirects(binding, testCell);
-      expectCellLinksEqual(result).toEqual(
-        testCell.key("a").key("b").key("c").getAsLegacyCellLink(),
+      expect(areLinksSame(result, testCell.key("a").key("b").key("c"))).toBe(
+        true,
       );
       expect(result.cell.getAtPath(result.path)).toBe(1);
     });

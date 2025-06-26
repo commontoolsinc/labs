@@ -6,7 +6,8 @@ import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { entityIdToJSON, toPlainObject } from "./test-helpers.ts";
+import { toURI } from "../src/uri-utils.ts";
+import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -283,8 +284,8 @@ describe("Schema Support", () => {
 
       // Make sure the schema is correct and it is still anchored at the root
       expect(current.schema).toEqual({ type: "string" });
-      expect(toPlainObject(current.getAsLegacyCellLink())).toEqual({
-        cell: entityIdToJSON(docCell.entityId!),
+      expect(parseLink(current.getAsLink({ includeSchema: true }))).toEqual({
+        id: toURI(docCell.entityId!),
         path: ["current", "label"],
         space,
         schema: current.schema,
@@ -308,8 +309,8 @@ describe("Schema Support", () => {
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
-      expect(toPlainObject(first.getAsLegacyCellLink())).toEqual({
-        cell: entityIdToJSON(initialEntityId),
+      expect(parseLink(first.getAsLink({ includeSchema: true }))).toEqual({
+        id: toURI(initialEntityId),
         path: ["foo"],
         space,
         schema: omitSchema,
@@ -318,14 +319,14 @@ describe("Schema Support", () => {
       expect(log.reads.length).toEqual(4);
       expect(
         log.reads.map((r: LegacyCellLink) => ({
-          cell: entityIdToJSON(r.cell.entityId!),
+          cell: toURI(r.cell.entityId!),
           path: r.path,
         })),
       ).toEqual([
-        { cell: entityIdToJSON(docCell.entityId!), path: ["current"] },
-        { cell: entityIdToJSON(linkEntityId), path: [] },
-        { cell: entityIdToJSON(initialEntityId), path: ["foo"] },
-        { cell: entityIdToJSON(initialEntityId), path: ["foo", "label"] },
+        { cell: toURI(docCell.entityId!), path: ["current"] },
+        { cell: toURI(linkEntityId), path: [] },
+        { cell: toURI(initialEntityId), path: ["foo"] },
+        { cell: toURI(initialEntityId), path: ["foo", "label"] },
       ]);
 
       // Then update it

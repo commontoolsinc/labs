@@ -10,6 +10,7 @@ import {
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
+  areLinksSame,
   isAnyCellLink,
   isCellLink,
   isLegacyCellLink,
@@ -19,7 +20,6 @@ import { arrayEqual } from "../src/path-utils.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { expectCellLinksEqual } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -177,9 +177,7 @@ describe("data-updating", () => {
       const changes = normalizeAndDiff(current, { name: "Jane", age: 30 });
 
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("name").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].location, testCell.key("user").key("name"))).toBe(true);
       expect(changes[0].value).toBe("Jane");
     });
 
@@ -195,9 +193,7 @@ describe("data-updating", () => {
       const changes = normalizeAndDiff(current, { name: "John", age: 30 });
 
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("age").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].location, testCell.key("user").key("age"))).toBe(true);
       expect(changes[0].value).toBe(30);
     });
 
@@ -211,9 +207,7 @@ describe("data-updating", () => {
       const changes = normalizeAndDiff(current, { name: "John" });
 
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("age").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].location, testCell.key("user").key("age"))).toBe(true);
       expect(changes[0].value).toBe(undefined);
     });
 
@@ -227,9 +221,7 @@ describe("data-updating", () => {
       const changes = normalizeAndDiff(current, [1, 2]);
 
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("items").key("length").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].location, testCell.key("items").key("length"))).toBe(true);
       expect(changes[0].value).toBe(2);
     });
 
@@ -243,9 +235,7 @@ describe("data-updating", () => {
       const changes = normalizeAndDiff(current, [1, 5, 3]);
 
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("items").key(1).getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].location, testCell.key("items").key(1))).toBe(true);
       expect(changes[0].value).toBe(5);
     });
 
@@ -266,9 +256,7 @@ describe("data-updating", () => {
 
       // Should follow alias to value and change it there
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("value").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].location, testCell.key("value"))).toBe(true);
       expect(changes[0].value).toBe(100);
     });
 
@@ -291,9 +279,7 @@ describe("data-updating", () => {
 
       // Should follow alias to value and change it there
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("value").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].location, testCell.key("value"))).toBe(true);
       expect(changes[0].value).toBe(100);
 
       applyChangeSet(changes);
@@ -305,17 +291,13 @@ describe("data-updating", () => {
       applyChangeSet(changes2);
 
       expect(changes2.length).toBe(1);
-      expectCellLinksEqual(changes2[0].location).toEqual(
-        testCell.key("alias").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes2[0].location, testCell.key("alias"))).toBe(true);
       expect(changes2[0].value).toEqual({ $alias: { path: ["value2"] } });
 
       const changes3 = normalizeAndDiff(current, 300);
 
       expect(changes3.length).toBe(1);
-      expectCellLinksEqual(changes3[0].location).toEqual(
-        testCell.key("value2").getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes3[0].location, testCell.key("value2"))).toBe(true);
       expect(changes3[0].value).toBe(300);
     });
 
@@ -358,11 +340,9 @@ describe("data-updating", () => {
       });
 
       expect(changes.length).toBe(1);
-      expectCellLinksEqual(changes[0].location).toEqual(
-        testCell.key("user").key("profile").key("details").key("address").key(
+      expect(areLinksSame(changes[0].location, testCell.key("user").key("profile").key("details").key("address").key(
           "city",
-        ).getAsLegacyCellLink(),
-      );
+        ))).toBe(true);
       expect(changes[0].value).toBe("Boston");
     });
 
@@ -576,9 +556,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expectCellLinksEqual(changes[0].value).toEqual(
-        cellA.getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].value, cellA)).toBe(true);
     });
 
     it("should handle doc and cell references that don't change", () => {
@@ -598,9 +576,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expectCellLinksEqual(changes[0].value).toEqual(
-        cellA.getAsLegacyCellLink(),
-      );
+      expect(areLinksSame(changes[0].value, cellA)).toBe(true);
 
       applyChangeSet(changes);
 
