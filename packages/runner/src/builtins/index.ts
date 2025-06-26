@@ -6,7 +6,7 @@ import { llm, generateObject } from "./llm.ts";
 import { ifElse } from "./if-else.ts";
 import type { IRuntime } from "../runtime.ts";
 import { compileAndRun } from "./compile-and-run.ts";
-import type { DocImpl } from "../doc.ts";
+import type { Cell } from "../cell.ts";
 import type { BuiltInGenerateObjectParams } from "@commontools/api";
 
 /**
@@ -22,9 +22,9 @@ export function registerBuiltins(runtime: IRuntime) {
   moduleRegistry.addModuleByRef("ifElse", raw(ifElse));
   moduleRegistry.addModuleByRef("compileAndRun", raw(compileAndRun));
   moduleRegistry.addModuleByRef("generateObject", raw<BuiltInGenerateObjectParams, {
-    pending: DocImpl<boolean>;
-    result: DocImpl<Record<string, unknown> | undefined>;
-    partial: DocImpl<string | undefined>;
-    requestHash: DocImpl<string | undefined>;
+    pending: Cell<boolean>;
+    result: Cell<Record<string, unknown> | undefined>;
+    partial: Cell<string | undefined>;
+    requestHash: Cell<string | undefined>;
   }>(generateObject));
 }

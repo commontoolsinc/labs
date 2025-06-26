@@ -3,7 +3,7 @@ import {
   Module,
   type ModuleFactory,
 } from "./builder/types.ts";
-import type { DocImpl } from "./doc.ts";
+import type { Cell } from "./cell.ts";
 import type { Action } from "./scheduler.ts";
 import type { AddCancel } from "./cancel.ts";
 import type { IModuleRegistry, IRuntime } from "./runtime.ts";
@@ -37,11 +37,11 @@ export class ModuleRegistry implements IModuleRegistry {
 // runner, and won't work with any other runners.
 export function raw<T, R>(
   implementation: (
-    inputsCell: DocImpl<T>,
+    inputsCell: Cell<T>,
     sendResult: (result: R) => void,
     addCancel: AddCancel,
     cause: any,
-    parentCell: DocImpl<any>,
+    parentCell: Cell<any>,
     runtime: IRuntime,
   ) => Action,
 ): ModuleFactory<T, R> {
