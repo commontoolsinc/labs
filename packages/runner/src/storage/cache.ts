@@ -48,7 +48,9 @@ import * as Codec from "@commontools/memory/codec";
 import { type Cancel, type EntityId } from "@commontools/runner";
 import type {
   Activity,
+  CommitError,
   IMemoryAddress,
+  IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
   IStorageManagerV2,
@@ -56,20 +58,23 @@ import type {
   IStorageTransaction,
   IStorageTransactionAborted,
   IStorageTransactionComplete,
-  IStorageTransactionError,
-  IStorageTransactionFailed,
   IStorageTransactionInconsistent,
-  IStorageTransactionJournal,
   IStorageTransactionProgress,
+  IStorageTransactionRejected,
   IStorageTransactionWriteIsolationError,
+  ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
-  IWriterError,
   MediaType,
   MemoryAddressPathComponent,
   Read,
+  ReaderError,
+  ReadError,
+  StorageTransactionFailed,
   StorageValue,
   URI,
+  WriteError,
+  WriterError,
   Wrote,
 } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
@@ -1464,7 +1469,7 @@ class StorageTransaction implements IStorageTransaction {
   #writer?: TransactionWriter;
   #readers: Map<MemorySpace, TransactionReader>;
   #result?: Promise<
-    Result<Unit, IStorageTransactionError | InactiveTransactionError>
+    Result<Unit, StorageTransactionFailed>
   >;
 
   constructor(manager: StorageManager) {
@@ -1474,13 +1479,13 @@ class StorageTransaction implements IStorageTransaction {
     this.#journal = new TransactionJournal();
   }
 
-  status(): Result<IStorageTransactionProgress, IStorageTransactionError> {
+  status(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
     return this.#journal.state();
   }
 
   reader(
     space: MemorySpace,
-  ): Result<TransactionReader, InactiveTransactionError> {
+  ): Result<TransactionReader, ReaderError> {
     // Obtait edit session for this transaction, if it fails transaction is
     // no longer editable, in which case we propagate error.
 
@@ -1516,11 +1521,13 @@ class StorageTransaction implements IStorageTransaction {
     });
   }
 
-  writer(space: MemorySpace): Result<ITransactionWriter, IWriterError> {
+  writer(
+    space: MemorySpace,
+  ): Result<ITransactionWriter, WriterError> {
     // Obtait edit session for this transaction, if it fails transaction is
     // no longer editable, in which case we propagate error.
     return this.#journal.edit(
-      (journal): Result<TransactionWriter, IWriterError> => {
+      (journal): Result<TransactionWriter, WriterError> => {
         const writer = this.#writer;
         if (writer) {
           if (writer.did() === space) {
@@ -1547,7 +1554,7 @@ class StorageTransaction implements IStorageTransaction {
     );
   }
 
-  read(address: IMemoryAddress) {
+  read(address: IMemorySpaceAddress) {
     const { ok: reader, error } = this.reader(address.space);
     if (error) {
       return { error };
@@ -1556,7 +1563,10 @@ class StorageTransaction implements IStorageTransaction {
     }
   }
 
-  write(address: IMemoryAddress, value: JSONValue | undefined) {
+  write(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ) {
     const { ok: writer, error } = this.writer(address.space);
     if (error) {
       return { error };
@@ -1570,7 +1580,7 @@ class StorageTransaction implements IStorageTransaction {
   }
 
   async commit(): Promise<
-    Result<Unit, IStorageTransactionError | InactiveTransactionError>
+    Result<Unit, CommitError>
   > {
     // Return cached promise if commit was already called
     if (this.#result) {
@@ -1580,14 +1590,19 @@ class StorageTransaction implements IStorageTransaction {
     // Check transaction state
     const { ok: changes, error } = this.#journal.end();
     if (error) {
-      this.#result = Promise.resolve({ error });
+      this.status();
+      this.#result = Promise.resolve(
+        // End can fail if we are in non-edit mode however if we are in non-edit
+        // mode we would have result already.
+        { error } as { error: StorageTransactionFailed },
+      );
       return this.#result;
     } else if (this.#writer) {
       const { ok, error } = await this.#writer.replica.push(changes);
       if (error) {
         // TODO(@gozala): Perform rollback
         this.#result = Promise.resolve({
-          error: error as IStorageTransactionFailed,
+          error: error as IStorageTransactionRejected,
         });
         return this.#result;
       } else {
@@ -1612,8 +1627,8 @@ type TransactionProgress = Variant<{
  * have central place to manage state of the transaction and prevent readers /
  * writers from making to mutate transaction after it's being commited.
  */
-class TransactionJournal implements IStorageTransactionJournal {
-  #state: Result<TransactionProgress, IStorageTransactionError> = {
+class TransactionJournal implements ITransactionJournal {
+  #state: Result<TransactionProgress, StorageTransactionFailed> = {
     ok: { edit: this },
   };
 
@@ -1648,7 +1663,7 @@ class TransactionJournal implements IStorageTransactionJournal {
 
   // Note that we downcast type to `IStorageTransactionProgress` as we don't
   // want outside users to non public API directly.
-  state(): Result<IStorageTransactionProgress, IStorageTransactionError> {
+  state(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
     return this.#state;
   }
 
@@ -1717,18 +1732,19 @@ class TransactionJournal implements IStorageTransactionJournal {
     address: IMemoryAddress,
     replica: Replica,
   ) {
+    const at = { ...address, space: replica.space };
     return this.edit((journal): Result<Read, INotFoundError> => {
       // log read activitiy in the journal
-      journal.#activity.push({ read: address });
+      journal.#activity.push({ read: at });
       const [the, of] = [address.type, address.id];
 
       // Obtain state of the fact from the provided replica and capture
       // it in the journals history
       const before = replica.get({ the, of }) ?? unclaimed({ the, of });
-      journal.#history.claims(address.space).add(before);
+      journal.#history.claims(replica.space).add(before);
 
       // Now read path from the fact as it's known to be at this moment
-      const { ok, error } = read(journal.get(address) ?? before, address);
+      const { ok, error } = read(journal.get(at) ?? before, at);
       if (error) {
         return { error };
       } else {
@@ -1742,9 +1758,10 @@ class TransactionJournal implements IStorageTransactionJournal {
     value: JSONValue | undefined,
     replica: Replica,
   ) {
+    const at = { ...address, space: replica.space };
     return this.edit((journal): Result<Wrote, INotFoundError> => {
       // log write activity in the journal
-      journal.#activity.push({ write: address });
+      journal.#activity.push({ write: at });
 
       const [the, of] = [address.type, address.id];
 
@@ -1755,8 +1772,8 @@ class TransactionJournal implements IStorageTransactionJournal {
       // Now obtais state from the journal in cas it was edited earlier
       // by this transaction.
       const { ok: state, error } = write(
-        this.get(address) ?? was,
-        address,
+        this.get(at) ?? was,
+        at,
         value,
       );
       if (error) {
@@ -1809,7 +1826,7 @@ class TransactionJournal implements IStorageTransactionJournal {
    * Merge is called when we receive remote changes. It checks if any of the
    */
   merge(updates: { [key: MemorySpace]: Iterable<State> }) {
-    return this.edit((journal): Result<Unit, IStorageTransactionError> => {
+    return this.edit((journal): Result<Unit, StorageTransactionFailed> => {
       const inconsistencies = [];
       // Otherwise we caputer every change in our stale set and verify whether
       // changed fact has being journaled by this transaction. If so we mark
@@ -1847,7 +1864,7 @@ class TransactionJournal implements IStorageTransactionJournal {
     });
   }
 
-  get(address: IMemoryAddress) {
+  get(address: IMemorySpaceAddress) {
     if (address.space === this.#space) {
       return this.#novelty.get({ the: address.type, of: address.id });
     }
@@ -2024,12 +2041,12 @@ function toFactAddress(address: IMemoryAddress): FactAddress {
  */
 const read = (
   state: Assert | Retract,
-  address: IMemoryAddress,
+  address: IMemorySpaceAddress,
 ): Result<{ value?: JSONValue }, INotFoundError> => resolve(state, address);
 
 const resolve = (
   state: Assert | Retract,
-  address: IMemoryAddress,
+  address: IMemorySpaceAddress,
 ) => {
   const { path } = address;
   let value = state?.is as JSONValue | undefined;
@@ -2063,7 +2080,7 @@ const resolve = (
 
 const write = (
   state: Assert | Retract,
-  address: IMemoryAddress,
+  address: IMemorySpaceAddress,
   value: JSONValue | undefined,
 ): Result<Assert | Retract, INotFoundError> => {
   const { path, id: of, type: the, space } = address;
@@ -2149,7 +2166,7 @@ class TransactionReader implements ITransactionReader {
 
   read(
     address: IMemoryAddress,
-  ): Result<Read, INotFoundError | InactiveTransactionError> {
+  ): Result<Read, ReadError> {
     return this.#journal.read(address, this.#replica);
   }
 }
@@ -2179,7 +2196,7 @@ class TransactionWriter implements ITransactionWriter {
 
   read(
     address: IMemoryAddress,
-  ): Result<Read, INotFoundError | InactiveTransactionError> {
+  ): Result<Read, ReadError> {
     return this.#reader.read(address);
   }
 
@@ -2189,7 +2206,7 @@ class TransactionWriter implements ITransactionWriter {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<Wrote, INotFoundError | InactiveTransactionError> {
+  ): Result<Wrote, WriteError> {
     return this.#state.write(address, value, this.replica);
   }
 }

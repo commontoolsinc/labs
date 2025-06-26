@@ -18,7 +18,7 @@ import type {
   Variant,
 } from "@commontools/memory/interface";
 
-export type { MemorySpace, Result, SchemaContext, Unit };
+export type { MediaType, MemorySpace, Result, SchemaContext, Unit, URI };
 
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
@@ -137,7 +137,7 @@ export interface IStorageTransaction {
    */
   status(): Result<
     IStorageTransactionProgress,
-    IStorageTransactionError
+    StorageTransactionFailed
   >;
 
   /**
@@ -145,7 +145,9 @@ export interface IStorageTransaction {
    * transaction is no longer in progress. Requesting a reader for the same
    * memory space will return same reader instance.
    */
-  reader(space: MemorySpace): Result<ITransactionReader, IReaderError>;
+  reader(
+    space: MemorySpace,
+  ): Result<ITransactionReader, ReadError>;
 
   /**
    * Creates a memory space writer for this transaction. Fails if transaction is
@@ -153,7 +155,9 @@ export interface IStorageTransaction {
    * on this transaction. Requesting a writer for the same memory space will
    * return same writer instance.
    */
-  writer(space: MemorySpace): Result<ITransactionWriter, IWriterError>;
+  writer(
+    space: MemorySpace,
+  ): Result<ITransactionWriter, WriteError>;
 
   /**
    * Transaction can be cancelled which causes storage provider to stop keeping
@@ -171,7 +175,7 @@ export interface IStorageTransaction {
    *
    * If transaction is still active and no consistency guarantees have being
    * invalidated it will be send upstream and status will be updated to
-   * `pending`. Transaction may still fail with {@link IStorageTransactionFailed}
+   * `pending`. Transaction may still fail with {@link IStorageTransactionRejected}
    * if state upstream affects values read from updated space have changed,
    * which can happen if another client concurrently updates them. Transaction
    * MAY also fail due to insufficient authorization level or due to various IO
@@ -181,7 +185,7 @@ export interface IStorageTransaction {
    * exact value as on first call and no execution will take place on subsequent
    * calls.
    */
-  commit(): Promise<Result<Unit, IStorageTransactionError>>;
+  commit(): Promise<Result<Unit, StorageTransactionFailed>>;
 }
 
 export interface ITransactionReader {
@@ -220,7 +224,7 @@ export interface ITransactionReader {
     address: IMemoryAddress,
   ): Result<
     Read,
-    INotFoundError | InactiveTransactionError
+    ReadError
   >;
 }
 
@@ -234,7 +238,7 @@ export interface ITransactionWriter extends ITransactionReader {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<Write, InactiveTransactionError>;
+  ): Result<Wrote, WriteError>;
 }
 
 /**
@@ -278,40 +282,44 @@ export interface IStorageTransactionInconsistent extends Error {
  * no longer active.
  */
 export type InactiveTransactionError =
-  | IStorageTransactionInconsistent
-  | IStorageTransactionAborted
-  | IStorageTransactionFailed
+  | StorageTransactionFailed
   | IStorageTransactionComplete;
 
-export type IStorageTransactionError =
-  | IStorageTransactionAborted
+export type StorageTransactionFailed =
   | IStorageTransactionInconsistent
-  | IStorageTransactionFailed;
+  | IStorageTransactionAborted
+  | IStorageTransactionRejected;
 
-export type IStorageTransactionFailed =
+export type IStorageTransactionRejected =
   | ConflictError
   | TransactionError
   | ConnectionError
   | AuthorizationError;
 
-export type IReaderError =
-  | IStorageTransactionComplete
-  | IStorageTransactionAborted;
+export type ReadError =
+  | INotFoundError
+  | InactiveTransactionError;
 
-export type IWriterError =
-  | IStorageTransactionComplete
-  | IStorageTransactionAborted
-  | IStorageTransactionInconsistent
+export type WriteError =
+  | INotFoundError
+  | InactiveTransactionError;
+
+export type ReaderError = InactiveTransactionError;
+
+export type WriterError =
+  | InactiveTransactionError
   | IStorageTransactionWriteIsolationError;
+
+export type CommitError = StorageTransactionFailed;
 
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
 }
 export interface INotFoundError extends Error {}
 export type IStorageTransactionProgress = Variant<{
-  open: IStorageTransactionLog;
-  pending: IStorageTransactionLog;
-  done: IStorageTransactionLog;
+  edit: ITransactionJournal;
+  pending: ITransactionJournal;
+  done: ITransactionJournal;
 }>;
 
 /**
@@ -335,16 +343,18 @@ export interface IMemoryAddress {
   path: MemoryAddressPathComponent[];
 }
 
-export type MemoryAddressPathComponent = string | number;
-
-export interface IStorageTransactionLog
-  extends Iterable<IStorageTransactionInvariant> {
-  get(address: IMemoryAddress): IStorageTransactionInvariant;
+export interface IMemorySpaceAddress extends IMemoryAddress {
+  space: MemorySpace;
 }
 
-export type IStorageTransactionInvariant = Variant<{
-  read: Read;
-  write: Write;
+export type MemoryAddressPathComponent = string | number;
+
+export interface ITransactionJournal {
+}
+
+export type Activity = Variant<{
+  read: IMemorySpaceAddress;
+  write: IMemorySpaceAddress;
 }>;
 
 /**
@@ -371,14 +381,12 @@ export interface IStorageTransactionWriteIsolationError extends Error {
 export interface Read {
   readonly address: IMemoryAddress;
   readonly value?: JSONValue;
-  readonly cause: Reference;
 }
 
 /**
  * Describes write invariant of the underlaying transaction.
  */
-export interface Write {
+export interface Wrote {
   readonly address: IMemoryAddress;
   readonly value?: JSONValue;
-  readonly cause: Reference;
 }
