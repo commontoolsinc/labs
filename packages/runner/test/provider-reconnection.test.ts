@@ -61,7 +61,7 @@ describe("Provider Reconnection", () => {
         { entityId: EntityId; schemaContext?: SchemaContext }
       > = [];
       const originalSync = provider.sync.bind(provider);
-      (provider as any).sync = async function (
+      (provider as any).sync = function (
         entityId: EntityId,
         expectedInStorage?: boolean,
         schemaContext?: SchemaContext,
@@ -99,7 +99,7 @@ describe("Provider Reconnection", () => {
       // Make sync fail for one entity
       const originalSync = provider.sync.bind(provider);
       let callCount = 0;
-      (provider as any).sync = async function (
+      (provider as any).sync = function (
         entityId: EntityId,
         expectedInStorage?: boolean,
         schemaContext?: SchemaContext,
