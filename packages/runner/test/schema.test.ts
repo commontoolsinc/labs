@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type Cell, isCell, isStream } from "../src/cell.ts";
-import { LegacyCellLink } from "../src/sigil-types.ts";
+import { LegacyDocCellLink } from "../src/sigil-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -56,10 +56,10 @@ describe("Schema Support", () => {
       // This is what the system (or someone manually) would create to remap
       // data to match the desired schema
       const mappingCell = runtime.getCell<{
-        id: LegacyCellLink;
-        changes: LegacyCellLink[];
-        kind: LegacyCellLink;
-        tag: LegacyCellLink;
+        id: LegacyDocCellLink;
+        changes: LegacyDocCellLink[];
+        kind: LegacyDocCellLink;
+        tag: LegacyDocCellLink;
       }>(
         space,
         "allows mapping of fields via interim cells 2",
@@ -120,7 +120,7 @@ describe("Schema Support", () => {
 
       const c = runtime.getCell<{
         value: string;
-        current: LegacyCellLink;
+        current: LegacyDocCellLink;
       }>(
         space,
         "should support nested sinks 2",
@@ -318,7 +318,7 @@ describe("Schema Support", () => {
       });
       expect(log.reads.length).toEqual(4);
       expect(
-        log.reads.map((r: LegacyCellLink) => ({
+        log.reads.map((r: LegacyDocCellLink) => ({
           cell: toURI(r.cell.entityId!),
           path: r.path,
         })),

@@ -40,7 +40,7 @@ import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
 import { isCell } from "./cell.ts";
-import { type LegacyCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 
 export class Runner implements IRunner {
@@ -484,7 +484,7 @@ export class Runner implements IRunner {
     }
 
     // Check if any of the read cells is a stream alias
-    let streamRef: LegacyCellLink | undefined = undefined;
+    let streamRef: LegacyDocCellLink | undefined = undefined;
     if (isRecord(inputs)) {
       for (const key in inputs) {
         let doc = processCell;
@@ -497,7 +497,7 @@ export class Runner implements IRunner {
           value = doc.getAtPath(path);
         }
         if (isStreamValue(value)) {
-          streamRef = { cell: doc, path } satisfies LegacyCellLink;
+          streamRef = { cell: doc, path } satisfies LegacyDocCellLink;
           break;
         }
       }

@@ -14,7 +14,7 @@ import type {
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell } from "./cell.ts";
-import { type JSONCellLink, type LegacyCellLink } from "./sigil-types.ts";
+import { type JSONCellLink, type LegacyDocCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
 import { type EntityId, getEntityId } from "./doc-map.ts";
@@ -23,7 +23,7 @@ import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
-import { isCellLink, type NormalizedLink } from "./link-utils.ts";
+import { isLegacyCellLink, type NormalizedLink } from "./link-utils.ts";
 
 export type { IStorageManager, IStorageProvider, MemorySpace };
 
@@ -100,12 +100,12 @@ export interface IRuntime {
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink<T>(
-    cellLink: LegacyCellLink | NormalizedLink,
+    cellLink: LegacyDocCellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: LegacyCellLink | NormalizedLink,
+    cellLink: LegacyDocCellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
@@ -159,8 +159,8 @@ export interface IScheduler {
   unschedule(action: Action): void;
   onConsole(fn: ConsoleHandler): void;
   onError(fn: ErrorHandler): void;
-  queueEvent(eventRef: LegacyCellLink, event: any): void;
-  addEventHandler(handler: EventHandler, ref: LegacyCellLink): Cancel;
+  queueEvent(eventRef: LegacyDocCellLink, event: any): void;
+  addEventHandler(handler: EventHandler, ref: LegacyDocCellLink): Cancel;
   runningPromise: Promise<unknown> | undefined;
 }
 
@@ -427,23 +427,23 @@ export class Runtime implements IRuntime {
   }
 
   getCellFromLink<T>(
-    cellLink: LegacyCellLink | JSONCellLink | NormalizedLink,
+    cellLink: LegacyDocCellLink | JSONCellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: LegacyCellLink | JSONCellLink | NormalizedLink,
+    cellLink: LegacyDocCellLink | JSONCellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink(
-    cellLink: LegacyCellLink | NormalizedLink,
+    cellLink: LegacyDocCellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<any> {
     let doc;
 
-    if (isCellLink(cellLink)) {
+    if (isLegacyCellLink(cellLink)) {
       if (isDoc(cellLink.cell)) {
         doc = cellLink.cell;
       } else if (cellLink.space) {

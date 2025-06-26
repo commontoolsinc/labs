@@ -9,7 +9,7 @@ import {
 import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell } from "./cell.ts";
-import { type LegacyCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -149,8 +149,8 @@ export function unsafe_createParentBindings(
 export function findAllLegacyAliasedCells<T>(
   binding: unknown,
   doc: DocImpl<T>,
-): LegacyCellLink[] {
-  const docs: LegacyCellLink[] = [];
+): LegacyDocCellLink[] {
+  const docs: LegacyDocCellLink[] = [];
   function find(binding: unknown, origDoc: DocImpl<T>): void {
     if (isLegacyAlias(binding)) {
       // Numbered docs are yet to be unwrapped nested recipes. Ignore them.

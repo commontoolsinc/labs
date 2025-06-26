@@ -27,7 +27,7 @@ import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type JSONCellLink,
-  type LegacyCellLink,
+  type LegacyDocCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -56,7 +56,7 @@ import { areLinksSame, isLink } from "./link-utils.ts";
  * @returns {void}
  *
  * @method push Adds an item to the end of an array cell.
- * @param {U | DocImpl<U> | LegacyCellLink} value - The value to add, where U is
+ * @param {U | DocImpl<U> | LegacyDocCellLink} value - The value to add, where U is
  * the array element type.
  * @returns {void}
  *
@@ -88,7 +88,7 @@ import { areLinksSame, isLink } from "./link-utils.ts";
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
  * @method getAsLegacyCellLink Returns a cell link for the cell (legacy format).
- * @returns {LegacyCellLink}
+ * @returns {LegacyDocCellLink}
  *
  * @method getAsLink Returns a cell link for the cell (new sigil format).
  * @returns {SigilLink}
@@ -134,7 +134,7 @@ import { areLinksSame, isLink } from "./link-utils.ts";
  * @returns {T}
  *
  * @property cellLink The cell link representing this cell.
- * @returns {LegacyCellLink}
+ * @returns {LegacyDocCellLink}
  */
 declare module "@commontools/api" {
   interface Cell<T> {
@@ -169,7 +169,7 @@ declare module "@commontools/api" {
       path?: Path,
       log?: ReactivityLog,
     ): QueryResult<DeepKeyLookup<T, Path>>;
-    getAsLegacyCellLink(): LegacyCellLink;
+    getAsLegacyCellLink(): LegacyDocCellLink;
     getAsLink(
       options?: {
         base?: Cell<any>;
@@ -210,7 +210,7 @@ declare module "@commontools/api" {
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
     value: T;
-    cellLink: LegacyCellLink;
+    cellLink: LegacyDocCellLink;
     space: MemorySpace;
     entityId: EntityId;
     sourceURI: URI;
@@ -460,7 +460,7 @@ function createRegularCell<T>(
       subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
-    getAsLegacyCellLink: (): LegacyCellLink => {
+    getAsLegacyCellLink: (): LegacyDocCellLink => {
       return { space: doc.space, cell: doc, path, schema, rootSchema };
     },
     getAsLink: (
@@ -503,7 +503,7 @@ function createRegularCell<T>(
     get value(): T {
       return self.get();
     },
-    get cellLink(): LegacyCellLink {
+    get cellLink(): LegacyDocCellLink {
       return { space: doc.space, cell: doc, path, schema, rootSchema };
     },
     get space(): MemorySpace {
