@@ -276,15 +276,15 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     }
     checker.declarationCheck();
 
-    const sourceEntry = tsProgram.getSourceFiles().find((source) =>
-      source.fileName === program.entry
+    const mainSource = tsProgram.getSourceFiles().find((source) =>
+      source.fileName === program.main
     );
-    if (!sourceEntry) {
-      throw new Error("Missing source entry.");
+    if (!mainSource) {
+      throw new Error("Missing main source.");
     }
 
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
-      sourceEntry,
+      mainSource,
     );
     checker.check(diagnostics);
 
@@ -296,16 +296,16 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const writes = host.getWrites();
 
     // TypeScript compiles AMD modules from "/main.ts" to "main".
-    // Derive the entry module name here.
-    const match = program.entry.match(/\/([^\.]*)/);
+    // Derive the main module name here.
+    const match = program.main.match(/\/([^\.]*)/);
     if (!match) {
-      throw new Error("Could not derive entry module name");
+      throw new Error("Could not derive main module name");
     }
-    const entryModule = match[1];
+    const mainModule = match[1];
     const source = writes[filename];
     const sourceMap = parseSourceMap(writes[`${filename}.map`]);
     const bundled = bundleAMDOutput({
-      entryModule,
+      mainModule,
       source,
       sourceMap,
       filename,
@@ -322,7 +322,7 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
 function validateSource(artifact: Program) {
   let entryFound = false;
   for (const { name } of artifact.files) {
-    if (name === artifact.entry) {
+    if (name === artifact.main) {
       entryFound = true;
     }
     // Sources must be root paths, unless they are type files,
@@ -333,7 +333,7 @@ function validateSource(artifact: Program) {
     }
   }
   if (!entryFound) {
-    throw new Error(`No entry module "${artifact.entry}" in source.`);
+    throw new Error(`No main module "${artifact.main}" in source.`);
   }
 }
 

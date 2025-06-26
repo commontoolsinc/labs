@@ -1295,7 +1295,7 @@ export class CharmManager {
   }
 
   // Consistently return the `Cell<Charm>` of charm with
-  // id `charmId`, applies the provided `recipe` (which may be 
+  // id `charmId`, applies the provided `recipe` (which may be
   // its current recipe -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
   async runWithRecipe(

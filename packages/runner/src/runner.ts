@@ -1,4 +1,4 @@
-import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import {
   type Alias,
   isAlias,

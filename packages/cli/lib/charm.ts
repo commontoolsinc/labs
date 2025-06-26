@@ -18,7 +18,8 @@ import {
   getRecipeIdFromCharm,
   processSchema,
 } from "@commontools/charm";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
+import { CliProgram } from "./dev.ts";
 
 export interface SpaceConfig {
   apiUrl: string;
@@ -98,15 +99,18 @@ async function getRecipeMeta(
 
 async function getRecipeFromFile(
   manager: CharmManager,
-  entryPath: string,
+  mainPath: string,
 ): Promise<Recipe> {
-  // `compileRecipe` should accept a ProgramResolver for multifiles
-  const recipeSrc = await Deno.readTextFile(entryPath);
+  // Walk entry file and collect all sources from fs.
+  const program = await manager.runtime.harness.resolve(
+    new CliProgram(mainPath),
+  );
   return await compileRecipe(
-    recipeSrc,
+    program,
     "recipe",
     manager.runtime,
     manager.getSpace(),
+    undefined, // parents
   );
 }
 
@@ -114,8 +118,7 @@ async function getRecipeFromService(
   manager: CharmManager,
   charmId: string,
 ): Promise<Recipe> {
-  // Could throw, TODO(js) handle
-  const charm = await manager.get(charmId!, false);
+  const charm = await manager.get(charmId, false);
   const recipeId = getRecipeIdFromCharm(charm!);
   return await manager.runtime.recipeManager.loadRecipe(
     recipeId,
@@ -164,22 +167,22 @@ export async function listCharms(
 // Creates a new charm from source code and optional input.
 export async function newCharm(
   config: SpaceConfig,
-  entryPath: string,
+  mainPath: string,
 ): Promise<string> {
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromFile(manager, entryPath);
+  const recipe = await getRecipeFromFile(manager, mainPath);
   const charm = await exec({ manager, recipe });
   return getCharmIdSafe(charm);
 }
 
 export async function setCharmRecipe(
   config: CharmConfig,
-  entryPath: string,
+  mainPath: string,
 ): Promise<void> {
   const manager = await loadManager(config);
   const recipe = await getRecipeFromFile(
     manager,
-    entryPath,
+    mainPath,
   );
   await exec({ manager, recipe, charmId: config.charm });
 }
@@ -191,13 +194,22 @@ export async function saveCharmRecipe(
   await ensureDir(outPath);
   const manager = await loadManager(config);
   const meta = await getRecipeMeta(manager, config.charm);
-  if (!meta.src) {
+
+  if (meta.src) {
+    // Write the main source file
+    await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
+  } else if (meta.program) {
+    for (const { name, contents } of meta.program.files) {
+      if (name[0] !== "/") {
+        throw new Error("Ungrounded file in recipe.");
+      }
+      await Deno.writeTextFile(join(outPath, name.substring(1)), contents);
+    }
+  } else {
     throw new Error(
       `Charm "${config.charm}" does not contain a recipe source.`,
     );
   }
-  // update for multifile
-  await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
 }
 
 export async function applyCharmInput(

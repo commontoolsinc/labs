@@ -21,7 +21,7 @@ API_URL="$1"
 SPACE=$(mktemp -u XXXXXXXXXX) # generates a random space
 IDENTITY=$(mktemp)
 SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
-RECIPE_SRC="$SCRIPT_DIR/../../../recipes/counter.tsx"
+RECIPE_SRC="$SCRIPT_DIR/recipe/main.tsx"
 WORK_DIR=$(mktemp -d)
 
 echo "API_URL=$API_URL"
@@ -41,6 +41,7 @@ fi
 CHARM_ID=$($CT charm new $SPACE_ARGS $RECIPE_SRC)
 echo "Created charm: $CHARM_ID"
 
+echo "Fetching charm source to $WORK_DIR"
 # Retrieve the source code for $CHARM_ID to $WORK_DIR
 $CT charm getsrc $SPACE_ARGS --charm $CHARM_ID $WORK_DIR
 
@@ -48,6 +49,11 @@ $CT charm getsrc $SPACE_ARGS --charm $CHARM_ID $WORK_DIR
 if [ ! -f "$WORK_DIR/main.tsx" ]; then
   error "Source code was not retrieved from $CHARM_ID"
 fi
+if [ ! -f "$WORK_DIR/utils.ts" ]; then
+  error "Source code was not retrieved from $CHARM_ID"
+fi
+
+echo "Updating charm source."
 
 # Update the charm's source code
 replace 's/Simple counter:/Simple counter 2:/g' "$WORK_DIR/main.tsx"
@@ -62,6 +68,8 @@ grep -q "Simple counter 2" "$WORK_DIR/main.tsx"
 if [ $? -ne 0 ]; then
   error "Retrieved source code was not modified"
 fi
+
+echo "Updating charm input."
 
 # Apply new input to charm
 echo '{"value":5}' | $CT charm apply $SPACE_ARGS --charm $CHARM_ID

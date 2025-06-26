@@ -89,13 +89,13 @@ export const charm = new Command()
     `ct charm new ${EX_ID} ${EX_URL} ./main.tsx`,
     `Create a new charm, using ./main.tsx as source.`,
   )
-  .arguments("<entry:string>")
+  .arguments("<main:string>")
   .action(
-    async (options, entryPath) =>
+    async (options, main) =>
       render(
         await newCharm(
           parseSpaceOptions(options),
-          absPath(entryPath),
+          absPath(main),
         ),
       ),
   )
@@ -142,9 +142,9 @@ export const charm = new Command()
     `Update the source for "${RAW_EX_COMP.charm!}" with ./main.tsx`,
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
-  .arguments("<entry:string>")
-  .action((options, entryPath) =>
-    setCharmRecipe(parseCharmOptions(options), absPath(entryPath))
+  .arguments("<main:string>")
+  .action((options, mainPath) =>
+    setCharmRecipe(parseCharmOptions(options), absPath(mainPath))
   )
   /* charm inspect */
   .command("inspect", "Inspect detailed information about a charm")

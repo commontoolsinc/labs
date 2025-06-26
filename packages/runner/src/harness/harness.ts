@@ -1,5 +1,6 @@
 import { type Recipe } from "../builder/types.ts";
-import { type Program } from "@commontools/js-runtime";
+import type { Program, ProgramResolver } from "@commontools/js-runtime";
+import { type EngineProcessOptions } from "./engine.ts";
 
 export type HarnessedFunction = (input: any) => void;
 
@@ -7,10 +8,18 @@ export type HarnessedFunction = (input: any) => void;
 export interface Harness extends EventTarget {
   // Compiles and executes `source`, returning the default export
   // of that module.
-  //run(source: Program): Promise<Recipe>;
-  // Compiles and executes a single tsx string, returning the default
-  // export of that module.
-  runSingle(source: string): Promise<Recipe>;
+  run(
+    source: Program,
+    options?: EngineProcessOptions,
+  ): Promise<Recipe>;
+
+  // Resolves a `ProgramResolver` into a `Program` using the engine's
+  // configuration.
+  resolve(
+    source: ProgramResolver,
+  ): Promise<Program>;
+
   getInvocation(source: string): HarnessedFunction;
+
   mapStackTrace(stack: string): string;
 }
