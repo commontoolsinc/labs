@@ -517,11 +517,7 @@ export class Runner implements IRunner {
             const alias = eventInputs[key];
 
             if (
-              areLinksSame(
-                alias,
-                streamRef,
-                processCell.asCell(),
-              )
+              areLinksSame(alias, streamRef, processDoc.asCell())
             ) {
               eventInputs[key] = event;
               cause[key] = crypto.randomUUID();

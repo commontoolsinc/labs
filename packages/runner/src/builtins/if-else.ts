@@ -24,7 +24,7 @@ export function ifElse(
     const condition = inputsWithLog.key(0).get();
 
     const ref = inputsWithLog.key(condition ? 1 : 2)
-      .getAsLink({ base: result.asCell() });
+      .getAsLink({ base: result });
 
     resultWithLog.send(ref);
   };
