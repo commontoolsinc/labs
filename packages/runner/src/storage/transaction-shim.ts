@@ -47,7 +47,7 @@ function validateParentPath(
 
   // Check if the document itself exists and is a record for first-level writes
   if (path.length === 1) {
-    if (doc.value === undefined || !isRecord(doc.value)) {
+    if (doc.get() === undefined || !isRecord(doc.get())) {
       const pathError: INotFoundError = new Error(
         `Cannot write to path [${String(path[0])}] - document is not a record`,
       ) as INotFoundError;
@@ -60,7 +60,7 @@ function validateParentPath(
   // For deeper paths, check that the parent path exists and is a record
   const parentPath = path.slice(0, -1);
 
-  const parentValue = getValueAtPath(doc.value, parentPath);
+  const parentValue = getValueAtPath(doc.get(), parentPath);
 
   if (parentValue === undefined || !isRecord(parentValue)) {
     const pathError: INotFoundError = new Error(
@@ -156,7 +156,7 @@ class TransactionReader implements ITransactionReader {
     }
 
     // Read the value at the specified path
-    const value = getValueAtPath(doc.value, address.path);
+    const value = getValueAtPath(doc.get(), address.path);
 
     // Create the read invariant
     const read: Read = {
@@ -195,7 +195,7 @@ class TransactionWriter extends TransactionReader
 
     // For non-empty paths, check if document exists and is a record
     if (address.path.length > 0) {
-      if (doc.value === undefined || !isRecord(doc.value)) {
+      if (doc.get() === undefined || !isRecord(doc.get())) {
         const notFoundError: INotFoundError = new Error(
           `Document not found or not a record: ${address.id}`,
         ) as INotFoundError;
