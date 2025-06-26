@@ -112,7 +112,7 @@ export default add(5, "5");`,
   for (const { name, source, expectedError, ...options } of TESTS) {
     it(name, () => {
       const artifact = {
-        entry: "/main.tsx",
+        main: "/main.tsx",
         files: [{ name: "/main.tsx", contents: source }],
       };
       const compiler = new TypeScriptCompiler(types);

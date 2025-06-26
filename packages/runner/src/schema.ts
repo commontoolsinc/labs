@@ -1,14 +1,12 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
-import {
-  isAlias,
-  type JSONSchema,
-  type JSONValue,
-} from "./builder/types.ts";
+import { type JSONSchema, type JSONValue } from "./builder/types.ts";
+import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
-import { type CellLink, createCell, isCell, isCellLink } from "./cell.ts";
+import { createCell, isCell } from "./cell.ts";
+import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { resolveLinks, resolveLinkToAlias } from "./link-resolution.ts";
+import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -281,7 +279,7 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedRef = resolveLinkToAlias(
+  const resolvedRef = resolveLinkToWriteRedirect(
     doc,
     path,
     log,
@@ -333,20 +331,21 @@ export function validateAndTransform(
     // the top of the current doc is already a reference.
     for (let i = -1; i < path.length; i++) {
       const value = doc.getAtPath(path.slice(0, i + 1));
-      if (isAlias(value)) {
+      if (isWriteRedirectLink(value)) {
         throw new Error(
-          "Unexpected alias in path, should have been handled by resolvePath",
+          "Unexpected write redirect in path, should have been handled by resolvePath",
         );
       }
-      if (isCellLink(value)) {
+      if (isAnyCellLink(value)) {
+        const link = parseLink(value, doc.asCell());
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         const extraPath = [...path.slice(i + 1)];
-        const newPath = [...value.path, ...extraPath];
+        const newPath = [...link.path, ...extraPath];
         const cfc = doc.runtime.cfc;
         let newSchema;
-        if (value.schema !== undefined) {
+        if (link.schema !== undefined) {
           newSchema = cfc.getSchemaAtPath(
-            value.schema,
+            link.schema,
             extraPath.map((key) => key.toString()),
             rootSchema,
           );
@@ -357,7 +356,7 @@ export function validateAndTransform(
           newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
         }
         return createCell(
-          value.cell,
+          doc.runtime.documentMap.getDocByEntityId(link.space, link.id, true),
           newPath,
           log,
           newSchema,
@@ -509,7 +508,7 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: CellLink[] = [];
+      const extraReads: LegacyCellLink[] = [];
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
           merged = result;

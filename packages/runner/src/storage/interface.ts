@@ -6,6 +6,7 @@ import type {
   ConflictError,
   ConnectionError,
   Entity as URI,
+  Entity as URI,
   JSONValue,
   MemorySpace,
   Reference,
@@ -186,6 +187,51 @@ export interface IStorageTransaction {
 
 export interface ITransactionReader {
   /**
+   * Creates a memory space reader for inside this transaction. Fails if
+   * transaction is no longer in progress. Requesting a reader for the same
+   * memory space will return same reader instance.
+   */
+  reader(space: MemorySpace): Result<ITransactionReader, IReaderError>;
+
+  /**
+   * Creates a memory space writer for this transaction. Fails if transaction is
+   * no longer in progress or if writer for the different space was already open
+   * on this transaction. Requesting a writer for the same memory space will
+   * return same writer instance.
+   */
+  writer(space: MemorySpace): Result<ITransactionWriter, IWriterError>;
+
+  /**
+   * Transaction can be cancelled which causes storage provider to stop keeping
+   * it up to date with incoming changes. Aborting inactive transactions will
+   * produce {@link InactiveTransactionError}. Aborted transactions will produce
+   * {@link IStorageTransactionAborted} error on attempt to commit.
+   */
+  abort(reason?: Unit): Result<Unit, InactiveTransactionError>;
+
+  /**
+   * Commits transaction. If transaction is no longer active, this will
+   * produce {@link IStorageTransactionAborted}. If transaction consistency
+   * gurantees have being violated by upstream changes
+   * {@link IStorageTransactionInconsistent} is returned.
+   *
+   * If transaction is still active and no consistency guarantees have being
+   * invalidated it will be send upstream and status will be updated to
+   * `pending`. Transaction may still fail with {@link IStorageTransactionFailed}
+   * if state upstream affects values read from updated space have changed,
+   * which can happen if another client concurrently updates them. Transaction
+   * MAY also fail due to insufficient authorization level or due to various IO
+   * problems.
+   *
+   * Commit is idempotent, meaning calling it over and over will return same
+   * exact value as on first call and no execution will take place on subsequent
+   * calls.
+   */
+  commit(): Promise<Result<Unit, IStorageTransactionError>>;
+}
+
+export interface ITransactionReader {
+  /**
    * Reads a value from a (local) memory address and captures corresponding
    * `Read` in the the transaction invariants. If value was written in read
    * memory address in this transaction read will return value that was written
@@ -199,7 +245,7 @@ export interface ITransactionReader {
    * captured however to ensure that assumption about non existence is upheld.
    *
    * ```ts
-   *  const w = tx.write({ the, of, at: [] }, {
+   *  const w = tx.write({ type, id, path: [] }, {
    *    title: "Hello world",
    *    content: [
    *       { text: "Beautiful day", format: "bold" }
@@ -207,13 +253,13 @@ export interface ITransactionReader {
    *  })
    *  assert(w.ok)
    *
-   *  assert(tx.read({ the, of, at: ['author'] }).ok === undefined)
-   *  assert(tx.read({ the, of, at: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type, id, path: ['author'] }).ok === undefined)
+   *  assert(tx.read({ type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
    *  // JS specific getters are not supported
-   *  assert(tx.read({ the, of, at: ['content', 'length'] }).ok.is === undefined)
-   *  assert(tx.read({ the, of, at: ['title'] }).ok.is === "Hello world")
+   *  assert(tx.read({ type, id, path: ['content', 'length'] }).ok.is === undefined)
+   *  assert(tx.read({ type, id, path: ['title'] }).ok.is === "Hello world")
    *  // Referencing non-existing facts produces errors
-   *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type: 'bad/mime' , id, path: ['author'] }).error.name === 'NotFoundError')
    * ```
    */
   read(

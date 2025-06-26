@@ -1,17 +1,19 @@
-import {
-  type Alias,
-  isAlias,
-  type JSONSchema,
-} from "./builder/types.ts";
+import { type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, type CellLink, isCell, isCellLink } from "./cell.ts";
-import { type ReactivityLog } from "./scheduler.ts";
+import { type Cell, createCell } from "./cell.ts";
 import {
-  getCellLinkOrThrow,
-  isQueryResultForDereferencing,
-} from "./query-result-proxy.ts";
-import { arrayEqual } from "./type-utils.ts";
+  type LegacyAlias,
+  type LegacyCellLink,
+  type SigilWriteRedirectLink,
+} from "./sigil-types.ts";
+import { type ReactivityLog } from "./scheduler.ts";
+import { arrayEqual } from "./path-utils.ts";
+import {
+  isWriteRedirectLink,
+  parseLink,
+  parseToLegacyCellLink,
+} from "./link-utils.ts";
 
 /**
  * Track visited cell links and memoize results during path resolution
@@ -19,11 +21,11 @@ import { arrayEqual } from "./type-utils.ts";
  */
 interface Visits {
   /** Tracks visited cell links to detect cycles */
-  seen: CellLink[];
+  seen: LegacyCellLink[];
   /** Cache for resolvePath results */
-  resolvePathCache: Map<string, CellLink>;
+  resolvePathCache: Map<string, LegacyCellLink>;
   /** Cache for followLinks results */
-  followLinksCache: Map<string, CellLink>;
+  followLinksCache: Map<string, LegacyCellLink>;
 }
 
 /**
@@ -54,25 +56,28 @@ export function resolveLinkToValue<T>(
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
-): CellLink {
+): LegacyCellLink {
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits);
 }
 
-export function resolveLinkToAlias<T>(
+export function resolveLinkToWriteRedirect<T>(
   doc: DocImpl<T>,
   path: PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
-): CellLink {
+): LegacyCellLink {
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits, true);
 }
 
-export function resolveLinks(ref: CellLink, log?: ReactivityLog): CellLink {
+export function resolveLinks(
+  ref: LegacyCellLink,
+  log?: ReactivityLog,
+): LegacyCellLink {
   const visits = createVisits();
   return followLinks(ref, log, visits);
 }
@@ -84,7 +89,7 @@ function resolvePath<T>(
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
   visits: Visits = createVisits(),
-): CellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
+): LegacyCellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
   // doc, meaning the one that contains the value we want to access without any
   // redirects in between.
   //
@@ -108,7 +113,7 @@ function resolvePath<T>(
   }
 
   // Try to find a cached result for a shorter path
-  let startRef: CellLink = { cell: doc, path: [] };
+  let startRef: LegacyCellLink = { cell: doc, path: [] };
   let keys = [...path];
 
   // Look for the longest matching prefix path in the cache
@@ -166,19 +171,19 @@ function resolvePath<T>(
 // log all taken links, so not the returned one, and thus nothing if the ref
 // already pointed to a value.
 export function followLinks(
-  ref: CellLink,
+  ref: LegacyCellLink,
   log: ReactivityLog | undefined,
   visits: Visits,
-  onlyAliases = false,
-): CellLink {
+  onlyWriteRedirects = false,
+): LegacyCellLink {
   // Check if we already followed these links
-  const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyAliases);
+  const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyWriteRedirects);
   const cached = visits.followLinksCache.get(cacheKey);
   if (cached) {
     return cached;
   }
 
-  let nextRef: CellLink | undefined;
+  let nextRef: LegacyCellLink | undefined;
   let result = ref;
 
   do {
@@ -201,8 +206,18 @@ export function followLinks(
 
     const target = result.cell.getAtPath(result.path);
 
-    nextRef = !onlyAliases || isAlias(target)
-      ? maybeGetCellLink(target, result.cell)
+    nextRef = !onlyWriteRedirects || isWriteRedirectLink(target)
+      ? parseToLegacyCellLink(
+        target,
+        createCell(
+          result.cell,
+          [], // Use empty path to reference the document itself
+          undefined,
+          undefined,
+          undefined,
+          true,
+        ),
+      )
       : undefined;
 
     if (nextRef !== undefined) {
@@ -241,40 +256,36 @@ export function followLinks(
   return result;
 }
 
-export function maybeGetCellLink<T>(
-  value: unknown,
-  parent?: DocImpl<T>,
-): CellLink | undefined {
-  if (isQueryResultForDereferencing(value)) return getCellLinkOrThrow(value);
-  else if (isCellLink(value)) return value;
-  else if (isDoc(value)) return { cell: value, path: [] } satisfies CellLink;
-  else if (isCell(value)) return value.getAsCellLink();
-  else if (isAlias(value)) {
-    if (!parent && !value.$alias.cell) {
-      throw new Error(
-        `Alias without cell and no parent provided: ${JSON.stringify(value)}`,
-      );
-    }
-    return { cell: parent, ...value.$alias } as CellLink;
-  } else return undefined;
-}
-
 // Follows aliases and returns cell reference describing the last alias.
 // Only logs interim aliases, not the first one, and not the non-alias value.
-export function followAliases<T = any>(
-  alias: Alias,
-  docOrCell: DocImpl<T> | Cell<T>,
+export function followWriteRedirects<T = any>(
+  writeRedirect: LegacyAlias | SigilWriteRedirectLink,
+  base: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
-): CellLink {
-  if (isAlias(alias)) {
-    const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
+): LegacyCellLink {
+  if (isDoc(base)) base = base.asCell();
+  else base = base as Cell<T>; // Makes TS happy
+
+  if (isWriteRedirectLink(writeRedirect)) {
+    const link = parseLink(writeRedirect, base);
     return followLinks(
-      { cell: doc, ...alias.$alias } as CellLink,
+      {
+        cell: base.getDoc().runtime.documentMap.getDocByEntityId(
+          link.space!,
+          link.id!,
+        ),
+        path: link.path,
+        space: link.space,
+        schema: link.schema,
+        rootSchema: link.rootSchema,
+      } as LegacyCellLink,
       log,
       createVisits(),
       true,
     );
   } else {
-    throw new Error(`Alias expected: ${JSON.stringify(alias)}`);
+    throw new Error(
+      `Write redirect expected: ${JSON.stringify(writeRedirect)}`,
+    );
   }
 }

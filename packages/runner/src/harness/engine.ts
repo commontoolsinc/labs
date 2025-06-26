@@ -4,7 +4,9 @@ import { Harness, HarnessedFunction } from "./harness.ts";
 import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
+  JsScript,
   Program,
+  ProgramResolver,
   Source,
   TypeScriptCompiler,
   UnsafeEvalIsolate,
@@ -31,6 +33,14 @@ export interface EngineProcessOptions {
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
   private runtimeModuleTypes: Record<string, string> | undefined;
+
+  constructor(program: Program) {
+    const modules = program.files.reduce((mod, file) => {
+      mod[file.name] = file.contents;
+      return mod;
+    }, {} as Record<string, string>);
+    super(program.main, modules);
+  }
 
   // Add `.d.ts` files for known supported 3P modules.
   override async resolveSource(
@@ -86,45 +96,44 @@ export class Engine extends EventTarget implements Harness {
     return { compiler, runtime, isolate, runtimeExports };
   }
 
-  runSingle(
-    source: string,
-    options: EngineProcessOptions = {},
-  ): Promise<Recipe> {
-    return this.run("/main.tsx", { "/main.tsx": source }, options);
+  // Resolve a `ProgramResolver` into a `Program`.
+  async resolve(program: ProgramResolver): Promise<Program> {
+    const { compiler } = await this.getInternals();
+    return await compiler.resolveProgram(program, {
+      runtimeModules: Engine.runtimeModuleNames(),
+    });
   }
 
+  // Compile and run a `Program`, returning the export default recipe.
   async run(
-    entry: string,
-    sources: Record<string, string>,
-    options: EngineProcessOptions,
+    program: Program,
+    options: EngineProcessOptions = {},
   ): Promise<Recipe> {
-    const { exports } = await this.process(
-      new EngineProgramResolver(entry, sources),
-      options,
-    );
+    const { exports } = await this.process(program, options);
+
     if (exports && !("default" in exports)) {
       throw new Error("No default export found in compiled recipe.");
     }
-    return exports.default;
+
+    return exports!.default as Recipe;
   }
 
-  // Lower level API for processing source code.
-  async process(program: EngineProgramResolver, options: EngineProcessOptions) {
-    if (!this.internals) {
-      this.internals = await this.initialize();
-    }
-    const { compiler, isolate, runtimeExports } = this.internals;
-    const runtimeModules = [...RuntimeModules.RuntimeModuleIdentifiers];
+  // Compile and run a `Program` with options, returning the compiled
+  // result and evaluated exports.
+  async process(
+    program: Program,
+    options: EngineProcessOptions = {},
+  ): Promise<{ exports?: object; output: JsScript }> {
+    const resolver = new EngineProgramResolver(program);
 
-    const resolvedProgram = await compiler.resolveProgram(program, {
-      runtimeModules,
-    });
+    const { compiler, isolate, runtimeExports } = await this.getInternals();
+    const resolvedProgram = await this.resolve(resolver);
 
     const compiled = await compiler.compile(resolvedProgram, {
       filename: options.filename ?? computeFilename(resolvedProgram),
       noCheck: options.noCheck,
       injectedScript: INJECTED_SCRIPT,
-      runtimeModules,
+      runtimeModules: Engine.runtimeModuleNames(),
     });
 
     let exports;
@@ -152,11 +161,22 @@ export class Engine extends EventTarget implements Harness {
   static getEnvironmentTypes() {
     return getTypeScriptEnvironmentTypes();
   }
+
+  static runtimeModuleNames() {
+    return [...RuntimeModules.RuntimeModuleIdentifiers];
+  }
+
+  private async getInternals(): Promise<Internals> {
+    if (!this.internals) {
+      this.internals = await this.initialize();
+    }
+    return this.internals;
+  }
 }
 
 function computeFilename(program: Program): string {
   const source = [
-    program.entry,
+    program.main,
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
   return merkleReference.refer(source).toString() + ".tsx";

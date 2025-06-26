@@ -3,9 +3,10 @@ import {
   isCell,
   isStream,
   type MemorySpace,
+  RecipeMeta,
   type Runtime,
 } from "@commontools/runner";
-import { isObject } from "@commontools/utils/types";
+import { isObject, Mutable } from "@commontools/utils/types";
 import {
   createJsonSchema,
   JSONSchema,
@@ -24,6 +25,8 @@ import {
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
+import { console } from "./conditional-console.ts";
+import { Program } from "@commontools/js-runtime";
 
 const llm = new LLMClient();
 
@@ -261,19 +264,21 @@ export function scrub(data: any): any {
 }
 
 /**
- * Turn cells references into aliases, this forces writes to go back
- * to the original cell.
+ * Turn cells references into writes redirects, this forces writes to go back to
+ * the original cell.
+ * @param data The data to process
+ * @param baseSpace Optional base space DID to make links relative to
  */
-function turnCellsIntoAliases(data: any): any {
+function turnCellsIntoWriteRedirects(data: any, baseSpace?: MemorySpace): any {
   if (isCell(data)) {
-    return { $alias: data.getAsCellLink() };
+    return data.getAsWriteRedirectLink(baseSpace ? { baseSpace } : undefined);
   } else if (Array.isArray(data)) {
-    return data.map((value) => turnCellsIntoAliases(value));
+    return data.map((value) => turnCellsIntoWriteRedirects(value, baseSpace));
   } else if (isObject(data)) {
     return Object.fromEntries(
       Object.entries(data).map((
         [key, value],
-      ) => [key, turnCellsIntoAliases(value)]),
+      ) => [key, turnCellsIntoWriteRedirects(value, baseSpace)]),
     );
   } else return data;
 }
@@ -475,7 +480,11 @@ export async function castNewRecipe(
   const scrubbed = scrub(form.input.references);
 
   // First, extract any existing schema if we have data
-  const existingSchema = createJsonSchema(scrubbed);
+  const existingSchema = createJsonSchema(
+    scrubbed,
+    false,
+    charmManager.runtime,
+  );
 
   // Prototype workflow: combine steps
   const { newSpec, newRecipeSrc, llmRequestId } =
@@ -483,7 +492,7 @@ export async function castNewRecipe(
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
 
-  const input = turnCellsIntoAliases(scrubbed);
+  const input = turnCellsIntoWriteRedirects(scrubbed, charmManager.getSpace());
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -509,13 +518,14 @@ export async function castNewRecipe(
 }
 
 export async function compileRecipe(
-  recipeSrc: string,
+  recipeSrc: string | Program,
   spec: string,
   runtime: Runtime,
   space: MemorySpace,
   parents?: string[],
 ) {
-  const recipe = await runtime.harness.runSingle(recipeSrc);
+  const recipe = await runtime.recipeManager.compileRecipe(recipeSrc);
+
   if (!recipe) {
     throw new Error("No default recipe found in the compiled exports.");
   }
@@ -524,17 +534,25 @@ export async function compileRecipe(
     recipe,
     recipeSrc,
   );
+
+  const recipeMeta: Partial<Mutable<RecipeMeta>> = {
+    id: recipeId,
+    spec,
+    parents: parentsIds,
+  };
+
+  if (typeof recipeSrc === "string") {
+    recipeMeta.src = recipeSrc;
+  } else {
+    recipeMeta.program = recipeSrc;
+  }
   await runtime.recipeManager.registerRecipe({
     recipeId,
     space,
     recipe,
-    recipeMeta: {
-      id: recipeId,
-      src: recipeSrc,
-      spec,
-      parents: parentsIds,
-    },
+    recipeMeta: recipeMeta as RecipeMeta,
   });
+
   return recipe;
 }
 

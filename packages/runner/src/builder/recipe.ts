@@ -30,10 +30,10 @@ import {
   createJsonSchema,
   moduleToJSON,
   recipeToJSON,
-  toJSONWithAliases,
+  toJSONWithLegacyAliases,
 } from "./json-utils.ts";
 import { setValueAtPath } from "../path-utils.ts";
-import { traverseValue } from "../traverse-utils.ts";
+import { traverseValue } from "./traverse-utils.ts";
 
 /** Declare a recipe
  *
@@ -233,10 +233,20 @@ function factoryFromRecipe<T, R>(
   let count = 0;
   cells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
-    const { cell: top, path, name, external } = cell.export();
+    const { cell: top, path, value, name, external } = cell.export();
     if (!external) {
       if (!paths.has(top)) {
-        paths.set(top, ["internal", name ?? `__#${count++}`]);
+        // HACK(seefeld): For unnamed cells, we've run into an issue when the
+        // order changes that a stream might clobber a previously used
+        // non-stream, which means the default value won't be assigned and the
+        // cell won't be treated as stream. So we'll namespace those separately.
+        const streamMarker = isRecord(value) && value.$stream === true
+          ? "stream"
+          : "";
+        paths.set(top, [
+          "internal",
+          name ?? `__#${count++}${streamMarker}`,
+        ]);
       }
       if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
     }
@@ -247,10 +257,10 @@ function factoryFromRecipe<T, R>(
   });
 
   // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithAliases(outputs ?? {}, paths, true)!;
+  const result = toJSONWithLegacyAliases(outputs ?? {}, paths, true)!;
 
   // Collect default values for the inputs
-  const defaults = toJSONWithAliases(
+  const defaults = toJSONWithLegacyAliases(
     inputs.export().defaultValue ?? {},
     paths,
     true,
@@ -297,9 +307,12 @@ function factoryFromRecipe<T, R>(
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) || {};
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = toJSONWithAliases(node.module, paths) as unknown as Module;
-    const inputs = toJSONWithAliases(node.inputs, paths)!;
-    const outputs = toJSONWithAliases(node.outputs, paths)!;
+    const module = toJSONWithLegacyAliases(
+      node.module,
+      paths,
+    ) as unknown as Module;
+    const inputs = toJSONWithLegacyAliases(node.inputs, paths)!;
+    const outputs = toJSONWithLegacyAliases(node.outputs, paths)!;
     return { module, inputs, outputs } satisfies Node;
   });
 

@@ -1,7 +1,16 @@
+import { Command } from "@cliffy/command";
 import { Engine } from "@commontools/runner";
-import { Command } from "../interface.ts";
 import { join } from "@std/path/join";
 import { getCompilerOptions } from "@commontools/js-runtime/typescript";
+
+export const init = new Command()
+  .name("init")
+  .description(
+    "Initialize a TypeScript environment for evaluating recipes in external tools.",
+  )
+  .action(() => {
+    return initWorkspace(Deno.cwd());
+  });
 
 function createTsConfig() {
   const filterProps = [
@@ -77,8 +86,7 @@ const jsxRuntime = `declare module "react/jsx-runtime" {
 // containing types for the imported stdlib (`commontools`), the
 // implicitly loaded jsx-runtime (`react/jsx-runtime`) and the
 // environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
-export async function initWorkspace(command: Command) {
-  const { cwd } = command;
+async function initWorkspace(cwd: string) {
   const runtimeModuleTypes = await Engine.getRuntimeModuleTypes();
   const envTypes = await Engine.getEnvironmentTypes();
 

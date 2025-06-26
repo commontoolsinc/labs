@@ -22,6 +22,7 @@ import { castNewRecipe } from "./iterate.ts";
 import { VNode } from "@commontools/html";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
 import { CharmSearchResult, searchCharms } from "./search.ts";
+import { console } from "./conditional-console.ts";
 
 export interface RecipeRecord {
   argumentSchema: JSONSchema; // Schema type from jsonschema

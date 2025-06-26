@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { followAliases } from "../src/link-resolution.ts";
+import { followWriteRedirects } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { expectCellLinksEqual } from "./test-helpers.ts";
+import { areLinksSame } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -28,7 +28,7 @@ describe("link-resolution", () => {
     await storageManager?.close();
   });
 
-  describe("followAliases", () => {
+  describe("followWriteRedirects", () => {
     it("should follow a simple alias", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
@@ -36,7 +36,7 @@ describe("link-resolution", () => {
       );
       testCell.set({ value: 42 });
       const binding = { $alias: { path: ["value"] } };
-      const result = followAliases(binding, testCell);
+      const result = followWriteRedirects(binding, testCell);
       expect(result.cell.getAtPath(result.path)).toBe(42);
     });
 
@@ -51,11 +51,11 @@ describe("link-resolution", () => {
         "should follow nested aliases 2",
       );
       outerCell.setRaw({
-        outer: { $alias: innerCell.key("inner").getAsCellLink() },
+        outer: { $alias: innerCell.key("inner").getAsLegacyCellLink() },
       });
       const binding = { $alias: { path: ["outer"] } };
-      const result = followAliases(binding, outerCell);
-      expectCellLinksEqual(result).toEqual(innerCell.key("inner").getAsCellLink());
+      const result = followWriteRedirects(binding, outerCell);
+      expect(areLinksSame(result, innerCell.key("inner"))).toBe(true);
       expect(result.cell.getAtPath(result.path)).toBe(10);
     });
 
@@ -70,10 +70,16 @@ describe("link-resolution", () => {
         "should throw an error on circular aliases 2",
       );
       cellB.set({});
-      cellA.setRaw({ alias: { $alias: cellB.key("alias").getAsCellLink() } });
-      cellB.setRaw({ alias: { $alias: cellA.key("alias").getAsCellLink() } });
+      cellA.setRaw({
+        alias: { $alias: cellB.key("alias").getAsLegacyCellLink() },
+      });
+      cellB.setRaw({
+        alias: { $alias: cellA.key("alias").getAsLegacyCellLink() },
+      });
       const binding = { $alias: { path: ["alias"] } };
-      expect(() => followAliases(binding, cellA)).toThrow("cycle detected");
+      expect(() => followWriteRedirects(binding, cellA)).toThrow(
+        "cycle detected",
+      );
     });
 
     it("should allow aliases in aliased paths", () => {
@@ -85,8 +91,10 @@ describe("link-resolution", () => {
         a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
       });
       const binding = { $alias: { path: ["a", "a", "c"] } };
-      const result = followAliases(binding, testCell);
-      expectCellLinksEqual(result).toEqual(testCell.key("a").key("b").key("c").getAsCellLink());
+      const result = followWriteRedirects(binding, testCell);
+      expect(areLinksSame(result, testCell.key("a").key("b").key("c"))).toBe(
+        true,
+      );
       expect(result.cell.getAtPath(result.path)).toBe(1);
     });
   });

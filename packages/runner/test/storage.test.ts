@@ -65,7 +65,7 @@ describe("Storage", () => {
 
       const testValue = {
         data: "test",
-        ref: refDoc.getAsCellLink(),
+        ref: refDoc.getAsLegacyCellLink(),
       };
       testDoc.send(testValue);
 

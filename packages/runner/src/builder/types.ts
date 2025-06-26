@@ -135,26 +135,11 @@ export type SchemaContext = {
   rootSchema: JSONSchema | boolean;
 };
 
-export type Alias = {
-  $alias: {
-    cell?: unknown;
-    path: PropertyKey[];
-    schema?: JSONSchema;
-    rootSchema?: JSONSchema;
-  };
-};
-
-export function isAlias(value: unknown): value is Alias {
-  return isObject(value) && "$alias" in value && isObject(value.$alias) &&
-    "path" in value.$alias &&
-    Array.isArray(value.$alias.path);
-}
-
-export type StreamAlias = {
+export type StreamValue = {
   $stream: true;
 };
 
-export function isStreamAlias(value: unknown): value is StreamAlias {
+export function isStreamValue(value: unknown): value is StreamValue {
   return isObject(value) && "$stream" in value && value.$stream === true;
 }
 
@@ -177,7 +162,7 @@ export function isModule(value: unknown): value is Module {
 
 export type Node = {
   description?: string;
-  module: Module | Alias;
+  module: Module; // TODO(seefeld): Add `Alias` here once supported
   inputs: JSONValue;
   outputs: JSONValue;
 };
