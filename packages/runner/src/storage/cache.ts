@@ -201,6 +201,24 @@ class Nursery implements SyncPush<State> {
     return undefined;
   }
 
+  /**
+   * If state `before` and `after` are the same that implies that remote has
+   * caught up with `nursery` so we evict record from nursery allowing reads
+   * to fall through to `heap`. If `after` is `undefined` that is very unusual,
+   * yet we keep value from `before` as nursery is more likely ahead. If
+   * `before` is `undefined` keep it as is because reads would fall through
+   * to `heap` anyway.
+   */
+  static evict(before?: State, after?: State) {
+    return before == undefined
+      ? undefined
+      : after === undefined
+      ? before
+      : JSON.stringify(before) === JSON.stringify(after)
+      ? undefined
+      : before;
+  }
+
   constructor(public store: Map<string, State> = new Map()) {
   }
   get(entry: FactAddress) {
@@ -787,7 +805,10 @@ export class Replica {
         ];
         // Turn facts into revisions corresponding with the commit.
         this.heap.merge(revisions, Replica.put);
-        this.nursery.merge(facts, Nursery.delete);
+        // Evict redundant facts which we just merged into `heap` so that reads
+        // will occur from `heap`. This way future changes upstream we not get
+        // shadowed by prior local changes.
+        this.nursery.merge(facts, Nursery.evict);
       }
 
       return result;
