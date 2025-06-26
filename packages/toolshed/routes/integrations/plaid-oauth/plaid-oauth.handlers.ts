@@ -32,6 +32,15 @@ import {
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
+import {
+  getRedisClient,
+  storeOAuthSession,
+  storeLinkTokenMapping,
+  getOAuthSession,
+  deleteOAuthSession,
+  getUserEmailByLinkToken,
+  type PlaidOAuthSession,
+} from "./plaid-oauth.redis.ts";
 import { setBGCharm } from "@commontools/background-charm";
 import { type CellLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
@@ -54,6 +63,19 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
       return createLinkTokenErrorResponse(c, "Missing authCellId in request");
+    }
+
+    // Get user email from Tailscale header, fallback to fake email for localhost
+    let userEmail = c.req.header("tailscale-user-login");
+    if (!userEmail) {
+      const url = new URL(c.req.url);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        userEmail = "fake@common.tools";
+        logger.info("Using fake email for localhost development");
+      } else {
+        logger.error("No user email found in tailscale-user-login header");
+        return createLinkTokenErrorResponse(c, "User authentication required");
+      }
     }
 
     const plaidClient = createPlaidClient();
@@ -82,15 +104,31 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     }
 
     logger.debug({ linkTokenRequest }, "Creating Plaid link token");
-    console.log("Create plaid link token request", linkTokenRequest);
 
     const response = await plaidClient.linkTokenCreate(linkTokenRequest);
-    console.log("Create plaid link token response", response);
     const { link_token, expiration } = response.data;
 
     logger.info(
       { linkToken: link_token.substring(0, 20) + "...", expiration },
       "Created Plaid link token",
+    );
+
+    // Store OAuth session in Redis
+    const redis = await getRedisClient();
+    const sessionData: PlaidOAuthSession = {
+      linkToken: link_token,
+      authCellId: payload.authCellId,
+      frontendUrl: payload.frontendUrl || "http://localhost:5173",
+      integrationCharmId: payload.integrationCharmId,
+      createdAt: new Date().toISOString(),
+    };
+
+    await storeOAuthSession(redis, userEmail, sessionData);
+    await storeLinkTokenMapping(redis, link_token, userEmail);
+
+    logger.info(
+      { userEmail, linkToken: link_token.substring(0, 20) + "..." },
+      "Stored OAuth session in Redis",
     );
 
     // Create the hosted Link URL
@@ -580,32 +618,42 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       state,
     } = query;
 
-    // Try to get session data from cookie
-    let frontendBaseUrl = "http://localhost:5173";
-    let sessionData: any = null;
-    
-    const cookieHeader = c.req.header("cookie");
-    if (cookieHeader) {
-      const cookies = cookieHeader.split(';').map(c => c.trim());
-      const sessionCookie = cookies.find(c => c.startsWith('plaid_oauth_session='));
-      if (sessionCookie) {
-        try {
-          const cookieValue = sessionCookie.split('=')[1];
-          sessionData = JSON.parse(decodeURIComponent(cookieValue));
-          if (sessionData.frontendUrl) {
-            frontendBaseUrl = sessionData.frontendUrl;
-          }
-          logger.info("Found Plaid OAuth session data in cookie", { sessionData });
-        } catch (e) {
-          logger.error("Failed to parse Plaid OAuth session cookie", { error: e });
-        }
+    // Get user email from Tailscale header, fallback to fake email for localhost
+    let userEmail = c.req.header("tailscale-user-login");
+    if (!userEmail) {
+      const url = new URL(c.req.url);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        userEmail = "fake@common.tools";
+        logger.info("Using fake email for localhost development");
+      } else {
+        logger.error("No user email found in tailscale-user-login header");
+        const errorUrl = new URL("/");
+        errorUrl.searchParams.set("error", "authentication_required");
+        return c.redirect(errorUrl.toString());
       }
     }
+
+    // Retrieve session data from Redis
+    const redis = await getRedisClient();
+    const sessionData = await getOAuthSession(redis, userEmail);
     
-    // Fallback to state parameter if no cookie (backwards compatibility)
-    if (!sessionData && state) {
-      frontendBaseUrl = state;
+    if (!sessionData) {
+      logger.error({ userEmail }, "No OAuth session found in Redis");
+      const errorUrl = new URL("/");
+      errorUrl.searchParams.set("error", "session_expired");
+      return c.redirect(errorUrl.toString());
     }
+
+    logger.info(
+      {
+        userEmail,
+        hasLinkToken: !!sessionData.linkToken,
+        frontendUrl: sessionData.frontendUrl,
+      },
+      "Retrieved OAuth session from Redis",
+    );
+
+    const frontendBaseUrl = sessionData.frontendUrl || "http://localhost:5173";
 
     // Handle OAuth flow - if we have oauth_state_id, this is an OAuth institution
     if (oauth_state_id && !public_token && !linkError) {
@@ -654,6 +702,10 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
         "Received public token",
       );
 
+      // Clean up the Redis session since OAuth is complete
+      await deleteOAuthSession(redis, userEmail);
+      logger.info({ userEmail }, "Deleted OAuth session from Redis");
+
       const successUrl = new URL(frontendBaseUrl);
       successUrl.searchParams.set("public_token", public_token);
       return c.redirect(successUrl.toString());
@@ -692,10 +744,47 @@ export const completeOAuth: AppRouteHandler<CompleteOAuthRoute> = async (c) => {
 
   try {
     const payload = await c.req.json();
-    logger.info(
-      { linkToken: payload.linkToken.substring(0, 20) + "..." },
-      "Received complete OAuth request",
-    );
+    logger.info("Received complete OAuth request", {
+      linkToken: payload.linkToken ? payload.linkToken.substring(0, 20) + "..." : "none",
+      authCellId: payload.authCellId,
+      integrationCharmId: payload.integrationCharmId,
+    });
+    
+    if (!payload.linkToken) {
+      logger.error("No link token provided in complete OAuth request");
+      return c.json({
+        error: "Link token is required to complete OAuth flow",
+      }, 400);
+    }
+
+    // If authCellId is missing, try to retrieve it from Redis using link token
+    let authCellId = payload.authCellId;
+    let integrationCharmId = payload.integrationCharmId;
+    
+    if (!authCellId) {
+      logger.info("No authCellId provided, attempting to retrieve from Redis");
+      const redis = await getRedisClient();
+      const userEmail = await getUserEmailByLinkToken(redis, payload.linkToken);
+      
+      if (userEmail) {
+        const sessionData = await getOAuthSession(redis, userEmail);
+        if (sessionData) {
+          authCellId = sessionData.authCellId;
+          integrationCharmId = integrationCharmId || sessionData.integrationCharmId;
+          logger.info(
+            { userEmail, authCellId, integrationCharmId },
+            "Retrieved session data from Redis",
+          );
+        }
+      }
+      
+      if (!authCellId) {
+        logger.error("Unable to retrieve authCellId from Redis");
+        return c.json({
+          error: "Unable to find OAuth session",
+        }, 400);
+      }
+    }
 
     const plaidClient = createPlaidClient();
 

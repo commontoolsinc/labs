@@ -50,10 +50,6 @@ export class CommonPlaidOauthElement extends LitElement {
     this.authStatus = "";
   }
 
-  private clearPlaidOAuthCookie() {
-    // Clear the OAuth session cookie
-    document.cookie = "plaid_oauth_session=; path=/; max-age=0; SameSite=Lax";
-  }
 
   override connectedCallback() {
     super.connectedCallback();
@@ -85,25 +81,10 @@ export class CommonPlaidOauthElement extends LitElement {
         // OAuth flow - retrieve stored link token and complete the flow
         this.authStatus = "Completing OAuth authentication...";
         
-        // Try to get session data from cookie first, then fallback to sessionStorage
-        let linkToken = sessionStorage.getItem('plaid_link_token');
-        let authCellId = sessionStorage.getItem('plaid_auth_cell_id');
-        let integrationCharmId = sessionStorage.getItem('plaid_integration_charm_id');
-        
-        // Check for cookie data
-        const cookies = document.cookie.split(';').map(c => c.trim());
-        const sessionCookie = cookies.find(c => c.startsWith('plaid_oauth_session='));
-        if (sessionCookie) {
-          try {
-            const cookieValue = sessionCookie.split('=')[1];
-            const sessionData = JSON.parse(decodeURIComponent(cookieValue));
-            linkToken = sessionData.linkToken || linkToken;
-            authCellId = sessionData.authCellId || authCellId;
-            integrationCharmId = sessionData.integrationCharmId || integrationCharmId;
-          } catch (e) {
-            console.error('Failed to parse Plaid OAuth session cookie:', e);
-          }
-        }
+        // Get session data from sessionStorage
+        const linkToken = sessionStorage.getItem('plaid_link_token');
+        const authCellId = sessionStorage.getItem('plaid_auth_cell_id');
+        const integrationCharmId = sessionStorage.getItem('plaid_integration_charm_id');
         
         if (linkToken && authCellId) {
           // Complete the OAuth flow using the link token
@@ -112,13 +93,12 @@ export class CommonPlaidOauthElement extends LitElement {
           this.authStatus = "Session expired. Please click 'Connect Bank Account' to start over.";
         }
         
-        // Clean up URL, sessionStorage, and cookie
+        // Clean up URL and sessionStorage
         window.history.replaceState({}, document.title, window.location.pathname);
         sessionStorage.removeItem('plaid_link_token');
         sessionStorage.removeItem('plaid_auth_cell_id');
         sessionStorage.removeItem('plaid_integration_charm_id');
         sessionStorage.removeItem('plaid_frontend_url');
-        this.clearPlaidOAuthCookie();
       }
     }
   }
@@ -154,9 +134,6 @@ export class CommonPlaidOauthElement extends LitElement {
       const result = await response.json();
       this.authStatus = "Bank account connected successfully!";
       this.isLoading = false;
-      
-      // Clean up OAuth session
-      this.clearPlaidOAuthCookie();
       
       // Force update to show new account
       this.requestUpdate();
@@ -205,18 +182,7 @@ export class CommonPlaidOauthElement extends LitElement {
       const data = await response.json();
       
       if (data.hostedLinkUrl && data.linkToken) {
-        // Store OAuth session data in cookies for the callback endpoint
-        const sessionData = {
-          linkToken: data.linkToken,
-          authCellId: authCellId,
-          frontendUrl: window.location.href.split('?')[0],
-          integrationCharmId: charmId || undefined,
-        };
-        
-        // Set cookie that will be accessible by the backend
-        document.cookie = `plaid_oauth_session=${encodeURIComponent(JSON.stringify(sessionData))}; path=/; max-age=3600; SameSite=Lax`;
-        
-        // Also keep in sessionStorage for frontend use
+        // Store session data in sessionStorage for frontend use
         sessionStorage.setItem('plaid_link_token', data.linkToken);
         sessionStorage.setItem('plaid_auth_cell_id', authCellId);
         sessionStorage.setItem('plaid_frontend_url', window.location.href.split('?')[0]);
@@ -268,7 +234,6 @@ export class CommonPlaidOauthElement extends LitElement {
       } else {
         this.authStatus = "Bank account connected successfully!";
         this.isLoading = false;
-        this.clearPlaidOAuthCookie();
         this.requestUpdate();
       }
     } catch (error) {
