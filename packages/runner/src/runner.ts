@@ -95,14 +95,10 @@ export class Runner implements IRunner {
     argument: T,
     resultCell: DocImpl<R> | Cell<R>,
   ): DocImpl<R> | Cell<R> {
-    // Cell version delegates to DocImpl version
-    if (isCell(resultCell)) {
-      this.run(recipeOrModule, argument, resultCell.getDoc());
-      return resultCell;
-    }
-
-    // Otherwise run existing DocImpl logic
-    const resultDoc = resultCell as DocImpl<R>;
+    // Convert to Cell if needed and work with Cell internally
+    const resultDoc = isCell(resultCell)
+      ? resultCell
+      : (resultCell as DocImpl<R>).asCell();
 
     let processDoc: DocImpl<{
       [TYPE]: string;
@@ -111,15 +107,16 @@ export class Runner implements IRunner {
       resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
     }>;
 
-    if (resultDoc.sourceCell !== undefined) {
-      processDoc = resultDoc.sourceCell;
+    const sourceCell = resultDoc.getSourceCell();
+    if (sourceCell !== undefined) {
+      processDoc = sourceCell.getDoc();
     } else {
       processDoc = this.runtime.documentMap.getDoc(
         undefined,
-        { cell: resultDoc, path: [] },
-        resultDoc.space,
+        { cell: resultDoc.getDoc(), path: [] },
+        resultDoc.getDoc().space,
       ) as any;
-      resultDoc.sourceCell = processDoc;
+      resultDoc.getDoc().sourceCell = processDoc;
     }
 
     let recipeId: string | undefined;
@@ -161,7 +158,7 @@ export class Runner implements IRunner {
 
     recipeId ??= this.runtime.recipeManager.generateRecipeId(recipe);
 
-    if (this.cancels.has(resultDoc)) {
+    if (this.cancels.has(resultDoc.getDoc())) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
       if (argument === undefined && recipeId === processDoc.get()?.[TYPE]) {
@@ -177,7 +174,7 @@ export class Runner implements IRunner {
 
     // Keep track of subscriptions to cancel them later
     const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(resultDoc, cancel);
+    this.cancels.set(resultDoc.getDoc(), cancel);
     this.allCancels.add(cancel);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
@@ -214,7 +211,7 @@ export class Runner implements IRunner {
     processDoc.send({
       ...processDoc.get(),
       [TYPE]: recipeId || "unknown",
-      resultRef: { cell: resultDoc, path: [] },
+      resultRef: { cell: resultDoc.getDoc(), path: [] },
       internal,
     });
     if (argument) {
@@ -254,7 +251,12 @@ export class Runner implements IRunner {
     }
 
     // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
-    return resultDoc;
+    // Return the correct type based on what was passed in
+    if (isCell(resultCell)) {
+      return resultDoc;
+    } else {
+      return resultDoc.getDoc();
+    }
   }
 
   async runSynced(
