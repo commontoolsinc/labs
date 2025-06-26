@@ -50,6 +50,11 @@ export class CommonPlaidOauthElement extends LitElement {
     this.authStatus = "";
   }
 
+  private clearPlaidOAuthCookie() {
+    // Clear the OAuth session cookie
+    document.cookie = "plaid_oauth_session=; path=/; max-age=0; SameSite=Lax";
+  }
+
   override connectedCallback() {
     super.connectedCallback();
     // Check for OAuth callback on component mount
@@ -64,6 +69,7 @@ export class CommonPlaidOauthElement extends LitElement {
     const oauthContinue = urlParams.get("oauth_continue");
     const oauthStateId = urlParams.get("oauth_state_id");
     
+    
     if (publicToken || error || oauthContinue) {
       if (error) {
         this.authStatus = `Authentication failed: ${urlParams.get("error_message") || error}`;
@@ -76,16 +82,43 @@ export class CommonPlaidOauthElement extends LitElement {
         // Clean up URL
         window.history.replaceState({}, document.title, window.location.pathname);
       } else if (oauthContinue && oauthStateId) {
-        // OAuth flow - need to show message to user
-        this.authStatus = "Please complete authentication with your bank. You may need to reconnect.";
-        // Clean up URL
-        window.history.replaceState({}, document.title, window.location.pathname);
+        // OAuth flow - retrieve stored link token and complete the flow
+        this.authStatus = "Completing OAuth authentication...";
         
-        // For OAuth institutions, the user needs to go through Link again
-        // after completing OAuth at their bank
-        setTimeout(() => {
-          this.authStatus = "Ready to connect. Please click 'Connect Bank Account' again.";
-        }, 3000);
+        // Try to get session data from cookie first, then fallback to sessionStorage
+        let linkToken = sessionStorage.getItem('plaid_link_token');
+        let authCellId = sessionStorage.getItem('plaid_auth_cell_id');
+        let integrationCharmId = sessionStorage.getItem('plaid_integration_charm_id');
+        
+        // Check for cookie data
+        const cookies = document.cookie.split(';').map(c => c.trim());
+        const sessionCookie = cookies.find(c => c.startsWith('plaid_oauth_session='));
+        if (sessionCookie) {
+          try {
+            const cookieValue = sessionCookie.split('=')[1];
+            const sessionData = JSON.parse(decodeURIComponent(cookieValue));
+            linkToken = sessionData.linkToken || linkToken;
+            authCellId = sessionData.authCellId || authCellId;
+            integrationCharmId = sessionData.integrationCharmId || integrationCharmId;
+          } catch (e) {
+            console.error('Failed to parse Plaid OAuth session cookie:', e);
+          }
+        }
+        
+        if (linkToken && authCellId) {
+          // Complete the OAuth flow using the link token
+          await this.completeOAuthFlow(linkToken, authCellId, integrationCharmId || undefined);
+        } else {
+          this.authStatus = "Session expired. Please click 'Connect Bank Account' to start over.";
+        }
+        
+        // Clean up URL, sessionStorage, and cookie
+        window.history.replaceState({}, document.title, window.location.pathname);
+        sessionStorage.removeItem('plaid_link_token');
+        sessionStorage.removeItem('plaid_auth_cell_id');
+        sessionStorage.removeItem('plaid_integration_charm_id');
+        sessionStorage.removeItem('plaid_frontend_url');
+        this.clearPlaidOAuthCookie();
       }
     }
   }
@@ -121,6 +154,9 @@ export class CommonPlaidOauthElement extends LitElement {
       const result = await response.json();
       this.authStatus = "Bank account connected successfully!";
       this.isLoading = false;
+      
+      // Clean up OAuth session
+      this.clearPlaidOAuthCookie();
       
       // Force update to show new account
       this.requestUpdate();
@@ -168,15 +204,75 @@ export class CommonPlaidOauthElement extends LitElement {
 
       const data = await response.json();
       
-      if (data.hostedLinkUrl) {
+      if (data.hostedLinkUrl && data.linkToken) {
+        // Store OAuth session data in cookies for the callback endpoint
+        const sessionData = {
+          linkToken: data.linkToken,
+          authCellId: authCellId,
+          frontendUrl: window.location.href.split('?')[0],
+          integrationCharmId: charmId || undefined,
+        };
+        
+        // Set cookie that will be accessible by the backend
+        document.cookie = `plaid_oauth_session=${encodeURIComponent(JSON.stringify(sessionData))}; path=/; max-age=3600; SameSite=Lax`;
+        
+        // Also keep in sessionStorage for frontend use
+        sessionStorage.setItem('plaid_link_token', data.linkToken);
+        sessionStorage.setItem('plaid_auth_cell_id', authCellId);
+        sessionStorage.setItem('plaid_frontend_url', window.location.href.split('?')[0]);
+        if (charmId) {
+          sessionStorage.setItem('plaid_integration_charm_id', charmId);
+        }
+        
         // Redirect to Plaid hosted Link
         this.authStatus = "Redirecting to Plaid...";
         window.location.href = data.hostedLinkUrl;
       } else {
-        throw new Error("No hosted link URL received");
+        throw new Error("No hosted link URL or link token received");
       }
     } catch (error) {
       console.error("Error creating link session:", error);
+      this.authStatus = `Error: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.isLoading = false;
+    }
+  }
+
+  private async completeOAuthFlow(linkToken: string, authCellId: string, integrationCharmId?: string) {
+    this.isLoading = true;
+    
+    try {
+      const response = await fetch("/api/integrations/plaid-oauth/complete-oauth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          linkToken,
+          authCellId,
+          integrationCharmId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.publicToken) {
+        // Exchange the public token
+        await this.handlePublicToken(result.publicToken);
+      } else {
+        this.authStatus = "Bank account connected successfully!";
+        this.isLoading = false;
+        this.clearPlaidOAuthCookie();
+        this.requestUpdate();
+      }
+    } catch (error) {
+      console.error("Error completing OAuth flow:", error);
       this.authStatus = `Error: ${
         error instanceof Error ? error.message : String(error)
       }`;
@@ -306,6 +402,11 @@ export class CommonPlaidOauthElement extends LitElement {
             : ""
           }
         </div>
+
+        <details class="debug-section">
+          <summary>Debug: Auth Cell Contents</summary>
+          <pre class="debug-content">${JSON.stringify(authData, null, 2)}</pre>
+        </details>
       </div>
     `;
   }
@@ -473,6 +574,34 @@ export class CommonPlaidOauthElement extends LitElement {
           color: #2e7d32;
           font-size: 0.9rem;
           text-align: center;
+        }
+
+        .debug-section {
+          margin-top: 24px;
+          padding: 16px;
+          background-color: #f5f5f5;
+          border-radius: 8px;
+          border: 1px solid #ddd;
+        }
+
+        .debug-section summary {
+          cursor: pointer;
+          font-weight: 500;
+          color: #666;
+          user-select: none;
+        }
+
+        .debug-content {
+          margin-top: 12px;
+          padding: 12px;
+          background-color: #fff;
+          border: 1px solid #e0e0e0;
+          border-radius: 4px;
+          overflow-x: auto;
+          font-family: monospace;
+          font-size: 0.85rem;
+          white-space: pre;
+          color: #333;
         }
       `,
     ];

@@ -9,6 +9,7 @@ const router = createRouter()
   .openapi(routes.refreshAccounts, handlers.refreshAccounts)
   .openapi(routes.syncTransactions, handlers.syncTransactions)
   .openapi(routes.removeItem, handlers.removeItem)
+  .openapi(routes.completeOAuth, handlers.completeOAuth)
   .openapi(routes.callback, handlers.callback)
   .openapi(routes.backgroundIntegration, handlers.backgroundIntegration);
 

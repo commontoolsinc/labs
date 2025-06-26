@@ -2,6 +2,7 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   BackgroundIntegrationRoute,
   CallbackRoute,
+  CompleteOAuthRoute,
   CreateLinkTokenRoute,
   ExchangeTokenRoute,
   RefreshAccountsRoute,
@@ -74,7 +75,7 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
       country_codes: (payload.countryCodes || ["US"]) as CountryCode[],
       language: "en",
     };
-    
+
     // Only add redirect_uri if provided
     if (redirectUri) {
       linkTokenRequest.redirect_uri = redirectUri;
@@ -104,10 +105,13 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     });
   } catch (error: any) {
     logger.error({ error }, "Failed to create link token");
-    
+
     // Extract Plaid error details if available
     if (error.response?.data) {
-      logger.error({ plaidError: error.response.data }, "Plaid API error details");
+      logger.error(
+        { plaidError: error.response.data },
+        "Plaid API error details",
+      );
       const plaidError = error.response.data;
       return c.json({
         error: plaidError.error_message || "Failed to create link token",
@@ -116,7 +120,7 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
         display_message: plaidError.display_message,
       }, 400);
     }
-    
+
     return createLinkTokenErrorResponse(
       c,
       error instanceof Error ? error.message : "Failed to create link token",
@@ -567,31 +571,61 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
   logger.info({ query }, "Received Plaid OAuth callback");
 
   try {
-    const { 
-      public_token, 
+    const {
+      public_token,
       oauth_state_id,
-      error: linkError, 
-      error_code, 
+      error: linkError,
+      error_code,
       error_message,
-      state 
+      state,
     } = query;
 
-    // Determine the frontend URL to redirect to
-    const frontendBaseUrl = state || "http://localhost:5173";
+    // Try to get session data from cookie
+    let frontendBaseUrl = "http://localhost:5173";
+    let sessionData: any = null;
     
+    const cookieHeader = c.req.header("cookie");
+    if (cookieHeader) {
+      const cookies = cookieHeader.split(';').map(c => c.trim());
+      const sessionCookie = cookies.find(c => c.startsWith('plaid_oauth_session='));
+      if (sessionCookie) {
+        try {
+          const cookieValue = sessionCookie.split('=')[1];
+          sessionData = JSON.parse(decodeURIComponent(cookieValue));
+          if (sessionData.frontendUrl) {
+            frontendBaseUrl = sessionData.frontendUrl;
+          }
+          logger.info("Found Plaid OAuth session data in cookie", { sessionData });
+        } catch (e) {
+          logger.error("Failed to parse Plaid OAuth session cookie", { error: e });
+        }
+      }
+    }
+    
+    // Fallback to state parameter if no cookie (backwards compatibility)
+    if (!sessionData && state) {
+      frontendBaseUrl = state;
+    }
+
     // Handle OAuth flow - if we have oauth_state_id, this is an OAuth institution
     if (oauth_state_id && !public_token && !linkError) {
       logger.info(
         { oauth_state_id },
         "OAuth flow detected - user needs to complete OAuth at institution",
       );
-      
+
       // For OAuth institutions, Plaid first redirects here, then user must complete
       // OAuth at their bank, then they come back through Link again
       // We should show a message that they need to continue in Plaid Link
       const continueUrl = new URL(frontendBaseUrl);
       continueUrl.searchParams.set("oauth_continue", "true");
       continueUrl.searchParams.set("oauth_state_id", oauth_state_id);
+      
+      // Pass along session data if we have it
+      if (sessionData && sessionData.linkToken) {
+        continueUrl.searchParams.set("has_session", "true");
+      }
+      
       return c.redirect(continueUrl.toString());
     }
 
@@ -646,6 +680,97 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
       };
       return createCallbackResponse(callbackResult);
     }
+  }
+};
+
+/**
+ * Complete OAuth Flow Handler
+ * Uses link token to get session results after OAuth
+ */
+export const completeOAuth: AppRouteHandler<CompleteOAuthRoute> = async (c) => {
+  const logger = c.get("logger");
+
+  try {
+    const payload = await c.req.json();
+    logger.info(
+      { linkToken: payload.linkToken.substring(0, 20) + "..." },
+      "Received complete OAuth request",
+    );
+
+    const plaidClient = createPlaidClient();
+
+    // Get session results using /link/token/get
+    try {
+      const linkTokenGetResponse = await plaidClient.linkTokenGet({
+        link_token: payload.linkToken,
+      });
+
+      logger.info("Link token get response received");
+
+      const { link_sessions, ...tokenData } = linkTokenGetResponse.data;
+
+      // Check if there are any sessions
+      if (!link_sessions || link_sessions.length === 0) {
+        logger.warn("No link sessions found");
+        return c.json({
+          error: "No link sessions found",
+        }, 400);
+      }
+
+      // Get the most recent session
+      const latestSession = link_sessions[link_sessions.length - 1];
+      
+      // Check if the session has results
+      if (latestSession.results) {
+        const results = latestSession.results;
+        
+        // Check for public tokens in results
+        if (results.item_add_results && results.item_add_results.length > 0) {
+          // Get the first public token (for single-item flow)
+          const publicToken = results.item_add_results[0].public_token;
+          
+          if (publicToken) {
+            logger.info("Found public token in session results");
+            return c.json({
+              publicToken,
+              success: true,
+            }, 200);
+          }
+        }
+      }
+
+      // Check if session is still in progress (OAuth not completed)
+      if (latestSession.on_exit && !latestSession.on_success) {
+        logger.info("Link session exited without success");
+        return c.json({
+          error: "OAuth authentication not completed",
+        }, 400);
+      }
+
+      logger.warn("No public token found in session results");
+      return c.json({
+        error: "No public token found in session",
+      }, 400);
+
+    } catch (error: any) {
+      // Check if it's a Plaid API error
+      if (error.response?.data) {
+        const plaidError = error.response.data;
+        logger.error(
+          { plaidError },
+          "Plaid API error getting link token",
+        );
+        return c.json({
+          error: plaidError.error_message || "Failed to get link token session",
+        }, 400);
+      }
+      throw error;
+    }
+  } catch (error) {
+    logger.error({ error }, "Failed to complete OAuth flow");
+    return c.json({
+      error: error instanceof Error ? error.message : "Failed to complete OAuth flow",
+    }, 500);
   }
 };
 

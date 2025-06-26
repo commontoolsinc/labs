@@ -4,7 +4,8 @@
       "WebFetch(domain:developers.google.com)",
       "Bash(deno task:*)",
       "Bash(rg:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebFetch(domain:plaid.com)"
     ],
     "deny": []
   }

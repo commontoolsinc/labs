@@ -51,6 +51,7 @@ export const createLinkToken = createRoute({
         "application/json": {
           schema: z.object({
             linkToken: z.string().describe("The Plaid Link token"),
+            hostedLinkUrl: z.string().describe("The hosted Link URL to redirect to"),
             expiration: z.string().describe("Token expiration timestamp"),
           }),
         },
@@ -317,6 +318,70 @@ export const removeItem = createRoute({
   },
 });
 
+export const completeOAuth = createRoute({
+  path: "/api/integrations/plaid-oauth/complete-oauth",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              linkToken: z.string().describe("The Plaid Link token"),
+              authCellId: z.string().describe("The authentication cell ID"),
+              integrationCharmId: z
+                .string()
+                .optional()
+                .describe("The charm ID of the integration charm"),
+            })
+            .openapi({
+              example: {
+                linkToken: "link-sandbox-xxx",
+                authCellId: "auth-cell-123",
+                integrationCharmId: "integration-charm-123",
+              },
+            }),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            publicToken: z.string().optional().describe("The public token if available"),
+            success: z.boolean(),
+            error: z.string().optional(),
+          }),
+        },
+      },
+      description: "OAuth flow completed successfully",
+    },
+    [HttpStatusCodes.BAD_REQUEST]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Invalid request parameters",
+    },
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+      description: "Internal server error",
+    },
+  },
+});
+
 export const callback = createRoute({
   path: "/api/integrations/plaid-oauth/callback",
   method: "get",
@@ -407,5 +472,6 @@ export type ExchangeTokenRoute = typeof exchangeToken;
 export type RefreshAccountsRoute = typeof refreshAccounts;
 export type SyncTransactionsRoute = typeof syncTransactions;
 export type RemoveItemRoute = typeof removeItem;
+export type CompleteOAuthRoute = typeof completeOAuth;
 export type CallbackRoute = typeof callback;
 export type BackgroundIntegrationRoute = typeof backgroundIntegration;
