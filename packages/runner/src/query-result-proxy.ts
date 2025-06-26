@@ -195,21 +195,21 @@ export function createQueryResultProxy<T>(
               if (!valueCell.runtime) {
                 throw new Error("No runtime available in document for getDoc");
               }
-              const resultCell = valueCell.runtime.documentMap.getDoc<any[]>(
+              const resultDoc = valueCell.runtime.documentMap.getDoc<any[]>(
                 undefined as unknown as any[],
                 cause,
                 valueCell.space,
               );
-              resultCell.send(result);
+              resultDoc.send(result);
 
               diffAndUpdate(
-                { cell: resultCell, path: [] },
+                { cell: resultDoc, path: [] },
                 result,
                 log,
                 cause,
               );
 
-              result = resultCell.getAsQueryResult([], log);
+              result = resultDoc.getAsQueryResult([], log);
             }
 
             return result;

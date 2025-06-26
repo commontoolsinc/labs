@@ -1,4 +1,4 @@
-import { type DocImpl } from "../doc.ts";
+import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import { type ReactivityLog } from "../scheduler.ts";
@@ -15,44 +15,44 @@ import { type ReactivityLog } from "../scheduler.ts";
  * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, streamed `result`, and any `error`.
  */
 export function streamData(
-  inputsCell: DocImpl<{
+  inputsCell: Cell<{
     url: string;
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: DocImpl<any>[],
-  parentDoc: DocImpl<any>,
+  cause: Cell<any>[],
+  parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = runtime.documentMap.getDoc(
-    false,
+  const pending = runtime.getCell(
+    parentCell.getDoc().space,
     { streamData: { pending: cause } },
-    parentDoc.space,
   );
-  const result = runtime.documentMap.getDoc<any | undefined>(
-    undefined,
+  pending.send(false);
+  
+  const result = runtime.getCell<any | undefined>(
+    parentCell.getDoc().space,
     {
       streamData: { result: cause },
     },
-    parentDoc.space,
   );
-  const error = runtime.documentMap.getDoc<any | undefined>(
-    undefined,
+  
+  const error = runtime.getCell<any | undefined>(
+    parentCell.getDoc().space,
     {
       streamData: { error: cause },
     },
-    parentDoc.space,
   );
 
-  pending.ephemeral = true;
-  result.ephemeral = true;
-  error.ephemeral = true;
+  pending.getDoc().ephemeral = true;
+  result.getDoc().ephemeral = true;
+  error.getDoc().ephemeral = true;
 
-  pending.sourceCell = parentDoc;
-  result.sourceCell = parentDoc;
-  error.sourceCell = parentDoc;
+  pending.getDoc().sourceCell = parentCell.getDoc();
+  result.getDoc().sourceCell = parentCell.getDoc();
+  error.getDoc().sourceCell = parentCell.getDoc();
 
   // Since we'll only write into the docs above, we only have to call this once
   // here, instead of in the action.
@@ -65,6 +65,10 @@ export function streamData(
 
   let previousCall = "";
   return (log: ReactivityLog) => {
+    const pendingWithLog = pending.withLog(log);
+    const resultWithLog = result.withLog(log);
+    const errorWithLog = error.withLog(log);
+    
     const { url, options } = inputsCell.getAsQueryResult([], log) || {};
 
     // Re-entrancy guard: Don't restart the stream if it's the same request.
@@ -78,16 +82,16 @@ export function streamData(
     }
 
     if (url === undefined) {
-      pending.setAtPath([], false, log);
-      result.setAtPath([], undefined, log);
-      error.setAtPath([], undefined, log);
+      pendingWithLog.set(false);
+      resultWithLog.set(undefined);
+      errorWithLog.set(undefined);
       ++status.run;
       return;
     }
 
-    pending.setAtPath([], true, log);
-    result.setAtPath([], undefined, log);
-    error.setAtPath([], undefined, log);
+    pendingWithLog.set(true);
+    resultWithLog.set(undefined);
+    errorWithLog.set(undefined);
 
     const controller = new AbortController();
     const signal = controller.signal;
@@ -139,7 +143,7 @@ export function streamData(
 
             await runtime.idle();
 
-            result.setAtPath([], parsedData, log);
+            resultWithLog.set(parsedData);
             id = undefined;
             event = undefined;
             data = undefined;
@@ -160,9 +164,9 @@ export function streamData(
         console.error(e);
 
         await runtime.idle();
-        pending.setAtPath([], false, log);
-        result.setAtPath([], undefined, log);
-        error.setAtPath([], e, log);
+        pendingWithLog.set(false);
+        resultWithLog.set(undefined);
+        errorWithLog.set(e);
 
         // Allow retrying the same request.
         previousCall = "";
