@@ -1,18 +1,18 @@
 import type {
   IMemoryAddress,
   InactiveTransactionError,
+  INotFoundError,
   IReaderError,
   IStorageTransaction,
   IStorageTransactionError,
   IStorageTransactionInconsistent,
   IStorageTransactionInvariant,
   IStorageTransactionLog,
-  IStorageTransactionNotFound,
   IStorageTransactionProgress,
-  IStorageTransactionWritePathError,
   ITransactionReader,
   ITransactionWriter,
   IWriterError,
+  MemoryAddressPathComponent,
   Read,
   Result,
   Write,
@@ -36,8 +36,8 @@ function uriToEntityId(uri: string): EntityId {
  */
 function validateParentPath(
   doc: DocImpl<any>,
-  path: PropertyKey[],
-): IStorageTransactionWritePathError | null {
+  path: MemoryAddressPathComponent[],
+): INotFoundError | null {
   if (path.length === 0) {
     return null; // Root write, no validation needed
   }
@@ -45,11 +45,10 @@ function validateParentPath(
   // Check if the document itself exists and is a record for first-level writes
   if (path.length === 1) {
     if (doc.value === undefined || !isRecord(doc.value)) {
-      const pathError: IStorageTransactionWritePathError = new Error(
+      const pathError: INotFoundError = new Error(
         `Cannot write to path [${String(path[0])}] - document is not a record`,
-      ) as IStorageTransactionWritePathError;
-      pathError.name = "StorageTransactionWritePathError";
-      pathError.path = path.map((p) => String(p));
+      ) as INotFoundError;
+      pathError.name = "NotFoundError";
       return pathError;
     }
     return null;
@@ -57,19 +56,29 @@ function validateParentPath(
 
   // For deeper paths, check that the parent path exists and is a record
   const parentPath = path.slice(0, -1);
+
   const parentValue = getValueAtPath(doc.value, parentPath);
 
   if (parentValue === undefined || !isRecord(parentValue)) {
-    const pathError: IStorageTransactionWritePathError = new Error(
+    const pathError: INotFoundError = new Error(
       `Cannot write to path [${
         path.map((p) => String(p)).join(", ")
       }] - parent path [${
         parentPath.map((p) => String(p)).join(", ")
       }] does not exist or is not a record`,
-    ) as IStorageTransactionWritePathError;
-    pathError.name = "StorageTransactionWritePathError";
-    pathError.path = path.map((p) => String(p));
-    pathError.parentPath = parentPath.map((p) => String(p));
+    ) as INotFoundError;
+    pathError.name = "NotFoundError";
+
+    // Set pathError.path to last valid parent path component
+    pathError.path = [];
+    let value = doc.get();
+    while (parentPath.length > 0) {
+      const segment = parentPath.shift()!;
+      value = value[segment];
+      if (!isRecord(value)) break;
+      pathError.path.push(segment);
+    }
+
     return pathError;
   }
 
@@ -130,8 +139,21 @@ class TransactionReader implements ITransactionReader {
       false, // Don't create if not found
     );
 
+    if (!doc) {
+      const notFoundError: INotFoundError = new Error(
+        `Document not found: ${address.id}`,
+      ) as INotFoundError;
+      notFoundError.name = "NotFoundError";
+      return { ok: undefined, error: notFoundError };
+    }
+
+    const validationError = validateParentPath(doc, address.path);
+    if (validationError) {
+      return { ok: undefined, error: validationError };
+    }
+
     // Read the value at the specified path
-    const value = doc ? getValueAtPath(doc.value, address.path) : undefined;
+    const value = getValueAtPath(doc.value, address.path);
 
     // Create the read invariant
     const read: Read = {
@@ -153,7 +175,7 @@ class TransactionWriter extends TransactionReader
   write(
     address: IMemoryAddress,
     value?: any,
-  ): Result<Write, IWriterError> {
+  ): Result<Write, INotFoundError | InactiveTransactionError> {
     // Convert URI to EntityId
     const entityId = uriToEntityId(address.id);
 
@@ -171,10 +193,10 @@ class TransactionWriter extends TransactionReader
     // For non-empty paths, check if document exists and is a record
     if (address.path.length > 0) {
       if (doc.value === undefined || !isRecord(doc.value)) {
-        const notFoundError: IStorageTransactionNotFound = new Error(
+        const notFoundError: INotFoundError = new Error(
           `Document not found or not a record: ${address.id}`,
-        ) as IStorageTransactionNotFound;
-        notFoundError.name = "StorageTransactionNotFound";
+        ) as INotFoundError;
+        notFoundError.name = "NotFoundError";
         return { ok: undefined, error: notFoundError };
       }
     }
@@ -300,17 +322,17 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: undefined };
   }
 
-  async commit(): Promise<Result<any, IStorageTransactionError>> {
+  commit(): Promise<Result<any, IStorageTransactionError>> {
     if (this.currentStatus.open === undefined) {
       const error: any = new Error("Transaction already aborted");
       error.name = "StorageTransactionAborted";
       error.reason = "Transaction was aborted";
-      return { ok: undefined, error };
+      return Promise.resolve({ ok: undefined, error });
     }
 
     // For now, just mark as done since we're only implementing basic read/write
     // In a real implementation, this would send the transaction to upstream storage
     this.currentStatus = { done: this.log };
-    return { ok: undefined };
+    return Promise.resolve({ ok: undefined });
   }
 }

@@ -245,7 +245,10 @@ export interface ITransactionReader {
    */
   read(
     address: IMemoryAddress,
-  ): Result<Read, IReaderError>;
+  ): Result<
+    Read,
+    INotFoundError | InactiveTransactionError
+  >;
 }
 
 export interface ITransactionWriter extends ITransactionReader {
@@ -258,7 +261,7 @@ export interface ITransactionWriter extends ITransactionReader {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<Write, IWriterError>;
+  ): Result<Write, INotFoundError | InactiveTransactionError>;
 }
 
 /**
@@ -320,18 +323,23 @@ export type IStorageTransactionFailed =
 
 export type IReaderError =
   | IStorageTransactionComplete
-  | IStorageTransactionAborted;
+  | IStorageTransactionAborted
+  | INotFoundError;
 
 export type IWriterError =
   | IStorageTransactionComplete
   | IStorageTransactionAborted
   | IStorageTransactionInconsistent
   | IStorageTransactionWriteIsolationError
-  | IStorageTransactionWritePathError
-  | IStorageTransactionNotFound;
+  | INotFoundError;
 
 export interface IStorageTransactionComplete extends Error {
-  name: "StorageTransactionComplete";
+  name: "StorageTransactionCompleteError";
+}
+
+export interface INotFoundError extends Error {
+  name: "NotFoundError";
+  path?: MemoryAddressPathComponent[];
 }
 
 export type IStorageTransactionProgress = Variant<{
@@ -393,22 +401,6 @@ export interface IStorageTransactionWriteIsolationError extends Error {
    * Memory space writer could not be opened for.
    */
   requested: MemorySpace;
-}
-
-export interface IStorageTransactionNotFound extends Error {
-  name: "StorageTransactionNotFound";
-}
-
-export interface IStorageTransactionWritePathError extends Error {
-  name: "StorageTransactionWritePathError";
-  /**
-   * The path that was invalid
-   */
-  path: MemoryAddressPathComponent[];
-  /**
-   * The parent path that doesn't exist or isn't a record
-   */
-  parentPath?: MemoryAddressPathComponent[];
 }
 
 /**
