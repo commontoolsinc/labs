@@ -18,8 +18,7 @@ import type {
 import type { IRuntime } from "../runtime.ts";
 import type { DocImpl } from "../doc.ts";
 import type { EntityId } from "../doc-map.ts";
-import { getValueAtPath, setValueAtPath } from "../path-utils.ts";
-import { createRef } from "../doc-map.ts";
+import { getValueAtPath } from "../path-utils.ts";
 import { refer } from "@commontools/memory/reference";
 import { isRecord } from "@commontools/utils/types";
 
@@ -118,30 +117,14 @@ class TransactionReader implements ITransactionReader {
         false, // Don't create if not found
       );
 
-      if (!doc) {
-        // Document doesn't exist, but we still capture the read invariant
-        const read: Read = {
-          address,
-          value: undefined,
-          cause: refer(address.id),
-        };
-        this.log.addRead(read);
-
-        const error: INotFoundError = new Error(
-          `Document not found: ${address.id}`,
-        ) as INotFoundError;
-        error.name = "NotFoundError";
-        return { ok: undefined, error };
-      }
-
       // Read the value at the specified path
-      const value = getValueAtPath(doc.value, address.path);
+      const value = doc ? getValueAtPath(doc.value, address.path) : undefined;
 
       // Create the read invariant
       const read: Read = {
         address,
         value,
-        cause: refer(address.id),
+        cause: refer("shim does not care"),
       };
       this.log.addRead(read);
 
