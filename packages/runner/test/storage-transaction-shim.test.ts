@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
+import { INotFoundError } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -34,7 +35,7 @@ describe("StorageTransaction", () => {
 
     // First write to root path to create a record
     const rootWriteResult = transaction.write({
-      space: "did:test:space",
+      space,
       id: "test:entity",
       type: "application/json",
       path: [],
@@ -44,7 +45,7 @@ describe("StorageTransaction", () => {
 
     // Test writing a value to nested path
     const writeResult = transaction.write({
-      space: "did:test:space",
+      space,
       id: "test:entity",
       type: "application/json",
       path: ["name"],
@@ -55,7 +56,7 @@ describe("StorageTransaction", () => {
 
     // Test reading the value
     const readResult = transaction.read({
-      space: "did:test:space",
+      space,
       id: "test:entity",
       type: "application/json",
       path: ["name"],
@@ -66,14 +67,40 @@ describe("StorageTransaction", () => {
 
     // Test reading non-existent path
     const readNonExistentResult = transaction.read({
-      space: "did:test:space",
+      space,
       id: "test:entity",
       type: "application/json",
-      path: ["age"],
+      path: ["address", "city"],
     });
 
-    expect(readNonExistentResult.ok).toBeDefined();
-    expect(readNonExistentResult.ok?.value).toBeUndefined();
+    expect(readNonExistentResult.error).toBeDefined();
+    expect(readNonExistentResult.error?.name).toBe("NotFoundError");
+    expect((readNonExistentResult.error as INotFoundError).path).toEqual([]);
+
+    // Test writing a value to nested path
+    const writeResult2 = transaction.write({
+      space,
+      id: "test:entity",
+      type: "application/json",
+      path: ["address"],
+    }, { street: "123 Main St" });
+
+    expect(writeResult2.ok).toBeDefined();
+    expect(writeResult2.ok?.value).toEqual({ street: "123 Main St" });
+
+    // Test reading non-existent path in a parent that does exist
+    const readNonExistentResult2 = transaction.read({
+      space,
+      id: "test:entity",
+      type: "application/json",
+      path: ["address", "country", "countryCode"],
+    });
+
+    expect(readNonExistentResult2.error).toBeDefined();
+    expect(readNonExistentResult2.error?.name).toBe("NotFoundError");
+    expect((readNonExistentResult2.error as INotFoundError).path).toEqual([
+      "address",
+    ]);
 
     // Test commit - dummy commit always succeeds
     const commitResult = await transaction.commit();
@@ -97,11 +124,11 @@ describe("StorageTransaction", () => {
     expect(commitResult.error?.name).toBe("StorageTransactionAborted");
   });
 
-  it("should enforce write isolation per space", async () => {
+  it("should enforce write isolation per space", () => {
     const transaction = runtime.edit();
 
     // Open writer for first space
-    const writer1Result = transaction.writer("did:test:space1");
+    const writer1Result = transaction.writer(space);
     expect(writer1Result.ok).toBeDefined();
 
     // Try to open writer for different space - should fail
@@ -113,11 +140,11 @@ describe("StorageTransaction", () => {
   });
 
   describe("write validation", () => {
-    it("should allow writing to root path when document is empty", async () => {
+    it("should allow writing to root path when document is empty", () => {
       const transaction = runtime.edit();
 
       const result = transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: [],
@@ -127,12 +154,12 @@ describe("StorageTransaction", () => {
       expect(result.ok).toBeDefined();
     });
 
-    it("should fail writing to nested path when document is not a record", async () => {
+    it("should fail writing to nested path when document is not a record", () => {
       const transaction = runtime.edit();
 
       // First write a non-record value to the document
       transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: [],
@@ -140,7 +167,7 @@ describe("StorageTransaction", () => {
 
       // Try to write to a nested path
       const result = transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: ["a"],
@@ -152,12 +179,12 @@ describe("StorageTransaction", () => {
       );
     });
 
-    it("should fail writing to deeply nested path when parent is not a record", async () => {
+    it("should fail writing to deeply nested path when parent is not a record", () => {
       const transaction = runtime.edit();
 
       // First write a record with a non-record value at "a"
       transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: [],
@@ -165,7 +192,7 @@ describe("StorageTransaction", () => {
 
       // Try to write to a deeply nested path
       const result = transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: ["a", "b"],
@@ -177,12 +204,12 @@ describe("StorageTransaction", () => {
       );
     });
 
-    it("should allow writing to nested path when parent is a record", async () => {
+    it("should allow writing to nested path when parent is a record", () => {
       const transaction = runtime.edit();
 
       // First write a record value to the document
       transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: [],
@@ -190,7 +217,7 @@ describe("StorageTransaction", () => {
 
       // Write to a nested path
       const result = transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: ["a", "b"],
@@ -200,12 +227,12 @@ describe("StorageTransaction", () => {
       expect(result.ok).toBeDefined();
     });
 
-    it("should allow writing to deeply nested path when all parents are records", async () => {
+    it("should allow writing to deeply nested path when all parents are records", () => {
       const transaction = runtime.edit();
 
       // First write a record with nested structure
       transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: [],
@@ -213,7 +240,7 @@ describe("StorageTransaction", () => {
 
       // Write to a deeply nested path
       const result = transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: ["a", "b", "c", "d"],
@@ -223,12 +250,12 @@ describe("StorageTransaction", () => {
       expect(result.ok).toBeDefined();
     });
 
-    it("should fail writing to nested path when parent path doesn't exist", async () => {
+    it("should fail writing to nested path when parent path doesn't exist", () => {
       const transaction = runtime.edit();
 
       // First write a record to the document
       transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: [],
@@ -236,7 +263,7 @@ describe("StorageTransaction", () => {
 
       // Try to write to a path where parent doesn't exist
       const result = transaction.write({
-        space: "did:test:space",
+        space,
         id: "test://doc1",
         type: "test",
         path: ["missing", "nested"],
