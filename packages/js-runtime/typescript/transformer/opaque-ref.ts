@@ -65,6 +65,7 @@ export function createOpaqueRefTransformer(
     return (sourceFile) => {
       let needsIfElseImport = false;
       let needsDeriveImport = false;
+      let needsToSchemaImport = false;
       let hasTransformed = false;
 
       const log = (message: string) => {
@@ -87,8 +88,47 @@ export function createOpaqueRefTransformer(
       const visit: ts.Visitor = (node) => {
         // Handle function calls with OpaqueRef arguments or method calls on OpaqueRef
         if (ts.isCallExpression(node)) {
-          // Check if this is a builder function call - these should not be transformed
+          // Special case: handler with type arguments
           const functionName = getFunctionName(node);
+          if (functionName === 'handler' && node.typeArguments && node.typeArguments.length >= 2) {
+            // Transform handler<E,T>(fn) to handler(toSchema<E>(), toSchema<T>(), fn)
+            if (debug) {
+              log(`Found handler with type arguments at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
+            }
+            
+            const [eventType, stateType] = node.typeArguments;
+            const handlerArgs = node.arguments;
+            
+            // Create toSchema calls for the type arguments
+            const toSchemaEventCall = context.factory.createCallExpression(
+              context.factory.createIdentifier('toSchema'),
+              [eventType],
+              []
+            );
+            
+            const toSchemaStateCall = context.factory.createCallExpression(
+              context.factory.createIdentifier('toSchema'),
+              [stateType],
+              []
+            );
+            
+            // Create new handler call without type arguments but with schema arguments
+            const newHandlerCall = context.factory.createCallExpression(
+              node.expression,
+              undefined, // No type arguments
+              [toSchemaEventCall, toSchemaStateCall, ...handlerArgs]
+            );
+            
+            // Mark that we need toSchema import
+            if (!hasCommonToolsImport(sourceFile, "toSchema")) {
+              needsToSchemaImport = true;
+            }
+            
+            hasTransformed = true;
+            return ts.visitEachChild(newHandlerCall, visit, context);
+          }
+          
+          // Check if this is a builder function call - these should not be transformed
           const builderFunctions = ['recipe', 'lift', 'handler', 'derive', 'compute', 'render', 'ifElse', 'str'];
           if (functionName && builderFunctions.includes(functionName)) {
             // Just visit children normally for builder function calls
@@ -554,6 +594,9 @@ export function createOpaqueRefTransformer(
         }
         if (needsDeriveImport) {
           result = addCommonToolsImport(result, context.factory, "derive");
+        }
+        if (needsToSchemaImport) {
+          result = addCommonToolsImport(result, context.factory, "toSchema");
         }
         
         // Log the transformed source if debug is enabled
