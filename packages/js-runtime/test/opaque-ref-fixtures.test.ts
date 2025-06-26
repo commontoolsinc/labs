@@ -184,4 +184,20 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       expect(result.matches).toBe(true);
     });
   });
+
+  describe("Handler Transformations", () => {
+    it("transforms handler with type parameters to use toSchema", async () => {
+      const result = await compareFixtureTransformation(
+        "opaque-refs/handler-with-types.input.ts",
+        "opaque-refs/handler-with-types.expected.ts",
+        { types }
+      );
+      
+      if (!result.matches) {
+        console.log("Expected:", result.expected);
+        console.log("Actual:", result.actual);
+      }
+      expect(result.matches).toBe(true);
+    });
+  });
 });
