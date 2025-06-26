@@ -52,7 +52,7 @@ export class Runner implements IRunner {
   /**
    * Run a recipe.
    *
-   * resultDoc is required and should have an id. processDoc is created if not
+   * resultDoc is required and should have an id. processCell is created if not
    * already set.
    *
    * If no recipe is provided, the previous one is used, and the recipe is started
@@ -100,30 +100,31 @@ export class Runner implements IRunner {
       ? resultCell
       : (resultCell as DocImpl<R>).asCell();
 
-    let processDoc: DocImpl<{
+    type ProcessCellData = {
       [TYPE]: string;
       argument?: T;
       internal?: JSONValue;
       resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
-    }>;
+    };
+
+    let processCell: Cell<ProcessCellData>;
 
     const sourceCell = resultDoc.getSourceCell();
     if (sourceCell !== undefined) {
-      processDoc = sourceCell.getDoc();
+      processCell = sourceCell as Cell<ProcessCellData>;
     } else {
-      processDoc = this.runtime.documentMap.getDoc(
-        undefined,
+      processCell = this.runtime.getCell<ProcessCellData>(
+        resultDoc.space,
         { cell: resultDoc.getDoc(), path: [] },
-        resultDoc.getDoc().space,
-      ) as any;
-      resultDoc.getDoc().sourceCell = processDoc;
+      );
+      resultDoc.getDoc().sourceCell = processCell.getDoc();
     }
 
     let recipeId: string | undefined;
 
-    if (!recipeOrModule && processDoc.get()?.[TYPE]) {
-      recipeId = processDoc.get()[TYPE];
-      recipeOrModule = this.runtime.recipeManager.recipeById(recipeId);
+    if (!recipeOrModule && processCell.getRaw()?.[TYPE]) {
+      recipeId = processCell.getRaw()[TYPE];
+      recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
       if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
     } else if (!recipeOrModule) {
       console.warn(
@@ -161,7 +162,7 @@ export class Runner implements IRunner {
     if (this.cancels.has(resultDoc.getDoc())) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
-      if (argument === undefined && recipeId === processDoc.get()?.[TYPE]) {
+      if (argument === undefined && recipeId === processCell.getRaw()?.[TYPE]) {
         return resultDoc;
       }
 
@@ -186,7 +187,7 @@ export class Runner implements IRunner {
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
-    const previousInternal = processDoc.get()?.internal;
+    const previousInternal = processCell.getRaw()?.internal;
     const internal: JSONValue = Object.assign(
       {},
       cellAwareDeepCopy(
@@ -202,24 +203,24 @@ export class Runner implements IRunner {
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
-    if (!processDoc.get()?.argument) {
+    if (!processCell.getRaw()?.argument) {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    const recipeChanged = recipeId !== processDoc.get()?.[TYPE];
+    const recipeChanged = recipeId !== processCell.getRaw()?.[TYPE];
 
-    processDoc.send({
-      ...processDoc.get(),
+    processCell.setRaw({
+      ...processCell.getRaw(),
       [TYPE]: recipeId || "unknown",
       resultRef: { cell: resultDoc.getDoc(), path: [] },
       internal,
     });
     if (argument) {
       diffAndUpdate(
-        { cell: processDoc, path: ["argument"] },
+        { cell: processCell.getDoc(), path: ["argument"] },
         argument,
         undefined,
-        processDoc,
+        processCell.getDoc(),
       );
     }
 
@@ -228,15 +229,15 @@ export class Runner implements IRunner {
     if (recipeChanged) {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
-      resultDoc.send(
-        unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processDoc),
+      resultDoc.setRaw(
+        unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }
 
     // [unsafe closures:] For recipes from closures, add a materialize factory
     if (recipe[unsafe_originalRecipe]) {
       recipe[unsafe_materializeFactory] = (log: any) => (path: PropertyKey[]) =>
-        processDoc.getAsQueryResult(path, log);
+        processCell.getAsQueryResult(path, log);
     }
 
     for (const node of recipe.nodes) {
@@ -244,7 +245,7 @@ export class Runner implements IRunner {
         node.module,
         node.inputs,
         node.outputs,
-        processDoc,
+        processCell,
         addCancel,
         recipe,
       );
@@ -389,7 +390,7 @@ export class Runner implements IRunner {
     module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
-    processDoc: DocImpl<any>,
+    processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
   ) {
@@ -402,7 +403,7 @@ export class Runner implements IRunner {
             ),
             inputBindings,
             outputBindings,
-            processDoc,
+            processCell,
             addCancel,
             recipe,
           );
@@ -412,7 +413,7 @@ export class Runner implements IRunner {
             module,
             inputBindings,
             outputBindings,
-            processDoc,
+            processCell,
             addCancel,
             recipe,
           );
@@ -422,7 +423,7 @@ export class Runner implements IRunner {
             module,
             inputBindings,
             outputBindings,
-            processDoc,
+            processCell,
             addCancel,
             recipe,
           );
@@ -432,7 +433,7 @@ export class Runner implements IRunner {
             module,
             inputBindings,
             outputBindings,
-            processDoc,
+            processCell,
             addCancel,
             recipe,
           );
@@ -442,7 +443,7 @@ export class Runner implements IRunner {
             module,
             inputBindings,
             outputBindings,
-            processDoc,
+            processCell,
             addCancel,
             recipe,
           );
@@ -461,19 +462,19 @@ export class Runner implements IRunner {
     module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
-    processDoc: DocImpl<any>,
+    processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(
       inputBindings,
-      processDoc,
+      processCell,
     );
 
-    const reads = findAllLegacyAliasedCells(inputs, processDoc);
+    const reads = findAllLegacyAliasedCells(inputs, processCell.getDoc());
 
-    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processDoc);
-    const writes = findAllLegacyAliasedCells(outputs, processDoc);
+    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
+    const writes = findAllLegacyAliasedCells(outputs, processCell.getDoc());
 
     let fn = (
       typeof module.implementation === "string"
@@ -489,11 +490,11 @@ export class Runner implements IRunner {
     let streamRef: LegacyDocCellLink | undefined = undefined;
     if (isRecord(inputs)) {
       for (const key in inputs) {
-        let doc = processDoc;
+        let doc = processCell.getDoc();
         let path: PropertyKey[] = [key];
         let value = inputs[key];
         while (isWriteRedirectLink(value)) {
-          const ref = followWriteRedirects(value, processDoc);
+          const ref = followWriteRedirects(value, processCell.getDoc());
           doc = ref.cell;
           path = ref.path;
           value = doc.getAtPath(path);
@@ -519,7 +520,11 @@ export class Runner implements IRunner {
             const alias = eventInputs[key];
 
             if (
-              areLinksSame(alias, streamRef, processDoc.asCell())
+              areLinksSame(
+                alias,
+                streamRef,
+                processCell,
+              )
             ) {
               eventInputs[key] = event;
               cause[key] = crypto.randomUUID();
@@ -527,17 +532,17 @@ export class Runner implements IRunner {
           }
         }
 
-        const inputsCell = processDoc.runtime!.documentMap.getDoc(
+        const inputsCell = this.runtime.documentMap.getDoc(
           eventInputs,
           cause,
-          processDoc.space,
+          processCell.space,
         );
         inputsCell.freeze("event handler");
 
         const frame = pushFrameFromCause(cause, {
           recipe,
           materialize: (path: PropertyKey[]) =>
-            processDoc.getAsQueryResult(path),
+            processCell.getAsQueryResult(path),
         });
 
         const argument = module.argumentSchema
@@ -556,9 +561,9 @@ export class Runner implements IRunner {
             const resultCell = this.run(
               resultRecipe,
               undefined,
-              processDoc.runtime!.documentMap.getDoc(undefined, {
+              this.runtime.documentMap.getDoc(undefined, {
                 resultFor: cause,
-              }, processDoc.space),
+              }, processCell.space),
             );
             addCancel(() => this.stop(resultCell));
           }
@@ -583,9 +588,9 @@ export class Runner implements IRunner {
       }
 
       // Schedule the action to run when the inputs change
-      const inputsCell = processDoc.runtime!.documentMap.getDoc(inputs, {
+      const inputsCell = this.runtime.documentMap.getDoc(inputs, {
         immutable: inputs,
-      }, processDoc.space);
+      }, processCell.space);
       inputsCell.freeze("javascript node");
 
       let previousResultDoc: DocImpl<any> | undefined;
@@ -601,7 +606,7 @@ export class Runner implements IRunner {
           {
             recipe,
             materialize: (path: PropertyKey[]) =>
-              processDoc.getAsQueryResult(path, log),
+              processCell.getAsQueryResult(path, log),
           } satisfies UnsafeBinding,
         );
         const result = fn(argument);
@@ -623,10 +628,10 @@ export class Runner implements IRunner {
               resultRecipe,
               undefined,
               previousResultDoc ??
-                processDoc.runtime!.documentMap.getDoc(
+                this.runtime.documentMap.getDoc(
                   undefined,
                   { resultFor: { inputs, outputs, fn: fn.toString() } },
-                  processDoc.space,
+                  processCell.space,
                 ),
             );
             addCancel(() => this.stop(resultDoc));
@@ -634,14 +639,14 @@ export class Runner implements IRunner {
             if (!previousResultDoc) {
               previousResultDoc = resultDoc;
               sendValueToBinding(
-                processDoc,
+                processCell,
                 outputs,
                 { cell: resultDoc, path: [] },
                 log,
               );
             }
           } else {
-            sendValueToBinding(processDoc, outputs, result, log);
+            sendValueToBinding(processCell, outputs, result, log);
           }
 
           popFrame(frame);
@@ -668,7 +673,7 @@ export class Runner implements IRunner {
     module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
-    processDoc: DocImpl<any>,
+    processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
   ) {
@@ -680,11 +685,11 @@ export class Runner implements IRunner {
 
     const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
       inputBindings,
-      processDoc,
+      processCell,
     );
     const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
       outputBindings,
-      processDoc,
+      processCell,
     );
 
     // For `map` and future other node types that take closures, we need to
@@ -693,26 +698,26 @@ export class Runner implements IRunner {
 
     const inputCells = findAllLegacyAliasedCells(
       mappedInputBindings,
-      processDoc,
+      processCell.getDoc(),
     );
     const outputCells = findAllLegacyAliasedCells(
       mappedOutputBindings,
-      processDoc,
+      processCell.getDoc(),
     );
 
-    const inputsDoc = processDoc.runtime!.documentMap.getDoc(
+    const inputsDoc = this.runtime.documentMap.getDoc(
       mappedInputBindings,
       { immutable: mappedInputBindings },
-      processDoc.space,
+      processCell.space,
     );
 
     const action = module.implementation(
       inputsDoc.asCell(),
       (result: any) =>
-        sendValueToBinding(processDoc, mappedOutputBindings, result),
+        sendValueToBinding(processCell, mappedOutputBindings, result),
       addCancel,
       inputCells, // cause
-      processDoc.asCell(),
+      processCell,
       this.runtime,
     );
 
@@ -728,22 +733,22 @@ export class Runner implements IRunner {
     module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
-    processDoc: DocImpl<any>,
+    processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
   ) {
-    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processDoc);
-    const inputsCell = processDoc.runtime!.documentMap.getDoc(inputs, {
+    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
+    const inputsCell = this.runtime.documentMap.getDoc(inputs, {
       immutable: inputs,
-    }, processDoc.space);
-    const reads = findAllLegacyAliasedCells(inputs, processDoc);
+    }, processCell.space);
+    const reads = findAllLegacyAliasedCells(inputs, processCell.getDoc());
 
-    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processDoc);
-    const writes = findAllLegacyAliasedCells(outputs, processDoc);
+    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
+    const writes = findAllLegacyAliasedCells(outputs, processCell.getDoc());
 
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsQueryResult([], log);
-      sendValueToBinding(processDoc, outputBindings, inputsProxy, log);
+      sendValueToBinding(processCell, outputBindings, inputsProxy, log);
     };
 
     addCancel(
@@ -758,28 +763,28 @@ export class Runner implements IRunner {
     module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
-    processDoc: DocImpl<any>,
+    processCell: Cell<any>,
     addCancel: AddCancel,
     recipe: Recipe,
   ) {
     if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
     const recipeImpl = unwrapOneLevelAndBindtoDoc(
       module.implementation,
-      processDoc,
+      processCell,
     );
-    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processDoc);
-    const resultCell = processDoc.runtime!.documentMap.getDoc(
+    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
+    const resultCell = this.runtime.documentMap.getDoc(
       undefined,
       {
         recipe: module.implementation,
-        parent: processDoc,
+        parent: processCell.getDoc(),
         inputBindings,
         outputBindings,
       },
-      processDoc.space,
+      processCell.space,
     );
     this.run(recipeImpl, inputs, resultCell);
-    sendValueToBinding(processDoc, outputBindings, {
+    sendValueToBinding(processCell, outputBindings, {
       cell: resultCell,
       path: [],
     });

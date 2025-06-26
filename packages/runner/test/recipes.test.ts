@@ -396,7 +396,7 @@ describe("Recipe Runner", () => {
     ]);
   });
 
-  it.skip("should handle recipes returned by lifted functions", async () => {
+  it("should handle recipes returned by lifted functions", async () => {
     const x = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 1",
