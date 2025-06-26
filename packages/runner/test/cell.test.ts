@@ -11,7 +11,7 @@ import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { isCellLink } from "../src/link-utils.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { expectCellLinksEqual, normalizeCellLink } from "./test-helpers.ts";
+import { areLinksSame } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -523,10 +523,11 @@ describe("createProxy", () => {
     const proxy = c.getAsQueryResult([], log);
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
-    expectCellLinksEqual(log.writes).toEqual([
-      c.key("length").getAsLegacyCellLink(),
-      c.key(2).getAsLegacyCellLink(),
-    ]);
+    expect(areLinksSame(log.writes[0], c.key("length").getAsLegacyCellLink()))
+      .toBe(true);
+    expect(areLinksSame(log.writes[1], c.key(2).getAsLegacyCellLink())).toBe(
+      true,
+    );
     proxy.length = 4;
     expect(c.get()).toEqual([1, 2, undefined, undefined]);
     expect(log.writes.length).toBe(5);
@@ -2077,22 +2078,23 @@ describe("JSON.stringify bug", () => {
       space,
       "json-test2",
     );
+    const cLink = c.key("result").getAsLink({ base: d });
     d.setRaw({
       internal: {
-        "__#2": normalizeCellLink(c.key("result").getAsLegacyCellLink()),
+        "__#2": cLink,
       },
     });
     const e = runtime.getCell<{ internal: { a: any } }>(
       space,
       "json-test3",
     );
+    const dLink = d.key("internal").key("__#2").key("data")
+      .getAsWriteRedirectLink(
+        { base: e },
+      );
     e.setRaw({
       internal: {
-        a: {
-          $alias: normalizeCellLink(
-            d.key("internal").key("__#2").key("data").getAsLegacyCellLink(),
-          ),
-        },
+        a: dLink,
       },
     });
     const proxy = e.getAsQueryResult();
@@ -2101,16 +2103,10 @@ describe("JSON.stringify bug", () => {
     expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
 
     expect(JSON.stringify(d.getRaw())).toEqual(
-      `{"internal":{"__#2":{"cell":${
-        JSON.stringify(c.entityId)
-      },"path":["result"]}}}`,
+      `{"internal":{"__#2":${JSON.stringify(cLink)}}}`,
     );
     expect(JSON.stringify(e.getRaw())).toEqual(
-      `{"internal":{"a":{"$alias":{"cell":${
-        JSON.stringify(
-          d.entityId,
-        )
-      },"path":["internal","__#2","data"]}}}}`,
+      `{"internal":{"a":${JSON.stringify(dLink)}}}`,
     );
   });
 });

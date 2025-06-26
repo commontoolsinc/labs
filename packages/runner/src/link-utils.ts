@@ -237,7 +237,7 @@ export function parseLink(
       space: resolvedSpace,
       schema: link.schema,
       rootSchema: link.rootSchema,
-      overwrite: link.overwrite !== "redirect" ? "redirect" : undefined,
+      overwrite: link.overwrite === "redirect" ? "redirect" : undefined,
     };
   }
 

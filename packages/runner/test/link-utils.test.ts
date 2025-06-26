@@ -253,6 +253,53 @@ describe("link-utils", () => {
             space: space,
             schema: { type: "number" },
             rootSchema: { type: "object" },
+          },
+        },
+      };
+      const result = parseLink(sigilLink);
+
+      expect(result).toEqual({
+        id: "of:test",
+        path: ["nested", "value"],
+        space: space,
+        schema: { type: "number" },
+        rootSchema: { type: "object" },
+      });
+    });
+
+    it("should parse sigil links to normalized links", () => {
+      const sigilLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:test",
+            path: ["nested", "value"],
+            space: space,
+            schema: { type: "number" },
+            rootSchema: { type: "object" },
+            overwrite: "this",
+          },
+        },
+      };
+      const result = parseLink(sigilLink);
+
+      expect(result).toEqual({
+        id: "of:test",
+        path: ["nested", "value"],
+        space: space,
+        schema: { type: "number" },
+        rootSchema: { type: "object" },
+      });
+    });
+
+    it("should parse sigil links with overwrite this to normalized links", () => {
+      const sigilLink = {
+        "/": {
+          [LINK_V1_TAG]: {
+            id: "of:test",
+            path: ["nested", "value"],
+            space: space,
+            schema: { type: "number" },
+            rootSchema: { type: "object" },
             overwrite: "redirect",
           },
         },
@@ -265,7 +312,7 @@ describe("link-utils", () => {
         space: space,
         schema: { type: "number" },
         rootSchema: { type: "object" },
-        overwrite: undefined,
+        overwrite: "redirect",
       });
     });
 
@@ -276,7 +323,6 @@ describe("link-utils", () => {
           [LINK_V1_TAG]: {
             path: ["nested", "value"],
             space: space,
-            overwrite: "redirect",
           },
         },
       };
@@ -288,7 +334,6 @@ describe("link-utils", () => {
         space: space,
         schema: undefined,
         rootSchema: undefined,
-        overwrite: undefined,
       });
     });
 
