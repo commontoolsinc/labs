@@ -25,7 +25,7 @@ import {
   tokenToAuthData,
 } from "./google-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
-import { type CellLink } from "@commontools/runner";
+import { parseLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Tokens } from "@cmd-johnson/oauth2-client";
 
@@ -201,7 +201,7 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
     // Add this charm to the Gmail integration charms cell
     try {
       // Get the charm ID and space from the decodedState (which is the auth cell ID)
-      const authCellLink = JSON.parse(decodedState.authCellId) as CellLink;
+      const authCellLink = parseLink(JSON.parse(decodedState.authCellId))!;
       const space = authCellLink.space;
       const integrationCharmId = decodedState?.integrationCharmId;
 

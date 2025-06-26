@@ -1,10 +1,8 @@
-import { isObject, isRecord } from "@commontools/utils/types";
-import { type CellLink, isCell, isCellLink, isDoc } from "../index.ts";
-import { createShadowRef } from "./opaque-ref.ts";
+import { isRecord } from "@commontools/utils/types";
+import { type LegacyAlias } from "../sigil-types.ts";
+import { isLegacyAlias, isLink } from "../link-utils.ts";
 import {
-  type Alias,
   canBeOpaqueRef,
-  isAlias,
   isOpaqueRef,
   isRecipe,
   isShadowRef,
@@ -20,9 +18,11 @@ import {
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
-import { deepEqual, getValueAtPath } from "../path-utils.ts";
+import { deepEqual } from "../path-utils.ts";
+import { IRuntime } from "../runtime.ts";
+import { parseLink } from "../link-utils.ts";
 
-export function toJSONWithAliases(
+export function toJSONWithLegacyAliases(
   value: Opaque<any>,
   paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
@@ -58,12 +58,12 @@ export function toJSONWithAliases(
           ...(exported?.schema ? { schema: exported.schema } : {}),
           ...(exported?.rootSchema ? { rootSchema: exported.rootSchema } : {}),
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else throw new Error(`Cell not found in paths`);
   }
 
-  if (isAlias(value)) {
-    const alias = (value as Alias).$alias;
+  if (isLegacyAlias(value)) {
+    const alias = (value as LegacyAlias).$alias;
     if (isShadowRef(alias.cell)) {
       const cell = alias.cell.shadowOf;
       if (cell.export().frame !== getTopFrame()) {
@@ -83,14 +83,14 @@ export function toJSONWithAliases(
         $alias: {
           path: [...paths.get(cell)!, ...alias.path] as (string | number)[],
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else if (!("cell" in alias) || typeof alias.cell === "number") {
       return {
         $alias: {
           cell: ((alias.cell as number) ?? 0) + 1,
           path: alias.path as (string | number)[],
         },
-      } satisfies Alias;
+      } satisfies LegacyAlias;
     } else {
       throw new Error(`Invalid alias cell`);
     }
@@ -98,7 +98,7 @@ export function toJSONWithAliases(
 
   if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
+      toJSONWithLegacyAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
   }
 
@@ -106,7 +106,7 @@ export function toJSONWithAliases(
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {
-      const jsonValue = toJSONWithAliases(
+      const jsonValue = toJSONWithLegacyAliases(
         value[key],
         paths,
         ignoreSelfAliases,
@@ -129,30 +129,31 @@ export function toJSONWithAliases(
 export function createJsonSchema(
   example: any,
   addDefaults = false,
+  runtime?: IRuntime,
 ): JSONSchemaMutable {
+  const seen = new Map<string, JSONSchemaMutable>();
+
   function analyzeType(value: any): JSONSchema {
-    if (isCell(value)) {
-      if (value.schema) {
-        return value.schema;
-      } else {
-        value = value.get();
+    if (isLink(value)) {
+      const link = parseLink(value);
+      const linkAsStr = JSON.stringify(link);
+      if (seen.has(linkAsStr)) {
+        // Return a copy of the schema to avoid mutating the original.
+        return JSON.parse(JSON.stringify(seen.get(linkAsStr)!));
       }
-    }
 
-    if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
+      const cell = runtime?.getCellFromLink(link);
+      if (!cell) return {}; // TODO(seefeld): Should be `true`
 
-    if (isCellLink(value)) {
-      value = value.cell.getAtPath(value.path);
-      return analyzeType(value);
-    }
-
-    if (isAlias(value)) {
-      if (isDoc(value.$alias.cell)) {
-        value = value.$alias.cell.getAtPath(value.$alias.path);
-      } else {
-        value = getValueAtPath(example, value.$alias.path);
+      let schema = cell.schema;
+      if (!schema) {
+        // If we find pointing back here, assume an empty schema. This is
+        // overwritten below. (TODO(seefeld): This should create `$ref: "#/.."`)
+        seen.set(linkAsStr, {} as JSONSchemaMutable);
+        schema = analyzeType(cell.getRaw());
       }
-      return analyzeType(value);
+      seen.set(linkAsStr, schema as JSONSchemaMutable);
+      return schema;
     }
 
     const type = typeof value;
@@ -162,33 +163,19 @@ export function createJsonSchema(
       case "object":
         if (Array.isArray(value)) {
           schema.type = "array";
-          // Check the array type. The array type is determined by the first element
-          // of the array, or if objects, a superset of all properties of the object elements.
-          // If array is empty, `items` is `{}`.
           if (value.length === 0) {
-            schema.items = {};
+            schema.items = {}; // TODO(seefeld): Should be `true`
           } else {
-            const first = value[0];
-            if (isObject(first)) {
-              const properties: { [key: string]: any } = {};
-              for (let i = 0; i < value.length; i++) {
-                const item = value?.[i];
-                if (isRecord(item)) {
-                  Object.keys(item).forEach((key) => {
-                    if (!(key in properties)) {
-                      properties[key] = analyzeType(
-                        value?.[i]?.[key],
-                      );
-                    }
-                  });
-                }
-              }
-              schema.items = {
-                type: "object",
-                properties,
-              };
+            const schemas = value.map((v) => analyzeType(v)).map((s) =>
+              JSON.stringify(s)
+            );
+            const uniqueSchemas = [...new Set(schemas)].map((s) =>
+              JSON.parse(s)
+            );
+            if (uniqueSchemas.length === 1) {
+              schema.items = uniqueSchemas[0];
             } else {
-              schema.items = analyzeType(first) as JSONSchemaMutable;
+              schema.items = { anyOf: uniqueSchemas };
             }
           }
         } else if (value !== null) {

@@ -6,8 +6,10 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
+import { isCell } from "./cell.ts";
+import { parseLink } from "./link-utils.ts";
 import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
+import { fromURI } from "./uri-utils.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -78,26 +80,25 @@ export function createRef(
  */
 export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
+    // Handle URI format with "of:" prefix
+    if (value.startsWith("of:")) value = fromURI(value);
     return value.startsWith("{") ? JSON.parse(value) : { "/": value };
   }
   if (isRecord(value) && "/" in value) {
     return JSON.parse(JSON.stringify(value));
   }
 
-  let ref: CellLink | undefined = undefined;
+  const link = parseLink(value);
 
-  if (isQueryResultForDereferencing(value)) ref = getCellLinkOrThrow(value);
-  else if (isCellLink(value)) ref = value;
-  else if (isCell(value)) ref = value.getAsCellLink();
-  else if (isDoc(value)) ref = { cell: value, path: [] };
+  if (!link || !link.id) return undefined;
 
-  if (!ref?.cell.entityId) return undefined;
+  const entityId = { "/": fromURI(link.id) };
 
-  if (ref.path.length > 0) {
+  if (link.path && link.path.length > 0) {
     return JSON.parse(
-      JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)),
+      JSON.stringify(createRef({ path: link.path }, entityId)),
     );
-  } else return JSON.parse(JSON.stringify(ref.cell.entityId));
+  } else return entityId;
 }
 
 /**
@@ -176,20 +177,28 @@ export class DocumentMap implements IDocumentMap {
   getDocByEntityId<T = any>(
     space: MemorySpace,
     entityId: EntityId | string,
+    createIfNotFound?: true,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T>;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
+    createIfNotFound: false,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T> | undefined;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
     createIfNotFound = true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined {
-    const id = typeof entityId === "string"
-      ? entityId
-      : JSON.stringify(entityId);
-    let doc = this.entityIdToDocMap.get(space, id);
+    const normalizedId = normalizeEntityId(entityId);
+
+    let doc = this.entityIdToDocMap.get(space, JSON.stringify(normalizedId));
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
 
-    if (typeof entityId === "string") {
-      entityId = JSON.parse(entityId) as EntityId;
-    }
-    doc = createDoc<T>(undefined as T, entityId, space, this.runtime);
+    doc = this.createDoc<T>(undefined as T, normalizedId, space);
     doc.sourceCell = sourceIfCreated;
     return doc;
   }
@@ -244,7 +253,19 @@ export class DocumentMap implements IDocumentMap {
     space: MemorySpace,
   ): DocImpl<T> {
     // Use the full createDoc implementation with runtime parameter
-    const doc = createDoc(value, entityId, space, this.runtime);
-    return doc;
+    return createDoc(value, entityId, space, this.runtime);
+  }
+}
+
+function normalizeEntityId(entityId: EntityId | string): EntityId {
+  if (typeof entityId === "string") {
+    if (entityId.startsWith("of:")) {
+      return { "/": fromURI(entityId) };
+    }
+    return JSON.parse(entityId) as EntityId;
+  } else if (isRecord(entityId) && "/" in entityId) {
+    return entityId;
+  } else {
+    throw new Error("Invalid entity ID: " + JSON.stringify(entityId));
   }
 }

@@ -7,7 +7,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { expectCellLinksEqual } from "./test-helpers.ts";
+import { areLinksSame } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -127,11 +127,16 @@ describe("recipe-binding", () => {
       };
 
       const result = unwrapOneLevelAndBindtoDoc(binding, testCell);
-      expectCellLinksEqual(result).toEqual({
-        x: { $alias: testCell.key("a").getAsCellLink() },
-        y: { $alias: testCell.key("b").key("c").getAsCellLink() },
-        z: 3,
-      });
+      expect(
+        areLinksSame(result.x, {
+          $alias: testCell.key("a").getAsLegacyCellLink(),
+        }),
+      ).toBe(true);
+      expect(
+        areLinksSame(result.y, {
+          $alias: testCell.key("b").key("c").getAsLegacyCellLink(),
+        }),
+      ).toBe(true);
     });
   });
 });

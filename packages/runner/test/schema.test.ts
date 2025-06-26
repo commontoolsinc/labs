@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type Cell, CellLink, isCell, isStream } from "../src/cell.ts";
+import { type Cell, isCell, isStream } from "../src/cell.ts";
+import { LegacyCellLink } from "../src/sigil-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { entityIdToJSON, toPlainObject } from "./test-helpers.ts";
+import { toURI } from "../src/uri-utils.ts";
+import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -54,23 +56,23 @@ describe("Schema Support", () => {
       // This is what the system (or someone manually) would create to remap
       // data to match the desired schema
       const mappingCell = runtime.getCell<{
-        id: CellLink;
-        changes: CellLink[];
-        kind: CellLink;
-        tag: CellLink;
+        id: LegacyCellLink;
+        changes: LegacyCellLink[];
+        kind: LegacyCellLink;
+        tag: LegacyCellLink;
       }>(
         space,
         "allows mapping of fields via interim cells 2",
       );
       mappingCell.setRaw({
         // as-is
-        id: c.key("id").getAsCellLink(),
+        id: c.key("id").getAsLegacyCellLink(),
         // turn single value to set
-        changes: [c.key("metadata").key("createdAt").getAsCellLink()],
+        changes: [c.key("metadata").key("createdAt").getAsLegacyCellLink()],
         // rename field and uplift from nested element
-        kind: c.key("metadata").key("type").getAsCellLink(),
+        kind: c.key("metadata").key("type").getAsLegacyCellLink(),
         // turn set into a single value
-        tag: c.key("tags").key(0).getAsCellLink(),
+        tag: c.key("tags").key(0).getAsLegacyCellLink(),
       });
 
       // This schema is how the recipient specifies what they want
@@ -115,17 +117,17 @@ describe("Schema Support", () => {
         "should support nested sinks 1",
       );
       innerCell.set({ label: "first" });
-      
+
       const c = runtime.getCell<{
         value: string;
-        current: CellLink;
+        current: LegacyCellLink;
       }>(
         space,
         "should support nested sinks 2",
       );
       c.setRaw({
         value: "root",
-        current: innerCell.getAsCellLink(),
+        current: innerCell.getAsLegacyCellLink(),
       });
       const cWithSchema = c.asSchema(schema);
 
@@ -235,14 +237,14 @@ describe("Schema Support", () => {
       );
       initial.set({ foo: { label: "first" } });
       const initialEntityId = initial.entityId!;
-      
+
       const linkCell = runtime.getCell<any>(
         space,
         "should support nested sinks via asCell with aliases 2",
       );
-      linkCell.setRaw(initial.getAsCellLink());
+      linkCell.setRaw(initial.getAsLegacyCellLink());
       const linkEntityId = linkCell.entityId!;
-      
+
       const docCell = runtime.getCell<{
         value: string;
         current: any;
@@ -252,7 +254,7 @@ describe("Schema Support", () => {
       );
       docCell.setRaw({
         value: "root",
-        current: { $alias: linkCell.key("foo").getAsCellLink() },
+        current: { $alias: linkCell.key("foo").getAsLegacyCellLink() },
       });
       const docEntityId = docCell.entityId!;
       const root = docCell.asSchema(schema);
@@ -282,8 +284,8 @@ describe("Schema Support", () => {
 
       // Make sure the schema is correct and it is still anchored at the root
       expect(current.schema).toEqual({ type: "string" });
-      expect(toPlainObject(current.getAsCellLink())).toEqual({
-        cell: entityIdToJSON(docCell.entityId!),
+      expect(parseLink(current.getAsLink({ includeSchema: true }))).toEqual({
+        id: toURI(docCell.entityId!),
         path: ["current", "label"],
         space,
         schema: current.schema,
@@ -307,8 +309,8 @@ describe("Schema Support", () => {
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
-      expect(toPlainObject(first.getAsCellLink())).toEqual({
-        cell: entityIdToJSON(initialEntityId),
+      expect(parseLink(first.getAsLink({ includeSchema: true }))).toEqual({
+        id: toURI(initialEntityId),
         path: ["foo"],
         space,
         schema: omitSchema,
@@ -316,15 +318,15 @@ describe("Schema Support", () => {
       });
       expect(log.reads.length).toEqual(4);
       expect(
-        log.reads.map((r: CellLink) => ({
-          cell: entityIdToJSON(r.cell.entityId!),
+        log.reads.map((r: LegacyCellLink) => ({
+          cell: toURI(r.cell.entityId!),
           path: r.path,
         })),
       ).toEqual([
-        { cell: entityIdToJSON(docCell.entityId!), path: ["current"] },
-        { cell: entityIdToJSON(linkEntityId), path: [] },
-        { cell: entityIdToJSON(initialEntityId), path: ["foo"] },
-        { cell: entityIdToJSON(initialEntityId), path: ["foo", "label"] },
+        { cell: toURI(docCell.entityId!), path: ["current"] },
+        { cell: toURI(linkEntityId), path: [] },
+        { cell: toURI(initialEntityId), path: ["foo"] },
+        { cell: toURI(initialEntityId), path: ["foo", "label"] },
       ]);
 
       // Then update it
@@ -340,7 +342,7 @@ describe("Schema Support", () => {
         "should support nested sinks via asCell with aliases 4",
       );
       second.set({ foo: { label: "second" } });
-      linkCell.setRaw(second.getAsCellLink());
+      linkCell.setRaw(second.getAsLegacyCellLink());
 
       await runtime.idle();
 
@@ -382,7 +384,7 @@ describe("Schema Support", () => {
       );
       third.set({ label: "third" });
       docCell.key("current").setRaw({
-        $alias: third.getAsCellLink(),
+        $alias: third.getAsLegacyCellLink(),
       });
 
       await runtime.idle();
@@ -667,9 +669,9 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("parent").setRaw(c.getAsCellLink());
-      c.key("children").key(0).key("parent").setRaw(c.getAsCellLink());
-      c.key("children").key(1).key("parent").setRaw(c.getAsCellLink());
+      c.key("parent").setRaw(c.getAsLegacyCellLink());
+      c.key("children").key(0).key("parent").setRaw(c.getAsLegacyCellLink());
+      c.key("children").key(1).key("parent").setRaw(c.getAsLegacyCellLink());
 
       const schema = {
         type: "object",
@@ -723,9 +725,11 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("nested").key("items").key(0).key("value").setRaw(c.getAsCellLink());
+      c.key("nested").key("items").key(0).key("value").setRaw(
+        c.getAsLegacyCellLink(),
+      );
       c.key("nested").key("items").key(1).key("value").setRaw(
-        c.key("nested").getAsCellLink()
+        c.key("nested").getAsLegacyCellLink(),
       );
 
       const schema = {
@@ -793,7 +797,7 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("children").key(1).key("value").setRaw(c.getAsCellLink());
+      c.key("children").key(1).key("value").setRaw(c.getAsLegacyCellLink());
 
       const schema = {
         type: "object",
@@ -1254,7 +1258,7 @@ describe("Schema Support", () => {
         );
         childrenArrayCell.set([
           { type: "text", value: "hello" },
-          innerTextCell.getAsCellLink(),
+          innerTextCell.getAsLegacyCellLink(),
         ]);
 
         const withLinks = runtime.getCell<{
@@ -1275,11 +1279,11 @@ describe("Schema Support", () => {
           type: "vnode",
           name: "div",
           props: {
-            style: styleCell.getAsCellLink(),
+            style: styleCell.getAsLegacyCellLink(),
           },
           children: [
             { type: "text", value: "single" },
-            childrenArrayCell.getAsCellLink(),
+            childrenArrayCell.getAsLegacyCellLink(),
             "or just text",
           ],
         });

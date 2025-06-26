@@ -8,15 +8,13 @@ import type {
 import type { RecipeEnvironment } from "./builder/env.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { setRecipeEnvironment } from "./builder/env.ts";
-
 import type {
   IStorageManager,
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
-
-export type { IStorageManager, IStorageProvider, MemorySpace };
-import type { Cell, CellLink } from "./cell.ts";
+import { type Cell } from "./cell.ts";
+import { type JSONCellLink, type LegacyCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
 import { type EntityId, getEntityId } from "./doc-map.ts";
@@ -25,6 +23,9 @@ import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
+import { isCellLink, type NormalizedLink } from "./link-utils.ts";
+
+export type { IStorageManager, IStorageProvider, MemorySpace };
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -99,12 +100,12 @@ export interface IRuntime {
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink<T>(
-    cellLink: CellLink,
+    cellLink: LegacyCellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: CellLink,
+    cellLink: LegacyCellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
@@ -158,8 +159,8 @@ export interface IScheduler {
   unschedule(action: Action): void;
   onConsole(fn: ConsoleHandler): void;
   onError(fn: ErrorHandler): void;
-  queueEvent(eventRef: CellLink, event: any): void;
-  addEventHandler(handler: EventHandler, ref: CellLink): Cancel;
+  queueEvent(eventRef: LegacyCellLink, event: any): void;
+  addEventHandler(handler: EventHandler, ref: LegacyCellLink): Cancel;
   runningPromise: Promise<unknown> | undefined;
 }
 
@@ -203,7 +204,13 @@ export interface IDocumentMap {
   getDocByEntityId<T = any>(
     space: MemorySpace,
     entityId: EntityId | string,
-    createIfNotFound?: boolean,
+    createIfNotFound?: true,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T>;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
+    createIfNotFound: false,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: MemorySpace): void;
@@ -420,38 +427,52 @@ export class Runtime implements IRuntime {
   }
 
   getCellFromLink<T>(
-    cellLink: CellLink,
+    cellLink: LegacyCellLink | JSONCellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: CellLink,
+    cellLink: LegacyCellLink | JSONCellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink(
-    cellLink: CellLink,
+    cellLink: LegacyCellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<any> {
     let doc;
 
-    if (isDoc(cellLink.cell)) {
-      doc = cellLink.cell;
-    } else if (cellLink.space) {
-      doc = this.documentMap.getDocByEntityId(
-        cellLink.space as MemorySpace,
-        getEntityId(cellLink.cell)!,
-        true,
-      )!;
-      if (!doc) {
-        throw new Error(`Can't find ${cellLink.space}/${cellLink.cell}!`);
+    if (isCellLink(cellLink)) {
+      if (isDoc(cellLink.cell)) {
+        doc = cellLink.cell;
+      } else if (cellLink.space) {
+        doc = this.documentMap.getDocByEntityId(
+          cellLink.space as MemorySpace,
+          getEntityId(cellLink.cell)!,
+          true,
+        )!;
+        if (!doc) {
+          throw new Error(`Can't find ${cellLink.space}/${cellLink.cell}!`);
+        }
+      } else {
+        throw new Error("Cell link has no space");
       }
     } else {
-      throw new Error("Cell link has no space");
+      doc = this.documentMap.getDocByEntityId(
+        cellLink.space as MemorySpace,
+        getEntityId((cellLink as NormalizedLink).id)!,
+        true,
+      )!;
     }
+
     // If we aren't passed a schema, use the one in the cellLink
-    return doc.asCell(cellLink.path, log, schema ?? cellLink.schema);
+    return doc.asCell(
+      cellLink.path,
+      log,
+      schema ?? cellLink.schema,
+      schema ? undefined : cellLink.rootSchema,
+    );
   }
 
   getImmutableCell<T>(

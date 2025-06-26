@@ -17,7 +17,6 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { ClientObjectManager } from "../src/storage/query.ts";
-import { entityIdToJSON } from "./test-helpers.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -60,7 +59,7 @@ describe("Query", () => {
       `query test cell 1`,
     );
     testCell1.set(docValue1);
-    const entityId1 = testCell1.entityId!;
+    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
@@ -70,7 +69,7 @@ describe("Query", () => {
     };
     const docValue2 = {
       name: {
-        cell: entityIdToJSON(entityId1),
+        cell: entityId1,
         path: ["employees", "0", "fullName"],
       },
     };
@@ -151,7 +150,7 @@ describe("Query", () => {
       `query test cell 1`,
     );
     testCell1.set({ employees: [{ name: { first: "Bob" } }] });
-    const entityId1 = testCell1.entityId!;
+    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
@@ -167,7 +166,7 @@ describe("Query", () => {
     );
     testCell2.setRaw({
       name: {
-        cell: entityIdToJSON(entityId1),
+        cell: entityId1,
         path: ["employees", "0", "name"],
       },
     });
@@ -249,14 +248,14 @@ describe("Query", () => {
         path: ["name"],
       },
     });
-    const entityId1 = testCell1.entityId!;
+    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
       is: {
         value: {
           name: {
-            cell: entityIdToJSON(entityId1),
+            cell: entityId1,
             path: ["name"],
           },
         },
@@ -308,7 +307,7 @@ describe("Query", () => {
       `query test cell 1`,
     );
     testCell1.set(docValue1);
-    const entityId1 = testCell1.entityId!;
+    const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
     const assert1 = {
       the: "application/json",
       of: `of:${entityId1["/"]}` as Entity,
@@ -318,7 +317,12 @@ describe("Query", () => {
     };
 
     const docValue2 = {
-      employees: [{ address: { cell: entityIdToJSON(entityId1), path: ["home"] } }],
+      employees: [{
+        address: {
+          cell: entityId1,
+          path: ["home"],
+        },
+      }],
     };
     const testCell2 = runtime.getCell<any>(
       space,

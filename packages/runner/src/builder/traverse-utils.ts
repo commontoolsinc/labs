@@ -5,7 +5,7 @@ import {
   isRecipe,
   isShadowRef,
   type Opaque,
-} from "./builder/types.ts";
+} from "./types.ts";
 
 /**
  * Traverse a value, _not_ entering cells

@@ -21,7 +21,8 @@ export const login = createRoute({
             })
             .openapi({
               example: {
-                authCellId: "auth-cell-123",
+                authCellId:
+                  '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
                 integrationCharmId: "integration-charm-123",
               },
             }),
@@ -129,7 +130,8 @@ export const refresh = createRoute({
             })
             .openapi({
               example: {
-                authCellId: "auth-cell-123",
+                authCellId:
+                  '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
               },
             }),
         },
@@ -200,7 +202,8 @@ export const logout = createRoute({
             })
             .openapi({
               example: {
-                authCellId: "auth-cell-123",
+                authCellId:
+                  '{"/" : {"link-v0.1" : {"id" : "of:bafe...", "space" : "did:key:bafe...", "path" : ["path", "to", "value"]}}}',
               },
             }),
         },

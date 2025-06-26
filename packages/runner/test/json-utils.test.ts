@@ -10,13 +10,12 @@ const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("createJsonSchema", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
-    // Create runtime with the shared storage provider
-    // We need to bypass the URL-based configuration for this test
+
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
@@ -50,16 +49,28 @@ describe("createJsonSchema", () => {
       name: "item2",
       value: 42,
     }]);
-    expect(mixedArraySchema).toEqual({
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          value: { type: "integer" },
+    expect(mixedArraySchema).toEqual(
+      {
+        type: "array",
+        items: {
+          anyOf: [
+            {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+              },
+            },
+            {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                value: { type: "integer" },
+              },
+            },
+          ],
         },
-      },
-    });
+      } satisfies JSONSchema,
+    );
   });
 
   it("should create schema for objects", () => {
@@ -162,7 +173,7 @@ describe("createJsonSchema", () => {
       { type: "string", format: "email" },
     );
 
-    const schema = createJsonSchema(cellWithSchema);
+    const schema = createJsonSchema(cellWithSchema, false, runtime);
     expect(schema).toEqual({ type: "string", format: "email" });
   });
 
@@ -176,7 +187,7 @@ describe("createJsonSchema", () => {
       },
     );
 
-    const schema = createJsonSchema(cellWithoutSchema);
+    const schema = createJsonSchema(cellWithoutSchema, false, runtime);
     expect(schema).toEqual({
       type: "object",
       properties: {
@@ -188,9 +199,12 @@ describe("createJsonSchema", () => {
   });
 
   it("should handle array cell without schema", () => {
-    const arrayCell = runtime.getImmutableCell(space, [1, 2, 3, 4]);
+    const arrayCell = runtime.getImmutableCell(
+      space,
+      [1, 2, 3, 4],
+    );
 
-    const schema = createJsonSchema(arrayCell);
+    const schema = createJsonSchema(arrayCell, false, runtime);
 
     expect(schema).toEqual({
       type: "array",
@@ -201,7 +215,10 @@ describe("createJsonSchema", () => {
   });
 
   it("should handle nested cells with and without schema", () => {
-    const userCell = runtime.getImmutableCell(space, { id: 1, name: "Alice" });
+    const userCell = runtime.getImmutableCell(
+      space,
+      { id: 1, name: "Alice" },
+    );
 
     const prefsSchema = {
       type: "object",
@@ -222,7 +239,7 @@ describe("createJsonSchema", () => {
       preferences: prefsCell,
     };
 
-    const schema = createJsonSchema(nestedObject);
+    const schema = createJsonSchema(nestedObject, false, runtime);
     expect(schema).toEqual({
       type: "object",
       properties: {

@@ -34,7 +34,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const runtime = new Runtime({
   storageManager: new StorageManager({
     address: "https://example.com/storage",
-    signer: myIdentitySigner
+    signer: myIdentitySigner,
   }),
   consoleHandler: myConsoleHandler, // Optional
   errorHandlers: [myErrorHandler], // Optional
@@ -88,7 +88,7 @@ relationship between documents and cells:
 
 - **Cell**: The user-facing abstraction that provides a reactive view over one
   or more documents. Cells are defined by schemas and can traverse document
-  relationships through cell links and aliases.
+  relationships through sigil-based links.
 
 While DocImpl handles the low-level storage concerns, Cells provide the
 higher-level programming model with schema validation, reactivity, and
@@ -105,13 +105,11 @@ storage:
 - Schemas can define nested cells with `asCell: true`
 - Schema validation happens automatically when setting values
 
-### CellLink and Aliases
+### Sigil-based Links
 
-Cells can reference other cells through links and aliases:
+Cells can reference other cells through a unified sigil-based linking system. This approach replaces the previous distinction between CellLinks and Aliases.
 
-- **CellLink**: A reference to another cell, containing a space ID and document
-  ID
-- **Aliases**: Named references within documents that point to other documents
+- **Sigil Links**: A flexible, JSON-based format for representing references to other cells. They can be simple links to other documents or write-redirects (previously aliases).
 - These mechanisms allow building complex, interconnected data structures
 - The system automatically traverses links when needed
 
@@ -178,6 +176,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Create a cell with schema and default values
 const settingsCell = runtime.getCell(
   "my-space", // The space this cell belongs to
@@ -234,7 +233,6 @@ const cleanup = settingsCell.sink((value) => {
 
 // Clean up subscription when done
 cleanup();
-
 ```
 
 ### Cells with Type-Safe Schemas
@@ -260,6 +258,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Define a schema with type assertions for TypeScript inference
 const userSchema = {
   type: "object",
@@ -312,7 +311,6 @@ settingsCell.set({ theme: "dark", notifications: false });
 // Key navigation preserves schema
 const nameCell = userCell.key("name");
 console.log(nameCell.get()); // "Alice"
-
 ```
 
 ### Running Recipes
@@ -338,6 +336,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Define a recipe with input and output schemas
 const doubleNumberRecipe = recipe(
   // Input schema
@@ -386,7 +385,6 @@ console.log(result.get()); // { result: 20 }
 
 // Stop recipe execution when no longer needed
 runtime.runner.stop(result);
-
 ```
 
 ### Storage
@@ -405,7 +403,7 @@ const signer = await Identity.fromPassphrase("my-passphrase");
 // Create storage manager (for production, use StorageManager.open() with remote storage)
 const storageManager = StorageManager.open({
   as: signer,
-  address: new URL("https://example.com/api")
+  address: new URL("https://example.com/api"),
 });
 
 // Create a runtime instance with configuration
@@ -419,6 +417,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Sync a cell with storage
 await runtime.storage.syncCell(userCell);
 
@@ -430,7 +429,6 @@ await runtime.storage.synced();
 
 // When cells with the same causal ID are synced across instances,
 // they will automatically be kept in sync with the latest value
-
 ```
 
 ## Advanced Features
@@ -456,6 +454,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 // Original data source cell
 const sourceCell = runtime.getCell(
   "my-space",
@@ -503,14 +502,14 @@ const mappingCell = runtime.getCell(
       firstTag: { type: "string" },
     },
     default: {
-      // References to source cell values
-      id: { cell: sourceCell, path: ["id"] },
+      // References to source cell values using sigil links
+      id: sourceCell.key("id").getAsLink(),
       // Turn single value to array
-      changes: [{ cell: sourceCell, path: ["metadata", "createdAt"] }],
+      changes: [sourceCell.key("metadata").key("createdAt").getAsLink()],
       // Rename field and uplift from nested element
-      kind: { cell: sourceCell, path: ["metadata", "type"] },
+      kind: sourceCell.key("metadata").key("type").getAsLink(),
       // Reference to first array element
-      firstTag: { cell: sourceCell, path: ["tags", 0] },
+      firstTag: sourceCell.key("tags").key(0).getAsLink(),
     },
   },
 );
@@ -524,7 +523,6 @@ console.log(result);
 //   kind: "user",
 //   firstTag: "tag1"
 // }
-
 ```
 
 ### Nested Reactivity
@@ -547,6 +545,7 @@ const runtime = new Runtime({
 });
 ```
 
+```typescript
 const rootCell = runtime.getCell(
   "my-space",
   "nested-example",
@@ -604,7 +603,6 @@ rootCell.key("current").key("label").set("updated");
 // "Label value: updated"
 // "Nested value: { label: 'updated' }"
 // "Root changed: { value: 'root', current: { label: 'updated' } }"
-
 ```
 
 ## Migration from Singleton Pattern
@@ -663,7 +661,8 @@ interface RuntimeOptions {
 
 ### Storage Manager
 
-Storage manager is used by runtime to open storage providers when reading or writing documents into a corresponding space.
+Storage manager is used by runtime to open storage providers when reading or
+writing documents into a corresponding space.
 
 ```ts
 export interface IStorageManager {
@@ -671,7 +670,8 @@ export interface IStorageManager {
 }
 ```
 
-The storage manager opens storage providers for different memory spaces. The StorageManager provides convenient factory methods:
+The storage manager opens storage providers for different memory spaces. The
+StorageManager provides convenient factory methods:
 
 ```ts
 import { StorageManager } from "@commontools/runner/storage/cache ";
@@ -689,7 +689,8 @@ const storageManager = StorageManager.open({
 });
 ```
 
-The `@commontools/storage/cache` provides  a default implementation of the `IStorageManager` interface.
+The `@commontools/storage/cache` provides a default implementation of the
+`IStorageManager` interface.
 
 - `"volatile://"` - In-memory storage (for testing)
 - `"https://example.com/storage"` - Remote storage with schema queries
@@ -709,7 +710,7 @@ components interact:
 2. **Validation** → Schema validation ensures data conforms to expected
    structure (so far only on get, not yet on write)
 3. **Processing** → Recipes transform data according to their logic
-4. **Reactivity** → Changes propagate to dependent cells and recipes
+4. **Reactivity** → Changes propagate to dependent cells and recipes through the unified sigil-based linking system
 5. **Storage** → Updated data is persisted to storage if configured
 6. **Synchronization** → Changes are synchronized across clients if enabled
 

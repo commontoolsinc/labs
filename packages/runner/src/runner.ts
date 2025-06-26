@@ -1,10 +1,9 @@
-import { isObject, isRecord } from "@commontools/utils/types";
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
-  type Alias,
-  isAlias,
   isModule,
+  isOpaqueRef,
   isRecipe,
-  isStreamAlias,
+  isStreamValue,
   type JSONSchema,
   type JSONValue,
   type Module,
@@ -23,20 +22,25 @@ import {
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
-import { containsOpaqueRef, deepCopy } from "./type-utils.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
-  findAllAliasedCells,
+  findAllLegacyAliasedCells,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
-import { followAliases, maybeGetCellLink } from "./link-resolution.ts";
+import { followWriteRedirects } from "./link-resolution.ts";
+import {
+  areLinksSame,
+  isLink,
+  isWriteRedirectLink,
+  parseLink,
+  parseToLegacyAlias,
+} from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
-import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
-import { getCellLinkOrThrow } from "./query-result-proxy.ts";
+import { isCell } from "./cell.ts";
+import { type LegacyCellLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 
 export class Runner implements IRunner {
@@ -177,21 +181,8 @@ export class Runner implements IRunner {
     this.allCancels.add(cancel);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
-    if (
-      isDoc(argument) ||
-      isCellLink(argument) ||
-      isCell(argument) ||
-      isQueryResultForDereferencing(argument)
-    ) {
-      const ref = isCellLink(argument)
-        ? argument
-        : isCell(argument)
-        ? argument.getAsCellLink()
-        : isQueryResultForDereferencing(argument)
-        ? getCellLinkOrThrow(argument)
-        : ({ cell: argument, path: [] } satisfies CellLink);
-
-      argument = { $alias: ref } as T;
+    if (isLink(argument)) {
+      argument = parseToLegacyAlias(argument) as T;
     }
 
     // Walk the recipe's schema and extract all default values
@@ -201,8 +192,10 @@ export class Runner implements IRunner {
     const previousInternal = processCell.get()?.internal;
     const internal: JSONValue = Object.assign(
       {},
-      deepCopy((defaults as unknown as { internal: JSONValue })?.internal),
-      deepCopy(
+      cellAwareDeepCopy(
+        (defaults as unknown as { internal: JSONValue })?.internal,
+      ),
+      cellAwareDeepCopy(
         isRecord(recipe.initial) && isRecord(recipe.initial.internal)
           ? recipe.initial.internal
           : {},
@@ -305,10 +298,12 @@ export class Runner implements IRunner {
       if (seen.has(value)) return;
       seen.add(value);
 
-      const link = maybeGetCellLink(value);
+      const link = parseLink(value, resultCell);
 
-      if (link && link.cell) {
-        const maybePromise = this.runtime.storage.syncCell(link.cell);
+      if (link) {
+        const maybePromise = this.runtime.storage.syncCell(
+          this.runtime.getCellFromLink(link),
+        );
         if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (isRecord(value)) {
         for (const key in value) syncAllMentionedCells(value[key]);
@@ -338,8 +333,8 @@ export class Runner implements IRunner {
 
     for (const node of recipe.nodes) {
       const sourceDoc = sourceCell.getDoc();
-      const inputs = findAllAliasedCells(node.inputs, sourceDoc);
-      const outputs = findAllAliasedCells(node.outputs, sourceDoc);
+      const inputs = findAllLegacyAliasedCells(node.inputs, sourceDoc);
+      const outputs = findAllLegacyAliasedCells(node.outputs, sourceDoc);
 
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
@@ -389,7 +384,7 @@ export class Runner implements IRunner {
   }
 
   private instantiateNode(
-    module: Module | Alias,
+    module: Module,
     inputBindings: JSONValue,
     outputBindings: JSONValue,
     processCell: DocImpl<any>,
@@ -453,7 +448,7 @@ export class Runner implements IRunner {
         default:
           throw new Error(`Unknown module type: ${module.type}`);
       }
-    } else if (isAlias(module)) {
+    } else if (isWriteRedirectLink(module)) {
       // TODO(seefeld): Implement, a dynamic node
     } else {
       throw new Error(`Unknown module: ${JSON.stringify(module)}`);
@@ -473,10 +468,10 @@ export class Runner implements IRunner {
       processCell,
     );
 
-    const reads = findAllAliasedCells(inputs, processCell);
+    const reads = findAllLegacyAliasedCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllAliasedCells(outputs, processCell);
+    const writes = findAllLegacyAliasedCells(outputs, processCell);
 
     let fn = (
       typeof module.implementation === "string"
@@ -489,20 +484,20 @@ export class Runner implements IRunner {
     }
 
     // Check if any of the read cells is a stream alias
-    let streamRef: CellLink | undefined = undefined;
+    let streamRef: LegacyCellLink | undefined = undefined;
     if (isRecord(inputs)) {
       for (const key in inputs) {
         let doc = processCell;
         let path: PropertyKey[] = [key];
         let value = inputs[key];
-        while (isAlias(value)) {
-          const ref = followAliases(value, processCell);
+        while (isWriteRedirectLink(value)) {
+          const ref = followWriteRedirects(value, processCell);
           doc = ref.cell;
           path = ref.path;
           value = doc.getAtPath(path);
         }
-        if (isStreamAlias(value)) {
-          streamRef = { cell: doc, path };
+        if (isStreamValue(value)) {
+          streamRef = { cell: doc, path } satisfies LegacyCellLink;
           break;
         }
       }
@@ -517,17 +512,20 @@ export class Runner implements IRunner {
         const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
         for (const key in eventInputs) {
-          if (
-            isAlias(eventInputs[key]) &&
-            eventInputs[key].$alias.cell === stream.cell &&
-            eventInputs[key].$alias.path.length === stream.path.length &&
-            eventInputs[key].$alias.path.every(
-              (value: PropertyKey, index: number) =>
-                value === stream.path[index],
-            )
-          ) {
-            eventInputs[key] = event;
-            cause[key] = crypto.randomUUID();
+          if (isWriteRedirectLink(eventInputs[key])) {
+            // Use format-agnostic comparison for aliases
+            const alias = eventInputs[key];
+
+            if (
+              areLinksSame(
+                alias,
+                streamRef,
+                processCell.asCell(),
+              )
+            ) {
+              eventInputs[key] = event;
+              cause[key] = crypto.randomUUID();
+            }
           }
         }
 
@@ -695,8 +693,14 @@ export class Runner implements IRunner {
     // note the parent recipe on the closure recipes.
     unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
 
-    const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
-    const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
+    const inputCells = findAllLegacyAliasedCells(
+      mappedInputBindings,
+      processCell,
+    );
+    const outputCells = findAllLegacyAliasedCells(
+      mappedOutputBindings,
+      processCell,
+    );
 
     const action = module.implementation(
       processCell.runtime!.documentMap.getDoc(
@@ -732,10 +736,10 @@ export class Runner implements IRunner {
     const inputsCell = processCell.runtime!.documentMap.getDoc(inputs, {
       immutable: inputs,
     }, processCell.space);
-    const reads = findAllAliasedCells(inputs, processCell);
+    const reads = findAllLegacyAliasedCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllAliasedCells(outputs, processCell);
+    const writes = findAllLegacyAliasedCells(outputs, processCell);
 
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsQueryResult([], log);
@@ -786,6 +790,29 @@ export class Runner implements IRunner {
   }
 }
 
+function containsOpaqueRef(value: unknown): boolean {
+  if (isOpaqueRef(value)) return true;
+  if (isLink(value)) return false;
+  if (isRecord(value)) {
+    return Object.values(value).some(containsOpaqueRef);
+  }
+  return false;
+}
+
+export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
+  if (isLink(value)) return value as Mutable<T>;
+  if (isRecord(value)) {
+    return Array.isArray(value)
+      ? value.map(cellAwareDeepCopy) as unknown as Mutable<T>
+      : Object.fromEntries(
+        Object.entries(value).map((
+          [key, value],
+        ) => [key, cellAwareDeepCopy(value)]),
+      ) as unknown as Mutable<T>;
+    // Literal value:
+  } else return value as Mutable<T>;
+}
+
 /**
  * Extracts default values from a JSON schema object.
  * @param schema - The JSON schema to extract defaults from
@@ -801,7 +828,9 @@ export function extractDefaultValues(
   ) {
     // Ignore the schema.default if it's not an object, since it's not a valid
     // default value for an object.
-    const obj = deepCopy(isRecord(schema.default) ? schema.default : {});
+    const obj = cellAwareDeepCopy(
+      isRecord(schema.default) ? schema.default : {},
+    );
     for (const [propKey, propSchema] of Object.entries(schema.properties)) {
       const value = extractDefaultValues(propSchema);
       if (value !== undefined) {
@@ -836,15 +865,7 @@ export function mergeObjects<T>(
     // If we have a literal value, return it. Same for arrays, since we wouldn't
     // know how to merge them. Note that earlier objects take precedence, so if
     // an earlier was e.g. an object, we'll return that instead of the literal.
-    if (
-      typeof obj !== "object" ||
-      obj === null ||
-      Array.isArray(obj) ||
-      isAlias(obj) ||
-      isCellLink(obj) ||
-      isDoc(obj) ||
-      isCell(obj)
-    ) {
+    if (!isObject(obj) || isLink(obj)) {
       return obj as T;
     }
 
