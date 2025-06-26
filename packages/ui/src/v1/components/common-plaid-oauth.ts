@@ -30,64 +30,112 @@ export interface PlaidAuthData {
   }>;
 }
 
-declare global {
-  interface Window {
-    Plaid: any;
-  }
-}
-
 export class CommonPlaidOauthElement extends LitElement {
   static override properties = {
     auth: { type: Object },
     products: { type: Array },
     isLoading: { type: Boolean },
-    linkToken: { type: String },
     authStatus: { type: String },
-    plaidHandler: { type: Object },
   };
 
   declare auth: Cell<PlaidAuthData> | undefined;
   declare products: string[];
   declare isLoading: boolean;
-  declare linkToken: string | null;
   declare authStatus: string;
-  declare plaidHandler: any;
 
   constructor() {
     super();
-    this.products = ["accounts", "transactions"];
+    this.products = ["transactions"];  // transactions includes balance/account info
     this.isLoading = false;
-    this.linkToken = null;
     this.authStatus = "";
-    this.plaidHandler = null;
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    this.loadPlaidScript();
+    // Check for OAuth callback on component mount
+    this.checkForOAuthCallback();
   }
 
-  private async loadPlaidScript() {
-    if (window.Plaid) {
-      return;
+  private async checkForOAuthCallback() {
+    // Check if we're returning from Plaid OAuth
+    const urlParams = new URLSearchParams(window.location.search);
+    const publicToken = urlParams.get("public_token");
+    const error = urlParams.get("error");
+    const oauthContinue = urlParams.get("oauth_continue");
+    const oauthStateId = urlParams.get("oauth_state_id");
+    
+    if (publicToken || error || oauthContinue) {
+      if (error) {
+        this.authStatus = `Authentication failed: ${urlParams.get("error_message") || error}`;
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (publicToken) {
+        // Handle the public token exchange
+        this.authStatus = "Processing authentication...";
+        await this.handlePublicToken(publicToken);
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (oauthContinue && oauthStateId) {
+        // OAuth flow - need to show message to user
+        this.authStatus = "Please complete authentication with your bank. You may need to reconnect.";
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        // For OAuth institutions, the user needs to go through Link again
+        // after completing OAuth at their bank
+        setTimeout(() => {
+          this.authStatus = "Ready to connect. Please click 'Connect Bank Account' again.";
+        }, 3000);
+      }
     }
-
-    const script = document.createElement("script");
-    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-    script.async = true;
-    script.onload = () => {
-      console.log("Plaid Link SDK loaded");
-    };
-    script.onerror = () => {
-      console.error("Failed to load Plaid Link SDK");
-      this.authStatus = "Failed to load Plaid Link SDK";
-    };
-    document.head.appendChild(script);
   }
 
-  async createLinkToken() {
+  private async handlePublicToken(publicToken: string) {
     this.isLoading = true;
-    this.authStatus = "Creating link token...";
+    this.authStatus = "Exchanging token...";
+
+    const authCellId = JSON.stringify(this.auth?.getAsCellLink());
+    const container = CommonCharmElement.findCharmContainer(this);
+    if (!container) {
+      throw new Error("No <common-charm> container.");
+    }
+    const { charmId } = container;
+
+    try {
+      const response = await fetch("/api/integrations/plaid-oauth/exchange-token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          publicToken,
+          authCellId,
+          integrationCharmId: charmId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      this.authStatus = "Bank account connected successfully!";
+      this.isLoading = false;
+      
+      // Force update to show new account
+      this.requestUpdate();
+    } catch (error) {
+      console.error("Error exchanging token:", error);
+      this.authStatus = `Error: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.isLoading = false;
+    }
+  }
+
+  async handleConnectClick() {
+    this.isLoading = true;
+    this.authStatus = "Creating link session...";
 
     const authCellId = JSON.stringify(this.auth?.getAsCellLink());
 
@@ -101,6 +149,8 @@ export class CommonPlaidOauthElement extends LitElement {
       authCellId,
       integrationCharmId: charmId,
       products: this.products,
+      // Send the current page URL so the callback knows where to redirect
+      frontendUrl: window.location.href.split('?')[0],
     };
 
     try {
@@ -117,93 +167,21 @@ export class CommonPlaidOauthElement extends LitElement {
       }
 
       const data = await response.json();
-      this.linkToken = data.linkToken;
-      this.authStatus = "Link token created, initializing Plaid Link...";
       
-      // Initialize Plaid Link after getting the token
-      await this.initializePlaidLink();
+      if (data.hostedLinkUrl) {
+        // Redirect to Plaid hosted Link
+        this.authStatus = "Redirecting to Plaid...";
+        window.location.href = data.hostedLinkUrl;
+      } else {
+        throw new Error("No hosted link URL received");
+      }
     } catch (error) {
-      console.error("Error creating link token:", error);
+      console.error("Error creating link session:", error);
       this.authStatus = `Error: ${
         error instanceof Error ? error.message : String(error)
       }`;
       this.isLoading = false;
     }
-  }
-
-  async initializePlaidLink() {
-    if (!this.linkToken || !window.Plaid) {
-      this.authStatus = "Missing link token or Plaid SDK not loaded";
-      this.isLoading = false;
-      return;
-    }
-
-    const authCellId = JSON.stringify(this.auth?.getAsCellLink());
-    const container = CommonCharmElement.findCharmContainer(this);
-    if (!container) {
-      throw new Error("No <common-charm> container.");
-    }
-    const { charmId } = container;
-
-    this.plaidHandler = window.Plaid.create({
-      token: this.linkToken,
-      onSuccess: async (publicToken: string, metadata: any) => {
-        this.authStatus = "Bank connection successful, exchanging token...";
-        
-        try {
-          const response = await fetch("/api/integrations/plaid-oauth/exchange-token", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              publicToken,
-              authCellId,
-              integrationCharmId: charmId,
-              metadata,
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-
-          const result = await response.json();
-          this.authStatus = "Bank account connected successfully!";
-          this.isLoading = false;
-          this.linkToken = null;
-          
-          // Force update to show new account
-          this.requestUpdate();
-        } catch (error) {
-          console.error("Error exchanging token:", error);
-          this.authStatus = `Error: ${
-            error instanceof Error ? error.message : String(error)
-          }`;
-          this.isLoading = false;
-        }
-      },
-      onExit: (err: any, metadata: any) => {
-        if (err) {
-          console.error("Plaid Link error:", err);
-          this.authStatus = `Error: ${err.display_message || err.error_message || "Unknown error"}`;
-        } else {
-          this.authStatus = "Plaid Link closed";
-        }
-        this.isLoading = false;
-        this.linkToken = null;
-      },
-      onEvent: (eventName: string, metadata: any) => {
-        console.log("Plaid Link event:", eventName, metadata);
-      },
-    });
-
-    // Open Plaid Link
-    this.plaidHandler.open();
-  }
-
-  async handleConnectClick() {
-    await this.createLinkToken();
   }
 
   async handleRemoveAccount(itemId: string) {

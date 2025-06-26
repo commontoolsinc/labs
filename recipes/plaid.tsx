@@ -235,7 +235,7 @@ const PlaidImporterInputs = {
         products: {
           type: "array",
           items: { type: "string" },
-          default: ["accounts", "transactions"],
+          default: ["transactions"],
           description: "Plaid products to request",
         },
         daysToSync: {

@@ -28,6 +28,10 @@ export const createLinkToken = createRoute({
                 .optional()
                 .default(["US"])
                 .describe("Country codes for institutions"),
+              redirectUri: z
+                .string()
+                .optional()
+                .describe("Redirect URI for hosted Link flow"),
             })
             .openapi({
               example: {
@@ -319,9 +323,13 @@ export const callback = createRoute({
   tags,
   request: {
     query: z.object({
-      oauth_state_id: z.string().optional().describe("OAuth state ID from Plaid"),
-      state: z.string().optional().describe("State parameter for validation"),
-      error: z.string().optional().describe("Error message if OAuth failed"),
+      public_token: z.string().optional().describe("Public token from Plaid Link"),
+      error: z.string().optional().describe("Error code from Plaid Link"),
+      error_code: z.string().optional().describe("Specific error code"),
+      error_message: z.string().optional().describe("Error message details"),
+      redirect_uri: z.string().optional().describe("Original redirect URI"),
+      oauth_state_id: z.string().optional().describe("OAuth state ID from Plaid (legacy)"),
+      state: z.string().optional().describe("State parameter for validation (legacy)"),
     }),
   },
   responses: {

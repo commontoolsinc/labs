@@ -10,7 +10,6 @@ import type {
 } from "./plaid-oauth.routes.ts";
 import {
   type CallbackResult,
-  type PlaidItem,
   createBackgroundIntegrationErrorResponse,
   createBackgroundIntegrationSuccessResponse,
   createCallbackResponse,
@@ -28,6 +27,7 @@ import {
   getAuthData,
   getBaseUrl,
   getPlaidItem,
+  type PlaidItem,
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
@@ -60,21 +60,31 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     // Create a user ID for Plaid (can be any stable string)
     const userId = "commontools-user";
 
+    // Use the redirect URI from env (backend callback URL)
+    // This should match what's configured in Plaid dashboard
+    const redirectUri = env.PLAID_REDIRECT_URI || payload.redirectUri;
+
     // Create link token request
-    const linkTokenRequest = {
+    const linkTokenRequest: any = {
       user: {
         client_user_id: userId,
       },
       client_name: "Common Tools",
-      products: payload.products || ["accounts", "transactions"],
+      products: payload.products || ["transactions"],
       country_codes: (payload.countryCodes || ["US"]) as CountryCode[],
       language: "en",
-      redirect_uri: env.PLAID_REDIRECT_URI || undefined,
     };
+    
+    // Only add redirect_uri if provided
+    if (redirectUri) {
+      linkTokenRequest.redirect_uri = redirectUri;
+    }
 
     logger.debug({ linkTokenRequest }, "Creating Plaid link token");
+    console.log("Create plaid link token request", linkTokenRequest);
 
     const response = await plaidClient.linkTokenCreate(linkTokenRequest);
+    console.log("Create plaid link token response", response);
     const { link_token, expiration } = response.data;
 
     logger.info(
@@ -82,9 +92,31 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
       "Created Plaid link token",
     );
 
-    return createLinkTokenSuccessResponse(c, link_token, expiration);
-  } catch (error) {
+    // Create the hosted Link URL
+    // Use the standard hosted Link URL without deprecated isWebview parameter
+    const hostedLinkUrl =
+      `https://cdn.plaid.com/link/v2/stable/link.html?token=${link_token}`;
+
+    return c.json({
+      linkToken: link_token,
+      hostedLinkUrl,
+      expiration,
+    });
+  } catch (error: any) {
     logger.error({ error }, "Failed to create link token");
+    
+    // Extract Plaid error details if available
+    if (error.response?.data) {
+      logger.error({ plaidError: error.response.data }, "Plaid API error details");
+      const plaidError = error.response.data;
+      return c.json({
+        error: plaidError.error_message || "Failed to create link token",
+        error_code: plaidError.error_code,
+        error_type: plaidError.error_type,
+        display_message: plaidError.display_message,
+      }, 400);
+    }
+    
     return createLinkTokenErrorResponse(
       c,
       error instanceof Error ? error.message : "Failed to create link token",
@@ -526,7 +558,7 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
 
 /**
  * Plaid OAuth Callback Handler
- * Handles OAuth callbacks from Plaid (if using OAuth flow)
+ * Handles OAuth callbacks from Plaid hosted Link
  */
 export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
   const logger = c.get("logger");
@@ -535,38 +567,85 @@ export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
   logger.info({ query }, "Received Plaid OAuth callback");
 
   try {
-    const { oauth_state_id, state, error: oauthError } = query;
+    const { 
+      public_token, 
+      oauth_state_id,
+      error: linkError, 
+      error_code, 
+      error_message,
+      state 
+    } = query;
 
-    // Handle OAuth errors
-    if (oauthError) {
-      logger.error({ oauthError }, "OAuth error received");
+    // Determine the frontend URL to redirect to
+    const frontendBaseUrl = state || "http://localhost:5173";
+    
+    // Handle OAuth flow - if we have oauth_state_id, this is an OAuth institution
+    if (oauth_state_id && !public_token && !linkError) {
+      logger.info(
+        { oauth_state_id },
+        "OAuth flow detected - user needs to complete OAuth at institution",
+      );
+      
+      // For OAuth institutions, Plaid first redirects here, then user must complete
+      // OAuth at their bank, then they come back through Link again
+      // We should show a message that they need to continue in Plaid Link
+      const continueUrl = new URL(frontendBaseUrl);
+      continueUrl.searchParams.set("oauth_continue", "true");
+      continueUrl.searchParams.set("oauth_state_id", oauth_state_id);
+      return c.redirect(continueUrl.toString());
+    }
+
+    // Handle Link errors
+    if (linkError || error_code) {
+      logger.error(
+        { linkError, error_code, error_message },
+        "Link error received",
+      );
+
+      const errorUrl = new URL(frontendBaseUrl);
+      errorUrl.searchParams.set(
+        "error",
+        linkError || error_code || "unknown_error",
+      );
+      if (error_message) {
+        errorUrl.searchParams.set("error_message", error_message);
+      }
+      return c.redirect(errorUrl.toString());
+    }
+
+    // Handle successful link with public token
+    if (public_token) {
+      logger.info(
+        { publicToken: public_token.substring(0, 20) + "..." },
+        "Received public token",
+      );
+
+      const successUrl = new URL(frontendBaseUrl);
+      successUrl.searchParams.set("public_token", public_token);
+      return c.redirect(successUrl.toString());
+    }
+
+    // No token or error - something went wrong
+    logger.error("No public token or error in callback");
+    const errorUrl = new URL(frontendBaseUrl);
+    errorUrl.searchParams.set("error", "invalid_callback");
+    return c.redirect(errorUrl.toString());
+  } catch (error) {
+    logger.error(error, "Failed to process callback");
+
+    // Try to redirect with error
+    try {
+      const errorUrl = new URL(query.redirect_uri || "/");
+      errorUrl.searchParams.set("error", "callback_processing_error");
+      return c.redirect(errorUrl.toString());
+    } catch {
+      // If we can't redirect, return an error page
       const callbackResult: CallbackResult = {
         success: false,
-        error: `Authentication failed: ${oauthError}`,
+        error: "Failed to process callback",
       };
       return createCallbackResponse(callbackResult);
     }
-
-    // For now, we'll just return a success page
-    // In a real OAuth flow, we would validate state and process oauth_state_id
-    const callbackResult: CallbackResult = {
-      success: true,
-      message: "OAuth callback received",
-      details: {
-        oauth_state_id,
-        state,
-        timestamp: new Date().toISOString(),
-      },
-    };
-
-    return createCallbackResponse(callbackResult);
-  } catch (error) {
-    logger.error(error, "Failed to process callback");
-    const callbackResult: CallbackResult = {
-      success: false,
-      error: "Failed to process callback",
-    };
-    return createCallbackResponse(callbackResult);
   }
 };
 

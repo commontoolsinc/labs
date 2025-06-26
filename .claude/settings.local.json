@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:developers.google.com)",
-      "Bash(deno task:*)"
+      "Bash(deno task:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)"
     ],
     "deny": []
   }
