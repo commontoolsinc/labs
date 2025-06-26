@@ -147,7 +147,9 @@ describe("StorageTransaction", () => {
       }, "value");
 
       expect(result.error).toBeDefined();
-      expect(result.error!.message).toContain("document is not a record");
+      expect(result.error!.message).toContain(
+        "Document not found or not a record",
+      );
     });
 
     it("should fail writing to deeply nested path when parent is not a record", async () => {

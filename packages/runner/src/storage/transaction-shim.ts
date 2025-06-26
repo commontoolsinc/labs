@@ -1,13 +1,15 @@
 import type {
   IMemoryAddress,
   InactiveTransactionError,
-  INotFoundError,
   IReaderError,
   IStorageTransaction,
   IStorageTransactionError,
+  IStorageTransactionInconsistent,
   IStorageTransactionInvariant,
   IStorageTransactionLog,
+  IStorageTransactionNotFound,
   IStorageTransactionProgress,
+  IStorageTransactionWritePathError,
   ITransactionReader,
   ITransactionWriter,
   IWriterError,
@@ -32,19 +34,25 @@ function uriToEntityId(uri: string): EntityId {
 /**
  * Validate that the parent path exists and is a record for nested writes
  */
-function validateParentPath(doc: DocImpl<any>, path: PropertyKey[]): void {
+function validateParentPath(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+): IStorageTransactionWritePathError | null {
   if (path.length === 0) {
-    return; // Root write, no validation needed
+    return null; // Root write, no validation needed
   }
 
   // Check if the document itself exists and is a record for first-level writes
   if (path.length === 1) {
     if (doc.value === undefined || !isRecord(doc.value)) {
-      throw new Error(
+      const pathError: IStorageTransactionWritePathError = new Error(
         `Cannot write to path [${String(path[0])}] - document is not a record`,
-      );
+      ) as IStorageTransactionWritePathError;
+      pathError.name = "StorageTransactionWritePathError";
+      pathError.path = path.map((p) => String(p));
+      return pathError;
     }
-    return;
+    return null;
   }
 
   // For deeper paths, check that the parent path exists and is a record
@@ -52,14 +60,20 @@ function validateParentPath(doc: DocImpl<any>, path: PropertyKey[]): void {
   const parentValue = getValueAtPath(doc.value, parentPath);
 
   if (parentValue === undefined || !isRecord(parentValue)) {
-    throw new Error(
+    const pathError: IStorageTransactionWritePathError = new Error(
       `Cannot write to path [${
         path.map((p) => String(p)).join(", ")
       }] - parent path [${
         parentPath.map((p) => String(p)).join(", ")
       }] does not exist or is not a record`,
-    );
+    ) as IStorageTransactionWritePathError;
+    pathError.name = "StorageTransactionWritePathError";
+    pathError.path = path.map((p) => String(p));
+    pathError.parentPath = parentPath.map((p) => String(p));
+    return pathError;
   }
+
+  return null;
 }
 
 /**
@@ -105,36 +119,29 @@ class TransactionReader implements ITransactionReader {
 
   read(
     address: IMemoryAddress,
-  ): Result<Read, INotFoundError | InactiveTransactionError> {
-    try {
-      // Convert URI to EntityId
-      const entityId = uriToEntityId(address.id);
+  ): Result<Read, IReaderError> {
+    // Convert URI to EntityId
+    const entityId = uriToEntityId(address.id);
 
-      // Get the document from the runtime's document map
-      const doc = this.runtime.documentMap.getDocByEntityId(
-        address.space,
-        entityId,
-        false, // Don't create if not found
-      );
+    // Get the document from the runtime's document map
+    const doc = this.runtime.documentMap.getDocByEntityId(
+      address.space,
+      entityId,
+      false, // Don't create if not found
+    );
 
-      // Read the value at the specified path
-      const value = doc ? getValueAtPath(doc.value, address.path) : undefined;
+    // Read the value at the specified path
+    const value = doc ? getValueAtPath(doc.value, address.path) : undefined;
 
-      // Create the read invariant
-      const read: Read = {
-        address,
-        value,
-        cause: refer("shim does not care"),
-      };
-      this.log.addRead(read);
+    // Create the read invariant
+    const read: Read = {
+      address,
+      value,
+      cause: refer("shim does not care"),
+    };
+    this.log.addRead(read);
 
-      return { ok: read };
-    } catch (error) {
-      return {
-        ok: undefined,
-        error: error as INotFoundError | InactiveTransactionError,
-      };
-    }
+    return { ok: read };
   }
 }
 
@@ -146,40 +153,50 @@ class TransactionWriter extends TransactionReader
   write(
     address: IMemoryAddress,
     value?: any,
-  ): Result<Write, InactiveTransactionError> {
-    try {
-      // Convert URI to EntityId
-      const entityId = uriToEntityId(address.id);
+  ): Result<Write, IWriterError> {
+    // Convert URI to EntityId
+    const entityId = uriToEntityId(address.id);
 
-      // Get or create the document from the runtime's document map
-      const doc = this.runtime.documentMap.getDocByEntityId(
-        address.space,
-        entityId,
-        true, // Create if not found
-      );
+    // Get or create the document from the runtime's document map
+    const doc = this.runtime.documentMap.getDocByEntityId(
+      address.space,
+      entityId,
+      true, // Create if not found
+    );
 
-      if (!doc) {
-        throw new Error(`Failed to get or create document: ${address.id}`);
-      }
-
-      // Validate parent path exists and is a record for nested writes
-      validateParentPath(doc, address.path);
-
-      // Write the value at the specified path
-      const changed = doc.setAtPath(address.path, value);
-
-      // Create the write invariant
-      const write: Write = {
-        address,
-        value,
-        cause: refer(address.id),
-      };
-      this.log.addWrite(write);
-
-      return { ok: write };
-    } catch (error) {
-      return { ok: undefined, error: error as InactiveTransactionError };
+    if (!doc) {
+      throw new Error(`Failed to get or create document: ${address.id}`);
     }
+
+    // For non-empty paths, check if document exists and is a record
+    if (address.path.length > 0) {
+      if (doc.value === undefined || !isRecord(doc.value)) {
+        const notFoundError: IStorageTransactionNotFound = new Error(
+          `Document not found or not a record: ${address.id}`,
+        ) as IStorageTransactionNotFound;
+        notFoundError.name = "StorageTransactionNotFound";
+        return { ok: undefined, error: notFoundError };
+      }
+    }
+
+    // Validate parent path exists and is a record for nested writes
+    const validationError = validateParentPath(doc, address.path);
+    if (validationError) {
+      return { ok: undefined, error: validationError };
+    }
+
+    // Write the value at the specified path
+    const changed = doc.setAtPath(address.path, value);
+
+    // Create the write invariant
+    const write: Write = {
+      address,
+      value,
+      cause: refer(address.id),
+    };
+    this.log.addWrite(write);
+
+    return { ok: write };
   }
 }
 
