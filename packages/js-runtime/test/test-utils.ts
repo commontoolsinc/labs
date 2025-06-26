@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { createOpaqueRefTransformer } from "../typescript/transformer/mod.ts";
+import { createOpaqueRefTransformer, createSchemaTransformer } from "../typescript/transformer/mod.ts";
 import { getTypeScriptEnvironmentTypes } from "../mod.ts";
 import { join } from "@std/path";
 
@@ -16,9 +16,10 @@ export async function transformSource(
     debug?: boolean;
     types?: Record<string, string>;
     logger?: (message: string) => void;
+    applySchemaTransformer?: boolean;
   } = {},
 ): Promise<string> {
-  const { mode = "transform", debug = false, types = {}, logger } = options;
+  const { mode = "transform", debug = false, types = {}, logger, applySchemaTransformer = false } = options;
   
   // Get environment types if not cached
   if (!envTypesCache) {
@@ -150,16 +151,24 @@ export async function transformSource(
     }
   }
 
-  // Create the transformer
-  const transformer = createOpaqueRefTransformer(program, {
+  // Create the transformers
+  const transformers: ts.TransformerFactory<ts.SourceFile>[] = [];
+  
+  // Always add OpaqueRef transformer first
+  transformers.push(createOpaqueRefTransformer(program, {
     mode,
     debug,
     logger,
-  });
+  }));
+  
+  // Optionally add schema transformer
+  if (applySchemaTransformer) {
+    transformers.push(createSchemaTransformer(program, { debug }));
+  }
 
   // Transform the source file
   const sourceFile = program.getSourceFile(fileName)!;
-  const result = ts.transform(sourceFile, [transformer]);
+  const result = ts.transform(sourceFile, transformers);
 
   // Print the result with 2-space indentation to match Deno style
   const printer = ts.createPrinter({
