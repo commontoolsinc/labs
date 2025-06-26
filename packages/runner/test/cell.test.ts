@@ -8,7 +8,7 @@ import { ID, JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
-import { isCellLink } from "../src/link-utils.ts";
+import { isLegacyCellLink } from "../src/link-utils.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { areLinksSame } from "../src/link-utils.ts";
@@ -216,8 +216,8 @@ describe("Cell utility functions", () => {
     );
     c.set({ x: 10 });
     const ref = c.key("x").getAsLegacyCellLink();
-    expect(isCellLink(ref)).toBe(true);
-    expect(isCellLink({})).toBe(false);
+    expect(isLegacyCellLink(ref)).toBe(true);
+    expect(isLegacyCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
@@ -1588,8 +1588,8 @@ describe("asCell with schema", () => {
     testCell.set(initialDataCopy);
     popFrame(frame1);
 
-    expect(isCellLink(testDoc.getRaw()[0])).toBe(true);
-    expect(isCellLink(testDoc.getRaw()[1])).toBe(true);
+    expect(isLegacyCellLink(testDoc.getRaw()[0])).toBe(true);
+    expect(isLegacyCellLink(testDoc.getRaw()[1])).toBe(true);
     expect(testDoc.getRaw()[0].cell.get().name).toEqual("First Item");
     expect(testDoc.getRaw()[1].cell.get().name).toEqual("Second Item");
 
@@ -1606,8 +1606,8 @@ describe("asCell with schema", () => {
     testCell.set(returnedData);
     popFrame(frame2);
 
-    expect(isCellLink(testDoc.getRaw()[0])).toBe(true);
-    expect(isCellLink(testDoc.getRaw()[1])).toBe(true);
+    expect(isLegacyCellLink(testDoc.getRaw()[0])).toBe(true);
+    expect(isLegacyCellLink(testDoc.getRaw()[1])).toBe(true);
     expect(testDoc.getRaw()[0].cell.get().name).toEqual("First Item");
     expect(testDoc.getRaw()[1].cell.get().name).toEqual("Second Item");
 
@@ -1677,8 +1677,8 @@ describe("asCell with schema", () => {
     arrayCell.push({ [ID]: "test", value: 43 });
     expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
     popFrame(frame);
-    expect(isCellLink(c.getRaw().items[0])).toBe(true);
-    expect(isCellLink(c.getRaw().items[1])).toBe(true);
+    expect(isLegacyCellLink(c.getRaw().items[0])).toBe(true);
+    expect(isLegacyCellLink(c.getRaw().items[1])).toBe(true);
     expect(arrayCell.get()).toEqual([{ value: 42 }, { value: 43 }]);
   });
 });

@@ -47,11 +47,13 @@ export type SigilWriteRedirectLink = SigilValue<WriteRedirectV1>;
  ****************/
 
 /**
- * Cell link.
+ * Legacy doc cell link.
  *
- * A cell link is a doc and a path within that doc.
+ * @deprecated Switch to sigil links instead.
+ *
+ * A legacy doc cell link is a doc and a path within that doc.
  */
-export type LegacyCellLink = {
+export type LegacyDocCellLink = {
   space?: MemorySpace;
   cell: DocImpl<any>;
   path: PropertyKey[];
@@ -61,6 +63,8 @@ export type LegacyCellLink = {
 
 /**
  * Legacy alias.
+ *
+ * @deprecated Switch to sigil write redirect links instead.
  *
  * A legacy alias is a cell and a path within that cell.
  */
@@ -74,7 +78,9 @@ export type LegacyAlias = {
 };
 
 /**
- * JSON cell link format used in storage
+ * JSON cell link format used in storage.
+ *
+ * @deprecated Switch to sigil links instead.
  */
 export type JSONCellLink = {
   cell: { "/": string };

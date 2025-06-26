@@ -5,7 +5,7 @@ import { type Cell, isCell, type MemorySpace } from "./cell.ts";
 import {
   type JSONCellLink,
   type LegacyAlias,
-  type LegacyCellLink,
+  type LegacyDocCellLink as LegacyDocCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilValue,
@@ -44,15 +44,18 @@ export type NormalizedFullLink = {
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
+/**
+ * A type reflecting all possible link formats, including cells themselves.
+ */
 export type CellLink =
   | Cell<any>
-  | DocImpl<any>
-  | LegacyCellLink
   | SigilLink
-  | JSONCellLink
-  | LegacyAlias
   | QueryResultInternals
-  | { "/": string };
+  | DocImpl<any> // @deprecated
+  | LegacyDocCellLink // @deprecated
+  | JSONCellLink // @deprecated
+  | LegacyAlias // @deprecated
+  | { "/": string }; // @deprecated
 
 /**
  * Check if value is a sigil value with any type
@@ -69,20 +72,26 @@ export function isSigilValue(value: any): value is SigilValue<any> {
 /**
  * Check if value is a legacy cell link.
  *
+ * @deprecated Switch to isLink instead.
+ *
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCellLink(value: any): value is LegacyCellLink | JSONCellLink {
-  return isLegacyCellLink(value) || isJSONCellLink(value);
+export function isLegacyCellLink(
+  value: any,
+): value is LegacyDocCellLink | JSONCellLink {
+  return isLegacyDocCellLink(value) || isJSONCellLink(value);
 }
 
 /**
  * Check if value is a legacy cell link.
  *
+ * @deprecated Switch to isLink instead.
+ *
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isLegacyCellLink(value: any): value is LegacyCellLink {
+export function isLegacyDocCellLink(value: any): value is LegacyDocCellLink {
   return (
     isRecord(value) && isDoc(value.cell) && Array.isArray(value.path)
   );
@@ -90,6 +99,11 @@ export function isLegacyCellLink(value: any): value is LegacyCellLink {
 
 /**
  * Check if value is a JSON cell link (storage format).
+ *
+ * @deprecated Switch to isLink instead.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
  */
 export function isJSONCellLink(value: any): value is JSONCellLink {
   return (
@@ -119,11 +133,17 @@ export function isSigilWriteRedirectLink(
 
 /**
  * Check if value is any kind of cell link format.
+ *
+ * @deprecated Switch to isLink instead.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
  */
 export function isAnyCellLink(
   value: any,
-): value is LegacyCellLink | SigilLink | JSONCellLink | LegacyAlias {
-  return isCellLink(value) || isJSONCellLink(value) || isSigilLink(value) ||
+): value is LegacyDocCellLink | SigilLink | JSONCellLink | LegacyAlias {
+  return isLegacyCellLink(value) || isJSONCellLink(value) ||
+    isSigilLink(value) ||
     isLegacyAlias(value);
 }
 
@@ -161,6 +181,14 @@ export function isWriteRedirectLink(
   return false;
 }
 
+/**
+ * Check if value is a legacy alias.
+ *
+ * @deprecated Switch to isWriteRedirectLink instead.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
 export function isLegacyAlias(value: any): value is LegacyAlias {
   return isRecord(value) && "$alias" in value && isRecord(value.$alias) &&
     Array.isArray(value.$alias.path);
@@ -242,7 +270,7 @@ export function parseLink(
   }
 
   // Handle legacy CellLink format (runtime format with DocImpl)
-  if (isLegacyCellLink(value)) {
+  if (isLegacyDocCellLink(value)) {
     return {
       id: toURI(value.cell.entityId),
       path: value.path.map((p) => p.toString()),
@@ -321,6 +349,8 @@ export function parseLinkOrThrow(
 /**
  * Parse a link to a legacy CellLink format
  *
+ * @deprecated Switch to parseLink instead.
+ *
  * @param value - The value to parse
  * @param baseCell - The base cell to use for resolving relative references
  * @returns The parsed cell link, or undefined if the value cannot be parsed
@@ -328,23 +358,25 @@ export function parseLinkOrThrow(
 export function parseToLegacyCellLink(
   value: CellLink,
   baseCell?: Cell,
-): LegacyCellLink;
+): LegacyDocCellLink;
 export function parseToLegacyCellLink(
   value: any,
   baseCell?: Cell,
-): LegacyCellLink | undefined;
+): LegacyDocCellLink | undefined;
 export function parseToLegacyCellLink(
   value: any,
   baseCell?: Cell,
-): LegacyCellLink | undefined {
+): LegacyDocCellLink | undefined {
   const partial = parseToLegacyCellLinkWithMaybeACell(value, baseCell);
   if (!partial) return undefined;
   if (!isDoc(partial.cell)) throw new Error("No id or base cell provided");
-  return partial as LegacyCellLink;
+  return partial as LegacyDocCellLink;
 }
 
 /**
  * Parse a link to a legacy Alias format
+ *
+ * @deprecated Switch to parseLink instead.
  *
  * @param value - The value to parse
  * @param baseCell - The base cell to use for resolving relative references
@@ -363,7 +395,7 @@ export function parseToLegacyAlias(value: any): LegacyAlias | undefined {
 function parseToLegacyCellLinkWithMaybeACell(
   value: any,
   baseCell?: Cell,
-): Partial<LegacyCellLink> | undefined {
+): Partial<LegacyDocCellLink> | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
   if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);
@@ -399,7 +431,7 @@ function parseToLegacyCellLinkWithMaybeACell(
     space: link.space,
     schema: link.schema,
     rootSchema: link.rootSchema,
-  } satisfies Partial<LegacyCellLink>;
+  } satisfies Partial<LegacyDocCellLink>;
 }
 
 /**

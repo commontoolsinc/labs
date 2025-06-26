@@ -4,7 +4,7 @@ import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
 import { createCell, isCell } from "./cell.ts";
-import { type LegacyCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
 
@@ -508,7 +508,7 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: LegacyCellLink[] = [];
+      const extraReads: LegacyDocCellLink[] = [];
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
           merged = result;
