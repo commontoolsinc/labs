@@ -68,6 +68,8 @@ export const getIframeRecipe = (
   runtime: Runtime,
 ): {
   recipeId: string;
+  // `src` is either a single file string source, or the entry
+  // file source code in a recipe.
   src?: string;
   iframe?: IFrameRecipe;
 } => {
@@ -76,9 +78,13 @@ export const getIframeRecipe = (
     console.warn("No recipeId found for charm", getEntityId(charm));
     return { recipeId, src: "", iframe: undefined };
   }
-  const src = runtime.recipeManager.getRecipeMeta({ recipeId })?.src;
+  const meta = runtime.recipeManager.getRecipeMeta({ recipeId });
+  const src = meta
+    ? (meta.src ??
+      meta.program?.files.find((file) => file.name === meta.program?.main)
+        ?.contents)
+    : undefined;
   if (!src) {
-    console.warn("No src found for charm", getEntityId(charm));
     return { recipeId };
   }
   try {
