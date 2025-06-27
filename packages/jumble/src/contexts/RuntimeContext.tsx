@@ -53,8 +53,7 @@ export function RuntimeProvider({
             "Uncaught error in recipe: " + error.message + "\n" + error.stack,
           );
         }
-        console.error("Uncaught error in recipe:", error.message);
-        console.error("Stack trace:", error.stack);
+        console.error(error);
         // Also send to Sentry
         Sentry.captureException(error);
       }],

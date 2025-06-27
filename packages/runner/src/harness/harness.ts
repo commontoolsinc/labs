@@ -19,7 +19,7 @@ export interface Harness extends EventTarget {
     source: ProgramResolver,
   ): Promise<Program>;
 
-  getInvocation(source: string): HarnessedFunction;
+  invoke(fn: () => any): any;
 
-  mapStackTrace(stack: string): string;
+  getInvocation(source: string): HarnessedFunction;
 }
