@@ -55,10 +55,8 @@ jobs:
         with:
           ref: ${{ env.target_sha }}
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: "2.2.2"
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
 
       - name: 📦 Cache Deno dependencies
         uses: actions/cache@v3
