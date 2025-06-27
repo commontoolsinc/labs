@@ -302,17 +302,6 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
 }
 
 /**
- * Get cell link or return values as is if not a cell value proxy.
- *
- * @param {any} value - The value to get the cell link or value from.
- * @returns {LegacyDocCellLink | any}
- */
-export function getCellLinkOrValue(value: any): LegacyDocCellLink {
-  if (isQueryResult(value)) return value[getCellLink];
-  else return value;
-}
-
-/**
  * Get cell link or throw if not a cell value proxy.
  *
  * @param {any} value - The value to get the cell link from.
