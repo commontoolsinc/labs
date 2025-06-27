@@ -47,7 +47,7 @@ export function map(
     },
   );
   result.send([]);
-  result.getDoc().sourceCell = parentCell.getDoc();
+  result.setSourceCell(parentCell);
 
   sendResult(result);
 
@@ -109,7 +109,7 @@ export function map(
         },
         resultCell,
       );
-      resultCell.getDoc().sourceCell!.sourceCell = parentCell.getDoc();
+      resultCell.getSourceCell()!.setSourceCell(parentCell);
       // Add cancel from runtime's runner
       addCancel(() => runtime.runner.stop(resultCell));
 

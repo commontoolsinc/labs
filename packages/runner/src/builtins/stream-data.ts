@@ -31,14 +31,14 @@ export function streamData(
     { streamData: { pending: cause } },
   );
   pending.send(false);
-  
+
   const result = runtime.getCell<any | undefined>(
     parentCell.getDoc().space,
     {
       streamData: { result: cause },
     },
   );
-  
+
   const error = runtime.getCell<any | undefined>(
     parentCell.getDoc().space,
     {
@@ -50,9 +50,9 @@ export function streamData(
   result.getDoc().ephemeral = true;
   error.getDoc().ephemeral = true;
 
-  pending.getDoc().sourceCell = parentCell.getDoc();
-  result.getDoc().sourceCell = parentCell.getDoc();
-  error.getDoc().sourceCell = parentCell.getDoc();
+  pending.setSourceCell(parentCell);
+  result.setSourceCell(parentCell);
+  error.setSourceCell(parentCell);
 
   // Since we'll only write into the docs above, we only have to call this once
   // here, instead of in the action.
@@ -68,7 +68,7 @@ export function streamData(
     const pendingWithLog = pending.withLog(log);
     const resultWithLog = result.withLog(log);
     const errorWithLog = error.withLog(log);
-    
+
     const { url, options } = inputsCell.getAsQueryResult([], log) || {};
 
     // Re-entrancy guard: Don't restart the stream if it's the same request.
