@@ -60,7 +60,7 @@ export interface ProcessOptions {
 
 export async function process(
   options: ProcessOptions,
-): Promise<{ output: JsScript; exports: any }> {
+): Promise<{ output: JsScript; main?: Record<string, any> }> {
   const filename = options.filename
     ? basename(options.filename)
     : options.output
@@ -68,7 +68,7 @@ export async function process(
     : undefined;
   const engine = new Engine(await createRuntime());
   const program = await engine.resolve(new CliProgram(options.main));
-  const { output, exports } = await engine.process(program, {
+  const { output, main } = await engine.process(program, {
     noCheck: !options.check,
     noRun: !options.run,
     filename,
@@ -77,5 +77,5 @@ export async function process(
   if (options.output) {
     await Deno.writeTextFile(options.output, output.js);
   }
-  return { output, exports };
+  return { output, main };
 }

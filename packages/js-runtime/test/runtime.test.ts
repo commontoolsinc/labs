@@ -5,7 +5,6 @@ import {
   InMemoryProgram,
   JsScript,
   TypeScriptCompiler,
-  UnsafeEvalJsValue,
   UnsafeEvalRuntime,
 } from "../mod.ts";
 
@@ -18,9 +17,11 @@ describe("Runtime", () => {
       "/main.tsx": "import { add } from './utils.ts';export default add(10,2)",
       "/utils.ts": "export const add=(x:number,y:number):number =>x+y;",
     });
-    const compiled = await compiler.resolveAndCompile(program);
-    const exports = execute(compiled).invoke();
-    expect(exports.inner().default).toBe(12);
+    const compiled = await compiler.resolveAndCompile(program, {
+      bundleExportAll: true,
+    });
+    const { main, exportMap: _ } = execute(compiled);
+    expect(main.default).toBe(12);
   });
 
   it("Executes with runtime dependencies", async () => {
@@ -32,15 +33,16 @@ describe("Runtime", () => {
     });
     const compiled = await compiler.resolveAndCompile(program, {
       runtimeModules: ["@std/math"],
+      bundleExportAll: true,
     });
-    const exports = execute(compiled).invoke({
+    const { main, exportMap: _ } = execute(compiled, {
       "@std/math": {
         add(x: number, y: number): number {
           return x + y;
         },
       },
     });
-    expect(exports.inner().default).toBe(12);
+    expect(main.default).toBe(12);
   });
 
   it("Source maps errors on invoke", async () => {
@@ -62,11 +64,12 @@ describe("Runtime", () => {
     });
     const compiled = await compiler.resolveAndCompile(program, {
       filename: "recipe-abc.js",
+      bundleExportAll: true,
     });
     let thrown: Error | undefined;
     try {
-      const exports = execute(compiled).invoke();
-      expect(exports.inner().default).toBe(12);
+      const { main, exportMap: _ } = execute(compiled);
+      expect(main.default).toBe(12);
     } catch (e: any) {
       thrown = e as Error;
     } finally {
@@ -85,10 +88,58 @@ describe("Runtime", () => {
       expect(stack.join("\n")).toBe(expected.join("\n"));
     }
   });
+
+  it("Exports all file exports", async () => {
+    const compiler = new TypeScriptCompiler(types);
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx":
+        "import { add } from '/utils/foo.ts';export default add(10,2); export const foo = 'bar';",
+      "/utils/foo.ts":
+        "import * as math from '@std/math'; export const add = (x: number, y: number) => math.add(x, y); export const sub = (x: number, y: number): number => x - y;",
+      "@std/math.d.ts":
+        "export declare function add(x: number, y: number): number;",
+    });
+    const compiled = await compiler.resolveAndCompile(program, {
+      runtimeModules: ["@std/math"],
+      bundleExportAll: true,
+    });
+    const { main: _, exportMap } = execute(compiled, {
+      "@std/math": {
+        add(x: number, y: number): number {
+          return x + y;
+        },
+      },
+    });
+    expect(Object.keys(exportMap).length).toBe(2);
+    expect(Object.keys(exportMap["/main.tsx"]).length).toBe(2);
+    expect(exportMap["/main.tsx"]["default"]).toBe(12);
+    expect(exportMap["/main.tsx"]["foo"]).toBe("bar");
+    expect(exportMap["/utils/foo.ts"]["add"]).toBeInstanceOf(Function);
+    expect(exportMap["/utils/foo.ts"]["sub"]).toBeInstanceOf(Function);
+  });
 });
 
-function execute(bundled: JsScript): UnsafeEvalJsValue {
+function execute(
+  bundled: JsScript,
+  rtBundle?: object,
+): {
+  main: Record<string, any>;
+  exportMap: Record<string, Record<string, any>>;
+} {
   const runtime = new UnsafeEvalRuntime();
   const isolate = runtime.getIsolate("");
-  return isolate.execute(bundled);
+  const evaledBundle = isolate.execute(bundled);
+  const result = rtBundle !== undefined
+    ? evaledBundle.invoke(rtBundle).inner()
+    : evaledBundle.invoke().inner();
+  if (
+    result && typeof result === "object" && "main" in result &&
+    "exportMap" in result
+  ) {
+    return {
+      main: result.main as Record<string, any>,
+      exportMap: result.exportMap as Record<string, Record<string, any>>,
+    };
+  }
+  throw new Error("Unexpected evaluation result.");
 }
