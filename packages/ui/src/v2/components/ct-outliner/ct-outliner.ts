@@ -174,12 +174,14 @@ export class CTOutliner extends BaseElement {
     }
 
     .mentions-dropdown {
-      position: absolute;
+      position: fixed;
       background: var(--background);
       border: 1px solid var(--border);
       border-radius: 0.375rem;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      z-index: 1000;
+      box-shadow:
+        0 4px 6px -1px rgba(0, 0, 0, 0.1),
+        0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      z-index: 9999;
       max-height: 12rem;
       overflow-y: auto;
       min-width: 12rem;
@@ -1135,8 +1137,19 @@ export class CTOutliner extends BaseElement {
       return "";
     }
 
+    // Calculate position relative to viewport for fixed positioning
+    const editor = this.shadowRoot?.querySelector(
+      `#editor-${this.editingNodeId}`,
+    ) as HTMLTextAreaElement;
+    let style = "top: 100%; left: 0;";
+
+    if (editor) {
+      const rect = editor.getBoundingClientRect();
+      style = `top: ${rect.bottom + 2}px; left: ${rect.left}px;`;
+    }
+
     return html`
-      <div class="mentions-dropdown" style="top: 100%; left: 0;">
+      <div class="mentions-dropdown" style="${style}">
         ${filteredMentions.map((mention, index) =>
         html`
           <div
