@@ -1,0 +1,45 @@
+name: CLI (Mac) 
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Git commit SHA to evaluate"
+        required: true
+        type: string
+
+env:
+  target_sha: ${{ github.event.inputs.commit_sha }}
+
+jobs:
+  cli-mac:
+    name: CLI (Mac)
+    runs-on: macos-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.target_sha }}
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 📦 Cache Deno dependencies
+        uses: actions/cache@v3
+        with:
+          # TODO these are not the paths used in macos
+          path: |
+            ~/.deno
+            ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+
+      - name: 🧪 Build CLI 
+        run: |
+          deno task build-binaries --cli-only
+
+      - name: 📤 Upload CLI 
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-cli
+          path: |
+            ./dist/ct
