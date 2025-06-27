@@ -1,6 +1,11 @@
 import { Recipe } from "../builder/types.ts";
 import { Console } from "./console.ts";
-import { Harness, HarnessedFunction } from "./harness.ts";
+import {
+  Harness,
+  HarnessedFunction,
+  RuntimeProgram,
+  TypeScriptHarnessProcessOptions,
+} from "./harness.ts";
 import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
@@ -25,12 +30,6 @@ declare global {
 }
 
 type Exports = Record<string, any>;
-
-export interface EngineProcessOptions {
-  noCheck?: boolean;
-  noRun?: boolean;
-  filename?: string;
-}
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -108,26 +107,27 @@ export class Engine extends EventTarget implements Harness {
 
   // Compile and run a `Program`, returning the export default recipe.
   async run(
-    program: Program,
-    options: EngineProcessOptions = {},
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
   ): Promise<Recipe> {
     const { main: exports, exportMap: _ } = await this.process(
       program,
       options,
     );
 
-    if (exports && !("default" in exports)) {
-      throw new Error("No default export found in compiled recipe.");
+    const exportName = program.mainExport ?? "default";
+    if (exports && !(exportName in exports)) {
+      throw new Error(`No "${exportName}" export found in compiled recipe.`);
     }
 
-    return exports!.default as Recipe;
+    return exports![exportName] as Recipe;
   }
 
   // Compile and run a `Program` with options, returning the compiled
   // result and evaluated exports.
   async process(
     program: Program,
-    options: EngineProcessOptions = {},
+    options: TypeScriptHarnessProcessOptions = {},
   ): Promise<
     { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
   > {

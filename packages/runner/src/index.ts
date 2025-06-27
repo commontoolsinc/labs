@@ -30,8 +30,8 @@ export {
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
-  type EngineProcessOptions,
-  EngineProgramResolver,
+  type RuntimeProgram,
+  type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
 export { followWriteRedirects } from "./link-resolution.ts";

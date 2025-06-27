@@ -20,7 +20,7 @@ import { isDoc } from "./doc.ts";
 import { type EntityId, getEntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
-import type { Harness } from "./harness/harness.ts";
+import type { Harness, RuntimeProgram } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
 import { isLegacyCellLink, type NormalizedLink } from "./link-utils.ts";
@@ -178,9 +178,9 @@ export interface IStorage {
 export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
-  generateRecipeId(recipe: any, src?: string | Program): string;
+  generateRecipeId(recipe: any, src?: string | RuntimeProgram): string;
   loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
-  compileRecipe(input: string | Program): Promise<Recipe>;
+  compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
   registerRecipe(
     params: {
@@ -258,7 +258,6 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-import { Program } from "@commontools/js-runtime";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.

@@ -90,12 +90,16 @@ export const charm = new Command()
     `Create a new charm, using ./main.tsx as source.`,
   )
   .arguments("<main:string>")
+  .option(
+    "--main-export <export:string>",
+    'Named export from entry for recipe definition. Defaults to "default".',
+  )
   .action(
     async (options, main) =>
       render(
         await newCharm(
           parseSpaceOptions(options),
-          absPath(main),
+          { mainPath: absPath(main), mainExport: options.mainExport },
         ),
       ),
   )
@@ -142,9 +146,16 @@ export const charm = new Command()
     `Update the source for "${RAW_EX_COMP.charm!}" with ./main.tsx`,
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option(
+    "--main-export <export:string>",
+    'Named export from entry for recipe definition. Defaults to "default".',
+  )
   .arguments("<main:string>")
   .action((options, mainPath) =>
-    setCharmRecipe(parseCharmOptions(options), absPath(mainPath))
+    setCharmRecipe(parseCharmOptions(options), {
+      mainPath: absPath(mainPath),
+      mainExport: options.mainExport,
+    })
   )
   /* charm inspect */
   .command("inspect", "Inspect detailed information about a charm")

@@ -2,7 +2,7 @@ import { JSONSchema, Module, Recipe, Schema } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
-import { Program } from "@commontools/js-runtime";
+import { RuntimeProgram } from "./harness/harness.ts";
 
 export const recipeMetaSchema = {
   type: "object",
@@ -17,6 +17,7 @@ export const recipeMetaSchema = {
       type: "object",
       properties: {
         main: { type: "string" },
+        mainExport: { type: "string" },
         files: {
           type: "array",
           items: {
@@ -69,7 +70,10 @@ export class RecipeManager implements IRecipeManager {
     return this.recipeMetaMap.get(input as Recipe)?.get()!;
   }
 
-  generateRecipeId(recipe: Recipe | Module, src?: string | Program): string {
+  generateRecipeId(
+    recipe: Recipe | Module,
+    src?: string | RuntimeProgram,
+  ): string {
     const id = this.recipeMetaMap.get(recipe as Recipe)?.get()?.id;
     if (id) {
       return id;
@@ -114,8 +118,8 @@ export class RecipeManager implements IRecipeManager {
     return this.recipeIdMap.get(recipeId);
   }
 
-  async compileRecipe(input: string | Program): Promise<Recipe> {
-    let program: Program | undefined;
+  async compileRecipe(input: string | RuntimeProgram): Promise<Recipe> {
+    let program: RuntimeProgram | undefined;
     if (typeof input === "string") {
       program = {
         main: "/main.tsx",
@@ -141,7 +145,7 @@ export class RecipeManager implements IRecipeManager {
     }
 
     const source = recipeMeta.program
-      ? (recipeMeta.program as Program)
+      ? (recipeMeta.program as RuntimeProgram)
       : recipeMeta.src!;
     const recipe = await this.compileRecipe(source);
     this.recipeIdMap.set(recipeId, recipe);
