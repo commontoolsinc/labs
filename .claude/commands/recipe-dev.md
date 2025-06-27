@@ -6,14 +6,14 @@ This script guides Claude through recipe development with the `ct` utility after
 
 **Before starting recipe development:**
 - User should have already run the space setup script or have an existing space
-- Claude should read the common CT setup instructions in `.claude/commands/ct-common.md`
+- Claude should read the common CT setup instructions in `.claude/commands/common/ct.md`
 
 ## Script Flow for Claude
 
 ### STEP 1: Initial Setup and Context
 
 **Read common setup instructions:**
-- First, read `.claude/commands/ct-common.md` for shared CT binary setup
+- First, read `.claude/commands/common/ct.md` for shared CT binary setup
 - Follow those instructions for:
   - CT binary check
   - Identity management
@@ -98,7 +98,7 @@ This script guides Claude through recipe development with the `ct` utility after
 
 **Recipe patterns:**
 - **Filter recipes**: Take collection input, output filtered subset
-- **Transformer recipes**: Convert data from one format to another  
+- **Transformer recipes**: Convert data from one format to another
 - **Aggregator recipes**: Combine multiple inputs into single output
 - **Generator recipes**: Create new data based on inputs
 - **Side-effect recipes**: Perform actions (send emails, create files, etc.)
@@ -165,7 +165,7 @@ This script guides Claude through recipe development with the `ct` utility after
 # Get recipe source
 ./dist/ct charm getsrc --identity [key] --api-url [url] --space [space] --charm [id]
 
-# Update recipe source  
+# Update recipe source
 ./dist/ct charm setsrc --identity [key] --api-url [url] --space [space] --charm [id] [recipe-file]
 
 # Test recipe syntax
