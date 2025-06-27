@@ -928,6 +928,7 @@ export class CharmManager {
     await this.runtime.storage.syncCell(charm);
 
     const sourceCell = charm.getSourceCell();
+    if (!sourceCell) throw new Error("charm missing source cell");
     await this.runtime.storage.syncCell(sourceCell);
 
     const recipeId = sourceCell.get()?.[TYPE];
@@ -954,5 +955,7 @@ export class CharmManager {
 }
 
 export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
-  return charm.getSourceCell(processSchema)?.get()?.[TYPE];
+  const sourceCell = charm.getSourceCell(processSchema);
+  if (!sourceCell) throw new Error("charm missing source cell");
+  return sourceCell.get()?.[TYPE]!;
 };
