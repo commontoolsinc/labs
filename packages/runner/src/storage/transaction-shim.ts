@@ -163,6 +163,7 @@ class TransactionReader implements ITransactionReader {
           "Invalid data URI",
         ) as IInvalidDataURIError;
         dataUriError.name = "InvalidDataURIError";
+        dataUriError.cause = error;
         return {
           ok: undefined,
           error: dataUriError,

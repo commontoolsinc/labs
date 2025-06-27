@@ -347,6 +347,7 @@ export interface IUnsupportedMediaTypeError extends Error {
  */
 export interface IInvalidDataURIError extends Error {
   name: "InvalidDataURIError";
+  cause: Error;
 }
 
 export type IReaderError =
