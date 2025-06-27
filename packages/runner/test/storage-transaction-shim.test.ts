@@ -4,6 +4,7 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { INotFoundError } from "../src/storage/interface.ts";
+import { getJSONFromDataURI } from "../src/uri-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -273,6 +274,96 @@ describe("StorageTransaction", () => {
       expect(result.error!.message).toContain(
         "parent path [missing] does not exist or is not a record",
       );
+    });
+  });
+});
+
+describe("URI Utils", () => {
+  describe("getJSONFromDataURI", () => {
+    it("should parse URI-encoded JSON data URI", () => {
+      const testData = { name: "John Doe", age: 30, city: "New York" };
+      const encodedData = encodeURIComponent(JSON.stringify(testData));
+      const dataURI = `data:application/json,${encodedData}`;
+
+      const result = getJSONFromDataURI(dataURI);
+
+      expect(result).toEqual(testData);
+    });
+
+    it("should parse base64-encoded JSON data URI", () => {
+      const testData = { name: "Jane Smith", age: 25, city: "Los Angeles" };
+      const jsonString = JSON.stringify(testData);
+      const base64Data = btoa(jsonString);
+      const dataURI = `data:application/json;base64,${base64Data}`;
+
+      const result = getJSONFromDataURI(dataURI);
+
+      expect(result).toEqual(testData);
+    });
+
+    it("should parse data URI with UTF-8 charset", () => {
+      const testData = { message: "Hello, 世界!", emoji: "🚀" };
+      const encodedData = encodeURIComponent(JSON.stringify(testData));
+      const dataURI = `data:application/json;charset=utf-8,${encodedData}`;
+
+      const result = getJSONFromDataURI(dataURI);
+
+      expect(result).toEqual(testData);
+    });
+
+    it("should parse data URI with utf8 charset variant", () => {
+      const testData = { message: "Hello, 世界!", emoji: "🚀" };
+      const encodedData = encodeURIComponent(JSON.stringify(testData));
+      const dataURI = `data:application/json;charset=utf8,${encodedData}`;
+
+      const result = getJSONFromDataURI(dataURI);
+
+      expect(result).toEqual(testData);
+    });
+
+    it("should throw error for unsupported charset", () => {
+      const dataURI =
+        `data:application/json;charset=iso-8859-1,{"test":"data"}`;
+
+      expect(() => getJSONFromDataURI(dataURI)).toThrow(
+        "Unsupported charset: iso-8859-1. Only UTF-8 is supported.",
+      );
+    });
+
+    it("should throw error for invalid data URI format", () => {
+      const invalidURI = "data:application/json";
+
+      expect(() => getJSONFromDataURI(invalidURI)).toThrow(
+        "Invalid data URI format: data:application/json",
+      );
+    });
+
+    it("should throw error for non-JSON data URI", () => {
+      const nonJsonURI = "data:text/plain,Hello World";
+
+      expect(() => getJSONFromDataURI(nonJsonURI)).toThrow(
+        "Invalid URI: data:text/plain,Hello World",
+      );
+    });
+
+    it("should throw error for invalid base64 data", () => {
+      const invalidBase64URI = "data:application/json;base64,invalid-base64!@#";
+
+      expect(() => getJSONFromDataURI(invalidBase64URI)).toThrow();
+    });
+
+    it("should throw error for invalid JSON in URI-encoded data", () => {
+      const invalidJson = encodeURIComponent("{ invalid json }");
+      const dataURI = `data:application/json,${invalidJson}`;
+
+      expect(() => getJSONFromDataURI(dataURI)).toThrow();
+    });
+
+    it("should throw error for invalid JSON in base64 data", () => {
+      const invalidJson = btoa("{ invalid json }");
+      const dataURI = `data:application/json;base64,${invalidJson}`;
+
+      expect(() => getJSONFromDataURI(dataURI)).toThrow();
     });
   });
 });
