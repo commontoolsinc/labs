@@ -30,18 +30,18 @@ export function compileAndRun(
   runtime: IRuntime,
 ): Action {
   const compiling = runtime.getCell<boolean>(
-    parentCell.getDoc().space,
+    parentCell.space,
     { compile: { compiling: cause } },
   );
   compiling.send(false);
-  
+
   const result = runtime.getCell<string | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     { compile: { result: cause } },
   );
-  
+
   const error = runtime.getCell<string | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     { compile: { error: cause } },
   );
 
