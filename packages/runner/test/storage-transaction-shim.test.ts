@@ -36,7 +36,7 @@ describe("StorageTransaction", () => {
     // First write to root path to create a record
     const rootWriteResult = transaction.write({
       space,
-      id: "test:entity",
+      id: "of:test-entity",
       type: "application/json",
       path: [],
     }, {});
@@ -46,7 +46,7 @@ describe("StorageTransaction", () => {
     // Test writing a value to nested path
     const writeResult = transaction.write({
       space,
-      id: "test:entity",
+      id: "of:test-entity",
       type: "application/json",
       path: ["name"],
     }, "John Doe");
@@ -57,7 +57,7 @@ describe("StorageTransaction", () => {
     // Test reading the value
     const readResult = transaction.read({
       space,
-      id: "test:entity",
+      id: "of:test-entity",
       type: "application/json",
       path: ["name"],
     });
@@ -68,7 +68,7 @@ describe("StorageTransaction", () => {
     // Test reading non-existent path
     const readNonExistentResult = transaction.read({
       space,
-      id: "test:entity",
+      id: "of:test-entity",
       type: "application/json",
       path: ["address", "city"],
     });
@@ -80,7 +80,7 @@ describe("StorageTransaction", () => {
     // Test writing a value to nested path
     const writeResult2 = transaction.write({
       space,
-      id: "test:entity",
+      id: "of:test-entity",
       type: "application/json",
       path: ["address"],
     }, { street: "123 Main St" });
@@ -91,7 +91,7 @@ describe("StorageTransaction", () => {
     // Test reading non-existent path in a parent that does exist
     const readNonExistentResult2 = transaction.read({
       space,
-      id: "test:entity",
+      id: "of:test-entity",
       type: "application/json",
       path: ["address", "country", "countryCode"],
     });
@@ -145,7 +145,7 @@ describe("StorageTransaction", () => {
 
       const result = transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: [],
       }, { name: "test" });
@@ -160,7 +160,7 @@ describe("StorageTransaction", () => {
       // First write a non-record value to the document
       transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: [],
       }, "not a record");
@@ -168,7 +168,7 @@ describe("StorageTransaction", () => {
       // Try to write to a nested path
       const result = transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: ["a"],
       }, "value");
@@ -185,7 +185,7 @@ describe("StorageTransaction", () => {
       // First write a record with a non-record value at "a"
       transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: [],
       }, { a: "not a record" });
@@ -193,7 +193,7 @@ describe("StorageTransaction", () => {
       // Try to write to a deeply nested path
       const result = transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: ["a", "b"],
       }, "value");
@@ -210,7 +210,7 @@ describe("StorageTransaction", () => {
       // First write a record value to the document
       transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: [],
       }, { a: {} });
@@ -218,7 +218,7 @@ describe("StorageTransaction", () => {
       // Write to a nested path
       const result = transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: ["a", "b"],
       }, "value");
@@ -233,7 +233,7 @@ describe("StorageTransaction", () => {
       // First write a record with nested structure
       transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: [],
       }, { a: { b: { c: {} } } });
@@ -241,7 +241,7 @@ describe("StorageTransaction", () => {
       // Write to a deeply nested path
       const result = transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: ["a", "b", "c", "d"],
       }, "deep value");
@@ -256,7 +256,7 @@ describe("StorageTransaction", () => {
       // First write a record to the document
       transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: [],
       }, { existing: "value" });
@@ -264,7 +264,7 @@ describe("StorageTransaction", () => {
       // Try to write to a path where parent doesn't exist
       const result = transaction.write({
         space,
-        id: "test://doc1",
+        id: "of:test-entity",
         type: "test",
         path: ["missing", "nested"],
       }, "value");
