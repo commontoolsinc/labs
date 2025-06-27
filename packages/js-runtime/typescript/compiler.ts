@@ -210,6 +210,23 @@ export interface TypeScriptCompilerOptions {
   // Optional mapping of runtime module name e.g. `"@commontools/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
+  // Whether the bundling process results in the bundle, upon invocation,
+  // evaluating to the main entry's exports (false|undefined),
+  // or an object containing the main/default export and a map of all files'
+  // exports (true).
+  // Changes the bundle's evaluation signature from
+  // ```ts
+  //   ({ runtimeDeps: Record<string, any> }) =>
+  //     Record<string, any>;
+  // ```
+  //
+  // to
+  //
+  // ```ts
+  //   ({ runtimeDeps: Record<string, any> }) =>
+  //     { main: Record<string, any>, exportMap: Record<string, Record<string, any>> }`
+  // ```
+  bundleExportAll?: true;
 }
 
 export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
@@ -295,21 +312,18 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     // Get written files, should be a JS and source map.
     const writes = host.getWrites();
 
-    // TypeScript compiles AMD modules from "/main.ts" to "main".
-    // Derive the main module name here.
-    const match = program.main.match(/\/([^\.]*)/);
-    if (!match) {
-      throw new Error("Could not derive main module name");
-    }
-    const mainModule = match[1];
     const source = writes[filename];
     const sourceMap = parseSourceMap(writes[`${filename}.map`]);
+    const exportModuleExports = inputOptions.bundleExportAll
+      ? sourceNames.filter((name) => !name.endsWith(".d.ts"))
+      : undefined;
     const bundled = bundleAMDOutput({
-      mainModule,
+      mainModule: program.main,
       source,
       sourceMap,
       filename,
       injectedScript,
+      exportModuleExports,
     });
     return {
       js: bundled,

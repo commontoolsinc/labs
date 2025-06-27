@@ -30,7 +30,7 @@ export const dev = new Command()
   )
   .arguments("<main:string>")
   .action(async (options, main) => {
-    const { exports } = await process({
+    const { main: exports } = await process({
       main: join(Deno.cwd(), main),
       check: options.check,
       run: options.run,

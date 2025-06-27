@@ -24,6 +24,8 @@ declare global {
   var [RUNTIME_ENGINE_CONSOLE_HOOK]: any;
 }
 
+type Exports = Record<string, any>;
+
 export interface EngineProcessOptions {
   noCheck?: boolean;
   noRun?: boolean;
@@ -109,7 +111,10 @@ export class Engine extends EventTarget implements Harness {
     program: Program,
     options: EngineProcessOptions = {},
   ): Promise<Recipe> {
-    const { exports } = await this.process(program, options);
+    const { main: exports, exportMap: _ } = await this.process(
+      program,
+      options,
+    );
 
     if (exports && !("default" in exports)) {
       throw new Error("No default export found in compiled recipe.");
@@ -123,25 +128,35 @@ export class Engine extends EventTarget implements Harness {
   async process(
     program: Program,
     options: EngineProcessOptions = {},
-  ): Promise<{ exports?: object; output: JsScript }> {
+  ): Promise<
+    { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
+  > {
     const resolver = new EngineProgramResolver(program);
 
     const { compiler, isolate, runtimeExports } = await this.getInternals();
     const resolvedProgram = await this.resolve(resolver);
 
-    const compiled = await compiler.compile(resolvedProgram, {
+    const output = await compiler.compile(resolvedProgram, {
       filename: options.filename ?? computeFilename(resolvedProgram),
       noCheck: options.noCheck,
       injectedScript: INJECTED_SCRIPT,
       runtimeModules: Engine.runtimeModuleNames(),
+      bundleExportAll: true,
     });
 
-    let exports;
     if (!options.noRun) {
-      exports = isolate.execute(compiled).invoke(runtimeExports)
+      const result = isolate.execute(output).invoke(runtimeExports)
         .inner();
+      if (
+        result && typeof result === "object" && "main" in result &&
+        "exportMap" in result
+      ) {
+        const main = result.main as Exports;
+        const exportMap = result.exportMap as Record<string, Exports>;
+        return { output, main, exportMap };
+      }
     }
-    return { exports, output: compiled };
+    return { output };
   }
 
   getInvocation(source: string): HarnessedFunction {

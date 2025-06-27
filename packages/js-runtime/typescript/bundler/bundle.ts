@@ -9,15 +9,11 @@ const BUNDLE_PRE = stripNewLines(`
   for (const [name, dep] of Object.entries(runtimeDeps)) {
     define(name, ["exports"], exports => Object.assign(exports, dep));
   }`);
-const BUNDLE_POST = stripNewLines(`
-  return require("$MAIN");
-});
-`);
+const BUNDLE_POST = stripNewLines(`});`);
 
 export interface BundleAMDOutputConfig {
   // The AMD module to require and return in
-  // the enclosing bundle. TypeScript's compiler
-  // sets a filename of "/main.tsx" to "main".
+  // the enclosing bundle, like "/main.tsx".
   mainModule: string;
   // The concatenated source of multiple AMD "defines".
   source: string;
@@ -27,6 +23,9 @@ export interface BundleAMDOutputConfig {
   filename: string;
   // Extra script to minify and inject before `source`.
   injectedScript?: string;
+  // If defined, the bundle evaluates to { main: MAINEXPORTS, exportMap: Record<string, Record<string, any>> }
+  // containing all exported modules that are in the list.
+  exportModuleExports?: string[];
 }
 
 export function bundleAMDOutput(config: BundleAMDOutputConfig): string {
@@ -37,10 +36,50 @@ export function bundleAMDOutput(config: BundleAMDOutputConfig): string {
   output += BUNDLE_PRE;
   if (config.injectedScript) output += stripNewLines(config.injectedScript);
   output += stripSourceMappingUrl(config.source) + "\n";
-  output += BUNDLE_POST.replace(MAIN, config.mainModule) + "\n";
+  output += returnValue(config);
+  output += BUNDLE_POST + "\n";
   output += sourceMappingUrl(config.sourceMap);
   output += sourceUrl(config.filename);
   return output;
+}
+
+// We track module names rooted with `/`, like
+// `/main.tsx`, `/utils/foo.ts`.
+// The typescript output for AMD translates these
+// into `main`, and `utils/foo`, stripping prefix `/`
+// and the suffix extension. This could cause collisions
+// with non-local files.
+function mapModuleName(name: string): string {
+  if (name.startsWith("/")) name = name.substring(1);
+  if (
+    name.endsWith(".tsx") ||
+    name.endsWith(".ts") || name.endsWith(".jsx") || name.endsWith(".js")
+  ) {
+    name = name.substring(0, name.lastIndexOf("."));
+  }
+  return name;
+}
+
+function returnValue(
+  { mainModule, exportModuleExports }: {
+    mainModule: string;
+    exportModuleExports?: string[];
+  },
+): string {
+  let code = `return require("$MAIN");`;
+
+  if (exportModuleExports) {
+    const modExports = exportModuleExports.map((module) =>
+      `exportMap["${module}"] = require("${mapModuleName(module)}");`
+    ).join("");
+    code = `
+const main = require("$MAIN");
+const exportMap = Object.create(null);
+${modExports}
+return { main, exportMap };`;
+  }
+
+  return stripNewLines(code).replace(MAIN, mapModuleName(mainModule));
 }
 
 // Strip new lines
