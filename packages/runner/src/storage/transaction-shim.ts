@@ -66,7 +66,9 @@ function validateParentPath(
 
   const parentValue = getValueAtPath(value, parentPath);
 
-  if (parentValue === undefined || !isRecord(parentValue)) {
+  if (
+    value === undefined || parentValue === undefined || !isRecord(parentValue)
+  ) {
     const pathError: INotFoundError = new Error(
       `Cannot write to path [${
         path.map((p) => String(p)).join(", ")
@@ -163,7 +165,7 @@ class TransactionReader implements ITransactionReader {
           "Invalid data URI",
         ) as IInvalidDataURIError;
         dataUriError.name = "InvalidDataURIError";
-        dataUriError.cause = error;
+        dataUriError.cause = error as Error;
         return {
           ok: undefined,
           error: dataUriError,
