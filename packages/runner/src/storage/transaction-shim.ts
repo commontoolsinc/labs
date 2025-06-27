@@ -92,31 +92,22 @@ function validateParentPath(
  * Simple implementation of IStorageTransactionLog that tracks read/write operations
  */
 class StorageTransactionLog implements IStorageTransactionLog {
-  private invariants = new Map<string, IStorageTransactionInvariant>();
+  private log: IStorageTransactionInvariant[] = [];
 
   get(address: IMemoryAddress): IStorageTransactionInvariant {
-    const key = this.addressToKey(address);
-    return this.invariants.get(key)!;
-  }
-
-  private addressToKey(address: IMemoryAddress): string {
-    return `${address.space}/${address.id}/${address.type}/${
-      JSON.stringify(address.path)
-    }`;
+    throw new Error("Not implemented");
   }
 
   addRead(read: Read): void {
-    const key = this.addressToKey(read.address);
-    this.invariants.set(key, { read });
+    this.log.push({ read });
   }
 
   addWrite(write: Write): void {
-    const key = this.addressToKey(write.address);
-    this.invariants.set(key, { write });
+    this.log.push({ write });
   }
 
   [Symbol.iterator](): Iterator<IStorageTransactionInvariant> {
-    return this.invariants.values();
+    return this.log[Symbol.iterator]();
   }
 }
 
@@ -211,7 +202,7 @@ class TransactionWriter extends TransactionReader
     }
 
     // Write the value at the specified path
-    const changed = doc.setAtPath(address.path, value);
+    doc.setAtPath(address.path, value);
 
     // Create the write invariant
     const write: Write = {
