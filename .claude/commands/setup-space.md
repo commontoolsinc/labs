@@ -6,43 +6,27 @@ This script guides Claude through setting up a complete space with the `ct` util
 
 ### STEP 1: Initial Setup Check and Preparation
 
-**Check if user is in the right directory:**
-- Run `pwd` to see current directory
-- If not in `labs`, ask user to `cd` to the labs directory
+**Read common setup instructions:**
+- First, read `.claude/commands/ct-common.md` for shared CT binary setup and configuration
+- Follow those instructions for:
+  - Checking if user is in the right directory (should be in `labs`)
+  - CT binary check and build if needed
+  - Identity keyfile management
+  - Environment variable setup (CT_API_URL and CT_IDENTITY)
+  - API URL collection and connectivity test
 
-**Check CT binary:**
-- Run `ls -la ./dist/ct`
-- If missing: Run `deno task build-binaries --cli-only` (this takes a few minutes)
-- Verify with `./dist/ct --help`
-
-**Check for identity keyfile:**
-- Run `ls -la *.key`
-- If no keyfiles found: Run `./dist/ct id new > space-identity.key`
-- If keyfiles exist, ask user which one to use or create a new one
-
-**Set up environment (recommend but don't require):**
-- Ask if they want to set environment variables to make commands shorter
-- If yes: Guide them to set `CT_API_URL="[their-api-url]"` and `CT_IDENTITY="./their-keyfile.key"`
-
-### STEP 2: Gather Parameters
-
-**Get API URL:**
-- Ask user: "What is your CT API URL? (e.g., https://ct.dev, https://toolshed.saga-castor.ts.net/, or your custom instance)"
-- Store as variable for all commands
-- Test connectivity: `./dist/ct charm ls --identity [keyfile] --api-url [user-api-url] --space test-connection` (this might fail but shows if URL works)
+### STEP 2: Space-Specific Setup
 
 **Get space name:**
 - Ask user what they want to name their space (no spaces, lowercase recommended)
 - Store as variable for commands
 
-**Find recipe path (recipes are in a separate repo, not in labs):**
-- Ask user: "Where is your recipe repository located? Please provide the full path (e.g., /Users/username/my-recipes or ../my-recipe-repo)"
-- User will need to provide the path to their recipe repository
-- Once they provide a path, verify it exists: `ls -la [user-provided-path]`
-- Look for recipe files in their repo: `find [user-provided-path] -name "*.tsx" | head -10`
-- Look specifically for key recipes: `find [user-provided-path] -name "*gmail*" -o -name "*email*" -o -name "*list*" | head -5`
-- Verify key recipes exist: `ls -la [user-provided-path]/coralreef/gmail.tsx` (or find where gmail.tsx is located)
-- If recipes are in a subfolder, help them find the right path: `find [user-provided-path] -name "recipes" -type d`
+**Find recipe path:**
+- Follow the recipe path discovery process from ct-common.md
+- Additionally, look specifically for these key recipes:
+  - `find [user-provided-path] -name "*gmail*" -o -name "*email*" -o -name "*list*" | head -5`
+  - Verify key recipes exist: `ls -la [user-provided-path]/coralreef/gmail.tsx` (or find where gmail.tsx is located)
+  - If recipes are in a subfolder, help them find the right path: `find [user-provided-path] -name "recipes" -type d`
 
 ### STEP 3: Execute Space Setup Workflow
 
@@ -106,11 +90,11 @@ This script guides Claude through setting up a complete space with the `ct` util
 
 ### Error Handling
 
-**If any command fails:**
-- Show the error
-- Check common issues (file permissions, network, file existence)
-- Offer solutions or ask user for clarification
+**General error handling:**
+- Refer to error handling section in `.claude/commands/ct-common.md` for common issues
 - Don't continue to dependent steps until current step works
+
+**Space setup specific errors:**
 
 **If recipe files are missing:**
 - Ask user to double-check the recipe repository path
@@ -148,35 +132,11 @@ This script guides Claude through setting up a complete space with the `ct` util
 
 ## Reference Information for Claude
 
-### Key Commands Claude Will Use:
-- `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]` - Create charm
-- `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source] [target]/[field]` - Link data
-- `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]` - List charms
-- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Inspect charm details
-- `./dist/ct charm inspect --identity [keyfile] --url [full-url-with-charm-id]` - Inspect charm details (URL syntax)
-- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] --json` - Output raw JSON data
-
-### Understanding Linking with `ct charm link`:
-
-**Basic Syntax:** `ct charm link [source] [target]/[field]`
-
-**Charm-to-Charm Linking:**
-- `ct charm link charmA/fieldName charmB/inputField` means `charmB.input.inputField = charmA.result.fieldName`
-- The source reads from the charm's computed result/output
-- The target writes to the charm's input parameters
-
-**Well-Known ID Linking:**
-- `ct charm link wellKnownCellId charmB/inputField` links a well-known cell directly to a charm's input
-- Well-known IDs don't need field paths since they reference specific cells
-
-**Examples:**
-- `ct charm link gmail123/emails emailList456/emails` - Links email results from gmail charm to email list input
-- `ct charm link baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye allLists789/allCharms` - Links well-known charms list to allCharms input
-
-**Important:**
-- Source can be either `charmId/fieldName` (reads from charm result) or just `wellKnownId` (reads entire cell)
-- Target is always `charmId/fieldName` (writes to charm input)
-- The link creates live data flow - when source updates, target receives new data
+### Key Commands and Linking Concepts:
+- See `.claude/commands/ct-common.md` for:
+  - Complete list of CT commands
+  - Understanding linking syntax and concepts
+  - Examples of charm-to-charm and well-known ID linking
 
 ### Expected Workflow:
 1. Gmail charm → extract emails field
@@ -190,13 +150,14 @@ This script guides Claude through setting up a complete space with the `ct` util
 ### Well-Known IDs:
 - Charms list in any space: `baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye`
 
-### Troubleshooting for Claude:
-- If commands fail, check file existence first
-- Charm IDs start with "bafy" and are long content hashes
-- Recipe files are .tsx files in a separate repository (not in labs)
-- Users must provide the full path to their recipe repository
-- Users must provide their CT API URL (not always https://ct.dev)
-- Environment variables CT_API_URL and CT_IDENTITY can simplify commands
-- Test recipes with `./dist/ct dev [full-path-to-recipe] --no-run` if there are issues
-- Always use absolute paths or full relative paths to the external recipe repo
-- If API connection fails, verify the URL is correct and accessible
+### Space Setup Specific Notes:
+- See `.claude/commands/ct-common.md` for general troubleshooting
+- Recipe files needed for initial setup:
+  - gmail.tsx (in coralreef subfolder)
+  - email-list.tsx
+  - all-lists.tsx
+  - all-pages.tsx
+  - list.tsx
+  - page.tsx
+  - page-manager.tsx
+- Verify all these recipes exist before starting the setup workflow
