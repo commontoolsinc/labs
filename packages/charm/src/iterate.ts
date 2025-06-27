@@ -11,6 +11,7 @@ import {
   createJsonSchema,
   JSONSchema,
   JSONSchemaMutable,
+  RuntimeProgram,
 } from "@commontools/runner";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
@@ -26,7 +27,6 @@ import {
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
 import { console } from "./conditional-console.ts";
-import { Program } from "@commontools/js-runtime";
 
 const llm = new LLMClient();
 
@@ -518,7 +518,7 @@ export async function castNewRecipe(
 }
 
 export async function compileRecipe(
-  recipeSrc: string | Program,
+  recipeSrc: string | RuntimeProgram,
   spec: string,
   runtime: Runtime,
   space: MemorySpace,

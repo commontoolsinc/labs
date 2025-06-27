@@ -1,7 +1,14 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import { Cell, NAME, Recipe, RecipeMeta, Runtime } from "@commontools/runner";
+import {
+  Cell,
+  NAME,
+  Recipe,
+  RecipeMeta,
+  Runtime,
+  RuntimeProgram,
+} from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
   buildFullRecipe,
@@ -17,6 +24,11 @@ import {
 } from "@commontools/charm";
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
+
+export interface EntryConfig {
+  mainPath: string;
+  mainExport?: string;
+}
 
 export interface SpaceConfig {
   apiUrl: string;
@@ -119,12 +131,15 @@ async function getIframeRecipeFromFile(
 
 async function getRecipeFromFile(
   manager: CharmManager,
-  mainPath: string,
+  entry: EntryConfig,
 ): Promise<Recipe> {
   // Walk entry file and collect all sources from fs.
-  const program = await manager.runtime.harness.resolve(
-    new CliProgram(mainPath),
+  const program: RuntimeProgram = await manager.runtime.harness.resolve(
+    new CliProgram(entry.mainPath),
   );
+  if (entry.mainExport) {
+    program.mainExport = entry.mainExport;
+  }
   return await compileRecipe(
     program,
     "recipe",
@@ -191,26 +206,30 @@ export async function listCharms(
 // Creates a new charm from source code and optional input.
 export async function newCharm(
   config: SpaceConfig,
-  mainPath: string,
+  entry: EntryConfig,
 ): Promise<string> {
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromFile(manager, mainPath);
+  const recipe = await getRecipeFromFile(manager, entry);
   const charm = await exec({ manager, recipe });
   return getCharmIdSafe(charm);
 }
 
 export async function setCharmRecipe(
   config: CharmConfig,
-  mainPath: string,
+  entry: EntryConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
   let recipe;
-  if (mainPath.endsWith(".iframe.js")) {
-    recipe = await getIframeRecipeFromFile(manager, mainPath, config.charm);
+  if (entry.mainPath.endsWith(".iframe.js")) {
+    recipe = await getIframeRecipeFromFile(
+      manager,
+      entry.mainPath,
+      config.charm,
+    );
   } else {
     recipe = await getRecipeFromFile(
       manager,
-      mainPath,
+      entry,
     );
   }
   await exec({ manager, recipe, charmId: config.charm });
