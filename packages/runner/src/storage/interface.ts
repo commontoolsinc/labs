@@ -247,7 +247,10 @@ export interface ITransactionReader {
     address: IMemoryAddress,
   ): Result<
     Read,
-    INotFoundError | InactiveTransactionError
+    | INotFoundError
+    | InactiveTransactionError
+    | IUnsupportedMediaTypeError
+    | IInvalidDataURIError
   >;
 }
 
@@ -261,7 +264,13 @@ export interface ITransactionWriter extends ITransactionReader {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<Write, INotFoundError | InactiveTransactionError>;
+  ): Result<
+    Write,
+    | INotFoundError
+    | InactiveTransactionError
+    | IUnsupportedMediaTypeError
+    | IInvalidDataURIError
+  >;
 }
 
 /**
@@ -321,25 +330,43 @@ export type IStorageTransactionFailed =
   | ConnectionError
   | AuthorizationError;
 
+export interface INotFoundError extends Error {
+  name: "NotFoundError";
+  path?: MemoryAddressPathComponent[];
+}
+
+/**
+ * Error returned when the media type is not supported by the storage transaction.
+ */
+export interface IUnsupportedMediaTypeError extends Error {
+  name: "UnsupportedMediaTypeError";
+}
+
+/**
+ * Error returned when a data URI is invalid or cannot be parsed.
+ */
+export interface IInvalidDataURIError extends Error {
+  name: "InvalidDataURIError";
+}
+
 export type IReaderError =
   | IStorageTransactionComplete
   | IStorageTransactionAborted
-  | INotFoundError;
+  | INotFoundError
+  | IUnsupportedMediaTypeError
+  | IInvalidDataURIError;
 
 export type IWriterError =
   | IStorageTransactionComplete
   | IStorageTransactionAborted
   | IStorageTransactionInconsistent
   | IStorageTransactionWriteIsolationError
-  | INotFoundError;
+  | INotFoundError
+  | IUnsupportedMediaTypeError
+  | IInvalidDataURIError;
 
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
-}
-
-export interface INotFoundError extends Error {
-  name: "NotFoundError";
-  path?: MemoryAddressPathComponent[];
 }
 
 export type IStorageTransactionProgress = Variant<{

@@ -1,9 +1,13 @@
+import { refer } from "@commontools/memory/reference";
+import { isRecord } from "@commontools/utils/types";
 import type {
+  IInvalidDataURIError,
   IMemoryAddress,
   InactiveTransactionError,
   INotFoundError,
   IReaderError,
   IStorageTransaction,
+  IStorageTransactionComplete,
   IStorageTransactionError,
   IStorageTransactionInconsistent,
   IStorageTransactionInvariant,
@@ -11,6 +15,7 @@ import type {
   IStorageTransactionProgress,
   ITransactionReader,
   ITransactionWriter,
+  IUnsupportedMediaTypeError,
   IWriterError,
   MemoryAddressPathComponent,
   Read,
@@ -21,8 +26,7 @@ import type { IRuntime } from "../runtime.ts";
 import type { DocImpl } from "../doc.ts";
 import type { EntityId } from "../doc-map.ts";
 import { getValueAtPath } from "../path-utils.ts";
-import { refer } from "@commontools/memory/reference";
-import { isRecord } from "@commontools/utils/types";
+import { getJSONFromDataURI } from "../uri-utils.ts";
 
 /**
  * Convert a URI string to an EntityId object
@@ -38,7 +42,7 @@ function uriToEntityId(uri: string): EntityId {
  * Validate that the parent path exists and is a record for nested writes
  */
 function validateParentPath(
-  doc: DocImpl<any>,
+  value: any,
   path: MemoryAddressPathComponent[],
 ): INotFoundError | null {
   if (path.length === 0) {
@@ -47,7 +51,7 @@ function validateParentPath(
 
   // Check if the document itself exists and is a record for first-level writes
   if (path.length === 1) {
-    if (doc.get() === undefined || !isRecord(doc.get())) {
+    if (value === undefined || !isRecord(value)) {
       const pathError: INotFoundError = new Error(
         `Cannot write to path [${String(path[0])}] - document is not a record`,
       ) as INotFoundError;
@@ -60,7 +64,7 @@ function validateParentPath(
   // For deeper paths, check that the parent path exists and is a record
   const parentPath = path.slice(0, -1);
 
-  const parentValue = getValueAtPath(doc.get(), parentPath);
+  const parentValue = getValueAtPath(value, parentPath);
 
   if (parentValue === undefined || !isRecord(parentValue)) {
     const pathError: INotFoundError = new Error(
@@ -74,7 +78,6 @@ function validateParentPath(
 
     // Set pathError.path to last valid parent path component
     pathError.path = [];
-    let value = doc.get();
     while (parentPath.length > 0) {
       const segment = parentPath.shift()!;
       value = value[segment];
@@ -94,7 +97,7 @@ function validateParentPath(
 class StorageTransactionLog implements IStorageTransactionLog {
   private log: IStorageTransactionInvariant[] = [];
 
-  get(address: IMemoryAddress): IStorageTransactionInvariant {
+  get(_address: IMemoryAddress): IStorageTransactionInvariant {
     throw new Error("Not implemented");
   }
 
@@ -123,6 +126,50 @@ class TransactionReader implements ITransactionReader {
   read(
     address: IMemoryAddress,
   ): Result<Read, IReaderError> {
+    if (address.type !== "application/json") {
+      const error = new Error(
+        "Unsupported media type",
+      ) as IUnsupportedMediaTypeError;
+      error.name = "UnsupportedMediaTypeError";
+      return {
+        ok: undefined,
+        error,
+      };
+    }
+
+    // If the address is a data URI, don't read from doc, just read the JSON
+    // from the data URI and validate the path and return the value.
+    if (address.id.startsWith("data:")) {
+      try {
+        const json = getJSONFromDataURI(address.id);
+
+        const validationError = validateParentPath(json, address.path);
+        if (validationError) {
+          return { ok: undefined, error: validationError };
+        }
+
+        const value = getValueAtPath(json, address.path);
+
+        const read: Read = {
+          address,
+          value,
+          cause: refer("shim does not care"),
+        };
+        this.log.addRead(read);
+
+        return { ok: read };
+      } catch (error) {
+        const dataUriError = new Error(
+          "Invalid data URI",
+        ) as IInvalidDataURIError;
+        dataUriError.name = "InvalidDataURIError";
+        return {
+          ok: undefined,
+          error: dataUriError,
+        };
+      }
+    }
+
     // Convert URI to EntityId
     const entityId = uriToEntityId(address.id);
 
@@ -141,7 +188,7 @@ class TransactionReader implements ITransactionReader {
       return { ok: undefined, error: notFoundError };
     }
 
-    const validationError = validateParentPath(doc, address.path);
+    const validationError = validateParentPath(doc.get(), address.path);
     if (validationError) {
       return { ok: undefined, error: validationError };
     }
@@ -169,7 +216,37 @@ class TransactionWriter extends TransactionReader
   write(
     address: IMemoryAddress,
     value?: any,
-  ): Result<Write, INotFoundError | InactiveTransactionError> {
+  ): Result<
+    Write,
+    | INotFoundError
+    | InactiveTransactionError
+    | IUnsupportedMediaTypeError
+    | IInvalidDataURIError
+  > {
+    if (address.type !== "application/json") {
+      const error = new Error(
+        "Unsupported media type",
+      ) as IUnsupportedMediaTypeError;
+      error.name = "UnsupportedMediaTypeError";
+      return {
+        ok: undefined,
+        error,
+      };
+    }
+
+    // If the address is a data URI, don't write to doc, just write the JSON
+    // to the data URI and return the write.
+    if (address.id.startsWith("data:")) {
+      const error = new Error(
+        "Cannot write to data URI",
+      ) as IUnsupportedMediaTypeError;
+      error.name = "UnsupportedMediaTypeError";
+      return {
+        ok: undefined,
+        error,
+      };
+    }
+
     // Convert URI to EntityId
     const entityId = uriToEntityId(address.id);
 
@@ -196,7 +273,7 @@ class TransactionWriter extends TransactionReader
     }
 
     // Validate parent path exists and is a record for nested writes
-    const validationError = validateParentPath(doc, address.path);
+    const validationError = validateParentPath(doc.get(), address.path);
     if (validationError) {
       return { ok: undefined, error: validationError };
     }
@@ -233,9 +310,13 @@ export class StorageTransaction implements IStorageTransaction {
 
   reader(space: string): Result<ITransactionReader, IReaderError> {
     if (this.currentStatus.open === undefined) {
+      const error = new Error(
+        "Storage transaction complete",
+      ) as IStorageTransactionComplete;
+      error.name = "StorageTransactionCompleteError";
       return {
         ok: undefined,
-        error: { name: "StorageTransactionCompleteError" } as any,
+        error,
       };
     }
 
@@ -263,9 +344,13 @@ export class StorageTransaction implements IStorageTransaction {
 
   writer(space: string): Result<ITransactionWriter, IWriterError> {
     if (this.currentStatus.open === undefined) {
+      const error = new Error(
+        "Storage transaction complete",
+      ) as IStorageTransactionComplete;
+      error.name = "StorageTransactionCompleteError";
       return {
         ok: undefined,
-        error: { name: "StorageTransactionCompleteError" } as any,
+        error,
       };
     }
 
@@ -305,9 +390,13 @@ export class StorageTransaction implements IStorageTransaction {
 
   abort(reason?: any): Result<any, InactiveTransactionError> {
     if (this.currentStatus.open === undefined) {
+      const error = new Error(
+        "Storage transaction complete",
+      ) as IStorageTransactionComplete;
+      error.name = "StorageTransactionCompleteError";
       return {
         ok: undefined,
-        error: { name: "StorageTransactionCompleteError" } as any,
+        error,
       };
     }
 
