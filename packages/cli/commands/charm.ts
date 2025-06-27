@@ -3,6 +3,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  generateSpaceMap,
   inspectCharm,
   linkCharms,
   listCharms,
@@ -285,105 +286,10 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   )
   .action(async (options) => {
     const spaceConfig = parseSpaceOptions(options);
+    const format = options.format as "ascii" | "dot";
     
-    // Get all charms in the space
-    const charms = await listCharms(spaceConfig);
-    
-    if (charms.length === 0) {
-      render("No charms found in space.");
-      return;
-    }
-
-    // Build a graph of connections
-    const connections: Map<string, {
-      name: string;
-      readingFrom: string[];
-      readBy: string[];
-    }> = new Map();
-
-    // First pass: get all charm details
-    for (const charm of charms) {
-      const charmConfig: CharmConfig = { ...spaceConfig, charm: charm.id };
-      try {
-        const details = await inspectCharm(charmConfig);
-        connections.set(charm.id, {
-          name: details.name || charm.id.slice(0, 8) + "...",
-          readingFrom: details.readingFrom.map(c => c.id),
-          readBy: details.readBy.map(c => c.id),
-        });
-      } catch (error) {
-        // Skip charms that can't be inspected
-        console.error(`Warning: Could not inspect charm ${charm.id}: ${error instanceof Error ? error.message : String(error)}`);
-        connections.set(charm.id, {
-          name: charm.name || charm.id.slice(0, 8) + "...",
-          readingFrom: [],
-          readBy: [],
-        });
-      }
-    }
-
-    if (options.format === "dot") {
-      // Generate Graphviz DOT format
-      let dot = "digraph CharmSpace {\n";
-      dot += "  rankdir=LR;\n";
-      dot += "  node [shape=box];\n\n";
-
-      // Add nodes
-      for (const [id, info] of connections) {
-        const shortId = id.slice(0, 8);
-        dot += `  "${id}" [label="${info.name}\\n${shortId}..."];\n`;
-      }
-      dot += "\n";
-
-      // Add edges
-      for (const [id, info] of connections) {
-        for (const targetId of info.readingFrom) {
-          dot += `  "${targetId}" -> "${id}";\n`;
-        }
-      }
-
-      dot += "}";
-      render(dot);
-    } else {
-      // Generate ASCII format
-      let output = "=== Charm Space Map ===\n\n";
-
-      // Sort charms by connection count for better visualization
-      const sortedCharms = Array.from(connections.entries()).sort(
-        ([, a], [, b]) => 
-          (b.readingFrom.length + b.readBy.length) - 
-          (a.readingFrom.length + a.readBy.length)
-      );
-
-      for (const [id, info] of sortedCharms) {
-        const shortId = id.slice(0, 8);
-        output += `📦 ${info.name} [${shortId}...]\n`;
-        
-        if (info.readingFrom.length > 0) {
-          output += "  ← reads from:\n";
-          for (const sourceId of info.readingFrom) {
-            const sourceName = connections.get(sourceId)?.name || sourceId.slice(0, 8) + "...";
-            output += `    • ${sourceName} [${sourceId.slice(0, 8)}...]\n`;
-          }
-        }
-        
-        if (info.readBy.length > 0) {
-          output += "  → read by:\n";
-          for (const targetId of info.readBy) {
-            const targetName = connections.get(targetId)?.name || targetId.slice(0, 8) + "...";
-            output += `    • ${targetName} [${targetId.slice(0, 8)}...]\n`;
-          }
-        }
-        
-        if (info.readingFrom.length === 0 && info.readBy.length === 0) {
-          output += "  (no connections)\n";
-        }
-        
-        output += "\n";
-      }
-
-      render(output);
-    }
+    const map = await generateSpaceMap(spaceConfig, format);
+    render(map);
   });
 
 interface CharmCLIOptions {
