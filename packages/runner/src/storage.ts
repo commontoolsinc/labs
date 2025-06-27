@@ -1,5 +1,5 @@
 import { refer } from "merkle-reference";
-import { isRecord } from "@commontools/utils/types";
+import { Immutable, isRecord } from "@commontools/utils/types";
 import { defer } from "@commontools/utils/defer";
 import type {
   JSONValue,
@@ -11,10 +11,6 @@ import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { Cell, isCell, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type EntityId, entityIdStr } from "./doc-map.ts";
-import {
-  getCellLinkOrThrow,
-  isQueryResultForDereferencing,
-} from "./query-result-proxy.ts";
 import type {
   IStorageManager,
   IStorageProvider,
@@ -25,7 +21,11 @@ import { log } from "./log.ts";
 import type { IRuntime, IStorage } from "./runtime.ts";
 import { DocObjectManager, querySchema } from "./storage/query.ts";
 import { deepEqual } from "./path-utils.ts";
-import { isLink, parseLink } from "./link-utils.ts";
+import {
+  getCellLinkOrThrow,
+  isQueryResultForDereferencing,
+} from "./query-result-proxy.ts";
+import { isLink } from "./link-utils.ts";
 export type { Labels, MemorySpace };
 
 /**
@@ -260,7 +260,10 @@ export class Storage implements IStorage {
       docMap.getDocByEntityId(doc.space, entityId, true)!;
     }
     // Any objects that aren't on the server may need to be sent there.
-    const valuesToSend = [];
+    const valuesToSend: {
+      entityId: EntityId;
+      value: StorageValue<JSONValue>;
+    }[] = [];
     // Now make another pass. At this point, we can leave any docs that aren't
     // in the DocumentMap alone, but set the cell to the DocImpl for the ones
     // that are present.
@@ -282,12 +285,9 @@ export class Storage implements IStorage {
         // The object exists on the server, so push its value to the doc
         // unless we already have the same contents.
         if (!deepEqual(storageValue.value, docValue.value)) {
-          const newValue = Storage._cellLinkFromJSON(
-            newDoc,
-            storageValue,
-            this.runtime,
-          );
-          newDoc.send(newValue.value);
+          // Copy the value in storage to the doc
+          const newValue = JSON.parse(JSON.stringify(storageValue.value));
+          newDoc.send(newValue);
         }
         // We can only set the source if it hasn't been set
         if (
@@ -305,7 +305,7 @@ export class Storage implements IStorage {
       } else {
         // The object doesn't exist in storage, but it does in the doc map
         // TODO(@ubik2): investigate labels
-        // Add to the set of writes
+        // Copy the value in doc for storage, and add to the set of writes
         valuesToSend.push({ entityId: entityId, value: docValue });
       }
 
@@ -323,79 +323,6 @@ export class Storage implements IStorage {
     }
     return entityIds;
   }
-
-  // Walk through the object, replacing any links to cells that were expressed
-  // with a JSON string with the actual object from the DocumentMap.
-  private static _cellLinkFromJSON<T>(
-    doc: DocImpl<T>,
-    storageValue: StorageValue<JSONValue>,
-    runtime: IRuntime,
-  ): StorageValue<any> {
-    // Helper function that converts a JSONValue into an object where the
-    // cell links have been replaced with DocImpl objects.
-    const traverse = (value: JSONValue): any => {
-      if (typeof value !== "object" || value === null) {
-        return value;
-      } else if (isLink(value)) {
-        const link = parseLink(value, doc.asCell());
-        const cell = runtime.getCellFromLink(link);
-
-        // We don't convert here as we plan to remove this whole transformation
-        // soon. So return value instead of creating a sigil link.
-        return value;
-      } else if ("cell" in value && "path" in value) {
-        // If we see a doc link with just an id, then we replace it with
-        // the actual doc:
-        if (
-          isRecord(value.cell) &&
-          "/" in value.cell &&
-          Array.isArray(value.path)
-        ) {
-          // Any dependent docs that we expected should already be loaded,
-          // so we can just grab them from the runtime's document map.
-          // If they aren't available, then leave the link in its raw form.
-          const dependency = runtime.documentMap.getDocByEntityId(
-            doc.space,
-            value.cell as { "/": string },
-            false,
-          );
-          if (dependency === undefined) {
-            console.warn(
-              "No match found for",
-              value.cell,
-              "; leaving cell unchanged",
-            );
-            return value;
-          }
-          // Previously, we would also call _ensureIsSyncedById to recursively
-          // load the docs linked to by this dependency, but now we expect to
-          // already have all the docs we need in our Provider. We still need
-          // to do the subscription to changes through the Provider, and we
-          // still need to connect the dependent docs to the Provider's data.
-          // return value;
-          return { ...value, cell: dependency };
-        } else {
-          console.warn("unexpected doc link", value);
-          return value;
-        }
-      } else if (Array.isArray(value)) {
-        return value.map(traverse);
-      } else {
-        return Object.fromEntries(
-          Object.entries(value).map(([k, v]): any => [k, traverse(v)]),
-        );
-      }
-    };
-
-    // Make sure the source doc is loaded, and add it as a dependency
-    const newValue: StorageValue = {
-      value: traverse(storageValue.value),
-      source: storageValue.source,
-    };
-
-    return newValue;
-  }
-
   // We need to call this for all the docs that will be part of this transaction
   // This goes through the document and converts the DocImpls in CellLink objects
   // to plain JSON links instead.
@@ -434,7 +361,7 @@ export class Storage implements IStorage {
 
     // Convert all doc references to ids and remember as dependent docs
     const newValue: StorageValue<JSONValue> = {
-      value: traverse(doc.get() as Readonly<any>),
+      value: traverse(doc.get() as Immutable<any>),
       ...(doc.sourceCell?.entityId !== undefined)
         ? { source: doc.sourceCell.entityId }
         : {},
@@ -493,7 +420,16 @@ export class Storage implements IStorage {
           JSON.stringify(value),
         ],
       );
-      const storageValue = Storage._cellLinkToJSON(doc, labels);
+      const storageValue: StorageValue<JSONValue> = {
+        value: (doc.get() === undefined
+          ? undefined
+          : JSON.parse(JSON.stringify(doc.get()))),
+        ...(doc.sourceCell?.entityId !== undefined)
+          ? { source: doc.sourceCell.entityId }
+          : {},
+        ...(labels !== undefined) ? { labels: labels } : {},
+      };
+
       const existingValue = this._getStorageProviderForSpace(doc.space).get<
         JSONValue
       >(
@@ -523,19 +459,15 @@ export class Storage implements IStorage {
     >(
       doc.entityId!,
       (storageValue) => {
-        const newValue = Storage._cellLinkFromJSON(
-          doc,
-          storageValue,
-          this.runtime,
-        );
-        if (!deepEqual(newValue.value, doc.get())) {
+        if (!deepEqual(storageValue.value, doc.get())) {
           // values differ
-          doc.send(newValue.value);
+          const newDocValue = JSON.parse(JSON.stringify(storageValue.value));
+          doc.send(newDocValue);
         }
-        const newSourceCell = (newValue.source !== undefined)
+        const newSourceCell = (storageValue.source !== undefined)
           ? this.runtime.documentMap.getDocByEntityId(
             doc.space,
-            newValue.source,
+            storageValue.source,
             false,
           )
           : undefined;
