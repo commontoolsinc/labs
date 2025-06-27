@@ -541,7 +541,7 @@ export default recipe(
             Plaid Banking Integration
           </h2>
           
-          <common-plaid-oauth
+          <common-plaid-link
             $auth={auth}
             products={settings.products}
           />
