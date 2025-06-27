@@ -5,6 +5,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { INotFoundError } from "../src/storage/interface.ts";
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
+import { IMemoryAddress } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -147,7 +148,7 @@ describe("StorageTransaction", () => {
       const result = transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: [],
       }, { name: "test" });
 
@@ -162,7 +163,7 @@ describe("StorageTransaction", () => {
       transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: [],
       }, "not a record");
 
@@ -170,7 +171,7 @@ describe("StorageTransaction", () => {
       const result = transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: ["a"],
       }, "value");
 
@@ -187,7 +188,7 @@ describe("StorageTransaction", () => {
       transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: [],
       }, { a: "not a record" });
 
@@ -195,7 +196,7 @@ describe("StorageTransaction", () => {
       const result = transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: ["a", "b"],
       }, "value");
 
@@ -212,7 +213,7 @@ describe("StorageTransaction", () => {
       transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: [],
       }, { a: {} });
 
@@ -220,7 +221,7 @@ describe("StorageTransaction", () => {
       const result = transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: ["a", "b"],
       }, "value");
 
@@ -235,7 +236,7 @@ describe("StorageTransaction", () => {
       transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: [],
       }, { a: { b: { c: {} } } });
 
@@ -243,7 +244,7 @@ describe("StorageTransaction", () => {
       const result = transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: ["a", "b", "c", "d"],
       }, "deep value");
 
@@ -258,7 +259,7 @@ describe("StorageTransaction", () => {
       transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: [],
       }, { existing: "value" });
 
@@ -266,7 +267,7 @@ describe("StorageTransaction", () => {
       const result = transaction.write({
         space,
         id: "of:test-entity",
-        type: "test",
+        type: "application/json",
         path: ["missing", "nested"],
       }, "value");
 
@@ -365,5 +366,84 @@ describe("URI Utils", () => {
 
       expect(() => getJSONFromDataURI(dataURI)).toThrow();
     });
+  });
+});
+
+describe("data: URI behaviors", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
+      blobbyServerUrl: "http://localhost:8080",
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should read from a valid data URI", () => {
+    const transaction = runtime.edit();
+    const testData = { foo: { bar: 42 } };
+    const encoded = encodeURIComponent(JSON.stringify(testData));
+    const address = {
+      space,
+      id: `data:application/json,${encoded}`,
+      type: "application/json",
+      path: ["foo", "bar"],
+    } as IMemoryAddress;
+    const result = transaction.read(address);
+    expect(result.ok).toBeDefined();
+    expect(result.ok?.value).toBe(42);
+  });
+
+  it("should error on invalid data URI format", () => {
+    const transaction = runtime.edit();
+    const address = {
+      space,
+      id: "data:application/json", // missing data
+      type: "application/json",
+      path: [],
+    } as IMemoryAddress;
+    const result = transaction.read(address);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("InvalidDataURIError");
+    expect(result.error?.message).toMatch(
+      /Invalid data URI|Invalid data URI format/,
+    );
+  });
+
+  it("should error on invalid JSON in data URI", () => {
+    const transaction = runtime.edit();
+    const invalidJson = encodeURIComponent("{ invalid json }");
+    const address = {
+      space,
+      id: `data:application/json,${invalidJson}`,
+      type: "application/json",
+      path: [],
+    } as IMemoryAddress;
+    const result = transaction.read(address);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("InvalidDataURIError");
+    // Should have a cause property with the original error
+    expect(result.error && "cause" in result.error).toBe(true);
+    expect(result.error?.cause).toBeInstanceOf(Error);
+  });
+
+  it("should error on write to data URI", () => {
+    const transaction = runtime.edit();
+    const address = {
+      space,
+      id: "data:application/json,%7B%7D",
+      type: "application/json",
+      path: [],
+    } as IMemoryAddress;
+    const result = transaction.write(address, {});
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("UnsupportedMediaTypeError");
   });
 });
