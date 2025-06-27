@@ -393,6 +393,7 @@ export class Replica {
 
   // Track the causes of pending nursery changes
   private pendingNurseryChanges = new MapSet<string, string>();
+  private seenNurseryChanges = new MapSet<string, string>();
 
   constructor(
     /**
@@ -746,6 +747,7 @@ export class Replica {
       if (result.error) {
         for (const fact of facts) {
           this.pendingNurseryChanges.delete(toKey(fact));
+          this.seenNurseryChanges.delete(toKey(fact));
         }
         this.nursery.merge(facts, Nursery.delete);
         const fact = result.error.name === "ConflictError" &&
@@ -767,23 +769,22 @@ export class Replica {
         ];
         // Avoid sending out updates to subscribers if it's a fact we already
         // know about in the nursery.
-        const resolvedFacts = this.updatePendingNurseryFacts(revisions);
+        const localFacts = this.getLocalFacts(revisions);
         this.heap.merge(
           revisions,
           Replica.put,
-          (revision) => !resolvedFacts.has(revision),
+          (revision) => !localFacts.has(revision),
         );
-        // We only delete from the nursery when we receive fresh facts.
-        // Stale facts may have newer nursery changes that we want to keep.
-        // The nursery can't do this itself, since it doesn't have `since`
-        const freshFacts = revisions.filter((revision) => {
-          const heapRevision = this.heap.get(revision);
-          return heapRevision === undefined ||
-            revision.since > heapRevision.since;
-        });
+        // We only delete from the nursery when we've seen all of our pending
+        // facts (or gotten a conflict).
+        // Server facts may have newer nursery changes that we want to keep.
+        const freshFacts = revisions.filter((revision) =>
+          this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0 === 0
+        );
         this.nursery.merge(freshFacts, Nursery.delete);
         for (const fact of freshFacts) {
           this.pendingNurseryChanges.delete(toKey(fact));
+          this.seenNurseryChanges.delete(toKey(fact));
         }
       }
 
@@ -808,8 +809,11 @@ export class Replica {
       ...toChanges(commit),
     ];
 
-    // Store newer revisions into the heap,
-    const resolvedFacts = this.updatePendingNurseryFacts(revisions);
+    // Store newer revisions into the heap.
+    // It's possible to get the same fact (including cause) twice, and we'll
+    // have a new since field on the second, so we can't clear them from
+    // tracking when we see them.
+    const resolvedFacts = this.getLocalFacts(revisions);
     this.heap.merge(
       revisions,
       Replica.update,
@@ -827,15 +831,16 @@ export class Replica {
   }
 
   /**
-   * Updates our pending nursery facts, removing them as they're seen
+   * Gets facts that have an entry in the pending or seen MapSet
+   * This will also update the pending and seen sets
    *
    * @param revisions the facts we received from the server
-   * @returns the set of facts that we've resolved (removed)
+   * @returns the set of these facts that are in the pending or seen lists
    */
-  private updatePendingNurseryFacts(
+  private getLocalFacts(
     revisions: (Revision<State> | undefined)[],
   ) {
-    const resolvedFacts = new Set<Revision<State> | undefined>();
+    const matches = new Set();
     for (const revision of revisions) {
       if (revision === undefined || revision.cause === undefined) {
         continue;
@@ -843,11 +848,14 @@ export class Replica {
       const factKey = toKey(revision);
       const factCause = revision.cause.toString();
       if (this.pendingNurseryChanges.hasValue(factKey, factCause)) {
+        this.seenNurseryChanges.add(factKey, factCause);
         this.pendingNurseryChanges.deleteValue(factKey, factCause);
-        resolvedFacts.add(revision);
+      }
+      if (this.seenNurseryChanges.hasValue(factKey, factCause)) {
+        matches.add(revision);
       }
     }
-    return resolvedFacts;
+    return matches;
   }
 }
 
