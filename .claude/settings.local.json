@@ -5,7 +5,9 @@
       "Bash(deno task:*)",
       "Bash(rg:*)",
       "Bash(ls:*)",
-      "WebFetch(domain:plaid.com)"
+      "WebFetch(domain:plaid.com)",
+      "Bash(grep:*)",
+      "Bash(deno fmt:*)"
     ],
     "deny": []
   }

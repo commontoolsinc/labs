@@ -6,7 +6,6 @@ export * as CommonDict from "./common-dict.ts";
 export * as CommonForm from "./common-form.ts";
 export * as CommonFragment from "./common-fragment.ts";
 export * as CommonGoogleOauth from "./common-google-oauth.ts";
-export * as CommonPlaidOauth from "./common-plaid-oauth.ts";
 export * as CommonPlaidLink from "./common-plaid-link.ts";
 export * as CommonGrid from "./common-grid.ts";
 export * as CommonHeroLayout from "./common-hero-layout.ts";

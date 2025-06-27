@@ -83,24 +83,27 @@ export class CommonPlaidLinkElement extends LitElement {
     }
 
     // Check if script tag already exists
-    const existingScript = document.querySelector('script[src*="plaid.com/link/v2/stable/link-initialize.js"]');
+    const existingScript = document.querySelector(
+      'script[src*="plaid.com/link/v2/stable/link-initialize.js"]',
+    );
     if (existingScript) {
-      existingScript.addEventListener('load', () => {
+      existingScript.addEventListener("load", () => {
         this.plaidScriptLoaded = true;
       });
       return;
     }
 
     // Load the script
-    const script = document.createElement('script');
-    script.src = 'https://cdn.plaid.com/link/v2/stable/link-initialize.js';
+    const script = document.createElement("script");
+    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
     script.async = true;
     script.onload = () => {
       this.plaidScriptLoaded = true;
     };
     script.onerror = () => {
-      console.error('Failed to load Plaid Link script');
-      this.authStatus = 'Failed to load Plaid Link. Please refresh and try again.';
+      console.error("Failed to load Plaid Link script");
+      this.authStatus =
+        "Failed to load Plaid Link. Please refresh and try again.";
     };
     document.head.appendChild(script);
   }
@@ -130,27 +133,33 @@ export class CommonPlaidLinkElement extends LitElement {
 
     try {
       // Get link token from backend
-      const response = await fetch("/api/integrations/plaid-oauth/create-link-token", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        "/api/integrations/plaid-oauth/create-link-token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
       const data = await response.json();
-      
+
       if (!data.linkToken) {
         throw new Error("No link token received from server");
       }
 
       // Initialize Plaid Link
-      this.initializePlaidLink(data.linkToken, authCellId, charmId);
-      
+      this.initializePlaidLink(
+        data.linkToken,
+        authCellId,
+        charmId || undefined,
+      );
     } catch (error) {
       console.error("Error creating link session:", error);
       this.authStatus = `Error: ${
@@ -160,7 +169,11 @@ export class CommonPlaidLinkElement extends LitElement {
     }
   }
 
-  private initializePlaidLink(linkToken: string, authCellId: string, integrationCharmId?: string) {
+  private initializePlaidLink(
+    linkToken: string,
+    authCellId: string,
+    integrationCharmId?: string,
+  ) {
     // Destroy existing handler if any
     if (this.plaidHandler) {
       this.plaidHandler.destroy();
@@ -169,55 +182,66 @@ export class CommonPlaidLinkElement extends LitElement {
     const config = {
       token: linkToken,
       onSuccess: async (publicToken: string, metadata: any) => {
-        console.log('Plaid Link success', { publicToken: publicToken.substring(0, 20) + '...', metadata });
         this.authStatus = "Processing authentication...";
-        await this.handlePublicToken(publicToken, authCellId, integrationCharmId);
+        await this.handlePublicToken(
+          publicToken,
+          authCellId,
+          integrationCharmId,
+        );
       },
       onExit: (error: any, metadata: any) => {
-        console.log('Plaid Link exit', { error, metadata });
         if (error) {
-          this.authStatus = `Authentication failed: ${error.error_message || error.display_message || 'Unknown error'}`;
+          this.authStatus = `Authentication failed: ${
+            error.error_message || error.display_message || "Unknown error"
+          }`;
         } else {
           this.authStatus = "Authentication cancelled";
         }
         this.isLoading = false;
       },
       onEvent: (eventName: string, metadata: any) => {
-        console.log('Plaid Link event', { eventName, metadata });
-        
         // Update status based on events
-        if (eventName === 'OPEN') {
+        if (eventName === "OPEN") {
           this.authStatus = "Link opened...";
-        } else if (eventName === 'SELECT_INSTITUTION') {
-          this.authStatus = `Connecting to ${metadata.institution_name || 'bank'}...`;
-        } else if (eventName === 'SUBMIT_CREDENTIALS') {
+        } else if (eventName === "SELECT_INSTITUTION") {
+          this.authStatus = `Connecting to ${
+            metadata.institution_name || "bank"
+          }...`;
+        } else if (eventName === "SUBMIT_CREDENTIALS") {
           this.authStatus = "Verifying credentials...";
         }
       },
     };
 
     this.plaidHandler = window.Plaid.create(config);
-    
+
     // Open Link immediately
     this.plaidHandler.open();
   }
 
-  private async handlePublicToken(publicToken: string, authCellId: string, integrationCharmId?: string) {
+  private async handlePublicToken(
+    publicToken: string,
+    authCellId: string,
+    integrationCharmId?: string,
+  ) {
     this.isLoading = true;
     this.authStatus = "Exchanging token...";
 
     try {
-      const response = await fetch("/api/integrations/plaid-oauth/exchange-token", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        "/api/integrations/plaid-oauth/exchange-token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            publicToken,
+            authCellId,
+            integrationCharmId,
+          }),
         },
-        body: JSON.stringify({
-          publicToken,
-          authCellId,
-          integrationCharmId,
-        }),
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -226,7 +250,7 @@ export class CommonPlaidLinkElement extends LitElement {
       const result = await response.json();
       this.authStatus = "Bank account connected successfully!";
       this.isLoading = false;
-      
+
       // Force update to show new account
       this.requestUpdate();
     } catch (error) {
@@ -245,16 +269,19 @@ export class CommonPlaidLinkElement extends LitElement {
     const authCellId = JSON.stringify(this.auth?.getAsCellLink());
 
     try {
-      const response = await fetch("/api/integrations/plaid-oauth/remove-item", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        "/api/integrations/plaid-oauth/remove-item",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            authCellId,
+            itemId,
+          }),
         },
-        body: JSON.stringify({
-          authCellId,
-          itemId,
-        }),
-      });
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -262,7 +289,7 @@ export class CommonPlaidLinkElement extends LitElement {
 
       this.authStatus = "Bank connection removed successfully";
       this.isLoading = false;
-      
+
       // Force update to reflect removal
       this.requestUpdate();
     } catch (error) {
@@ -290,84 +317,83 @@ export class CommonPlaidLinkElement extends LitElement {
     return html`
       <div class="plaid-wrapper">
         ${items.length > 0
-          ? html`
-            <div class="connected-accounts">
-              <h3>Connected Bank Accounts</h3>
-              ${items.map((item) => html`
-                <div class="bank-item">
-                  <div class="bank-header">
-                    <h4>${item.institutionName}</h4>
-                    <button 
-                      @click="${() => this.handleRemoveAccount(item.itemId)}"
-                      class="remove-button"
-                      ?disabled="${this.isLoading}"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <div class="accounts-list">
-                    ${item.accounts.map((account) => html`
-                      <div class="account">
-                        <div class="account-info">
-                          <span class="account-name">${account.name}</span>
-                          <span class="account-mask">****${account.mask}</span>
-                          <span class="account-type">${account.subtype || account.type}</span>
-                        </div>
-                        <div class="account-balance">
-                          <span class="balance-label">Available:</span>
-                          <span class="balance-amount">
-                            ${this.formatCurrency(
-                              account.balances.available,
-                              account.balances.isoCurrencyCode
-                            )}
-                          </span>
-                          <span class="balance-label">Current:</span>
-                          <span class="balance-amount">
-                            ${this.formatCurrency(
-                              account.balances.current,
-                              account.balances.isoCurrencyCode
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    `)}
-                  </div>
-                  <div class="bank-footer">
-                    <span class="last-updated">
-                      Last updated: ${new Date(item.lastUpdated).toLocaleString()}
-                    </span>
-                  </div>
+        ? html`
+          <div class="connected-accounts">
+            <h3>Connected Bank Accounts</h3>
+            ${items.map((item) =>
+            html`
+              <div class="bank-item">
+                <div class="bank-header">
+                  <h4>${item.institutionName}</h4>
+                  <button
+                    @click="${() => this.handleRemoveAccount(item.itemId)}"
+                    class="remove-button"
+                    ?disabled="${this.isLoading}"
+                  >
+                    Remove
+                  </button>
                 </div>
-              `)}
-            </div>
-          `
-          : ""
-        }
+                <div class="accounts-list">
+                  ${item.accounts.map((account) =>
+                html`
+                  <div class="account">
+                    <div class="account-info">
+                      <span class="account-name">${account.name}</span>
+                      <span class="account-mask">****${account.mask}</span>
+                      <span class="account-type">${account.subtype ||
+                    account.type}</span>
+                    </div>
+                    <div class="account-balance">
+                      <span class="balance-label">Available:</span>
+                      <span class="balance-amount">
+                        ${this.formatCurrency(
+                    account.balances.available,
+                    account.balances.isoCurrencyCode,
+                  )}
+                      </span>
+                      <span class="balance-label">Current:</span>
+                      <span class="balance-amount">
+                        ${this.formatCurrency(
+                    account.balances.current,
+                    account.balances.isoCurrencyCode,
+                  )}
+                      </span>
+                    </div>
+                  </div>
+                `
+              )}
+                </div>
+                <div class="bank-footer">
+                  <span class="last-updated">
+                    Last updated: ${new Date(item.lastUpdated).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            `
+          )}
+          </div>
+        `
+        : ""}
 
         <div class="action-section">
-          <button 
+          <button
             @click="${this.handleConnectClick}"
             ?disabled="${this.isLoading || !this.plaidScriptLoaded}"
             class="connect-button"
           >
-            ${this.isLoading ? "Processing..." : 
-              !this.plaidScriptLoaded ? "Loading Plaid..." : 
-              "Connect Bank Account"}
+            ${this.isLoading
+        ? "Processing..."
+        : !this.plaidScriptLoaded
+        ? "Loading Plaid..."
+        : "Connect Bank Account"}
           </button>
-          
-          ${this.authStatus
-            ? html`
-              <div class="status-message">${this.authStatus}</div>
-            `
-            : ""
-          }
-        </div>
 
-        <details class="debug-section">
-          <summary>Debug Info</summary>
-          <pre class="debug-content">Plaid Script Loaded: ${this.plaidScriptLoaded}
-Auth Cell Contents: ${JSON.stringify(authData, null, 2)}</pre>
-        </details>
+          ${this.authStatus
+        ? html`
+          <div class="status-message">${this.authStatus}</div>
+        `
+        : ""}
+        </div>
       </div>
     `;
   }
@@ -536,34 +562,6 @@ Auth Cell Contents: ${JSON.stringify(authData, null, 2)}</pre>
           color: #2e7d32;
           font-size: 0.9rem;
           text-align: center;
-        }
-
-        .debug-section {
-          margin-top: 24px;
-          padding: 16px;
-          background-color: #f5f5f5;
-          border-radius: 8px;
-          border: 1px solid #ddd;
-        }
-
-        .debug-section summary {
-          cursor: pointer;
-          font-weight: 500;
-          color: #666;
-          user-select: none;
-        }
-
-        .debug-content {
-          margin-top: 12px;
-          padding: 12px;
-          background-color: #fff;
-          border: 1px solid #e0e0e0;
-          border-radius: 4px;
-          overflow-x: auto;
-          font-family: monospace;
-          font-size: 0.85rem;
-          white-space: pre;
-          color: #333;
         }
       `,
     ];

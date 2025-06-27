@@ -1,8 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   BackgroundIntegrationRoute,
-  CallbackRoute,
-  CompleteOAuthRoute,
   CreateLinkTokenRoute,
   ExchangeTokenRoute,
   RefreshAccountsRoute,
@@ -10,10 +8,8 @@ import type {
   SyncTransactionsRoute,
 } from "./plaid-oauth.routes.ts";
 import {
-  type CallbackResult,
   createBackgroundIntegrationErrorResponse,
   createBackgroundIntegrationSuccessResponse,
-  createCallbackResponse,
   createExchangeErrorResponse,
   createExchangeSuccessResponse,
   createLinkTokenErrorResponse,
@@ -26,21 +22,11 @@ import {
   createSyncErrorResponse,
   createSyncSuccessResponse,
   getAuthData,
-  getBaseUrl,
   getPlaidItem,
   type PlaidItem,
   removePlaidItem,
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
-import {
-  getRedisClient,
-  storeOAuthSession,
-  storeLinkTokenMapping,
-  getOAuthSession,
-  deleteOAuthSession,
-  getUserEmailByLinkToken,
-  type PlaidOAuthSession,
-} from "./plaid-oauth.redis.ts";
 import { setBGCharm } from "@commontools/background-charm";
 import { type CellLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
@@ -58,24 +44,11 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
 
   try {
     const payload = await c.req.json();
-    logger.info({ payload }, "Received Plaid create link token request");
+    logger.info("Received Plaid create link token request");
 
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
       return createLinkTokenErrorResponse(c, "Missing authCellId in request");
-    }
-
-    // Get user email from Tailscale header, fallback to fake email for localhost
-    let userEmail = c.req.header("tailscale-user-login");
-    if (!userEmail) {
-      const url = new URL(c.req.url);
-      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-        userEmail = "fake@common.tools";
-        logger.info("Using fake email for localhost development");
-      } else {
-        logger.error("No user email found in tailscale-user-login header");
-        return createLinkTokenErrorResponse(c, "User authentication required");
-      }
     }
 
     const plaidClient = createPlaidClient();
@@ -92,67 +65,21 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
       products: payload.products || ["transactions"],
       country_codes: (payload.countryCodes || ["US"]) as CountryCode[],
       language: "en",
-      // For hosted Link, we need to specify the completion redirect
-      hosted_link: {
-        // This is where Plaid redirects after the ENTIRE session is complete
-        completion_redirect_uri: payload.frontendUrl || "http://localhost:5173",
-        // Explicitly request hosted link URL
-        url_lifetime_seconds: 14400, // 4 hours
-      }
     };
 
-    // NOTE: We should NOT set redirect_uri for hosted Link OAuth!
-    // Plaid handles the OAuth redirect internally
-    // Setting redirect_uri breaks the OAuth flow by redirecting to us instead of back to Plaid
-
-    logger.debug({ linkTokenRequest }, "Creating Plaid link token");
-
     const response = await plaidClient.linkTokenCreate(linkTokenRequest);
-    const { link_token, expiration, hosted_link_url } = response.data;
+    const { link_token, expiration } = response.data;
 
     logger.info(
-      { 
-        linkToken: link_token.substring(0, 20) + "...", 
+      {
+        linkToken: link_token.substring(0, 20) + "...",
         expiration,
-        hasHostedLinkUrl: !!hosted_link_url,
-        hostedLinkUrlPrefix: hosted_link_url ? hosted_link_url.substring(0, 50) + "..." : null,
       },
       "Created Plaid link token",
     );
 
-    // Store OAuth session in Redis
-    const redis = await getRedisClient();
-    const sessionData: PlaidOAuthSession = {
-      linkToken: link_token,
-      authCellId: payload.authCellId,
-      frontendUrl: payload.frontendUrl || "http://localhost:5173",
-      integrationCharmId: payload.integrationCharmId,
-      createdAt: new Date().toISOString(),
-    };
-
-    await storeOAuthSession(redis, userEmail, sessionData);
-    await storeLinkTokenMapping(redis, link_token, userEmail);
-
-    logger.info(
-      { userEmail, linkToken: link_token.substring(0, 20) + "..." },
-      "Stored OAuth session in Redis",
-    );
-
-    // Use the hosted_link_url from Plaid if available, otherwise construct it
-    const hostedLinkUrl = hosted_link_url || 
-      `https://cdn.plaid.com/link/v2/stable/link.html?token=${link_token}`;
-
-    logger.info(
-      { 
-        usingPlaidHostedUrl: !!hosted_link_url,
-        finalHostedLinkUrl: hostedLinkUrl.substring(0, 50) + "...",
-      },
-      "Hosted Link URL determined",
-    );
-
     return c.json({
       linkToken: link_token,
-      hostedLinkUrl,
       expiration,
     });
   } catch (error: any) {
@@ -160,10 +87,6 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
 
     // Extract Plaid error details if available
     if (error.response?.data) {
-      logger.error(
-        { plaidError: error.response.data },
-        "Plaid API error details",
-      );
       const plaidError = error.response.data;
       return c.json({
         error: plaidError.error_message || "Failed to create link token",
@@ -189,10 +112,7 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
 
   try {
     const payload = await c.req.json();
-    logger.info(
-      { publicToken: payload.publicToken.substring(0, 20) + "..." },
-      "Received Plaid token exchange request",
-    );
+    logger.info("Received Plaid token exchange request");
 
     if (!payload.publicToken || !payload.authCellId) {
       logger.error("Missing required fields in request payload");
@@ -205,23 +125,15 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
     const plaidClient = createPlaidClient();
 
     // Exchange public token for access token
-    logger.debug("Exchanging public token for access token");
     const exchangeResponse = await plaidClient.itemPublicTokenExchange({
       public_token: payload.publicToken,
     });
 
     const { access_token, item_id } = exchangeResponse.data;
 
-    logger.info(
-      {
-        accessTokenPrefix: access_token.substring(0, 21) + "...",
-        itemId: item_id,
-      },
-      "Exchanged public token for access token",
-    );
+    logger.info({ itemId: item_id }, "Exchanged public token for access token");
 
     // Fetch account details
-    logger.debug("Fetching account details");
     const accountsResponse = await plaidClient.accountsGet({
       access_token,
     });
@@ -326,7 +238,7 @@ export const refreshAccounts: AppRouteHandler<RefreshAccountsRoute> = async (
 
   try {
     const payload = await c.req.json();
-    logger.info({ payload }, "Received Plaid refresh accounts request");
+    logger.info("Received Plaid refresh accounts request");
 
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
@@ -350,8 +262,6 @@ export const refreshAccounts: AppRouteHandler<RefreshAccountsRoute> = async (
     // Refresh each item
     for (const item of itemsToRefresh) {
       try {
-        logger.debug({ itemId: item.itemId }, "Refreshing accounts for item");
-
         const accountsResponse = await plaidClient.accountsGet({
           access_token: item.accessToken,
         });
@@ -386,11 +296,6 @@ export const refreshAccounts: AppRouteHandler<RefreshAccountsRoute> = async (
 
         await upsertPlaidItem(payload.authCellId, updatedItem);
         updatedItems++;
-
-        logger.info(
-          { itemId: item.itemId, accountCount: accounts.length },
-          "Successfully refreshed accounts",
-        );
       } catch (error) {
         logger.error(
           { error, itemId: item.itemId },
@@ -421,7 +326,7 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
 
   try {
     const payload = await c.req.json();
-    logger.info({ payload }, "Received Plaid sync transactions request");
+    logger.info("Received Plaid sync transactions request");
 
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
@@ -448,8 +353,6 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
     // Sync transactions for each item
     for (const item of itemsToSync) {
       try {
-        logger.debug({ itemId: item.itemId }, "Syncing transactions for item");
-
         let hasMore = true;
         let cursor = item.lastSyncCursor;
         let itemAdded = 0;
@@ -482,17 +385,6 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
           cursor = next_cursor;
           hasMore = has_more;
 
-          logger.debug(
-            {
-              itemId: item.itemId,
-              added: added.length,
-              modified: modified.length,
-              removed: removed.length,
-              hasMore,
-            },
-            "Synced transaction batch",
-          );
-
           // Break after one batch if we're not syncing everything
           if (!env.PLAID_SYNC_ALL_TRANSACTIONS) {
             break;
@@ -518,16 +410,6 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
         totalModified += itemModified;
         totalRemoved += itemRemoved;
         if (hasMore) hasMoreOverall = true;
-
-        logger.info(
-          {
-            itemId: item.itemId,
-            added: itemAdded,
-            modified: itemModified,
-            removed: itemRemoved,
-          },
-          "Successfully synced transactions",
-        );
       } catch (error) {
         logger.error(
           { error, itemId: item.itemId },
@@ -562,7 +444,7 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
 
   try {
     const payload = await c.req.json();
-    logger.info({ payload }, "Received Plaid remove item request");
+    logger.info("Received Plaid remove item request");
 
     if (!payload.authCellId || !payload.itemId) {
       logger.error("Missing required fields in request payload");
@@ -586,7 +468,6 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
       await plaidClient.itemRemove({
         access_token: item.accessToken,
       });
-      logger.info({ itemId: payload.itemId }, "Removed item from Plaid");
     } catch (error) {
       logger.error(
         { error, itemId: payload.itemId },
@@ -597,11 +478,6 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
     // Remove from auth cell
     await removePlaidItem(payload.authCellId, payload.itemId);
 
-    logger.info(
-      { itemId: payload.itemId },
-      "Successfully removed item from auth cell",
-    );
-
     return createRemoveSuccessResponse(c);
   } catch (error) {
     logger.error({ error }, "Failed to remove item");
@@ -609,379 +485,6 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
       c,
       error instanceof Error ? error.message : "Failed to remove item",
     );
-  }
-};
-
-/**
- * Plaid OAuth Callback Handler
- * Handles OAuth callbacks from Plaid hosted Link
- */
-export const callback: AppRouteHandler<CallbackRoute> = async (c) => {
-  const logger = c.get("logger");
-  const query = c.req.query();
-
-  logger.info({ query }, "Received Plaid OAuth callback");
-
-  try {
-    const {
-      public_token,
-      oauth_state_id,
-      error: linkError,
-      error_code,
-      error_message,
-      state,
-    } = query;
-
-    // Get user email from Tailscale header, fallback to fake email for localhost
-    let userEmail = c.req.header("tailscale-user-login");
-    if (!userEmail) {
-      const url = new URL(c.req.url);
-      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-        userEmail = "fake@common.tools";
-        logger.info("Using fake email for localhost development");
-      } else {
-        logger.error("No user email found in tailscale-user-login header");
-        const errorUrl = new URL("/");
-        errorUrl.searchParams.set("error", "authentication_required");
-        return c.redirect(errorUrl.toString());
-      }
-    }
-
-    // Retrieve session data from Redis
-    const redis = await getRedisClient();
-    const sessionData = await getOAuthSession(redis, userEmail);
-    
-    if (!sessionData) {
-      logger.error({ userEmail }, "No OAuth session found in Redis");
-      const errorUrl = new URL("/");
-      errorUrl.searchParams.set("error", "session_expired");
-      return c.redirect(errorUrl.toString());
-    }
-
-    logger.info(
-      {
-        userEmail,
-        hasLinkToken: !!sessionData.linkToken,
-        frontendUrl: sessionData.frontendUrl,
-      },
-      "Retrieved OAuth session from Redis",
-    );
-
-    const frontendBaseUrl = sessionData.frontendUrl || "http://localhost:5173";
-
-    // Handle OAuth flow - if we have oauth_state_id, this is an OAuth institution
-    if (oauth_state_id && !public_token && !linkError) {
-      logger.info(
-        { oauth_state_id },
-        "OAuth flow detected - user needs to complete OAuth at institution",
-      );
-
-      // For OAuth institutions, Plaid first redirects here, then user must complete
-      // OAuth at their bank, then they come back through Link again
-      // We should show a message that they need to continue in Plaid Link
-      const continueUrl = new URL(frontendBaseUrl);
-      continueUrl.searchParams.set("oauth_continue", "true");
-      continueUrl.searchParams.set("oauth_state_id", oauth_state_id);
-      
-      // Pass along session data if we have it
-      if (sessionData && sessionData.linkToken) {
-        continueUrl.searchParams.set("has_session", "true");
-      }
-      
-      return c.redirect(continueUrl.toString());
-    }
-
-    // Handle Link errors
-    if (linkError || error_code) {
-      logger.error(
-        { linkError, error_code, error_message },
-        "Link error received",
-      );
-
-      const errorUrl = new URL(frontendBaseUrl);
-      errorUrl.searchParams.set(
-        "error",
-        linkError || error_code || "unknown_error",
-      );
-      if (error_message) {
-        errorUrl.searchParams.set("error_message", error_message);
-      }
-      return c.redirect(errorUrl.toString());
-    }
-
-    // Handle successful link with public token
-    if (public_token) {
-      logger.info(
-        { publicToken: public_token.substring(0, 20) + "..." },
-        "Received public token",
-      );
-
-      // Clean up the Redis session since OAuth is complete
-      await deleteOAuthSession(redis, userEmail);
-      logger.info({ userEmail }, "Deleted OAuth session from Redis");
-
-      const successUrl = new URL(frontendBaseUrl);
-      successUrl.searchParams.set("public_token", public_token);
-      return c.redirect(successUrl.toString());
-    }
-
-    // No token or error - something went wrong
-    logger.error("No public token or error in callback");
-    const errorUrl = new URL(frontendBaseUrl);
-    errorUrl.searchParams.set("error", "invalid_callback");
-    return c.redirect(errorUrl.toString());
-  } catch (error) {
-    logger.error(error, "Failed to process callback");
-
-    // Try to redirect with error
-    try {
-      const errorUrl = new URL(query.redirect_uri || "/");
-      errorUrl.searchParams.set("error", "callback_processing_error");
-      return c.redirect(errorUrl.toString());
-    } catch {
-      // If we can't redirect, return an error page
-      const callbackResult: CallbackResult = {
-        success: false,
-        error: "Failed to process callback",
-      };
-      return createCallbackResponse(callbackResult);
-    }
-  }
-};
-
-/**
- * Complete OAuth Flow Handler
- * Uses link token to get session results after OAuth
- */
-export const completeOAuth: AppRouteHandler<CompleteOAuthRoute> = async (c) => {
-  const logger = c.get("logger");
-
-  try {
-    const payload = await c.req.json();
-    logger.info("Received complete OAuth request", {
-      linkToken: payload.linkToken ? payload.linkToken.substring(0, 20) + "..." : "none",
-      authCellId: payload.authCellId,
-      integrationCharmId: payload.integrationCharmId,
-    });
-    
-    if (!payload.linkToken) {
-      logger.error("No link token provided in complete OAuth request");
-      return c.json({
-        error: "Link token is required to complete OAuth flow",
-      }, 400);
-    }
-
-    // If authCellId is missing, try to retrieve it from Redis using link token
-    let authCellId = payload.authCellId;
-    let integrationCharmId = payload.integrationCharmId;
-    
-    if (!authCellId) {
-      logger.info("No authCellId provided, attempting to retrieve from Redis");
-      const redis = await getRedisClient();
-      const userEmail = await getUserEmailByLinkToken(redis, payload.linkToken);
-      
-      if (userEmail) {
-        const sessionData = await getOAuthSession(redis, userEmail);
-        if (sessionData) {
-          authCellId = sessionData.authCellId;
-          integrationCharmId = integrationCharmId || sessionData.integrationCharmId;
-          logger.info(
-            { userEmail, authCellId, integrationCharmId },
-            "Retrieved session data from Redis",
-          );
-        }
-      }
-      
-      if (!authCellId) {
-        logger.error("Unable to retrieve authCellId from Redis");
-        return c.json({
-          error: "Unable to find OAuth session",
-        }, 400);
-      }
-    }
-
-    const plaidClient = createPlaidClient();
-
-    // Get session results using /link/token/get
-    try {
-      const linkTokenGetResponse = await plaidClient.linkTokenGet({
-        link_token: payload.linkToken,
-      });
-
-      logger.info("Link token get response received");
-
-      // Log the full response structure for debugging
-      logger.info({
-        responseKeys: Object.keys(linkTokenGetResponse.data),
-        hasLinkSessions: !!linkTokenGetResponse.data.link_sessions,
-        sessionCount: linkTokenGetResponse.data.link_sessions?.length || 0,
-      }, "Link token response overview");
-
-      const { link_sessions, ...tokenData } = linkTokenGetResponse.data;
-
-      // Log non-session data
-      logger.info({
-        tokenData: {
-          ...tokenData,
-          link_token: tokenData.link_token ? tokenData.link_token.substring(0, 20) + '...' : 'none',
-        }
-      }, "Token metadata");
-
-      // Check if there are any sessions
-      if (!link_sessions || link_sessions.length === 0) {
-        logger.warn("No link sessions found");
-        return c.json({
-          error: "No link sessions found",
-        }, 400);
-      }
-
-      // Log all sessions
-      logger.info({
-        totalSessions: link_sessions.length,
-        sessions: link_sessions.map((session: any, index: number) => ({
-          index,
-          sessionId: session.id || session.link_session_id,
-          hasResults: !!session.results,
-          hasOnSuccess: !!session.on_success,
-          hasOnExit: !!session.on_exit,
-          startedAt: session.started_at,
-          finishedAt: session.finished_at,
-          exitedAt: session.exited_at,
-          sessionKeys: Object.keys(session),
-        }))
-      }, "All link sessions");
-
-      // Get the most recent session
-      const latestSession = link_sessions[link_sessions.length - 1];
-      
-      // Detailed session logging
-      logger.info({
-        sessionStructure: {
-          keys: Object.keys(latestSession),
-          id: latestSession.id || latestSession.link_session_id,
-          hasResults: !!latestSession.results,
-          hasOnSuccess: !!latestSession.on_success,
-          hasOnExit: !!latestSession.on_exit,
-          hasMetadata: !!latestSession.metadata,
-          hasEvents: !!latestSession.events,
-          started: latestSession.started_at,
-          finished: latestSession.finished_at,
-          exited: latestSession.exited_at,
-        }
-      }, "Latest session structure");
-
-      // Log results structure if present
-      if (latestSession.results) {
-        const results = latestSession.results;
-        logger.info({
-          resultsKeys: Object.keys(results),
-          hasItemAddResults: !!results.item_add_results,
-          itemAddResultsLength: results.item_add_results?.length || 0,
-          itemAddResultsDetails: results.item_add_results?.map((item: any, idx: number) => ({
-            index: idx,
-            keys: Object.keys(item),
-            hasPublicToken: !!item.public_token,
-            institutionId: item.institution_id,
-            itemId: item.item_id,
-          }))
-        }, "Results structure");
-        
-        // Check for public tokens in results
-        if (results.item_add_results && results.item_add_results.length > 0) {
-          // Get the first public token (for single-item flow)
-          const publicToken = results.item_add_results[0].public_token;
-          
-          if (publicToken) {
-            logger.info({
-              publicTokenFound: true,
-              tokenPrefix: publicToken.substring(0, 20) + '...',
-            }, "Found public token in results.item_add_results");
-            return c.json({
-              publicToken,
-              success: true,
-            }, 200);
-          }
-        }
-      }
-
-      // Check on_success structure
-      if (latestSession.on_success) {
-        logger.info({
-          onSuccessKeys: Object.keys(latestSession.on_success),
-          hasPublicToken: !!latestSession.on_success.public_token,
-          hasMetadata: !!latestSession.on_success.metadata,
-          publicTokenLocation: latestSession.on_success.public_token ? 'on_success.public_token' : null,
-        }, "on_success structure");
-
-        if (latestSession.on_success.public_token) {
-          logger.info({
-            publicTokenFound: true,
-            tokenPrefix: latestSession.on_success.public_token.substring(0, 20) + '...',
-          }, "Found public token in on_success");
-          return c.json({
-            publicToken: latestSession.on_success.public_token,
-            success: true,
-          }, 200);
-        }
-      }
-
-      // Check if session is still in progress (OAuth not completed)
-      if (latestSession.on_exit && !latestSession.on_success) {
-        logger.info({
-          onExitKeys: Object.keys(latestSession.on_exit),
-          exitError: latestSession.on_exit.error,
-          exitMetadata: latestSession.on_exit.metadata,
-        }, "Link session exited without success");
-        return c.json({
-          error: "OAuth authentication not completed",
-          exitDetails: latestSession.on_exit.error,
-        }, 400);
-      }
-
-      // Check if session is incomplete
-      if (!latestSession.finished_at && !latestSession.on_exit && !latestSession.on_success) {
-        logger.info({
-          sessionStatus: "incomplete",
-          hasStarted: !!latestSession.started_at,
-          startedAt: latestSession.started_at,
-        }, "Session appears to be incomplete");
-        return c.json({
-          error: "Link session still in progress",
-          details: "Session has not finished yet",
-        }, 400);
-      }
-
-      logger.warn({
-        sessionComplete: !!latestSession.finished_at,
-        hasSuccess: !!latestSession.on_success,
-        hasExit: !!latestSession.on_exit,
-        hasResults: !!latestSession.results,
-        allSessionKeys: Object.keys(latestSession),
-      }, "No public token found despite session appearing complete");
-      
-      return c.json({
-        error: "No public token found in session",
-      }, 400);
-
-    } catch (error: any) {
-      // Check if it's a Plaid API error
-      if (error.response?.data) {
-        const plaidError = error.response.data;
-        logger.error(
-          { plaidError },
-          "Plaid API error getting link token",
-        );
-        return c.json({
-          error: plaidError.error_message || "Failed to get link token session",
-        }, 400);
-      }
-      throw error;
-    }
-  } catch (error) {
-    logger.error({ error }, "Failed to complete OAuth flow");
-    return c.json({
-      error: error instanceof Error ? error.message : "Failed to complete OAuth flow",
-    }, 500);
   }
 };
 

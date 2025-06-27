@@ -28,10 +28,10 @@ export const createLinkToken = createRoute({
                 .optional()
                 .default(["US"])
                 .describe("Country codes for institutions"),
-              redirectUri: z
+              frontendUrl: z
                 .string()
                 .optional()
-                .describe("Redirect URI for hosted Link flow"),
+                .describe("Frontend URL for Link SDK integration"),
             })
             .openapi({
               example: {
@@ -51,7 +51,6 @@ export const createLinkToken = createRoute({
         "application/json": {
           schema: z.object({
             linkToken: z.string().describe("The Plaid Link token"),
-            hostedLinkUrl: z.string().describe("The hosted Link URL to redirect to"),
             expiration: z.string().describe("Token expiration timestamp"),
           }),
         },
@@ -251,7 +250,9 @@ export const syncTransactions = createRoute({
             added: z.number().describe("Number of transactions added"),
             modified: z.number().describe("Number of transactions modified"),
             removed: z.number().describe("Number of transactions removed"),
-            hasMore: z.boolean().describe("Whether more transactions are available"),
+            hasMore: z.boolean().describe(
+              "Whether more transactions are available",
+            ),
           }),
         },
       },
@@ -318,105 +319,6 @@ export const removeItem = createRoute({
   },
 });
 
-export const completeOAuth = createRoute({
-  path: "/api/integrations/plaid-oauth/complete-oauth",
-  method: "post",
-  tags,
-  request: {
-    body: {
-      content: {
-        "application/json": {
-          schema: z
-            .object({
-              linkToken: z.string().describe("The Plaid Link token"),
-              authCellId: z.string().describe("The authentication cell ID"),
-              integrationCharmId: z
-                .string()
-                .optional()
-                .describe("The charm ID of the integration charm"),
-            })
-            .openapi({
-              example: {
-                linkToken: "link-sandbox-xxx",
-                authCellId: "auth-cell-123",
-                integrationCharmId: "integration-charm-123",
-              },
-            }),
-        },
-      },
-    },
-  },
-  responses: {
-    [HttpStatusCodes.OK]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            publicToken: z.string().optional().describe("The public token if available"),
-            success: z.boolean(),
-            error: z.string().optional(),
-          }),
-        },
-      },
-      description: "OAuth flow completed successfully",
-    },
-    [HttpStatusCodes.BAD_REQUEST]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-          }),
-        },
-      },
-      description: "Invalid request parameters",
-    },
-    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-          }),
-        },
-      },
-      description: "Internal server error",
-    },
-  },
-});
-
-export const callback = createRoute({
-  path: "/api/integrations/plaid-oauth/callback",
-  method: "get",
-  tags,
-  request: {
-    query: z.object({
-      public_token: z.string().optional().describe("Public token from Plaid Link"),
-      error: z.string().optional().describe("Error code from Plaid Link"),
-      error_code: z.string().optional().describe("Specific error code"),
-      error_message: z.string().optional().describe("Error message details"),
-      redirect_uri: z.string().optional().describe("Original redirect URI"),
-      oauth_state_id: z.string().optional().describe("OAuth state ID from Plaid (legacy)"),
-      state: z.string().optional().describe("State parameter for validation (legacy)"),
-    }),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: {
-      content: {
-        "text/html": {
-          schema: z.any().describe("HTML response with callback handling"),
-        },
-      },
-      description: "OAuth callback response",
-    },
-    [HttpStatusCodes.BAD_REQUEST]: {
-      content: {
-        "text/html": {
-          schema: z.any().describe("HTML response with error handling"),
-        },
-      },
-      description: "Invalid callback parameters",
-    },
-  },
-});
-
 export const backgroundIntegration = createRoute({
   path: "/api/integrations/plaid-oauth/bg",
   method: "post",
@@ -472,6 +374,4 @@ export type ExchangeTokenRoute = typeof exchangeToken;
 export type RefreshAccountsRoute = typeof refreshAccounts;
 export type SyncTransactionsRoute = typeof syncTransactions;
 export type RemoveItemRoute = typeof removeItem;
-export type CompleteOAuthRoute = typeof completeOAuth;
-export type CallbackRoute = typeof callback;
 export type BackgroundIntegrationRoute = typeof backgroundIntegration;

@@ -1,17 +1,25 @@
 # Plaid OAuth Integration Implementation Plan
 
 ## Overview
-This document outlines the comprehensive plan for implementing Plaid OAuth integration, modeled after the existing Google OAuth implementation but adapted for Plaid's specific requirements.
+
+This document outlines the comprehensive plan for implementing Plaid OAuth
+integration, modeled after the existing Google OAuth implementation but adapted
+for Plaid's specific requirements.
 
 ## Key Differences from Google OAuth
-1. **Token Flow**: Plaid uses Link tokens → Public tokens → Access tokens (not traditional OAuth2)
+
+1. **Token Flow**: Plaid uses Link tokens → Public tokens → Access tokens (not
+   traditional OAuth2)
 2. **No Refresh Tokens**: Plaid access tokens don't expire like OAuth2 tokens
-3. **Product-Based Scopes**: Instead of OAuth scopes, Plaid uses "products" (transactions, accounts, etc.)
-4. **Institution-Specific**: Each connected bank account is a separate "Item" with its own access token
+3. **Product-Based Scopes**: Instead of OAuth scopes, Plaid uses "products"
+   (transactions, accounts, etc.)
+4. **Institution-Specific**: Each connected bank account is a separate "Item"
+   with its own access token
 
 ## Architecture Overview
 
 ### Backend Components
+
 ```
 /packages/toolshed/routes/integrations/plaid-oauth/
 ├── plaid-oauth.index.ts      # Router setup with CORS
@@ -21,12 +29,14 @@ This document outlines the comprehensive plan for implementing Plaid OAuth integ
 ```
 
 ### Frontend Components
+
 ```
 /packages/ui/src/v1/components/
 └── common-plaid-oauth.ts     # Web component for Plaid Link
 ```
 
 ### Recipe Integration
+
 ```
 /recipes/
 └── plaid.tsx                 # Single recipe for accounts and transactions
@@ -37,7 +47,9 @@ This document outlines the comprehensive plan for implementing Plaid OAuth integ
 ### Phase 1: Backend Infrastructure
 
 #### 1.1 Environment Configuration
+
 Add to environment variables:
+
 ```
 PLAID_CLIENT_ID=xxx
 PLAID_SECRET=xxx
@@ -48,6 +60,7 @@ PLAID_REDIRECT_URI=https://app.domain.com/api/integrations/plaid-oauth/callback
 ```
 
 #### 1.2 Route Definitions (`plaid-oauth.routes.ts`)
+
 - **POST `/api/integrations/plaid-oauth/create-link-token`**
   - Creates a Plaid Link token for initiating OAuth
   - Input: `authCellId`, `integrationCharmId`, `userId`, `products[]`
@@ -76,6 +89,7 @@ PLAID_REDIRECT_URI=https://app.domain.com/api/integrations/plaid-oauth/callback
 #### 1.3 Handlers Implementation (`plaid-oauth.handlers.ts`)
 
 **Create Link Token Handler**:
+
 ```typescript
 - Initialize Plaid client
 - Generate Link token with:
@@ -88,6 +102,7 @@ PLAID_REDIRECT_URI=https://app.domain.com/api/integrations/plaid-oauth/callback
 ```
 
 **Callback Handler**:
+
 ```typescript
 - Validate state parameter
 - Handle error cases
@@ -102,6 +117,7 @@ PLAID_REDIRECT_URI=https://app.domain.com/api/integrations/plaid-oauth/callback
 ```
 
 **Token Exchange Handler**:
+
 ```typescript
 - Receive public_token from frontend
 - Exchange for access_token
@@ -112,12 +128,14 @@ PLAID_REDIRECT_URI=https://app.domain.com/api/integrations/plaid-oauth/callback
 #### 1.4 Utils Implementation (`plaid-oauth.utils.ts`)
 
 **PlaidClient Helper**:
+
 ```typescript
 - Create configured Plaid client instance
 - Handle different environments (sandbox/development/production)
 ```
 
 **Auth Schema for Plaid**:
+
 ```typescript
 const PlaidAuthSchema = {
   type: "object",
@@ -151,19 +169,19 @@ const PlaidAuthSchema = {
                     available: { type: "number" },
                     current: { type: "number" },
                     limit: { type: "number" },
-                  }
-                }
-              }
-            }
+                  },
+                },
+              },
+            },
           },
           products: { type: "array", items: { type: "string" } },
           consentExpirationTime: { type: "string" },
           lastUpdated: { type: "string" },
-        }
+        },
       },
-      default: []
-    }
-  }
+      default: [],
+    },
+  },
 } as const satisfies JSONSchema;
 ```
 
@@ -172,6 +190,7 @@ const PlaidAuthSchema = {
 #### 2.1 Plaid OAuth Web Component (`common-plaid-oauth.ts`)
 
 Key Features:
+
 - Initialize Plaid Link SDK
 - Handle Link token creation
 - Manage OAuth flow
@@ -179,6 +198,7 @@ Key Features:
 - Support for multiple bank connections
 
 Structure:
+
 ```typescript
 export class CommonPlaidOauthElement extends LitElement {
   // Properties
@@ -205,9 +225,11 @@ export class CommonPlaidOauthElement extends LitElement {
 
 #### 3.1 Plaid Recipe (`plaid.tsx`)
 
-A single comprehensive recipe that handles both accounts and transactions, similar to the Gmail recipe structure.
+A single comprehensive recipe that handles both accounts and transactions,
+similar to the Gmail recipe structure.
 
 Features:
+
 - Display all connected bank accounts with balances
 - Import and display transaction history
 - Filter transactions by account, date range, category
@@ -217,6 +239,7 @@ Features:
 - Export both account and transaction data
 
 Schema:
+
 ```typescript
 const PlaidImporterInputs = {
   type: "object",
@@ -224,48 +247,49 @@ const PlaidImporterInputs = {
     settings: {
       type: "object",
       properties: {
-        products: { 
-          type: "array", 
+        products: {
+          type: "array",
           items: { type: "string" },
           default: ["accounts", "transactions", "identity"],
-          description: "Plaid products to request"
+          description: "Plaid products to request",
         },
         daysToSync: {
           type: "number",
           default: 90,
-          description: "Number of days of transactions to sync"
+          description: "Number of days of transactions to sync",
         },
         lastSyncCursor: {
           type: "string",
           default: "",
-          description: "Cursor for incremental transaction sync"
-        }
+          description: "Cursor for incremental transaction sync",
+        },
       },
-      required: ["products", "daysToSync", "lastSyncCursor"]
+      required: ["products", "daysToSync", "lastSyncCursor"],
     },
-    auth: PlaidAuthSchema
+    auth: PlaidAuthSchema,
   },
   required: ["settings", "auth"],
-  description: "Plaid Importer"
-}
+  description: "Plaid Importer",
+};
 
 const ResultSchema = {
   type: "object",
   properties: {
     accounts: {
       type: "array",
-      items: AccountSchema
+      items: AccountSchema,
     },
     transactions: {
       type: "array",
-      items: TransactionSchema
+      items: TransactionSchema,
     },
-    plaidUpdater: { asStream: true, type: "object", properties: {} }
-  }
-}
+    plaidUpdater: { asStream: true, type: "object", properties: {} },
+  },
+};
 ```
 
 The recipe will include:
+
 - `<common-plaid-oauth>` component for authentication
 - Account listing with current balances
 - Transaction table with filtering options
@@ -273,6 +297,7 @@ The recipe will include:
 - Settings for sync preferences
 
 Key Implementation Details:
+
 ```typescript
 export default recipe(
   PlaidImporterInputs,
@@ -280,7 +305,7 @@ export default recipe(
   ({ settings, auth }) => {
     const accounts = cell<Account[]>([]);
     const transactions = cell<Transaction[]>([]);
-    
+
     // Handler for syncing data
     const plaidUpdater = handler(
       {},
@@ -288,18 +313,25 @@ export default recipe(
         type: "object",
         properties: {
           accounts: { type: "array", items: AccountSchema, asCell: true },
-          transactions: { type: "array", items: TransactionSchema, asCell: true },
+          transactions: {
+            type: "array",
+            items: TransactionSchema,
+            asCell: true,
+          },
           auth: { ...PlaidAuthSchema, asCell: true },
-          settings: { ...PlaidImporterInputs.properties.settings, asCell: true }
-        }
+          settings: {
+            ...PlaidImporterInputs.properties.settings,
+            asCell: true,
+          },
+        },
       },
       async (_event, state) => {
         // Sync logic similar to googleUpdater in gmail.tsx
         // Fetch accounts and transactions for all connected items
         // Handle incremental sync using cursor
-      }
+      },
     );
-    
+
     return {
       [NAME]: str`Plaid Banking`,
       [UI]: (
@@ -313,32 +345,36 @@ export default recipe(
       ),
       accounts,
       transactions,
-      bgUpdater: plaidUpdater({ accounts, transactions, auth, settings })
+      bgUpdater: plaidUpdater({ accounts, transactions, auth, settings }),
     };
-  }
+  },
 );
 ```
 
 ### Phase 4: Key Implementation Considerations
 
 #### 4.1 Security
+
 - Store access tokens with proper classification (secret)
 - Never expose access tokens to frontend
 - Validate all state parameters
 - Use HTTPS for all callbacks
 
 #### 4.2 Error Handling
+
 - Handle Plaid-specific errors (ITEM_LOGIN_REQUIRED, etc.)
 - Implement reconnection flow for expired consent
 - Graceful degradation for missing products
 
 #### 4.3 Data Sync Strategy
+
 - Use webhooks for real-time updates (optional)
 - Implement manual refresh functionality
 - Cache account data with timestamps
 - Handle rate limits appropriately
 
 #### 4.4 Multi-Item Support
+
 - Support multiple bank connections per user
 - Store items in array structure
 - Handle item-specific operations
@@ -376,7 +412,8 @@ export default recipe(
 
 - **Phase 1**: Backend Infrastructure (2-3 days)
 - **Phase 2**: Frontend Components (1-2 days)
-- **Phase 3**: Recipe Integration (1-2 days) - Reduced since we're building one recipe instead of two
+- **Phase 3**: Recipe Integration (1-2 days) - Reduced since we're building one
+  recipe instead of two
 - **Phase 4**: Security & Error Handling (1 day)
 - **Phase 5**: Testing (1-2 days)
 - **Phase 6**: Documentation (1 day)

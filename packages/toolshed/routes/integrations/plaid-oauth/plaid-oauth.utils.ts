@@ -1,7 +1,11 @@
 import { type CellLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Context } from "@hono/hono";
-import { type JSONSchema, type Mutable, type Schema } from "@commontools/runner";
+import {
+  type JSONSchema,
+  type Mutable,
+  type Schema,
+} from "@commontools/runner";
 import { Configuration, PlaidApi, PlaidEnvironments } from "plaid";
 import env from "@/env.ts";
 
@@ -52,7 +56,15 @@ export const PlaidAuthSchema = {
           lastUpdated: { type: "string" },
           lastSyncCursor: { type: ["string", "null"] },
         },
-        required: ["accessToken", "itemId", "institutionId", "institutionName", "accounts", "products", "lastUpdated"],
+        required: [
+          "accessToken",
+          "itemId",
+          "institutionId",
+          "institutionName",
+          "accounts",
+          "products",
+          "lastUpdated",
+        ],
       },
       default: [],
     },
@@ -88,13 +100,6 @@ export interface PlaidItem {
   lastSyncCursor: string | null;
 }
 
-export interface CallbackResult extends Record<string, unknown> {
-  success: boolean;
-  error?: string;
-  message?: string;
-  details?: Record<string, unknown>;
-}
-
 // Create Plaid client
 export const createPlaidClient = (): PlaidApi => {
   const configuration = new Configuration({
@@ -109,68 +114,6 @@ export const createPlaidClient = (): PlaidApi => {
 
   return new PlaidApi(configuration);
 };
-
-// Helper function to get the base URL
-export const getBaseUrl = (url: string): string => {
-  try {
-    const parsedUrl = new URL(url);
-    const origin = parsedUrl.origin;
-    return origin.startsWith("http://localhost")
-      ? origin
-      : origin.replace("http://", "https://");
-  } catch (error) {
-    return "http://localhost:8000";
-  }
-};
-
-// Helper function to generate HTML for the callback page
-export function generateCallbackHtml(result: Record<string, unknown>): string {
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Plaid OAuth Callback</title>
-      <style>
-        body {
-          font-family: Arial, sans-serif;
-          text-align: center;
-          margin-top: 50px;
-        }
-        .success {
-          color: green;
-        }
-        .error {
-          color: red;
-        }
-      </style>
-    </head>
-    <body>
-      <h1 class="${result.success ? "success" : "error"}">
-        ${
-    result.success ? "Bank Connection Successful!" : "Bank Connection Failed"
-  }
-      </h1>
-      <p>${
-    result.success
-      ? "You can close this window now."
-      : result.error || "An error occurred"
-  }</p>
-      <script>
-        // Send message to opener and close window
-        if (window.opener) {
-          window.opener.postMessage({
-            type: 'plaid-oauth-callback',
-            result: ${JSON.stringify(result)}
-          }, window.location.origin);
-          
-          // Close the window after a short delay
-          setTimeout(() => window.close(), 2000);
-        }
-      </script>
-    </body>
-    </html>
-  `;
-}
 
 // Helper function to get auth cell
 export async function getAuthCell(docLink: CellLink | string) {
@@ -244,7 +187,7 @@ export async function upsertPlaidItem(
 ): Promise<PlaidAuthData> {
   try {
     const authData = await getAuthData(authCellDocLink);
-    
+
     // Ensure items array exists
     if (!authData.items) {
       authData.items = [];
@@ -315,17 +258,6 @@ export function createErrorResponse(c: Context, message: string, status = 400) {
     success: false,
     error: message,
   }, status as any);
-}
-
-// Create a callback response
-export function createCallbackResponse(
-  result: Record<string, unknown>,
-): Response {
-  return new Response(generateCallbackHtml(result), {
-    headers: {
-      "Content-Type": "text/html",
-    },
-  });
 }
 
 // Type-safe response helpers for route handlers
