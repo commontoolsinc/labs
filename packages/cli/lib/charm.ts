@@ -1,24 +1,21 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import {
-  Cell,
-  getEntityId,
-  NAME,
-  Recipe,
-  RecipeMeta,
-  Runtime,
-} from "@commontools/runner";
+import { Cell, NAME, Recipe, RecipeMeta, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
+  buildFullRecipe,
   Charm,
   charmId,
   CharmManager,
   compileRecipe,
+  extractUserCode,
+  getIframeRecipe,
   getRecipeIdFromCharm,
+  injectUserCode,
   processSchema,
 } from "@commontools/charm";
-import { dirname, join } from "@std/path";
+import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 
 export interface SpaceConfig {
@@ -97,6 +94,29 @@ async function getRecipeMeta(
   ) as RecipeMeta;
 }
 
+async function getIframeRecipeFromFile(
+  manager: CharmManager,
+  mainPath: string,
+  charmId: string,
+): Promise<Recipe> {
+  const charm = await manager.get(charmId);
+  if (!charm) {
+    throw new Error(`Charm "${charmId}" not found.`);
+  }
+  const iframeRecipe = getIframeRecipe(charm, manager.runtime);
+  if (!iframeRecipe.iframe) {
+    throw new Error(`Expected charm "${charmId}" to be an iframe recipe.`);
+  }
+  iframeRecipe.iframe.src = injectUserCode(await Deno.readTextFile(mainPath));
+  return await compileRecipe(
+    buildFullRecipe(iframeRecipe.iframe),
+    "recipe",
+    manager.runtime,
+    manager.getSpace(),
+    undefined,
+  );
+}
+
 async function getRecipeFromFile(
   manager: CharmManager,
   mainPath: string,
@@ -119,6 +139,10 @@ async function getRecipeFromService(
   charmId: string,
 ): Promise<Recipe> {
   const charm = await manager.get(charmId, false);
+  if (!charm) {
+    throw new Error(`Charm "${charmId}" not found`);
+  }
+
   const recipeId = getRecipeIdFromCharm(charm!);
   return await manager.runtime.recipeManager.loadRecipe(
     recipeId,
@@ -180,10 +204,15 @@ export async function setCharmRecipe(
   mainPath: string,
 ): Promise<void> {
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromFile(
-    manager,
-    mainPath,
-  );
+  let recipe;
+  if (mainPath.endsWith(".iframe.js")) {
+    recipe = await getIframeRecipeFromFile(manager, mainPath, config.charm);
+  } else {
+    recipe = await getRecipeFromFile(
+      manager,
+      mainPath,
+    );
+  }
   await exec({ manager, recipe, charmId: config.charm });
 }
 
@@ -193,9 +222,27 @@ export async function saveCharmRecipe(
 ): Promise<void> {
   await ensureDir(outPath);
   const manager = await loadManager(config);
-  const meta = await getRecipeMeta(manager, config.charm);
+  const recipe = await getRecipeFromService(manager, config.charm);
+  const meta = manager.runtime.recipeManager.getRecipeMeta(
+    recipe,
+  ) as RecipeMeta;
 
-  if (meta.src) {
+  const charm = await manager.get(config.charm);
+  if (!charm) {
+    throw new Error(`Charm ${config.charm} not found.`);
+  }
+
+  const iframeRecipe = getIframeRecipe(charm, manager.runtime);
+  if (iframeRecipe.iframe) {
+    const userCode = extractUserCode(iframeRecipe.iframe.src);
+    if (!userCode) {
+      throw new Error(`No user code found in iframe recipe "${config.charm}".`);
+    }
+    await Deno.writeTextFile(
+      join(outPath, "main.iframe.js"),
+      userCode,
+    );
+  } else if (meta.src) {
     // Write the main source file
     await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
   } else if (meta.program) {
