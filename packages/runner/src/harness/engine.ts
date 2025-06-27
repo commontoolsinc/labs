@@ -144,13 +144,22 @@ export class Engine extends EventTarget implements Harness {
     return { exports, output: compiled };
   }
 
-  getInvocation(source: string): HarnessedFunction {
-    return eval(source);
+  // Invokes a function that should've came from this isolate (unverifiable).
+  // We use this to hook into the isolate's source mapping functionality.
+  invoke(fn: () => any): any {
+    // Scheduler dictates this is a synchronous function,
+    // and if we have functions from this source, this should already
+    // be set up.
+    // Some tests invoke values outside of this isolate, so just
+    // execute and return if internals have not been initialized.
+    if (!this.internals) {
+      return fn();
+    }
+    return this.internals.isolate.value(fn).invoke().inner();
   }
 
-  mapStackTrace(stack: string): string {
-    //return mapSourceMapsOnStacktrace(stack);
-    return stack;
+  getInvocation(source: string): HarnessedFunction {
+    return eval(source);
   }
 
   // Returns a map of runtime module types.

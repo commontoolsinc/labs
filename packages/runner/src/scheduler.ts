@@ -38,7 +38,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
-  private eventQueue: (() => void)[] = [];
+  private eventQueue: (() => any)[] = [];
   private eventHandlers: [LegacyDocCellLink, EventHandler][] = [];
   private dirty = new Set<DocImpl<any>>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
@@ -227,11 +227,6 @@ export class Scheduler implements IScheduler {
   }
 
   private handleError(error: Error, action: any) {
-    // Since most errors come from `eval`ed code, let's fix the stack trace.
-    if (error.stack) {
-      error.stack = this.runtime.harness.mapStackTrace(error.stack);
-    }
-
     const { charmId, recipeId, space } = getCharmMetadataFromFrame() ?? {};
 
     const errorWithContext = error as ErrorWithContext;
@@ -261,7 +256,9 @@ export class Scheduler implements IScheduler {
     const handler = this.eventQueue.shift();
     if (handler) {
       try {
-        this.runningPromise = Promise.resolve(handler()).catch((error) => {
+        this.runningPromise = Promise.resolve(
+          this.runtime.harness.invoke(handler),
+        ).catch((error) => {
           this.handleError(error as Error, handler);
         });
         await this.runningPromise;
