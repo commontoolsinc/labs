@@ -7,32 +7,13 @@ import type {
   OpaqueRef,
   Schema,
 } from "./types.ts";
-
-export interface BuiltInLLMParams {
-  messages?: string[];
-  model?: string;
-  system?: string;
-  stop?: string;
-  maxTokens?: number;
-  /**
-   * Specifies the mode of operation for the LLM.
-   * - `"json"`: Indicates that the LLM should process and return data in JSON format.
-   * This parameter is optional and defaults to undefined, which may result in standard behavior.
-   */
-  mode?: "json";
-}
-
-export interface BuiltInCompileAndRunParams<T> {
-  files: Record<string, string>;
-  main: string;
-  input?: T;
-}
-
-export interface BuiltInCompileAndRunState<T> {
-  pending: boolean;
-  result?: T;
-  error?: any;
-}
+import type {
+  BuiltInCompileAndRunParams,
+  BuiltInCompileAndRunState,
+  BuiltInGenerateObjectParams,
+  BuiltInLLMParams,
+  BuiltInLLMState,
+} from "commontools";
 
 export const compileAndRun = createNodeFactory({
   type: "ref",
@@ -40,23 +21,6 @@ export const compileAndRun = createNodeFactory({
 }) as <T = any, S = any>(
   params: Opaque<BuiltInCompileAndRunParams<T>>,
 ) => OpaqueRef<BuiltInCompileAndRunState<S>>;
-
-export interface BuiltInLLMState<T> {
-  pending: boolean;
-  result?: T;
-  partial?: string;
-  error: unknown;
-}
-
-export interface BuiltInGenerateObjectParams {
-  model?: string;
-  prompt?: string;
-  schema?: JSONSchema;
-  system?: string;
-  cache?: boolean;
-  maxTokens?: number;
-  metadata?: Record<string, string | undefined | object>;
-}
 
 export const llm = createNodeFactory({
   type: "ref",

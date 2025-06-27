@@ -1,9 +1,10 @@
-import { BuiltInCompileAndRunParams } from "@commontools/api";
-import { refer } from "merkle-reference";
+import { type BuiltInCompileAndRunParams } from "commontools";
+import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
+import type { Program } from "@commontools/js-runtime";
 
 /**
  * Compile a recipe/module and run it.
@@ -56,11 +57,31 @@ export function compileAndRun(
     const resultWithLog = result.withLog(log);
     const errorWithLog = error.withLog(log);
 
-    const { files, main } = inputsCell.getAsQueryResult([], log) ?? {};
+    // TODO(seefeld): Ideally, this cell already has this schema, because we set
+    // it on the node itself.
+    const program: Program = inputsCell.asSchema({
+      type: "object",
+      properties: {
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              contents: { type: "string" },
+            },
+            required: ["name", "contents"],
+            additionalProperties: false,
+          },
+        },
+        main: { type: "string" },
+      },
+      required: ["files", "main"],
+      additionalProperties: false,
+    }).withLog(log).get();
     const input = inputsCell.withLog(log).key("input");
 
-    const hash = refer({ files: JSON.stringify(files ?? {}), main: main ?? "" })
-      .toString();
+    const hash = refer(program ?? { files: [], main: "" }).toString();
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
@@ -73,14 +94,14 @@ export function compileAndRun(
     errorWithLog.set(undefined);
 
     // Undefined inputs => Undefined output, not pending
-    if (!main || !files) {
+    if (!program.main || !program.files) {
       compilingWithLog.set(false);
       return;
     }
 
     // Main file not found => Error, not pending
-    if (!(main in files)) {
-      errorWithLog.set(`"${main}" not found in files`);
+    if (!program.files.some((file) => file.name === program.main)) {
+      errorWithLog.set(`"${program.main}" not found in files`);
       compilingWithLog.set(false);
       return;
     }
@@ -88,9 +109,7 @@ export function compileAndRun(
     // Now we're sure that we have a new file to compile
     compilingWithLog.set(true);
 
-    const compilePromise = runtime.harness.run(
-      files[main],
-    )
+    const compilePromise = runtime.harness.run(program)
       .catch(
         (err) => {
           if (thisRun !== currentRun) return;
