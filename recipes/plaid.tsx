@@ -560,36 +560,46 @@ const plaidUpdater = handler(
       state.settings.get().syncLimit,
     );
 
-    // Update transactions if there are changes
-    if (
-      syncResult.added.length > 0 || syncResult.modified.length > 0 ||
-      syncResult.removed.length > 0
-    ) {
-      // Remove deleted transactions
-      let updatedTransactions = existingTransactions.filter(
-        (t) => !syncResult.removed.includes(t.transactionId),
+    // Handle deleted transactions
+    if (syncResult.removed.length > 0) {
+      console.log(`Removing ${syncResult.removed.length} deleted transactions`);
+      const deleteSet = new Set(syncResult.removed);
+      const currentTransactions = state.transactions.get();
+      const remainingTransactions = currentTransactions.filter(
+        (t) => !deleteSet.has(t.transactionId),
       );
+      state.transactions.set(remainingTransactions);
+    }
 
-      // Update modified transactions
-      for (const modified of syncResult.modified) {
-        const index = updatedTransactions.findIndex(
-          (t) => t.transactionId === modified.transactionId,
-        );
-        if (index >= 0) {
-          updatedTransactions[index] = modified;
-        }
-      }
-
-      // Add new transactions
-      updatedTransactions = [...updatedTransactions, ...syncResult.added];
-
-      // Sort by date (newest first)
-      updatedTransactions.sort((a, b) => b.date.localeCompare(a.date));
-
-      state.transactions.set(updatedTransactions);
+    // Handle modified transactions
+    if (syncResult.modified.length > 0) {
       console.log(
-        `Transaction sync complete: ${syncResult.added.length} added, ${syncResult.modified.length} modified, ${syncResult.removed.length} removed`,
+        `Updating ${syncResult.modified.length} modified transactions`,
       );
+      const currentTransactions = state.transactions.get();
+      const modifiedMap = new Map(
+        syncResult.modified.map((t) => [t.transactionId, t]),
+      );
+
+      const updatedTransactions = currentTransactions.map((t) =>
+        modifiedMap.has(t.transactionId) ? modifiedMap.get(t.transactionId)! : t
+      );
+      state.transactions.set(updatedTransactions);
+    }
+
+    // Add new transactions
+    if (syncResult.added.length > 0) {
+      console.log(`Adding ${syncResult.added.length} new transactions`);
+      // Add ID field for Common Tools
+      syncResult.added.forEach((t: any) => {
+        t[ID] = t.transactionId;
+      });
+      state.transactions.push(...syncResult.added);
+
+      // Sort all transactions by date (newest first)
+      const allTransactions = state.transactions.get();
+      allTransactions.sort((a, b) => b.date.localeCompare(a.date));
+      state.transactions.set(allTransactions);
     }
   },
 );
