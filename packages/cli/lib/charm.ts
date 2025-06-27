@@ -328,7 +328,12 @@ export type CharmConnectionMap = Map<string, CharmConnection>;
 
 // Helper functions for charm mapping
 function createShortId(id: string): string {
-  return id.slice(0, SHORT_ID_LENGTH) + "...";
+  if (id.length <= SHORT_ID_LENGTH * 2 + 3) {
+    return id; // Don't truncate if it's already short enough
+  }
+  const start = id.slice(0, SHORT_ID_LENGTH);
+  const end = id.slice(-SHORT_ID_LENGTH);
+  return `${start}...${end}`;
 }
 
 function createCharmConnection(
@@ -383,7 +388,7 @@ function generateAsciiMap(connections: CharmConnectionMap): string {
       output += "  ← reads from:\n";
       for (const sourceId of info.readingFrom) {
         const sourceName = connections.get(sourceId)?.name || createShortId(sourceId);
-        output += `    • ${sourceName} [${createShortId(sourceId)}]\n`;
+        output += `    • ${sourceName}\n`;
       }
     }
     
@@ -391,7 +396,7 @@ function generateAsciiMap(connections: CharmConnectionMap): string {
       output += "  → read by:\n";
       for (const targetId of info.readBy) {
         const targetName = connections.get(targetId)?.name || createShortId(targetId);
-        output += `    • ${targetName} [${createShortId(targetId)}]\n`;
+        output += `    • ${targetName}\n`;
       }
     }
     
