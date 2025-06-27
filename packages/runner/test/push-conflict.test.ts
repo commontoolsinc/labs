@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { ID } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
 import { type IStorage, Runtime } from "../src/runtime.ts";
-import { isCellLink } from "../src/cell.ts";
+import { isAnyCellLink } from "../src/link-utils.ts";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import { Provider } from "../src/storage/cache.ts";
@@ -226,7 +226,7 @@ describe("Push conflict", () => {
     // This is locally ahead of the db, and retry wasn't called yet.
     expect(name.get()).toEqual("bar");
     expect(list.get()).toEqual([{ n: 4 }]);
-    expect(isCellLink(list.getRaw()?.[0])).toBe(true);
+    expect(isAnyCellLink(list.getRaw()?.[0])).toBe(true);
     const entry = list.getRaw()[0].cell?.asCell();
     expect(retryCalled).toEqual(0);
 
@@ -248,6 +248,6 @@ describe("Push conflict", () => {
 
     // Check that the ID is still there
     // TODO(@ubik2): this is an important test to have, so re-add soon
-    //expect(entry.equals(list.getRaw()[3].cell.asCell())).toBe(true);
+    //expect(JSON.stringify(entry)).toEqual(JSON.stringify(list.getRaw()[3]));
   });
 });

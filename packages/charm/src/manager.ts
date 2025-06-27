@@ -1,29 +1,24 @@
 import {
+  type Cell,
   Classification,
-  isAlias,
+  EntityId,
+  getEntityId,
+  isCell,
+  isLink,
   JSONSchema,
+  type MemorySpace,
   Module,
   NAME,
+  parseLink,
   Recipe,
+  Runtime,
   Schema,
   TYPE,
   UI,
-} from "@commontools/runner";
-import {
-  type Cell,
-  createRef,
-  EntityId,
-  followAliases,
-  getEntityId,
-  isCell,
-  isCellLink,
-  isDoc,
-  maybeGetCellLink,
-  type MemorySpace,
-  Runtime,
+  URI,
 } from "@commontools/runner";
 import { type Session } from "@commontools/identity";
-import { isObject } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 
 /**
  * Extracts the ID from a charm.
@@ -438,7 +433,7 @@ export class CharmManager {
       let argumentLink: any;
 
       try {
-        argumentLink = argumentCell.getAsCellLink();
+        argumentLink = argumentCell.getAsLegacyCellLink();
         if (!argumentLink || !argumentLink.cell) return result;
 
         argumentValue = argumentLink.cell.getAtPath(argumentLink.path);
@@ -511,11 +506,8 @@ export class CharmManager {
 
               // If we've reached the end and have a resultRef, return it
               if (value.resultRef) {
-                // Use maybeGetCellLink for safer access to resultRef
-                const resultLink = maybeGetCellLink(value.resultRef);
-                if (resultLink) {
-                  return getEntityId(resultLink.cell);
-                }
+                const { id: source } = parseLink(value.resultRef, cell)!;
+                if (source) return getEntityId(source);
               }
             }
           } catch (err) {
@@ -537,7 +529,7 @@ export class CharmManager {
         visited = new Set<any>(), // Track objects directly, not string representations
         depth = 0,
       ) => {
-        if (!value || typeof value !== "object" || depth > maxDepth) return;
+        if (!isRecord(value) || depth > maxDepth) return;
 
         // Prevent cycles in our traversal by tracking object references directly
         if (visited.has(value)) return;
@@ -545,164 +537,21 @@ export class CharmManager {
 
         try {
           // Handle values that are themselves cells, docs, or cell links
-          if (isCell(value)) {
-            try {
-              const cellLink = value.getAsCellLink();
-              if (cellLink && cellLink.cell) {
-                const cellId = getEntityId(cellLink.cell);
-                if (cellId) addMatchingCharm(cellId);
-
-                const sourceRefId = followSourceToResultRef(
-                  this.runtime.getCellFromLink(cellLink),
-                  new Set(),
-                  0,
-                );
-                if (sourceRefId) addMatchingCharm(sourceRefId);
-              }
-            } catch (err) {
-              console.debug("Error handling cell:", err);
+          if (isLink(value)) {
+            const link = parseLink(value, parent);
+            if (link.id) {
+              addMatchingCharm(getEntityId(link.id)!);
             }
-            return; // Don't process contents of cells
-          }
 
-          if (isDoc(value)) {
-            try {
-              const docId = getEntityId(value);
-              if (docId) addMatchingCharm(docId);
-
-              const sourceRefId = followSourceToResultRef(
-                value.asCell(),
-                new Set(),
-                0,
-              );
-              if (sourceRefId) addMatchingCharm(sourceRefId);
-            } catch (err) {
-              console.debug("Error handling doc:", err);
-            }
-            return; // Don't process contents of docs
-          }
-
-          if (isCellLink(value)) {
-            try {
-              const cellId = getEntityId(value.cell);
-              if (cellId) addMatchingCharm(cellId);
-
-              const sourceRefId = followSourceToResultRef(
-                this.runtime.getCellFromLink(value),
-                new Set(),
-                0,
-              );
-              if (sourceRefId) addMatchingCharm(sourceRefId);
-            } catch (err) {
-              console.debug("Error handling cell link:", err);
-            }
-            return; // Don't process contents of cell links
-          }
-
-          // Process aliases - follow them to their sources
-          if (isAlias(value)) {
-            try {
-              // Use followAliases, which is safer than manual traversal
-              const cellLink = followAliases(value, parent.getDoc());
-              if (cellLink && cellLink.cell) {
-                const cellId = getEntityId(cellLink.cell);
-                if (cellId) addMatchingCharm(cellId);
-
-                const sourceRefId = followSourceToResultRef(
-                  this.runtime.getCellFromLink(cellLink),
-                  new Set(),
-                  0,
-                );
-                if (sourceRefId) addMatchingCharm(sourceRefId);
-              }
-            } catch (err) {
-              console.debug("Error following aliases:", err);
-            }
-            return; // Aliases have been fully handled
-          }
-
-          // Try to get a cell link from various types of values
-          const cellLink = maybeGetCellLink(value, parent.getDoc());
-          if (cellLink) {
-            try {
-              const cellId = getEntityId(cellLink.cell);
-              if (cellId) addMatchingCharm(cellId);
-
-              const sourceRefId = followSourceToResultRef(
-                this.runtime.getCellFromLink(cellLink),
-                new Set(),
-                0,
-              );
-              if (sourceRefId) addMatchingCharm(sourceRefId);
-            } catch (err) {
-              console.debug("Error handling cell link from value:", err);
-            }
-            return; // Direct cell references fully handled
-          }
-
-          // Direct $alias handling (for cases not caught by isAlias)
-          if (value.$alias && value.$alias.cell) {
-            try {
-              const aliasId = getEntityId(value.$alias.cell);
-              if (aliasId) addMatchingCharm(aliasId);
-
-              const sourceRefId = followSourceToResultRef(
-                value.$alias.cell.asCell(),
-                new Set(),
-                0,
-              );
-              if (sourceRefId) addMatchingCharm(sourceRefId);
-            } catch (err) {
-              console.debug("Error handling alias reference:", err);
-            }
-          }
-
-          // Direct cell reference handling (for cases not caught by maybeGetCellLink)
-          if (value.cell && value.path !== undefined) {
-            try {
-              const cellId = getEntityId(value.cell);
-              if (cellId) addMatchingCharm(cellId);
-
-              const sourceRefId = followSourceToResultRef(
-                value.cell.asCell(),
-                new Set(),
-                0,
-              );
-              if (sourceRefId) addMatchingCharm(sourceRefId);
-            } catch (err) {
-              console.debug("Error handling direct cell reference:", err);
-            }
-          }
-
-          // Safe recursive processing of arrays
-          if (Array.isArray(value)) {
+            const sourceRefId = followSourceToResultRef(
+              this.runtime.getCellFromLink(link),
+              new Set(),
+              0,
+            );
+            if (sourceRefId) addMatchingCharm(sourceRefId);
+          } else if (Array.isArray(value)) {
+            // Safe recursive processing of arrays
             for (let i = 0; i < value.length; i++) {
-              // Skip null/undefined items
-              if (value[i] == null) continue;
-
-              // Skip items that might be cells to avoid Copy trap
-              if (
-                typeof value[i] === "object" &&
-                (isCell(value[i]) || isDoc(value[i]) || isCellLink(value[i]))
-              ) {
-                try {
-                  // Process each cell directly
-                  processValue(
-                    value[i],
-                    parent,
-                    new Set([...visited]),
-                    depth + 1,
-                  );
-                } catch (err) {
-                  console.debug(
-                    `Error processing special array item at index ${i}:`,
-                    err,
-                  );
-                }
-                continue;
-              }
-
-              // Process regular items
               try {
                 processValue(
                   value[i],
@@ -722,14 +571,6 @@ export class CharmManager {
             const keys = Object.keys(value);
             for (let i = 0; i < keys.length; i++) {
               const key = keys[i];
-
-              // Skip properties that might be or contain Cell objects
-              if (
-                key === "sourceCell" || key === "cell" || key === "value" ||
-                key === "getAsCellLink" || key === "getSourceCell"
-              ) {
-                continue;
-              }
 
               try {
                 processValue(
@@ -814,19 +655,14 @@ export class CharmManager {
       cell: Cell<any>,
       visited = new Set<string>(),
       depth = 0,
-    ): EntityId | undefined => {
+    ): URI | undefined => {
       if (depth > maxDepth) return undefined; // Prevent infinite recursion
 
-      const docId = getEntityId(cell);
-      if (!docId || !docId["/"]) return undefined;
-
-      const docIdStr = typeof docId["/"] === "string"
-        ? docId["/"]
-        : JSON.stringify(docId["/"]);
+      const cellURI = cell.sourceURI;
 
       // Prevent cycles
-      if (visited.has(docIdStr)) return undefined;
-      visited.add(docIdStr);
+      if (visited.has(cellURI)) return undefined;
+      visited.add(cellURI);
 
       // If document has a sourceCell, follow it
       const value = cell.getRaw();
@@ -840,10 +676,10 @@ export class CharmManager {
 
       // If we've reached the end and have a resultRef, return it
       if (value && typeof value === "object" && value.resultRef) {
-        return getEntityId(value.resultRef);
+        return parseLink(value.resultRef, cell)?.id;
       }
 
-      return docId; // Return the current document's ID if no further references
+      return cellURI; // Return the current document's ID if no further references
     };
 
     // Helper to check if a document refers to our target charm
@@ -853,80 +689,27 @@ export class CharmManager {
       visited = new Set<any>(), // Track objects directly, not string representations
       depth = 0,
     ): boolean => {
-      if (!value || typeof value !== "object" || depth > maxDepth) return false;
+      if (!isRecord(value) || depth > maxDepth) return false;
 
       // Prevent cycles in our traversal by tracking object references directly
       if (visited.has(value)) return false;
       visited.add(value);
 
       try {
-        // Handle cells, docs, and cell links directly
-        if (isCell(value)) {
+        if (isLink(value)) {
           try {
-            const cellLink = value.getAsCellLink();
-            if (cellLink && cellLink.cell) {
-              // Check if this cell's doc is our target
-              const cellId = getEntityId(cellLink.cell);
-              if (cellId && cellId["/"] === charmId["/"]) {
-                return true;
-              }
+            const link = parseLink(value, parent);
 
-              // Check if this cell's source chain leads to our target
-              const sourceRefId = followSourceToResultRef(
-                this.runtime.getCellFromLink(cellLink),
-                new Set(),
-                0,
-              );
-              if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-                return true;
-              }
-            }
-          } catch (err) {
-            console.debug("Error handling cell in checkRefersToTarget:", err);
-          }
-          return false; // Don't process cell contents
-        }
-
-        if (isDoc(value)) {
-          try {
-            // Check if this doc is our target
-            const docId = getEntityId(value);
-            if (docId && docId["/"] === charmId["/"]) {
-              return true;
-            }
-
-            // Check if this doc's source chain leads to our target
-            const sourceRefId = followSourceToResultRef(
-              value.asCell(),
-              new Set(),
-              0,
-            );
-            if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-              return true;
-            }
-          } catch (err) {
-            console.debug("Error handling doc in checkRefersToTarget:", err);
-          }
-          return false; // Don't process doc contents
-        }
-
-        if (isCellLink(value)) {
-          try {
             // Check if the cell link's doc is our target
-            const cellId = getEntityId(value.cell);
-            if (cellId && cellId["/"] === charmId["/"]) {
-              return true;
-            }
+            if (link.id === charm.sourceURI) return true;
 
             // Check if cell link's source chain leads to our target
-            const sourceRefId = followSourceToResultRef(
-              value.cell.asCell(),
+            const sourceResultRefURI = followSourceToResultRef(
+              this.runtime.getCellFromLink(link),
               new Set(),
               0,
             );
-            if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-              return true;
-            }
+            if (sourceResultRefURI === charm.sourceURI) return true;
           } catch (err) {
             console.debug(
               "Error handling cell link in checkRefersToTarget:",
@@ -936,150 +719,9 @@ export class CharmManager {
           return false; // Don't process cell link contents
         }
 
-        // Use isAlias and followAliases for aliases
-        if (isAlias(value)) {
-          try {
-            // Follow all aliases to their source
-            const cellLink = followAliases(value, parent.getDoc());
-            if (cellLink && cellLink.cell) {
-              // Check if the aliased doc is our target
-              const cellId = getEntityId(cellLink.cell);
-              if (cellId && cellId["/"] === charmId["/"]) {
-                return true;
-              }
-
-              // Check if source chain leads to our target
-              const sourceRefId = followSourceToResultRef(
-                this.runtime.getCellFromLink(cellLink),
-                new Set(),
-                0,
-              );
-              if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-                return true;
-              }
-            }
-          } catch (err) {
-            console.debug(
-              "Error following aliases in checkRefersToTarget:",
-              err,
-            );
-          }
-          return false; // Aliases have been fully handled
-        }
-
-        // Use maybeGetCellLink to handle various reference types
-        const cellLink = maybeGetCellLink(value, parent.getDoc());
-        if (cellLink) {
-          try {
-            // Check if the linked doc is our target
-            const cellId = getEntityId(cellLink.cell);
-            if (cellId && cellId["/"] === charmId["/"]) {
-              return true;
-            }
-
-            // Check if source chain leads to our target
-            const sourceRefId = followSourceToResultRef(
-              this.runtime.getCellFromLink(cellLink),
-              new Set(),
-              0,
-            );
-            if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-              return true;
-            }
-          } catch (err) {
-            console.debug(
-              "Error handling maybeGetCellLink in checkRefersToTarget:",
-              err,
-            );
-          }
-          return false; // Cell link has been fully handled
-        }
-
-        // Direct $alias handling (for cases not caught by isAlias)
-        if (value.$alias && value.$alias.cell) {
-          try {
-            // Check if the alias points to our target
-            const aliasId = getEntityId(value.$alias.cell);
-            if (aliasId && aliasId["/"] === charmId["/"]) {
-              return true;
-            }
-
-            // Check if source chain leads to our target
-            const sourceRefId = followSourceToResultRef(
-              value.$alias.cell,
-              new Set(),
-              0,
-            );
-            if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-              return true;
-            }
-          } catch (err) {
-            console.debug(
-              "Error handling direct alias in checkRefersToTarget:",
-              err,
-            );
-          }
-        }
-
-        // Direct cell reference handling (for cases not caught by maybeGetCellLink)
-        if (value.cell && value.path !== undefined) {
-          try {
-            // Check if cell reference points to our target
-            const cellId = getEntityId(value.cell);
-            if (cellId && cellId["/"] === charmId["/"]) {
-              return true;
-            }
-
-            // Check if source chain leads to our target
-            const sourceRefId = followSourceToResultRef(
-              value.cell,
-              new Set(),
-              0,
-            );
-            if (sourceRefId && sourceRefId["/"] === charmId["/"]) {
-              return true;
-            }
-          } catch (err) {
-            console.debug(
-              "Error handling direct cell ref in checkRefersToTarget:",
-              err,
-            );
-          }
-        }
-
         // Safe recursive processing of arrays
         if (Array.isArray(value)) {
           for (let i = 0; i < value.length; i++) {
-            // Skip null/undefined items
-            if (value[i] == null) continue;
-
-            // Handle cells carefully
-            if (
-              typeof value[i] === "object" &&
-              (isCell(value[i]) || isDoc(value[i]) || isCellLink(value[i]))
-            ) {
-              try {
-                // Process cells directly to avoid copy trap
-                if (
-                  checkRefersToTarget(
-                    value[i],
-                    parent,
-                    new Set([...visited]),
-                    depth + 1,
-                  )
-                ) {
-                  return true;
-                }
-              } catch (err) {
-                console.debug(
-                  `Error checking special array item at index ${i}:`,
-                  err,
-                );
-              }
-              continue;
-            }
-
-            // Regular value processing
             try {
               if (
                 checkRefersToTarget(
@@ -1095,19 +737,11 @@ export class CharmManager {
               console.debug(`Error checking array item at index ${i}:`, err);
             }
           }
-        } else if (typeof value === "object") {
+        } else if (isRecord(value)) {
           // Process regular object properties
           const keys = Object.keys(value);
           for (let i = 0; i < keys.length; i++) {
             const key = keys[i];
-
-            // Skip properties that might be or contain Cell objects
-            if (
-              key === "sourceCell" || key === "cell" || key === "value" ||
-              key === "getAsCellLink" || key === "getSourceCell"
-            ) {
-              continue;
-            }
 
             try {
               if (
@@ -1136,53 +770,28 @@ export class CharmManager {
     for (const otherCharm of allCharms) {
       if (isSameEntity(otherCharm, charm)) continue; // Skip self
 
-      // First check the charm document
-      try {
-        const otherCellLink = otherCharm.getAsCellLink();
-        if (!otherCellLink.cell) continue;
-
-        const charmValue = otherCellLink.cell.get();
-
-        // Check if the charm document references our target
-        if (charmValue && typeof charmValue === "object") {
-          if (
-            checkRefersToTarget(
-              charmValue,
-              this.runtime.getCellFromLink(otherCellLink),
-              new Set(),
-              0,
-            )
-          ) {
-            addReadingCharm(otherCharm);
-            continue; // Skip additional checks for this charm
-          }
-        }
-      } catch (err) {
-        // Error checking charm references - continue to check argument references
+      if (checkRefersToTarget(otherCharm, otherCharm, new Set(), 0)) {
+        addReadingCharm(otherCharm);
+        continue; // Skip additional checks for this charm
       }
 
       // Also specifically check the argument data where references are commonly found
       try {
         const argumentCell = this.getArgument(otherCharm);
         if (argumentCell) {
-          const argumentLink = argumentCell.getAsCellLink();
-          if (argumentLink && argumentLink.cell) {
-            const argumentValue = argumentLink.cell.getAtPath(
-              argumentLink.path,
-            );
+          const argumentValue = argumentCell.getRaw();
 
-            // Check if the argument references our target
-            if (argumentValue && typeof argumentValue === "object") {
-              if (
-                checkRefersToTarget(
-                  argumentValue,
-                  this.runtime.getCellFromLink(argumentLink),
-                  new Set(),
-                  0,
-                )
-              ) {
-                addReadingCharm(otherCharm);
-              }
+          // Check if the argument references our target
+          if (argumentValue && typeof argumentValue === "object") {
+            if (
+              checkRefersToTarget(
+                argumentValue,
+                argumentCell,
+                new Set(),
+                0,
+              )
+            ) {
+              addReadingCharm(otherCharm);
             }
           }
         }
@@ -1298,7 +907,7 @@ export class CharmManager {
   }
 
   // Consistently return the `Cell<Charm>` of charm with
-  // id `charmId`, applies the provided `recipe` (which may be 
+  // id `charmId`, applies the provided `recipe` (which may be
   // its current recipe -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
   async runWithRecipe(

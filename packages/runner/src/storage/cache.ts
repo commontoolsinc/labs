@@ -11,14 +11,12 @@ import type {
   Entity,
   Fact,
   FactAddress,
-  JSONValue,
   MemorySpace,
   Protocol,
   ProviderCommand,
   QueryError,
   Result,
   Revision,
-  SchemaContext,
   SchemaQueryArgs,
   Signer,
   State,
@@ -36,7 +34,7 @@ import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import { SchemaNone } from "@commontools/memory/schema";
 import { type Cancel, type EntityId } from "@commontools/runner";
-import { type JSONSchema } from "../builder/types.ts";
+import type { JSONSchema, JSONValue, SchemaContext } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
 import { MapSet, type SchemaPathSelector } from "../traverse.ts";

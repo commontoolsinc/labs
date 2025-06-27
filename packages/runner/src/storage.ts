@@ -8,7 +8,7 @@ import type {
   SchemaPathSelector,
 } from "@commontools/memory/interface";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, type CellLink, isCell, isCellLink, isStream } from "./cell.ts";
+import { Cell, isCell, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type EntityId, entityIdStr } from "./doc-map.ts";
 import {
@@ -22,9 +22,10 @@ import type {
   StorageValue,
 } from "./storage/interface.ts";
 import { log } from "./log.ts";
-import type { IDocumentMap, IRuntime, IStorage } from "./runtime.ts";
+import type { IRuntime, IStorage } from "./runtime.ts";
 import { DocObjectManager, querySchema } from "./storage/query.ts";
 import { deepEqual } from "./path-utils.ts";
+import { isLink, parseLink } from "./link-utils.ts";
 export type { Labels, MemorySpace };
 
 /**
@@ -284,7 +285,7 @@ export class Storage implements IStorage {
           const newValue = Storage._cellLinkFromJSON(
             newDoc,
             storageValue,
-            this.runtime.documentMap,
+            this.runtime,
           );
           newDoc.send(newValue.value);
         }
@@ -328,12 +329,19 @@ export class Storage implements IStorage {
   private static _cellLinkFromJSON<T>(
     doc: DocImpl<T>,
     storageValue: StorageValue<JSONValue>,
-    documentMap: IDocumentMap,
+    runtime: IRuntime,
   ): StorageValue<any> {
     // Helper function that converts a JSONValue into an object where the
     // cell links have been replaced with DocImpl objects.
     const traverse = (value: JSONValue): any => {
       if (typeof value !== "object" || value === null) {
+        return value;
+      } else if (isLink(value)) {
+        const link = parseLink(value, doc.asCell());
+        const cell = runtime.getCellFromLink(link);
+
+        // We don't convert here as we plan to remove this whole transformation
+        // soon. So return value instead of creating a sigil link.
         return value;
       } else if ("cell" in value && "path" in value) {
         // If we see a doc link with just an id, then we replace it with
@@ -346,7 +354,7 @@ export class Storage implements IStorage {
           // Any dependent docs that we expected should already be loaded,
           // so we can just grab them from the runtime's document map.
           // If they aren't available, then leave the link in its raw form.
-          const dependency = documentMap.getDocByEntityId(
+          const dependency = runtime.documentMap.getDocByEntityId(
             doc.space,
             value.cell as { "/": string },
             false,
@@ -401,23 +409,18 @@ export class Storage implements IStorage {
       value: Readonly<any>,
     ): JSONValue => {
       // If it's a doc, make it a doc link -- we'll swap this for json below
-      if (isDoc(value)) value = { cell: value, path: [] } satisfies CellLink;
-
-      // If it's a query result proxy, make it a doc link
-      if (isQueryResultForDereferencing(value)) {
-        value = getCellLinkOrThrow(value);
-      }
-
-      // If it's a doc link, convert it to a doc link with an id
-      if (isCellLink(value)) {
-        return {
-          ...value,
-          path: value.path.map((pk) => pk.toString()),
-          cell: value.cell.toJSON!()!, /* = the id */
-        };
+      if (isLink(value)) {
+        // Don't convert to sigil link here, as we plan to remove this whole
+        // transformation soon. So return value instead of creating a sigil
+        // link. Roundtripping through JSON converts all Cells and Docs to a
+        // serializable format.
+        if (isQueryResultForDereferencing(value)) {
+          value = getCellLinkOrThrow(value);
+        }
+        return JSON.parse(JSON.stringify(value));
       } else if (isRecord(value)) {
         if (Array.isArray(value)) {
-          return value.map((val, _index) => traverse(val));
+          return value.map((val) => traverse(val));
         } else {
           return Object.fromEntries(
             Object.entries(value).map(([key, val]: [PropertyKey, any]) => [
@@ -432,8 +435,8 @@ export class Storage implements IStorage {
     // Convert all doc references to ids and remember as dependent docs
     const newValue: StorageValue<JSONValue> = {
       value: traverse(doc.get() as Readonly<any>),
-      ...(doc.sourceCell !== undefined)
-        ? { source: doc.sourceCell.toJSON() }
+      ...(doc.sourceCell?.entityId !== undefined)
+        ? { source: doc.sourceCell.entityId }
         : {},
       ...(labels !== undefined) ? { labels: labels } : {},
     };
@@ -523,7 +526,7 @@ export class Storage implements IStorage {
         const newValue = Storage._cellLinkFromJSON(
           doc,
           storageValue,
-          this.runtime.documentMap,
+          this.runtime,
         );
         if (!deepEqual(newValue.value, doc.get())) {
           // values differ

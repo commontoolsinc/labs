@@ -30,10 +30,10 @@ import {
   createJsonSchema,
   moduleToJSON,
   recipeToJSON,
-  toJSONWithAliases,
+  toJSONWithLegacyAliases,
 } from "./json-utils.ts";
 import { setValueAtPath } from "../path-utils.ts";
-import { traverseValue } from "../traverse-utils.ts";
+import { traverseValue } from "./traverse-utils.ts";
 
 /** Declare a recipe
  *
@@ -257,10 +257,10 @@ function factoryFromRecipe<T, R>(
   });
 
   // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithAliases(outputs ?? {}, paths, true)!;
+  const result = toJSONWithLegacyAliases(outputs ?? {}, paths, true)!;
 
   // Collect default values for the inputs
-  const defaults = toJSONWithAliases(
+  const defaults = toJSONWithLegacyAliases(
     inputs.export().defaultValue ?? {},
     paths,
     true,
@@ -307,9 +307,12 @@ function factoryFromRecipe<T, R>(
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) || {};
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = toJSONWithAliases(node.module, paths) as unknown as Module;
-    const inputs = toJSONWithAliases(node.inputs, paths)!;
-    const outputs = toJSONWithAliases(node.outputs, paths)!;
+    const module = toJSONWithLegacyAliases(
+      node.module,
+      paths,
+    ) as unknown as Module;
+    const inputs = toJSONWithLegacyAliases(node.inputs, paths)!;
+    const outputs = toJSONWithLegacyAliases(node.outputs, paths)!;
     return { module, inputs, outputs } satisfies Node;
   });
 

@@ -1,5 +1,5 @@
 import { type Recipe } from "../builder/types.ts";
-import { type DocImpl } from "../doc.ts";
+import { type Cell } from "../cell.ts";
 import { getCellLinkOrThrow } from "../query-result-proxy.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 import { type Action } from "../scheduler.ts";
@@ -28,28 +28,28 @@ import type { IRuntime } from "../runtime.ts";
  * @returns A doc containing the mapped values.
  */
 export function map(
-  inputsCell: DocImpl<{
+  inputsCell: Cell<{
     list: any[];
     op: Recipe;
   }>,
   sendResult: (result: any) => void,
   addCancel: AddCancel,
   cause: any,
-  parentDoc: DocImpl<any>,
+  parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const result = runtime.documentMap.getDoc<any[]>(
-    [],
+  const result = runtime.getCell<any[]>(
+    parentCell.getDoc().space,
     {
-      map: parentDoc.entityId,
+      map: parentCell.entityId,
       op: inputsCell.getAsQueryResult([])?.op,
       cause,
     },
-    parentDoc.space,
   );
-  result.sourceCell = parentDoc;
+  result.send([]);
+  result.getDoc().sourceCell = parentCell.getDoc();
 
-  sendResult({ cell: result, path: [] });
+  sendResult(result);
 
   // Tracks up to where in the source array we've handled entries. Right now we
   // start at zero, even though in principle the result doc above could have
@@ -59,17 +59,18 @@ export function map(
   let initializedUpTo = 0;
 
   return (log: ReactivityLog) => {
+    const resultWithLog = result.withLog(log);
     let { list, op } = inputsCell.getAsQueryResult([], log);
 
     // If the result's value is undefined, set it to the empty array.
-    if (result.get() === undefined) {
-      result.setAtPath([], [], log);
+    if (resultWithLog.get() === undefined) {
+      resultWithLog.set([]);
     }
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
-      result.setAtPath([], [], log);
+      resultWithLog.set([]);
       // Reset progress so that once the list becomes defined again we
       // recompute from the beginning.
       initializedUpTo = 0;
@@ -92,10 +93,9 @@ export function map(
 
     // Add values that have been appended
     while (initializedUpTo < list.length) {
-      const resultCell = runtime.documentMap.getDoc(
-        undefined,
+      const resultCell = runtime.getCell(
+        parentCell.getDoc().space,
         { result, index: initializedUpTo },
-        parentDoc.space,
       );
       runtime.runner.run(
         op,
@@ -109,19 +109,19 @@ export function map(
         },
         resultCell,
       );
-      resultCell.sourceCell!.sourceCell = parentDoc;
+      resultCell.getDoc().sourceCell!.sourceCell = parentCell.getDoc();
       // Add cancel from runtime's runner
       addCancel(() => runtime.runner.stop(resultCell));
 
-      // Send the result value to the result doc
-      result.setAtPath([initializedUpTo], { cell: resultCell, path: [] }, log);
+      // Send the result value to the result cell
+      resultWithLog.key(initializedUpTo).set(resultCell);
 
       initializedUpTo++;
     }
 
     // Shorten the result if the list got shorter
-    if (result.get().length > list.length) {
-      result.setAtPath(["length"], list.length, log);
+    if (resultWithLog.get().length > list.length) {
+      resultWithLog.key("length").set(list.length);
       initializedUpTo = list.length;
     }
 

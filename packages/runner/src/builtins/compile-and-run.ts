@@ -1,8 +1,8 @@
-import { type DocImpl } from "../doc.ts";
-import { type Action } from "../scheduler.ts";
-import { refer } from "merkle-reference";
-import { type ReactivityLog } from "../scheduler.ts";
 import { BuiltInCompileAndRunParams } from "@commontools/api";
+import { refer } from "merkle-reference";
+import { type Cell } from "../cell.ts";
+import { type Action } from "../scheduler.ts";
+import { type ReactivityLog } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 
 /**
@@ -22,27 +22,27 @@ import type { IRuntime } from "../runtime.ts";
  * be defined. (Note: Runtime errors are not currently handled).
  */
 export function compileAndRun(
-  inputsDoc: DocImpl<BuiltInCompileAndRunParams<any>>,
+  inputsCell: Cell<BuiltInCompileAndRunParams<any>>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
-  parentDoc: DocImpl<any>,
+  parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  const compiling = runtime.documentMap.getDoc<boolean>(
-    false,
+  const compiling = runtime.getCell<boolean>(
+    parentCell.getDoc().space,
     { compile: { compiling: cause } },
-    parentDoc.space,
   );
-  const result = runtime.documentMap.getDoc<string | undefined>(
-    undefined,
+  compiling.send(false);
+  
+  const result = runtime.getCell<string | undefined>(
+    parentCell.getDoc().space,
     { compile: { result: cause } },
-    parentDoc.space,
   );
-  const error = runtime.documentMap.getDoc<string | undefined>(
-    undefined,
+  
+  const error = runtime.getCell<string | undefined>(
+    parentCell.getDoc().space,
     { compile: { error: cause } },
-    parentDoc.space,
   );
 
   sendResult({ compiling, result, error });
@@ -52,9 +52,12 @@ export function compileAndRun(
 
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
+    const compilingWithLog = compiling.withLog(log);
+    const resultWithLog = result.withLog(log);
+    const errorWithLog = error.withLog(log);
 
-    const { files, main } = inputsDoc.getAsQueryResult([], log) ?? {};
-    const input = inputsDoc.asCell().withLog(log).key("input");
+    const { files, main } = inputsCell.getAsQueryResult([], log) ?? {};
+    const input = inputsCell.withLog(log).key("input");
 
     const hash = refer({ files: JSON.stringify(files ?? {}), main: main ?? "" })
       .toString();
@@ -66,45 +69,45 @@ export function compileAndRun(
     previousCallHash = hash;
 
     runtime.runner.stop(result);
-    result.setAtPath([], undefined, log);
-    error.setAtPath([], undefined, log);
+    resultWithLog.set(undefined);
+    errorWithLog.set(undefined);
 
     // Undefined inputs => Undefined output, not pending
     if (!main || !files) {
-      compiling.setAtPath([], false, log);
+      compilingWithLog.set(false);
       return;
     }
 
     // Main file not found => Error, not pending
     if (!(main in files)) {
-      error.setAtPath([], `"${main}" not found in files`, log);
-      compiling.setAtPath([], false, log);
+      errorWithLog.set(`"${main}" not found in files`);
+      compilingWithLog.set(false);
       return;
     }
 
     // Now we're sure that we have a new file to compile
-    compiling.setAtPath([], true, log);
+    compilingWithLog.set(true);
 
-    const compilePromise = runtime.harness.runSingle(
+    const compilePromise = runtime.harness.run(
       files[main],
     )
       .catch(
-        (error) => {
+        (err) => {
           if (thisRun !== currentRun) return;
-          error.setAtPath(
-            [],
-            error.message + (error.stack ? "\n" + error.stack : ""),
-            log,
+          errorWithLog.set(
+            err.message + (err.stack ? "\n" + err.stack : ""),
           );
         },
       ).finally(() => {
         if (thisRun !== currentRun) return;
-        compiling.setAtPath([], false, log);
+        compilingWithLog.set(false);
       });
 
     compilePromise.then(async (recipe) => {
       if (thisRun !== currentRun) return;
-      if (recipe) await runtime.runSynced(result.asCell(), recipe, input);
+      if (recipe) {
+        await runtime.runSynced(result, recipe, input);
+      }
       // TODO(seefeld): Add capturing runtime errors.
     });
   };

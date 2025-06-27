@@ -14,8 +14,15 @@ import type {
   JSONValue,
   SchemaContext,
 } from "./builder/types.ts";
-import { isAlias } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
+import {
+  isLegacyAlias,
+  isSigilLink,
+  type NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
+import { fromURI } from "./uri-utils.ts";
+import { type JSONCellLink } from "./sigil-types.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -107,7 +114,6 @@ export type PointerCycleTracker = CycleTracker<
   Immutable<JSONValue>
 >;
 
-type JSONCellLink = { cell: { "/": string }; path: string[] };
 export type CellTarget = { path: string[]; cellTarget: string | undefined };
 
 export interface ObjectStorageManager<K, S, V> {
@@ -539,7 +545,7 @@ function narrowSchema(
 }
 
 /**
- * Extract the path and cellTarget from an Alias or JSONCellLink
+ * Extract the path and cellTarget from an Alias, JSONCellLink, or sigil value
  *
  * @param value - The JSON object that might contain pointer information
  * @returns A CellTarget object containing:
@@ -547,26 +553,16 @@ function narrowSchema(
  *   - cellTarget: The target cell identifier as a string, or undefined if it refers to the current document
  */
 export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
-  if (isAlias(value)) {
-    if (isObject(value.$alias.cell) && "/" in value.$alias.cell) {
-      return {
-        path: value.$alias.path.map((p) => p.toString()),
-        cellTarget: value.$alias.cell["/"] as string,
-      };
-    }
-    return {
-      path: value.$alias.path.map((p) => p.toString()),
-      cellTarget: undefined,
-    };
-  } else if (isJSONCellLink(value)) {
-    //console.error("cell: ", obj.cell, "; path: ", obj.path);
-    return { path: value.path, cellTarget: value.cell["/"] as string };
-  }
-  return { path: [], cellTarget: undefined };
+  const link = parseLink(value, {} as NormalizedLink);
+  if (!link) return { path: [], cellTarget: undefined };
+  return {
+    path: link.path ?? [],
+    cellTarget: link.id ? fromURI(link.id) : undefined,
+  };
 }
 
 export function isPointer(value: unknown): boolean {
-  return (isAlias(value) || isJSONCellLink(value));
+  return (isSigilLink(value) || isJSONCellLink(value) || isLegacyAlias(value));
 }
 
 /**

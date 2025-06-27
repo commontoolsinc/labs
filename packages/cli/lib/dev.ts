@@ -1,6 +1,10 @@
-import { JsScript, type Source } from "@commontools/js-runtime";
+import {
+  type JsScript,
+  type ProgramResolver,
+  type Source,
+} from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
-import { Engine, EngineProgramResolver, Runtime } from "@commontools/runner";
+import { Engine, Runtime } from "@commontools/runner";
 import { basename, dirname, join } from "@std/path";
 
 async function createRuntime() {
@@ -16,23 +20,22 @@ async function createRuntime() {
 // Extend `EngineProgramResolver` to add the necessary 3P module
 // types when needed, but otherwise lazily crawl the filesystem
 // while walking source files
-class CliProgram extends EngineProgramResolver {
+export class CliProgram implements ProgramResolver {
   private fsRoot: string;
-  private _entry: Source;
-  constructor(entryPath: string) {
-    super(entryPath, {});
-    this.fsRoot = dirname(entryPath);
-    this._entry = {
-      name: entryPath.substring(this.fsRoot.length),
-      contents: Deno.readTextFileSync(entryPath),
+  private _main: Source;
+  constructor(mainPath: string) {
+    this.fsRoot = dirname(mainPath);
+    this._main = {
+      name: mainPath.substring(this.fsRoot.length),
+      contents: Deno.readTextFileSync(mainPath),
     };
   }
 
-  override entry(): Source {
-    return this._entry;
+  main(): Source {
+    return this._main;
   }
 
-  override resolveSource(specifier: string): Promise<Source | undefined> {
+  resolveSource(specifier: string): Promise<Source | undefined> {
     if (specifier && specifier[0] === "/") {
       const absPath = join(
         this.fsRoot,
@@ -43,12 +46,12 @@ class CliProgram extends EngineProgramResolver {
         contents: Deno.readTextFileSync(absPath),
       });
     }
-    return super.resolveSource(specifier);
+    return Promise.resolve(undefined);
   }
 }
 
 export interface ProcessOptions {
-  entry: string;
+  main: string;
   run: boolean;
   check: boolean;
   output?: string;
@@ -63,8 +66,8 @@ export async function process(
     : options.output
     ? basename(options.output)
     : undefined;
-  const program = new CliProgram(options.entry);
   const engine = new Engine(await createRuntime());
+  const program = await engine.resolve(new CliProgram(options.main));
   const { output, exports } = await engine.process(program, {
     noCheck: !options.check,
     noRun: !options.run,

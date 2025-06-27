@@ -1,6 +1,5 @@
 import { OAuth2Client, Tokens } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import { type CellLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Context } from "@hono/hono";
 import { AuthSchema, Mutable, Schema } from "@commontools/runner";
@@ -144,18 +143,16 @@ export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
 }
 
 // Helper function to get auth cell
-export async function getAuthCell(docLink: CellLink | string) {
+export async function getAuthCell(docLink: string) {
   try {
     // Parse string to docLink if needed
-    const parsedDocLink = typeof docLink === "string"
-      ? JSON.parse(docLink)
-      : docLink;
+    const parsedDocLink = JSON.parse(docLink);
+
+    let authCell = runtime.getCellFromLink(parsedDocLink);
 
     // We already should have the schema on the parsedDocLink (from our state),
     // but if it's missing, we can add it  here.
-    parsedDocLink.schema = parsedDocLink.schema ?? AuthSchema;
-
-    const authCell = runtime.getCellFromLink(parsedDocLink);
+    if (!authCell.schema) authCell = authCell.asSchema(AuthSchema);
 
     // make sure the cell is live!
     await runtime.storage.syncCell(authCell, true);
@@ -171,7 +168,7 @@ export async function getAuthCell(docLink: CellLink | string) {
 export async function persistTokens(
   oauthToken: OAuth2Tokens,
   userInfo: UserInfo,
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string,
 ) {
   try {
     const authCell = await getAuthCell(authCellDocLink);
@@ -202,7 +199,7 @@ export async function persistTokens(
 
 // Get tokens from the auth cell
 export async function getTokensFromAuthCell(
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string,
 ) {
   try {
     const authCell = await getAuthCell(authCellDocLink);
@@ -279,7 +276,7 @@ export function createRefreshErrorResponse(
 }
 
 // Clears authentication data from the auth cell
-export async function clearAuthData(authCellDocLink: string | CellLink) {
+export async function clearAuthData(authCellDocLink: string) {
   try {
     const authCell = await getAuthCell(authCellDocLink);
 
