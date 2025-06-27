@@ -412,10 +412,55 @@ class PlaidClient {
 
         const result = await response.json();
 
-        // For now, we'll simulate the transaction processing
-        // In a real implementation, the backend would return the actual transaction data
+        // Collect the transactions with proper formatting
+        if (result.added && result.added.length > 0) {
+          const formattedTransactions = result.added.map((t: any) => ({
+            transactionId: t.transaction_id,
+            accountId: t.account_id,
+            itemId: item.itemId,
+            amount: t.amount,
+            isoCurrencyCode: t.iso_currency_code,
+            unofficialCurrencyCode: t.unofficial_currency_code,
+            date: t.date,
+            authorizedDate: t.authorized_date,
+            name: t.name,
+            merchantName: t.merchant_name,
+            category: t.category || [],
+            pending: t.pending,
+            paymentChannel: t.payment_channel,
+          }));
+          allAdded.push(...formattedTransactions);
+        }
+
+        if (result.modified && result.modified.length > 0) {
+          const formattedTransactions = result.modified.map((t: any) => ({
+            transactionId: t.transaction_id,
+            accountId: t.account_id,
+            itemId: item.itemId,
+            amount: t.amount,
+            isoCurrencyCode: t.iso_currency_code,
+            unofficialCurrencyCode: t.unofficial_currency_code,
+            date: t.date,
+            authorizedDate: t.authorized_date,
+            name: t.name,
+            merchantName: t.merchant_name,
+            category: t.category || [],
+            pending: t.pending,
+            paymentChannel: t.payment_channel,
+          }));
+          allModified.push(...formattedTransactions);
+        }
+
+        if (result.removed && result.removed.length > 0) {
+          allRemoved.push(...result.removed);
+        }
+
         console.log(
-          `Synced transactions for ${item.itemId}: ${result.added} added, ${result.modified} modified, ${result.removed} removed`,
+          `Synced transactions for ${item.itemId}: ${
+            result.added?.length || 0
+          } added, ${result.modified?.length || 0} modified, ${
+            result.removed?.length || 0
+          } removed`,
         );
       } catch (error) {
         console.error(

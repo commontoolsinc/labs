@@ -335,9 +335,9 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
 
     const plaidClient = createPlaidClient();
     const authData = await getAuthData(payload.authCellId);
-    let totalAdded = 0;
-    let totalModified = 0;
-    let totalRemoved = 0;
+    const allAddedTransactions: any[] = [];
+    const allModifiedTransactions: any[] = [];
+    const allRemovedIds: string[] = [];
     let hasMoreOverall = false;
 
     // Filter items to sync
@@ -355,9 +355,6 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
       try {
         let hasMore = true;
         let cursor = item.lastSyncCursor;
-        let itemAdded = 0;
-        let itemModified = 0;
-        let itemRemoved = 0;
 
         // Continue syncing until no more updates
         while (hasMore) {
@@ -379,9 +376,11 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
             has_more,
           } = syncResponse.data;
 
-          itemAdded += added.length;
-          itemModified += modified.length;
-          itemRemoved += removed.length;
+          // Collect the actual transaction data
+          allAddedTransactions.push(...added);
+          allModifiedTransactions.push(...modified);
+          allRemovedIds.push(...removed.map((r: any) => r.transaction_id));
+
           cursor = next_cursor;
           hasMore = has_more;
 
@@ -406,9 +405,6 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
 
         await upsertPlaidItem(payload.authCellId, updatedItem);
 
-        totalAdded += itemAdded;
-        totalModified += itemModified;
-        totalRemoved += itemRemoved;
         if (hasMore) hasMoreOverall = true;
       } catch (error) {
         logger.error(
@@ -419,13 +415,15 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
       }
     }
 
-    return createSyncSuccessResponse(
-      c,
-      totalAdded,
-      totalModified,
-      totalRemoved,
-      hasMoreOverall,
-    );
+    // Return the actual transaction data
+    return c.json({
+      success: true,
+      message: "Transactions synced successfully",
+      added: allAddedTransactions,
+      modified: allModifiedTransactions,
+      removed: allRemovedIds,
+      hasMore: hasMoreOverall,
+    }, 200);
   } catch (error) {
     logger.error({ error }, "Failed to sync transactions");
     return createSyncErrorResponse(
