@@ -19,7 +19,6 @@ export { isDoc } from "./doc.ts";
 export { isCell, isStream } from "./cell.ts";
 export {
   getCellLinkOrThrow,
-  getCellLinkOrValue,
   isQueryResult,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
