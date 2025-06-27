@@ -275,15 +275,31 @@ export class CTOutliner extends BaseElement {
     if (this.nodes.length === 0) {
       this.nodes = [this.createNode("", 0)];
     }
+    // Set initial focus to first node if we have nodes
+    if (this.nodes.length > 0 && !this.focusedNodeId) {
+      this.focusedNodeId = this.nodes[0].id;
+    }
   }
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
 
     if (changedProperties.has("value") && !this.editingNodeId) {
+      const previousNodes = this.nodes;
       this.nodes = this.parseMarkdown(this.value);
+
       if (this.nodes.length === 0) {
         this.nodes = [this.createNode("", 0)];
+      }
+
+      // Preserve focus if possible, otherwise focus first node
+      if (this.focusedNodeId) {
+        const focusedNode = this.findNode(this.focusedNodeId);
+        if (!focusedNode && this.nodes.length > 0) {
+          this.focusedNodeId = this.nodes[0].id;
+        }
+      } else if (this.nodes.length > 0) {
+        this.focusedNodeId = this.nodes[0].id;
       }
     }
   }
@@ -459,17 +475,12 @@ export class CTOutliner extends BaseElement {
     const parentArray = this.findNodeParent(this.editingNodeId) || this.nodes;
     const currentIndex = this.getNodeIndex(this.editingNodeId, parentArray);
 
-    // Create new node at same level
+    // Create new node - always at same level as current node
     const newNode = this.createNode("", currentNode.level);
 
-    // If current node has children and is not collapsed, insert as first child
-    if (currentNode.children.length > 0 && !currentNode.collapsed) {
-      currentNode.children.unshift(newNode);
-      newNode.level = currentNode.level + 1;
-    } else {
-      // Otherwise insert after current node
-      parentArray.splice(currentIndex + 1, 0, newNode);
-    }
+    // Always insert after current node at the same level
+    // This provides more predictable behavior
+    parentArray.splice(currentIndex + 1, 0, newNode);
 
     // Clear editing state
     this.editingNodeId = null;
@@ -540,6 +551,9 @@ export class CTOutliner extends BaseElement {
 
     if (!node || currentIndex === -1) return;
 
+    // Store the node ID to maintain focus after indentation
+    const nodeId = this.editingNodeId;
+
     if (outdent) {
       // Outdent (move left)
       if (node.level > 0) {
@@ -597,6 +611,16 @@ export class CTOutliner extends BaseElement {
 
     this.requestUpdate();
     this.emitChange();
+
+    // Restore focus to the editor after indentation
+    setTimeout(() => {
+      const editor = this.shadowRoot?.querySelector(
+        `#editor-${nodeId}`,
+      ) as HTMLTextAreaElement;
+      if (editor) {
+        editor.focus();
+      }
+    }, 0);
   }
 
   private handleEditorInput(event: Event) {
@@ -818,6 +842,9 @@ export class CTOutliner extends BaseElement {
         event.preventDefault();
         if (currentIndex > 0) {
           this.focusedNodeId = allNodes[currentIndex - 1].id;
+        } else if (currentIndex === -1 && allNodes.length > 0) {
+          // If nothing is focused, start from the last node
+          this.focusedNodeId = allNodes[allNodes.length - 1].id;
         }
         break;
 
@@ -825,6 +852,9 @@ export class CTOutliner extends BaseElement {
         event.preventDefault();
         if (currentIndex < allNodes.length - 1) {
           this.focusedNodeId = allNodes[currentIndex + 1].id;
+        } else if (currentIndex === -1 && allNodes.length > 0) {
+          // If nothing is focused, start from the first node
+          this.focusedNodeId = allNodes[0].id;
         }
         break;
 
@@ -972,9 +1002,7 @@ export class CTOutliner extends BaseElement {
         @click="${this.handleOutlinerClick}"
         tabindex="0"
       >
-        ${this.nodes.length === 0 ||
-          (this.nodes.length === 1 && this.nodes[0].content === "" &&
-            this.nodes[0].children.length === 0)
+        ${this.nodes.length === 0
         ? html`
           <div class="placeholder">Click to start typing...</div>
         `
@@ -985,45 +1013,44 @@ export class CTOutliner extends BaseElement {
 
   private handleOutlinerClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
-    
+
     // Handle charm link clicks
-    if (target.matches('a.charm-link')) {
+    if (target.matches("a.charm-link")) {
       event.preventDefault();
-      const href = target.getAttribute('href');
+      const href = target.getAttribute("href");
       const text = target.textContent;
-      
+
       // Emit a custom event for charm link clicks
-      this.emit('charm-link-click', {
+      this.emit("charm-link-click", {
         href,
         text,
         charm: this.decodeCharmFromHref(href),
       });
       return;
     }
-    
-    // If clicking on empty space and we have a single empty node, start editing it
-    if (
-      this.nodes.length === 1 && this.nodes[0].content === "" &&
-      this.nodes[0].children.length === 0
-    ) {
+
+    // Handle clicks on the main placeholder (when no nodes exist)
+    if (target.matches(".placeholder") && this.nodes.length === 0) {
       event.preventDefault();
+      this.nodes = [this.createNode("", 0)];
       this.focusedNodeId = this.nodes[0].id;
       this.startEditing(this.nodes[0].id);
+      this.requestUpdate();
     }
   }
 
   private decodeCharmFromHref(href: string | null): any {
     if (!href) return null;
-    
+
     try {
       // Decode the URL-encoded charm representation
       const decoded = decodeURIComponent(href);
-      
+
       // Try to parse it back if it looks like JSON
-      if (decoded.startsWith('{') && decoded.endsWith('}')) {
+      if (decoded.startsWith("{") && decoded.endsWith("}")) {
         return JSON.parse(decoded);
       }
-      
+
       // Otherwise return the decoded string
       return decoded;
     } catch (error) {
@@ -1154,20 +1181,22 @@ export class CTOutliner extends BaseElement {
 
   private renderMarkdownContent(content: string): unknown {
     if (!content.trim()) {
-      return html`<span class="placeholder">Empty</span>`;
+      return html`
+        <span class="placeholder">Empty</span>
+      `;
     }
 
     try {
       // Configure marked for inline content (no paragraphs)
       const renderer = new marked.Renderer();
-      
+
       // Override paragraph to not wrap in <p> tags for inline content
       renderer.paragraph = (text: string) => text;
-      
+
       // Override link to handle charm references
       renderer.link = (href: string, title: string | null, text: string) => {
         // For charm links, we'll add a special class and handle clicks
-        const titleAttr = title ? ` title="${title}"` : '';
+        const titleAttr = title ? ` title="${title}"` : "";
         return `<a href="${href}" class="charm-link"${titleAttr}>${text}</a>`;
       };
 
@@ -1177,10 +1206,14 @@ export class CTOutliner extends BaseElement {
         gfm: true,
       });
 
-      return html`<span class="markdown-content">${unsafeHTML(html_content)}</span>`;
+      return html`
+        <span class="markdown-content">${unsafeHTML(html_content)}</span>
+      `;
     } catch (error) {
       // Fallback to plain text if markdown parsing fails
-      return html`<span>${content}</span>`;
+      return html`
+        <span>${content}</span>
+      `;
     }
   }
 }
