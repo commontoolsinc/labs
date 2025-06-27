@@ -83,10 +83,6 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     // Create a user ID for Plaid (can be any stable string)
     const userId = "commontools-user";
 
-    // Use the redirect URI from env (backend callback URL)
-    // This should match what's configured in Plaid dashboard
-    const redirectUri = env.PLAID_REDIRECT_URI || payload.redirectUri;
-
     // Create link token request
     const linkTokenRequest: any = {
       user: {
@@ -96,20 +92,31 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
       products: payload.products || ["transactions"],
       country_codes: (payload.countryCodes || ["US"]) as CountryCode[],
       language: "en",
+      // For hosted Link, we need to specify the completion redirect
+      hosted_link: {
+        // This is where Plaid redirects after the ENTIRE session is complete
+        completion_redirect_uri: payload.frontendUrl || "http://localhost:5173",
+        // Explicitly request hosted link URL
+        url_lifetime_seconds: 14400, // 4 hours
+      }
     };
 
-    // Only add redirect_uri if provided
-    if (redirectUri) {
-      linkTokenRequest.redirect_uri = redirectUri;
-    }
+    // NOTE: We should NOT set redirect_uri for hosted Link OAuth!
+    // Plaid handles the OAuth redirect internally
+    // Setting redirect_uri breaks the OAuth flow by redirecting to us instead of back to Plaid
 
     logger.debug({ linkTokenRequest }, "Creating Plaid link token");
 
     const response = await plaidClient.linkTokenCreate(linkTokenRequest);
-    const { link_token, expiration } = response.data;
+    const { link_token, expiration, hosted_link_url } = response.data;
 
     logger.info(
-      { linkToken: link_token.substring(0, 20) + "...", expiration },
+      { 
+        linkToken: link_token.substring(0, 20) + "...", 
+        expiration,
+        hasHostedLinkUrl: !!hosted_link_url,
+        hostedLinkUrlPrefix: hosted_link_url ? hosted_link_url.substring(0, 50) + "..." : null,
+      },
       "Created Plaid link token",
     );
 
@@ -131,10 +138,17 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
       "Stored OAuth session in Redis",
     );
 
-    // Create the hosted Link URL
-    // Use the standard hosted Link URL without deprecated isWebview parameter
-    const hostedLinkUrl =
+    // Use the hosted_link_url from Plaid if available, otherwise construct it
+    const hostedLinkUrl = hosted_link_url || 
       `https://cdn.plaid.com/link/v2/stable/link.html?token=${link_token}`;
+
+    logger.info(
+      { 
+        usingPlaidHostedUrl: !!hosted_link_url,
+        finalHostedLinkUrl: hostedLinkUrl.substring(0, 50) + "...",
+      },
+      "Hosted Link URL determined",
+    );
 
     return c.json({
       linkToken: link_token,
@@ -796,7 +810,22 @@ export const completeOAuth: AppRouteHandler<CompleteOAuthRoute> = async (c) => {
 
       logger.info("Link token get response received");
 
+      // Log the full response structure for debugging
+      logger.info({
+        responseKeys: Object.keys(linkTokenGetResponse.data),
+        hasLinkSessions: !!linkTokenGetResponse.data.link_sessions,
+        sessionCount: linkTokenGetResponse.data.link_sessions?.length || 0,
+      }, "Link token response overview");
+
       const { link_sessions, ...tokenData } = linkTokenGetResponse.data;
+
+      // Log non-session data
+      logger.info({
+        tokenData: {
+          ...tokenData,
+          link_token: tokenData.link_token ? tokenData.link_token.substring(0, 20) + '...' : 'none',
+        }
+      }, "Token metadata");
 
       // Check if there are any sessions
       if (!link_sessions || link_sessions.length === 0) {
@@ -806,12 +835,56 @@ export const completeOAuth: AppRouteHandler<CompleteOAuthRoute> = async (c) => {
         }, 400);
       }
 
+      // Log all sessions
+      logger.info({
+        totalSessions: link_sessions.length,
+        sessions: link_sessions.map((session: any, index: number) => ({
+          index,
+          sessionId: session.id || session.link_session_id,
+          hasResults: !!session.results,
+          hasOnSuccess: !!session.on_success,
+          hasOnExit: !!session.on_exit,
+          startedAt: session.started_at,
+          finishedAt: session.finished_at,
+          exitedAt: session.exited_at,
+          sessionKeys: Object.keys(session),
+        }))
+      }, "All link sessions");
+
       // Get the most recent session
       const latestSession = link_sessions[link_sessions.length - 1];
       
-      // Check if the session has results
+      // Detailed session logging
+      logger.info({
+        sessionStructure: {
+          keys: Object.keys(latestSession),
+          id: latestSession.id || latestSession.link_session_id,
+          hasResults: !!latestSession.results,
+          hasOnSuccess: !!latestSession.on_success,
+          hasOnExit: !!latestSession.on_exit,
+          hasMetadata: !!latestSession.metadata,
+          hasEvents: !!latestSession.events,
+          started: latestSession.started_at,
+          finished: latestSession.finished_at,
+          exited: latestSession.exited_at,
+        }
+      }, "Latest session structure");
+
+      // Log results structure if present
       if (latestSession.results) {
         const results = latestSession.results;
+        logger.info({
+          resultsKeys: Object.keys(results),
+          hasItemAddResults: !!results.item_add_results,
+          itemAddResultsLength: results.item_add_results?.length || 0,
+          itemAddResultsDetails: results.item_add_results?.map((item: any, idx: number) => ({
+            index: idx,
+            keys: Object.keys(item),
+            hasPublicToken: !!item.public_token,
+            institutionId: item.institution_id,
+            itemId: item.item_id,
+          }))
+        }, "Results structure");
         
         // Check for public tokens in results
         if (results.item_add_results && results.item_add_results.length > 0) {
@@ -819,7 +892,10 @@ export const completeOAuth: AppRouteHandler<CompleteOAuthRoute> = async (c) => {
           const publicToken = results.item_add_results[0].public_token;
           
           if (publicToken) {
-            logger.info("Found public token in session results");
+            logger.info({
+              publicTokenFound: true,
+              tokenPrefix: publicToken.substring(0, 20) + '...',
+            }, "Found public token in results.item_add_results");
             return c.json({
               publicToken,
               success: true,
@@ -828,15 +904,61 @@ export const completeOAuth: AppRouteHandler<CompleteOAuthRoute> = async (c) => {
         }
       }
 
+      // Check on_success structure
+      if (latestSession.on_success) {
+        logger.info({
+          onSuccessKeys: Object.keys(latestSession.on_success),
+          hasPublicToken: !!latestSession.on_success.public_token,
+          hasMetadata: !!latestSession.on_success.metadata,
+          publicTokenLocation: latestSession.on_success.public_token ? 'on_success.public_token' : null,
+        }, "on_success structure");
+
+        if (latestSession.on_success.public_token) {
+          logger.info({
+            publicTokenFound: true,
+            tokenPrefix: latestSession.on_success.public_token.substring(0, 20) + '...',
+          }, "Found public token in on_success");
+          return c.json({
+            publicToken: latestSession.on_success.public_token,
+            success: true,
+          }, 200);
+        }
+      }
+
       // Check if session is still in progress (OAuth not completed)
       if (latestSession.on_exit && !latestSession.on_success) {
-        logger.info("Link session exited without success");
+        logger.info({
+          onExitKeys: Object.keys(latestSession.on_exit),
+          exitError: latestSession.on_exit.error,
+          exitMetadata: latestSession.on_exit.metadata,
+        }, "Link session exited without success");
         return c.json({
           error: "OAuth authentication not completed",
+          exitDetails: latestSession.on_exit.error,
         }, 400);
       }
 
-      logger.warn("No public token found in session results");
+      // Check if session is incomplete
+      if (!latestSession.finished_at && !latestSession.on_exit && !latestSession.on_success) {
+        logger.info({
+          sessionStatus: "incomplete",
+          hasStarted: !!latestSession.started_at,
+          startedAt: latestSession.started_at,
+        }, "Session appears to be incomplete");
+        return c.json({
+          error: "Link session still in progress",
+          details: "Session has not finished yet",
+        }, 400);
+      }
+
+      logger.warn({
+        sessionComplete: !!latestSession.finished_at,
+        hasSuccess: !!latestSession.on_success,
+        hasExit: !!latestSession.on_exit,
+        hasResults: !!latestSession.results,
+        allSessionKeys: Object.keys(latestSession),
+      }, "No public token found despite session appearing complete");
+      
       return c.json({
         error: "No public token found in session",
       }, 400);

@@ -75,23 +75,6 @@ export class CommonPlaidOauthElement extends LitElement {
         // Handle the public token exchange
         this.authStatus = "Processing authentication...";
         await this.handlePublicToken(publicToken);
-        // Clean up URL
-        window.history.replaceState({}, document.title, window.location.pathname);
-      } else if (oauthContinue && oauthStateId) {
-        // OAuth flow - retrieve stored link token and complete the flow
-        this.authStatus = "Completing OAuth authentication...";
-        
-        // Get session data from sessionStorage
-        const linkToken = sessionStorage.getItem('plaid_link_token');
-        const authCellId = sessionStorage.getItem('plaid_auth_cell_id');
-        const integrationCharmId = sessionStorage.getItem('plaid_integration_charm_id');
-        
-        if (linkToken && authCellId) {
-          // Complete the OAuth flow using the link token
-          await this.completeOAuthFlow(linkToken, authCellId, integrationCharmId || undefined);
-        } else {
-          this.authStatus = "Session expired. Please click 'Connect Bank Account' to start over.";
-        }
         
         // Clean up URL and sessionStorage
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -99,6 +82,14 @@ export class CommonPlaidOauthElement extends LitElement {
         sessionStorage.removeItem('plaid_auth_cell_id');
         sessionStorage.removeItem('plaid_integration_charm_id');
         sessionStorage.removeItem('plaid_frontend_url');
+        sessionStorage.removeItem('plaid_oauth_state_id');
+        sessionStorage.removeItem('plaid_oauth_completed');
+      } else if (oauthContinue && oauthStateId) {
+        // This shouldn't happen anymore with proper hosted Link setup
+        // But keeping for backward compatibility
+        this.authStatus = "Unexpected OAuth callback. Please try again.";
+        // Clean up URL
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
     }
   }
@@ -198,6 +189,79 @@ export class CommonPlaidOauthElement extends LitElement {
       }
     } catch (error) {
       console.error("Error creating link session:", error);
+      this.authStatus = `Error: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.isLoading = false;
+    }
+  }
+
+  private async pollForOAuthCompletion(linkToken: string, authCellId: string, integrationCharmId?: string, attempt = 0) {
+    const maxAttempts = 60; // Poll for up to 2 minutes
+    
+    // Set loading state on first attempt
+    if (attempt === 0) {
+      this.isLoading = true;
+    }
+    
+    try {
+      const response = await fetch("/api/integrations/plaid-oauth/complete-oauth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          linkToken,
+          authCellId,
+          integrationCharmId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        
+        // If session is still in progress, keep polling
+        if (errorData.error === "Link session still in progress" && attempt < maxAttempts) {
+          const elapsed = attempt * 2;
+          this.authStatus = `Waiting for bank authorization... (${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')})`;
+          
+          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+          return this.pollForOAuthCompletion(linkToken, authCellId, integrationCharmId, attempt + 1);
+        }
+        
+        // If we've hit max attempts, show error
+        if (attempt >= maxAttempts) {
+          this.authStatus = "Bank authorization is taking too long. Please try again.";
+          this.isLoading = false;
+          
+          // Clean up session storage
+          sessionStorage.removeItem('plaid_link_token');
+          sessionStorage.removeItem('plaid_auth_cell_id');
+          sessionStorage.removeItem('plaid_integration_charm_id');
+          sessionStorage.removeItem('plaid_oauth_state_id');
+          return;
+        }
+        
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      if (result.publicToken) {
+        // Exchange the public token
+        await this.handlePublicToken(result.publicToken);
+      } else {
+        this.authStatus = "Unexpected response from server. Please try again.";
+        this.isLoading = false;
+      }
+      
+      // Clean up session storage
+      sessionStorage.removeItem('plaid_link_token');
+      sessionStorage.removeItem('plaid_auth_cell_id');
+      sessionStorage.removeItem('plaid_integration_charm_id');
+      sessionStorage.removeItem('plaid_oauth_state_id');
+    } catch (error) {
+      console.error("Error polling for OAuth completion:", error);
       this.authStatus = `Error: ${
         error instanceof Error ? error.message : String(error)
       }`;
