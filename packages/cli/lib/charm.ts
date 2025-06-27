@@ -428,14 +428,29 @@ function generateDotMap(connections: CharmConnectionMap): string {
   return dot;
 }
 
-export async function generateSpaceMap(config: SpaceConfig, format: "ascii" | "dot" = "ascii"): Promise<string> {
-  const connections = await buildConnectionMap(config);
-  
-  if (format === "dot") {
-    return generateDotMap(connections);
-  } else {
-    return generateAsciiMap(connections);
+export enum MapFormat {
+  ASCII = "ascii",
+  DOT = "dot",
+}
+
+export async function getCharmConnections(config: SpaceConfig): Promise<CharmConnectionMap> {
+  return await buildConnectionMap(config);
+}
+
+export function formatSpaceMap(connections: CharmConnectionMap, format: MapFormat): string {
+  switch (format) {
+    case MapFormat.ASCII:
+      return generateAsciiMap(connections);
+    case MapFormat.DOT:
+      return generateDotMap(connections);
+    default:
+      throw new Error(`Unsupported format: ${format}`);
   }
+}
+
+export async function generateSpaceMap(config: SpaceConfig, format: MapFormat = MapFormat.ASCII): Promise<string> {
+  const connections = await getCharmConnections(config);
+  return formatSpaceMap(connections, format);
 }
 
 export async function inspectCharm(

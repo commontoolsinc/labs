@@ -7,6 +7,7 @@ import {
   inspectCharm,
   linkCharms,
   listCharms,
+  MapFormat,
   newCharm,
   saveCharmRecipe,
   setCharmRecipe,
@@ -286,7 +287,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   )
   .action(async (options) => {
     const spaceConfig = parseSpaceOptions(options);
-    const format = options.format as "ascii" | "dot";
+    const format = options.format === "dot" ? MapFormat.DOT : MapFormat.ASCII;
     
     const map = await generateSpaceMap(spaceConfig, format);
     render(map);
