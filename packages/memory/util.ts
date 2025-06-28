@@ -41,31 +41,3 @@ export const fromDID = async <ID extends DIDKey>(
     }
   }
 };
-
-/**
- * A data structure that maps keys to sets of values, allowing multiple values
- * to be associated with a single key without duplication.
- *
- * @template K The type of keys in the map
- * @template V The type of values stored in the sets
- */
-export class MapSet<K, V> {
-  private map = new Map<K, Set<V>>();
-
-  public get(key: K): Set<V> | undefined {
-    return this.map.get(key);
-  }
-
-  public add(key: K, value: V) {
-    if (!this.map.has(key)) {
-      const values = new Set<V>([value]);
-      this.map.set(key, values);
-    } else {
-      this.map.get(key)!.add(value);
-    }
-  }
-
-  public has(key: K): boolean {
-    return this.map.has(key);
-  }
-}

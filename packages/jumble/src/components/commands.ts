@@ -12,8 +12,7 @@ import {
 } from "@commontools/charm";
 import { charmId } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
-import { NAME } from "@commontools/runner";
-import { isStream } from "@commontools/runner";
+import { type Cell, isStream, NAME } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 import { LanguageModelId } from "@/components/common/ModelSelector.tsx";
 
@@ -238,7 +237,7 @@ async function handleExecuteCharmAction(ctx: CommandContext) {
   }
 }
 
-function navigateToCharm(ctx: CommandContext, charm: Charm | string) {
+function navigateToCharm(ctx: CommandContext, charm: Cell<Charm> | string) {
   // Navigate to the new charm
   const id = typeof charm === "string" ? charm : charmId(charm);
   if (!id || !ctx.focusedReplicaId) {
@@ -668,8 +667,8 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
             const data = charm.get();
             const title = data?.[NAME] ?? "Untitled";
             return {
-              title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
-              id: charmId(charm.entityId!)!,
+              title: title + ` (#${charmId(charm)!.slice(-4)})`,
+              id: charmId(charm)!,
               value: charm.entityId!,
             };
           });

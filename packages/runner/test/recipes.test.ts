@@ -449,6 +449,7 @@ describe("Recipe Runner", () => {
       result2: 6,
     });
 
+    // We mark the process cell dirty, run, then mark the process cell dirty again.
     expect(runCounts).toMatchObject({
       multiply: 2,
       multiplyGenerator: 1,

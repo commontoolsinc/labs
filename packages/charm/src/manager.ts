@@ -25,7 +25,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
  * @param charm - The charm to extract ID from
  * @returns The charm ID string, or undefined if no ID is found
  */
-export function charmId(charm: Charm): string | undefined {
+export function charmId(charm: Cell<Charm>): string | undefined {
   const id = getEntityId(charm);
   if (!id) return undefined;
   const idValue = id["/"];
@@ -340,7 +340,10 @@ export class CharmManager {
     if (isCell(id)) charm = id;
     else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
 
-    await this.runtime.storage.syncCell(charm);
+    await this.runtime.storage.syncCell(charm, false, {
+      schema: charmSchema,
+      rootSchema: charmSchema,
+    });
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) throw new Error("recipeId is required");
@@ -927,6 +930,8 @@ export class CharmManager {
   async syncRecipe(charm: Cell<Charm>) {
     await this.runtime.storage.syncCell(charm);
 
+    // When we subscribe to a doc, our subscription includes the doc's source,
+    // so get that.
     const sourceCell = charm.getSourceCell();
     await this.runtime.storage.syncCell(sourceCell);
 

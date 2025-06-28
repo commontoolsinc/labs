@@ -1,10 +1,10 @@
-import type { JSONObject, JSONValue } from "@commontools/runner";
+import type { JSONObject, JSONValue, URI } from "@commontools/runner";
 import {
   BaseObjectManager,
-  type CellTarget,
   CycleTracker,
   DefaultSchemaSelector,
   getAtPath,
+  loadSource,
   MapSet,
   type PointerCycleTracker,
   SchemaObjectTraverser,
@@ -74,11 +74,12 @@ export class ServerObjectManager extends BaseObjectManager<
     return `${doc.of}/${doc.the}`;
   }
 
-  override getTarget(target: CellTarget): FactAddress {
-    return {
-      the: "application/json",
-      of: `of:${target.cellTarget}`,
-    } as FactAddress;
+  override toAddress(str: string): FactAddress {
+    return { of: `of:${str}`, the: "application/json" };
+  }
+
+  override getTarget(uri: URI): FactAddress {
+    return { of: uri, the: "application/json" };
   }
 
   /**
@@ -274,6 +275,8 @@ function loadFactsForDoc(
       // object in our manager, so load it directly.
       manager.load(factAddress);
     }
+    // Also load any source links and recipes
+    loadSource(manager, fact, new Set<string>(), schemaTracker);
   }
 }
 
