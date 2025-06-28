@@ -617,7 +617,7 @@ const swap = <Space extends MemorySpace>(
   // matching `cause`. It may be because `cause` referenced implicit fact
   // in which case which case `IMPORT_MEMORY` provisioned desired record and
   // update would not have applied. Or it could be that `cause` in the database
-  // is different from the one being asserted. We will asses this by pulling
+  // is different from the one being asserted. We will assess this by pulling
   // the record and comparing it to desired state.
   if (updated === 0) {
     const revision = recall(session, { the, of });

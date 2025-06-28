@@ -1,7 +1,6 @@
-import type { JSONObject, JSONValue } from "@commontools/runner";
+import type { JSONObject, JSONValue, URI } from "@commontools/runner";
 import {
   BaseObjectManager,
-  type CellTarget,
   CycleTracker,
   DefaultSchemaSelector,
   getAtPath,
@@ -76,12 +75,11 @@ export class ServerObjectManager extends BaseObjectManager<
   }
 
   override toAddress(str: string): FactAddress {
-    const entity: Entity = `of:${str}`;
-    return { of: entity, the: "application/json" };
+    return { of: `of:${str}`, the: "application/json" };
   }
 
-  override getTarget(target: CellTarget): FactAddress {
-    return this.toAddress(target.cellTarget!);
+  override getTarget(uri: URI): FactAddress {
+    return { of: uri, the: "application/json" };
   }
 
   /**

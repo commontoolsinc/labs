@@ -15,14 +15,8 @@ import type {
   SchemaContext,
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
-import {
-  isLegacyAlias,
-  isSigilLink,
-  type NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
-import { fromURI } from "./uri-utils.ts";
-import { type JSONCellLink } from "./sigil-types.ts";
+import { isAnyCellLink, parseLink } from "./link-utils.ts";
+import type { URI } from "./sigil-types.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -120,7 +114,7 @@ export interface ObjectStorageManager<K, S, V> {
   addRead(doc: K, value: V, source: S): void;
   addWrite(doc: K, value: V, source: S): void;
   // get the key for the doc pointed to by the cell target
-  getTarget(value: CellTarget): K;
+  getTarget(uri: URI): K;
   // load the object for the specified key
   load(doc: K): ValueEntry<S, V | undefined> | null;
 }
@@ -161,7 +155,7 @@ export abstract class BaseObjectManager<K, S, V>
     const key = this.toKey(doc);
     this.writeValues.set(key, { value: value, source: source });
   }
-  abstract getTarget(value: CellTarget): K;
+  abstract getTarget(uri: URI): K;
   // load the doc from the underlying system.
   // implementations are responsible for adding this to the readValues
   abstract load(doc: K): ValueEntry<S, V | undefined> | null;
@@ -226,7 +220,7 @@ export abstract class BaseObjectTraverser<K, S> {
       }
     } else if (isObject(doc.value)) {
       // First, see if we need special handling
-      if (isPointer(doc.value)) {
+      if (isAnyCellLink(doc.value)) {
         const [newDoc, _] = getAtPath(
           this.manager,
           doc,
@@ -298,7 +292,7 @@ export function getAtPath<K, S>(
   // we may mutate curDoc's value and path, so copy the object and the path
   let curDoc = { ...doc, path: [...doc.path] };
   let remaining = [...path];
-  while (isPointer(curDoc.value)) {
+  while (isAnyCellLink(curDoc.value)) {
     [curDoc, selector] = followPointer(
       manager,
       curDoc,
@@ -328,7 +322,7 @@ export function getAtPath<K, S>(
       return [{ ...curDoc, path: [], value: undefined }, selector];
     }
     // If this next value is a pointer, use the pointer resolution code
-    while (isPointer(curDoc.value)) {
+    while (isAnyCellLink(curDoc.value)) {
       [curDoc, selector] = followPointer(
         manager,
         curDoc,
@@ -367,9 +361,10 @@ function followPointer<K, S>(
     return [{ ...doc, path: [], value: undefined }, selector];
   }
   try {
-    const cellTarget = getPointerInfo(doc.value as Immutable<JSONObject>);
-    const target = (cellTarget.cellTarget !== undefined)
-      ? manager.getTarget(cellTarget)
+    const link = parseLink(doc.value)!;
+    console.log("link", link, doc.value);
+    const target = (link.id !== undefined)
+      ? manager.getTarget(link.id)
       : doc.doc;
     let [targetDoc, targetDocRoot] = [doc.doc, doc.docRoot];
     if (selector !== undefined) {
@@ -378,9 +373,9 @@ function followPointer<K, S>(
       // Also insert the portions of cellTarget.path, so selector is relative to new target doc
       // We do this even if the target doc is the same doc, since we want the
       // selector path to match.
-      selector = narrowSchema(doc.path, selector, cellTarget.path);
+      selector = narrowSchema(doc.path, selector, link.path);
     }
-    if (cellTarget.cellTarget !== undefined) {
+    if (link.id !== undefined) {
       // We have a reference to a different cell, so track the dependency
       // and update our targetDoc and targetDocRoot
       const valueEntry = manager.load(target);
@@ -423,7 +418,7 @@ function followPointer<K, S>(
         path: [],
         value: targetDocRoot,
       },
-      [...cellTarget.path, ...path],
+      [...link.path, ...path],
       tracker,
       schemaTracker,
       selector,
@@ -542,39 +537,6 @@ function narrowSchema(
       schemaContext: selector.schemaContext,
     };
   }
-}
-
-/**
- * Extract the path and cellTarget from an Alias, JSONCellLink, or sigil value
- *
- * @param value - The JSON object that might contain pointer information
- * @returns A CellTarget object containing:
- *   - path: An array of string segments representing the path to the target
- *   - cellTarget: The target cell identifier as a string, or undefined if it refers to the current document
- */
-export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
-  const link = parseLink(value, {} as NormalizedLink);
-  if (!link) return { path: [], cellTarget: undefined };
-  return {
-    path: link.path ?? [],
-    cellTarget: link.id ? fromURI(link.id) : undefined,
-  };
-}
-
-export function isPointer(value: unknown): boolean {
-  return (isSigilLink(value) || isJSONCellLink(value) || isLegacyAlias(value));
-}
-
-/**
- * Check if value is a cell link. Unlike the isCellLink version, this does not check for a marker symbol, since that won't exist in the JSON object.
- *
- * @param {unknown} value - The value to check.
- * @returns {boolean}
- */
-function isJSONCellLink(value: unknown): value is JSONCellLink {
-  return (isObject(value) && "cell" in value && isObject(value.cell) &&
-    "/" in value.cell && "path" in value &&
-    Array.isArray(value.path));
 }
 
 function indexFromPath(
@@ -713,7 +675,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       }
       return undefined;
     } else if (isObject(doc.value)) {
-      if (isPointer(doc.value)) {
+      if (isAnyCellLink(doc.value)) {
         return this.traversePointerWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,

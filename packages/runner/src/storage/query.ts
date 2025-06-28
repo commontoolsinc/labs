@@ -4,6 +4,7 @@ import type {
   Revision,
   SchemaPathSelector,
   State,
+  URI,
 } from "@commontools/memory/interface";
 import type { JSONObject, JSONValue } from "../builder/types.ts";
 import type { DocImpl } from "../doc.ts";
@@ -12,7 +13,6 @@ import type { StorageValue } from "./interface.ts";
 import type { IDocumentMap, IStorageProvider } from "../runtime.ts";
 import {
   BaseObjectManager,
-  type CellTarget,
   CycleTracker,
   getAtPath,
   loadSource,
@@ -43,8 +43,8 @@ export abstract class ClientObjectManager extends BaseObjectManager<
   }
 
   // get the fact address for the doc pointed to by the cell target
-  override getTarget(target: CellTarget): FactAddress {
-    return this.toAddress(target.cellTarget!);
+  override getTarget(uri: URI): FactAddress {
+    return { of: uri, the: "application/json" };
   }
 
   getReadDocs(): Iterable<ValueEntry<FactAddress, JSONValue | undefined>> {
