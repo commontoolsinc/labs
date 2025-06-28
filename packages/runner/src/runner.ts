@@ -532,12 +532,10 @@ export class Runner implements IRunner {
           }
         }
 
-        const inputsCell = this.runtime.documentMap.getDoc(
-          eventInputs,
-          cause,
+        const inputsCell = this.runtime.getImmutableCell(
           processCell.space,
+          eventInputs,
         );
-        inputsCell.freeze("event handler");
 
         const frame = pushFrameFromCause(cause, {
           recipe,
@@ -546,7 +544,7 @@ export class Runner implements IRunner {
         });
 
         const argument = module.argumentSchema
-          ? inputsCell.asCell([], undefined, module.argumentSchema).get()
+          ? inputsCell.asSchema(module.argumentSchema).get()
           : inputsCell.getAsQueryResult([], undefined);
         const result = fn(argument);
 
@@ -561,9 +559,10 @@ export class Runner implements IRunner {
             const resultCell = this.run(
               resultRecipe,
               undefined,
-              this.runtime.documentMap.getDoc(undefined, {
-                resultFor: cause,
-              }, processCell.space),
+              this.runtime.getCell(
+                processCell.space,
+                { resultFor: cause },
+              ),
             );
             addCancel(() => this.stop(resultCell));
           }
@@ -588,17 +587,17 @@ export class Runner implements IRunner {
       }
 
       // Schedule the action to run when the inputs change
-      const inputsCell = this.runtime.documentMap.getDoc(inputs, {
-        immutable: inputs,
-      }, processCell.space);
-      inputsCell.freeze("javascript node");
+      const inputsCell = this.runtime.getImmutableCell(
+        processCell.space,
+        inputs,
+      );
 
-      let previousResultDoc: DocImpl<any> | undefined;
+      let previousResultDoc: Cell<any> | undefined;
       let previousResultRecipeAsString: string | undefined;
 
       const action: Action = (log: ReactivityLog) => {
         const argument = module.argumentSchema
-          ? inputsCell.asCell([], log, module.argumentSchema).get()
+          ? inputsCell.asSchema(module.argumentSchema).withLog(log).get()
           : inputsCell.getAsQueryResult([], log);
 
         const frame = pushFrameFromCause(
@@ -628,10 +627,9 @@ export class Runner implements IRunner {
               resultRecipe,
               undefined,
               previousResultDoc ??
-                this.runtime.documentMap.getDoc(
-                  undefined,
-                  { resultFor: { inputs, outputs, fn: fn.toString() } },
+                this.runtime.getCell(
                   processCell.space,
+                  { resultFor: { inputs, outputs, fn: fn.toString() } },
                 ),
             );
             addCancel(() => this.stop(resultDoc));
@@ -641,7 +639,7 @@ export class Runner implements IRunner {
               sendValueToBinding(
                 processCell,
                 outputs,
-                { cell: resultDoc, path: [] },
+                { cell: resultDoc.getDoc(), path: [] },
                 log,
               );
             }
@@ -705,11 +703,13 @@ export class Runner implements IRunner {
       processCell.getDoc(),
     );
 
-    const inputsDoc = this.runtime.documentMap.getDoc(
-      mappedInputBindings,
-      { immutable: mappedInputBindings },
+    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
+    const inputsCell = this.runtime.getCell(
       processCell.space,
+      { immutable: mappedInputBindings },
     );
+    inputsCell.setRaw(mappedInputBindings);
+    const inputsDoc = inputsCell.getDoc();
 
     const action = module.implementation(
       inputsDoc.asCell(),
@@ -738,9 +738,12 @@ export class Runner implements IRunner {
     recipe: Recipe,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    const inputsCell = this.runtime.documentMap.getDoc(inputs, {
-      immutable: inputs,
-    }, processCell.space);
+    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
+    const inputsCell = this.runtime.getCell(
+      processCell.space,
+      { immutable: inputs },
+    );
+    inputsCell.setRaw(inputs);
     const reads = findAllLegacyAliasedCells(inputs, processCell.getDoc());
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
@@ -773,25 +776,24 @@ export class Runner implements IRunner {
       processCell,
     );
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    const resultCell = this.runtime.documentMap.getDoc(
-      undefined,
+    const resultCell = this.runtime.getCell(
+      processCell.space,
       {
         recipe: module.implementation,
         parent: processCell.getDoc(),
         inputBindings,
         outputBindings,
       },
-      processCell.space,
     );
     this.run(recipeImpl, inputs, resultCell);
     sendValueToBinding(processCell, outputBindings, {
-      cell: resultCell,
+      cell: resultCell.getDoc(),
       path: [],
     });
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(this.cancels.get(resultCell.sourceCell!));
+    addCancel(this.cancels.get(resultCell.getSourceCell()!.getDoc()));
   }
 }
 
