@@ -115,7 +115,7 @@ export class Runner implements IRunner {
     } else {
       processCell = this.runtime.getCell<ProcessCellData>(
         resultDoc.space,
-        { cell: resultDoc.getDoc(), path: [] },
+        resultDoc.getAsLegacyCellLink(),
       );
       resultDoc.getDoc().sourceCell = processCell.getDoc();
     }
@@ -212,12 +212,12 @@ export class Runner implements IRunner {
     processCell.setRaw({
       ...processCell.getRaw(),
       [TYPE]: recipeId || "unknown",
-      resultRef: { cell: resultDoc.getDoc(), path: [] },
+      resultRef: resultDoc.getAsLegacyCellLink(),
       internal,
     });
     if (argument) {
       diffAndUpdate(
-        { cell: processCell.getDoc(), path: ["argument"] },
+        processCell.key("argument").getAsLegacyCellLink(),
         argument,
         undefined,
         processCell.getDoc(),
@@ -273,7 +273,7 @@ export class Runner implements IRunner {
       inputs,
     );
 
-    this.run(recipe, inputs, resultCell.getDoc());
+    this.run(recipe, inputs, resultCell);
 
     // If a new recipe was specified, make sure to sync any new cells
     // TODO(seefeld): Possible race condition here with lifted functions running
@@ -639,7 +639,7 @@ export class Runner implements IRunner {
               sendValueToBinding(
                 processCell,
                 outputs,
-                { cell: resultDoc.getDoc(), path: [] },
+                resultDoc.getAsLegacyCellLink(),
                 log,
               );
             }
@@ -786,10 +786,11 @@ export class Runner implements IRunner {
       },
     );
     this.run(recipeImpl, inputs, resultCell);
-    sendValueToBinding(processCell, outputBindings, {
-      cell: resultCell.getDoc(),
-      path: [],
-    });
+    sendValueToBinding(
+      processCell,
+      outputBindings,
+      resultCell.getAsLegacyCellLink(),
+    );
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
