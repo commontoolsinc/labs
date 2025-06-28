@@ -362,7 +362,6 @@ function followPointer<K, S>(
   }
   try {
     const link = parseLink(doc.value)!;
-    console.log("link", link, doc.value);
     const target = (link.id !== undefined)
       ? manager.getTarget(link.id)
       : doc.doc;
