@@ -1,6 +1,5 @@
-import { type Recipe } from "../builder/types.ts";
+import { type JSONSchema, type Recipe } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
-import { getCellLinkOrThrow } from "../query-result-proxy.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
@@ -39,7 +38,7 @@ export function map(
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
   const result = runtime.getCell<any[]>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       map: parentCell.entityId,
       op: inputsCell.getAsQueryResult([])?.op,
@@ -60,7 +59,21 @@ export function map(
 
   return (log: ReactivityLog) => {
     const resultWithLog = result.withLog(log);
-    let { list, op } = inputsCell.getAsQueryResult([], log);
+    const { list, op } = inputsCell.asSchema(
+      {
+        type: "object",
+        properties: {
+          list: { type: "array", items: { asCell: true } },
+          op: { asCell: true },
+        },
+        required: ["list", "op"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema,
+    ).withLog(log).get();
+
+    // .getRaw() because we want the recipe itself and avoid following the
+    // aliases in the recipe
+    const opRecipe = op.getRaw();
 
     // If the result's value is undefined, set it to the empty array.
     if (resultWithLog.get() === undefined) {
@@ -81,31 +94,18 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
-    // Hack to get to underlying array that lists doc links, etc.
-    const listRef = getCellLinkOrThrow(list);
-
-    // Same for op, but here it's so that the proxy doesn't follow the aliases
-    // in the recipe instead of returning the recipe.
-    // TODO(seefeld): Instead we should reify the recipe as a NodeFactory and
-    // teach the query result proxy to not enter those.
-    const opRef = getCellLinkOrThrow(op);
-    op = opRef.cell.getAtPath(opRef.path);
-
     // Add values that have been appended
     while (initializedUpTo < list.length) {
       const resultCell = runtime.getCell(
-        parentCell.getDoc().space,
+        parentCell.space,
         { result, index: initializedUpTo },
       );
       runtime.runner.run(
-        op,
+        opRecipe,
         {
-          element: {
-            cell: listRef.cell,
-            path: [...listRef.path, initializedUpTo],
-          },
+          element: inputsCell.key("list").key(initializedUpTo),
           index: initializedUpTo,
-          array: list,
+          array: inputsCell.key("list"),
         },
         resultCell,
       );

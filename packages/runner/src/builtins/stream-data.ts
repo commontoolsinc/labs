@@ -27,20 +27,20 @@ export function streamData(
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
   const pending = runtime.getCell(
-    parentCell.getDoc().space,
+    parentCell.space,
     { streamData: { pending: cause } },
   );
   pending.send(false);
-  
+
   const result = runtime.getCell<any | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       streamData: { result: cause },
     },
   );
-  
+
   const error = runtime.getCell<any | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       streamData: { error: cause },
     },
@@ -68,7 +68,7 @@ export function streamData(
     const pendingWithLog = pending.withLog(log);
     const resultWithLog = result.withLog(log);
     const errorWithLog = error.withLog(log);
-    
+
     const { url, options } = inputsCell.getAsQueryResult([], log) || {};
 
     // Re-entrancy guard: Don't restart the stream if it's the same request.
