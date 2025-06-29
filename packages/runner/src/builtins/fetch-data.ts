@@ -32,21 +32,21 @@ export function fetchData(
     { fetchData: { pending: cause } },
   );
   pending.send(false);
-  
+
   const result = runtime.getCell<any | undefined>(
     parentCell.getDoc().space,
     {
       fetchData: { result: cause },
     },
   );
-  
+
   const error = runtime.getCell<any | undefined>(
     parentCell.getDoc().space,
     {
       fetchData: { error: cause },
     },
   );
-  
+
   const requestHash = runtime.getCell<string | undefined>(
     parentCell.getDoc().space,
     {
@@ -54,10 +54,10 @@ export function fetchData(
     },
   );
 
-  pending.getDoc().sourceCell = parentCell.getDoc();
-  result.getDoc().sourceCell = parentCell.getDoc();
-  error.getDoc().sourceCell = parentCell.getDoc();
-  requestHash.getDoc().sourceCell = parentCell.getDoc();
+  pending.setSourceCell(parentCell);
+  result.setSourceCell(parentCell);
+  error.setSourceCell(parentCell);
+  requestHash.setSourceCell(parentCell);
 
   sendResult({
     pending,
@@ -74,7 +74,7 @@ export function fetchData(
     const resultWithLog = result.withLog(log);
     const errorWithLog = error.withLog(log);
     const requestHashWithLog = requestHash.withLog(log);
-    
+
     const { url, mode, options } = inputsCell.getAsQueryResult([], log);
 
     const hash = refer({
