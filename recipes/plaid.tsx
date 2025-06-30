@@ -609,13 +609,6 @@ const plaidUpdater = handler(
   },
 );
 
-// {derive(transaction, (transaction) =>
-//   new Intl.NumberFormat("en-US", {
-//     style: "currency",
-//     currency: transaction.isoCurrencyCode ||
-//       "USD",
-//   }).format(Math.abs(transaction.amount)))}
-
 const formatAmount = (amount: number, currency: string) => {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -802,7 +795,15 @@ export default recipe(
                             )}
                           </td>
                           <td style="padding: 12px; text-align: center;">
-                            {transaction.pending}
+                            {ifElse(
+                              transaction.pending,
+                              <span style="background-color: #ffc107; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
+                                Pending
+                              </span>,
+                              <span style="background-color: #28a745; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
+                                Posted
+                              </span>,
+                            )}
                           </td>
                         </tr>
                       ))}
