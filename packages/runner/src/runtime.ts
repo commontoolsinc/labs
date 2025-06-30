@@ -23,7 +23,14 @@ import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness, RuntimeProgram } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
-import { isLegacyCellLink, type NormalizedLink } from "./link-utils.ts";
+import {
+  type CellLink,
+  isLegacyCellLink,
+  isLink,
+  isNormalizedFullLink,
+  type NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
 
 export type { IStorageManager, IStorageProvider, MemorySpace };
 
@@ -100,12 +107,12 @@ export interface IRuntime {
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink<T>(
-    cellLink: LegacyDocCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: LegacyDocCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
@@ -426,52 +433,65 @@ export class Runtime implements IRuntime {
   }
 
   getCellFromLink<T>(
-    cellLink: LegacyDocCellLink | JSONCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: LegacyDocCellLink | JSONCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink(
-    cellLink: LegacyDocCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<any> {
     let doc;
 
     if (isLegacyCellLink(cellLink)) {
+      const link = cellLink as LegacyDocCellLink;
       if (isDoc(cellLink.cell)) {
         doc = cellLink.cell;
-      } else if (cellLink.space) {
+      } else if (link.space) {
         doc = this.documentMap.getDocByEntityId(
-          cellLink.space as MemorySpace,
+          link.space,
           getEntityId(cellLink.cell)!,
           true,
         )!;
         if (!doc) {
-          throw new Error(`Can't find ${cellLink.space}/${cellLink.cell}!`);
+          throw new Error(`Can't find ${link.space}/${link.cell}!`);
         }
       } else {
         throw new Error("Cell link has no space");
       }
+
+      // If we aren't passed a schema, use the one in the cellLink
+      return doc.asCell(
+        link.path,
+        log,
+        schema ?? link.schema,
+        schema ? undefined : link.rootSchema,
+      );
     } else {
+      const link = isLink(cellLink)
+        ? parseLink(cellLink)
+        : isNormalizedFullLink(cellLink)
+        ? cellLink
+        : undefined;
+      if (!link) throw new Error("Invalid cell link");
       doc = this.documentMap.getDocByEntityId(
-        cellLink.space as MemorySpace,
-        getEntityId((cellLink as NormalizedLink).id)!,
+        link.space as MemorySpace,
+        getEntityId(link.id)!,
         true,
       )!;
+      return doc.asCell(
+        link.path,
+        log,
+        schema ?? link.schema,
+        schema ? undefined : link.rootSchema,
+      );
     }
-
-    // If we aren't passed a schema, use the one in the cellLink
-    return doc.asCell(
-      cellLink.path,
-      log,
-      schema ?? cellLink.schema,
-      schema ? undefined : cellLink.rootSchema,
-    );
   }
 
   getImmutableCell<T>(
