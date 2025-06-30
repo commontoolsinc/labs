@@ -11,6 +11,7 @@ import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
   IStorageManager,
   IStorageProvider,
+  IStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell } from "./cell.ts";
@@ -23,6 +24,7 @@ import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
 import type { Harness, RuntimeProgram } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
+import { StorageTransaction } from "./storage/transaction-shim.ts";
 import {
   type CellLink,
   isLegacyCellLink,
@@ -32,7 +34,12 @@ import {
   parseLink,
 } from "./link-utils.ts";
 
-export type { IStorageManager, IStorageProvider, MemorySpace };
+export type {
+  IStorageManager,
+  IStorageProvider,
+  IStorageTransaction,
+  MemorySpace,
+};
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -78,6 +85,9 @@ export interface IRuntime {
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
+
+  // Storage transaction method
+  edit(): IStorageTransaction;
 
   // Cell factory methods
   getCell<T>(
@@ -381,6 +391,15 @@ export class Runtime implements IRuntime {
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern
+  }
+
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IStorageTransaction {
+    return new StorageTransaction(this);
   }
 
   // Cell factory methods
