@@ -5,7 +5,9 @@ import ts from "typescript";
  * In AMD output, TypeScript transforms module imports to parameters.
  * For imports from "commontools", it typically becomes "commontools_1".
  */
-export function getCommonToolsModuleAlias(sourceFile: ts.SourceFile): string | null {
+export function getCommonToolsModuleAlias(
+  sourceFile: ts.SourceFile,
+): string | null {
   // In AMD output, TypeScript transforms module imports to parameters
   // For imports from "commontools", it typically becomes "commontools_1"
   for (const statement of sourceFile.statements) {
@@ -29,7 +31,10 @@ export function getCommonToolsModuleAlias(sourceFile: ts.SourceFile): string | n
 /**
  * Checks if a specific import exists from commontools.
  */
-export function hasCommonToolsImport(sourceFile: ts.SourceFile, importName: string): boolean {
+export function hasCommonToolsImport(
+  sourceFile: ts.SourceFile,
+  importName: string,
+): boolean {
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement)) {
       const moduleSpecifier = statement.moduleSpecifier;
@@ -90,8 +95,7 @@ export function addCommonToolsImport(
     ts.isNamedImports(existingImport.importClause.namedBindings)
   ) {
     // Add to existing import if not already present
-    const existingElements =
-      existingImport.importClause.namedBindings.elements;
+    const existingElements = existingImport.importClause.namedBindings.elements;
     const hasImport = existingElements.some((element) =>
       element.name.text === importName
     );
@@ -138,11 +142,11 @@ export function addCommonToolsImport(
       factory.createStringLiteral("commontools"),
       undefined,
     );
-    
+
     // Add as first statement or after existing imports
     const newStatements = [...sourceFile.statements];
     let insertIndex = 0;
-    
+
     // Find the position after all import declarations
     for (let i = 0; i < newStatements.length; i++) {
       if (ts.isImportDeclaration(newStatements[i])) {
@@ -151,9 +155,9 @@ export function addCommonToolsImport(
         break;
       }
     }
-    
+
     newStatements.splice(insertIndex, 0, newImport);
-    
+
     return factory.updateSourceFile(
       sourceFile,
       newStatements,
@@ -179,4 +183,3 @@ export function addCommonToolsImport(
     sourceFile.libReferenceDirectives,
   );
 }
-

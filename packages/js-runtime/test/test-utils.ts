@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { createOpaqueRefTransformer, createSchemaTransformer } from "../typescript/transformer/mod.ts";
+import {
+  createOpaqueRefTransformer,
+  createSchemaTransformer,
+} from "../typescript/transformer/mod.ts";
 import { getTypeScriptEnvironmentTypes } from "../mod.ts";
 import { join } from "@std/path";
 
@@ -19,8 +22,14 @@ export async function transformSource(
     applySchemaTransformer?: boolean;
   } = {},
 ): Promise<string> {
-  const { mode = "transform", debug = false, types = {}, logger, applySchemaTransformer = false } = options;
-  
+  const {
+    mode = "transform",
+    debug = false,
+    types = {},
+    logger,
+    applySchemaTransformer = false,
+  } = options;
+
   // Get environment types if not cached
   if (!envTypesCache) {
     envTypesCache = await getTypeScriptEnvironmentTypes();
@@ -45,7 +54,7 @@ export async function transformSource(
       if (name === fileName) {
         return ts.createSourceFile(name, source, compilerOptions.target!, true);
       }
-      
+
       // Check for lib.d.ts -> map to es2023
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
         return ts.createSourceFile(
@@ -55,7 +64,7 @@ export async function transformSource(
           true,
         );
       }
-      
+
       // Handle type files
       if (allTypes[name]) {
         return ts.createSourceFile(
@@ -66,7 +75,7 @@ export async function transformSource(
         );
       }
       // Check for commontools.d.ts without path
-      const baseName = name.split('/').pop();
+      const baseName = name.split("/").pop();
       if (baseName && allTypes[baseName]) {
         return ts.createSourceFile(
           name,
@@ -84,15 +93,17 @@ export async function transformSource(
       if (name === fileName) return true;
       if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return true;
       if (allTypes[name]) return true;
-      const baseName = name.split('/').pop();
+      const baseName = name.split("/").pop();
       if (baseName && allTypes[baseName]) return true;
       return false;
     },
     readFile: (name) => {
       if (name === fileName) return source;
-      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) return allTypes.es2023;
+      if (name === "lib.d.ts" || name.endsWith("/lib.d.ts")) {
+        return allTypes.es2023;
+      }
       if (allTypes[name]) return allTypes[name];
-      const baseName = name.split('/').pop();
+      const baseName = name.split("/").pop();
       if (baseName && allTypes[baseName]) return allTypes[baseName];
       return undefined;
     },
@@ -119,9 +130,16 @@ export async function transformSource(
         return undefined;
       });
     },
-    resolveTypeReferenceDirectives: (typeDirectiveNames, containingFile, redirectedReference, options) => {
+    resolveTypeReferenceDirectives: (
+      typeDirectiveNames,
+      containingFile,
+      redirectedReference,
+      options,
+    ) => {
       return typeDirectiveNames.map((directive) => {
-        const name = typeof directive === 'string' ? directive : directive.fileName;
+        const name = typeof directive === "string"
+          ? directive
+          : directive.fileName;
         if (allTypes[name]) {
           return {
             primary: true,
@@ -137,14 +155,17 @@ export async function transformSource(
 
   // Create the program
   const program = ts.createProgram([fileName], compilerOptions, host);
-  
+
   // Debug: Check for errors
   if (debug && logger) {
     const diagnostics = ts.getPreEmitDiagnostics(program);
     if (diagnostics.length > 0) {
       logger("=== TypeScript Diagnostics ===");
-      diagnostics.forEach(diagnostic => {
-        const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
+      diagnostics.forEach((diagnostic) => {
+        const message = ts.flattenDiagnosticMessageText(
+          diagnostic.messageText,
+          "\n",
+        );
         logger(`${diagnostic.file?.fileName || "unknown"}: ${message}`);
       });
       logger("=== End Diagnostics ===");
@@ -153,14 +174,14 @@ export async function transformSource(
 
   // Create the transformers
   const transformers: ts.TransformerFactory<ts.SourceFile>[] = [];
-  
+
   // Always add OpaqueRef transformer first
   transformers.push(createOpaqueRefTransformer(program, {
     mode,
     debug,
     logger,
   }));
-  
+
   // Optionally add schema transformer
   if (applySchemaTransformer) {
     transformers.push(createSchemaTransformer(program, { debug }));
@@ -176,11 +197,11 @@ export async function transformSource(
     removeComments: false,
   });
   const output = printer.printFile(result.transformed[0]);
-  
+
   if (debug && logger) {
     logger(`\n=== TEST TRANSFORMER OUTPUT ===\n${output}\n=== END OUTPUT ===`);
   }
-  
+
   return output;
 }
 
@@ -212,7 +233,7 @@ export async function loadFixture(path: string): Promise<string> {
  * Load multiple fixtures as a record
  */
 export async function loadFixtures(
-  paths: string[]
+  paths: string[],
 ): Promise<Record<string, string>> {
   const fixtures: Record<string, string> = {};
   for (const path of paths) {
@@ -226,7 +247,7 @@ export async function loadFixtures(
  */
 export async function transformFixture(
   fixturePath: string,
-  options?: Parameters<typeof transformSource>[1]
+  options?: Parameters<typeof transformSource>[1],
 ): Promise<string> {
   const source = await loadFixture(fixturePath);
   return transformSource(source, options);
@@ -238,13 +259,13 @@ export async function transformFixture(
 export async function compareFixtureTransformation(
   inputPath: string,
   expectedPath: string,
-  options?: Parameters<typeof transformSource>[1]
+  options?: Parameters<typeof transformSource>[1],
 ): Promise<{ actual: string; expected: string; matches: boolean }> {
   const [actual, expected] = await Promise.all([
     transformFixture(inputPath, options),
     loadFixture(expectedPath),
   ]);
-  
+
   return {
     actual,
     expected,

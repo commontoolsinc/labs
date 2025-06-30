@@ -17,7 +17,7 @@ export function createSchemaTransformer(
       const hasCtsEnableDirective = () => {
         const text = sourceFile.getFullText();
         const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
-        
+
         for (const comment of tripleSlashDirectives) {
           const commentText = text.substring(comment.pos, comment.end);
           if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
@@ -182,18 +182,19 @@ function typeToJsonSchema(
       let actualPropType = propType;
       let isCell = false;
       let isStream = false;
-      
+
       // Check if this is a Cell<T> type
-      if (propTypeString.startsWith('Cell<') && propTypeString.endsWith('>')) {
+      if (propTypeString.startsWith("Cell<") && propTypeString.endsWith(">")) {
         isCell = true;
         // Extract the inner type
         const typeRef = propType as ts.TypeReference;
         if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
           actualPropType = typeRef.typeArguments[0];
         }
-      }
-      // Check if this is a Stream<T> type
-      else if (propTypeString.startsWith('Stream<') && propTypeString.endsWith('>')) {
+      } // Check if this is a Stream<T> type
+      else if (
+        propTypeString.startsWith("Stream<") && propTypeString.endsWith(">")
+      ) {
         isStream = true;
         // Extract the inner type
         const typeRef = propType as ts.TypeReference;
@@ -201,10 +202,10 @@ function typeToJsonSchema(
           actualPropType = typeRef.typeArguments[0];
         }
       }
-      
+
       // Get property schema for the actual type (unwrapped if it was Cell/Stream)
       let propSchema = typeToJsonSchema(actualPropType, checker);
-      
+
       // Add asCell/asStream flags
       if (isCell) {
         propSchema.asCell = true;

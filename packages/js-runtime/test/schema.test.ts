@@ -1,9 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { 
-  getTypeScriptEnvironmentTypes,
-  TypeScriptCompiler,
-} from "../mod.ts";
+import { getTypeScriptEnvironmentTypes, TypeScriptCompiler } from "../mod.ts";
 import { cache } from "@commontools/static";
 
 const types = await getTypeScriptEnvironmentTypes();
@@ -41,15 +38,15 @@ export { userSchema };
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Check that toSchema was transformed
-    expect(compiled.js).not.toContain('toSchema');
+    expect(compiled.js).not.toContain("toSchema");
     expect(compiled.js).toContain('type: "object"');
     expect(compiled.js).toContain('type: "string"');
     expect(compiled.js).toContain('type: "number"');
-    expect(compiled.js).toContain('properties:');
-    expect(compiled.js).toContain('name:');
-    expect(compiled.js).toContain('age:');
+    expect(compiled.js).toContain("properties:");
+    expect(compiled.js).toContain("name:");
+    expect(compiled.js).toContain("age:");
     expect(compiled.js).toContain('required: ["name", "age"]');
   });
 
@@ -81,10 +78,10 @@ export { stateSchema };
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Check that Stream<T> was detected
-    expect(compiled.js).toContain('asStream: true');
-    expect(compiled.js).toContain('events:');
+    expect(compiled.js).toContain("asStream: true");
+    expect(compiled.js).toContain("events:");
     expect(compiled.js).toContain('type: "string"');
   });
 
@@ -118,10 +115,10 @@ export { configSchema };
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Check that options were merged
-    expect(compiled.js).toContain('default: {');
-    expect(compiled.js).toContain('value: 42');
+    expect(compiled.js).toContain("default: {");
+    expect(compiled.js).toContain("value: 42");
     expect(compiled.js).toContain('description: "Configuration schema"');
   });
 
@@ -154,14 +151,14 @@ export { todoSchema };
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Check array handling
-    expect(compiled.js).toContain('tags:');
+    expect(compiled.js).toContain("tags:");
     expect(compiled.js).toContain('type: "array"');
     expect(compiled.js).toContain('type: "string"');
-    
+
     // Check required - should not include "done" in required array
-    expect(compiled.js).toContain('required:');
+    expect(compiled.js).toContain("required:");
     expect(compiled.js).toContain('"title"');
     expect(compiled.js).toContain('"tags"');
   });
@@ -197,16 +194,18 @@ export { stateSchema };
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Check that Cell<T> types are detected and asCell is added
-    expect(compiled.js).toContain('asCell: true');
-    expect(compiled.js).toContain('count: {');
+    expect(compiled.js).toContain("asCell: true");
+    expect(compiled.js).toContain("count: {");
     expect(compiled.js).toContain('type: "number"');
-    expect(compiled.js).toContain('name: {');
+    expect(compiled.js).toContain("name: {");
     expect(compiled.js).toContain('type: "string"');
     // enabled should not have asCell
-    expect(compiled.js).toContain('enabled: {');
-    expect(compiled.js).not.toContain('enabled: {\n            type: "boolean",\n            asCell: true');
+    expect(compiled.js).toContain("enabled: {");
+    expect(compiled.js).not.toContain(
+      'enabled: {\n            type: "boolean",\n            asCell: true',
+    );
   });
 
   it("works with OpaqueRef transformer", () => {
@@ -251,13 +250,13 @@ export default recipe(model, model, (cell) => {
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Check that both transformers worked
-    expect(compiled.js).not.toContain('toSchema');
+    expect(compiled.js).not.toContain("toSchema");
     expect(compiled.js).toContain('type: "object"');
-    expect(compiled.js).toContain('asCell: true');
-    expect(compiled.js).toContain('commontools_1.derive');
-    expect(compiled.js).toContain('(v) => v * 2');
+    expect(compiled.js).toContain("asCell: true");
+    expect(compiled.js).toContain("commontools_1.derive");
+    expect(compiled.js).toContain("(v) => v * 2");
   });
 
   it("skips transformation without /// <cts-enable /> directive", () => {

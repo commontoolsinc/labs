@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { transformFixture, compareFixtureTransformation } from "./test-utils.ts";
+import {
+  compareFixtureTransformation,
+  transformFixture,
+} from "./test-utils.ts";
 import { cache } from "@commontools/static";
 
 const commonToolsTypes = await cache.getText("types/commontools.d.ts");
@@ -13,9 +16,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/nested-ternary.input.ts",
         "opaque-refs/nested-ternary.expected.ts",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
       if (!result.matches) {
         console.log("Expected:", result.expected);
@@ -29,9 +32,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/binary-expressions.input.ts",
         "opaque-refs/binary-expressions.expected.ts",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
     });
 
@@ -39,9 +42,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/multiple-refs.input.ts",
         "opaque-refs/multiple-refs.expected.ts",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
     });
 
@@ -49,9 +52,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/binary-with-ternary.input.ts",
         "opaque-refs/binary-with-ternary.expected.ts",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
     });
 
@@ -59,9 +62,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/array-with-opaque-operations.input.ts",
         "opaque-refs/array-with-opaque-operations.expected.ts",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
       if (!result.matches) {
         console.log("Expected:", result.expected);
@@ -73,9 +76,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/object-literal-operations.input.ts",
         "opaque-refs/object-literal-operations.expected.ts",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
     });
 
@@ -84,9 +87,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/ternary-with-comparison.input.ts",
         "opaque-refs/ternary-with-comparison.expected.ts",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
     });
   });
@@ -96,9 +99,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/function-calls-with-opaque.input.ts",
         "opaque-refs/function-calls-with-opaque.expected.ts",
-        { types }
+        { types },
       );
-      
+
       if (!result.matches) {
         console.log("Expected:", result.expected);
         console.log("Actual:", result.actual);
@@ -110,9 +113,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/complex-function-with-ternary.input.ts",
         "opaque-refs/complex-function-with-ternary.expected.ts",
-        { types }
+        { types },
       );
-      
+
       if (!result.matches) {
         console.log("Expected:", result.expected);
         console.log("Actual:", result.actual);
@@ -125,9 +128,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
     it("transforms binary expressions correctly", async () => {
       const transformed = await transformFixture(
         "opaque-refs/binary-expressions.input.ts",
-        { types }
+        { types },
       );
-      
+
       // Custom assertions
       expect(transformed).toContain("commontools_1.derive");
       expect(transformed).toContain("_v1 => _v1 + 1");
@@ -142,9 +145,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "jsx-expressions/opaque-ref-operations.input.tsx",
         "jsx-expressions/opaque-ref-operations.expected.tsx",
-        { types }
+        { types },
       );
-      
+
       expect(result.matches).toBe(true);
       if (!result.matches) {
         console.log("Expected:", result.expected);
@@ -158,9 +161,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/property-access-and-methods.input.ts",
         "opaque-refs/property-access-and-methods.expected.ts",
-        { types }
+        { types },
       );
-      
+
       if (!result.matches) {
         console.log("Expected:", result.expected);
         console.log("Actual:", result.actual);
@@ -174,9 +177,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/multiple-refs-operations.input.ts",
         "opaque-refs/multiple-refs-operations.expected.ts",
-        { types }
+        { types },
       );
-      
+
       if (!result.matches) {
         console.log("Expected:", result.expected);
         console.log("Actual:", result.actual);
@@ -190,9 +193,9 @@ describe("OpaqueRef Transformer with Fixtures", () => {
       const result = await compareFixtureTransformation(
         "opaque-refs/handler-with-types.input.ts",
         "opaque-refs/handler-with-types.expected.ts",
-        { types }
+        { types },
       );
-      
+
       if (!result.matches) {
         console.log("Expected:", result.expected);
         console.log("Actual:", result.actual);
