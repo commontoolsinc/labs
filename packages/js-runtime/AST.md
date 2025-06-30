@@ -1,19 +1,26 @@
 # TypeScript AST Transformers
 
-This document describes the TypeScript AST (Abstract Syntax Tree) transformers used in the CommonTools js-runtime package. These transformers enable reactive programming patterns by automatically transforming TypeScript code that uses OpaqueRef types and generating JSON schemas from TypeScript types.
+This document describes the TypeScript AST (Abstract Syntax Tree) transformers
+used in the CommonTools js-runtime package. These transformers enable reactive
+programming patterns by automatically transforming TypeScript code that uses
+OpaqueRef types and generating JSON schemas from TypeScript types.
 
 ## Overview
 
 The js-runtime package includes two main TypeScript transformers:
 
-1. **OpaqueRef Transformer** - Transforms operations on `OpaqueRef` types to use reactive primitives
-2. **Schema Transformer** - Converts TypeScript type definitions to JSON Schema at compile time
+1. **OpaqueRef Transformer** - Transforms operations on `OpaqueRef` types to use
+   reactive primitives
+2. **Schema Transformer** - Converts TypeScript type definitions to JSON Schema
+   at compile time
 
-Both transformers are opt-in and require the `/// <cts-enable />` directive at the top of the file.
+Both transformers are opt-in and require the `/// <cts-enable />` directive at
+the top of the file.
 
 ## Enabling Transformations
 
-To enable AST transformations in a TypeScript file, add the following directive at the top:
+To enable AST transformations in a TypeScript file, add the following directive
+at the top:
 
 ```typescript
 /// <cts-enable />
@@ -25,11 +32,13 @@ Without this directive, the transformers will not modify your code.
 
 ## OpaqueRef Transformer
 
-The OpaqueRef transformer automatically transforms certain patterns involving `OpaqueRef` types from the CommonTools framework.
+The OpaqueRef transformer automatically transforms certain patterns involving
+`OpaqueRef` types from the CommonTools framework.
 
 ### Transformations
 
 #### 1. Ternary Operators
+
 When a ternary operator's condition is an OpaqueRef, transform to `ifElse()`:
 
 ```typescript
@@ -40,9 +49,11 @@ const status = isActive ? "on" : "off";
 const status = ifElse(isActive, "on", "off");
 ```
 
-**Why**: OpaqueRef values cannot be directly used in JavaScript conditionals. The `ifElse` function handles the reactive subscription internally.
+**Why**: OpaqueRef values cannot be directly used in JavaScript conditionals.
+The `ifElse` function handles the reactive subscription internally.
 
 #### 2. Binary Operations
+
 When any operand in a binary expression is an OpaqueRef, wrap in `derive()`:
 
 ```typescript
@@ -51,28 +62,37 @@ const next = count + 1;
 const total = price * quantity;
 
 // After
-const next = derive(count, _v1 => _v1 + 1);
-const total = derive({ price, quantity }, ({ price: _v1, quantity: _v2 }) => _v1 * _v2);
+const next = derive(count, (_v1) => _v1 + 1);
+const total = derive(
+  { price, quantity },
+  ({ price: _v1, quantity: _v2 }) => _v1 * _v2,
+);
 ```
 
-**Why**: JavaScript operators cannot work with OpaqueRef values directly. The `derive` function unwraps the values, performs the operation, and returns a new OpaqueRef.
+**Why**: JavaScript operators cannot work with OpaqueRef values directly. The
+`derive` function unwraps the values, performs the operation, and returns a new
+OpaqueRef.
 
-Supported operators: `+`, `-`, `*`, `/`, `%`, `>`, `<`, `>=`, `<=`, `==`, `===`, `!=`, `!==`
+Supported operators: `+`, `-`, `*`, `/`, `%`, `>`, `<`, `>=`, `<=`, `==`, `===`,
+`!=`, `!==`
 
 #### 3. JSX Expressions
+
 Transform OpaqueRef operations inside JSX expressions:
 
 ```typescript
 // Before
 const element = <div>Count: {count + 1}</div>;
 
-// After  
-const element = <div>Count: {derive(count, _v1 => _v1 + 1)}</div>;
+// After
+const element = <div>Count: {derive(count, (_v1) => _v1 + 1)}</div>;
 ```
 
-Note: Simple references like `<div>{count}</div>` are not transformed, only expressions that perform operations.
+Note: Simple references like `<div>{count}</div>` are not transformed, only
+expressions that perform operations.
 
 #### 4. Property Access and Method Calls
+
 Access properties and call methods on OpaqueRef objects:
 
 ```typescript
@@ -82,13 +102,15 @@ const upper = str.toUpperCase();
 const item = data.items[0];
 
 // After
-const len = derive(str, _v1 => _v1.length);
-const upper = derive(str, _v1 => _v1.toUpperCase());
-const item = derive(data, _v1 => _v1.items[0]);
+const len = derive(str, (_v1) => _v1.length);
+const upper = derive(str, (_v1) => _v1.toUpperCase());
+const item = derive(data, (_v1) => _v1.items[0]);
 ```
 
 #### 5. Array and Object Literals
-Transform each element/property independently (principle of independent reactivity):
+
+Transform each element/property independently (principle of independent
+reactivity):
 
 ```typescript
 // Before
@@ -96,25 +118,30 @@ const arr = [count + 1, price * 2];
 const obj = { next: count + 1, total: price * tax };
 
 // After
-const arr = [derive(count, _v1 => _v1 + 1), derive(price, _v1 => _v1 * 2)];
-const obj = { 
-  next: derive(count, _v1 => _v1 + 1), 
-  total: derive({ price, tax }, ({ price: _v1, tax: _v2 }) => _v1 * _v2)
+const arr = [derive(count, (_v1) => _v1 + 1), derive(price, (_v1) => _v1 * 2)];
+const obj = {
+  next: derive(count, (_v1) => _v1 + 1),
+  total: derive({ price, tax }, ({ price: _v1, tax: _v2 }) => _v1 * _v2),
 };
 ```
 
-**Why**: Each element/property may have different OpaqueRef dependencies and should be reactive independently.
+**Why**: Each element/property may have different OpaqueRef dependencies and
+should be reactive independently.
 
 ### Key Principles
 
-1. **Minimal Transformation**: Only transform what's necessary. Direct OpaqueRef references don't need transformation.
-2. **Preserve Semantics**: The transformed code should behave identically to the original, just with reactive support.
-3. **Independent Reactivity**: Each operation should be independently reactive to minimize unnecessary recomputation.
+1. **Minimal Transformation**: Only transform what's necessary. Direct OpaqueRef
+   references don't need transformation.
+2. **Preserve Semantics**: The transformed code should behave identically to the
+   original, just with reactive support.
+3. **Independent Reactivity**: Each operation should be independently reactive
+   to minimize unnecessary recomputation.
 4. **Type Safety**: Transformations maintain TypeScript type information.
 
 ## Schema Transformer
 
-The Schema transformer converts TypeScript type definitions to JSON Schema at compile time using the `toSchema<T>()` function.
+The Schema transformer converts TypeScript type definitions to JSON Schema at
+compile time using the `toSchema<T>()` function.
 
 ### Basic Usage
 
@@ -137,9 +164,9 @@ const userSchema = {
   properties: {
     name: { type: "string" },
     age: { type: "number" },
-    email: { type: "string" }
+    email: { type: "string" },
   },
-  required: ["name", "age"]
+  required: ["name", "age"],
 };
 ```
 
@@ -147,15 +174,15 @@ const userSchema = {
 
 ```typescript
 const schema = toSchema<User>({
-  default: { name: "Anonymous", age: 0 }
+  default: { name: "Anonymous", age: 0 },
 });
 
 // Result includes the default
 const schema = {
   type: "object",
-  properties: { /* ... */ },
+  properties: {/* ... */},
   required: ["name", "age"],
-  default: { name: "Anonymous", age: 0 }
+  default: { name: "Anonymous", age: 0 },
 };
 ```
 
@@ -178,12 +205,12 @@ const schema = {
   type: "object",
   properties: {
     count: { type: "number", asCell: true },
-    messages: { 
-      type: "array", 
+    messages: {
+      type: "array",
       items: { type: "string" },
-      asStream: true 
-    }
-  }
+      asStream: true,
+    },
+  },
 };
 ```
 
@@ -193,17 +220,17 @@ Both transformers work together seamlessly:
 
 ```typescript
 /// <cts-enable />
-import { toSchema, handler, recipe, cell } from "commontools";
+import { cell, handler, recipe, toSchema } from "commontools";
 
 interface InputState {
   count: number;
 }
 
-const schema = toSchema<InputState>();  // Transformed to JSON Schema
+const schema = toSchema<InputState>(); // Transformed to JSON Schema
 
 const myHandler = handler({}, schema, (_, state) => {
   // OpaqueRef operations are transformed
-  const next = state.count + 1;  // Becomes: derive(state.count, _v1 => _v1 + 1)
+  const next = state.count + 1; // Becomes: derive(state.count, _v1 => _v1 + 1)
 });
 ```
 
@@ -212,16 +239,21 @@ const myHandler = handler({}, schema, (_, state) => {
 The transformer system is organized into focused modules:
 
 ### OpaqueRef Transformer
+
 - `typescript/transformer/opaque-ref.ts` - Main transformer with configuration
-- `typescript/transformer/types.ts` - Type checking utilities for OpaqueRef detection
+- `typescript/transformer/types.ts` - Type checking utilities for OpaqueRef
+  detection
 - `typescript/transformer/transforms.ts` - Individual transformation functions
 - `typescript/transformer/imports.ts` - Import management utilities
 
 ### Schema Transformer
+
 - `typescript/transformer/schema.ts` - Main schema transformer
-- `typescript/transformer/schema-converter.ts` - TypeScript to JSON Schema conversion logic
+- `typescript/transformer/schema-converter.ts` - TypeScript to JSON Schema
+  conversion logic
 
 ### Shared
+
 - `typescript/compiler.ts` - TypeScript compiler integration
 - `test/test-utils.ts` - Testing utilities for transformers
 
@@ -231,8 +263,8 @@ The transformer system is organized into focused modules:
 
 ```typescript
 interface TransformerOptions {
-  mode?: 'transform' | 'error';  // Default: 'transform'
-  debug?: boolean;               // Enable debug logging
+  mode?: "transform" | "error"; // Default: 'transform'
+  debug?: boolean; // Enable debug logging
   logger?: (msg: string) => void; // Custom logger
 }
 ```
@@ -244,12 +276,12 @@ import { createOpaqueRefTransformer } from "./transformer/opaque-ref.ts";
 import { createSchemaTransformer } from "./transformer/schema.ts";
 
 const opaqueRefTransformer = createOpaqueRefTransformer(tsProgram, {
-  mode: 'transform',
-  debug: true
+  mode: "transform",
+  debug: true,
 });
 
 const schemaTransformer = createSchemaTransformer(tsProgram, {
-  debug: true
+  debug: true,
 });
 
 // Use in TypeScript compilation
@@ -265,12 +297,12 @@ tsProgram.emit(sourceFile, undefined, undefined, undefined, {
 The package includes comprehensive test utilities:
 
 ```typescript
-import { transformSource, checkWouldTransform } from "./test-utils.ts";
+import { checkWouldTransform, transformSource } from "./test-utils.ts";
 
 // Transform source code for testing
-const transformed = await transformSource(sourceCode, { 
-  mode: 'transform',
-  types: { "commontools.d.ts": typeDefinitions }
+const transformed = await transformSource(sourceCode, {
+  mode: "transform",
+  types: { "commontools.d.ts": typeDefinitions },
 });
 
 // Check if transformation would occur
@@ -289,21 +321,24 @@ fixtures/
 ```
 
 Naming convention:
+
 - `*.input.ts` or `*.input.tsx` - Source code before transformation
 - `*.expected.ts` or `*.expected.tsx` - Expected output after transformation
 - `no-transform-*` - Cases where transformation should NOT occur
 
 ## Error Mode
 
-Both transformers support an error mode that reports what transformations would be applied instead of applying them:
+Both transformers support an error mode that reports what transformations would
+be applied instead of applying them:
 
 ```typescript
-const transformer = createOpaqueRefTransformer(tsProgram, { mode: 'error' });
+const transformer = createOpaqueRefTransformer(tsProgram, { mode: "error" });
 
 // This will throw an error listing all transformations that would be applied
 ```
 
 This is useful for:
+
 - Gradually migrating code to use transformers
 - Understanding what transformations will be applied
 - Debugging transformation issues
@@ -314,7 +349,7 @@ This is useful for:
 
 ```typescript
 /// <cts-enable />
-import { recipe, cell, derive, ifElse, toSchema, h, UI } from "commontools";
+import { cell, derive, h, ifElse, recipe, toSchema, UI } from "commontools";
 
 interface TodoItem {
   id: string;
@@ -324,31 +359,32 @@ interface TodoItem {
 
 interface TodoState {
   items: TodoItem[];
-  filter: 'all' | 'active' | 'completed';
+  filter: "all" | "active" | "completed";
 }
 
 const schema = toSchema<TodoState>({
-  default: { items: [], filter: 'all' }
+  default: { items: [], filter: "all" },
 });
 
 export default recipe(schema, schema, (state) => {
   // These operations are automatically transformed
-  const activeCount = state.items.filter(item => !item.completed).length;
+  const activeCount = state.items.filter((item) => !item.completed).length;
   const hasActive = activeCount > 0;
-  
+
   return {
     [UI]: (
       <div>
         <h1>Todo List</h1>
         <p>Active items: {activeCount}</p>
-        {ifElse(hasActive,
+        {ifElse(
+          hasActive,
           <button>Clear completed</button>,
-          <span>No active items</span>
+          <span>No active items</span>,
         )}
       </div>
     ),
     items: state.items,
-    filter: state.filter
+    filter: state.filter,
   };
 });
 ```
@@ -358,8 +394,10 @@ export default recipe(schema, schema, (state) => {
 Potential areas for expansion:
 
 1. **Async Operations** - Transform promises and async/await with OpaqueRef
-2. **Logical Operations** - Special handling for `&&`, `||`, `!` with short-circuiting
-3. **Template Literals** - Transform template strings with OpaqueRef interpolations
+2. **Logical Operations** - Special handling for `&&`, `||`, `!` with
+   short-circuiting
+3. **Template Literals** - Transform template strings with OpaqueRef
+   interpolations
 4. **Destructuring** - Handle OpaqueRef in destructuring patterns
 5. **Spread Operations** - Transform spread with OpaqueRef values
 6. **Type Assertions** - Preserve type assertions through transformations
@@ -374,4 +412,5 @@ To add new transformations:
 4. Add comprehensive tests
 5. Update this documentation
 
-Remember to follow the key principles: minimal transformation, preserve semantics, independent reactivity, and type safety.
+Remember to follow the key principles: minimal transformation, preserve
+semantics, independent reactivity, and type safety.
