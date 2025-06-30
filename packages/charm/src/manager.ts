@@ -427,13 +427,9 @@ export class CharmManager {
 
       // Get the raw argument value
       let argumentValue: any;
-      let argumentLink: any;
 
       try {
-        argumentLink = argumentCell.getAsLegacyCellLink();
-        if (!argumentLink || !argumentLink.cell) return result;
-
-        argumentValue = argumentLink.cell.getAtPath(argumentLink.path);
+        argumentValue = argumentCell.getRaw();
       } catch (err) {
         console.debug("Error getting argument value:", err);
         return result;
@@ -593,7 +589,7 @@ export class CharmManager {
       if (argumentValue && typeof argumentValue === "object") {
         processValue(
           argumentValue,
-          this.runtime.getCellFromLink(argumentLink),
+          argumentCell,
           new Set(),
           0,
         );
