@@ -15,7 +15,7 @@ describe("Schema Transformer", () => {
 
   it("transforms toSchema<T>() with simple interface", () => {
     const program = {
-      entry: "/main.ts",
+      main: "/main.ts",
       files: [
         {
           name: "/main.ts",
@@ -55,7 +55,7 @@ export { userSchema };
 
   it("transforms toSchema<T>() with Stream<T> type", () => {
     const program = {
-      entry: "/main.ts",
+      main: "/main.ts",
       files: [
         {
           name: "/main.ts",
@@ -90,7 +90,7 @@ export { stateSchema };
 
   it("transforms toSchema<T>() with options", () => {
     const program = {
-      entry: "/main.ts",
+      main: "/main.ts",
       files: [
         {
           name: "/main.ts",
@@ -127,7 +127,7 @@ export { configSchema };
 
   it("transforms toSchema<T>() with arrays and optional properties", () => {
     const program = {
-      entry: "/main.ts",
+      main: "/main.ts",
       files: [
         {
           name: "/main.ts",
@@ -168,7 +168,7 @@ export { todoSchema };
 
   it("transforms toSchema<T>() with Cell<T> type", () => {
     const program = {
-      entry: "/main.ts",
+      main: "/main.ts",
       files: [
         {
           name: "/main.ts",
@@ -211,7 +211,7 @@ export { stateSchema };
 
   it("works with OpaqueRef transformer", () => {
     const program = {
-      entry: "/main.tsx",
+      main: "/main.tsx",
       files: [
         {
           name: "/main.tsx",

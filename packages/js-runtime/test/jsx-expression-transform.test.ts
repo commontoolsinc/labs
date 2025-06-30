@@ -15,7 +15,7 @@ describe("JSX Expression Transformer", () => {
 
   it("transforms JSX expressions with OpaqueRef", () => {
     const program = {
-      entry: "/main.tsx",
+      main: "/main.tsx",
       files: [
         {
           name: "/main.tsx",
