@@ -10,7 +10,7 @@ describe("OpaqueRef Transformer", () => {
 
   describe("Ternary Transformations", () => {
     it("transforms ternary with OpaqueRef condition", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, ifElse, cell } from "commontools";
 const isActive = cell<boolean>(false);
 const result = isActive ? "active" : "inactive";
@@ -32,7 +32,7 @@ const result = isActive ? "active" : "inactive";
     });
 
     it("adds ifElse import when not present", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef } from "commontools";
 const isActive: OpaqueRef<boolean> = {} as any;
 const result = isActive ? "active" : "inactive";
@@ -46,7 +46,7 @@ const result = isActive ? "active" : "inactive";
 
   describe("Binary Expression Transformations", () => {
     it("transforms binary expressions with OpaqueRef", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count + 1;
@@ -59,7 +59,7 @@ const result = count + 1;
     });
 
     it("transforms various binary operators", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const num: OpaqueRef<number> = {} as any;
 const a = num + 1;
@@ -99,7 +99,7 @@ const result = num + 1;
 
   describe("JSX Expression Transformations", () => {
     it("transforms JSX expressions with OpaqueRef operations", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const element = <div>{count + 1}</div>;
@@ -111,7 +111,7 @@ const element = <div>{count + 1}</div>;
     });
 
     it("does not transform simple OpaqueRef references in JSX", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const element = <div>{count}</div>;
@@ -122,7 +122,7 @@ const element = <div>{count}</div>;
     });
 
     it("transforms complex JSX expressions", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive, h } from "commontools";
 const price: OpaqueRef<number> = {} as any;
 const element = (
@@ -146,7 +146,7 @@ const element = (
 
   describe("Import Management", () => {
     it("adds derive import when needed", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count + 1;
@@ -158,7 +158,7 @@ const result = count + 1;
     });
 
     it("does not duplicate existing imports", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive, ifElse } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const isActive: OpaqueRef<boolean> = {} as any;
@@ -177,7 +177,7 @@ const b = isActive ? 1 : 0;
 
   describe("Error Mode", () => {
     it("reports errors instead of transforming", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count + 1;
@@ -189,7 +189,7 @@ const result = count + 1;
     });
 
     it("reports multiple errors", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const isActive: OpaqueRef<boolean> = {} as any;
@@ -206,7 +206,7 @@ const b = isActive ? 1 : 0;
   describe("Debug Mode", () => {
     it("logs transformation details", async () => {
       const logs: string[] = [];
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count + 1;
@@ -226,7 +226,7 @@ const result = count + 1;
 
   describe("checkWouldTransform utility", () => {
     it("returns true when transformation is needed", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count + 1;
@@ -245,7 +245,7 @@ const result = count + 1;
 
   describe("Edge Cases", () => {
     it("handles nested ternary expressions", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, ifElse } from "commontools";
 const a: OpaqueRef<boolean> = {} as any;
 const b: OpaqueRef<boolean> = {} as any;
@@ -257,7 +257,7 @@ const result = a ? (b ? 1 : 2) : 3;
     });
 
     it("handles property access on OpaqueRef", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 interface User { age: number; }
 const user: OpaqueRef<User> = {} as any;
@@ -271,7 +271,7 @@ const result = user.age + 1;
     });
 
     it("handles string concatenation with OpaqueRef", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const name: OpaqueRef<string> = {} as any;
 const greeting = "Hello, " + name;
@@ -283,7 +283,7 @@ const greeting = "Hello, " + name;
     });
 
     it("handles multiple different OpaqueRefs in one expression", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const count1: OpaqueRef<number> = {} as any;
 const count2: OpaqueRef<number> = {} as any;
@@ -297,7 +297,7 @@ const sum = count1 + count2;
     });
 
     it("handles multiple same OpaqueRefs in one expression", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const double = count + count;
@@ -310,7 +310,7 @@ const double = count + count;
     });
 
     it("handles complex expressions with multiple OpaqueRefs", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const a: OpaqueRef<number> = {} as any;
 const b: OpaqueRef<number> = {} as any;
@@ -325,7 +325,7 @@ const result = (a + b) * c;
     });
 
     it("handles mixed OpaqueRef and regular values", async () => {
-      const source = `
+      const source = `/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count + 10;
@@ -334,6 +334,38 @@ const result = count + 10;
       expect(transformed).toContain(
         "commontools_1.derive(count, _v1 => _v1 + 10)",
       );
+    });
+  });
+
+  describe("CTS-Enable Directive", () => {
+    it("skips transformation without /// <cts-enable /> directive", async () => {
+      const source = `
+import { OpaqueRef, derive } from "commontools";
+const count: OpaqueRef<number> = {} as any;
+const result = count > 5 ? "yes" : "no";
+const sum = count + 1;
+`;
+      const transformed = await transformSource(source, { types });
+      // Should NOT transform without the directive
+      expect(transformed).toContain('count > 5 ? "yes" : "no"');
+      expect(transformed).toContain("count + 1");
+      expect(transformed).not.toContain("ifElse");
+      expect(transformed).not.toContain("_v1 =>");
+    });
+
+    it("transforms with /// <cts-enable /> directive", async () => {
+      const source = `/// <cts-enable />
+import { OpaqueRef, derive } from "commontools";
+const count: OpaqueRef<number> = {} as any;
+const result = count > 5 ? "yes" : "no";
+const sum = count + 1;
+`;
+      const transformed = await transformSource(source, { types });
+      // Should transform with the directive
+      expect(transformed).toContain("ifElse");
+      expect(transformed).toContain("derive");
+      expect(transformed).not.toContain('count > 5 ? "yes" : "no"');
+      expect(transformed).not.toContain("count + 1");
     });
   });
 });
