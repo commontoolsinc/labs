@@ -3,12 +3,6 @@ import { baseStyles } from "./style.ts";
 import { Cell } from "@commontools/runner";
 import { CommonCharmElement } from "./common-charm.ts";
 
-declare global {
-  interface Window {
-    Plaid: any;
-  }
-}
-
 export interface PlaidAuthData {
   items: Array<{
     accessToken: string;
@@ -36,84 +30,129 @@ export interface PlaidAuthData {
   }>;
 }
 
-export class CommonPlaidLinkElement extends LitElement {
+export class CommonPlaidOauthElement extends LitElement {
   static override properties = {
     auth: { type: Object },
     products: { type: Array },
     isLoading: { type: Boolean },
     authStatus: { type: String },
-    plaidScriptLoaded: { type: Boolean },
   };
 
   declare auth: Cell<PlaidAuthData> | undefined;
   declare products: string[];
   declare isLoading: boolean;
   declare authStatus: string;
-  declare plaidScriptLoaded: boolean;
-
-  private plaidHandler: any = null;
 
   constructor() {
     super();
-    this.products = ["transactions"];
+    this.products = ["transactions"]; // transactions includes balance/account info
     this.isLoading = false;
     this.authStatus = "";
-    this.plaidScriptLoaded = false;
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    this.loadPlaidScript();
+    // Check for OAuth callback on component mount
+    this.checkForOAuthCallback();
   }
 
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    // Cleanup Plaid handler
-    if (this.plaidHandler) {
-      this.plaidHandler.destroy();
-      this.plaidHandler = null;
+  private async checkForOAuthCallback() {
+    // Check if we're returning from Plaid OAuth
+    const urlParams = new URLSearchParams(window.location.search);
+    const publicToken = urlParams.get("public_token");
+    const error = urlParams.get("error");
+    const oauthContinue = urlParams.get("oauth_continue");
+    const oauthStateId = urlParams.get("oauth_state_id");
+
+    if (publicToken || error || oauthContinue) {
+      if (error) {
+        this.authStatus = `Authentication failed: ${
+          urlParams.get("error_message") || error
+        }`;
+        // Clean up URL
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname,
+        );
+      } else if (publicToken) {
+        // Handle the public token exchange
+        this.authStatus = "Processing authentication...";
+        await this.handlePublicToken(publicToken);
+
+        // Clean up URL and sessionStorage
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname,
+        );
+        sessionStorage.removeItem("plaid_link_token");
+        sessionStorage.removeItem("plaid_auth_cell_id");
+        sessionStorage.removeItem("plaid_integration_charm_id");
+        sessionStorage.removeItem("plaid_frontend_url");
+        sessionStorage.removeItem("plaid_oauth_state_id");
+        sessionStorage.removeItem("plaid_oauth_completed");
+      } else if (oauthContinue && oauthStateId) {
+        // This shouldn't happen anymore with proper hosted Link setup
+        // But keeping for backward compatibility
+        this.authStatus = "Unexpected OAuth callback. Please try again.";
+        // Clean up URL
+        window.history.replaceState(
+          {},
+          document.title,
+          window.location.pathname,
+        );
+      }
     }
   }
 
-  private async loadPlaidScript() {
-    // Check if already loaded
-    if (window.Plaid) {
-      this.plaidScriptLoaded = true;
-      return;
-    }
+  private async handlePublicToken(publicToken: string) {
+    this.isLoading = true;
+    this.authStatus = "Exchanging token...";
 
-    // Check if script tag already exists
-    const existingScript = document.querySelector(
-      'script[src*="plaid.com/link/v2/stable/link-initialize.js"]',
-    );
-    if (existingScript) {
-      existingScript.addEventListener("load", () => {
-        this.plaidScriptLoaded = true;
-      });
-      return;
+    const authCellId = JSON.stringify(this.auth?.getAsLegacyCellLink());
+    const container = CommonCharmElement.findCharmContainer(this);
+    if (!container) {
+      throw new Error("No <common-charm> container.");
     }
+    const { charmId } = container;
 
-    // Load the script
-    const script = document.createElement("script");
-    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-    script.async = true;
-    script.onload = () => {
-      this.plaidScriptLoaded = true;
-    };
-    script.onerror = () => {
-      console.error("Failed to load Plaid Link script");
-      this.authStatus =
-        "Failed to load Plaid Link. Please refresh and try again.";
-    };
-    document.head.appendChild(script);
+    try {
+      const response = await fetch(
+        "/api/integrations/plaid-oauth/exchange-token",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            publicToken,
+            authCellId,
+            integrationCharmId: charmId,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      this.authStatus = "Bank account connected successfully!";
+      this.isLoading = false;
+
+      // Force update to show new account
+      this.requestUpdate();
+    } catch (error) {
+      console.error("Error exchanging token:", error);
+      this.authStatus = `Error: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.isLoading = false;
+    }
   }
 
   async handleConnectClick() {
-    if (!this.plaidScriptLoaded || !window.Plaid) {
-      this.authStatus = "Plaid Link is still loading, please wait...";
-      return;
-    }
-
     this.isLoading = true;
     this.authStatus = "Creating link session...";
 
@@ -129,10 +168,11 @@ export class CommonPlaidLinkElement extends LitElement {
       authCellId,
       integrationCharmId: charmId,
       products: this.products,
+      // Send the current page URL so the callback knows where to redirect
+      frontendUrl: window.location.href.split("?")[0],
     };
 
     try {
-      // Get link token from backend
       const response = await fetch(
         "/api/integrations/plaid-oauth/create-link-token",
         {
@@ -150,16 +190,24 @@ export class CommonPlaidLinkElement extends LitElement {
 
       const data = await response.json();
 
-      if (!data.linkToken) {
-        throw new Error("No link token received from server");
-      }
+      if (data.hostedLinkUrl && data.linkToken) {
+        // Store session data in sessionStorage for frontend use
+        sessionStorage.setItem("plaid_link_token", data.linkToken);
+        sessionStorage.setItem("plaid_auth_cell_id", authCellId);
+        sessionStorage.setItem(
+          "plaid_frontend_url",
+          window.location.href.split("?")[0],
+        );
+        if (charmId) {
+          sessionStorage.setItem("plaid_integration_charm_id", charmId);
+        }
 
-      // Initialize Plaid Link
-      this.initializePlaidLink(
-        data.linkToken,
-        authCellId,
-        charmId || undefined,
-      );
+        // Redirect to Plaid hosted Link
+        this.authStatus = "Redirecting to Plaid...";
+        window.location.href = data.hostedLinkUrl;
+      } else {
+        throw new Error("No hosted link URL or link token received");
+      }
     } catch (error) {
       console.error("Error creating link session:", error);
       this.authStatus = `Error: ${
@@ -169,74 +217,29 @@ export class CommonPlaidLinkElement extends LitElement {
     }
   }
 
-  private initializePlaidLink(
+  private async pollForOAuthCompletion(
     linkToken: string,
     authCellId: string,
     integrationCharmId?: string,
+    attempt = 0,
   ) {
-    // Destroy existing handler if any
-    if (this.plaidHandler) {
-      this.plaidHandler.destroy();
+    const maxAttempts = 60; // Poll for up to 2 minutes
+
+    // Set loading state on first attempt
+    if (attempt === 0) {
+      this.isLoading = true;
     }
-
-    const config = {
-      token: linkToken,
-      onSuccess: async (publicToken: string, metadata: any) => {
-        this.authStatus = "Processing authentication...";
-        await this.handlePublicToken(
-          publicToken,
-          authCellId,
-          integrationCharmId,
-        );
-      },
-      onExit: (error: any, metadata: any) => {
-        if (error) {
-          this.authStatus = `Authentication failed: ${
-            error.error_message || error.display_message || "Unknown error"
-          }`;
-        } else {
-          this.authStatus = "Authentication cancelled";
-        }
-        this.isLoading = false;
-      },
-      onEvent: (eventName: string, metadata: any) => {
-        // Update status based on events
-        if (eventName === "OPEN") {
-          this.authStatus = "Link opened...";
-        } else if (eventName === "SELECT_INSTITUTION") {
-          this.authStatus = `Connecting to ${
-            metadata.institution_name || "bank"
-          }...`;
-        } else if (eventName === "SUBMIT_CREDENTIALS") {
-          this.authStatus = "Verifying credentials...";
-        }
-      },
-    };
-
-    this.plaidHandler = window.Plaid.create(config);
-
-    // Open Link immediately
-    this.plaidHandler.open();
-  }
-
-  private async handlePublicToken(
-    publicToken: string,
-    authCellId: string,
-    integrationCharmId?: string,
-  ) {
-    this.isLoading = true;
-    this.authStatus = "Exchanging token...";
 
     try {
       const response = await fetch(
-        "/api/integrations/plaid-oauth/exchange-token",
+        "/api/integrations/plaid-oauth/complete-oauth",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            publicToken,
+            linkToken,
             authCellId,
             integrationCharmId,
           }),
@@ -244,17 +247,112 @@ export class CommonPlaidLinkElement extends LitElement {
       );
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json();
+
+        // If session is still in progress, keep polling
+        if (
+          errorData.error === "Link session still in progress" &&
+          attempt < maxAttempts
+        ) {
+          const elapsed = attempt * 2;
+          this.authStatus = `Waiting for bank authorization... (${
+            Math.floor(elapsed / 60)
+          }:${String(elapsed % 60).padStart(2, "0")})`;
+
+          await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
+          return this.pollForOAuthCompletion(
+            linkToken,
+            authCellId,
+            integrationCharmId,
+            attempt + 1,
+          );
+        }
+
+        // If we've hit max attempts, show error
+        if (attempt >= maxAttempts) {
+          this.authStatus =
+            "Bank authorization is taking too long. Please try again.";
+          this.isLoading = false;
+
+          // Clean up session storage
+          sessionStorage.removeItem("plaid_link_token");
+          sessionStorage.removeItem("plaid_auth_cell_id");
+          sessionStorage.removeItem("plaid_integration_charm_id");
+          sessionStorage.removeItem("plaid_oauth_state_id");
+          return;
+        }
+
+        throw new Error(
+          errorData.error || `HTTP error! status: ${response.status}`,
+        );
       }
 
       const result = await response.json();
-      this.authStatus = "Bank account connected successfully!";
-      this.isLoading = false;
 
-      // Force update to show new account
-      this.requestUpdate();
+      if (result.publicToken) {
+        // Exchange the public token
+        await this.handlePublicToken(result.publicToken);
+      } else {
+        this.authStatus = "Unexpected response from server. Please try again.";
+        this.isLoading = false;
+      }
+
+      // Clean up session storage
+      sessionStorage.removeItem("plaid_link_token");
+      sessionStorage.removeItem("plaid_auth_cell_id");
+      sessionStorage.removeItem("plaid_integration_charm_id");
+      sessionStorage.removeItem("plaid_oauth_state_id");
     } catch (error) {
-      console.error("Error exchanging token:", error);
+      console.error("Error polling for OAuth completion:", error);
+      this.authStatus = `Error: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      this.isLoading = false;
+    }
+  }
+
+  private async completeOAuthFlow(
+    linkToken: string,
+    authCellId: string,
+    integrationCharmId?: string,
+  ) {
+    this.isLoading = true;
+
+    try {
+      const response = await fetch(
+        "/api/integrations/plaid-oauth/complete-oauth",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            linkToken,
+            authCellId,
+            integrationCharmId,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.error || `HTTP error! status: ${response.status}`,
+        );
+      }
+
+      const result = await response.json();
+
+      if (result.publicToken) {
+        // Exchange the public token
+        await this.handlePublicToken(result.publicToken);
+      } else {
+        this.authStatus = "Bank account connected successfully!";
+        this.isLoading = false;
+        this.requestUpdate();
+      }
+    } catch (error) {
+      console.error("Error completing OAuth flow:", error);
       this.authStatus = `Error: ${
         error instanceof Error ? error.message : String(error)
       }`;
@@ -378,14 +476,10 @@ export class CommonPlaidLinkElement extends LitElement {
         <div class="action-section">
           <button
             @click="${this.handleConnectClick}"
-            ?disabled="${this.isLoading || !this.plaidScriptLoaded}"
+            ?disabled="${this.isLoading}"
             class="connect-button"
           >
-            ${this.isLoading
-        ? "Processing..."
-        : !this.plaidScriptLoaded
-        ? "Loading Plaid..."
-        : "Connect Bank Account"}
+            ${this.isLoading ? "Processing..." : "Connect Bank Account"}
           </button>
 
           ${this.authStatus
@@ -394,6 +488,11 @@ export class CommonPlaidLinkElement extends LitElement {
         `
         : ""}
         </div>
+
+        <details class="debug-section">
+          <summary>Debug: Auth Cell Contents</summary>
+          <pre class="debug-content">${JSON.stringify(authData, null, 2)}</pre>
+        </details>
       </div>
     `;
   }
@@ -402,7 +501,6 @@ export class CommonPlaidLinkElement extends LitElement {
     return [
       baseStyles,
       css`
-        /* Same styles as common-plaid-oauth */
         .plaid-wrapper {
           padding: 24px;
           border-radius: 12px;
@@ -563,12 +661,40 @@ export class CommonPlaidLinkElement extends LitElement {
           font-size: 0.9rem;
           text-align: center;
         }
+
+        .debug-section {
+          margin-top: 24px;
+          padding: 16px;
+          background-color: #f5f5f5;
+          border-radius: 8px;
+          border: 1px solid #ddd;
+        }
+
+        .debug-section summary {
+          cursor: pointer;
+          font-weight: 500;
+          color: #666;
+          user-select: none;
+        }
+
+        .debug-content {
+          margin-top: 12px;
+          padding: 12px;
+          background-color: #fff;
+          border: 1px solid #e0e0e0;
+          border-radius: 4px;
+          overflow-x: auto;
+          font-family: monospace;
+          font-size: 0.85rem;
+          white-space: pre;
+          color: #333;
+        }
       `,
     ];
   }
 }
 
 globalThis.customElements.define(
-  "common-plaid-link",
-  CommonPlaidLinkElement,
+  "common-plaid-oauth",
+  CommonPlaidOauthElement,
 );

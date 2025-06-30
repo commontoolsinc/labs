@@ -312,7 +312,9 @@ class PlaidClient {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              authCellId: JSON.stringify((this.auth as any).getAsCellLink()),
+              authCellId: JSON.stringify(
+                (this.auth as any).getAsLegacyCellLink(),
+              ),
               itemId: item.itemId,
             }),
           },
@@ -398,7 +400,9 @@ class PlaidClient {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              authCellId: JSON.stringify((this.auth as any).getAsCellLink()),
+              authCellId: JSON.stringify(
+                (this.auth as any).getAsLegacyCellLink(),
+              ),
               itemId: item.itemId,
               count,
             }),
@@ -633,6 +637,26 @@ export default recipe(
             $auth={auth}
             products={settings.products}
           />
+
+          {
+            /* Debug: Show raw transaction data
+          <div style="margin-bottom: 20px;">
+            <h4 style="margin: 0 0 10px; font-size: 16px;">
+              Debug: Raw Account Info
+            </h4>
+            <pre style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; max-height: 300px; font-size: 12px;">
+                        {derive(accounts, (accounts) => JSON.stringify(accounts, null, 2))}
+            </pre>
+          </div>
+          <div style="margin-bottom: 20px;">
+            <h4 style="margin: 0 0 10px; font-size: 16px;">
+              Debug: Raw Transaction Data
+            </h4>
+            <pre style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; max-height: 300px; font-size: 12px;">
+                        {derive(transactions, (transactions) => JSON.stringify(transactions, null, 2))}
+            </pre>
+          </div> */
+          }
 
           <div style="display: flex; gap: 20px; flex-direction: column;">
             <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px;">
