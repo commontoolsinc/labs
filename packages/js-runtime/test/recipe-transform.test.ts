@@ -15,7 +15,7 @@ describe("Recipe Transformation", () => {
 
   it("does not wrap handler calls or ifElse in derive", () => {
     const program = {
-      entry: "/main.tsx",
+      main: "/main.tsx",
       files: [
         {
           name: "/main.tsx",
