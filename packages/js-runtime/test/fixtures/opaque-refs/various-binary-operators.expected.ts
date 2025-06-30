@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { OpaqueRef, derive } from "commontools";
 const num: OpaqueRef<number> = {} as any;
 const a = commontools_1.derive(num, _v1 => _v1 + 1);

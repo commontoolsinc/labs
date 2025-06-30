@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { OpaqueRef, derive, h } from "commontools";
 const price: OpaqueRef<number> = {} as any;
 const element = (commontools_1.h("div", null,

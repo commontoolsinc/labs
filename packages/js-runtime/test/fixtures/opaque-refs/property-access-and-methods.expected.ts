@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { cell, derive } from "commontools";
 interface User {
     name: string;

@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { handler, cell, Cell, toSchema } from "commontools";
 // Test case 1: Simple handler with type parameters
 interface EventType {
