@@ -13,6 +13,25 @@ export function createSchemaTransformer(
 
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
+      // Check for /// <cts-enable /> directive
+      const hasCtsEnableDirective = () => {
+        const text = sourceFile.getFullText();
+        const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
+        
+        for (const comment of tripleSlashDirectives) {
+          const commentText = text.substring(comment.pos, comment.end);
+          if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      // Skip transformation if directive is not present
+      if (!hasCtsEnableDirective()) {
+        return sourceFile;
+      }
+
       const visit: ts.Visitor = (node) => {
         // Look for toSchema<T>() calls
         if (

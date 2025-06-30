@@ -19,7 +19,7 @@ describe("JSX Expression Transformer", () => {
       files: [
         {
           name: "/main.tsx",
-          contents: `
+          contents: `/// <cts-enable />
 import { derive, h, recipe, schema, UI } from "commontools";
 
 const model = schema({

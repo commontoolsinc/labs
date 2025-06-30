@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { cell } from "commontools";
 
 // Basic string concatenation with multiple OpaqueRefs

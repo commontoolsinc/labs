@@ -19,7 +19,7 @@ describe("Recipe Transformation", () => {
       files: [
         {
           name: "/main.tsx",
-          contents: `
+          contents: `/// <cts-enable />
 import {
   derive,
   generateObject,

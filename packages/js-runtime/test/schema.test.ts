@@ -19,7 +19,7 @@ describe("Schema Transformer", () => {
       files: [
         {
           name: "/main.ts",
-          contents: `
+          contents: `/// <cts-enable />
 import { toSchema, JSONSchema } from "commontools";
 
 interface User {
@@ -59,7 +59,7 @@ export { userSchema };
       files: [
         {
           name: "/main.ts",
-          contents: `
+          contents: `/// <cts-enable />
 import { Stream, toSchema } from "commontools";
 
 interface State {
@@ -94,7 +94,7 @@ export { stateSchema };
       files: [
         {
           name: "/main.ts",
-          contents: `
+          contents: `/// <cts-enable />
 import { toSchema } from "commontools";
 
 interface Config {
@@ -131,7 +131,7 @@ export { configSchema };
       files: [
         {
           name: "/main.ts",
-          contents: `
+          contents: `/// <cts-enable />
 import { toSchema } from "commontools";
 
 interface TodoItem {
@@ -172,7 +172,7 @@ export { todoSchema };
       files: [
         {
           name: "/main.ts",
-          contents: `
+          contents: `/// <cts-enable />
 import { Cell, toSchema } from "commontools";
 
 interface State {
@@ -215,7 +215,7 @@ export { stateSchema };
       files: [
         {
           name: "/main.tsx",
-          contents: `
+          contents: `/// <cts-enable />
 import { Cell, derive, h, recipe, toSchema, UI } from "commontools";
 
 interface State {
@@ -258,5 +258,41 @@ export default recipe(model, model, (cell) => {
     expect(compiled.js).toContain('asCell: true');
     expect(compiled.js).toContain('commontools_1.derive');
     expect(compiled.js).toContain('(v) => v * 2');
+  });
+
+  it("skips transformation without /// <cts-enable /> directive", () => {
+    const program = {
+      main: "/main.ts",
+      files: [
+        {
+          name: "/main.ts",
+          contents: `
+import { toSchema } from "commontools";
+
+interface User {
+  name: string;
+  age: number;
+}
+
+const schema = toSchema<User>();
+export default schema;
+`,
+        },
+        {
+          name: "commontools.d.ts",
+          contents: commontools,
+        },
+      ],
+    };
+
+    const compiled = compiler.compile(program, {
+      runtimeModules: ["commontools"],
+    });
+
+    // Should NOT transform without the directive
+    expect(compiled.js).toContain("commontools_1.toSchema)()");
+    expect(compiled.js).not.toContain('"type":"object"');
+    expect(compiled.js).not.toContain('"properties"');
+    expect(compiled.js).not.toContain("satisfies");
   });
 });
