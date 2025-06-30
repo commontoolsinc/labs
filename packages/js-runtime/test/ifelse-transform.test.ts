@@ -15,7 +15,7 @@ describe("IfElse Transformer", () => {
 
   it("transforms ternary with OpaqueRef and adds ifElse import", () => {
     const program = {
-      entry: "/main.ts",
+      main: "/main.ts",
       files: [
         {
           name: "/main.ts",
