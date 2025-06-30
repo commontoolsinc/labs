@@ -32,7 +32,7 @@ import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
  *  necessary when using the schedueler directly)
  */
 
-export function resolveSchema(
+function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
   filterAsCell = false,

@@ -1,22 +1,28 @@
+import type {
+  FactAddress,
+  MemorySpace,
+  Revision,
+  SchemaPathSelector,
+  State,
+  URI,
+} from "@commontools/memory/interface";
 import type { JSONObject, JSONValue } from "../builder/types.ts";
+import type { DocImpl } from "../doc.ts";
+import { entityIdStr } from "../doc-map.ts";
+import type { StorageValue } from "./interface.ts";
+import type { IDocumentMap, IStorageProvider } from "../runtime.ts";
 import {
   BaseObjectManager,
-  type CellTarget,
   CycleTracker,
   getAtPath,
+  loadSource,
   MapSet,
   MinimalSchemaSelector,
   SchemaObjectTraverser,
   type ValueEntry,
 } from "../traverse.ts";
-import type {
-  FactAddress,
-  Revision,
-  SchemaPathSelector,
-  State,
-} from "@commontools/memory/interface";
 
-export class ClientObjectManager extends BaseObjectManager<
+export abstract class ClientObjectManager extends BaseObjectManager<
   FactAddress,
   FactAddress,
   JSONValue | undefined
@@ -24,9 +30,7 @@ export class ClientObjectManager extends BaseObjectManager<
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, FactAddress>();
 
-  constructor(
-    private store: Map<string, Revision<State>>,
-  ) {
+  constructor() {
     super();
   }
 
@@ -34,12 +38,30 @@ export class ClientObjectManager extends BaseObjectManager<
     return `${doc.of}/${doc.the}`;
   }
 
+  override toAddress(str: string): FactAddress {
+    return { of: `of:${str}`, the: "application/json" };
+  }
+
   // get the fact address for the doc pointed to by the cell target
-  override getTarget(target: CellTarget): FactAddress {
-    return {
-      the: "application/json",
-      of: `of:${target.cellTarget}`,
-    } as FactAddress;
+  override getTarget(uri: URI): FactAddress {
+    return { of: uri, the: "application/json" };
+  }
+
+  getReadDocs(): Iterable<ValueEntry<FactAddress, JSONValue | undefined>> {
+    return this.readValues.values();
+  }
+
+  getMissingDocs(): Iterable<FactAddress> {
+    return this.missingDocs.values();
+  }
+}
+
+// Object Manager backed by a store map
+export class StoreObjectManager extends ClientObjectManager {
+  constructor(
+    private store: Map<string, Revision<State>>,
+  ) {
+    super();
   }
 
   // Returns null if there is no matching fact
@@ -57,7 +79,9 @@ export class ClientObjectManager extends BaseObjectManager<
     // we should only have one match
     if (this.store.has(key)) {
       const storeValue = this.store.get(key);
-      return { source: doc, value: storeValue?.is };
+      const rv = { source: doc, value: storeValue?.is };
+      this.readValues.set(key, rv);
+      return rv;
     } else {
       if (!this.missingDocs.has(key)) {
         this.missingDocs.set(key, doc);
@@ -65,27 +89,89 @@ export class ClientObjectManager extends BaseObjectManager<
     }
     return null;
   }
+}
 
-  getReadDocs(): Iterable<ValueEntry<FactAddress, JSONValue | undefined>> {
-    return this.readValues.values();
+// Object Manager backed by an IRuntime.
+// This will first look in the DocMap, and if that fails, it will look in the storage provider.
+export class DocObjectManager extends ClientObjectManager {
+  constructor(
+    private space: MemorySpace,
+    private storageProvider: IStorageProvider,
+    private documentMap: IDocumentMap,
+    private cellLinkToJSON: (doc: DocImpl<any>) => StorageValue<JSONValue>,
+  ) {
+    super();
   }
-
-  getMissingDocs(): Iterable<FactAddress> {
-    return this.missingDocs.values();
+  override load(
+    doc: FactAddress,
+  ): ValueEntry<FactAddress, JSONValue | undefined> | null {
+    const key = this.toKey(doc);
+    if (this.readValues.has(key)) {
+      return this.readValues.get(key)!;
+    }
+    // strip off the leading "of:"
+    const entityId = { "/": doc.of.slice(3) };
+    // First, check the document map
+    const docMapEntry = this.documentMap.getDocByEntityId(
+      this.space,
+      entityId,
+      false,
+    );
+    // I exclude entries where the value is undefined. While that could be
+    // used to represent a retraction, it's much more likely to mean that
+    // the object is being created, and we should use the value from storage.
+    if (docMapEntry !== undefined && docMapEntry.value !== undefined) {
+      // Use the storage class to convert this doc to json
+      const storageValue = this.cellLinkToJSON(
+        docMapEntry,
+      );
+      const valEntryValue: { value: JSONValue; source?: { "/": string } } = {
+        value: storageValue.value,
+      };
+      if (storageValue.source !== undefined) {
+        valEntryValue.source = { "/": entityIdStr(storageValue.source) };
+      }
+      const rv: ValueEntry<FactAddress, JSONValue> = {
+        source: doc,
+        value: valEntryValue,
+      };
+      this.readValues.set(key, rv);
+      return rv;
+    }
+    // Next, check the storage provider
+    const storageEntry = this.storageProvider.get<JSONValue>(entityId);
+    if (storageEntry !== undefined) {
+      const valEntryValue: { value: JSONValue; source?: { "/": string } } = {
+        value: storageEntry.value,
+      };
+      if (storageEntry.source !== undefined) {
+        valEntryValue.source = { "/": entityIdStr(storageEntry.source) };
+      }
+      const rv: ValueEntry<FactAddress, JSONValue> = {
+        source: doc,
+        value: valEntryValue,
+      };
+      this.readValues.set(key, rv);
+      return rv;
+    }
+    // Looks like it's missing
+    if (!this.missingDocs.has(key)) {
+      this.missingDocs.set(key, doc);
+    }
+    return null;
   }
 }
 
-export function querySchemaHeap(
+export function querySchema(
   selector: SchemaPathSelector,
   path: readonly string[],
   factAddress: FactAddress,
-  store: Map<string, Revision<State>>,
+  manager: ClientObjectManager,
 ): {
   missing: FactAddress[];
   loaded: Set<ValueEntry<FactAddress, JSONValue | undefined>>;
   selected: MapSet<string, SchemaPathSelector>;
 } {
-  const manager = new ClientObjectManager(store);
   // Then filter the facts by the associated schemas, which will dereference
   // pointers as we walk through the structure.
 
@@ -103,6 +189,13 @@ export function querySchemaHeap(
     return { missing: [], loaded: rv, selected: schemaTracker };
   }
   schemaTracker.add(manager.toKey(factAddress), selector);
+  // Also load any source links
+  loadSource(
+    manager,
+    valueEntry,
+    new Set<string>(),
+    schemaTracker,
+  );
   // We store the actual doc in the value field of the object
   const factValue = (valueEntry.value as JSONObject).value;
   const [newDoc, _] = getAtPath<
@@ -116,7 +209,8 @@ export function querySchemaHeap(
     schemaTracker,
     MinimalSchemaSelector,
   );
-  if (newDoc.value === undefined) {
+  if (newDoc === undefined) {
+    console.log("Encountered missing doc", newDoc, "; valueEntry", valueEntry);
     return {
       missing: [...manager.getMissingDocs()],
       loaded: rv,

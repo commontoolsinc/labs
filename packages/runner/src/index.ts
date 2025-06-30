@@ -9,9 +9,10 @@ export type {
 export { raw } from "./module.ts";
 export type { DocImpl } from "./doc.ts";
 export type { Cell, Stream } from "./cell.ts";
+export type { NormalizedLink } from "./link-utils.ts";
 export type { LegacyDocCellLink, URI } from "./sigil-types.ts";
 export type { EntityId } from "./doc-map.ts";
-export { createRef, getEntityId } from "./doc-map.ts";
+export { createRef, entityIdStr, getEntityId } from "./doc-map.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";

@@ -16,6 +16,15 @@ export type EntityId = {
   toJSON?: () => { "/": string };
 };
 
+export function entityIdStr(entityId: EntityId) {
+  const slashVal = entityId["/"];
+  if (typeof slashVal === "string") {
+    return slashVal;
+  } else {
+    return entityId.toJSON!()["/"];
+  }
+}
+
 /**
  * Generates an entity ID.
  *
