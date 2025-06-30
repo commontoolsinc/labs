@@ -125,15 +125,15 @@ export class DocObjectManager extends ClientObjectManager {
       const storageValue = this.cellLinkToJSON(
         docMapEntry,
       );
-      const docMapValue: { value: JSONValue; source?: string } = {
+      const valEntryValue: { value: JSONValue; source?: { "/": string } } = {
         value: storageValue.value,
       };
       if (storageValue.source !== undefined) {
-        docMapValue.source = entityIdStr(storageValue.source);
+        valEntryValue.source = { "/": entityIdStr(storageValue.source) };
       }
       const rv: ValueEntry<FactAddress, JSONValue> = {
         source: doc,
-        value: docMapValue,
+        value: valEntryValue,
       };
       this.readValues.set(key, rv);
       return rv;
@@ -141,7 +141,16 @@ export class DocObjectManager extends ClientObjectManager {
     // Next, check the storage provider
     const storageEntry = this.storageProvider.get<JSONValue>(entityId);
     if (storageEntry !== undefined) {
-      const rv = { source: doc, value: storageEntry.value };
+      const valEntryValue: { value: JSONValue; source?: { "/": string } } = {
+        value: storageEntry.value,
+      };
+      if (storageEntry.source !== undefined) {
+        valEntryValue.source = { "/": entityIdStr(storageEntry.source) };
+      }
+      const rv: ValueEntry<FactAddress, JSONValue> = {
+        source: doc,
+        value: valEntryValue,
+      };
       this.readValues.set(key, rv);
       return rv;
     }
