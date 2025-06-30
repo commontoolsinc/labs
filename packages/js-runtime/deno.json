@@ -10,5 +10,8 @@
     ".": "./mod.ts",
     "./typescript": "./typescript/mod.ts",
     "./cli": "./cli/mod.ts"
+  },
+  "fmt": {
+    "exclude": ["test/fixtures/"]
   }
 }
