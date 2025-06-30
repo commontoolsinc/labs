@@ -395,6 +395,75 @@ export class Storage implements IStorage {
     return querySchema(selector, [], docAddress, manager);
   }
 
+  // Update storage with the new doc value
+  private _updateStorage(
+    doc: DocImpl<any>,
+    value: StorageValue<JSONValue | undefined>,
+    labels: Labels | undefined,
+  ) {
+    log(
+      () => [
+        "got from doc",
+        JSON.stringify(doc.entityId),
+        JSON.stringify(value),
+      ],
+    );
+    const storageValue: StorageValue<JSONValue> = {
+      value:
+        (doc.get() === undefined
+          ? undefined
+          : JSON.parse(JSON.stringify(doc.get()))),
+      ...(doc.sourceCell?.entityId !== undefined)
+        ? { source: doc.sourceCell.entityId }
+        : {},
+      ...(labels !== undefined) ? { labels: labels } : {},
+    };
+
+    const existingValue = this._getStorageProviderForSpace(doc.space).get<
+      JSONValue
+    >(
+      doc.entityId,
+    );
+    if (deepEqual(storageValue, existingValue)) {
+      return;
+    }
+    // Track these promises for our synced call.
+    const docToStoragePromise = this._getStorageProviderForSpace(doc.space)
+      .send([{
+        entityId: doc.entityId,
+        value: storageValue,
+      }]);
+    this.docToStoragePromises.add(docToStoragePromise);
+    docToStoragePromise.finally(() =>
+      this.docToStoragePromises.delete(docToStoragePromise)
+    );
+  }
+
+  // Update the doc with the new value we got in storage.
+  private async _updateDoc(
+    doc: DocImpl<JSONValue>,
+    storageValue: StorageValue<JSONValue>,
+  ) {
+    // Don't update docs while they might be updating.
+    await this.runtime.scheduler.idle();
+
+    if (!deepEqual(storageValue.value, doc.get())) {
+      // values differ
+      const newDocValue = JSON.parse(JSON.stringify(storageValue.value));
+      doc.send(newDocValue);
+    }
+    const newSourceCell = (storageValue.source !== undefined)
+      ? this.runtime.documentMap.getDocByEntityId(
+        doc.space,
+        storageValue.source,
+        false,
+      )
+      : undefined;
+    if (doc.sourceCell !== newSourceCell) {
+      doc.sourceCell = newSourceCell;
+    }
+  }
+
   private _subscribeToChanges(doc: DocImpl<any>): void {
     log(() => ["subscribe to changes", JSON.stringify(doc.entityId)]);
 
@@ -415,43 +484,9 @@ export class Storage implements IStorage {
     }
 
     // Subscribe to doc changes, send updates to storage
-    const docToStorage = doc.updates((value, _path, labels) => {
-      log(
-        () => [
-          "got from doc",
-          JSON.stringify(doc.entityId),
-          JSON.stringify(value),
-        ],
-      );
-      const storageValue: StorageValue<JSONValue> = {
-        value: (doc.get() === undefined
-          ? undefined
-          : JSON.parse(JSON.stringify(doc.get()))),
-        ...(doc.sourceCell?.entityId !== undefined)
-          ? { source: doc.sourceCell.entityId }
-          : {},
-        ...(labels !== undefined) ? { labels: labels } : {},
-      };
-
-      const existingValue = this._getStorageProviderForSpace(doc.space).get<
-        JSONValue
-      >(
-        doc.entityId,
-      );
-      if (deepEqual(storageValue, existingValue)) {
-        return;
-      }
-      // Track these promises for our synced call.
-      const docToStoragePromise = this._getStorageProviderForSpace(doc.space)
-        .send([{
-          entityId: doc.entityId,
-          value: storageValue,
-        }]);
-      this.docToStoragePromises.add(docToStoragePromise);
-      docToStoragePromise.finally(() =>
-        this.docToStoragePromises.delete(docToStoragePromise)
-      );
-    });
+    const docToStorage = doc.updates((value, _path, labels) =>
+      this._updateStorage(doc, value, labels)
+    );
     this.addCancel(docToStorage);
     this.docToStorageSubs.set(docId, docToStorage);
 
@@ -461,26 +496,7 @@ export class Storage implements IStorage {
       JSONValue
     >(
       doc.entityId!,
-      async (storageValue) => {
-        // Don't update docs while they might be updating.
-        await this.runtime.scheduler.idle();
-
-        if (!deepEqual(storageValue.value, doc.get())) {
-          // values differ
-          const newDocValue = JSON.parse(JSON.stringify(storageValue.value));
-          doc.send(newDocValue);
-        }
-        const newSourceCell = (storageValue.source !== undefined)
-          ? this.runtime.documentMap.getDocByEntityId(
-            doc.space,
-            storageValue.source,
-            false,
-          )
-          : undefined;
-        if (doc.sourceCell !== newSourceCell) {
-          doc.sourceCell = newSourceCell;
-        }
-      },
+      async (storageValue) => await this._updateDoc(doc, storageValue),
     );
     this.addCancel(storageToDoc);
     this.storageToDocSubs.set(docId, storageToDoc);
