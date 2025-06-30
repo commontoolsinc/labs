@@ -3,9 +3,11 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  generateSpaceMap,
   inspectCharm,
   linkCharms,
   listCharms,
+  MapFormat,
   newCharm,
   saveCharmRecipe,
   setCharmRecipe,
@@ -277,6 +279,29 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     );
 
     render(`Linked ${sourceRef} to ${targetRef}`);
+  })
+  /* charm map */
+  .command("map", "Display a visual map of all charms and their connections")
+  .usage(spaceUsage)
+  .example(
+    `ct charm map ${EX_ID} ${EX_COMP}`,
+    `Display a map of all charms and connections in "${RAW_EX_COMP.space}".`,
+  )
+  .example(
+    `ct charm map ${EX_ID} ${EX_COMP} --format dot`,
+    `Output Graphviz DOT format for the space.`,
+  )
+  .option(
+    "-f,--format <format:string>",
+    "Output format: ascii (default) or dot (Graphviz)",
+    { default: "ascii" },
+  )
+  .action(async (options) => {
+    const spaceConfig = parseSpaceOptions(options);
+    const format = options.format === "dot" ? MapFormat.DOT : MapFormat.ASCII;
+    
+    const map = await generateSpaceMap(spaceConfig, format);
+    render(map);
   });
 
 interface CharmCLIOptions {

@@ -61,6 +61,8 @@ This document contains shared setup instructions for the CT binary that are used
 - `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Inspect charm details
 - `./dist/ct charm inspect --identity [keyfile] --url [full-url-with-charm-id]` - Inspect charm details (URL syntax)
 - `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] --json` - Output raw JSON data
+- `./dist/ct charm map --identity [keyfile] --api-url [api-url] --space [spacename]` - Display visual map of charms and connections
+- `./dist/ct charm map --identity [keyfile] --api-url [api-url] --space [spacename] --format dot` - Output Graphviz DOT format
 
 ### Recipe Development Commands:
 - `./dist/ct charm getsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Get recipe source code
@@ -84,6 +86,24 @@ This document contains shared setup instructions for the CT binary that are used
 - Source can be either `charmId/fieldName` (reads from charm result) or just `wellKnownId` (reads entire cell)
 - Target is always `charmId/fieldName` (writes to charm input)
 - The link creates live data flow - when source updates, target receives new data
+
+## Visualizing Space Maps
+
+The `ct charm map` command helps visualize the connections between charms in a space:
+
+**ASCII Format (default):**
+- Shows charms with their connections in a readable text format
+- Lists what each charm reads from and what reads from it
+- Sorted by connection count for better visibility
+
+**Graphviz DOT Format:**
+- Use `--format dot` to output in Graphviz format
+- Can be rendered to images using Graphviz tools:
+  ```bash
+  # Install Graphviz (macOS: brew install graphviz)
+  ct charm map --identity [key] --api-url [url] --space [space] --format dot | dot -Tpng -o map.png
+  ```
+- Alternatively, paste DOT output into online tools like https://dreampuf.github.io/GraphvizOnline/
 
 ## Important Notes
 
