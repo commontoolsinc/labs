@@ -609,6 +609,20 @@ const plaidUpdater = handler(
   },
 );
 
+// {derive(transaction, (transaction) =>
+//   new Intl.NumberFormat("en-US", {
+//     style: "currency",
+//     currency: transaction.isoCurrencyCode ||
+//       "USD",
+//   }).format(Math.abs(transaction.amount)))}
+
+const formatAmount = (amount: number, currency: string) => {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: currency || "USD",
+  }).format(Math.abs(amount));
+};
+
 // Main recipe
 export default recipe(
   PlaidImporterInputs,
@@ -726,10 +740,16 @@ export default recipe(
                             {account.type}
                           </td>
                           <td style="padding: 12px; text-align: right;">
-                            {account.availableBalance}
+                            {formatAmount(
+                              account.availableBalance,
+                              account.isoCurrencyCode,
+                            )}
                           </td>
                           <td style="padding: 12px; text-align: right;">
-                            {account.currentBalance}
+                            {formatAmount(
+                              account.currentBalance,
+                              account.isoCurrencyCode,
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -776,7 +796,10 @@ export default recipe(
                             {transaction.category}
                           </td>
                           <td style="padding: 12px; text-align: right;">
-                            {transaction.amount}
+                            {formatAmount(
+                              transaction.amount,
+                              transaction.isoCurrencyCode,
+                            )}
                           </td>
                           <td style="padding: 12px; text-align: center;">
                             {transaction.pending}
