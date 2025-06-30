@@ -58,7 +58,7 @@ console.log(exampleSource);
 console.log("\n=== TRANSFORM MODE ===");
 try {
   const transformed = transformSource(exampleSource, {
-    mode: 'transform',
+    mode: "transform",
     types: { "commontools.d.ts": commonToolsTypes },
   });
   console.log(transformed);
@@ -69,7 +69,7 @@ try {
 console.log("\n=== ERROR MODE ===");
 try {
   transformSource(exampleSource, {
-    mode: 'error',
+    mode: "error",
     types: { "commontools.d.ts": commonToolsTypes },
   });
   console.log("No transformations needed!");

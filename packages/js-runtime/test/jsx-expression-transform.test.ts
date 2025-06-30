@@ -1,9 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { 
-  getTypeScriptEnvironmentTypes,
-  TypeScriptCompiler,
-} from "../mod.ts";
+import { getTypeScriptEnvironmentTypes, TypeScriptCompiler } from "../mod.ts";
 import { cache } from "@commontools/static";
 
 const types = await getTypeScriptEnvironmentTypes();
@@ -54,12 +51,18 @@ export default recipe(model, model, (cell) => {
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Recipe call should NOT be wrapped in derive
-    expect(compiled.js).toContain('exports.default = (0, commontools_1.recipe)(model, model, (cell)');
-    
+    expect(compiled.js).toContain(
+      "exports.default = (0, commontools_1.recipe)(model, model, (cell)",
+    );
+
     // JSX expressions should be wrapped in derive
-    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 + 1)');
-    expect(compiled.js).toContain('commontools_1.derive(cell.value, _v1 => _v1 * 2)');
+    expect(compiled.js).toContain(
+      "commontools_1.derive(cell.value, _v1 => _v1 + 1)",
+    );
+    expect(compiled.js).toContain(
+      "commontools_1.derive(cell.value, _v1 => _v1 * 2)",
+    );
   });
 });

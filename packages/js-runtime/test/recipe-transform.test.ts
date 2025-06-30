@@ -1,9 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { 
-  getTypeScriptEnvironmentTypes,
-  TypeScriptCompiler,
-} from "../mod.ts";
+import { getTypeScriptEnvironmentTypes, TypeScriptCompiler } from "../mod.ts";
 import { cache } from "@commontools/static";
 
 const types = await getTypeScriptEnvironmentTypes();
@@ -98,16 +95,18 @@ export default recipe(inputSchema, outputSchema, (cell) => {
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     console.log("=== COMPILED OUTPUT ===");
     console.log(compiled.js);
     console.log("=== END OUTPUT ===");
-    
+
     // Handler calls should not be wrapped in derive
-    expect(compiled.js).not.toContain('commontools_1.derive(cell, _v1 => adder');
-    
+    expect(compiled.js).not.toContain(
+      "commontools_1.derive(cell, _v1 => adder",
+    );
+
     // ifElse should not be wrapped in derive
-    expect(compiled.js).not.toContain('commontools_1.derive({');
-    expect(compiled.js).toContain('(0, commontools_1.ifElse)(pending');
+    expect(compiled.js).not.toContain("commontools_1.derive({");
+    expect(compiled.js).toContain("(0, commontools_1.ifElse)(pending");
   });
 });

@@ -184,7 +184,7 @@ const result = count + 1;
 `;
 
       await expect(
-        transformSource(source, { mode: "error", types })
+        transformSource(source, { mode: "error", types }),
       ).rejects.toThrow(/Binary expression with OpaqueRef should use derive/);
     });
 
@@ -198,7 +198,7 @@ const b = isActive ? 1 : 0;
 `;
 
       await expect(
-        transformSource(source, { mode: "error", types })
+        transformSource(source, { mode: "error", types }),
       ).rejects.toThrow(/OpaqueRef transformation errors/);
     });
   });
@@ -253,7 +253,9 @@ const result = a ? (b ? 1 : 2) : 3;
 `;
       const transformed = await transformSource(source, { types });
       // Both ternaries are transformed because both a and b are OpaqueRefs
-      expect(transformed).toContain("commontools_1.ifElse(a, commontools_1.ifElse(b, 1, 2), 3)");
+      expect(transformed).toContain(
+        "commontools_1.ifElse(a, commontools_1.ifElse(b, 1, 2), 3)",
+      );
     });
 
     it("handles property access on OpaqueRef", async () => {

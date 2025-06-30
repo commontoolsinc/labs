@@ -1,9 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { 
-  getTypeScriptEnvironmentTypes,
-  TypeScriptCompiler,
-} from "../mod.ts";
+import { getTypeScriptEnvironmentTypes, TypeScriptCompiler } from "../mod.ts";
 import { cache } from "@commontools/static";
 
 const types = await getTypeScriptEnvironmentTypes();
@@ -51,10 +48,12 @@ export default recipe(model, model, (cell) => {
     const compiled = compiler.compile(program, {
       runtimeModules: ["commontools"],
     });
-    
+
     // Recipe call should NOT be wrapped in derive
-    expect(compiled.js).toContain('exports.default = (0, commontools_1.recipe)(model, model, (cell)');
-    
+    expect(compiled.js).toContain(
+      "exports.default = (0, commontools_1.recipe)(model, model, (cell)",
+    );
+
     // Ternary should be transformed to ifElse
     expect(compiled.js).toContain('commontools_1.ifElse(odd, "odd", "even")');
   });
