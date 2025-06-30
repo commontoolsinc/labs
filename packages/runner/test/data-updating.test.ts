@@ -107,7 +107,7 @@ describe("data-updating", () => {
         "should fail when setting a nested value on a frozen cell 1",
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      testCell.getDoc().freeze("test");
+      testCell.freeze("test");
       const log: ReactivityLog = { reads: [], writes: [] };
       const success = setNestedValue(testCell.getDoc(), [], {
         a: 1,

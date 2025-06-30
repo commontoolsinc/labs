@@ -54,10 +54,10 @@ export function fetchData(
     },
   );
 
-  pending.getDoc().sourceCell = parentCell.getDoc();
-  result.getDoc().sourceCell = parentCell.getDoc();
-  error.getDoc().sourceCell = parentCell.getDoc();
-  requestHash.getDoc().sourceCell = parentCell.getDoc();
+  pending.setSourceCell(parentCell);
+  result.setSourceCell(parentCell);
+  error.setSourceCell(parentCell);
+  requestHash.setSourceCell(parentCell);
 
   sendResult({
     pending,
