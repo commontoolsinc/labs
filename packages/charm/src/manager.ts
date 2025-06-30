@@ -340,10 +340,7 @@ export class CharmManager {
     if (isCell(id)) charm = id;
     else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
 
-    await this.runtime.storage.syncCell(charm, false, {
-      schema: charmSchema,
-      rootSchema: charmSchema,
-    });
+    await this.runtime.storage.syncCell(charm.asSchema(charmSchema));
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) throw new Error("recipeId is required");

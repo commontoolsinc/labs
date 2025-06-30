@@ -161,7 +161,7 @@ export class Storage implements IStorage {
     };
     const selectorRef = refer(JSON.stringify(selector)).toString();
     const docId = entityIdStr(doc.entityId);
-    return `${docId}/application/json:${selectorRef}`;
+    return `${doc.space}/${docId}/application/json:${selectorRef}`;
   }
 
   // Replacement for _ensureIsSynced
@@ -183,8 +183,7 @@ export class Storage implements IStorage {
     const syncKey = Storage._getSyncKey(doc, schemaContext);
     // If the doc/schema pair is already loading, await that promise
     if (this.loadingPromises.has(syncKey)) {
-      const loadingPromise = this.loadingPromises.get(syncKey)!;
-      return await loadingPromise;
+      return this.loadingPromises.get(syncKey)!;
     }
 
     // Set up a promise, so that we can notify other syncCell callers when our
