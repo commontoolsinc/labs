@@ -160,7 +160,6 @@
     "npm:ts-node@^10.9.2": "10.9.2_@types+node@22.15.32_typescript@5.8.3",
     "npm:turndown@^7.1.2": "7.2.0",
     "npm:typescript@*": "5.8.3",
-    "npm:typescript@5.8.3": "5.8.3",
     "npm:typescript@^5.6.2": "5.8.3",
     "npm:vite@*": "6.3.5_@types+node@22.15.32_picomatch@4.0.2_@types+node@22.15.15",
     "npm:vite@^6.2.1": "6.3.5_@types+node@22.15.32_picomatch@4.0.2_@types+node@22.15.15",
