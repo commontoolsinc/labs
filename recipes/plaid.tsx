@@ -6,6 +6,7 @@ import {
   h,
   handler,
   ID,
+  ifElse,
   JSONSchema,
   Mutable,
   NAME,
@@ -707,146 +708,162 @@ export default recipe(
             </div>
 
             {derive(accounts, (accounts) =>
-              accounts.length > 0
-                ? (
-                  <div>
-                    <h3 style="margin: 0 0 15px; font-size: 18px;">
-                      Accounts ({accounts.length})
-                    </h3>
-                    <div style="overflow-x: auto;">
-                      <table style="width: 100%; border-collapse: collapse;">
-                        <thead>
-                          <tr style="background-color: #f5f5f5;">
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                              Institution
-                            </th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                              Account
-                            </th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                              Type
-                            </th>
-                            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
-                              Available
-                            </th>
-                            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
-                              Current
-                            </th>
+              ifElse(
+                accounts.length > 0,
+                <div>
+                  <h3 style="margin: 0 0 15px; font-size: 18px;">
+                    Accounts ({accounts.length})
+                  </h3>
+                  <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <thead>
+                        <tr style="background-color: #f5f5f5;">
+                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                            Institution
+                          </th>
+                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                            Account
+                          </th>
+                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                            Type
+                          </th>
+                          <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
+                            Available
+                          </th>
+                          <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
+                            Current
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {accounts.map((account) => (
+                          <tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px;">
+                              {account.institutionName}
+                            </td>
+                            <td style="padding: 12px;">
+                              {account.name} ****{account.mask}
+                            </td>
+                            <td style="padding: 12px;">
+                              {derive(account, (account) => account.subtype || account.type)}
+                            </td>
+                            <td style="padding: 12px; text-align: right;">
+                              {derive(account, (account) =>
+                                ifElse(
+                                  account.availableBalance !== null,
+                                  new Intl.NumberFormat("en-US", {
+                                    style: "currency",
+                                    currency: account.isoCurrencyCode || "USD",
+                                  }).format(account.availableBalance),
+                                  "N/A"
+                                )
+                              )}
+                            </td>
+                            <td style="padding: 12px; text-align: right;">
+                              {derive(account, (account) =>
+                                ifElse(
+                                  account.currentBalance !== null,
+                                  new Intl.NumberFormat("en-US", {
+                                    style: "currency",
+                                    currency: account.isoCurrencyCode || "USD",
+                                  }).format(account.currentBalance),
+                                  "N/A"
+                                )
+                              )}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {accounts.map((account) => (
-                            <tr style="border-bottom: 1px solid #eee;">
-                              <td style="padding: 12px;">
-                                {account.institutionName}
-                              </td>
-                              <td style="padding: 12px;">
-                                {account.name} ****{account.mask}
-                              </td>
-                              <td style="padding: 12px;">
-                                {account.subtype || account.type}
-                              </td>
-                              <td style="padding: 12px; text-align: right;">
-                                {account.availableBalance !== null
-                                  ? new Intl.NumberFormat("en-US", {
-                                    style: "currency",
-                                    currency: account.isoCurrencyCode || "USD",
-                                  }).format(account.availableBalance)
-                                  : "N/A"}
-                              </td>
-                              <td style="padding: 12px; text-align: right;">
-                                {account.currentBalance !== null
-                                  ? new Intl.NumberFormat("en-US", {
-                                    style: "currency",
-                                    currency: account.isoCurrencyCode || "USD",
-                                  }).format(account.currentBalance)
-                                  : "N/A"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                )
-                : null)}
+                </div>,
+                null
+              ))}
 
             {derive(transactions, (transactions) =>
-              transactions.length > 0
-                ? (
-                  <div>
-                    <h3 style="margin: 0 0 15px; font-size: 18px;">
-                      Transactions ({transactions.length})
-                    </h3>
-                    <div style="overflow-x: auto; max-height: 500px;">
-                      <table style="width: 100%; border-collapse: collapse;">
-                        <thead style="position: sticky; top: 0; background-color: #f5f5f5;">
-                          <tr>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                              Date
-                            </th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                              Description
-                            </th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                              Category
-                            </th>
-                            <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
-                              Amount
-                            </th>
-                            <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">
-                              Status
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {transactions.slice(0, 100).map((transaction) => (
-                            <tr style="border-bottom: 1px solid #eee;">
-                              <td style="padding: 12px;">{transaction.date}</td>
-                              <td style="padding: 12px;">
-                                {transaction.merchantName || transaction.name}
-                              </td>
-                              <td style="padding: 12px;">
-                                {transaction.category.join(" > ")}
-                              </td>
-                              <td
-                                style={`padding: 12px; text-align: right; color: ${
-                                  transaction.amount > 0 ? "#dc3545" : "#28a745"
-                                };`}
-                              >
-                                {new Intl.NumberFormat("en-US", {
-                                  style: "currency",
-                                  currency: transaction.isoCurrencyCode ||
-                                    "USD",
-                                }).format(Math.abs(transaction.amount))}
-                              </td>
-                              <td style="padding: 12px; text-align: center;">
-                                {transaction.pending
-                                  ? (
-                                    <span style="background-color: #ffc107; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
-                                      Pending
-                                    </span>
+              ifElse(
+                transactions.length > 0,
+                <div>
+                  <h3 style="margin: 0 0 15px; font-size: 18px;">
+                    Transactions ({transactions.length})
+                  </h3>
+                  <div style="overflow-x: auto; max-height: 500px;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <thead style="position: sticky; top: 0; background-color: #f5f5f5;">
+                        <tr>
+                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                            Date
+                          </th>
+                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                            Description
+                          </th>
+                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                            Category
+                          </th>
+                          <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
+                            Amount
+                          </th>
+                          <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">
+                            Status
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transactions.slice(0, 100).map((transaction) => (
+                          <tr style="border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px;">{transaction.date}</td>
+                            <td style="padding: 12px;">
+                              {derive(transaction, (transaction) => transaction.merchantName || transaction.name)}
+                            </td>
+                            <td style="padding: 12px;">
+                              {derive(transaction, (transaction) => transaction.category.join(" > "))}
+                            </td>
+                            <td
+                              style={derive(transaction, (transaction) =>
+                                str`padding: 12px; text-align: right; color: ${
+                                  ifElse(
+                                    transaction.amount > 0,
+                                    "#dc3545",
+                                    "#28a745"
                                   )
-                                  : (
-                                    <span style="background-color: #28a745; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
-                                      Posted
-                                    </span>
-                                  )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {transactions.length > 100 && (
-                        <div style="padding: 12px; text-align: center; color: #666;">
-                          Showing first 100 of {transactions.length}{" "}
-                          transactions
-                        </div>
-                      )}
-                    </div>
+                                };`
+                              )}
+                            >
+                              {derive(transaction, (transaction) =>
+                                new Intl.NumberFormat("en-US", {
+                                  style: "currency",
+                                  currency: transaction.isoCurrencyCode || "USD",
+                                }).format(Math.abs(transaction.amount))
+                              )}
+                            </td>
+                            <td style="padding: 12px; text-align: center;">
+                              {derive(transaction, (transaction) =>
+                                ifElse(
+                                  transaction.pending,
+                                  <span style="background-color: #ffc107; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
+                                    Pending
+                                  </span>,
+                                  <span style="background-color: #28a745; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
+                                    Posted
+                                  </span>
+                                )
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {ifElse(
+                      transactions.length > 100,
+                      <div style="padding: 12px; text-align: center; color: #666;">
+                        Showing first 100 of {transactions.length} transactions
+                      </div>,
+                      null
+                    )}
                   </div>
-                )
-                : null)}
+                </div>,
+                null
+              ))}
           </div>
         </div>
       ),
