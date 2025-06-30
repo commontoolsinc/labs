@@ -745,31 +745,13 @@ export default recipe(
                               {account.name} ****{account.mask}
                             </td>
                             <td style="padding: 12px;">
-                              {derive(account, (account) => account.subtype || account.type)}
+                              {account.type}
                             </td>
                             <td style="padding: 12px; text-align: right;">
-                              {derive(account, (account) =>
-                                ifElse(
-                                  account.availableBalance !== null,
-                                  new Intl.NumberFormat("en-US", {
-                                    style: "currency",
-                                    currency: account.isoCurrencyCode || "USD",
-                                  }).format(account.availableBalance),
-                                  "N/A"
-                                )
-                              )}
+                              {account.availableBalance}
                             </td>
                             <td style="padding: 12px; text-align: right;">
-                              {derive(account, (account) =>
-                                ifElse(
-                                  account.currentBalance !== null,
-                                  new Intl.NumberFormat("en-US", {
-                                    style: "currency",
-                                    currency: account.isoCurrencyCode || "USD",
-                                  }).format(account.currentBalance),
-                                  "N/A"
-                                )
-                              )}
+                              {account.currentBalance}
                             </td>
                           </tr>
                         ))}
@@ -777,7 +759,7 @@ export default recipe(
                     </table>
                   </div>
                 </div>,
-                null
+                null,
               ))}
 
             {derive(transactions, (transactions) =>
@@ -813,41 +795,16 @@ export default recipe(
                           <tr style="border-bottom: 1px solid #eee;">
                             <td style="padding: 12px;">{transaction.date}</td>
                             <td style="padding: 12px;">
-                              {derive(transaction, (transaction) => transaction.merchantName || transaction.name)}
+                              {transaction.name}
                             </td>
                             <td style="padding: 12px;">
-                              {derive(transaction, (transaction) => transaction.category.join(" > "))}
+                              {transaction.category}
                             </td>
-                            <td
-                              style={derive(transaction, (transaction) =>
-                                str`padding: 12px; text-align: right; color: ${
-                                  ifElse(
-                                    transaction.amount > 0,
-                                    "#dc3545",
-                                    "#28a745"
-                                  )
-                                };`
-                              )}
-                            >
-                              {derive(transaction, (transaction) =>
-                                new Intl.NumberFormat("en-US", {
-                                  style: "currency",
-                                  currency: transaction.isoCurrencyCode || "USD",
-                                }).format(Math.abs(transaction.amount))
-                              )}
+                            <td style="padding: 12px; text-align: right;">
+                              {transaction.amount}
                             </td>
                             <td style="padding: 12px; text-align: center;">
-                              {derive(transaction, (transaction) =>
-                                ifElse(
-                                  transaction.pending,
-                                  <span style="background-color: #ffc107; color: #000; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
-                                    Pending
-                                  </span>,
-                                  <span style="background-color: #28a745; color: #fff; padding: 2px 8px; border-radius: 12px; font-size: 12px;">
-                                    Posted
-                                  </span>
-                                )
-                              )}
+                              {transaction.pending}
                             </td>
                           </tr>
                         ))}
@@ -858,11 +815,11 @@ export default recipe(
                       <div style="padding: 12px; text-align: center; color: #666;">
                         Showing first 100 of {transactions.length} transactions
                       </div>,
-                      null
+                      null,
                     )}
                   </div>
                 </div>,
-                null
+                null,
               ))}
           </div>
         </div>
