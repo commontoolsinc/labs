@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { cell, h, derive } from "commontools";
 const count = cell(10);
 const price = cell(10);

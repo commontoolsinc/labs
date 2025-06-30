@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { cell, derive } from "commontools";
 // Basic string concatenation with multiple OpaqueRefs
 const firstName = cell("John");

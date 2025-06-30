@@ -1,3 +1,4 @@
+/// <cts-enable />
 // Note: This is a simplified representation of the expected transformation
 // The actual output would be AMD module format, but this shows the key transformations
 import { derive, h, recipe, schema, UI } from "commontools";
