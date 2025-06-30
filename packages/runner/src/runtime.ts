@@ -55,6 +55,8 @@ export type ConsoleHandler = (
 ) => any[];
 export type ErrorHandler = (error: ErrorWithContext) => void;
 
+export type NavigateCallback = (target: Cell<any>) => void;
+
 export interface CharmMetadata {
   name?: string;
   description?: string;
@@ -68,6 +70,7 @@ export interface RuntimeOptions {
   errorHandlers?: ErrorHandler[];
   blobbyServerUrl: string;
   recipeEnvironment?: RecipeEnvironment;
+  navigateCallback?: NavigateCallback;
   debug?: boolean;
 }
 
@@ -81,6 +84,7 @@ export interface IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
 
   idle(): Promise<void>;
@@ -306,6 +310,7 @@ export class Runtime implements IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
 
   constructor(options: RuntimeOptions) {
@@ -343,6 +348,9 @@ export class Runtime implements IRuntime {
       "/api/storage/blobby",
       options.blobbyServerUrl,
     ).toString();
+
+    // Set the navigate callback
+    this.navigateCallback = options.navigateCallback;
 
     // Handle recipe environment configuration
     if (options.recipeEnvironment) {
