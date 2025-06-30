@@ -530,7 +530,7 @@ export async function compileRecipe(
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  const recipeId = runtime.recipeManager.generateRecipeId(
+  const recipeId = runtime.recipeManager.registerRecipe(
     recipe,
     recipeSrc,
   );

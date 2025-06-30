@@ -199,7 +199,7 @@ export interface IStorage {
 export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
-  generateRecipeId(recipe: any, src?: string | RuntimeProgram): string;
+  registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
   loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
   compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
@@ -218,7 +218,7 @@ export interface IRecipeManager {
       recipe?: Recipe | Module;
       recipeMeta?: RecipeMeta;
     },
-  ): Promise<boolean>;
+  ): Promise<void>;
 }
 
 export interface IModuleRegistry {

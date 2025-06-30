@@ -69,7 +69,7 @@ export class RecipeManager implements IRecipeManager {
     return this.recipeMetaMap.get(input as Recipe)?.get()!;
   }
 
-  generateRecipeId(
+  registerRecipe(
     recipe: Recipe | Module,
     src?: string | RuntimeProgram,
   ): string {
@@ -127,20 +127,19 @@ export class RecipeManager implements IRecipeManager {
     return true;
   }
 
-  saveAndSyncRecipe(
+  async saveAndSyncRecipe(
     { recipeId, space, recipe, recipeMeta }: {
       recipeId: string;
       space: MemorySpace;
       recipe: Recipe | Module;
       recipeMeta: RecipeMeta;
     },
-  ): Promise<boolean> {
-    if (!this.saveRecipe({ recipeId, space, recipe, recipeMeta })) {
-      return Promise.resolve(false);
+  ) {
+    if (this.saveRecipe({ recipeId, space, recipe, recipeMeta })) {
+      await this.runtime.storage.syncCell(
+        this.getRecipeMetaCell({ recipeId, space }),
+      );
     }
-    return Promise.resolve(this.runtime.storage
-      .syncCell(this.getRecipeMetaCell({ recipeId, space })))
-      .then(() => true);
   }
 
   // returns a recipe already loaded
