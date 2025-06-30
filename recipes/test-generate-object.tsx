@@ -13,12 +13,11 @@ import {
   UI,
 } from "commontools";
 
-// Define types using TypeScript interfaces
 interface InputState {
   number: Cell<number>;
 }
 
-interface OutputState {
+interface NumberStory {
   number: number;
   story: string;
   title: string;
@@ -32,23 +31,14 @@ interface SetNumberEvent {
   n: number;
 }
 
-// Transform to schemas at compile time
-const inputSchema = toSchema<InputState>({
-  default: { number: 0 },
-});
-
-const outputSchema = toSchema<OutputState>();
-
 // Handler to increment the number
-const adder = handler({}, inputSchema, (_, state) => {
+const adder = handler<{}, InputState>((_, state) => {
   state.number.set(state.number.get() + 1);
 });
 
 // Handler to set a specific number
-const setNumber = handler({}, toSchema<SetNumberEvent>(), (_, state) => {
-  if (state.number && state.n) {
-    state.number.set(state.n);
-  }
+const setNumber = handler((_, state: { number: Cell<number>; n: number }) => {
+  state.number.set(state.n);
 });
 
 // Generate the prompt for the LLM
@@ -65,9 +55,15 @@ const generateImageUrl = lift(({ imagePrompt }: { imagePrompt: string }) => {
   return `/api/ai/img?prompt=${encodeURIComponent(imagePrompt)}`;
 });
 
+const inputSchema = toSchema<InputState>({
+  default: { number: 0 },
+});
+
+const outputSchema = toSchema<NumberStory>();
+
 export default recipe(inputSchema, outputSchema, (cell) => {
   // Use generateObject to get structured data from the LLM
-  const { result: object, pending } = generateObject<OutputState>(
+  const { result: object, pending } = generateObject<NumberStory>(
     generatePrompt({ number: cell.number }),
   );
 

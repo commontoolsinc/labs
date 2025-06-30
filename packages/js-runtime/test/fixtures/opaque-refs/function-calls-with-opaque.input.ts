@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { cell } from "commontools";
 
 const a = cell(5);
