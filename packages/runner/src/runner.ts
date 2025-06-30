@@ -160,6 +160,11 @@ export class Runner implements IRunner {
     }
 
     recipeId ??= this.runtime.recipeManager.generateRecipeId(recipe);
+    this.runtime.recipeManager.saveRecipe({
+      recipeId,
+      space: resultDoc.space,
+      recipe,
+    });
 
     if (this.cancels.has(resultDoc)) {
       // If it's already running and no new recipe or argument are given,

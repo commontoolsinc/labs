@@ -14,8 +14,8 @@ describe("OpaqueRef Schema Support", () => {
   let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let recipe: ReturnType<typeof createBuilder>["recipe"];
-  let cell: ReturnType<typeof createBuilder>["cell"];
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let cell: ReturnType<typeof createBuilder>["commontools"]["cell"];
 
   beforeEach(() => {
     // Setup frame for the test
@@ -28,8 +28,8 @@ describe("OpaqueRef Schema Support", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
-    const builder = createBuilder(runtime);
-    ({ recipe, cell } = builder);
+    const { commontools } = createBuilder(runtime);
+    ({ recipe, cell } = commontools);
   });
 
   afterEach(async () => {

@@ -15,12 +15,12 @@ const space = signer.did();
 describe("Recipe Runner", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let lift: ReturnType<typeof createBuilder>["lift"];
-  let recipe: ReturnType<typeof createBuilder>["recipe"];
-  let createCell: ReturnType<typeof createBuilder>["createCell"];
-  let handler: ReturnType<typeof createBuilder>["handler"];
-  let byRef: ReturnType<typeof createBuilder>["byRef"];
-  let TYPE: ReturnType<typeof createBuilder>["TYPE"];
+  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let createCell: ReturnType<typeof createBuilder>["commontools"]["createCell"];
+  let handler: ReturnType<typeof createBuilder>["commontools"]["handler"];
+  let byRef: ReturnType<typeof createBuilder>["commontools"]["byRef"];
+  let TYPE: ReturnType<typeof createBuilder>["commontools"]["TYPE"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -31,7 +31,7 @@ describe("Recipe Runner", () => {
       storageManager,
     });
 
-    const builder = createBuilder(runtime);
+    const { commontools } = createBuilder(runtime);
     ({
       lift,
       recipe,
@@ -39,7 +39,7 @@ describe("Recipe Runner", () => {
       handler,
       byRef,
       TYPE,
-    } = builder);
+    } = commontools);
   });
 
   afterEach(async () => {

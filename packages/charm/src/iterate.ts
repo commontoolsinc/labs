@@ -546,7 +546,7 @@ export async function compileRecipe(
   } else {
     recipeMeta.program = recipeSrc;
   }
-  await runtime.recipeManager.registerRecipe({
+  await runtime.recipeManager.saveAndSyncRecipe({
     recipeId,
     space,
     recipe,

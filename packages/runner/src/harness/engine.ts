@@ -75,6 +75,7 @@ interface Internals {
   runtime: UnsafeEvalRuntime;
   isolate: UnsafeEvalIsolate;
   runtimeExports: Record<string, any> | undefined;
+  exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 }
 
 export class Engine extends EventTarget implements Harness {
@@ -93,8 +94,10 @@ export class Engine extends EventTarget implements Harness {
     const compiler = new TypeScriptCompiler(environmentTypes);
     const runtime = new UnsafeEvalRuntime();
     const isolate = runtime.getIsolate("");
-    const runtimeExports = await RuntimeModules.getExports(this.ctRuntime);
-    return { compiler, runtime, isolate, runtimeExports };
+    const { runtimeExports, exportsCallback } = await RuntimeModules.getExports(
+      this.ctRuntime,
+    );
+    return { compiler, runtime, isolate, runtimeExports, exportsCallback };
   }
 
   // Resolve a `ProgramResolver` into a `Program`.
@@ -133,7 +136,8 @@ export class Engine extends EventTarget implements Harness {
   > {
     const resolver = new EngineProgramResolver(program);
 
-    const { compiler, isolate, runtimeExports } = await this.getInternals();
+    const { compiler, isolate, runtimeExports, exportsCallback } = await this
+      .getInternals();
     const resolvedProgram = await this.resolve(resolver);
 
     const output = await compiler.compile(resolvedProgram, {
@@ -153,6 +157,19 @@ export class Engine extends EventTarget implements Harness {
       ) {
         const main = result.main as Exports;
         const exportMap = result.exportMap as Record<string, Exports>;
+        if (exportsCallback) {
+          const exportsByValue = new Map<any, RuntimeProgram>();
+          for (const [fileName, exports] of Object.entries(exportMap)) {
+            for (const [exportName, exportValue] of Object.entries(exports)) {
+              exportsByValue.set(exportValue, {
+                main: fileName,
+                mainExport: exportName,
+                files: program.files,
+              });
+            }
+          }
+          exportsCallback(exportsByValue);
+        }
         return { output, main, exportMap };
       }
     }
