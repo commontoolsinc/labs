@@ -639,26 +639,6 @@ export default recipe(
             products={settings.products}
           />
 
-          {
-            /* Debug: Show raw transaction data
-          <div style="margin-bottom: 20px;">
-            <h4 style="margin: 0 0 10px; font-size: 16px;">
-              Debug: Raw Account Info
-            </h4>
-            <pre style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; max-height: 300px; font-size: 12px;">
-                        {derive(accounts, (accounts) => JSON.stringify(accounts, null, 2))}
-            </pre>
-          </div>
-          <div style="margin-bottom: 20px;">
-            <h4 style="margin: 0 0 10px; font-size: 16px;">
-              Debug: Raw Transaction Data
-            </h4>
-            <pre style="background-color: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; max-height: 300px; font-size: 12px;">
-                        {derive(transactions, (transactions) => JSON.stringify(transactions, null, 2))}
-            </pre>
-          </div> */
-          }
-
           <div style="display: flex; gap: 20px; flex-direction: column;">
             <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px;">
               <h3 style="margin: 0 0 15px; font-size: 18px;">Sync Settings</h3>
@@ -707,120 +687,110 @@ export default recipe(
               </div>
             </div>
 
-            {derive(accounts, (accounts) =>
-              ifElse(
-                accounts.length > 0,
-                <div>
-                  <h3 style="margin: 0 0 15px; font-size: 18px;">
-                    Accounts ({accounts.length})
-                  </h3>
-                  <div style="overflow-x: auto;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <thead>
-                        <tr style="background-color: #f5f5f5;">
-                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                            Institution
-                          </th>
-                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                            Account
-                          </th>
-                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                            Type
-                          </th>
-                          <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
-                            Available
-                          </th>
-                          <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
-                            Current
-                          </th>
+            {derive(accounts, (accounts) => (
+              <div>
+                <h3 style="margin: 0 0 15px; font-size: 18px;">
+                  Accounts ({accounts.length})
+                </h3>
+                <div style="overflow-x: auto;">
+                  <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                      <tr style="background-color: #f5f5f5;">
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                          Institution
+                        </th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                          Account
+                        </th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                          Type
+                        </th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
+                          Available
+                        </th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
+                          Current
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {accounts.map((account) => (
+                        <tr style="border-bottom: 1px solid #eee;">
+                          <td style="padding: 12px;">
+                            {account.institutionName}
+                          </td>
+                          <td style="padding: 12px;">
+                            {account.name} ****{account.mask}
+                          </td>
+                          <td style="padding: 12px;">
+                            {account.type}
+                          </td>
+                          <td style="padding: 12px; text-align: right;">
+                            {account.availableBalance}
+                          </td>
+                          <td style="padding: 12px; text-align: right;">
+                            {account.currentBalance}
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {accounts.map((account) => (
-                          <tr style="border-bottom: 1px solid #eee;">
-                            <td style="padding: 12px;">
-                              {account.institutionName}
-                            </td>
-                            <td style="padding: 12px;">
-                              {account.name} ****{account.mask}
-                            </td>
-                            <td style="padding: 12px;">
-                              {account.type}
-                            </td>
-                            <td style="padding: 12px; text-align: right;">
-                              {account.availableBalance}
-                            </td>
-                            <td style="padding: 12px; text-align: right;">
-                              {account.currentBalance}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>,
-                null,
-              ))}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
 
-            {derive(transactions, (transactions) =>
-              ifElse(
-                transactions.length > 0,
-                <div>
-                  <h3 style="margin: 0 0 15px; font-size: 18px;">
-                    Transactions ({transactions.length})
-                  </h3>
-                  <div style="overflow-x: auto; max-height: 500px;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                      <thead style="position: sticky; top: 0; background-color: #f5f5f5;">
-                        <tr>
-                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                            Date
-                          </th>
-                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                            Description
-                          </th>
-                          <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
-                            Category
-                          </th>
-                          <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
-                            Amount
-                          </th>
-                          <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">
-                            Status
-                          </th>
+            {derive(transactions, (transactions) => (
+              <div>
+                <h3 style="margin: 0 0 15px; font-size: 18px;">
+                  Transactions ({transactions.length})
+                </h3>
+                <div style="overflow-x: auto; max-height: 500px;">
+                  <table style="width: 100%; border-collapse: collapse;">
+                    <thead style="position: sticky; top: 0; background-color: #f5f5f5;">
+                      <tr>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                          Date
+                        </th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                          Description
+                        </th>
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">
+                          Category
+                        </th>
+                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #ddd;">
+                          Amount
+                        </th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions.map((transaction) => (
+                        <tr style="border-bottom: 1px solid #eee;">
+                          <td style="padding: 12px;">{transaction.date}</td>
+                          <td style="padding: 12px;">
+                            {transaction.name}
+                          </td>
+                          <td style="padding: 12px;">
+                            {transaction.category}
+                          </td>
+                          <td style="padding: 12px; text-align: right;">
+                            {transaction.amount}
+                          </td>
+                          <td style="padding: 12px; text-align: center;">
+                            {transaction.pending}
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {transactions.slice(0, 100).map((transaction) => (
-                          <tr style="border-bottom: 1px solid #eee;">
-                            <td style="padding: 12px;">{transaction.date}</td>
-                            <td style="padding: 12px;">
-                              {transaction.name}
-                            </td>
-                            <td style="padding: 12px;">
-                              {transaction.category}
-                            </td>
-                            <td style="padding: 12px; text-align: right;">
-                              {transaction.amount}
-                            </td>
-                            <td style="padding: 12px; text-align: center;">
-                              {transaction.pending}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {ifElse(
-                      transactions.length > 100,
-                      <div style="padding: 12px; text-align: center; color: #666;">
-                        Showing first 100 of {transactions.length} transactions
-                      </div>,
-                      null,
-                    )}
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style="padding: 12px; text-align: center; color: #666;">
+                    {transactions.length} transactions
                   </div>
-                </div>,
-                null,
-              ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       ),
