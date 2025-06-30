@@ -2,7 +2,6 @@ import { createBuilder } from "../builder/factory.ts";
 import { cache } from "@commontools/static";
 import turndown from "turndown";
 import { IRuntime } from "../runtime.ts";
-import type { Program } from "@commontools/js-runtime";
 
 export type RuntimeModuleIdentifier =
   | "commontools"

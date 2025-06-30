@@ -163,19 +163,20 @@ export class Engine extends EventTarget implements Harness {
 
         // Create a map from exported values to `RuntimeProgram` that can
         // generate them and pass to the callback from the exports.
-        if (exportsCallback) {
-          const exportsByValue = new Map<any, RuntimeProgram>();
-          for (const [fileName, exports] of Object.entries(exportMap)) {
-            for (const [exportName, exportValue] of Object.entries(exports)) {
-              exportsByValue.set(exportValue, {
-                main: fileName,
-                mainExport: exportName,
-                files: program.files,
-              });
-            }
+        const exportsByValue = new Map<any, RuntimeProgram>();
+        for (const [fileName, exports] of Object.entries(exportMap)) {
+          for (const [exportName, exportValue] of Object.entries(exports)) {
+            exportsByValue.set(exportValue, {
+              main: fileName,
+              mainExport: exportName,
+              // TODO(seefeld): Sending all `program.files` is sub-optimal, as
+              // it is the super set of files actually needed by main. We should
+              // only send the files actually needed by main.
+              files: program.files,
+            });
           }
-          exportsCallback(exportsByValue);
         }
+        exportsCallback(exportsByValue);
 
         return { output, main, exportMap };
       }
