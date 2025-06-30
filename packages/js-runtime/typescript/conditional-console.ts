@@ -5,7 +5,8 @@
 
 const isDeno = typeof Deno !== "undefined";
 
-class NoOpConsole implements Pick<Console, "log" | "debug" | "info" | "warn" | "error"> {
+class NoOpConsole
+  implements Pick<Console, "log" | "debug" | "info" | "warn" | "error"> {
   log() {}
   debug() {}
   info() {}
@@ -13,4 +14,6 @@ class NoOpConsole implements Pick<Console, "log" | "debug" | "info" | "warn" | "
   error() {}
 }
 
-export const conditionalConsole = isDeno ? new NoOpConsole() : globalThis.console;
+export const conditionalConsole = isDeno
+  ? new NoOpConsole()
+  : globalThis.console;
