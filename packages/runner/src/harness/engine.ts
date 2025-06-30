@@ -75,6 +75,9 @@ interface Internals {
   runtime: UnsafeEvalRuntime;
   isolate: UnsafeEvalIsolate;
   runtimeExports: Record<string, any> | undefined;
+  // Callback will be called with a map of exported values to `RuntimeProgram`
+  // after compilation and initial eval and before compilation returns, so
+  // before any e.g. recipe would be instantiated.
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 }
 
@@ -157,6 +160,9 @@ export class Engine extends EventTarget implements Harness {
       ) {
         const main = result.main as Exports;
         const exportMap = result.exportMap as Record<string, Exports>;
+
+        // Create a map from exported values to `RuntimeProgram` that can
+        // generate them and pass to the callback from the exports.
         if (exportsCallback) {
           const exportsByValue = new Map<any, RuntimeProgram>();
           for (const [fileName, exports] of Object.entries(exportMap)) {
@@ -170,6 +176,7 @@ export class Engine extends EventTarget implements Harness {
           }
           exportsCallback(exportsByValue);
         }
+
         return { output, main, exportMap };
       }
     }

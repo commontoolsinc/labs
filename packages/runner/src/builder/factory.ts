@@ -81,6 +81,9 @@ export const createBuilder = (
     return cell;
   } as CreateCellFunction;
 
+  // Associate runtime programs with recipes after compilation and initial eval
+  // and before compilation returns, so before any e.g. recipe would be
+  // instantiated. This way they get saved with a way to rehydrate them.
   const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
     for (const [value, program] of exports) {
       if (isRecipe(value)) {
