@@ -157,12 +157,12 @@ declare module "@commontools/api" {
       T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
 
-    asSchema<T>(
-      schema?: JSONSchema,
-    ): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
+    asSchema<T>(
+      schema?: JSONSchema,
+    ): Cell<T>;
     withLog(log: ReactivityLog): Cell<T>;
     sink(callback: (value: T) => Cancel | undefined | void): Cancel;
     getAsQueryResult<Path extends PropertyKey[]>(

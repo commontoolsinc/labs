@@ -129,7 +129,7 @@ const step = recipe(
 
       console.log("got action", src);
       const { result, error } = compileAndRun({
-        files: { "toolcall.ts": wrapCode(src) },
+        files: [{ name: "toolcall.ts", contents: wrapCode(src) }],
         main: "toolcall.ts",
       });
 

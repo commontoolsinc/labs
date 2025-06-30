@@ -49,27 +49,27 @@ export function llm(
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
   const pending = runtime.getCell(
-    parentCell.getDoc().space,
+    parentCell.space,
     { llm: { pending: cause } },
   );
   pending.send(false);
-  
+
   const result = runtime.getCell<string | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       llm: { result: cause },
     },
   );
-  
+
   const partial = runtime.getCell<string | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       llm: { partial: cause },
     },
   );
-  
+
   const requestHash = runtime.getCell<string | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       llm: { requestHash: cause },
     },
@@ -195,27 +195,27 @@ export function generateObject<T extends Record<string, unknown>>(
   runtime: IRuntime,
 ): Action {
   const pending = runtime.getCell<boolean>(
-    parentCell.getDoc().space,
+    parentCell.space,
     { generateObject: { pending: cause } },
   );
   pending.send(false);
-  
+
   const result = runtime.getCell<T | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       generateObject: { result: cause },
     },
   );
-  
+
   const partial = runtime.getCell<string | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       generateObject: { partial: cause },
     },
   );
-  
+
   const requestHash = runtime.getCell<string | undefined>(
-    parentCell.getDoc().space,
+    parentCell.space,
     {
       generateObject: { requestHash: cause },
     },
