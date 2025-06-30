@@ -252,6 +252,9 @@ export class Storage implements IStorage {
       //   console.debug("missing", missing);
     }
 
+    // Don't update docs while they might be updating.
+    await this.runtime.scheduler.idle();
+
     const docMap = this.runtime.documentMap;
     // First, make sure we have all these docs in the runtime document map
     // This should also handle the source docs, since they will be included
@@ -458,7 +461,10 @@ export class Storage implements IStorage {
       JSONValue
     >(
       doc.entityId!,
-      (storageValue) => {
+      async (storageValue) => {
+        // Don't update docs while they might be updating.
+        await this.runtime.scheduler.idle();
+
         if (!deepEqual(storageValue.value, doc.get())) {
           // values differ
           const newDocValue = JSON.parse(JSON.stringify(storageValue.value));
