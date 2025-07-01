@@ -445,7 +445,6 @@ export interface IStoreError extends Error {
 
 export interface ITransactionJournal {
   activity(): Iterable<Activity>;
-  invariants(): Iterable<IStorageInvariant>;
 
   reader(
     space: MemorySpace,

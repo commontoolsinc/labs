@@ -1558,7 +1558,7 @@ type TransactionProgress = Variant<{
  * have central place to manage state of the transaction and prevent readers /
  * writers from making to mutate transaction after it's being commited.
  */
-class TransactionJournal implements ITransactionJournal {
+export class TransactionJournal implements ITransactionJournal {
   #manager: StorageManager;
   #readers: Map<MemorySpace, TransactionReader> = new Map();
   #writers: Map<MemorySpace, TransactionWriter> = new Map();
@@ -1850,35 +1850,6 @@ class TransactionJournal implements ITransactionJournal {
         });
       },
     );
-  }
-
-  /**
-   * Returns set of invariants that this transaction makes, which is set of
-   * {@link Claim}s corresponding to reads transaction performed and set of
-   * {@link Fact}s corresponding to the writes transaction performed.
-   */
-  invariants(): Iterable<IStorageInvariant> {
-    const history = this.#history;
-    const novelty = this.#novelty;
-
-    // First capture all the changes we have made
-    const output: IStorageInvariant[] = [];
-    for (const [space, invariants] of novelty) {
-      for (const { address, value } of invariants) {
-        output.push({ address: { ...address, space }, value });
-      }
-    }
-
-    for (const [space, invariants] of history) {
-      for (const { address, value } of invariants) {
-        output.push({
-          address: { ...address, space },
-          value,
-        });
-      }
-    }
-
-    return output;
   }
 
   get(address: IMemorySpaceAddress) {
