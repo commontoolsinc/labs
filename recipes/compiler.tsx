@@ -82,7 +82,7 @@ export default recipe(
           <common-code-editor
             source={code}
             language="text/x.typescript"
-            ontext-change={updateCode({ code })}
+            onChange={updateCode({ code })}
           />
           {ifElse(
             error,

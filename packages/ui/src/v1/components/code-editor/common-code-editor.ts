@@ -10,8 +10,7 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as creatHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { replaceSourceIfNeeded } from "./codemirror/utils.ts";
-import { createCancelGroup } from "../../shared/cancel.ts";
+import { createCancelGroup, replaceSourceIfNeeded } from "./codemirror/utils.ts";
 
 const freeze = Object.freeze;
 
@@ -85,7 +84,7 @@ export class CommonCodeEditorEvent extends Event {
   detail: CommonCodeEditorDetail;
 
   constructor(detail: CommonCodeEditorDetail) {
-    super("text-change", { bubbles: true, composed: true });
+    super("change", { bubbles: true, composed: true });
     this.detail = detail;
   }
 }

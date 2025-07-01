@@ -4,7 +4,8 @@ A CodeMirror 6 based code editor web component for CommonTools.
 
 ## Features
 
-- Syntax highlighting for multiple languages (JavaScript, TypeScript, JSX, CSS, HTML, JSON, Markdown)
+- Syntax highlighting for multiple languages (JavaScript, TypeScript, JSX, CSS,
+  HTML, JSON, Markdown)
 - Dark theme (One Dark)
 - Auto-completion and basic IDE features
 - Real-time change events
@@ -13,14 +14,14 @@ A CodeMirror 6 based code editor web component for CommonTools.
 ## Usage
 
 ```typescript
-import "@commontools/ui/v1/components/code-editor/common-code-editor.ts";
+const code = cell<string>("const foo=1");
 
-// In your HTML or Lit template:
 <common-code-editor
   language="text/javascript"
-  source="console.log('Hello, world!');"
-  @text-change="${(e) => console.log('Text changed', e.detail)}"
-></common-code-editor>
+  source={code}
+  onChange="updateCode({code})"
+>
+</common-code-editor>;
 ```
 
 ## Properties
@@ -37,11 +38,8 @@ import "@commontools/ui/v1/components/code-editor/common-code-editor.ts";
 
 ## Events
 
-- `text-change`: Fired when the text content changes (debounced by 500ms). The event detail contains:
+- `change`: Fired when the text content changes (debounced by 500ms). The event
+  detail contains:
   - `id`: The element's ID
   - `value`: The current source code
   - `language`: The current language mode
-
-## Example
-
-See `example.html` for a working example with language switching.
