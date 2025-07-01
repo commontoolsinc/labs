@@ -19,7 +19,7 @@ import "@commontools/ui/v1/components/code-editor/common-code-editor.ts";
 <common-code-editor
   language="text/javascript"
   source="console.log('Hello, world!');"
-  @doc-change="${(e) => console.log('Document changed', e.detail)}"
+  @text-change="${(e) => console.log('Text changed', e.detail)}"
 ></common-code-editor>
 ```
 
@@ -37,7 +37,10 @@ import "@commontools/ui/v1/components/code-editor/common-code-editor.ts";
 
 ## Events
 
-- `doc-change`: Fired when the document content changes (debounced by 500ms)
+- `text-change`: Fired when the text content changes (debounced by 500ms). The event detail contains:
+  - `id`: The element's ID
+  - `value`: The current source code
+  - `language`: The current language mode
 
 ## Example
 

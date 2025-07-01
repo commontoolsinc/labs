@@ -104,9 +104,10 @@ Try changing the language from the dropdown above!">
       editor.source = examples[newLang] || '';
     });
     
-    // Listen for document changes
-    editor.addEventListener('doc-change', (e) => {
-      status.textContent = `Document changed at ${new Date().toLocaleTimeString()}`;
+    // Listen for text changes
+    editor.addEventListener('text-change', (e) => {
+      status.textContent = `Text changed at ${new Date().toLocaleTimeString()} - Length: ${e.detail.value.length} chars`;
+      console.log('Text change:', e.detail);
     });
   </script>
 </body>

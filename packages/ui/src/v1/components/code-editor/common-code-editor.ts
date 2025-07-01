@@ -74,7 +74,20 @@ export const createEditor = ({
   });
 };
 
-export type DocChangeEvent = CustomEvent<{ state: EditorState }>;
+export type CommonCodeEditorDetail = {
+  id: string;
+  value: string;
+  language: string;
+};
+
+export class CommonCodeEditorEvent extends Event {
+  detail: CommonCodeEditorDetail;
+
+  constructor(detail: CommonCodeEditorDetail) {
+    super("text-change", { bubbles: true, composed: true });
+    this.detail = detail;
+  }
+}
 
 export class CommonCodeEditor extends LitElement {
   static override styles = [
@@ -146,7 +159,13 @@ export class CommonCodeEditor extends LitElement {
           globalThis.clearTimeout(this.#docChangeTimeout);
         }
         this.#docChangeTimeout = globalThis.setTimeout(() => {
-          this.dispatchEvent(new CustomEvent("doc-change", { detail: update }));
+          const value = this.#editorView?.state.doc.toString() || "";
+          this.source = value;
+          this.dispatchEvent(new CommonCodeEditorEvent({
+            id: this.id,
+            value,
+            language: this.language,
+          }));
         }, 500);
       }
     });
