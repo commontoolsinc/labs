@@ -149,29 +149,42 @@ export function unsafe_createParentBindings(
   }
 }
 
-// Traverses binding and returns all cells reacheable through write redirects.
+/**
+ * Traverses binding and returns all cells reacheable through write redirects.
+ *
+ * @param binding - The binding to traverse.
+ * @param baseCell - The base cell to use for resolving links.
+ * @returns All cells reacheable through write redirects.
+ */
 export function findAllWriteRedirectCells<T>(
   binding: unknown,
-  cell: Cell<T>,
+  baseCell: Cell<T>,
 ): NormalizedFullLink[] {
   const seen: NormalizedFullLink[] = [];
-  function find(binding: unknown, origCell: Cell<T>): void {
+  function find(binding: unknown, baseCell: Cell<T>): void {
     if (isLegacyAlias(binding) && typeof binding.$alias.cell === "number") {
+      // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
       return;
-    }
-    if (isWriteRedirectLink(binding)) {
-      const link = parseLink(binding, origCell);
+    } else if (isWriteRedirectLink(binding)) {
+      // If the binding is a write redirect, add the link to the seen list and
+      // recurse into the linked cell.
+      const link = parseLink(binding, baseCell);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
-      const linkCell = origCell.getDoc().runtime.getCellFromLink(link);
+      const linkCell = baseCell.getDoc().runtime.getCellFromLink(link);
       if (!linkCell) throw new Error("Link cell not found");
-      find(linkCell.getRaw(), origCell);
+      find(linkCell.getRaw(), baseCell);
+    } else if (isLink(binding)) {
+      // Links that are not write redirects: Ignore them.
+      return;
     } else if (Array.isArray(binding)) {
-      for (const value of binding) find(value, origCell);
+      // If the binding is an array, recurse into each element.
+      for (const value of binding) find(value, baseCell);
     } else if (isRecord(binding) && !isLink(binding)) {
-      for (const value of Object.values(binding)) find(value, origCell);
+      // If the binding is an object, recurse into each value.
+      for (const value of Object.values(binding)) find(value, baseCell);
     }
   }
-  find(binding, cell);
+  find(binding, baseCell);
   return seen;
 }
