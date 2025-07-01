@@ -327,4 +327,196 @@ describe("WriteInvariants", () => {
     // Query for the specific path should still work
     expect(invariants.get(name.address)).toEqual(merged); // Should return the same merged invariant
   });
+
+  it("should keep parallel paths separate and include both in iterator", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // Create invariants for different parallel paths that don't merge
+    const userProfile = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: { name: "Alice" },
+    } as const;
+
+    const userSettings = {
+      address: {
+        id: "user:1",
+        type: "application/json", 
+        path: ["settings"],
+      },
+      value: { theme: "dark" },
+    } as const;
+
+    const projectData = {
+      address: {
+        id: "project:1",
+        type: "application/json",
+        path: ["data"],
+      },
+      value: { title: "My Project" },
+    } as const;
+
+    invariants.claim(userProfile);
+    invariants.claim(userSettings);
+    invariants.claim(projectData);
+
+    // Parallel paths should remain separate
+    expect(invariants.get(userProfile.address)).toEqual(userProfile);
+    expect(invariants.get(userSettings.address)).toEqual(userSettings);
+    expect(invariants.get(projectData.address)).toEqual(projectData);
+
+    // Iterator should include all separate invariants
+    const collected = [...invariants];
+    expect(collected).toHaveLength(3);
+    expect(collected).toContainEqual(userProfile);
+    expect(collected).toContainEqual(userSettings);
+    expect(collected).toContainEqual(projectData);
+  });
+
+  it("should show merged invariant in iterator, not original invariants", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // Start with a parent invariant
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: { 
+        profile: { name: "Alice", email: "alice@example.com" },
+        settings: { theme: "light" }
+      },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Iterator should show the parent
+    let collected = [...invariants];
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toEqual(parent);
+
+    // Now claim child invariants that should merge into the parent
+    const nameUpdate = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Bob",
+    } as const;
+
+    const themeUpdate = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["settings", "theme"],
+      },
+      value: "dark",
+    } as const;
+
+    invariants.claim(nameUpdate);
+    invariants.claim(themeUpdate);
+
+    // After merging, iterator should only show the merged invariant at root
+    collected = [...invariants];
+    expect(collected).toHaveLength(1);
+    
+    // The single invariant should be the merged result at root path
+    const merged = collected[0];
+    expect(merged.address.path).toEqual([]);
+    expect(merged.value).toEqual({
+      profile: { name: "Bob", email: "alice@example.com" },
+      settings: { theme: "dark" }
+    });
+    
+    // Original individual updates should not appear as separate items
+    expect(collected).not.toContainEqual(nameUpdate);
+    expect(collected).not.toContainEqual(themeUpdate);
+  });
+
+  it("should overwrite child invariants when parent is claimed in iterator", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // Start with child invariants
+    const name = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Alice",
+    } as const;
+
+    const email = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "email"],
+      },
+      value: "alice@example.com",
+    } as const;
+
+    const theme = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["settings", "theme"],
+      },
+      value: "dark",
+    } as const;
+
+    invariants.claim(name);
+    invariants.claim(email);
+    invariants.claim(theme);
+
+    // Before overwriting, iterator should show individual child invariants
+    let collected = [...invariants];
+    expect(collected).toHaveLength(3);
+    expect(collected).toContainEqual(name);
+    expect(collected).toContainEqual(email);
+    expect(collected).toContainEqual(theme);
+
+    // Now claim a parent that overwrites the profile children
+    const profile = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: { name: "Bob", age: 30 },
+    } as const;
+
+    invariants.claim(profile);
+
+    // After overwriting, iterator should show the parent and unaffected invariants
+    collected = [...invariants];
+    expect(collected).toHaveLength(2);
+    
+    // Profile parent should be in the iterator
+    expect(collected).toContainEqual(profile);
+    
+    // Settings theme should still be there (unaffected parallel path)
+    expect(collected).toContainEqual(theme);
+    
+    // Original profile children should be gone
+    expect(collected).not.toContainEqual(name);
+    expect(collected).not.toContainEqual(email);
+
+    // Verify that getting the child paths returns the parent
+    expect(invariants.get(name.address)).toEqual(profile);
+    expect(invariants.get(email.address)).toEqual(profile);
+  });
 });
