@@ -150,7 +150,7 @@ export function unsafe_createParentBindings(
 }
 
 /**
- * Traverses binding and returns all cells reacheable through write redirects.
+ * Traverses binding and returns all cells reachable through write redirects.
  *
  * @param binding - The binding to traverse.
  * @param baseCell - The base cell to use for resolving links.
