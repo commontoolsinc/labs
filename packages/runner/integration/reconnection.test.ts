@@ -23,14 +23,14 @@ console.log(`Connecting to: ${MEMORY_WS_URL}`);
 const signer = await Identity.fromPassphrase("test operator");
 
 // Create storage manager
-const storageManager = StorageManager.open({
+const storageManager1 = StorageManager.open({
   as: signer,
   address: new URL(MEMORY_WS_URL),
   id: "reconnection-integration-test",
 });
 
 // Open provider
-const provider = storageManager.open(signer.did());
+const provider1 = storageManager1.open(signer.did());
 console.log(`Connected to memory server`);
 
 // Define test schema
@@ -64,7 +64,7 @@ const updates: UpdateValue[] = [];
 
 // Listen for updates on the test-reconnection-counter document
 // Note: this is not the schema subscription, its just a client-side listener
-provider.sink({ "/": TEST_DOC_ID }, (value) => {
+provider1.sink({ "/": TEST_DOC_ID }, (value) => {
   updateCount++;
   updates.push(value.value);
   console.log(`Update #${updateCount}:`, value.value);
@@ -72,11 +72,11 @@ provider.sink({ "/": TEST_DOC_ID }, (value) => {
 
 // Establish server-side subscription with schema
 console.log("Establishing subscription...");
-await provider.sync({ "/": TEST_DOC_ID }, true, testSchema);
+await provider1.sync({ "/": TEST_DOC_ID }, true, testSchema);
 
 // Send initial value to server
 console.log("Sending initial value...");
-await provider.send([{
+await provider1.send([{
   entityId: { "/": TEST_DOC_ID },
   value: {
     value: {
@@ -100,14 +100,14 @@ console.log("Initial update received");
 // Test reconnection behavior
 console.log("\nTesting reconnection behavior...");
 
-// Access the WebSocket connection
-const providerConnection = provider as any; // its private so we use any
-console.log("WebSocket state:", providerConnection.connection?.readyState);
+// Access the WebSocket connection -- it's private so we use any
+const providerSocket = (provider1 as any).connection as WebSocket | undefined;
+console.log("WebSocket state:", providerSocket?.readyState);
 
 // Force disconnect the WebSocket
 console.log("Forcing WebSocket disconnection...");
-if (providerConnection.connection) {
-  providerConnection.connection.close();
+if (providerSocket) {
+  providerSocket.close();
   console.log("WebSocket closed");
 } else {
   console.error("No WebSocket connection found");
@@ -119,15 +119,30 @@ let testValue = 100; // Use values over 100 to show the value happens after reco
 const preDisconnectCount = updateCount;
 
 // Give it a moment to reconnect
-await new Promise((resolve) => setTimeout(resolve, 2000));
+await new Promise((resolve) => setTimeout(resolve, 10000));
+
+// Create a second storage manager and provider
+const storageManager2 = StorageManager.open({
+  as: signer,
+  address: new URL(MEMORY_WS_URL),
+  id: "reconnection-integration-test",
+});
+
+// Open provider
+const provider2 = storageManager2.open(signer.did());
+console.log(`Connected to memory server as second client`);
+
+// Establish server-side subscription with schema
+console.log("Establishing subscription as second client...");
+await provider2.sync({ "/": TEST_DOC_ID }, true, testSchema);
 
 // Send test updates and check if subscription still works
 console.log("Sending test updates after disconnection...");
 
 const intervalId = setInterval(async () => {
   try {
-    // Send an update
-    await provider.send([{
+    // Send an update as the second
+    const result = await provider2.send([{
       entityId: { "/": TEST_DOC_ID },
       value: {
         value: {
@@ -136,6 +151,7 @@ const intervalId = setInterval(async () => {
         },
       },
     }]);
+    console.log(result);
 
     // Check if we've received updates with value >= 100 (post-reconnection)
     const postReconnectUpdates = updates.filter((u) => u.value >= 100);
@@ -148,7 +164,8 @@ const intervalId = setInterval(async () => {
       console.log(`Post-reconnect updates: ${postReconnectUpdates.length}`);
 
       clearInterval(intervalId);
-      storageManager.close();
+      storageManager1.close();
+      storageManager2.close();
       Deno.exit(0);
     }
   } catch (error) {
@@ -163,7 +180,8 @@ const intervalId = setInterval(async () => {
 setTimeout(() => {
   console.error("TIMEOUT: Test did not complete within 60 seconds");
   clearInterval(intervalId);
-  storageManager.close();
+  storageManager1.close();
+  storageManager2.close();
   Deno.exit(1);
 }, 30000);
 

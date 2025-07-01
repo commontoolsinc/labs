@@ -1375,20 +1375,21 @@ export class Provider implements IStorageProvider {
   async reestablishSubscriptions(): Promise<void> {
     const subscriptions = this.serverSubscriptions.getAllSubscriptions();
 
-    // Re-establish each subscription
+    // Re-establish subscriptions
+    const need: [FactAddress, SchemaContext?][] = [];
     for (const { factAddress, selector } of subscriptions) {
-      if (selector.schemaContext) {
-        const entityId: EntityId = { "/": factAddress.of.replace("of:", "") };
-        try {
-          await this.sync(entityId, true, selector.schemaContext);
-        } catch (error) {
-          // catch error so we can continue with other subscriptions
-          console.error(
-            `Failed to re-establish subscription for ${entityId["/"]}:`,
-            error,
-          );
-        }
-      }
+      need.push([factAddress, selector.schemaContext]);
+    }
+    try {
+      console.log("re-establishing subs for", JSON.stringify(need));
+      const result = await this.workspace.pull(need);
+      console.log("pull returned", result);
+    } catch (error) {
+      // catch error so we can continue with other subscriptions
+      console.error(
+        `Failed to re-establish subscriptions`,
+        error,
+      );
     }
   }
 
