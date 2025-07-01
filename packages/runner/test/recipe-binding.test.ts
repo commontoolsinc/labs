@@ -169,7 +169,6 @@ describe("recipe-binding", () => {
         [binding, nestedBinding],
         testCell,
       );
-      console.log(links);
       expect(links.length).toBe(3);
       expect(links[0].path).toEqual(["a"]);
       expect(links[1].path).toEqual(["b", "c"]);
