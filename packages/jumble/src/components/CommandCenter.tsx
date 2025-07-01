@@ -435,8 +435,18 @@ export function CommandCenter() {
       });
     };
 
-    const handleNavigateToCharm = (event: CustomEvent) => {
-      const { charmId, replicaName } = event.detail || {};
+    const handleNavigateToCharm = async (event: CustomEvent) => {
+      const { charmId, charm, replicaName } = event.detail || {};
+
+      // If we have a charm object, ensure it's added to the charm manager
+      if (charm && charmManager) {
+        try {
+          await charmManager.add([charm]);
+        } catch (error) {
+          console.error("Failed to add charm to manager:", error);
+        }
+      }
+
       if (charmId && replicaName) {
         navigate(
           createPath("charmShow", {
@@ -464,7 +474,7 @@ export function CommandCenter() {
     globalThis.addEventListener("new-charm-command", handleNewCharmEvent);
     globalThis.addEventListener(
       "navigate-to-charm",
-      handleNavigateToCharm as EventListener,
+      handleNavigateToCharm as unknown as EventListener,
     );
 
     return () => {
@@ -475,7 +485,7 @@ export function CommandCenter() {
       );
       globalThis.removeEventListener(
         "navigate-to-charm",
-        handleNavigateToCharm as EventListener,
+        handleNavigateToCharm as unknown as EventListener,
       );
     };
   }, [focusedCharmId, allCommands, navigate, focusedReplicaId]);

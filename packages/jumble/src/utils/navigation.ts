@@ -15,7 +15,7 @@ export function navigateToCharm(charm: Cell<any>, replicaName?: string): void {
 
   globalThis.dispatchEvent(
     new CustomEvent("navigate-to-charm", {
-      detail: { charmId: id, replicaName },
+      detail: { charmId: id, charm, replicaName },
     }),
   );
 }
