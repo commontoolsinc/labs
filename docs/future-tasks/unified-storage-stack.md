@@ -110,7 +110,7 @@ This plan should be entirely incremental and can be rolled out step by step.
   - Key areas: loading promises map (line 84), dependency tracking, and batch
     processing
   - Watch for the FIXME at line 84 about keying by doc+schema combination
-- [x] When connection is dropped, re-establish all schema queries again
+- [x] When connection is dropped, re-establish all schema queries again CT-442
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now) CT-446
