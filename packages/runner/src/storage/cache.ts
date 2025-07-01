@@ -40,19 +40,27 @@ import type {
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import { assert, claim, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
-import * as ChangesBuilder from "@commontools/memory/changes";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import { type Cancel, type EntityId } from "@commontools/runner";
 import type {
   Activity,
+  Assert,
+  Claim,
   CommitError,
+  IClaim,
   IMemoryAddress,
   IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
+  IRemoteStorageProviderSettings,
+  ISpace,
+  ISpaceReplica,
+  IStorageEdit,
+  IStorageInvariant,
+  IStorageManager,
   IStorageManagerV2,
   IStorageProvider,
   IStorageTransaction,
@@ -62,20 +70,23 @@ import type {
   IStorageTransactionProgress,
   IStorageTransactionRejected,
   IStorageTransactionWriteIsolationError,
+  IStoreError,
+  ITransaction,
+  ITransactionInvariant,
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
   MediaType,
   MemoryAddressPathComponent,
-  Read,
+  PushError,
   ReaderError,
   ReadError,
+  Retract,
   StorageTransactionFailed,
   StorageValue,
   URI,
   WriteError,
   WriterError,
-  Wrote,
 } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
@@ -105,7 +116,7 @@ export interface AsyncPull<Model, Address> {
   pull(
     selector: Selector<Address>,
   ): Promise<
-    Result<Selection<Address, Model>, StoreError>
+    Result<Selection<Address, Model>, IStoreError>
   >;
 }
 
@@ -113,7 +124,7 @@ export interface AsyncPush<Model> {
   merge(
     entries: Iterable<Model>,
     merge: Merge<Model>,
-  ): Promise<Result<Unit, StoreError>>;
+  ): Promise<Result<Unit, IStoreError>>;
 }
 
 export interface AsyncStore<Model, Address>
@@ -124,7 +135,7 @@ export interface SyncPull<Model, Address> {
   pull(
     selector: Selector<Address>,
   ): Promise<
-    Result<Selection<Address, Model>, StoreError>
+    Result<Selection<Address, Model>, IStoreError>
   >;
 }
 
@@ -132,7 +143,7 @@ export interface SyncPush<Model> {
   merge(
     entries: Iterable<Model>,
     merge: Merge<Model>,
-  ): Result<Unit, StoreError>;
+  ): Result<Unit, IStoreError>;
 }
 
 export interface SyncStore<Model, Address>
@@ -144,34 +155,6 @@ interface NotFoundError extends Error {
   address: FactAddress;
 }
 
-interface StoreError extends Error {
-  name: "StoreError";
-  cause: Error;
-}
-
-export interface Assert {
-  the: The;
-  of: Entity;
-  is: JSONValue;
-
-  claim?: void;
-}
-
-export interface Retract {
-  the: The;
-  of: Entity;
-  is?: void;
-
-  claim?: void;
-}
-
-export interface Claim {
-  the: The;
-  of: Entity;
-  is?: void;
-  claim: true;
-}
-
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
 
 export class NoCache<Model extends object, Address>
@@ -181,7 +164,7 @@ export class NoCache<Model extends object, Address>
    */
   async pull(
     selector: Selector<Address>,
-  ): Promise<Result<Selection<Address, Model>, StoreError>> {
+  ): Promise<Result<Selection<Address, Model>, IStoreError>> {
     return await { ok: new Map() };
   }
 
@@ -476,6 +459,10 @@ export class Replica {
     this.pull = this.pull.bind(this);
   }
 
+  did(): MemorySpace {
+    return this.space;
+  }
+
   async poll() {
     // Poll re-fetches the commit log, then subscribes to that
     // We don't use the autosubscribing query, since we want the
@@ -504,7 +491,7 @@ export class Replica {
       if (next.done) {
         break;
       }
-      this.merge(next.value[this.space] as unknown as Commit);
+      this.integrate(next.value[this.space] as unknown as Commit);
     }
   }
 
@@ -519,7 +506,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | AuthorizationError | ConnectionError
+      IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // If requested entry list is empty there is nothing to fetch so we return
@@ -635,7 +622,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | AuthorizationError | ConnectionError
+      IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // First we identify entries that we need to load from the store.
@@ -725,12 +712,7 @@ export class Replica {
   ): Promise<
     Result<
       Commit,
-      | StoreError
-      | QueryError
-      | ConnectionError
-      | ConflictError
-      | TransactionError
-      | AuthorizationError
+      PushError
     >
   > {
     // First we pull all the affected entries into heap so we can build a
@@ -744,12 +726,12 @@ export class Replica {
       // Collect facts so that we can derive desired state and a corresponding
       // transaction
       const facts: Fact[] = [];
-      const invariants: Invariant[] = [];
+      const claims: Invariant[] = [];
       for (const { the, of, is, claim } of changes) {
         const fact = this.get({ the, of });
 
         if (claim) {
-          invariants.push({
+          claims.push({
             the,
             of,
             fact: refer(fact),
@@ -773,46 +755,51 @@ export class Replica {
         }
       }
 
-      // Store facts in a nursery so that subsequent changes will be build
-      // optimistically assuming that push will succeed.
-      this.nursery.merge(facts, Nursery.put);
-
       // These push transaction that will commit desired state to a remote.
-      const result = await this.remote.transact({
-        changes: getChanges([...invariants, ...facts]),
-      });
-
-      // If transaction fails we delete facts from the nursery so that new
-      // changes will not build upon rejected state. If there are other inflight
-      // transactions that already were built upon our facts they will also fail.
-      if (result.error) {
-        this.nursery.merge(facts, Nursery.delete);
-        const fact = result.error.name === "ConflictError" &&
-          result.error.conflict.actual;
-        // We also update heap so it holds latest record
-        if (fact) {
-          this.heap.merge([fact], Replica.update);
-        }
-      } //
-      // If transaction succeeded we promote facts from nursery into a heap.
-      else {
-        const commit = toRevision(result.ok);
-        const { since } = commit.is;
-        const revisions = [
-          ...facts.map((fact) => ({ ...fact, since })),
-          // We strip transaction info so we don't duplicate same data
-          { ...commit, is: { since: commit.is.since } },
-        ];
-        // Turn facts into revisions corresponding with the commit.
-        this.heap.merge(revisions, Replica.put);
-        // Evict redundant facts which we just merged into `heap` so that reads
-        // will occur from `heap`. This way future changes upstream we not get
-        // shadowed by prior local changes.
-        this.nursery.merge(facts, Nursery.evict);
-      }
-
-      return result;
+      return this.commit({ facts, claims });
     }
+  }
+
+  async commit({ facts, claims }: ITransaction) {
+    // Store facts in a nursery so that subsequent changes will be build
+    // optimistically assuming that push will succeed.
+    this.nursery.merge(facts, Nursery.put);
+
+    // These push transaction that will commit desired state to a remote.
+    const result = await this.remote.transact({
+      changes: getChanges([...claims, ...facts] as Statement[]),
+    });
+
+    // If transaction fails we delete facts from the nursery so that new
+    // changes will not build upon rejected state. If there are other inflight
+    // transactions that already were built upon our facts they will also fail.
+    if (result.error) {
+      this.nursery.merge(facts, Nursery.delete);
+      const fact = result.error.name === "ConflictError" &&
+        result.error.conflict.actual;
+      // We also update heap so it holds latest record
+      if (fact) {
+        this.heap.merge([fact], Replica.update);
+      }
+    } //
+    // If transaction succeeded we promote facts from nursery into a heap.
+    else {
+      const commit = toRevision(result.ok);
+      const { since } = commit.is;
+      const revisions = [
+        ...facts.map((fact) => ({ ...fact, since })),
+        // We strip transaction info so we don't duplicate same data
+        { ...commit, is: { since: commit.is.since } },
+      ];
+      // Turn facts into revisions corresponding with the commit.
+      this.heap.merge(revisions, Replica.put);
+      // Evict redundant facts which we just merged into `heap` so that reads
+      // will occur from `heap`. This way future changes upstream we not get
+      // shadowed by prior local changes.
+      this.nursery.merge(facts, Nursery.evict);
+    }
+
+    return result;
   }
 
   subscribe(
@@ -828,7 +815,7 @@ export class Replica {
     this.heap.unsubscribe(entry, subscriber);
   }
 
-  merge(commit: Commit) {
+  integrate(commit: Commit) {
     const { the, of, cause, is, since } = toRevision(commit);
     const revisions = [
       { the, of, cause, is: { since: is.since }, since },
@@ -844,38 +831,19 @@ export class Replica {
    * Returns state corresponding to the requested entry. If there is a pending
    * state returns it otherwise returns recent state.
    */
-  get(entry: FactAddress) {
+  get(entry: FactAddress): State | undefined {
     return this.nursery.get(entry) ?? this.heap.get(entry);
   }
-}
-
-export interface RemoteStorageProviderSettings {
-  /**
-   * Number of subscriptions remote storage provider is allowed to have per
-   * space.
-   */
-  maxSubscriptionsPerSpace: number;
-
-  /**
-   * Amount of milliseconds we will spend waiting on WS connection before we
-   * abort.
-   */
-  connectionTimeout: number;
-
-  /**
-   * Flag to enable or disable remote schema subscriptions
-   */
-  useSchemaQueries: boolean;
 }
 
 export interface RemoteStorageProviderOptions {
   session: Consumer.MemoryConsumer<MemorySpace>;
   space: MemorySpace;
   the?: string;
-  settings?: RemoteStorageProviderSettings;
+  settings?: IRemoteStorageProviderSettings;
 }
 
-export const defaultSettings: RemoteStorageProviderSettings = {
+export const defaultSettings: IRemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
   useSchemaQueries: true,
@@ -1186,7 +1154,7 @@ export class Provider implements IStorageProvider {
   the: string;
   session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
-  settings: RemoteStorageProviderSettings;
+  settings: IRemoteStorageProviderSettings;
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
@@ -1287,7 +1255,7 @@ export class Provider implements IStorageProvider {
       | ConnectionError
       | AuthorizationError
       | QueryError
-      | StoreError
+      | IStoreError
     >
   > {
     const { the, workspace } = this;
@@ -1366,25 +1334,22 @@ export interface Options {
   /**
    * Various settings to configure storage provider.
    */
-  settings?: RemoteStorageProviderSettings;
+  settings?: IRemoteStorageProviderSettings;
 }
 
-export interface IStorageManager {
-  id: string;
-  open(space: string): IStorageProvider;
+interface Subscriber<T> {
+  integrate(changes: Differential<T>): Result<Unit, Error>;
 }
 
-export interface LocalStorageOptions {
-  as: Signer;
-  id?: string;
-  settings?: RemoteStorageProviderSettings;
+interface Differential<T>
+  extends Iterable<[undefined, T] | [T, undefined] | [T, T]> {
 }
 
 export class StorageManager implements IStorageManager, IStorageManagerV2 {
   address: URL;
   as: Signer;
   id: string;
-  settings: RemoteStorageProviderSettings;
+  settings: IRemoteStorageProviderSettings;
   #providers: Map<string, IStorageProvider> = new Map();
 
   static open(options: Options) {
@@ -1485,19 +1450,14 @@ const getSchema = (
  * for reads and writes across memory spaces.
  */
 class StorageTransaction implements IStorageTransaction {
-  #manager: StorageManager;
   #journal: TransactionJournal;
-  #writer?: TransactionWriter;
-  #readers: Map<MemorySpace, TransactionReader>;
+  #writer?: MemorySpace;
   #result?: Promise<
     Result<Unit, StorageTransactionFailed>
   >;
 
   constructor(manager: StorageManager) {
-    this.#manager = manager;
-    this.#readers = new Map();
-
-    this.#journal = new TransactionJournal();
+    this.#journal = new TransactionJournal(manager);
   }
 
   status(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
@@ -1506,73 +1466,30 @@ class StorageTransaction implements IStorageTransaction {
 
   reader(
     space: MemorySpace,
-  ): Result<TransactionReader, ReaderError> {
-    // Obtait edit session for this transaction, if it fails transaction is
-    // no longer editable, in which case we propagate error.
-
-    return this.#journal.edit((journal) => {
-      const readers = this.#readers;
-      // Otherwise we lookup a a reader for the requested `space`, if we one
-      // already exists return it otherwise create one and return it.
-      const reader = readers.get(space);
-      if (reader) {
-        return { ok: reader };
-      } else {
-        // TODO(@gozala): Refactor codebase so we are able to obtain a replica
-        // without having to perform type casting. Previous storage interface
-        // was not designed with this new transaction system in mind so there
-        // is a mismatch that we can address as a followup.
-        const replica = (this.#manager.open(space) as Provider).workspace;
-        const reader = new TransactionReader(
-          journal,
-          replica,
-          space,
-        );
-
-        replica.subscribe(null, (state) => {
-          if (state) {
-            journal.merge({ [space]: [state] });
-          }
-        });
-
-        // Store reader so that subsequent attempts calls of this method.
-        readers.set(space, reader);
-        return { ok: reader };
-      }
-    });
+  ): Result<ITransactionReader, ReaderError> {
+    return this.#journal.reader(space);
   }
 
   writer(
     space: MemorySpace,
-  ): Result<ITransactionWriter, WriterError> {
-    // Obtait edit session for this transaction, if it fails transaction is
-    // no longer editable, in which case we propagate error.
-    return this.#journal.edit(
-      (journal): Result<TransactionWriter, WriterError> => {
-        const writer = this.#writer;
-        if (writer) {
-          if (writer.did() === space) {
-            return { ok: writer };
-          } else {
-            return {
-              error: new WriteIsolationError({
-                open: writer.did(),
-                requested: space,
-              }),
-            };
-          }
-        } else {
-          const { ok: reader, error } = this.reader(space);
-          if (error) {
-            return { error };
-          } else {
-            const writer = new TransactionWriter(journal, reader);
-            this.#writer = writer;
-            return { ok: writer };
-          }
-        }
-      },
-    );
+  ): Result<TransactionWriter, WriterError> {
+    const writer = this.#writer;
+    if (writer && writer !== space) {
+      return {
+        error: new WriteIsolationError({
+          open: writer,
+          requested: space,
+        }),
+      };
+    } else {
+      const { ok: writer, error } = this.#journal.writer(space);
+      if (error) {
+        return { error };
+      } else {
+        this.#writer = space;
+        return { ok: writer };
+      }
+    }
   }
 
   read(address: IMemorySpaceAddress) {
@@ -1600,7 +1517,7 @@ class StorageTransaction implements IStorageTransaction {
     return this.#journal.abort(reason);
   }
 
-  async commit(): Promise<
+  commit(): Promise<
     Result<Unit, CommitError>
   > {
     // Return cached promise if commit was already called
@@ -1609,7 +1526,7 @@ class StorageTransaction implements IStorageTransaction {
     }
 
     // Check transaction state
-    const { ok: changes, error } = this.#journal.end();
+    const { ok: edit, error } = this.#journal.close();
     if (error) {
       this.status();
       this.#result = Promise.resolve(
@@ -1617,23 +1534,20 @@ class StorageTransaction implements IStorageTransaction {
         // mode we would have result already.
         { error } as { error: StorageTransactionFailed },
       );
-      return this.#result;
     } else if (this.#writer) {
-      const { ok, error } = await this.#writer.replica.push(changes);
+      const { ok: writer, error } = this.#journal.writer(this.#writer);
       if (error) {
-        // TODO(@gozala): Perform rollback
         this.#result = Promise.resolve({
           error: error as IStorageTransactionRejected,
         });
-        return this.#result;
       } else {
-        this.#result = Promise.resolve({ ok: {} });
-        return this.#result!;
+        this.#result = writer.replica.commit(edit.for(this.#writer));
       }
     } else {
       this.#result = Promise.resolve({ ok: {} });
-      return this.#result;
     }
+
+    return this.#result;
   }
 }
 
@@ -1649,6 +1563,10 @@ type TransactionProgress = Variant<{
  * writers from making to mutate transaction after it's being commited.
  */
 class TransactionJournal implements ITransactionJournal {
+  #manager: StorageManager;
+  #readers: Map<MemorySpace, TransactionReader> = new Map();
+  #writers: Map<MemorySpace, TransactionWriter> = new Map();
+
   #state: Result<TransactionProgress, StorageTransactionFailed> = {
     ok: { edit: this },
   };
@@ -1670,17 +1588,9 @@ class TransactionJournal implements ITransactionJournal {
    */
   #novelty: Novelty = new Novelty();
 
-  /**
-   * Set of facts that have being updated upstream during transaction lifecycle.
-   * We track them to ensure that read / writes that may happen later later
-   * in the lifecycle will be considered.
-   */
-  #stale: FactSet = new FactSet();
-
-  /**
-   * Memory space that is a write target for this transaction.
-   */
-  #space: MemorySpace | undefined = undefined;
+  constructor(manager: StorageManager) {
+    this.#manager = manager;
+  }
 
   // Note that we downcast type to `IStorageTransactionProgress` as we don't
   // want outside users to non public API directly.
@@ -1691,6 +1601,69 @@ class TransactionJournal implements ITransactionJournal {
   *activity() {
     yield* this.#activity;
   }
+
+  novelty(space: MemorySpace) {
+    return this.#novelty.for(space);
+  }
+
+  history(space: MemorySpace) {
+    return this.#history.for(space);
+  }
+
+  reader(space: MemorySpace) {
+    // Obtait edit session for this transaction, if it fails transaction is
+    // no longer editable, in which case we propagate error.
+
+    return this.edit((journal): Result<TransactionReader, never> => {
+      const readers = this.#readers;
+      // Otherwise we lookup a a reader for the requested `space`, if we one
+      // already exists return it otherwise create one and return it.
+      const reader = readers.get(space);
+      if (reader) {
+        return { ok: reader };
+      } else {
+        // TODO(@gozala): Refactor codebase so we are able to obtain a replica
+        // without having to perform type casting. Previous storage interface
+        // was not designed with this new transaction system in mind so there
+        // is a mismatch that we can address as a followup.
+        const replica = (this.#manager.open(space) as Provider).workspace;
+        const reader = new TransactionReader(
+          journal,
+          replica,
+          space,
+        );
+
+        // Store reader so that subsequent attempts calls of this method.
+        readers.set(space, reader);
+        return { ok: reader };
+      }
+    });
+  }
+
+  writer(
+    space: MemorySpace,
+  ): Result<TransactionWriter, WriterError> {
+    // Obtait edit session for this transaction, if it fails transaction is
+    // no longer editable, in which case we propagate error.
+    return this.edit(
+      (journal): Result<TransactionWriter, WriterError> => {
+        const writer = this.#writers.get(space);
+        if (writer) {
+          return { ok: writer };
+        } else {
+          const { ok: reader, error } = this.reader(space);
+          if (error) {
+            return { error };
+          } else {
+            const writer = new TransactionWriter(journal, reader);
+            this.#writers.set(space, writer);
+            return { ok: writer };
+          }
+        }
+      },
+    );
+  }
+
   /**
    * Ensures that transaction is still editable, that is it has not being
    * commited yet. If so it returns `{ ok: this }` otherwise, it returns
@@ -1724,7 +1697,7 @@ class TransactionJournal implements ITransactionJournal {
    */
   abort<Reason extends Unit>(
     reason?: Reason,
-  ) {
+  ): Result<Unit, InactiveTransactionError> {
     return this.edit((journal): Result<Unit, never> => {
       journal.#state = {
         error: new TransactionAborted(reason),
@@ -1735,77 +1708,169 @@ class TransactionJournal implements ITransactionJournal {
   }
 
   /**
-   * Transitions transaction from editable to done state. If transaction is
-   * not in editable state returns error.
+   * 
    */
-  end(): Result<
-    Array<Assert | Retract | Claim>,
-    InactiveTransactionError
-  > {
+  close() {
     return this.edit((journal) => {
       const status = { pending: this };
       journal.#state = { ok: status };
-      return { ok: this.invariants() };
+
+      const edit = new StorageEdit();
+
+      for (const [space, invariants] of journal.#history) {
+        for (const invariant of invariants) {
+          const replica = this.#readers.get(space)?.replica;
+          const address = { ...invariant.address, space };
+          const state = replica?.get({ the: address.type, of: address.id }) ??
+            unclaimed({ the: address.type, of: address.id });
+          const actual = {
+            address: { ...address, path: [] },
+            value: state.is,
+          };
+          const value = TransactionInvariant.read(actual, address)?.ok?.value;
+
+          if (JSON.stringify(invariant.value) !== JSON.stringify(value)) {
+            journal.#state = { error: new Inconsistency([actual, invariant]) };
+            return journal.#state;
+          } else {
+            edit.for(space).claim(state);
+          }
+        }
+      }
+
+      for (const [space, invariants] of journal.#novelty) {
+        for (const invariant of invariants) {
+          const replica = this.#readers.get(space)?.replica;
+          const address = { ...invariant.address, space };
+          const state = replica?.get({ the: address.type, of: address.id }) ??
+            unclaimed({ the: address.type, of: address.id });
+          const actual = {
+            address: { ...address, path: [] },
+            value: state.is,
+          };
+
+          const { error, ok: change } = TransactionInvariant.write(
+            actual,
+            address,
+            invariant.value,
+          );
+
+          if (error) {
+            journal.#state = {
+              error: new Inconsistency([actual, invariant]),
+            };
+            return journal.#state;
+          } else {
+            // If change removes the fact we either retract it or if it was
+            // already retracted we just claim current state.
+            if (change.value === undefined) {
+              if (state.is === undefined) {
+                edit.for(space).claim(state);
+              } else {
+                edit.for(space).retract(state);
+              }
+            } else {
+              edit.for(space).assert({
+                the: state.the,
+                of: state.of,
+                is: change.value,
+                cause: refer(state),
+              });
+            }
+          }
+        }
+      }
+
+      return { ok: edit };
     });
   }
 
   read(
-    address: IMemoryAddress,
-    replica: Replica,
-  ) {
-    const at = { ...address, space: replica.space };
-    return this.edit((journal): Result<Read, INotFoundError> => {
-      // log read activitiy in the journal
-      journal.#activity.push({ read: at });
-      const [the, of] = [address.type, address.id];
+    at: IMemoryAddress,
+    replica: ISpaceReplica,
+  ): Result<ITransactionInvariant, ReadError> {
+    const address = { ...at, space: replica.did() };
+    return this.edit(
+      (journal): Result<ITransactionInvariant, INotFoundError> => {
+        // log read activitiy in the journal
+        journal.#activity.push({ read: address });
+        const [the, of] = [address.type, address.id];
 
-      // Obtain state of the fact from the provided replica and capture
-      // it in the journals history
-      const before = replica.get({ the, of }) ?? unclaimed({ the, of });
-      journal.#history.claims(replica.space).add(before);
+        // We may have written into an addressed or it's parent memory loaction,
+        // if so MUST read from it as it will contain current state. If we have
+        // not written, we should also consider read we made made from the
+        // addressed or it's parent memory location. If we find either write or
+        // read invariant we read from it and return the value.
+        const prior = this.get(address);
+        if (prior) {
+          return TransactionInvariant.read(prior, address);
+        }
 
-      // Now read path from the fact as it's known to be at this moment
-      const { ok, error } = read(journal.get(at) ?? before, at);
-      if (error) {
-        return { error };
-      } else {
-        return { ok: { address, value: ok.value } };
-      }
-    });
+        // If we have not wrote or read from the relevant memory location we'll
+        // have to read from the local replica and if it does not contain a
+        // corresponding fact we assume fact to be new ethier way we use it
+        const state = replica.get({ the, of }) ??
+          unclaimed({ the, of });
+
+        const { ok, error } = TransactionInvariant.read({
+          address: { ...address, path: [] },
+          value: state.is,
+        }, address);
+
+        // If we we could not read desired path from the invariant we fail the
+        // read without capturing new invariant. We expect reader to ascend the
+        // address path until it finds existing value.
+        if (error) {
+          return { error };
+        } else {
+          // If read succeeds we attempt to claim read invariant, however it may
+          // be in violation with previously claimed invariant e.g. previously
+          // we claimed `user.name = "Alice"` and now we are claiming that
+          // `user = { name: "John" }`. This indicates that state between last
+          // read from the replica and current read form the replica has changed.
+          const result = this.#history.for(address.space).claim(ok);
+          // If so we switch current state to an inconsistent state as this
+          // transaction can no longer succeed.
+          if (result.error) {
+            this.#state = result;
+          }
+          return result;
+        }
+      },
+    );
   }
 
   write(
-    address: IMemoryAddress,
+    at: IMemoryAddress,
     value: JSONValue | undefined,
-    replica: Replica,
-  ) {
-    const at = { ...address, space: replica.space };
-    return this.edit((journal): Result<Wrote, INotFoundError> => {
-      // log write activity in the journal
-      journal.#activity.push({ write: at });
-
-      const [the, of] = [address.type, address.id];
-
-      // Obtain state of the fact from provided replica to capture
-      // what we expect it to be upstream.
-      const was = replica.get({ the, of }) ?? unclaimed({ the, of });
-
-      // Now obtais state from the journal in cas it was edited earlier
-      // by this transaction.
-      const { ok: state, error } = write(
-        this.get(at) ?? was,
-        at,
-        value,
-      );
-      if (error) {
-        return { error };
-      } else {
-        // Store updated state as novelty, potentially overriding prior state
-        journal.#novelty.put(state);
-
-        return { ok: { address, value } };
-      }
-    });
+    replica: ISpace,
+  ): Result<ITransactionInvariant, WriteError> {
+    return this.edit(
+      (journal): Result<ITransactionInvariant, INotFoundError> => {
+        const address = { ...at, space: replica.did() };
+        // We may have written path this will be overwritting.
+        const patch = this.#novelty.for(address.space)?.get(address);
+        if (patch) {
+          const { ok, error } = TransactionInvariant.write(
+            patch,
+            address,
+            value,
+          );
+          if (error) {
+            return { error };
+          } else {
+            journal.#activity.push({ write: address });
+            this.#novelty.for(address.space)?.put(ok);
+            return { ok };
+          }
+        } else {
+          const patch = { address, value };
+          journal.#activity.push({ write: address });
+          this.#novelty.for(address.space)?.put(patch);
+          return { ok: patch };
+        }
+      },
+    );
   }
 
   /**
@@ -1813,82 +1878,132 @@ class TransactionJournal implements ITransactionJournal {
    * {@link Claim}s corresponding to reads transaction performed and set of
    * {@link Fact}s corresponding to the writes transaction performed.
    */
-  invariants(): Array<Assert | Retract | Claim> {
+  invariants(): Iterable<IStorageInvariant> {
     const history = this.#history;
     const novelty = this.#novelty;
-    const space = this.#space;
-    const invariants = new Set();
 
     // First capture all the changes we have made
-    const output: (Assert | Retract | Claim)[] = [];
-    for (const change of novelty) {
-      invariants.add(toKey(change));
-      output.push(change);
+    const output: IStorageInvariant[] = [];
+    for (const [space, invariants] of novelty) {
+      for (const { address, value } of invariants) {
+        output.push({ address: { ...address, space }, value });
+      }
     }
 
-    if (space) {
-      // Then capture all the claims we have made
-      for (const claim of history.claims(space)) {
-        if (!invariants.has(toKey(claim))) {
-          invariants.add(toKey(claim));
-          output.push({
-            the: claim.the,
-            of: claim.of,
-            claim: true,
-          });
-        }
+    for (const [space, invariants] of history) {
+      for (const { address, value } of invariants) {
+        output.push({
+          address: { ...address, space },
+          value,
+        });
       }
     }
 
     return output;
   }
 
-  /**
-   * Merge is called when we receive remote changes. It checks if any of the
-   */
-  merge(updates: { [key: MemorySpace]: Iterable<State> }) {
-    return this.edit((journal): Result<Unit, StorageTransactionFailed> => {
-      const inconsistencies = [];
-      // Otherwise we caputer every change in our stale set and verify whether
-      // changed fact has being journaled by this transaction. If so we mark
-      // transition transaction into an inconsistent state.
-      const stale = journal.#stale;
-      const history = journal.#history;
-      for (const [subject, changes] of Object.entries(updates)) {
-        const space = subject as MemorySpace;
-        for (const { the, of, cause } of changes) {
-          const address = { the, of, space };
-          // If change has no `cause` it is considered unclaimed and we don't
-          // really need to do anything about it.
-          if (cause) {
-            // First add fact into a stale set.
-            stale.add(address);
+  get(address: IMemorySpaceAddress) {
+    return this.#novelty.for(address.space)?.get(address) ??
+      this.#history.for(address.space).get(address);
+  }
+}
 
-            // Next check if journal captured changed address in the read
-            // history, if so transaction must transaction into an inconsistent
-            // state.
-            if (history.claims(space).has(address)) {
-              inconsistencies.push(address);
-            }
-          }
-        }
-      }
+class TransactionInvariant {
+  #model: Map<string, ITransactionInvariant> = new Map();
 
-      // If we discovered inconsistencies transition journal into error state
-      if (inconsistencies.length > 0) {
-        journal.#state = { error: new Inconsistency(inconsistencies) };
-      }
-
-      // Propagate error if we encountered on to ensure that caller is aware
-      // we no longer wish to receive updates
-      return journal.state();
-    });
+  protected get model() {
+    return this.#model;
   }
 
-  get(address: IMemorySpaceAddress) {
-    if (address.space === this.#space) {
-      return this.#novelty.get({ the: address.type, of: address.id });
+  static toKey(address: IMemoryAddress) {
+    return `/${address.id}/${address.type}/${address.path.join("/")}`;
+  }
+
+  static resolve(
+    source: ITransactionInvariant,
+    address: IMemorySpaceAddress,
+  ): Result<ITransactionInvariant, INotFoundError> {
+    const { path } = address;
+    let at = source.address.path.length;
+    let value = source.value;
+    while (at++ < path.length) {
+      const key = path[at];
+      if (typeof value === "object" && value != null) {
+        // We do not support array.length as that is JS specific getter.
+        value = Array.isArray(value) && key === "length"
+          ? undefined
+          : (value as Record<string, JSONValue>)[key];
+      } else {
+        return {
+          error: new NotFound(
+            `Can not resolve "${address.type}" of "${address.id}" at "${
+              path.slice(0, at).join(".")
+            }" in "${address.space}", because target is not an object`,
+          ),
+        };
+      }
     }
+
+    return { ok: { value, address } };
+  }
+
+  static read(source: ITransactionInvariant, address: IMemorySpaceAddress) {
+    return this.resolve(source, address);
+  }
+
+  static write(
+    source: ITransactionInvariant,
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): Result<ITransactionInvariant, INotFoundError> {
+    const [...path] = address.path.slice(source.address.path.length);
+    if (path.length === 0) {
+      return { ok: source };
+    } else {
+      const key = path.pop()!;
+      const patch = {
+        ...source,
+        value: source.value === undefined
+          ? source.value
+          : JSON.parse(JSON.stringify(source.value)),
+      };
+
+      const { ok, error } = this.resolve(patch, { ...address, path });
+
+      if (error) {
+        return { error };
+      } else {
+        const type = ok.value === null ? "null" : typeof ok.value;
+        if (type === "object") {
+          const target = ok.value as Record<string, JSONValue>;
+
+          // If target value is same as desired value this write is a noop
+          if (target[key] === value) {
+            return { ok: source };
+          } else if (value === undefined) {
+            // If value is `undefined` we delete property from the tagret
+            delete target[key];
+          } else {
+            // Otherwise we assign value to the target
+            target[key] = value;
+          }
+
+          return { ok: patch };
+        } else {
+          return {
+            error: new NotFound(
+              `Can not write "${address.type}" of "${address.id}" at "${
+                path.join(".")
+              }" in "${address.space}", because target is not an object`,
+            ),
+          };
+        }
+      }
+    }
+  }
+
+  *[Symbol.iterator]() {
+    yield* this.#model.values();
   }
 }
 
@@ -1897,26 +2012,119 @@ class TransactionJournal implements ITransactionJournal {
  * yet being applied to the memory.
  */
 class Novelty {
-  #model: Map<string, Assert | Retract> = new Map();
+  /**
+   * State is grouped by space because we commit will only care about invariants
+   * made for the space that is being modified allowing us to iterate those
+   * without having to filter.
+   */
+  #model: Map<MemorySpace, WriteInvariants> = new Map();
 
-  get size() {
-    return this.#model.size;
+  /**
+   * Returns state group for the requested space. If group does not exists
+   * it will be created.
+   */
+  for(space: MemorySpace): WriteInvariants {
+    const invariants = this.#model.get(space);
+    if (invariants) {
+      return invariants;
+    } else {
+      const invariants = new WriteInvariants(space);
+      this.#model.set(space, invariants);
+      return invariants;
+    }
   }
 
-  get(adddress: FactAddress) {
-    return this.#model.get(toKey(adddress));
+  *[Symbol.iterator]() {
+    yield* this.#model.entries();
+  }
+}
+
+class StorageEdit implements IStorageEdit {
+  #transactions: Map<MemorySpace, SpaceTransaction> = new Map();
+
+  for(space: MemorySpace) {
+    const transaction = this.#transactions.get(space);
+    if (transaction) {
+      return transaction;
+    } else {
+      const transaction = new SpaceTransaction();
+      this.#transactions.set(space, transaction);
+      return transaction;
+    }
+  }
+}
+
+class SpaceTransaction implements ITransaction {
+  #claims: IClaim[] = [];
+  #facts: Fact[] = [];
+
+  claim(state: State) {
+    this.#claims.push({
+      the: state.the,
+      of: state.of,
+      fact: refer(state),
+    });
+  }
+  retract(fact: Assertion) {
+    this.#facts.push(retract(fact));
+  }
+
+  assert(fact: Assertion) {
+    this.#facts.push(fact);
+  }
+
+  get claims() {
+    return this.#claims;
+  }
+  get facts() {
+    return this.#facts;
+  }
+}
+
+class WriteInvariants {
+  #model: Map<string, ITransactionInvariant> = new Map();
+  #space: MemorySpace;
+  constructor(space: MemorySpace) {
+    this.#space = space;
+  }
+
+  get space() {
+    return this.#space;
+  }
+  get(address: IMemoryAddress) {
+    const at = TransactionInvariant.toKey(address);
+    let candidate: undefined | ITransactionInvariant = undefined;
+    for (const [key, entry] of this.#model) {
+      // If key contains the address we should be able to read from here.
+      if (at.startsWith(key)) {
+        if (
+          candidate?.address?.path?.length ?? -1 < entry.address.path.length
+        ) {
+          candidate = entry;
+        }
+      }
+    }
+    return candidate;
+  }
+  /**
+   * Adds given {@link TransactionInvariant}.
+   */
+  put(invariant: ITransactionInvariant) {
+    const at = TransactionInvariant.toKey(invariant.address);
+
+    for (const key of this.#model.keys()) {
+      // If address constains address of the entry it is being
+      // overwritten so we can remove it.
+      if (key.startsWith(at)) {
+        this.#model.delete(key);
+      }
+    }
+
+    this.#model.set(at, invariant);
   }
 
   *[Symbol.iterator]() {
     yield* this.#model.values();
-  }
-
-  delete(address: FactAddress) {
-    this.#model.delete(toKey(address));
-  }
-
-  put(fact: Assert | Retract) {
-    this.#model.set(toKey(fact), fact);
   }
 }
 
@@ -1932,51 +2140,108 @@ class History {
    * made for the space that is being modified allowing us to iterate those
    * without having to filter.
    */
-  #model: Map<MemorySpace, Claims> = new Map();
+  #model: Map<MemorySpace, ReadInvariants> = new Map();
 
   /**
    * Returns state group for the requested space. If group does not exists
    * it will be created.
    */
-  claims(space: MemorySpace): Claims {
-    const claims = this.#model.get(space);
-    if (claims) {
-      return claims;
+  for(space: MemorySpace): ReadInvariants {
+    const invariantns = this.#model.get(space);
+    if (invariantns) {
+      return invariantns;
     } else {
-      const claims = new Claims();
-      this.#model.set(space, claims);
-      return claims;
+      const invariantns = new ReadInvariants(space);
+      this.#model.set(space, invariantns);
+      return invariantns;
     }
   }
-}
 
-class Claims {
-  #model: Map<string, State> = new Map();
-
-  add(state: State) {
-    this.#model.set(toKey(state), state);
+  *[Symbol.iterator]() {
+    yield* this.#model.entries();
   }
-  has(address: FactAddress) {
-    return this.#model.has(toKey(address));
+}
+class ReadInvariants {
+  #model: Map<string, ITransactionInvariant> = new Map();
+  #space: MemorySpace;
+  constructor(space: MemorySpace) {
+    this.#space = space;
+  }
+
+  get space() {
+    return this.#space;
   }
   *[Symbol.iterator]() {
     yield* this.#model.values();
   }
-}
 
-class FactSet {
-  #model: Set<string>;
-  constructor(model: Set<string> = new Set()) {
-    this.#model = model;
+  /**
+   * Gets {@link TransactionInvariant} for the given `address` from which we
+   * could read out the value. Note that returned invariant may not have exact
+   * same `path` as the provided by the address, but if one is returned it will
+   * have either exact same path or a parent path.
+   *
+   * @example
+   * ```ts
+   * const alice = {
+   *    address: { id: 'user:1', type: 'application/json', path: ['profile'] }
+   *    value: { name: "Alice", email: "alice@web.mail" }
+   * }
+   * const history = new MemorySpaceHistory()
+   * history.put(alice)
+   *
+   * history.get(alice.address) === alice
+   * // Lookup nested path still returns `alice`
+   * history.get({
+   *  id: 'user:1',
+   *  type: 'application/json',
+   *  path: ['profile', 'name']
+   * }) === alice
+   * ```
+   */
+  get(address: IMemoryAddress) {
+    const at = TransactionInvariant.toKey(address);
+    let candidate: undefined | ITransactionInvariant = undefined;
+    for (const invariant of this) {
+      const key = TransactionInvariant.toKey(invariant.address);
+      // If `address` is contained in inside an invariant address it is a
+      // candidate invariant. If this candidate has longer path than previous
+      // candidate this is a better match so we pick this one.
+      const length = at.startsWith(key) ? invariant.address.path.length : -1;
+      if (candidate?.address?.path?.length ?? -1 < length) {
+        candidate = invariant;
+      }
+    }
+
+    return candidate;
   }
-  static toKey({ space, the, of }: FactAddress & { space: MemorySpace }) {
-    return `${space}/${the}/${of}`;
-  }
-  add(address: FactAddress & { space: MemorySpace }) {
-    this.#model.add(FactSet.toKey(address));
-  }
-  has(address: FactAddress & { space: MemorySpace }) {
-    return this.#model.has(FactSet.toKey(address));
+
+  /**
+   * Claims an new read invariant while ensuring consistency with all the
+   * privous invariants.
+   */
+  claim(
+    invariant: ITransactionInvariant,
+  ): Result<ITransactionInvariant, IStorageTransactionInconsistent> {
+    const at = TransactionInvariant.toKey(invariant.address);
+    const address = { ...invariant.address, space: this.space };
+
+    for (const candidate of this) {
+      const key = TransactionInvariant.toKey(invariant.address);
+      // If we have an existing invariant that is either child or a parent of
+      // the new one two must be consistent with one another otherwise we are in
+      // an inconsistent state.
+      if (at.startsWith(key) || at.startsWith(key)) {
+        const expect = TransactionInvariant.read(candidate, address).ok?.value;
+        const actual = TransactionInvariant.read(invariant, address).ok?.value;
+
+        if (JSON.stringify(expect) !== JSON.stringify(actual)) {
+          return { error: new Inconsistency([candidate, invariant]) };
+        }
+      }
+    }
+
+    return { ok: invariant };
   }
 }
 
@@ -2032,7 +2297,7 @@ function toFactAddress(address: IMemoryAddress): FactAddress {
 
 /**
  * Reads the value from the given fact at a given path and either returns
- * {@link Read} object or {@link NotFoundError} if path does not exist in
+ * {@link ITransactionInvariant} object or {@link NotFoundError} if path does not exist in
  * the provided {@link State}.
  *
  * Read fails when key is accessed in the non-existing parent, but succeeds
@@ -2063,7 +2328,7 @@ function toFactAddress(address: IMemoryAddress): FactAddress {
 const read = (
   state: Assert | Retract,
   address: IMemorySpaceAddress,
-): Result<{ value?: JSONValue }, INotFoundError> => resolve(state, address);
+): Result<ITransactionInvariant, INotFoundError> => resolve(state, address);
 
 const resolve = (
   state: Assert | Retract,
@@ -2096,7 +2361,7 @@ const resolve = (
     }
   }
 
-  return { ok: { value } };
+  return { ok: { value, address } };
 };
 
 const write = (
@@ -2163,12 +2428,12 @@ const write = (
  * Maintains its own set of Read invariants and can consult Write changes.
  */
 class TransactionReader implements ITransactionReader {
-  #journal: TransactionJournal;
-  #replica: Replica;
+  #journal: ITransactionJournal;
+  #replica: ISpaceReplica;
   #space: MemorySpace;
 
   constructor(
-    journal: TransactionJournal,
+    journal: ITransactionJournal,
     replica: Replica,
     space: MemorySpace,
   ) {
@@ -2187,7 +2452,7 @@ class TransactionReader implements ITransactionReader {
 
   read(
     address: IMemoryAddress,
-  ): Result<Read, ReadError> {
+  ): Result<ITransactionInvariant, ReadError> {
     return this.#journal.read(address, this.#replica);
   }
 }
@@ -2197,14 +2462,14 @@ class TransactionReader implements ITransactionReader {
  * and maintains its own set of Write changes.
  */
 class TransactionWriter implements ITransactionWriter {
-  #state: TransactionJournal;
+  #journal: TransactionJournal;
   #reader: TransactionReader;
 
   constructor(
     state: TransactionJournal,
     reader: TransactionReader,
   ) {
-    this.#state = state;
+    this.#journal = state;
     this.#reader = reader;
   }
 
@@ -2217,7 +2482,7 @@ class TransactionWriter implements ITransactionWriter {
 
   read(
     address: IMemoryAddress,
-  ): Result<Read, ReadError> {
+  ): Result<ITransactionInvariant, ReadError> {
     return this.#reader.read(address);
   }
 
@@ -2227,19 +2492,21 @@ class TransactionWriter implements ITransactionWriter {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<Wrote, WriteError> {
-    return this.#state.write(address, value, this.replica);
+  ): Result<ITransactionInvariant, WriteError> {
+    return this.#journal.write(address, value, this.replica);
   }
 }
 
 class Inconsistency extends RangeError
   implements IStorageTransactionInconsistent {
   override name = "StorageTransactionInconsistent" as const;
-  constructor(public inconsitencies: (FactAddress & { space: MemorySpace })[]) {
+  constructor(public inconsitencies: ITransactionInvariant[]) {
     const details = [`Transaction consistency guarntees have being violated:`];
-    for (const address of inconsitencies) {
+    for (const { address, value } of inconsitencies) {
       details.push(
-        `  - The ${address.the} of ${address.of} in ${address.space} got updated`,
+        `  - The ${address.type} of ${address.id} at ${
+          address.path.join(".")
+        } has value ${JSON.stringify(value)}`,
       );
     }
 

@@ -1,16 +1,22 @@
 import type { EntityId } from "../doc-map.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
-  AuthorizationError,
+  AuthorizationError as IAuthorizationError,
+  Changes,
   Commit,
-  ConflictError,
-  ConnectionError,
+  ConflictError as IConflictError,
+  ConnectionError as IConnectionError,
   Entity as URI,
+  Fact,
+  FactAddress,
+  Invariant as IClaim,
   JSONValue,
   MemorySpace,
+  QueryError as IQueryError,
   Reference,
   Result,
   SchemaContext,
+  Signer,
   State,
   The as MediaType,
   TransactionError,
@@ -18,7 +24,19 @@ import type {
   Variant,
 } from "@commontools/memory/interface";
 
-export type { MediaType, MemorySpace, Result, SchemaContext, Unit, URI };
+export type {
+  IAuthorizationError,
+  IClaim,
+  IConflictError,
+  IConnectionError,
+  IQueryError,
+  MediaType,
+  MemorySpace,
+  Result,
+  SchemaContext,
+  Unit,
+  URI,
+};
 
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
@@ -37,6 +55,31 @@ export interface StorageValue<T = any> {
 export interface IStorageManager {
   id: string;
   open(space: MemorySpace): IStorageProvider;
+}
+
+export interface IRemoteStorageProviderSettings {
+  /**
+   * Number of subscriptions remote storage provider is allowed to have per
+   * space.
+   */
+  maxSubscriptionsPerSpace: number;
+
+  /**
+   * Amount of milliseconds we will spend waiting on WS connection before we
+   * abort.
+   */
+  connectionTimeout: number;
+
+  /**
+   * Flag to enable or disable remote schema subscriptions
+   */
+  useSchemaQueries: boolean;
+}
+
+export interface LocalStorageOptions {
+  as: Signer;
+  id?: string;
+  settings?: IRemoteStorageProviderSettings;
 }
 
 export interface IStorageProvider {
@@ -223,7 +266,7 @@ export interface ITransactionReader {
   read(
     address: IMemoryAddress,
   ): Result<
-    Read,
+    ITransactionInvariant,
     ReadError
   >;
 }
@@ -238,7 +281,7 @@ export interface ITransactionWriter extends ITransactionReader {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<Wrote, WriteError>;
+  ): Result<ITransactionInvariant, WriteError>;
 }
 
 /**
@@ -291,10 +334,11 @@ export type StorageTransactionFailed =
   | IStorageTransactionRejected;
 
 export type IStorageTransactionRejected =
-  | ConflictError
+  | IConflictError
+  | IStoreError
   | TransactionError
-  | ConnectionError
-  | AuthorizationError;
+  | IConnectionError
+  | IAuthorizationError;
 
 export type ReadError =
   | INotFoundError
@@ -349,7 +393,121 @@ export interface IMemorySpaceAddress extends IMemoryAddress {
 
 export type MemoryAddressPathComponent = string | number;
 
+export interface Assert {
+  the: MediaType;
+  of: URI;
+  is: JSONValue;
+
+  claim?: void;
+}
+
+export interface Retract {
+  the: MediaType;
+  of: URI;
+  is?: void;
+
+  claim?: void;
+}
+
+export interface Claim {
+  the: MediaType;
+  of: URI;
+  is?: void;
+  claim: true;
+}
+
+export interface ISpace {
+  did(): MemorySpace;
+}
+
+export interface ISpaceReplica extends ISpace {
+  /**
+   * Return a state for the requested entry or returns `undefined` if replica
+   * does not have it.
+   */
+  get(entry: FactAddress): State | undefined;
+
+  commit(transaction: ITransaction): Promise<Result<Unit, CommitError>>;
+}
+
+export type PushError =
+  | IQueryError
+  | IStoreError
+  | IConnectionError
+  | IConflictError
+  | TransactionError
+  | IAuthorizationError;
+
+export interface IStoreError extends Error {
+  name: "StoreError";
+  cause: Error;
+}
+
 export interface ITransactionJournal {
+  activity(): Iterable<Activity>;
+  invariants(): Iterable<IStorageInvariant>;
+
+  reader(
+    space: MemorySpace,
+  ): Result<ITransactionReader, InactiveTransactionError>;
+
+  /**
+   * Reads requested address from the memory space. If journal already performed
+   * a read from which requested read can be fulfilled result is derived from
+   * the prior read response, otherwise reads from the provided `replica` and
+   * captures invariant.
+   *
+   * Please note that read may also cause underlying transaction to fail
+   * producing `IStorageTransactionInconsistent` error, when reading from the
+   * parent path of the prior read which returned inconsistent value.
+   */
+  read(
+    at: IMemoryAddress,
+    replica: ISpaceReplica,
+  ): Result<ITransactionInvariant, ReadError>;
+
+  /**
+   * Write request to addressed memory space is captured. If journal already has
+   * overlapping write it will be owerwritten. Reading from journal within the
+   * written address will return data that was written. Write will error if
+   * journal is already closed or aborted. It can also fail with `INotFoundError`
+   * if writing into an invalid path, e.g. writing `.foo` property of the
+   * `"hello"` string or when whriting into `.foo.bar` of the object that has
+   * no `foo` property.
+   *
+   * Please note that writing `.foo.bar` may succeed, but later fail commit if
+   * target had no `foo` property that is because invariants get validated on
+   * commit as thoes may change through the transaction lifecycle.
+   */
+  write(
+    at: IMemoryAddress,
+    value: JSONValue | undefined,
+    replica: ISpace,
+  ): Result<ITransactionInvariant, WriteError>;
+
+  /**
+   * Closes underlying transaction, making it non-editable going forward. Any
+   * attempts to edit it will fail.
+   */
+  close(): Result<IStorageEdit, InactiveTransactionError>;
+
+  /**
+   * Aborts underlying transaction, making it non-editable going forward. Any
+   * attempts to edit it will fail.
+   */
+  abort<Reason extends Unit>(
+    reason?: Reason,
+  ): Result<Unit, InactiveTransactionError>;
+}
+
+export interface ITransaction {
+  claims: IClaim[];
+
+  facts: State[];
+}
+
+export interface IStorageEdit {
+  for(space: MemorySpace): ITransaction;
 }
 
 export type Activity = Variant<{
@@ -376,17 +534,14 @@ export interface IStorageTransactionWriteIsolationError extends Error {
 }
 
 /**
- * Describes read invariant of the underlaying  transaction.
+ * Describes write invariant of the underlaying transaction.
  */
-export interface Read {
+export interface ITransactionInvariant {
   readonly address: IMemoryAddress;
   readonly value?: JSONValue;
 }
 
-/**
- * Describes write invariant of the underlaying transaction.
- */
-export interface Wrote {
-  readonly address: IMemoryAddress;
+export interface IStorageInvariant {
+  readonly address: IMemorySpaceAddress;
   readonly value?: JSONValue;
 }
