@@ -216,6 +216,7 @@ export abstract class BaseObjectTraverser<K, S> {
           tracker.exit(doc.value);
         }
       } else {
+        console.log("Cycle detected", JSON.stringify(doc));
         return null;
       }
     } else if (isObject(doc.value)) {
@@ -256,6 +257,7 @@ export abstract class BaseObjectTraverser<K, S> {
             tracker.exit(doc.value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -358,6 +360,7 @@ function followPointer<K, S>(
   selector?: SchemaPathSelector,
 ): [ValueAtPath<K>, SchemaPathSelector | undefined] {
   if (!tracker.enter(doc.value!)) {
+    console.log("Cycle detected", JSON.stringify(doc));
     return [{ ...doc, path: [], value: undefined }, selector];
   }
   try {
@@ -669,6 +672,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             this.tracker.exit(doc.value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -692,6 +696,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             this.tracker.exit(doc.value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -824,6 +829,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         this.tracker.exit(doc.value!);
       }
     } else {
+      console.log("Cycle detected", JSON.stringify(doc));
       return null;
     }
   }
