@@ -65,8 +65,8 @@ This document contains shared setup instructions for the CT binary that are used
 - `./dist/ct charm map --identity [keyfile] --api-url [api-url] --space [spacename] --format dot` - Output Graphviz DOT format
 
 ### Recipe Development Commands:
-- `./dist/ct charm getsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Get recipe source code
-- `./dist/ct charm setsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] [recipe-path]` - Update recipe source
+- `./dist/ct charm getsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] [output-folder]` - Get recipe source code and save to folder
+- `./dist/ct charm setsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] [recipe-path]` - Update recipe source from file or folder
 - `./dist/ct dev [recipe-path] --no-run` - Test recipe syntax locally
 
 ## Understanding Linking
@@ -111,3 +111,5 @@ The `ct charm map` command helps visualize the connections between charms in a s
 - Always use absolute paths or full relative paths to recipes
 - Charm IDs start with "bafy" and are long content hashes
 - Environment variables CT_API_URL and CT_IDENTITY can simplify commands
+- `getsrc` saves recipes to a folder, supporting both single-file recipes (saved as main.tsx) and multi-file recipes (preserving file structure)
+- `setsrc` can accept either a single file path or a folder path containing multiple recipe files
