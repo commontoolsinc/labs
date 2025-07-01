@@ -1,5 +1,5 @@
 import { EditorState } from "@codemirror/state";
-import { EditorView } from "codemirror";
+import { EditorView } from "@codemirror/view";
 
 export const replaceSource = (state: EditorState, value: string) =>
   state.update({
@@ -13,7 +13,7 @@ export const replaceSource = (state: EditorState, value: string) =>
 /** Replace the source in this editor view, but only if it's different */
 export const replaceSourceIfNeeded = (view: EditorView, value: string) => {
   if (view.state.doc.toString() === value) return;
-  view.update([
+  view.dispatch(
     view.state.update({
       changes: {
         from: 0,
@@ -21,5 +21,5 @@ export const replaceSourceIfNeeded = (view: EditorView, value: string) => {
         insert: value,
       },
     }),
-  ]);
+  );
 };

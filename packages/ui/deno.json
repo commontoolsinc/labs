@@ -15,6 +15,7 @@
     "lit": "npm:lit@^3.0.0",
     "codemirror": "npm:codemirror@^6.0.1",
     "@codemirror/state": "npm:@codemirror/state@^6.5.1",
+    "@codemirror/view": "npm:@codemirror/view@^6.26.0",
     "@codemirror/language": "npm:@codemirror/language@^6.10.8",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
     "@codemirror/lang-markdown": "npm:@codemirror/lang-markdown@^6.3.0",

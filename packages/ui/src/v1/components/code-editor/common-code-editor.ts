@@ -1,6 +1,7 @@
 import { css, html, LitElement, PropertyValues, render } from "lit";
 import { baseStyles } from "../style.ts";
-import { basicSetup, EditorView } from "codemirror";
+import { basicSetup } from "codemirror";
+import { EditorView } from "@codemirror/view";
 import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { LanguageSupport } from "@codemirror/language";
 import { javascript as createJavaScript } from "@codemirror/lang-javascript";
