@@ -12,7 +12,6 @@
   "imports": {
     "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1",
     "marked": "npm:marked@^4.0.0",
-    "lit": "npm:lit@^3.0.0",
     "codemirror": "npm:codemirror@^6.0.1",
     "@codemirror/state": "npm:@codemirror/state@^6.5.1",
     "@codemirror/view": "npm:@codemirror/view@^6.26.0",

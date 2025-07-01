@@ -132,7 +132,6 @@
     "npm:jsdom@*": "26.1.0",
     "npm:json5@^2.2.3": "2.2.3",
     "npm:jsonschema@^1.5.0": "1.5.0",
-    "npm:lit@3": "3.3.0",
     "npm:lit@^3.2.1": "3.3.0",
     "npm:marked@4": "4.3.0",
     "npm:merkle-reference@^2.2.0": "2.2.0",
@@ -7001,7 +7000,6 @@
           "npm:@codemirror/view@^6.26.0",
           "npm:@shoelace-style/shoelace@^2.19.1",
           "npm:codemirror@^6.0.1",
-          "npm:lit@3",
           "npm:marked@4"
         ]
       }
