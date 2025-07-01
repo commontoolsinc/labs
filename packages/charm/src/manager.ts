@@ -67,6 +67,7 @@ export const charmSourceCellSchema = {
   type: "object",
   properties: {
     [TYPE]: { type: "string" },
+    recipe: { type: "object" },
     lineage: {
       type: "array",
       items: charmLineageSchema,
@@ -81,6 +82,7 @@ export const processSchema = {
   properties: {
     argument: { type: "object" },
     [TYPE]: { type: "string" },
+    recipe: { type: "object" },
   },
   required: [TYPE],
 } as const satisfies JSONSchema;
