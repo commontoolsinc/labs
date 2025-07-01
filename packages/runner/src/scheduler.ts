@@ -2,7 +2,9 @@ import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink, type URI } from "./sigil-types.ts";
+import { toURI } from "./uri-utils.ts";
+import type { IMemoryAddress } from "./storage/interface.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
@@ -15,32 +17,148 @@ import type {
   IRuntime,
   IScheduler,
   MemorySpace,
+  IStorageTransaction,
 } from "./runtime.ts";
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 
 export type Action = (log: ReactivityLog) => any;
+export type TransactionAction = (tx: IStorageTransaction) => any;
 export type EventHandler = (event: any) => any;
 
 /**
  * Reactivity log.
  *
- * Used to log reads and writes to docs. Used by scheduler to keep track of
+ * Used to log reads and writes to memory locations. Used by scheduler to keep track of
  * dependencies and to topologically sort pending actions before executing them.
+ * 
+ * Currently supports both legacy LegacyDocCellLink format and new IMemoryAddress format
+ * for backward compatibility during migration.
  */
 export type ReactivityLog = {
-  reads: LegacyDocCellLink[];
-  writes: LegacyDocCellLink[];
+  reads: (LegacyDocCellLink | IMemoryAddress)[];
+  writes: (LegacyDocCellLink | IMemoryAddress)[];
 };
 
+/**
+ * Extract reads and writes from a transaction for dependency tracking.
+ * Converts transaction invariants to ReactivityLog format.
+ */
+function extractDependenciesFromTransaction(
+  tx: IStorageTransaction,
+  runtime: IRuntime,
+): ReactivityLog {
+  const reads: IMemoryAddress[] = [];
+  const writes: IMemoryAddress[] = [];
+  
+  const status = tx.status();
+  if (status.ok) {
+    const log = status.ok.open || status.ok.pending || status.ok.done;
+    if (log) {
+      // Iterate through transaction invariants
+      for (const invariant of log) {
+        if (invariant.read) {
+          const read = invariant.read;
+          // Use the address directly - it's already an IMemoryAddress
+          reads.push(read.address);
+        } else if (invariant.write) {
+          const write = invariant.write;
+          // Use the address directly - it's already an IMemoryAddress
+          writes.push(write.address);
+        }
+      }
+    }
+  }
+  
+  return { reads, writes };
+}
+
 const MAX_ITERATIONS_PER_RUN = 100;
+
+/**
+ * Check if a value is an IMemoryAddress (not a LegacyDocCellLink).
+ */
+function isMemoryAddress(value: any): value is IMemoryAddress {
+  return value && typeof value.id === "string" && value.type === "application/json";
+}
+
+/**
+ * Convert a LegacyDocCellLink to IMemoryAddress.
+ */
+function toMemoryAddress(link: LegacyDocCellLink | IMemoryAddress): IMemoryAddress {
+  if (isMemoryAddress(link)) {
+    return link;
+  }
+  return {
+    id: toURI(link.cell.entityId),
+    space: link.space || link.cell.space,
+    path: link.path.map(p => p.toString()),
+    type: "application/json",
+  };
+}
+
+/**
+ * Compare two IMemoryAddress objects for equality.
+ */
+function isSameAddress(a: IMemoryAddress, b: IMemoryAddress): boolean {
+  return (
+    a.id === b.id &&
+    a.space === b.space &&
+    a.type === b.type &&
+    a.path.length === b.path.length &&
+    a.path.every((p, i) => p === b.path[i])
+  );
+}
+
+/**
+ * Create a string key for an IMemoryAddress for use in Set/Map.
+ */
+function addressKey(addr: IMemoryAddress): string {
+  return JSON.stringify({
+    id: addr.id,
+    space: addr.space,
+    path: addr.path,
+    type: addr.type,
+  });
+}
+
+/**
+ * Custom Set implementation for IMemoryAddress objects.
+ */
+class AddressSet {
+  private items = new Map<string, IMemoryAddress>();
+  
+  add(addr: IMemoryAddress): void {
+    this.items.set(addressKey(addr), addr);
+  }
+  
+  has(addr: IMemoryAddress): boolean {
+    return this.items.has(addressKey(addr));
+  }
+  
+  delete(addr: IMemoryAddress): boolean {
+    return this.items.delete(addressKey(addr));
+  }
+  
+  clear(): void {
+    this.items.clear();
+  }
+  
+  get size(): number {
+    return this.items.size;
+  }
+  
+  [Symbol.iterator](): Iterator<IMemoryAddress> {
+    return this.items.values();
+  }
+}
 
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
   private eventQueue: (() => any)[] = [];
-  private eventHandlers: [LegacyDocCellLink, EventHandler][] = [];
-  private dirty = new Set<DocImpl<any>>();
+  private eventHandlers: [IMemoryAddress, EventHandler][] = [];
+  private dirty = new AddressSet();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel[]>();
   private idlePromises: (() => void)[] = [];
@@ -95,7 +213,7 @@ export class Scheduler implements IScheduler {
 
   schedule(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
-    reads.forEach(({ cell: doc }) => this.dirty.add(doc));
+    reads.forEach((addr) => this.dirty.add(addr));
 
     this.queueExecution();
     this.pending.add(action);
@@ -113,18 +231,45 @@ export class Scheduler implements IScheduler {
   subscribe(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
 
-    this.cancels.set(
-      action,
-      reads.map(({ cell: doc, path }) =>
-        doc.updates((_newValue: any, changedPath: PropertyKey[]) => {
-          if (pathAffected(changedPath, path)) {
-            this.dirty.add(doc);
-            this.queueExecution();
-            this.pending.add(action);
-          }
-        })
-      ),
-    );
+    // For now, we need to convert back to docs for subscription
+    // TODO: Implement proper subscription mechanism for memory addresses
+    const cancels: Cancel[] = [];
+    for (const addr of reads) {
+      const entityId = { "/": addr.id.slice(3) }; // Remove "of:" prefix
+      const doc = this.runtime.documentMap.getDocByEntityId(
+        addr.space,
+        entityId,
+        false,
+      );
+      if (doc) {
+        cancels.push(
+          doc.updates((_newValue: any, changedPath: PropertyKey[]) => {
+            // Check if the changed path affects our watched address
+            // Need to handle both cases: paths with and without "value" prefix
+            let pathToCheck = addr.path;
+            
+            // If the address path starts with "value", compare with value-prefixed changed path
+            if (addr.path.length > 0 && addr.path[0] === "value") {
+              const fullChangedPath = ["value", ...changedPath];
+              if (pathAffected(fullChangedPath, addr.path)) {
+                this.dirty.add(addr);
+                this.queueExecution();
+                this.pending.add(action);
+              }
+            } else {
+              // Otherwise, compare directly
+              if (pathAffected(changedPath, addr.path)) {
+                this.dirty.add(addr);
+                this.queueExecution();
+                this.pending.add(action);
+              }
+            }
+          })
+        );
+      }
+    }
+    
+    this.cancels.set(action, cancels);
 
     return () => this.unschedule(action);
   }
@@ -162,6 +307,70 @@ export class Scheduler implements IScheduler {
     return this.runningPromise;
   }
 
+  /**
+   * Run a transaction-based action. Creates a transaction, runs the action,
+   * extracts dependencies, and commits the transaction.
+   */
+  async runWithTransaction(action: TransactionAction): Promise<any> {
+    if (this.runningPromise) await this.runningPromise;
+
+    let result: any;
+    this.runningPromise = new Promise((resolve) => {
+      const tx = this.runtime.edit();
+      
+      const finalizeAction = (error?: unknown) => {
+        try {
+          if (error) {
+            tx.abort();
+            this.handleError(error as Error, action);
+          } else {
+            // Extract dependencies before committing
+            const log = extractDependenciesFromTransaction(tx, this.runtime);
+            
+            // Commit the transaction
+            tx.commit().then((commitResult) => {
+              if (commitResult.error) {
+                this.handleError(
+                  new Error(`Transaction commit failed: ${commitResult.error}`),
+                  action,
+                );
+              } else {
+                // Set up reactive subscriptions after successful commit
+                // Create a wrapper action that creates a new transaction
+                const wrappedAction = (log: ReactivityLog) => {
+                  const newTx = this.runtime.edit();
+                  const result = action(newTx);
+                  // Extract dependencies to update the log
+                  const txLog = extractDependenciesFromTransaction(newTx, this.runtime);
+                  log.reads.push(...txLog.reads);
+                  log.writes.push(...txLog.writes);
+                  newTx.commit();
+                  return result;
+                };
+                this.subscribe(wrappedAction, log);
+              }
+            });
+          }
+        } finally {
+          resolve(result);
+        }
+      };
+
+      try {
+        Promise.resolve(action(tx))
+          .then((actionResult) => {
+            result = actionResult;
+            finalizeAction();
+          })
+          .catch((error) => finalizeAction(error));
+      } catch (error) {
+        finalizeAction(error);
+      }
+    });
+
+    return this.runningPromise;
+  }
+
   idle(): Promise<void> {
     return new Promise<void>((resolve) => {
       // NOTE: This relies on the finally clause to set runningPromise to
@@ -180,12 +389,16 @@ export class Scheduler implements IScheduler {
   }
 
   queueEvent(eventRef: LegacyDocCellLink, event: any): void {
+    // Convert LegacyDocCellLink to IMemoryAddress
+    const eventAddr: IMemoryAddress = {
+      id: toURI(eventRef.cell.entityId),
+      space: eventRef.space || eventRef.cell.space,
+      path: eventRef.path.map(p => p.toString()),
+      type: "application/json",
+    };
+    
     for (const [ref, handler] of this.eventHandlers) {
-      if (
-        ref.cell === eventRef.cell &&
-        ref.path.length === eventRef.path.length &&
-        ref.path.every((p, i) => p === eventRef.path[i])
-      ) {
+      if (isSameAddress(ref, eventAddr)) {
         this.queueExecution();
         this.eventQueue.push(() => handler(event));
       }
@@ -193,10 +406,18 @@ export class Scheduler implements IScheduler {
   }
 
   addEventHandler(handler: EventHandler, ref: LegacyDocCellLink): Cancel {
-    this.eventHandlers.push([ref, handler]);
+    // Convert LegacyDocCellLink to IMemoryAddress
+    const addr: IMemoryAddress = {
+      id: toURI(ref.cell.entityId),
+      space: ref.space || ref.cell.space,
+      path: ref.path.map(p => p.toString()),
+      type: "application/json",
+    };
+    
+    this.eventHandlers.push([addr, handler]);
     return () => {
       const index = this.eventHandlers.findIndex(([r, h]) =>
-        r === ref && h === handler
+        isSameAddress(r, addr) && h === handler
       );
       if (index !== -1) this.eventHandlers.splice(index, 1);
     };
@@ -219,9 +440,13 @@ export class Scheduler implements IScheduler {
   private setDependencies(
     action: Action,
     log: ReactivityLog,
-  ): LegacyDocCellLink[] {
-    const reads = compactifyPaths(log.reads);
-    const writes = compactifyPaths(log.writes);
+  ): IMemoryAddress[] {
+    // Convert all entries to IMemoryAddress format
+    const readAddresses = log.reads.map(toMemoryAddress);
+    const writeAddresses = log.writes.map(toMemoryAddress);
+    
+    const reads = compactifyAddresses(readAddresses);
+    const writes = compactifyAddresses(writeAddresses);
     this.dependencies.set(action, { reads, writes });
     return reads;
   }
@@ -312,7 +537,7 @@ export class Scheduler implements IScheduler {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
-  dirty: Set<DocImpl<any>>,
+  dirty: AddressSet,
 ): Action[] {
   const relevantActions = new Set<Action>();
   const graph = new Map<Action, Set<Action>>();
@@ -326,7 +551,16 @@ function topologicalSort(
       // Actions with no dependencies are always relevant. Note that they must
       // be manually added to `pending`, which happens only once on `schedule`.
       relevantActions.add(action);
-    } else if (reads.some(({ cell: doc }) => dirty.has(doc))) {
+    } else if (reads.some((addr) => {
+      // Check if any dirty address matches this read
+      const memAddr = toMemoryAddress(addr);
+      for (const dirtyAddr of dirty) {
+        if (isSameAddress(memAddr, dirtyAddr)) {
+          return true;
+        }
+      }
+      return false;
+    })) {
       relevantActions.add(action);
     }
   }
@@ -344,8 +578,12 @@ function topologicalSort(
               dependencies
                 .get(relevantAction)!
                 .reads.some(
-                  ({ cell, path }) =>
-                    cell === write.cell && pathAffected(write.path, path),
+                  (read) => {
+                    const readAddr = toMemoryAddress(read);
+                    const writeAddr = toMemoryAddress(write);
+                    return isSameAddress({ ...readAddr, path: [] }, { ...writeAddr, path: [] }) && 
+                           pathAffected(writeAddr.path, readAddr.path);
+                  }
                 )
             )
           ) {
@@ -372,9 +610,12 @@ function topologicalSort(
         if (actionA !== actionB && !graphA.has(actionB)) {
           const { reads } = dependencies.get(actionB)!;
           if (
-            reads.some(({ cell, path }) =>
-              cell === write.cell && pathAffected(write.path, path)
-            )
+            reads.some((read) => {
+              const readAddr = toMemoryAddress(read);
+              const writeAddr = toMemoryAddress(write);
+              return isSameAddress({ ...readAddr, path: [] }, { ...writeAddr, path: [] }) && 
+                     pathAffected(writeAddr.path, readAddr.path);
+            })
           ) {
             graphA.add(actionB);
             inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
@@ -426,18 +667,55 @@ function topologicalSort(
 export function compactifyPaths(
   entries: LegacyDocCellLink[],
 ): LegacyDocCellLink[] {
-  // First group by doc via a Map
-  const docToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
-  for (const { cell: doc, path } of entries) {
-    const paths = docToPaths.get(doc) || [];
-    paths.push(path.map((key) => key.toString())); // Normalize to strings as keys
-    docToPaths.set(doc, paths);
+  // Convert to addresses, compactify, then convert back
+  const addresses: IMemoryAddress[] = entries.map((entry) => ({
+    id: toURI(entry.cell.entityId),
+    space: entry.space || entry.cell.space,
+    path: entry.path.map(p => p.toString()),
+    type: "application/json",
+  }));
+  
+  const compacted = compactifyAddresses(addresses);
+  
+  // Convert back to LegacyDocCellLink format
+  return compacted.map((addr) => {
+    const entityId = { "/": addr.id.slice(3) };
+    const doc = entries.find(e => toURI(e.cell.entityId) === addr.id)?.cell;
+    if (!doc) {
+      throw new Error(`Could not find doc for ${addr.id}`);
+    }
+    return {
+      cell: doc,
+      path: addr.path.map(p => p.toString()),
+      space: addr.space,
+    };
+  });
+}
+
+// Remove longer paths already covered by shorter paths
+function compactifyAddresses(
+  entries: IMemoryAddress[],
+): IMemoryAddress[] {
+  // First group by id and space via a Map
+  const addressGroups = new Map<string, { addr: IMemoryAddress; paths: PropertyKey[][] }>();
+  
+  for (const addr of entries) {
+    const key = `${addr.id}:${addr.space}`;
+    const existing = addressGroups.get(key);
+    if (existing) {
+      existing.paths.push(addr.path);
+    } else {
+      addressGroups.set(key, {
+        addr: addr,
+        paths: [addr.path]
+      });
+    }
   }
 
-  // For each cell, sort the paths by length, then only return those that don't
+  // For each address group, sort the paths by length, then only return those that don't
   // have a prefix earlier in the list
-  const result: LegacyDocCellLink[] = [];
-  for (const [doc, paths] of docToPaths.entries()) {
+  const result: IMemoryAddress[] = [];
+  for (const { addr, paths } of addressGroups.values()) {
     paths.sort((a, b) => a.length - b.length);
     for (let i = 0; i < paths.length; i++) {
       const earlier = paths.slice(0, i);
@@ -448,18 +726,26 @@ export function compactifyPaths(
       ) {
         continue;
       }
-      result.push({ cell: doc, path: paths[i] });
+      result.push({
+        id: addr.id,
+        space: addr.space,
+        path: paths[i].map(p => p.toString()),
+        type: addr.type,
+      });
     }
   }
   return result;
 }
 
 function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
-  changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
+  // Normalize both paths to strings for comparison
+  changedPath = changedPath.map((key) => key.toString());
+  const normalizedPath = path.map((key) => key.toString());
+  
   return (
-    (changedPath.length <= path.length &&
-      changedPath.every((key, index) => key === path[index])) ||
-    path.every((key, index) => key === changedPath[index])
+    (changedPath.length <= normalizedPath.length &&
+      changedPath.every((key, index) => key === normalizedPath[index])) ||
+    normalizedPath.every((key, index) => key === changedPath[index])
   );
 }
 

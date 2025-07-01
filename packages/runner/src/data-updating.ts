@@ -5,7 +5,7 @@ import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { isCell } from "./cell.ts";
 import { isAnyCellLink } from "./link-utils.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink, type URI } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
@@ -18,6 +18,14 @@ import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
+import type {
+  IStorageTransaction,
+  IMemoryAddress,
+} from "./storage/interface.ts";
+import { StorageTransaction } from "./storage/transaction-shim.ts";
+import type { IRuntime } from "./runtime.ts";
+import { toURI } from "./uri-utils.ts";
+import type { MemorySpace } from "@commontools/memory/interface";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -429,4 +437,90 @@ export function addCommonIDfromObjectID(
   }
 
   traverse(obj);
+}
+
+/**
+ * Transaction-based version of setNestedValue.
+ */
+export function setNestedValueTx(
+  tx: IStorageTransaction,
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  value: unknown,
+): boolean {
+  // For now, still use the doc-based implementation
+  // TODO: Implement full transaction-based nested value setting
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, true);
+  if (!doc) {
+    throw new Error(`Document not found: ${uri}`);
+  }
+  
+  return setNestedValue(doc, path, value, undefined);
+}
+
+/**
+ * Legacy wrapper for backward compatibility.
+ */
+export function setNestedValueWithTransaction(
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  value: unknown,
+  log?: ReactivityLog,
+): boolean {
+  const tx = runtime.edit();
+  const result = setNestedValueTx(tx, runtime, uri, space, path, value);
+  tx.commit();
+  return result;
+}
+
+/**
+ * Transaction-based version of diffAndUpdate.
+ */
+export function diffAndUpdateTx(
+  tx: IStorageTransaction,
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  newValue: unknown,
+  context?: unknown,
+): boolean {
+  // For now, still use the doc-based implementation
+  // TODO: Implement full transaction-based diff and update
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, true);
+  if (!doc) {
+    throw new Error(`Document not found: ${uri}`);
+  }
+  
+  const current: LegacyDocCellLink = {
+    cell: doc,
+    path,
+    space,
+  };
+  
+  return diffAndUpdate(current, newValue, undefined, context);
+}
+
+/**
+ * Legacy wrapper for backward compatibility.
+ */
+export function diffAndUpdateWithTransaction(
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  newValue: unknown,
+  log?: ReactivityLog,
+  context?: unknown,
+): boolean {
+  const tx = runtime.edit();
+  const result = diffAndUpdateTx(tx, runtime, uri, space, path, newValue, context);
+  tx.commit();
+  return result;
 }

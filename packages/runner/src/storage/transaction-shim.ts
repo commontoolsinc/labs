@@ -80,11 +80,13 @@ function validateParentPath(
 
     // Set pathError.path to last valid parent path component
     pathError.path = [];
-    while (parentPath.length > 0) {
-      const segment = parentPath.shift()!;
-      value = value[segment];
-      if (!isRecord(value)) break;
-      pathError.path.push(segment);
+    if (isRecord(value)) {
+      while (parentPath.length > 0) {
+        const segment = parentPath.shift()!;
+        value = value[segment];
+        if (!isRecord(value)) break;
+        pathError.path.push(segment);
+      }
     }
 
     return pathError;
@@ -191,23 +193,60 @@ class TransactionReader implements ITransactionReader {
       return { ok: undefined, error: notFoundError };
     }
 
-    const validationError = validateParentPath(doc.get(), address.path);
-    if (validationError) {
-      return { ok: undefined, error: validationError };
+    // Path-based logic
+    if (!address.path.length) {
+      const notFoundError: INotFoundError = new Error(
+        `Path must not be empty`,
+      ) as INotFoundError;
+      notFoundError.name = "NotFoundError";
+      return { ok: undefined, error: notFoundError };
     }
-
-    // Read the value at the specified path
-    const value = getValueAtPath(doc.get(), address.path);
-
-    // Create the read invariant
-    const read: Read = {
-      address,
-      value,
-      cause: refer("shim does not care"),
-    };
-    this.log.addRead(read);
-
-    return { ok: read };
+    const [first, ...rest] = address.path;
+    if (first === "value") {
+      // Validate parent path exists and is a record for nested writes/reads
+      const validationError = validateParentPath(doc.get(), rest);
+      if (validationError) {
+        return { ok: undefined, error: validationError };
+      }
+      // Read from doc itself
+      const value = doc.getAtPath(rest);
+      const read: Read = {
+        address,
+        value,
+        cause: refer("shim does not care"),
+      };
+      this.log.addRead(read);
+      return { ok: read };
+    } else if (first === "source") {
+      // Only allow path length 1
+      if (rest.length > 0) {
+        const notFoundError: INotFoundError = new Error(
+          `Path beyond 'source' is not allowed`,
+        ) as INotFoundError;
+        notFoundError.name = "NotFoundError";
+        return { ok: undefined, error: notFoundError };
+      }
+      // Return the URI of the sourceCell if it exists
+      const sourceCell = doc.sourceCell;
+      let value: string | undefined = undefined;
+      if (sourceCell) {
+        // Convert EntityId to URI string
+        value = `of:${JSON.parse(JSON.stringify(sourceCell.entityId))["/"]}`;
+      }
+      const read: Read = {
+        address,
+        value,
+        cause: refer("shim does not care"),
+      };
+      this.log.addRead(read);
+      return { ok: read };
+    } else {
+      const notFoundError: INotFoundError = new Error(
+        `Invalid first path element: ${String(first)}`,
+      ) as INotFoundError;
+      notFoundError.name = "NotFoundError";
+      return { ok: undefined, error: notFoundError };
+    }
   }
 }
 
@@ -264,35 +303,76 @@ class TransactionWriter extends TransactionReader
       throw new Error(`Failed to get or create document: ${address.id}`);
     }
 
-    // For non-empty paths, check if document exists and is a record
-    if (address.path.length > 0) {
-      if (doc.get() === undefined || !isRecord(doc.get())) {
+    // Path-based logic
+    if (!address.path.length) {
+      const notFoundError: INotFoundError = new Error(
+        `Path must not be empty`,
+      ) as INotFoundError;
+      notFoundError.name = "NotFoundError";
+      return { ok: undefined, error: notFoundError };
+    }
+    const [first, ...rest] = address.path;
+    if (first === "value") {
+      // Validate parent path exists and is a record for nested writes
+      const validationError = validateParentPath(doc.get(), rest);
+      if (validationError) {
+        return { ok: undefined, error: validationError };
+      }
+      // Write to doc itself
+      doc.setAtPath(rest, value);
+      const write: Write = {
+        address,
+        value,
+        cause: refer(address.id),
+      };
+      this.log.addWrite(write);
+      return { ok: write };
+    } else if (first === "source") {
+      // Only allow path length 1
+      if (rest.length > 0) {
         const notFoundError: INotFoundError = new Error(
-          `Document not found or not a record: ${address.id}`,
+          `Path beyond 'source' is not allowed`,
         ) as INotFoundError;
         notFoundError.name = "NotFoundError";
         return { ok: undefined, error: notFoundError };
       }
+      // Value must be a URI string (of:...)
+      if (typeof value !== "string" || !value.startsWith("of:")) {
+        const notFoundError: INotFoundError = new Error(
+          `Value for 'source' must be a URI string (of:...)`,
+        ) as INotFoundError;
+        notFoundError.name = "NotFoundError";
+        return { ok: undefined, error: notFoundError };
+      }
+      // Get the source doc in the same space
+      const sourceEntityId = uriToEntityId(value);
+      const sourceDoc = this.runtime.documentMap.getDocByEntityId(
+        address.space,
+        sourceEntityId,
+        false,
+      );
+      if (!sourceDoc) {
+        const notFoundError: INotFoundError = new Error(
+          `Source document not found: ${value}`,
+        ) as INotFoundError;
+        notFoundError.name = "NotFoundError";
+        return { ok: undefined, error: notFoundError };
+      }
+      doc.sourceCell = sourceDoc;
+      const write: Write = {
+        address,
+        value,
+        cause: refer(address.id),
+      };
+      this.log.addWrite(write);
+      return { ok: write };
+    } else {
+      const notFoundError: INotFoundError = new Error(
+        `Invalid first path element: ${String(first)}`,
+      ) as INotFoundError;
+      notFoundError.name = "NotFoundError";
+      return { ok: undefined, error: notFoundError };
     }
-
-    // Validate parent path exists and is a record for nested writes
-    const validationError = validateParentPath(doc.get(), address.path);
-    if (validationError) {
-      return { ok: undefined, error: validationError };
-    }
-
-    // Write the value at the specified path
-    doc.setAtPath(address.path, value);
-
-    // Create the write invariant
-    const write: Write = {
-      address,
-      value,
-      cause: refer(address.id),
-    };
-    this.log.addWrite(write);
-
-    return { ok: write };
   }
 }
 

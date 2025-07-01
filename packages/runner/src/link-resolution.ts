@@ -6,6 +6,7 @@ import {
   type LegacyAlias,
   type LegacyDocCellLink,
   type SigilWriteRedirectLink,
+  type URI,
 } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { arrayEqual } from "./path-utils.ts";
@@ -14,6 +15,14 @@ import {
   parseLink,
   parseToLegacyCellLink,
 } from "./link-utils.ts";
+import type {
+  IStorageTransaction,
+  IMemoryAddress,
+} from "./storage/interface.ts";
+// import { StorageTransaction } from "./storage/transaction-shim.ts"; // Not needed, use runtime.edit()
+import type { IRuntime } from "./runtime.ts";
+import { toURI } from "./uri-utils.ts";
+import type { MemorySpace } from "@commontools/memory/interface";
 
 /**
  * Track visited cell links and memoize results during path resolution
@@ -50,6 +59,59 @@ function createPathCacheKey<T>(
   return JSON.stringify([doc.space, doc.toJSON(), path, aliases]);
 }
 
+/**
+ * Creates a cache key for a URI and path combination.
+ */
+function createPathCacheKeyFromURI(
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  aliases: boolean = false,
+): string {
+  return JSON.stringify([space, { "/": uri.slice(3) }, path, aliases]);
+}
+
+/**
+ * Helper to create an IMemoryAddress from a URI and path
+ */
+function createMemoryAddress(
+  uri: URI,
+  path: PropertyKey[],
+  space: MemorySpace,
+): IMemoryAddress {
+  // Add the 'value' path prefix for entity data
+  const actualPath = path.length === 0 ? ["value"] : ["value", ...path];
+  return {
+    id: uri,
+    space,
+    path: actualPath.map(p => p.toString()),
+    type: "application/json",
+  };
+}
+
+/**
+ * Read a value using the transaction API
+ */
+function readValueWithTransaction(
+  tx: IStorageTransaction,
+  uri: URI,
+  path: PropertyKey[],
+  space: MemorySpace,
+): any {
+  const address = createMemoryAddress(uri, path, space);
+  const result = tx.read(address);
+  
+  if (result.error) {
+    // Handle not found by returning undefined
+    if (result.error.name === "NotFoundError") {
+      return undefined;
+    }
+    throw new Error(`Transaction read failed: ${result.error.message}`);
+  }
+  
+  return result.ok?.value;
+}
+
 export function resolveLinkToValue<T>(
   doc: DocImpl<T>,
   path: PropertyKey[],
@@ -62,6 +124,37 @@ export function resolveLinkToValue<T>(
   return followLinks(ref, log, visits);
 }
 
+/**
+ * Transaction-based version of resolveLinkToValue.
+ * Resolves a path to its final value location, following all links.
+ */
+export function resolveLinkToValueTx(
+  tx: IStorageTransaction,
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
+): { uri: URI; path: PropertyKey[]; space: MemorySpace; schema?: JSONSchema; rootSchema?: JSONSchema } {
+  // TODO: Implement full transaction-based resolution
+  // For now, use the existing implementation with a temporary doc
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, false);
+  if (!doc) {
+    return { uri, path, space, schema, rootSchema };
+  }
+  
+  const result = resolveLinkToValue(doc, path, undefined, schema, rootSchema);
+  return {
+    uri: toURI(result.cell.entityId),
+    path: result.path,
+    space: result.space || space,
+    schema: result.schema,
+    rootSchema: result.rootSchema,
+  };
+}
+
 export function resolveLinkToWriteRedirect<T>(
   doc: DocImpl<T>,
   path: PropertyKey[],
@@ -72,6 +165,36 @@ export function resolveLinkToWriteRedirect<T>(
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits, true);
+}
+
+/**
+ * Transaction-based version of resolveLinkToWriteRedirect.
+ */
+export function resolveLinkToWriteRedirectTx(
+  tx: IStorageTransaction,
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
+): { uri: URI; path: PropertyKey[]; space: MemorySpace; schema?: JSONSchema; rootSchema?: JSONSchema } {
+  // TODO: Implement full transaction-based resolution
+  // For now, use the existing implementation
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, false);
+  if (!doc) {
+    return { uri, path, space, schema, rootSchema };
+  }
+  
+  const result = resolveLinkToWriteRedirect(doc, path, undefined, schema, rootSchema);
+  return {
+    uri: toURI(result.cell.entityId),
+    path: result.path,
+    space: result.space || space,
+    schema: result.schema,
+    rootSchema: result.rootSchema,
+  };
 }
 
 export function resolveLinks(
@@ -288,4 +411,104 @@ export function followWriteRedirects<T = any>(
       `Write redirect expected: ${JSON.stringify(writeRedirect)}`,
     );
   }
+}
+
+/**
+ * Transaction-based version of resolveLinkToValue.
+ * Resolves a URI and path to the final value location, following links.
+ */
+export function resolveLinkToValueWithTransaction(
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  log?: ReactivityLog,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
+): { uri: URI; path: PropertyKey[]; space: MemorySpace; schema?: JSONSchema; rootSchema?: JSONSchema } {
+  // For now, we need to get the doc to maintain compatibility
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, false);
+  if (!doc) {
+    // Return the original if doc not found
+    return { uri, path, space, schema, rootSchema };
+  }
+  
+  // Use the existing function
+  const result = resolveLinkToValue(doc, path, log, schema, rootSchema);
+  
+  // Convert back to URI-based result
+  return {
+    uri: toURI(result.cell.entityId),
+    path: result.path,
+    space: result.space || space,
+    schema: result.schema,
+    rootSchema: result.rootSchema,
+  };
+}
+
+/**
+ * Transaction-based version of resolveLinkToWriteRedirect.
+ */
+export function resolveLinkToWriteRedirectWithTransaction(
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  log?: ReactivityLog,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
+): { uri: URI; path: PropertyKey[]; space: MemorySpace; schema?: JSONSchema; rootSchema?: JSONSchema } {
+  // For now, we need to get the doc to maintain compatibility
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, false);
+  if (!doc) {
+    // Return the original if doc not found
+    return { uri, path, space, schema, rootSchema };
+  }
+  
+  // Use the existing function
+  const result = resolveLinkToWriteRedirect(doc, path, log, schema, rootSchema);
+  
+  // Convert back to URI-based result
+  return {
+    uri: toURI(result.cell.entityId),
+    path: result.path,
+    space: result.space || space,
+    schema: result.schema,
+    rootSchema: result.rootSchema,
+  };
+}
+
+/**
+ * Transaction-based version of followLinks that works with URIs.
+ */
+function followLinksWithTransaction(
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[],
+  log: ReactivityLog | undefined,
+  visits: Visits,
+  onlyWriteRedirects = false,
+  schema?: JSONSchema,
+  rootSchema?: JSONSchema,
+): { uri: URI; path: PropertyKey[]; space: MemorySpace; schema?: JSONSchema; rootSchema?: JSONSchema } {
+  // For compatibility, convert to doc and use existing function
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, false);
+  if (!doc) {
+    return { uri, path, space, schema, rootSchema };
+  }
+  
+  const ref: LegacyDocCellLink = { cell: doc, path, space, schema, rootSchema };
+  const result = followLinks(ref, log, visits, onlyWriteRedirects);
+  
+  return {
+    uri: toURI(result.cell.entityId),
+    path: result.path,
+    space: result.space || space,
+    schema: result.schema,
+    rootSchema: result.rootSchema,
+  };
 }

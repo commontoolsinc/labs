@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { isQueryResult } from "../src/query-result-proxy.ts";
-import { type ReactivityLog } from "../src/scheduler.ts";
+import type { IStorageTransaction } from "../src/storage/interface.ts";
 import { ID, JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -18,6 +18,41 @@ const space = signer.did();
 
 const signer2 = await Identity.fromPassphrase("test operator 2");
 const space2 = signer2.did();
+
+// Helper to check if a value is an IMemoryAddress
+function isMemoryAddress(value: any): boolean {
+  return value && typeof value.id === "string" && value.type === "application/json";
+}
+
+// Helper to get the path from a log entry (handles both LegacyDocCellLink and IMemoryAddress)
+function getLogPath(entry: any): PropertyKey[] {
+  if (isMemoryAddress(entry)) {
+    // Remove 'value' prefix if present for display/comparison purposes
+    const path = entry.path;
+    if (path && path[0] === "value") {
+      return path.slice(1);
+    }
+    return path || [];
+  }
+  return entry.path || [];
+}
+
+// Helper to get the cell from a log entry
+function getLogCell(entry: any, runtime: Runtime): any {
+  if (isMemoryAddress(entry)) {
+    const entityId = { "/": entry.id.slice(3) };
+    const doc = runtime.documentMap.getDocByEntityId(entry.space, entityId, false);
+    return doc?.asCell();
+  }
+  return entry.cell?.asCell();
+}
+
+// Helper to convert entity ID to URI
+function entityIdToUri(entityId: any): string {
+  if (typeof entityId === 'string') return entityId;
+  if (entityId && entityId["/"]) return `of:${entityId["/"]}`;
+  return JSON.stringify(entityId);
+}
 
 describe("Cell", () => {
   let runtime: Runtime;
@@ -332,7 +367,7 @@ describe("createProxy", () => {
   });
 
   it("should support modifying array methods and log reads and writes", () => {
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const c = runtime.getCell<{ array: number[] }>(
       space,
       "should support modifying array methods and log reads and writes",
@@ -348,14 +383,15 @@ describe("createProxy", () => {
     expect(proxy.array.length).toBe(4);
     expect(proxy.array[3]).toBe(4);
     expect(
-      log.writes.some((write) =>
-        write.path[0] === "array" && write.path[1] === "3"
-      ),
+      log.writes.some((write) => {
+        const path = getLogPath(write);
+        return path[0] === "array" && path[1] === "3";
+      })
     ).toBe(true);
   });
 
   it("should handle array methods on previously undefined arrays", () => {
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const c = runtime.getCell<{ data: any }>(
       space,
       "should handle array methods on previously undefined arrays",
@@ -379,9 +415,10 @@ describe("createProxy", () => {
 
     // Check that writes were logged
     expect(
-      log.writes.some((write) =>
-        write.path[0] === "data" && write.path[1] === "array"
-      ),
+      log.writes.some((write) => {
+        const path = getLogPath(write);
+        return path[0] === "data" && path[1] === "array";
+      })
     ).toBe(true);
   });
 
@@ -453,11 +490,11 @@ describe("createProxy", () => {
       "should support pop() and only read the popped element",
     );
     c.set({ a: [] as number[] });
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
     proxy.a = [1, 2, 3];
     const result = proxy.a.pop();
-    const pathsRead = log.reads.map((r) => r.path.join("."));
+    const pathsRead = log.reads.map((r) => getLogPath(r).join("."));
     expect(pathsRead).toContain("a.2");
     expect(pathsRead).not.toContain("a.0");
     expect(pathsRead).not.toContain("a.1");
@@ -471,7 +508,7 @@ describe("createProxy", () => {
       "should correctly sort() with cell references",
     );
     c.set({ a: [] as number[] });
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
     proxy.a = [3, 1, 2];
     const result = proxy.a.sort();
@@ -485,12 +522,12 @@ describe("createProxy", () => {
       "should support readonly array methods and log reads",
     );
     c.set([1, 2, 3]);
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
     const result = proxy.find((x: any) => x === 2);
     expect(result).toBe(2);
     expect(c.get()).toEqual([1, 2, 3]);
-    expect(log.reads.map((r) => r.path)).toEqual([[], [0], [1], [2]]);
+    expect(log.reads.map((r) => getLogPath(r))).toEqual([[], [0], [1], [2]]);
     expect(log.writes).toEqual([]);
   });
 
@@ -500,11 +537,11 @@ describe("createProxy", () => {
       "should support mapping over a proxied array",
     );
     c.set({ a: [1, 2, 3] });
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
     const result = proxy.a.map((x: any) => x + 1);
     expect(result).toEqual([2, 3, 4]);
-    expect(log.reads.map((r) => r.path)).toEqual([
+    expect(log.reads.map((r) => getLogPath(r))).toEqual([
       [],
       ["a"],
       ["a", 0],
@@ -519,7 +556,7 @@ describe("createProxy", () => {
       "should allow changing array lengths by writing length",
     );
     c.set([1, 2, 3]);
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
@@ -531,12 +568,12 @@ describe("createProxy", () => {
     proxy.length = 4;
     expect(c.get()).toEqual([1, 2, undefined, undefined]);
     expect(log.writes.length).toBe(5);
-    expect(log.writes[2].cell.asCell().equals(c)).toBe(true);
-    expect(log.writes[2].path).toEqual(["length"]);
-    expect(log.writes[3].cell.asCell().equals(c)).toBe(true);
-    expect(log.writes[3].path).toEqual([2]);
-    expect(log.writes[4].cell.asCell().equals(c)).toBe(true);
-    expect(log.writes[4].path).toEqual([3]);
+    expect(getLogCell(log.writes[2], runtime)?.equals(c)).toBe(true);
+    expect(getLogPath(log.writes[2])).toEqual(["length"]);
+    expect(getLogCell(log.writes[3], runtime)?.equals(c)).toBe(true);
+    expect(getLogPath(log.writes[3])).toEqual([2]);
+    expect(getLogCell(log.writes[4], runtime)?.equals(c)).toBe(true);
+    expect(getLogPath(log.writes[4])).toEqual([3]);
   });
 
   it("should allow changing array by splicing", () => {
@@ -545,17 +582,17 @@ describe("createProxy", () => {
       "should allow changing array by splicing",
     );
     c.set([1, 2, 3]);
-    const log: ReactivityLog = { reads: [], writes: [] };
+    const log = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
     proxy.splice(1, 1, 4, 5);
     expect(c.get()).toEqual([1, 4, 5, 3]);
     expect(log.writes.length).toBe(3);
-    expect(log.writes[0].cell.asCell().equals(c)).toBe(true);
-    expect(log.writes[0].path).toEqual(["1"]);
-    expect(log.writes[1].cell.asCell().equals(c)).toBe(true);
-    expect(log.writes[1].path).toEqual(["2"]);
-    expect(log.writes[2].cell.asCell().equals(c)).toBe(true);
-    expect(log.writes[2].path).toEqual(["3"]);
+    expect(getLogCell(log.writes[0], runtime)?.equals(c)).toBe(true);
+    expect(getLogPath(log.writes[0])).toEqual(["1"]);
+    expect(getLogCell(log.writes[1], runtime)?.equals(c)).toBe(true);
+    expect(getLogPath(log.writes[1])).toEqual(["2"]);
+    expect(getLogCell(log.writes[2], runtime)?.equals(c)).toBe(true);
+    expect(getLogPath(log.writes[2])).toEqual(["3"]);
   });
 });
 
@@ -1271,7 +1308,7 @@ describe("asCell with schema", () => {
       required: ["context"],
     } as const satisfies JSONSchema;
 
-    const log = { reads: [], writes: [] } as ReactivityLog;
+    const log = { reads: [], writes: [] };
     const cell = c.asSchema(schema).withLog(log);
     const value = cell.get() as any;
 
@@ -1279,16 +1316,21 @@ describe("asCell with schema", () => {
     expect(isCell(value.context.nested)).toBe(true);
     expect(value.context.nested.get().value).toBe(42);
 
-    // Check that 4 unique documents were read (by entity ID)
-    const readEntityIds = new Set(log.reads.map((r) => r.cell.entityId));
+    // Check that 4 unique documents were read
+    const readEntityIds = new Set(log.reads.map((r: any) => {
+      if (isMemoryAddress(r)) {
+        return r.id;
+      }
+      return r.cell?.entityId ? JSON.stringify(r.cell.entityId) : null;
+    }).filter(Boolean));
     expect(readEntityIds.size).toBe(4);
 
     // Verify each cell was read using equals()
-    const readCells = log.reads.map((r) => r.cell.asCell());
-    expect(readCells.some((cell) => cell.equals(c))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(ref3Cell))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(ref2Cell))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(innerCell))).toBe(true);
+    const readCells = log.reads.map((r: any) => getLogCell(r, runtime)).filter(Boolean);
+    expect(readCells.some((cell: any) => cell.equals(c))).toBe(true);
+    expect(readCells.some((cell: any) => cell.equals(ref3Cell))).toBe(true);
+    expect(readCells.some((cell: any) => cell.equals(ref2Cell))).toBe(true);
+    expect(readCells.some((cell: any) => cell.equals(innerCell))).toBe(true);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });

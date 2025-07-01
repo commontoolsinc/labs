@@ -4,9 +4,14 @@ import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
 import { type DocImpl } from "./doc.ts";
 import { createCell, isCell } from "./cell.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink, type URI } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
+import type { IRuntime } from "./runtime.ts";
+import { toURI } from "./uri-utils.ts";
+import type { MemorySpace } from "@commontools/memory/interface";
+// import { StorageTransaction } from "./storage/transaction-shim.ts"; // Not needed, use runtime.edit()
+import type { IMemoryAddress, IStorageTransaction } from "./storage/interface.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -704,4 +709,101 @@ export function validateAndTransform(
   // Add the current value to seen before returning
   seen.push({ cell: doc, path, schema: resolvedSchema, rootSchema, value });
   return value;
+}
+
+/**
+ * Transaction-based version of validateAndTransform that uses transactions for all reads.
+ */
+export function validateAndTransformTx(
+  tx: IStorageTransaction,
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[] = [],
+  schema?: JSONSchema,
+  rootSchema: JSONSchema | undefined = schema,
+  seen?: Array<{
+    uri: URI;
+    space: MemorySpace;
+    path: PropertyKey[];
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+    value: any;
+  }>,
+): any {
+  // For now, still use the doc-based implementation
+  // TODO: Fully implement transaction-based validation
+  const entityId = { "/": uri.slice(3) };
+  const doc = runtime.documentMap.getDocByEntityId(space, entityId, false);
+  if (!doc) {
+    // If document not found, read directly from transaction
+    const actualPath = path.length === 0 ? ["value"] : ["value", ...path];
+    const address: IMemoryAddress = {
+      id: uri,
+      space,
+      path: actualPath.map(p => p.toString()),
+      type: "application/json",
+    };
+    const result = tx.read(address);
+    
+    if (result.error) {
+      if (result.error.name === "NotFoundError") {
+        return undefined;
+      }
+      throw new Error(`Transaction read failed: ${result.error.message}`);
+    }
+    
+    return result.ok?.value;
+  }
+  
+  // Use the existing validateAndTransform for now
+  return validateAndTransform(
+    doc,
+    path,
+    schema,
+    undefined, // Don't pass ReactivityLog
+    rootSchema,
+    seen?.map(entry => ({
+      cell: runtime.documentMap.getDocByEntityId(space, { "/": entry.uri.slice(3) }, false)!,
+      path: entry.path,
+      schema: entry.schema,
+      rootSchema: entry.rootSchema,
+      value: entry.value,
+    })),
+  );
+}
+
+/**
+ * Legacy wrapper for backward compatibility.
+ */
+export function validateAndTransformWithTransaction(
+  runtime: IRuntime,
+  uri: URI,
+  space: MemorySpace,
+  path: PropertyKey[] = [],
+  schema?: JSONSchema,
+  log?: ReactivityLog,
+  rootSchema: JSONSchema | undefined = schema,
+  seen?: Array<{
+    uri: URI;
+    space: MemorySpace;
+    path: PropertyKey[];
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+    value: any;
+  }>,
+): any {
+  const tx = runtime.edit();
+  const result = validateAndTransformTx(
+    tx,
+    runtime,
+    uri,
+    space,
+    path,
+    schema,
+    rootSchema,
+    seen,
+  );
+  tx.commit();
+  return result;
 }
