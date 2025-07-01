@@ -125,7 +125,10 @@ export function compileAndRun(
     compilePromise.then(async (recipe) => {
       if (thisRun !== currentRun) return;
       if (recipe) {
-        await runtime.runSynced(result, recipe, input);
+        // TODO(ja): to support editting of existing charms / running with
+        // inputs from other charms, we will need to think more about
+        // how we pass input into the builtin.
+        await runtime.runSynced(result, recipe, input.get());
       }
       // TODO(seefeld): Add capturing runtime errors.
     });
