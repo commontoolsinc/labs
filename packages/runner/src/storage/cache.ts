@@ -2237,7 +2237,9 @@ class ReadInvariants {
     invariant: ITransactionInvariant,
   ): Result<ITransactionInvariant, IStorageTransactionInconsistent> {
     const at = TransactionInvariant.toKey(invariant.address);
-    const address = { ...invariant.address, space: this.space };
+
+    // Track which invariants to delete after consistency check
+    const obsolete = new Set<string>();
 
     for (const candidate of this) {
       const key = TransactionInvariant.toKey(candidate.address);
@@ -2245,17 +2247,40 @@ class ReadInvariants {
       // the new one two must be consistent with one another otherwise we are in
       // an inconsistent state.
       if (at.startsWith(key) || key.startsWith(at)) {
+        // Always read at the more specific (longer) path for consistency check
+        const address = at.length > key.length
+          ? { ...invariant.address, space: this.space }
+          : { ...candidate.address, space: this.space };
+
         const expect = TransactionInvariant.read(candidate, address).ok?.value;
         const actual = TransactionInvariant.read(invariant, address).ok?.value;
 
         if (JSON.stringify(expect) !== JSON.stringify(actual)) {
           return { error: new Inconsistency([candidate, invariant]) };
         }
+
+        // If consistent, determine which invariant(s) to keep
+        if (at.startsWith(key)) {
+          // New invariant is a child of existing candidate (candidate is parent)
+          // Drop the child invariant as it's redundant with the parent
+          obsolete.add(at);
+        } else if (key.startsWith(at)) {
+          // New invariant is a parent of existing candidate (candidate is child)
+          // Delete the child candidate as it's redundant with the new parent
+          obsolete.add(key);
+        }
       }
     }
 
-    // Store the invariant after consistency check passes
-    this.#model.set(at, invariant);
+    if (!obsolete.has(at)) {
+      this.#model.set(at, invariant);
+    }
+
+    // Delete redundant child invariants
+    for (const key of obsolete) {
+      this.#model.delete(key);
+    }
+
     return { ok: invariant };
   }
 }

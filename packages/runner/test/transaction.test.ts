@@ -1021,7 +1021,7 @@ describe("ReadInvariants", () => {
     } as const;
 
     const result1 = invariants.claim(parent);
-    expect(result1.ok).toBeDefined();
+    expect(result1.ok).toEqual(parent);
 
     // Consistent child invariant
     const child = {
@@ -1034,11 +1034,12 @@ describe("ReadInvariants", () => {
     } as const;
 
     const result2 = invariants.claim(child);
-    expect(result2.ok).toBeDefined();
+    expect(result2.ok).toEqual(child);
 
-    // Both should coexist
+    // Child should not be stored as it's redundant with parent
+    expect([...invariants]).toHaveLength(1);
     expect(invariants.get(parent.address)).toEqual(parent);
-    expect(invariants.get(child.address)).toEqual(child); // Returns exact match
+    expect(invariants.get(child.address)).toEqual(parent); // Returns parent since child is redundant
   });
 
   it("should be iterable and include all claimed invariants", async () => {
@@ -1074,7 +1075,7 @@ describe("ReadInvariants", () => {
     expect(collected).toContainEqual(bob);
   });
 
-  it("should return deepest matching parent for nested queries", async () => {
+  it("should return root parent after redundancy elimination", async () => {
     const history = new History();
     const identity = await Identity.fromPassphrase("read invariants test");
     const space = identity.did();
@@ -1111,30 +1112,31 @@ describe("ReadInvariants", () => {
       value: { theme: "light" }, // Must match root.profile.settings
     } as const;
 
+    // Claim from parent to children - each child should replace its parent
     invariants.claim(root);
     invariants.claim(profile);
     invariants.claim(settings);
 
-    // Query for deep nested path should return the deepest matching parent
+    // After redundancy elimination, only the root invariant (parent) should remain
+    expect([...invariants]).toHaveLength(1);
+
+    // All queries should return the root invariant (parent replaces children)
     const deepQuery = {
       id: "user:1",
       type: "application/json",
       path: ["profile", "settings", "theme"],
     } as const;
 
-    const retrieved = invariants.get(deepQuery);
-    expect(retrieved).toEqual(settings); // Settings is the deepest match
+    expect(invariants.get(deepQuery)).toEqual(root);
 
-    // Query for path at profile level
     const profileQuery = {
       id: "user:1",
       type: "application/json",
       path: ["profile", "name"],
     } as const;
 
-    expect(invariants.get(profileQuery)).toEqual(profile);
+    expect(invariants.get(profileQuery)).toEqual(root);
 
-    // Query for path outside profile should return root
     const otherQuery = {
       id: "user:1",
       type: "application/json",
@@ -1142,5 +1144,197 @@ describe("ReadInvariants", () => {
     } as const;
 
     expect(invariants.get(otherQuery)).toEqual(root);
+  });
+
+  it("should delete child invariants when consistent parent is claimed", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // First claim some child invariants
+    const child1 = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Alice",
+    } as const;
+
+    const child2 = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "email"],
+      },
+      value: "alice@example.com",
+    } as const;
+
+    invariants.claim(child1);
+    invariants.claim(child2);
+
+    // Verify children exist initially
+    expect([...invariants]).toHaveLength(2);
+    expect(invariants.get(child1.address)).toEqual(child1);
+    expect(invariants.get(child2.address)).toEqual(child2);
+
+    // Now claim a consistent parent that covers both children
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: { name: "Alice", email: "alice@example.com" },
+    } as const;
+
+    const result = invariants.claim(parent);
+    expect(result.ok).toBeDefined();
+
+    // Children should be deleted, only parent should remain
+    const collected = [...invariants];
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toEqual(parent);
+
+    // Queries for child paths should return the parent
+    expect(invariants.get(child1.address)).toEqual(parent);
+    expect(invariants.get(child2.address)).toEqual(parent);
+  });
+
+  it("should not store child invariant when consistent parent already exists", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // First claim a parent invariant
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: { profile: { name: "Alice", email: "alice@example.com" } },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Verify parent exists
+    expect([...invariants]).toHaveLength(1);
+    expect(invariants.get(parent.address)).toEqual(parent);
+
+    // Now try to claim a consistent child - it should be dropped as redundant
+    const child = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Alice", // Consistent with parent
+    } as const;
+
+    const result = invariants.claim(child);
+    expect(result.ok).toBeDefined();
+
+    // Only parent should remain, child should not be stored
+    const collected = [...invariants];
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toEqual(parent);
+
+    // Query for child should still return parent
+    expect(invariants.get(child.address)).toEqual(parent);
+  });
+
+  it("should maintain both invariants when they are parallel paths", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Claim two invariants that are parallel (neither is parent of the other)
+    const profile = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: { name: "Alice" },
+    } as const;
+
+    const settings = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["settings"],
+      },
+      value: { theme: "light" },
+    } as const;
+
+    invariants.claim(profile);
+    invariants.claim(settings);
+
+    // Both should coexist since they're parallel paths
+    const collected = [...invariants];
+    expect(collected).toHaveLength(2);
+    expect(collected).toContainEqual(profile);
+    expect(collected).toContainEqual(settings);
+  });
+
+  it("should handle complex parent-child relationships correctly", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Start with multiple levels of child invariants
+    const deepChild = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "contact", "email"],
+      },
+      value: "alice@example.com",
+    } as const;
+
+    const midChild = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "contact"],
+      },
+      value: { email: "alice@example.com", phone: "123-456-7890" },
+    } as const;
+
+    const profile = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: {
+        name: "Alice",
+        contact: { email: "alice@example.com", phone: "123-456-7890" },
+      },
+    } as const;
+
+    // Claim in child-to-parent order
+    invariants.claim(deepChild);
+    expect([...invariants]).toHaveLength(1);
+
+    // Claim mid-level - should delete deepChild
+    invariants.claim(midChild);
+    expect([...invariants]).toHaveLength(1);
+    expect([...invariants][0]).toEqual(midChild);
+
+    // Claim parent - should delete midChild
+    invariants.claim(profile);
+    expect([...invariants]).toHaveLength(1);
+    expect([...invariants][0]).toEqual(profile);
+
+    // All queries should return the parent
+    expect(invariants.get(deepChild.address)).toEqual(profile);
+    expect(invariants.get(midChild.address)).toEqual(profile);
+    expect(invariants.get(profile.address)).toEqual(profile);
   });
 });
