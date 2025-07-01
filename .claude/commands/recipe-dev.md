@@ -105,6 +105,62 @@ This script guides Claude through recipe development with the `ct` utility after
 - **Generator recipes**: Create new data based on inputs
 - **Side-effect recipes**: Perform actions (send emails, create files, etc.)
 
+#### Workflow D: Multi-File Recipe Development
+
+**Understanding multi-file recipes:**
+Multi-file recipes allow you to compose functionality from multiple source files. When deployed, all imported files are bundled together into a self-contained charm.
+
+**Key concepts:**
+1. **Import/Export pattern**: Export schemas, types, and even entire recipes from one file, import them in another
+2. **Self-contained deployment**: When you deploy a recipe that imports others, CT bundles all dependencies
+3. **Two deployment strategies**:
+   - **Single charm**: Deploy the main recipe that imports others (creates one bundled charm)
+   - **Linked charms**: Deploy each recipe separately and link their outputs/inputs
+
+**Common pitfalls and solutions:**
+
+1. **Schema mismatches between linked charms**:
+   - Problem: Charm A outputs `{items: [...]}` but Charm B expects `{source: {items: [...]}}`
+   - Solution: Carefully design schemas. Consider having "adapter" recipes if needed
+   - Better: Export shared schemas from a common file
+
+2. **File organization confusion**:
+   - Problem: Multiple versions of the same recipe in different locations
+   - Solution: Use clear folder structure (e.g., `recipes/feature-name/main.tsx`)
+   - Always clean up old versions after reorganizing
+
+3. **Deployment vs development paths**:
+   - Problem: Import paths work locally but fail when deployed
+   - Solution: Use relative imports (`./list.tsx` not absolute paths)
+   - Test with `ct dev [recipe] --no-run` before deploying
+
+**Best practices for multi-file recipes:**
+
+1. **Export reusable schemas**:
+   ```typescript
+   // list.tsx
+   export const TodoItemSchema = { ... };
+   export const TodoListSchema = { ... };
+   
+   // suggestions.tsx
+   import { TodoListSchema } from "./list.tsx";
+   ```
+
+2. **Clear separation of concerns**:
+   - Core functionality in one file
+   - UI enhancements in another
+   - Shared utilities in a common file
+
+3. **Test incrementally**:
+   - Test each file independently first
+   - Test the composed recipe locally
+   - Deploy and verify linking works
+
+4. **Debug multi-file deployments**:
+   - Use `ct charm getsrc` to verify what was actually deployed
+   - Check that all files were bundled correctly
+   - Inspect charm inputs/outputs to ensure schemas match
+
 ### STEP 4: Testing and Validation
 
 **Test recipe changes:**
