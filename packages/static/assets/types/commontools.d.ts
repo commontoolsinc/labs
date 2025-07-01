@@ -160,6 +160,12 @@ export interface BuiltInCompileAndRunState<T> {
     pending: boolean;
     result?: T;
     error?: any;
+    errors?: Array<{
+        line: number;
+        column: number;
+        message: string;
+        type: string;
+    }>;
 }
 export type RecipeFunction = {
     <S extends JSONSchema>(argumentSchema: S, fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;
