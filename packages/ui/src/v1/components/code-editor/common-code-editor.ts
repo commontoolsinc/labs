@@ -10,7 +10,15 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as creatHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { createCancelGroup, replaceSourceIfNeeded } from "./codemirror/utils.ts";
+import {
+  createCancelGroup,
+  replaceSourceIfNeeded,
+} from "./codemirror/utils.ts";
+import {
+  type CompilationError,
+  errorDecorations,
+  setErrors,
+} from "./codemirror/error-decorations.ts";
 
 const freeze = Object.freeze;
 
@@ -126,10 +134,12 @@ export class CommonCodeEditor extends LitElement {
   static override properties = {
     source: { type: String },
     language: { type: String },
+    errors: { type: Array },
   };
 
   declare source: string;
   declare language: MimeType;
+  declare errors?: CompilationError[];
 
   constructor() {
     super();
@@ -150,7 +160,12 @@ export class CommonCodeEditor extends LitElement {
     // Set up skeleton
     // - #editor is managed by ProseMirror
     // - #reactive is rendered via Lit templates and driven by store updates
-    render(html`<div id="editor" class="code-editor"></div>`, this.renderRoot);
+    render(
+      html`
+        <div id="editor" class="code-editor"></div>
+      `,
+      this.renderRoot,
+    );
     const editorRoot = this.renderRoot.querySelector("#editor") as HTMLElement;
 
     const ext = EditorView.updateListener.of((update) => {
@@ -161,11 +176,13 @@ export class CommonCodeEditor extends LitElement {
         this.#docChangeTimeout = globalThis.setTimeout(() => {
           const value = this.#editorView?.state.doc.toString() || "";
           this.source = value;
-          this.dispatchEvent(new CommonCodeEditorEvent({
-            id: this.id,
-            value,
-            language: this.language,
-          }));
+          this.dispatchEvent(
+            new CommonCodeEditorEvent({
+              id: this.id,
+              value,
+              language: this.language,
+            }),
+          );
         }, 500);
       }
     });
@@ -175,6 +192,7 @@ export class CommonCodeEditor extends LitElement {
         this.#lang.of(defaultLang),
         this.#tabSize.of(EditorState.tabSize.of(4)),
         ext,
+        errorDecorations(),
       ],
     });
 
@@ -195,6 +213,9 @@ export class CommonCodeEditor extends LitElement {
       this.#editorView?.dispatch({
         effects: this.#lang.reconfigure(lang),
       });
+    }
+    if (changedProperties.has("errors") && this.#editorView) {
+      setErrors(this.#editorView, this.errors || []);
     }
   }
 }

@@ -5,6 +5,7 @@ import { type Action } from "../scheduler.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { Program } from "@commontools/js-runtime";
+import { CompilerError } from "@commontools/js-runtime/typescript";
 
 /**
  * Compile a recipe/module and run it.
@@ -13,10 +14,12 @@ import type { Program } from "@commontools/js-runtime";
  * @param main - The name of the main recipe to run.
  * @param input - Inputs passed to the recipe once compiled.
  *
- * @returns { result?: any, error?: string, compiling: boolean }
+ * @returns { result?: any, error?: string, errors?: Array<{line: number, column: number, message: string, type: string}>, pending: boolean }
  *   - `result` is the result of the recipe, or undefined.
- *   - `error` error that occurred during compilation or execution, or
+ *   - `error` error string that occurred during compilation or execution, or
  *     undefined.
+ *   - `errors` structured error array with line/column information for
+ *     compilation errors.
  *   - `compiling` is true if the recipe is still being compiled.
  *
  * Note that if an error occurs during execution, both `result` and `error` can
@@ -46,7 +49,15 @@ export function compileAndRun(
     { compile: { error: cause } },
   );
 
-  sendResult({ compiling, result, error });
+  const errors = runtime.getCell<
+    | Array<{ line: number; column: number; message: string; type: string }>
+    | undefined
+  >(
+    parentCell.space,
+    { compile: { errors: cause } },
+  );
+
+  sendResult({ pending: compiling, result, error, errors });
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
@@ -56,6 +67,7 @@ export function compileAndRun(
     const compilingWithLog = compiling.withLog(log);
     const resultWithLog = result.withLog(log);
     const errorWithLog = error.withLog(log);
+    const errorsWithLog = errors.withLog(log);
 
     // TODO(seefeld): Ideally, this cell already has this schema, because we set
     // it on the node itself.
@@ -92,6 +104,7 @@ export function compileAndRun(
     runtime.runner.stop(result);
     resultWithLog.set(undefined);
     errorWithLog.set(undefined);
+    errorsWithLog.set(undefined);
 
     // Undefined inputs => Undefined output, not pending
     if (!program.main || !program.files) {
@@ -116,6 +129,17 @@ export function compileAndRun(
           errorWithLog.set(
             err.message + (err.stack ? "\n" + err.stack : ""),
           );
+
+          // Extract structured errors if this is a CompilerError
+          if (err instanceof CompilerError) {
+            const structuredErrors = err.errors.map((e) => ({
+              line: e.line ?? 1,
+              column: e.column ?? 1,
+              message: e.message,
+              type: e.type,
+            }));
+            errorsWithLog.set(structuredErrors);
+          }
         },
       ).finally(() => {
         if (thisRun !== currentRun) return;
