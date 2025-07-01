@@ -165,6 +165,7 @@ export interface BuiltInCompileAndRunState<T> {
         column: number;
         message: string;
         type: string;
+        file?: string;
     }>;
 }
 export type RecipeFunction = {

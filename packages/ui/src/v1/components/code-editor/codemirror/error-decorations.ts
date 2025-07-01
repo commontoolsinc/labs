@@ -12,6 +12,7 @@ export interface CompilationError {
   column: number;
   message: string;
   type: string;
+  file?: string;
 }
 
 const errorUnderlineStyle = Decoration.mark({
@@ -118,7 +119,8 @@ const errorTooltip = (
             create() {
               const dom = document.createElement("div");
               dom.className = "cm-error-tooltip";
-              dom.textContent = `[${error.type}] ${error.message}`;
+              const fileInfo = error.file ? ` in ${error.file}` : "";
+              dom.textContent = `[${error.type}] ${error.message}${fileInfo}`;
               return { dom };
             },
           };

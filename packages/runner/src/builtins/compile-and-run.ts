@@ -14,13 +14,13 @@ import { CompilerError } from "@commontools/js-runtime/typescript";
  * @param main - The name of the main recipe to run.
  * @param input - Inputs passed to the recipe once compiled.
  *
- * @returns { result?: any, error?: string, errors?: Array<{line: number, column: number, message: string, type: string}>, pending: boolean }
+ * @returns { result?: any, error?: string, errors?: Array<{line: number, column: number, message: string, type: string, file?: string}>, pending: boolean }
  *   - `result` is the result of the recipe, or undefined.
  *   - `error` error string that occurred during compilation or execution, or
  *     undefined.
- *   - `errors` structured error array with line/column information for
+ *   - `errors` structured error array with line/column/file information for
  *     compilation errors.
- *   - `compiling` is true if the recipe is still being compiled.
+ *   - `pending` is true if the recipe is still being compiled.
  *
  * Note that if an error occurs during execution, both `result` and `error` can
  * be defined. (Note: Runtime errors are not currently handled).
@@ -33,11 +33,11 @@ export function compileAndRun(
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  const compiling = runtime.getCell<boolean>(
+  const pending = runtime.getCell<boolean>(
     parentCell.space,
-    { compile: { compiling: cause } },
+    { compile: { pending: cause } },
   );
-  compiling.send(false);
+  pending.send(false);
 
   const result = runtime.getCell<string | undefined>(
     parentCell.space,
@@ -50,21 +50,21 @@ export function compileAndRun(
   );
 
   const errors = runtime.getCell<
-    | Array<{ line: number; column: number; message: string; type: string }>
+    | Array<{ line: number; column: number; message: string; type: string; file?: string }>
     | undefined
   >(
     parentCell.space,
     { compile: { errors: cause } },
   );
 
-  sendResult({ pending: compiling, result, error, errors });
+  sendResult({ pending, result, error, errors });
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
 
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
-    const compilingWithLog = compiling.withLog(log);
+    const pendingWithLog = pending.withLog(log);
     const resultWithLog = result.withLog(log);
     const errorWithLog = error.withLog(log);
     const errorsWithLog = errors.withLog(log);
@@ -108,19 +108,19 @@ export function compileAndRun(
 
     // Undefined inputs => Undefined output, not pending
     if (!program.main || !program.files) {
-      compilingWithLog.set(false);
+      pendingWithLog.set(false);
       return;
     }
 
     // Main file not found => Error, not pending
     if (!program.files.some((file) => file.name === program.main)) {
       errorWithLog.set(`"${program.main}" not found in files`);
-      compilingWithLog.set(false);
+      pendingWithLog.set(false);
       return;
     }
 
     // Now we're sure that we have a new file to compile
-    compilingWithLog.set(true);
+    pendingWithLog.set(true);
 
     const compilePromise = runtime.harness.run(program)
       .catch(
@@ -137,13 +137,14 @@ export function compileAndRun(
               column: e.column ?? 1,
               message: e.message,
               type: e.type,
+              file: e.file,
             }));
             errorsWithLog.set(structuredErrors);
           }
         },
       ).finally(() => {
         if (thisRun !== currentRun) return;
-        compilingWithLog.set(false);
+        pendingWithLog.set(false);
       });
 
     compilePromise.then(async (recipe) => {
