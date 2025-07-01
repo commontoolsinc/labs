@@ -1337,10 +1337,6 @@ export interface Options {
   settings?: IRemoteStorageProviderSettings;
 }
 
-interface Subscriber<T> {
-  integrate(changes: Differential<T>): Result<Unit, Error>;
-}
-
 interface Differential<T>
   extends Iterable<[undefined, T] | [T, undefined] | [T, T]> {
 }
@@ -1707,9 +1703,7 @@ class TransactionJournal implements ITransactionJournal {
     });
   }
 
-  /**
-   * 
-   */
+  /** */
   close() {
     return this.edit((journal) => {
       const status = { pending: this };
@@ -1848,27 +1842,12 @@ class TransactionJournal implements ITransactionJournal {
     return this.edit(
       (journal): Result<ITransactionInvariant, INotFoundError> => {
         const address = { ...at, space: replica.did() };
+        journal.#activity.push({ write: address });
         // We may have written path this will be overwritting.
-        const patch = this.#novelty.for(address.space)?.get(address);
-        if (patch) {
-          const { ok, error } = TransactionInvariant.write(
-            patch,
-            address,
-            value,
-          );
-          if (error) {
-            return { error };
-          } else {
-            journal.#activity.push({ write: address });
-            this.#novelty.for(address.space)?.put(ok);
-            return { ok };
-          }
-        } else {
-          const patch = { address, value };
-          journal.#activity.push({ write: address });
-          this.#novelty.for(address.space)?.put(patch);
-          return { ok: patch };
-        }
+        return this.#novelty.for(address.space).claim({
+          address,
+          value,
+        });
       },
     );
   }
@@ -1924,9 +1903,9 @@ class TransactionInvariant {
     address: IMemorySpaceAddress,
   ): Result<ITransactionInvariant, INotFoundError> {
     const { path } = address;
-    let at = source.address.path.length;
+    let at = source.address.path.length - 1;
     let value = source.value;
-    while (at++ < path.length) {
+    while (++at < path.length) {
       const key = path[at];
       if (typeof value === "object" && value != null) {
         // We do not support array.length as that is JS specific getter.
@@ -1956,9 +1935,9 @@ class TransactionInvariant {
     address: IMemorySpaceAddress,
     value: JSONValue | undefined,
   ): Result<ITransactionInvariant, INotFoundError> {
-    const [...path] = address.path.slice(source.address.path.length);
+    const path = address.path.slice(source.address.path.length);
     if (path.length === 0) {
-      return { ok: source };
+      return { ok: { ...source, value } };
     } else {
       const key = path.pop()!;
       const patch = {
@@ -2011,7 +1990,7 @@ class TransactionInvariant {
  * Novelty introduced by the transaction. It represents changes that have not
  * yet being applied to the memory.
  */
-class Novelty {
+export class Novelty {
   /**
    * State is grouped by space because we commit will only care about invariants
    * made for the space that is being modified allowing us to iterate those
@@ -2106,12 +2085,39 @@ class WriteInvariants {
     }
     return candidate;
   }
-  /**
-   * Adds given {@link TransactionInvariant}.
-   */
-  put(invariant: ITransactionInvariant) {
-    const at = TransactionInvariant.toKey(invariant.address);
 
+  /**
+   * Claims a new write invariant, merging it with existing parent invariants
+   * when possible instead of keeping both parent and child separately.
+   */
+  claim(
+    invariant: ITransactionInvariant,
+  ): Result<ITransactionInvariant, INotFoundError> {
+    const at = TransactionInvariant.toKey(invariant.address);
+    const address = { ...invariant.address, space: this.#space };
+
+    for (const candidate of this.#model.values()) {
+      const key = TransactionInvariant.toKey(candidate.address);
+      // If the new invariant is a parent of the existing invariant we
+      // merge provided child invariant with existing parent inveraint.
+      if (at.startsWith(key)) {
+        const { error, ok: merged } = TransactionInvariant.write(
+          candidate,
+          address,
+          invariant.value,
+        );
+
+        if (error) {
+          return { error };
+        } else {
+          this.#model.set(key, merged);
+          return { ok: merged };
+        }
+      }
+    }
+
+    // If we did not found any parents we may have some children
+    // that will be replaced by this invariant
     for (const key of this.#model.keys()) {
       // If address constains address of the entry it is being
       // overwritten so we can remove it.
@@ -2119,8 +2125,10 @@ class WriteInvariants {
         this.#model.delete(key);
       }
     }
-
+    // Store this invariant
     this.#model.set(at, invariant);
+
+    return { ok: invariant };
   }
 
   *[Symbol.iterator]() {
@@ -2134,7 +2142,7 @@ class WriteInvariants {
  * be included in the commit changeset allowing remote to verify that all of the
  * assumptions made by trasaction are still vaild.
  */
-class History {
+export class History {
   /**
    * State is grouped by space because we commit will only care about invariants
    * made for the space that is being modified allowing us to iterate those
