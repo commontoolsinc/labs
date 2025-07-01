@@ -2260,7 +2260,11 @@ class ReadInvariants {
         }
 
         // If consistent, determine which invariant(s) to keep
-        if (at.startsWith(key)) {
+        if (at === key) {
+          // Same exact address - replace the existing invariant
+          // No need to mark as obsolete, just overwrite
+          continue;
+        } else if (at.startsWith(key)) {
           // New invariant is a child of existing candidate (candidate is parent)
           // Drop the child invariant as it's redundant with the parent
           obsolete.add(at);

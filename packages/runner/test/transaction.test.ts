@@ -903,6 +903,59 @@ describe("WriteInvariants", () => {
       value: undefined,
     });
   });
+
+  it("should overwrite when claiming same exact address", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim an invariant
+    const original = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Alice",
+    } as const;
+
+    const result1 = invariants.claim(original);
+    expect(result1.ok).toEqual(original);
+    expect([...invariants]).toHaveLength(1);
+
+    // Claim again with same exact address but different value
+    const updated = {
+      address: {
+        id: "user:1",
+        type: "application/json", 
+        path: ["profile", "name"],
+      },
+      value: "Bob", // Different value
+    } as const;
+
+    const result2 = invariants.claim(updated);
+    expect(result2.ok).toEqual(updated);
+    expect([...invariants]).toHaveLength(1); // Still only one invariant
+
+    // Should retrieve the updated value
+    const retrieved = invariants.get(original.address);
+    expect(retrieved).toEqual(updated);
+
+    // Claim again with same address and same value (no-op)
+    const sameAgain = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Bob", // Same value as before
+    } as const;
+
+    const result3 = invariants.claim(sameAgain);
+    expect(result3.ok).toEqual(sameAgain);
+    expect([...invariants]).toHaveLength(1); // Still only one invariant
+  });
 });
 
 describe("ReadInvariants", () => {
@@ -1002,6 +1055,213 @@ describe("ReadInvariants", () => {
     const result2 = invariants.claim(conflicting);
     expect(result2.error).toBeDefined();
     expect(result2.error?.name).toBe("StorageTransactionInconsistent");
+  });
+
+  it("should detect inconsistency when child conflicts with parent", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Claim parent invariant first
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: { name: "Alice", email: "alice@example.com" },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Try to claim conflicting child
+    const conflictingChild = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Bob", // Conflicts with parent.name
+    } as const;
+
+    const result = invariants.claim(conflictingChild);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("StorageTransactionInconsistent");
+  });
+
+  it("should detect inconsistency when parent conflicts with child", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Claim child invariant first
+    const child = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "email"],
+      },
+      value: "alice@example.com",
+    } as const;
+
+    invariants.claim(child);
+
+    // Try to claim conflicting parent
+    const conflictingParent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: { name: "Alice", email: "bob@example.com" }, // Conflicts with child.email
+    } as const;
+
+    const result = invariants.claim(conflictingParent);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("StorageTransactionInconsistent");
+  });
+
+  it("should detect inconsistency with nested object conflicts", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Claim nested object invariant
+    const nested = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "settings"],
+      },
+      value: { theme: "dark", language: "en" },
+    } as const;
+
+    invariants.claim(nested);
+
+    // Try to claim parent with conflicting nested data
+    const conflictingParent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: { 
+        name: "Alice", 
+        settings: { theme: "light", language: "en" } // theme conflicts
+      },
+    } as const;
+
+    const result = invariants.claim(conflictingParent);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("StorageTransactionInconsistent");
+  });
+
+  it("should detect inconsistency when child is null and parent expects object", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Claim parent expecting an object at profile
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: { profile: { name: "Alice" } },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Try to claim child that makes profile null
+    const nullChild = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile"],
+      },
+      value: null,
+    } as const;
+
+    const result = invariants.claim(nullChild);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("StorageTransactionInconsistent");
+  });
+
+  it("should detect inconsistency with array vs object conflicts", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Claim invariant with array value
+    const arrayInvariant = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["tags"],
+      },
+      value: ["developer", "javascript"],
+    } as const;
+
+    invariants.claim(arrayInvariant);
+
+    // Try to claim parent that expects tags to be an object
+    const conflictingParent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: { tags: { primary: "developer", secondary: "javascript" } },
+    } as const;
+
+    const result = invariants.claim(conflictingParent);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("StorageTransactionInconsistent");
+  });
+
+  it("should include both invariants in inconsistency error details", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // Claim first invariant
+    const first = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["config"],
+      },
+      value: { mode: "production", debug: false },
+    } as const;
+
+    invariants.claim(first);
+
+    // Try to claim conflicting invariant
+    const conflicting = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["config", "mode"],
+      },
+      value: "development", // Conflicts with first.mode
+    } as const;
+
+    const result = invariants.claim(conflicting);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("StorageTransactionInconsistent");
+    
+    // Verify error includes both invariants
+    const error = result.error as any;
+    expect(error.inconsitencies).toHaveLength(2);
+    expect(error.inconsitencies).toContainEqual(first);
+    expect(error.inconsitencies).toContainEqual(conflicting);
   });
 
   it("should allow consistent child invariants", async () => {
@@ -1336,5 +1596,62 @@ describe("ReadInvariants", () => {
     expect(invariants.get(deepChild.address)).toEqual(profile);
     expect(invariants.get(midChild.address)).toEqual(profile);
     expect(invariants.get(profile.address)).toEqual(profile);
+  });
+
+  it("should detect inconsistency when claiming same exact address with different value", async () => {
+    const history = new History();
+    const identity = await Identity.fromPassphrase("read invariants test");
+    const space = identity.did();
+    const invariants = history.for(space);
+
+    // First claim an invariant
+    const original = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Alice",
+    } as const;
+
+    const result1 = invariants.claim(original);
+    expect(result1.ok).toEqual(original);
+    expect([...invariants]).toHaveLength(1);
+
+    // Claim again with same exact address but different value should fail
+    const updated = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Bob", // Different value
+    } as const;
+
+    const result2 = invariants.claim(updated);
+    expect(result2.error).toBeDefined();
+    expect(result2.error?.name).toBe("StorageTransactionInconsistent");
+    expect([...invariants]).toHaveLength(1); // Still only one invariant
+
+    // Should still retrieve the original value
+    const retrieved = invariants.get(original.address);
+    expect(retrieved).toEqual(original);
+
+    // Claim again with same address and same value (should work fine)
+    const sameAgain = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "name"],
+      },
+      value: "Alice", // Same value as original
+    } as const;
+
+    const result3 = invariants.claim(sameAgain);
+    expect(result3.ok).toEqual(sameAgain);
+    expect([...invariants]).toHaveLength(1); // Still only one invariant
+
+    // Final verification
+    expect(invariants.get(original.address)).toEqual(original);
   });
 });
