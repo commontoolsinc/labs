@@ -19,6 +19,7 @@ This script guides Claude through recipe development with the `ct` utility after
   - Identity management
   - Environment setup
   - Parameter collection (API URL, space name, recipe path)
+  - Recipe development TypeScript setup (`ct init`)
 
 **Verify existing space:**
 - Run: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
@@ -57,10 +58,11 @@ This script guides Claude through recipe development with the `ct` utility after
    - What processing logic is required
 
 **Create recipe file:**
-1. Guide user through creating a new .tsx file
-2. Start with a template based on their requirements
-3. Test syntax: `./dist/ct dev [new-recipe-path] --no-run`
-4. Iterate on the recipe until it's correct
+1. Ensure TypeScript setup is current: `./dist/ct init` (run in recipes directory)
+2. Guide user through creating a new .tsx file
+3. Start with a template based on their requirements
+4. Test syntax: `./dist/ct dev [new-recipe-path] --no-run`
+5. Iterate on the recipe until it's correct
 
 **Deploy new charm:**
 1. Create the charm: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [new-recipe-path]`

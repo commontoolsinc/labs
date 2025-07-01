@@ -16,6 +16,14 @@ This document contains shared setup instructions for the CT binary that are used
 - If no keyfiles found: Run `./dist/ct id new > space-identity.key`
 - If keyfiles exist, ask user which one to use or create a new one
 
+## Recipe Development Setup
+
+**Initialize TypeScript environment:**
+- Navigate to your recipes repository (or any folder where you'll develop recipes)
+- Run `./dist/ct init` to set up TypeScript types for recipe development
+- This creates/updates tsconfig.json and provides proper type definitions
+- Run this command whenever you update CT to get the latest types
+
 ## Environment Setup
 
 **Set up environment (recommend but don't require):**
@@ -28,7 +36,8 @@ This document contains shared setup instructions for the CT binary that are used
 **Get API URL:**
 - Ask user: "What is your CT API URL? (e.g., https://ct.dev, https://toolshed.saga-castor.ts.net/, or your custom instance)"
 - Store as variable for all commands
-- Test connectivity: `./dist/ct charm ls --identity [keyfile] --api-url [user-api-url] --space test-connection` (this might fail but shows if URL works)
+- **IMPORTANT:** For toolshed.saga-castor.ts.net or any *.ts.net URL, you must be connected to the CT Tailnet. If commands fail or hang, this is likely the issue.
+- Test connectivity: `./dist/ct charm ls --identity <keyfile> --api-url <user-api-url> --space test-connection` (this might fail but shows if URL works)
 
 **Get space name:**
 - Ask user what space they want to work with
@@ -51,23 +60,38 @@ This document contains shared setup instructions for the CT binary that are used
 - Verify the URL is correct and accessible
 - Check network connectivity
 - Verify identity file permissions
+- **For *.ts.net URLs:** Ensure you're connected to the CT Tailnet (commands will hang or timeout if not connected)
 
 ## Key CT Commands Reference
 
+### Identity Management:
+- `./dist/ct id new` - Create a new identity keyfile
+- `./dist/ct id` - Interact with common identities
+
+### Recipe Development Setup:
+- `./dist/ct init` - Initialize TypeScript environment for recipe development (run this in your recipes repo)
+
 ### Basic Commands:
-- `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]` - Create charm
-- `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source] [target]/[field]` - Link data
-- `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]` - List charms
-- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Inspect charm details
-- `./dist/ct charm inspect --identity [keyfile] --url [full-url-with-charm-id]` - Inspect charm details (URL syntax)
-- `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] --json` - Output raw JSON data
-- `./dist/ct charm map --identity [keyfile] --api-url [api-url] --space [spacename]` - Display visual map of charms and connections
-- `./dist/ct charm map --identity [keyfile] --api-url [api-url] --space [spacename] --format dot` - Output Graphviz DOT format
+- `./dist/ct charm new --identity <keyfile> --api-url <api-url> --space <spacename> <recipe-path>` - Create charm
+- `./dist/ct charm new --identity <keyfile> --api-url <api-url> --space <spacename> --main-export <export> <recipe-path>` - Create charm with named export
+- `./dist/ct charm link --identity <keyfile> --api-url <api-url> --space <spacename> <source> <target>/<field>` - Link data
+- `./dist/ct charm ls --identity <keyfile> --api-url <api-url> --space <spacename>` - List charms
+- `./dist/ct charm inspect --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id>` - Inspect charm details
+- `./dist/ct charm inspect --identity <keyfile> --url <full-url-with-charm-id>` - Inspect charm details (URL syntax)
+- `./dist/ct charm inspect --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> --json` - Output raw JSON data
+- `./dist/ct charm map --identity <keyfile> --api-url <api-url> --space <spacename>` - Display visual map of charms and connections (ASCII format)
+- `./dist/ct charm map --identity <keyfile> --api-url <api-url> --space <spacename> --format dot` - Output Graphviz DOT format
+- `./dist/ct charm apply --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id>` - Apply new inputs to charm (pipe JSON via stdin)
 
 ### Recipe Development Commands:
-- `./dist/ct charm getsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id]` - Get recipe source code
-- `./dist/ct charm setsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [id] [recipe-path]` - Update recipe source
-- `./dist/ct dev [recipe-path] --no-run` - Test recipe syntax locally
+- `./dist/ct charm getsrc --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <outpath>` - Get recipe source code
+- `./dist/ct charm setsrc --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <recipe-path>` - Update recipe source
+- `./dist/ct charm setsrc --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> --main-export <export> <recipe-path>` - Update recipe source with named export
+- `./dist/ct dev <recipe-path>` - Compile and execute recipe locally
+- `./dist/ct dev <recipe-path> --no-run` - Type check recipe without executing
+- `./dist/ct dev <recipe-path> --no-check` - Execute recipe without type checking
+- `./dist/ct dev <recipe-path> --no-run --output <file>` - Compile recipe to JavaScript file
+- `./dist/ct dev <recipe-path> --filename <name>` - Set filename for source maps
 
 ## Understanding Linking
 
@@ -100,10 +124,14 @@ The `ct charm map` command helps visualize the connections between charms in a s
 - Use `--format dot` to output in Graphviz format
 - Can be rendered to images using Graphviz tools:
   ```bash
-  # Install Graphviz (macOS: brew install graphviz)
-  ct charm map --identity [key] --api-url [url] --space [space] --format dot | dot -Tpng -o map.png
+  # Install Graphviz (macOS: brew install graphviz, Linux: apt-get install graphviz)
+  ct charm map --identity <key> --api-url <url> --space <space> --format dot | dot -Tpng -o map.png
   ```
-- Alternatively, paste DOT output into online tools like https://dreampuf.github.io/GraphvizOnline/
+- Alternatively, use online visualization:
+  1. Run: `ct charm map --identity <key> --api-url <url> --space <space> --format dot`
+  2. Copy the DOT output
+  3. URL encode the output and append to: `https://dreampuf.github.io/GraphvizOnline/?engine=dot#`
+  4. Or paste directly into https://dreampuf.github.io/GraphvizOnline/
 
 ## Important Notes
 
