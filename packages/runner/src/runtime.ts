@@ -287,6 +287,7 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { isCell } from "./cell.ts";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
@@ -578,7 +579,15 @@ export class Runtime implements IRuntime {
     argument: T,
     resultCell: DocImpl<R> | Cell<R>,
   ): DocImpl<R> | Cell<R> {
-    return this.runner.run(recipeOrModule, argument, resultCell as any);
+    if (isCell(resultCell)) {
+      return this.runner.run<T, R>(recipeOrModule, argument, resultCell);
+    } else {
+      return this.runner.run<T, R>(
+        recipeOrModule,
+        argument,
+        resultCell as DocImpl<R>,
+      );
+    }
   }
 
   runSynced(
