@@ -2215,9 +2215,14 @@ class ReadInvariants {
       // If `address` is contained in inside an invariant address it is a
       // candidate invariant. If this candidate has longer path than previous
       // candidate this is a better match so we pick this one.
-      const length = at.startsWith(key) ? invariant.address.path.length : -1;
-      if (candidate?.address?.path?.length ?? -1 < length) {
-        candidate = invariant;
+      if (at.startsWith(key)) {
+        if (!candidate) {
+          candidate = invariant;
+        } else if (
+          candidate.address.path.length < invariant.address.path.length
+        ) {
+          candidate = invariant;
+        }
       }
     }
 
@@ -2235,11 +2240,11 @@ class ReadInvariants {
     const address = { ...invariant.address, space: this.space };
 
     for (const candidate of this) {
-      const key = TransactionInvariant.toKey(invariant.address);
+      const key = TransactionInvariant.toKey(candidate.address);
       // If we have an existing invariant that is either child or a parent of
       // the new one two must be consistent with one another otherwise we are in
       // an inconsistent state.
-      if (at.startsWith(key) || at.startsWith(key)) {
+      if (at.startsWith(key) || key.startsWith(at)) {
         const expect = TransactionInvariant.read(candidate, address).ok?.value;
         const actual = TransactionInvariant.read(invariant, address).ok?.value;
 
@@ -2249,6 +2254,8 @@ class ReadInvariants {
       }
     }
 
+    // Store the invariant after consistency check passes
+    this.#model.set(at, invariant);
     return { ok: invariant };
   }
 }
