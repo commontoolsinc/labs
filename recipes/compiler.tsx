@@ -54,7 +54,7 @@ const updateCode = handler<{ detail: { value: string } }, { code: string }>(
 );
 
 const visit = handler<
-  {},
+  { detail: { value: string } },
   { result: { [UI]: any; [NAME]: string } }
 >(
   (_, state) => {
