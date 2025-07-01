@@ -141,7 +141,7 @@ export class Runner implements IRunner {
     // passing arguments in unmodified and passing all results through as is
     if (isModule(recipeOrModule)) {
       const module = recipeOrModule as Module;
-      recipeId ??= this.runtime.recipeManager.generateRecipeId(module);
+      recipeId ??= this.runtime.recipeManager.registerRecipe(module);
 
       recipe = {
         argumentSchema: module.argumentSchema ?? {},
@@ -159,7 +159,12 @@ export class Runner implements IRunner {
       recipe = recipeOrModule as Recipe;
     }
 
-    recipeId ??= this.runtime.recipeManager.generateRecipeId(recipe);
+    recipeId ??= this.runtime.recipeManager.registerRecipe(recipe);
+    this.runtime.recipeManager.saveRecipe({
+      recipeId,
+      space: resultDoc.space,
+      recipe,
+    });
 
     if (this.cancels.has(resultDoc)) {
       // If it's already running and no new recipe or argument are given,

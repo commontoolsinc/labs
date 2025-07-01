@@ -199,18 +199,26 @@ export interface IStorage {
 export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
-  generateRecipeId(recipe: any, src?: string | RuntimeProgram): string;
+  registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
   loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
   compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
-  registerRecipe(
+  saveRecipe(
     params: {
       recipeId: string;
       space: MemorySpace;
-      recipe: Recipe | Module;
-      recipeMeta: RecipeMeta;
+      recipe?: Recipe | Module;
+      recipeMeta?: RecipeMeta;
     },
-  ): Promise<boolean>;
+  ): boolean;
+  saveAndSyncRecipe(
+    params: {
+      recipeId: string;
+      space: MemorySpace;
+      recipe?: Recipe | Module;
+      recipeMeta?: RecipeMeta;
+    },
+  ): Promise<void>;
 }
 
 export interface IModuleRegistry {
