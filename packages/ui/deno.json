@@ -10,6 +10,7 @@
     "test": "echo 'No tests to run.'"
   },
   "imports": {
-    "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1"
+    "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1",
+    "marked": "npm:marked@^4.0.0"
   }
 }

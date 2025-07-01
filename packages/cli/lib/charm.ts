@@ -380,6 +380,150 @@ export async function linkCharms(
   await manager.synced();
 }
 
+// Constants for charm mapping
+const SHORT_ID_LENGTH = 8;
+
+// Types for charm mapping
+export interface CharmConnection {
+  name: string;
+  readingFrom: string[];
+  readBy: string[];
+}
+
+export type CharmConnectionMap = Map<string, CharmConnection>;
+
+// Helper functions for charm mapping
+function createShortId(id: string): string {
+  if (id.length <= SHORT_ID_LENGTH * 2 + 3) {
+    return id; // Don't truncate if it's already short enough
+  }
+  const start = id.slice(0, SHORT_ID_LENGTH);
+  const end = id.slice(-SHORT_ID_LENGTH);
+  return `${start}...${end}`;
+}
+
+function createCharmConnection(
+  charm: { id: string; name?: string },
+  details?: { name?: string; readingFrom: Array<{ id: string }>; readBy: Array<{ id: string }> },
+): CharmConnection {
+  return {
+    name: details?.name || charm.name || createShortId(charm.id),
+    readingFrom: details?.readingFrom.map(c => c.id) || [],
+    readBy: details?.readBy.map(c => c.id) || [],
+  };
+}
+
+async function buildConnectionMap(config: SpaceConfig): Promise<CharmConnectionMap> {
+  const charms = await listCharms(config);
+  const connections: CharmConnectionMap = new Map();
+
+  for (const charm of charms) {
+    const charmConfig: CharmConfig = { ...config, charm: charm.id };
+    try {
+      const details = await inspectCharm(charmConfig);
+      connections.set(charm.id, createCharmConnection(charm, details));
+    } catch (error) {
+      // Skip charms that can't be inspected, but include them with no connections
+      console.error(`Warning: Could not inspect charm ${charm.id}: ${error instanceof Error ? error.message : String(error)}`);
+      connections.set(charm.id, createCharmConnection(charm));
+    }
+  }
+
+  return connections;
+}
+
+function generateAsciiMap(connections: CharmConnectionMap): string {
+  if (connections.size === 0) {
+    return "No charms found in space.";
+  }
+
+  let output = "=== Charm Space Map ===\n\n";
+
+  // Sort charms by connection count for better visualization
+  const sortedCharms = Array.from(connections.entries()).sort(
+    ([, a], [, b]) => 
+      (b.readingFrom.length + b.readBy.length) - 
+      (a.readingFrom.length + a.readBy.length)
+  );
+
+  for (const [id, info] of sortedCharms) {
+    const shortId = createShortId(id);
+    output += `📦 ${info.name} [${shortId}]\n`;
+    
+    if (info.readingFrom.length > 0) {
+      output += "  ← reads from:\n";
+      for (const sourceId of info.readingFrom) {
+        const sourceName = connections.get(sourceId)?.name || createShortId(sourceId);
+        output += `    • ${sourceName}\n`;
+      }
+    }
+    
+    if (info.readBy.length > 0) {
+      output += "  → read by:\n";
+      for (const targetId of info.readBy) {
+        const targetName = connections.get(targetId)?.name || createShortId(targetId);
+        output += `    • ${targetName}\n`;
+      }
+    }
+    
+    if (info.readingFrom.length === 0 && info.readBy.length === 0) {
+      output += "  (no connections)\n";
+    }
+    
+    output += "\n";
+  }
+
+  return output;
+}
+
+function generateDotMap(connections: CharmConnectionMap): string {
+  let dot = "digraph CharmSpace {\n";
+  dot += "  rankdir=LR;\n";
+  dot += "  node [shape=box];\n\n";
+
+  // Add nodes
+  for (const [id, info] of connections) {
+    const shortId = createShortId(id);
+    dot += `  "${id}" [label="${info.name}\\n${shortId}"];\n`;
+  }
+  dot += "\n";
+
+  // Add edges
+  for (const [id, info] of connections) {
+    for (const targetId of info.readingFrom) {
+      dot += `  "${targetId}" -> "${id}";\n`;
+    }
+  }
+
+  dot += "}";
+  return dot;
+}
+
+export enum MapFormat {
+  ASCII = "ascii",
+  DOT = "dot",
+}
+
+export async function getCharmConnections(config: SpaceConfig): Promise<CharmConnectionMap> {
+  return await buildConnectionMap(config);
+}
+
+export function formatSpaceMap(connections: CharmConnectionMap, format: MapFormat): string {
+  switch (format) {
+    case MapFormat.ASCII:
+      return generateAsciiMap(connections);
+    case MapFormat.DOT:
+      return generateDotMap(connections);
+    default:
+      throw new Error(`Unsupported format: ${format}`);
+  }
+}
+
+export async function generateSpaceMap(config: SpaceConfig, format: MapFormat = MapFormat.ASCII): Promise<string> {
+  const connections = await getCharmConnections(config);
+  return formatSpaceMap(connections, format);
+}
+
 export async function inspectCharm(
   config: CharmConfig,
 ): Promise<{

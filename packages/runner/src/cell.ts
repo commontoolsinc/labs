@@ -9,7 +9,7 @@ import {
   type JSONSchema,
   type Schema,
 } from "./builder/types.ts";
-import { type DeepKeyLookup, type DocImpl, isDoc } from "./doc.ts";
+import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
 import { getEntityId } from "./doc-map.ts";
 import {
   createQueryResultProxy,
@@ -157,12 +157,12 @@ declare module "@commontools/api" {
       T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
 
-    asSchema<T>(
-      schema?: JSONSchema,
-    ): Cell<T>;
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
+    asSchema<T>(
+      schema?: JSONSchema,
+    ): Cell<T>;
     withLog(log: ReactivityLog): Cell<T>;
     sink(callback: (value: T) => Cancel | undefined | void): Cancel;
     getAsQueryResult<Path extends PropertyKey[]>(
@@ -189,23 +189,30 @@ declare module "@commontools/api" {
     setRaw(value: any): boolean;
     getSourceCell<T>(
       schema?: JSONSchema,
-    ): Cell<
-      & T
-      // Add default types for TYPE and `argument`. A more specific type in T will
-      // take precedence.
-      & { [TYPE]: string | undefined }
-      & ("argument" extends keyof T ? unknown : { argument: any })
-    >;
+    ):
+      | Cell<
+        & T
+        // Add default types for TYPE and `argument`. A more specific type in T will
+        // take precedence.
+        & { [TYPE]: string | undefined }
+        & ("argument" extends keyof T ? unknown : { argument: any })
+      >
+      | undefined;
     getSourceCell<S extends JSONSchema = JSONSchema>(
       schema: S,
-    ): Cell<
-      & Schema<S>
-      // Add default types for TYPE and `argument`. A more specific type in
-      // `schema` will take precedence.
-      & { [TYPE]: string | undefined }
-      & ("argument" extends keyof Schema<S> ? unknown
-        : { argument: any })
-    >;
+    ):
+      | Cell<
+        & Schema<S>
+        // Add default types for TYPE and `argument`. A more specific type in
+        // `schema` will take precedence.
+        & { [TYPE]: string | undefined }
+        & ("argument" extends keyof Schema<S> ? unknown
+          : { argument: any })
+      >
+      | undefined;
+    setSourceCell(sourceCell: Cell<any>): void;
+    freeze(reason: string): void;
+    isFrozen(): boolean;
     toJSON(): JSONCellLink;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
@@ -498,6 +505,14 @@ function createRegularCell<T>(
     setRaw: (value: any) => doc.setAtPath(path, value),
     getSourceCell: (newSchema?: JSONSchema) =>
       doc.sourceCell?.asCell([], log, newSchema, newSchema) as Cell<any>,
+    setSourceCell: (sourceCell: Cell<any>) => {
+      if (sourceCell.path.length > 0) {
+        throw new Error("Source cell must have empty path for now");
+      }
+      doc.sourceCell = sourceCell.getDoc();
+    },
+    freeze: (reason: string) => doc.freeze(reason),
+    isFrozen: () => doc.isFrozen(),
     toJSON: (): JSONCellLink => // Keep old format for backward compatibility
     ({ cell: doc.toJSON()!, path: path as (string | number)[] }),
     get value(): T {

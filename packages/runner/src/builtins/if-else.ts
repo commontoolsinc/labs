@@ -12,7 +12,7 @@ export function ifElse(
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
   const result = runtime.getCell<any>(
-    parentCell.getDoc().space,
+    parentCell.space,
     { ifElse: cause },
   );
   sendResult(result);

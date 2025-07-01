@@ -14,6 +14,7 @@ This script guides Claude through setting up a complete space with the `ct` util
   - Identity keyfile management
   - Environment variable setup (CT_API_URL and CT_IDENTITY)
   - API URL collection and connectivity test
+  - Recipe development TypeScript setup (user should run `ct init` in recipes directory)
 
 ### STEP 2: Space-Specific Setup
 
@@ -23,6 +24,7 @@ This script guides Claude through setting up a complete space with the `ct` util
 
 **Find recipe path:**
 - Follow the recipe path discovery process from common/ct.md
+- Once recipe path is found, user should run `ct init` in the recipes directory to set up TypeScript types
 - Additionally, look specifically for these key recipes:
   - `find [user-provided-path] -name "*gmail*" -o -name "*email*" -o -name "*list*" | head -5`
   - Verify key recipes exist: `ls -la [user-provided-path]/coralreef/gmail.tsx` (or find where gmail.tsx is located)

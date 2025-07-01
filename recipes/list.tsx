@@ -62,6 +62,14 @@ const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
   },
 );
 
+const removeTask = handler<
+  { detail: { item: { title: string } } },
+  { items: TodoItem[] }
+>(({ detail }, { items }) => {
+  const idx = items.findIndex((i) => i.title === detail.item.title);
+  if (idx !== -1) items.splice(idx, 1);
+});
+
 const addItem = handler(
   {
     type: "object",
@@ -105,6 +113,12 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
   derive(items, (items) => {
     console.log("todo list items changed", { items });
   });
+
+  const listData = derive(items, (items) => ({
+    title: "",
+    items: items.map(item => ({ title: item.title }))
+  }));
+
   return {
     [NAME]: title,
     [UI]: (
@@ -115,46 +129,10 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
           oncommon-input={updateTitle({ title })}
           customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
         />
-        <common-vstack gap="sm">
-          {items.map((item: TodoItem) => (
-            <common-draggable
-              $entity={item}
-              spell={JSON.stringify(
-                recipe(TodoItemSchema, {}, (item) => ({
-                  [UI]: (
-                    <common-todo
-                      checked={item.done}
-                      value={item.title}
-                      ontodo-checked={updateItem({ item })}
-                      ontodo-input={updateItem({ item })}
-                    />
-                  ),
-                })),
-              )}
-            >
-              <common-hstack>
-                <common-todo
-                  checked={item.done}
-                  value={item.title}
-                  ontodo-checked={updateItem({ item })}
-                  ontodo-input={updateItem({ item })}
-                />
-                <sl-button
-                  outline
-                  variant="danger"
-                  onclick={deleteItem({ item, items })}
-                >
-                  Delete
-                </sl-button>
-              </common-hstack>
-            </common-draggable>
-          ))}
-        </common-vstack>
-        <common-send-message
-          name="Add"
-          placeholder="New task"
-          appearance="rounded"
-          onmessagesend={addTask({ items })}
+        <ct-list
+          list={listData}
+          onct-add-item={addTask({ items })}
+          onct-remove-item={removeTask({ items })}
         />
       </os-container>
     ),

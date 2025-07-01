@@ -163,6 +163,22 @@ export function isLink(
 }
 
 /**
+ * Check if value is a normalized link.
+ *
+ * Beware: Unlike all the other types that `isLink` is checking for, this could
+ * appear in regular data and not actually be meant as a link. So only use this
+ * if you know for sure that the value is a link.
+ */
+export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.space === "string" &&
+    Array.isArray(value.path)
+  );
+}
+
+/**
  * Check if value is an alias in any format (old $alias or new sigil)
  */
 export function isWriteRedirectLink(

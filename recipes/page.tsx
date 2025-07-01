@@ -328,7 +328,7 @@ export default recipe(PageInputSchema, PageResultSchema, (
           value={title}
           placeholder="Page title"
           oncommon-input={updateTitle({ title })}
-          customStyle="font-size: 20px; font-family: monospace; text-decoration: underline;"
+          customStyle="font-size: 32px; font-family: serif;"
         />
         <fieldset>
           <common-input

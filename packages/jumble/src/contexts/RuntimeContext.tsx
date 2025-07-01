@@ -11,6 +11,7 @@ import {
   StorageManager,
 } from "@commontools/runner/storage/cache";
 import { useAuthentication } from "./AuthenticationContext.tsx";
+import { navigateToCharm } from "@/utils/navigation.ts";
 import { setupIframe } from "@/iframe-ctx.ts";
 import * as Sentry from "@sentry/react";
 interface RuntimeContextType {
@@ -66,6 +67,7 @@ export function RuntimeProvider({
         }
         return [`Console [${method}]:`, ...args];
       },
+      navigateCallback: (target) => navigateToCharm(target),
     });
 
     setupIframe(runtime);

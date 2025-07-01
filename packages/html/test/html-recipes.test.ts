@@ -15,10 +15,10 @@ describe("recipes with HTML", () => {
   let document: Document;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let lift: ReturnType<typeof createBuilder>["lift"];
-  let recipe: ReturnType<typeof createBuilder>["recipe"];
-  let str: ReturnType<typeof createBuilder>["str"];
-  let UI: ReturnType<typeof createBuilder>["UI"];
+  let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let str: ReturnType<typeof createBuilder>["commontools"]["str"];
+  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
   beforeEach(() => {
     // Set up a fresh JSDOM instance for each test
@@ -39,8 +39,8 @@ describe("recipes with HTML", () => {
       storageManager,
     });
 
-    const builder = createBuilder(runtime);
-    ({ lift, recipe, str, UI } = builder);
+    const { commontools } = createBuilder(runtime);
+    ({ lift, recipe, str, UI } = commontools);
   });
 
   afterEach(async () => {
