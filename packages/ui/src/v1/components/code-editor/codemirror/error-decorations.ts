@@ -60,7 +60,7 @@ const errorField = StateField.define<DecorationSet>({
             }
           }
         }
-        return Decoration.set(decorations as any, true);
+        return Decoration.set(decorations as any, false);
       }
     }
     return errors.map(tr.changes);
