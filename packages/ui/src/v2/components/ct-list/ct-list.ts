@@ -10,20 +10,33 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {Object} list - List object with title and items array
  * @attr {boolean} readonly - Whether the list is read-only
+ * @attr {Object} action - Action button config: { type: 'remove'|'accept'|'custom', label?: string, event?: string }
  *
  * @fires ct-add-item - Fired when adding an item with detail: { message }
  * @fires ct-remove-item - Fired when removing an item with detail: { item }
+ * @fires ct-accept-item - Fired when accepting an item with detail: { item }
+ * @fires ct-action-item - Fired for custom actions with detail: { item }
  *
  * @example
- * <ct-list .list="${{title: 'My List', items: [...]}}" @ct-add-item="${handleAdd}"></ct-list>
+ * <ct-list .list="${{title: 'My List', items: [...]}}" .action="${{type: 'accept'}}" @ct-accept-item="${handleAccept}"></ct-list>
  */
 
 export class CTList extends BaseElement {
   @property({ type: Object })
-  accessor list: { title: string; items: Array<{ title: string; done?: boolean }> } = { title: "", items: [] };
+  accessor list: {
+    title: string;
+    items: Array<{ title: string; done?: boolean }>;
+  } = { title: "", items: [] };
 
   @property({ type: Boolean })
   accessor readonly: boolean = false;
+
+  @property({ type: Object })
+  accessor action: {
+    type: "remove" | "accept" | "custom";
+    label?: string;
+    event?: string;
+  } | null = { type: "remove" };
 
   static override styles = css`
     :host {
@@ -93,15 +106,13 @@ export class CTList extends BaseElement {
       color: var(--foreground);
     }
 
-    .item-remove {
+    .item-action {
       display: flex;
       align-items: center;
       justify-content: center;
       width: 1.5rem;
       height: 1.5rem;
       border-radius: 0.25rem;
-      background-color: var(--destructive);
-      color: var(--destructive-foreground);
       cursor: pointer;
       font-size: 0.75rem;
       font-weight: bold;
@@ -110,12 +121,26 @@ export class CTList extends BaseElement {
       border: none;
     }
 
-    .list-item:hover .item-remove {
+    .list-item:hover .item-action {
       opacity: 1;
     }
 
-    .item-remove:hover {
+    .item-action.remove {
+      background-color: var(--destructive);
+      color: var(--destructive-foreground);
+    }
+
+    .item-action.remove:hover {
       background-color: #dc2626;
+    }
+
+    .item-action.accept {
+      background-color: #22c55e;
+      color: #ffffff;
+    }
+
+    .item-action.accept:hover {
+      background-color: #16a34a;
     }
 
     .add-item-container {
@@ -172,9 +197,20 @@ export class CTList extends BaseElement {
     }
   `;
 
+  private handleActionItem(item: { title: string; done?: boolean }) {
+    if (!this.action) return;
 
-  private handleRemoveItem(item: { title: string; done?: boolean }) {
-    this.emit("ct-remove-item", { item });
+    switch (this.action.type) {
+      case "remove":
+        this.emit("ct-remove-item", { item });
+        break;
+      case "accept":
+        this.emit("ct-accept-item", { item });
+        break;
+      case "custom":
+        this.emit(this.action.event || "ct-action-item", { item });
+        break;
+    }
   }
 
   private handleAddItem(event: Event) {
@@ -182,7 +218,7 @@ export class CTList extends BaseElement {
     const form = event.target as HTMLFormElement;
     const formData = new FormData(form);
     const message = formData.get("message") as string;
-    
+
     if (message?.trim()) {
       this.emit("ct-add-item", { message: message.trim() });
       form.reset();
@@ -191,22 +227,25 @@ export class CTList extends BaseElement {
 
   override render() {
     if (!this.list) {
-      return html`<div class="empty-state">No list data</div>`;
+      return html`
+        <div class="empty-state">No list data</div>
+      `;
     }
 
     return html`
       <div class="list-container">
         <h2 class="list-title">${this.list.title}</h2>
-        
+
         <div class="list-items">
-          ${this.list.items.length === 0 
-            ? html`<div class="empty-state">No items in this list</div>`
-            : repeat(
-                this.list.items,
-                (item) => item.title,
-                (item) => this.renderItem(item)
-              )
-          }
+          ${this.list.items.length === 0
+        ? html`
+          <div class="empty-state">No items in this list</div>
+        `
+        : repeat(
+          this.list.items,
+          (item) => item.title,
+          (item) => this.renderItem(item),
+        )}
         </div>
 
         ${!this.readonly ? this.renderAddItem() : ""}
@@ -215,23 +254,52 @@ export class CTList extends BaseElement {
   }
 
   private renderItem(item: { title: string; done?: boolean }) {
+    const actionButton = this.action && !this.readonly
+      ? this.renderActionButton(item)
+      : "";
+
     return html`
       <div class="list-item">
         <div class="item-bullet"></div>
         <div class="item-content">${item.title}</div>
-        ${!this.readonly 
-          ? html`
-            <button 
-              class="item-remove"
-              @click="${() => this.handleRemoveItem(item)}"
-              title="Remove item"
-            >
-              ×
-            </button>
-          `
-          : ""
-        }
+        ${actionButton}
       </div>
+    `;
+  }
+
+  private renderActionButton(item: { title: string; done?: boolean }) {
+    if (!this.action) return "";
+
+    const getButtonContent = () => {
+      switch (this.action!.type) {
+        case "remove":
+          return "×";
+        case "accept":
+          return "+";
+        case "custom":
+          return this.action!.label || "•";
+      }
+    };
+
+    const getTitle = () => {
+      switch (this.action!.type) {
+        case "remove":
+          return "Remove item";
+        case "accept":
+          return "Accept item";
+        case "custom":
+          return this.action!.label || "Action";
+      }
+    };
+
+    return html`
+      <button
+        class="item-action ${this.action.type}"
+        @click="${() => this.handleActionItem(item)}"
+        title="${getTitle()}"
+      >
+        ${getButtonContent()}
+      </button>
     `;
   }
 

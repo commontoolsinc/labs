@@ -19,7 +19,7 @@ This script guides Claude through recipe development with the `ct` utility after
   - Identity management
   - Environment setup
   - Parameter collection (API URL, space name, recipe path)
-  - Recipe development TypeScript setup (`ct init`)
+  - Recipe development TypeScript setup (user should run `ct init` in recipes directory)
 
 **Verify existing space:**
 - Run: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
@@ -58,7 +58,7 @@ This script guides Claude through recipe development with the `ct` utility after
    - What processing logic is required
 
 **Create recipe file:**
-1. Ensure TypeScript setup is current: `./dist/ct init` (run in recipes directory)
+1. Ensure TypeScript setup is current: User should run `ct init` manually in their recipes directory
 2. Guide user through creating a new .tsx file
 3. Start with a template based on their requirements
 4. Test syntax: `./dist/ct dev [new-recipe-path] --no-run`
@@ -184,6 +184,40 @@ Multi-file recipes allow you to compose functionality from multiple source files
 - Explain CommonTools recipe format
 - Show how to define inputs, outputs, and processing
 - Guide on using UI components and controls
+
+**Handler pattern for UI interactions:**
+Handlers in CommonTools follow a specific pattern for managing UI events and state:
+
+```typescript
+// Handler definition: handler(eventSchema, stateSchema, handlerFunction)
+const myHandler = handler(
+  {},  // Event schema (data from UI events like clicks)
+  {    // State schema (data the handler needs to operate on)
+    type: "object",
+    properties: {
+      items: { type: "array" },
+      someValue: { type: "string" },
+    },
+    required: ["items"],
+  },
+  (event, { items, someValue }) => {
+    // Handler function receives (event, state)
+    // Modify state directly
+    items.push(someValue);
+  }
+);
+
+// Handler invocation: pass state data matching the state schema
+<button onclick={myHandler({ items: myItems, someValue: "hello" })}>
+  Click me
+</button>
+```
+
+Key points:
+- Event schema: For UI event data (usually empty `{}` for simple clicks)
+- State schema: Declares what data the handler needs access to
+- Handler invocation: Pass an object matching the state schema
+- Handler function: Receives `(event, state)` - destructure state as needed
 
 **Performance considerations:**
 - Advise on efficient data processing
