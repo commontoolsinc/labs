@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommonCodeEditor Example</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 20px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    .editor-wrapper {
+      height: 400px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    
+    .controls {
+      margin-bottom: 20px;
+    }
+    
+    select {
+      padding: 8px;
+      background: #333;
+      color: white;
+      border: 1px solid #555;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>CommonCodeEditor Example</h1>
+    
+    <div class="controls">
+      <label>
+        Language:
+        <select id="language-select">
+          <option value="text/markdown">Markdown</option>
+          <option value="text/javascript">JavaScript</option>
+          <option value="text/x.jsx">JSX</option>
+          <option value="text/x.typescript">TypeScript</option>
+          <option value="text/css">CSS</option>
+          <option value="text/html">HTML</option>
+          <option value="application/json">JSON</option>
+        </select>
+      </label>
+    </div>
+    
+    <div class="editor-wrapper">
+      <common-code-editor 
+        id="editor"
+        language="text/markdown"
+        source="# Welcome to CommonCodeEditor
+
+This is a **CodeMirror 6** based code editor component.
+
+## Features
+
+- Syntax highlighting for multiple languages
+- Dark theme (One Dark)
+- Auto-completion and basic IDE features
+- Real-time change events
+
+Try changing the language from the dropdown above!">
+      </common-code-editor>
+    </div>
+    
+    <div id="status">Ready</div>
+  </div>
+
+  <script type="module">
+    import './common-code-editor.ts';
+    
+    const editor = document.getElementById('editor');
+    const languageSelect = document.getElementById('language-select');
+    const status = document.getElementById('status');
+    
+    // Language examples
+    const examples = {
+      'text/markdown': '# Markdown Example\n\n- List item\n- **Bold text**\n- *Italic text*\n\n```js\nconst hello = "world";\n```',
+      'text/javascript': '// JavaScript Example\nfunction fibonacci(n) {\n  if (n <= 1) return n;\n  return fibonacci(n - 1) + fibonacci(n - 2);\n}\n\nconsole.log(fibonacci(10));',
+      'text/x.jsx': '// JSX Example\nconst Button = ({ onClick, children }) => (\n  <button \n    className="btn btn-primary"\n    onClick={onClick}\n  >\n    {children}\n  </button>\n);',
+      'text/x.typescript': '// TypeScript Example\ninterface User {\n  id: number;\n  name: string;\n  email?: string;\n}\n\nfunction greetUser(user: User): string {\n  return `Hello, ${user.name}!`;\n}',
+      'text/css': '/* CSS Example */\n.container {\n  display: flex;\n  flex-direction: column;\n  gap: 1rem;\n  padding: 2rem;\n  background: #f0f0f0;\n}',
+      'text/html': '<!-- HTML Example -->\n<!DOCTYPE html>\n<html>\n<head>\n  <title>Hello World</title>\n</head>\n<body>\n  <h1>Welcome!</h1>\n</body>\n</html>',
+      'application/json': '{\n  "name": "CommonCodeEditor",\n  "version": "1.0.0",\n  "features": [\n    "syntax-highlighting",\n    "auto-completion",\n    "dark-theme"\n  ]\n}'
+    };
+    
+    // Handle language change
+    languageSelect.addEventListener('change', (e) => {
+      const newLang = e.target.value;
+      editor.language = newLang;
+      editor.source = examples[newLang] || '';
+    });
+    
+    // Listen for document changes
+    editor.addEventListener('doc-change', (e) => {
+      status.textContent = `Document changed at ${new Date().toLocaleTimeString()}`;
+    });
+  </script>
+</body>
+</html>
