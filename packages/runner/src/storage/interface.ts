@@ -1,6 +1,7 @@
 import type { EntityId } from "../doc-map.ts";
 import type { Cancel } from "../cancel.ts";
 import type {
+  Assertion,
   AuthorizationError as IAuthorizationError,
   Changes,
   Commit,
@@ -15,6 +16,7 @@ import type {
   QueryError as IQueryError,
   Reference,
   Result,
+  Retraction,
   SchemaContext,
   Signer,
   State,
@@ -25,15 +27,20 @@ import type {
 } from "@commontools/memory/interface";
 
 export type {
+  Assertion,
+  Fact,
   IAuthorizationError,
   IClaim,
   IConflictError,
   IConnectionError,
   IQueryError,
+  JSONValue,
   MediaType,
   MemorySpace,
   Result,
+  Retraction,
   SchemaContext,
+  State,
   Unit,
   URI,
 };

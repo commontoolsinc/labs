@@ -93,6 +93,7 @@ import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
 import { SchemaNone } from "@commontools/memory/schema";
+import { resourceUsage } from "node:process";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -1784,25 +1785,84 @@ export class TransactionJournal implements ITransactionJournal {
     replica: ISpaceReplica,
   ): Result<ITransactionInvariant, ReadError> {
     const address = { ...at, space: replica.did() };
-    return this.edit(
+    const result = this.edit(
       (journal): Result<ITransactionInvariant, INotFoundError> => {
         // log read activitiy in the journal
         journal.#activity.push({ read: address });
         const [the, of] = [address.type, address.id];
 
-        // We may have written into an addressed or it's parent memory loaction,
-        // if so MUST read from it as it will contain current state. If we have
-        // not written, we should also consider read we made made from the
-        // addressed or it's parent memory location. If we find either write or
-        // read invariant we read from it and return the value.
-        const prior = this.get(address);
-        if (prior) {
-          return TransactionInvariant.read(prior, address);
+        // First, try to get exact match from novelty (writes)
+        const noveltyInvariant = this.#novelty.for(address.space).get(address);
+        if (noveltyInvariant) {
+          return TransactionInvariant.read(noveltyInvariant, address);
         }
 
-        // If we have not wrote or read from the relevant memory location we'll
-        // have to read from the local replica and if it does not contain a
-        // corresponding fact we assume fact to be new ethier way we use it
+        // Second, check if there are child write invariants that affect this read
+        const noveltyEntries = this.#novelty.for(address.space);
+        const addressKey = TransactionInvariant.toKey(address);
+        let baseInvariant: ITransactionInvariant | undefined;
+        let hasChildWrites = false;
+
+        // Check for child write invariants
+        for (const writeInvariant of noveltyEntries) {
+          const writeKey = TransactionInvariant.toKey(writeInvariant.address);
+          if (writeKey.startsWith(addressKey) && writeKey !== addressKey) {
+            hasChildWrites = true;
+          }
+        }
+
+        if (hasChildWrites) {
+          // Get base state from history or replica
+          const historyBase = this.#history.for(address.space).get(address);
+          if (historyBase) {
+            baseInvariant = historyBase;
+          } else {
+            // Get from replica
+            const state = replica.get({ the, of }) ?? unclaimed({ the, of });
+            baseInvariant = {
+              address: { ...address, path: [] },
+              value: state.is,
+            };
+          }
+
+          // Apply all child writes to the base invariant
+          let mergedInvariant = baseInvariant;
+          for (const writeInvariant of noveltyEntries) {
+            const writeKey = TransactionInvariant.toKey(writeInvariant.address);
+            if (writeKey.startsWith(addressKey) && writeKey !== addressKey) {
+              const { ok: merged, error } = TransactionInvariant.write(
+                mergedInvariant,
+                { ...writeInvariant.address, space: address.space },
+                writeInvariant.value,
+              );
+              if (error) {
+                return { error };
+              }
+              mergedInvariant = merged;
+            }
+          }
+
+          // Read from the merged invariant
+          const { ok, error } = TransactionInvariant.read(
+            mergedInvariant,
+            address,
+          );
+          if (error) {
+            return { error };
+          }
+
+          // Return the merged result directly without claiming in history
+          // since this is a computed/derived value, not a raw read from replica
+          return { ok };
+        }
+
+        // Third, try to get exact match from history (reads)
+        const historyInvariant = this.#history.for(address.space).get(address);
+        if (historyInvariant) {
+          return TransactionInvariant.read(historyInvariant, address);
+        }
+
+        // Fourth, fallback to reading from replica if no writes affect this read
         const state = replica.get({ the, of }) ??
           unclaimed({ the, of });
 
@@ -1832,6 +1892,7 @@ export class TransactionJournal implements ITransactionJournal {
         }
       },
     );
+    return result;
   }
 
   write(
@@ -1858,7 +1919,7 @@ export class TransactionJournal implements ITransactionJournal {
   }
 }
 
-class TransactionInvariant {
+export class TransactionInvariant {
   #model: Map<string, ITransactionInvariant> = new Map();
 
   protected get model() {
@@ -2295,148 +2356,6 @@ export class WriteIsolationError extends RangeError
 export class NotFound extends RangeError implements INotFoundError {
   override name = "NotFoundError" as const;
 }
-
-function addressToKey(address: IMemoryAddress): string {
-  return `${address.id}/${address.type}/${address.path.join("/")}`;
-}
-
-/**
- * Convert IMemoryAddress to FactAddress for use with existing storage system.
- */
-function toFactAddress(address: IMemoryAddress): FactAddress {
-  return {
-    the: address.type,
-    of: address.id,
-  };
-}
-
-/**
- * Reads the value from the given fact at a given path and either returns
- * {@link ITransactionInvariant} object or {@link NotFoundError} if path does not exist in
- * the provided {@link State}.
- *
- * Read fails when key is accessed in the non-existing parent, but succeeds
- * with `undefined` when last component of the path does not exists. Here are
- * couple of examples illustrating behavior.
- *
- * ```ts
- * const unclaimed = {
- *    the: "application/json",
- *    of: "test:1",
- * }
- * const fact = {
- *    the: "application/json",
- *    of: "test:1",
- *    is: { hello: "world", from: { user: { name: "Alice" } } }
- * }
- *
- * read({ path: [] }, fact)                   // { ok: { value: fact.is } }
- * read({ path: ['hello'] }, fact)            // { ok: { value: "world" } }
- * read({ path: ['hello', 'length'] }, fact)  // { ok: { value: undefined } }
- * read({ path: ['hello', 0] }, fact)         // { ok: { value: undefined } }
- * read({ path: ['hello', 0, 0] }, fact)      // { error }
- * read({ path: ['from', 'user'] }, fact)     // { ok: { value: {name: "Alice"} } }
- * read({ path: [] }, unclaimed)              // { ok: { value: undefined } }
- * read({ path: ['a'] }, unclaimed)           // { error }
- * ```
- */
-const read = (
-  state: Assert | Retract,
-  address: IMemorySpaceAddress,
-): Result<ITransactionInvariant, INotFoundError> => resolve(state, address);
-
-const resolve = (
-  state: Assert | Retract,
-  address: IMemorySpaceAddress,
-) => {
-  const { path } = address;
-  let value = state?.is as JSONValue | undefined;
-  let at = -1;
-  while (++at < path.length) {
-    const key = path[at];
-    if (typeof value === "object" && value != null) {
-      // We do not support array.length as that is JS specific getter.
-      value = Array.isArray(value) && key === "length"
-        ? undefined
-        : (value as Record<string, JSONValue>)[key];
-    } else {
-      return {
-        error: state
-          ? new NotFound(
-            `Can not resolve "${address.type}" of "${address.id}" at "${
-              path.slice(0, at).join(".")
-            }" in "${address.space}", because target is not an object`,
-          )
-          : new NotFound(
-            `Can not resolve "${address.type}" of "${address.id}" at "${
-              path.join(".")
-            }" in "${address.space}", because target fact is not found in local replica`,
-          ),
-      };
-    }
-  }
-
-  return { ok: { value, address } };
-};
-
-const write = (
-  state: Assert | Retract,
-  address: IMemorySpaceAddress,
-  value: JSONValue | undefined,
-): Result<Assert | Retract, INotFoundError> => {
-  const { path, id: of, type: the, space } = address;
-
-  // We need to handle write without any paths differently as there are various
-  // nuances regarding when fact need to be asserted / retracted.
-  if (path.length === 0) {
-    // If desired value matches current value this is noop.
-    return {
-      ok: state.is === value
-        ? state
-        : { the, of, is: value } as Assert | Retract,
-    };
-  } else {
-    // If do have a path we will need to patch `is` under that path. At the
-    // moment we will simply copy value using JSON stringy/parse.
-    const is = state.is === undefined
-      ? state.is
-      : JSON.parse(JSON.stringify(state.is));
-
-    const [...at] = path;
-    const key = at.pop()!;
-
-    const { ok, error } = resolve({ the, of, is }, { ...address, path: at });
-    if (error) {
-      return { error };
-    } else {
-      const type = ok.value === null ? "null" : typeof ok.value;
-      if (type === "object") {
-        const target = ok.value as Record<string, JSONValue>;
-
-        // If target value is same as desired value this write is a noop
-        if (target[key] === value) {
-          return { ok: state };
-        } else if (value === undefined) {
-          // If value is `undefined` we delete property from the tagret
-          delete target[key];
-        } else {
-          // Otherwise we assign value to the target
-          target[key] = value;
-        }
-
-        return { ok: { the, of, is } };
-      } else {
-        return {
-          error: new NotFound(
-            `Can not write "${the}" of "${of}" at "${
-              path.join(".")
-            }" in "${space}", because target is not an object`,
-          ),
-        };
-      }
-    }
-  }
-};
 
 /**
  * Transaction reader implementation for reading from a specific memory space.
