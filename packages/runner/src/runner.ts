@@ -24,7 +24,7 @@ import { type Cell } from "./cell.ts";
 import { type Action, type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
-  findAllLegacyAliasedCells,
+  findAllWriteRedirectCells,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
@@ -34,6 +34,7 @@ import {
   isLink,
   isWriteRedirectLink,
   parseLink,
+  parseNormalizedFullLinktoLegacyDocCellLink,
   parseToLegacyAlias,
 } from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
@@ -340,14 +341,13 @@ export class Runner implements IRunner {
     const cells: Cell<any>[] = [];
 
     for (const node of recipe.nodes) {
-      const sourceDoc = sourceCell.getDoc();
-      const inputs = findAllLegacyAliasedCells(node.inputs, sourceDoc);
-      const outputs = findAllLegacyAliasedCells(node.outputs, sourceDoc);
+      const inputs = findAllWriteRedirectCells(node.inputs, sourceCell);
+      const outputs = findAllWriteRedirectCells(node.outputs, sourceCell);
 
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
       [...inputs, ...outputs].forEach((c) => {
-        const cell = c.cell.asCell(c.path);
+        const cell = this.runtime.getCellFromLink(c);
         cells.push(cell);
       });
     }
@@ -476,10 +476,10 @@ export class Runner implements IRunner {
       processCell,
     );
 
-    const reads = findAllLegacyAliasedCells(inputs, processCell.getDoc());
+    const reads = findAllWriteRedirectCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllLegacyAliasedCells(outputs, processCell.getDoc());
+    const writes = findAllWriteRedirectCells(outputs, processCell);
 
     let fn = (
       typeof module.implementation === "string"
@@ -666,7 +666,14 @@ export class Runner implements IRunner {
       addCancel(
         this.runtime.scheduler.schedule(
           action,
-          { reads, writes } satisfies ReactivityLog,
+          {
+            reads: reads.map((r) =>
+              parseNormalizedFullLinktoLegacyDocCellLink(r, this.runtime)
+            ),
+            writes: writes.map((w) =>
+              parseNormalizedFullLinktoLegacyDocCellLink(w, this.runtime)
+            ),
+          } satisfies ReactivityLog,
         ),
       );
     }
@@ -699,13 +706,13 @@ export class Runner implements IRunner {
     // note the parent recipe on the closure recipes.
     unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
 
-    const inputCells = findAllLegacyAliasedCells(
+    const inputCells = findAllWriteRedirectCells(
       mappedInputBindings,
-      processCell.getDoc(),
+      processCell,
     );
-    const outputCells = findAllLegacyAliasedCells(
+    const outputCells = findAllWriteRedirectCells(
       mappedOutputBindings,
-      processCell.getDoc(),
+      processCell,
     );
 
     // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
@@ -728,8 +735,12 @@ export class Runner implements IRunner {
 
     addCancel(
       this.runtime.scheduler.schedule(action, {
-        reads: inputCells,
-        writes: outputCells,
+        reads: inputCells.map((c) =>
+          parseNormalizedFullLinktoLegacyDocCellLink(c, this.runtime)
+        ),
+        writes: outputCells.map((c) =>
+          parseNormalizedFullLinktoLegacyDocCellLink(c, this.runtime)
+        ),
       }),
     );
   }
@@ -749,10 +760,10 @@ export class Runner implements IRunner {
       { immutable: inputs },
     );
     inputsCell.setRaw(inputs);
-    const reads = findAllLegacyAliasedCells(inputs, processCell.getDoc());
+    const reads = findAllWriteRedirectCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllLegacyAliasedCells(outputs, processCell.getDoc());
+    const writes = findAllWriteRedirectCells(outputs, processCell);
 
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsQueryResult([], log);
@@ -762,7 +773,14 @@ export class Runner implements IRunner {
     addCancel(
       this.runtime.scheduler.schedule(
         action,
-        { reads, writes } satisfies ReactivityLog,
+        {
+          reads: reads.map((r) =>
+            parseNormalizedFullLinktoLegacyDocCellLink(r, this.runtime)
+          ),
+          writes: writes.map((w) =>
+            parseNormalizedFullLinktoLegacyDocCellLink(w, this.runtime)
+          ),
+        } satisfies ReactivityLog,
       ),
     );
   }

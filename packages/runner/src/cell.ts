@@ -254,6 +254,7 @@ export type Cellify<T> =
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+  getRaw(): any;
   getDoc(): DocImpl<any>;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
@@ -324,6 +325,7 @@ function createStreamCell<T>(
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
+    getRaw: () => doc.getAtPath(path),
     getDoc: () => doc,
     schema,
     rootSchema,

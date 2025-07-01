@@ -9,10 +9,15 @@ import {
 import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell } from "./cell.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
+import {
+  areNormalizedLinksSame,
+  isWriteRedirectLink,
+  type NormalizedFullLink,
+  parseLink,
+} from "./link-utils.ts";
 
 /**
  * Sends a value to a binding. If the binding is an array or object, it'll
@@ -144,28 +149,29 @@ export function unsafe_createParentBindings(
   }
 }
 
-// Traverses binding and returns all docs reacheable through legacy aliases.
-// TODO(seefeld): Transition to all write redirects once recipes use those.
-export function findAllLegacyAliasedCells<T>(
+// Traverses binding and returns all cells reacheable through write redirects.
+export function findAllWriteRedirectCells<T>(
   binding: unknown,
-  doc: DocImpl<T>,
-): LegacyDocCellLink[] {
-  const docs: LegacyDocCellLink[] = [];
-  function find(binding: unknown, origDoc: DocImpl<T>): void {
-    if (isLegacyAlias(binding)) {
-      // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
-      if (typeof binding.$alias.cell === "number") return;
-      const doc = (binding.$alias.cell ?? origDoc) as DocImpl<T>;
-      const path = binding.$alias.path;
-      if (docs.find((c) => c.cell === doc && c.path === path)) return;
-      docs.push({ cell: doc as DocImpl<unknown>, path });
-      find(doc.getAtPath(path), doc);
+  cell: Cell<T>,
+): NormalizedFullLink[] {
+  const seen: NormalizedFullLink[] = [];
+  function find(binding: unknown, origCell: Cell<T>): void {
+    if (isLegacyAlias(binding) && typeof binding.$alias.cell === "number") {
+      return;
+    }
+    if (isWriteRedirectLink(binding)) {
+      const link = parseLink(binding, origCell);
+      if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
+      seen.push(link);
+      const linkCell = origCell.getDoc().runtime.getCellFromLink(link);
+      if (!linkCell) throw new Error("Link cell not found");
+      find(linkCell.getRaw(), origCell);
     } else if (Array.isArray(binding)) {
-      for (const value of binding) find(value, origDoc);
+      for (const value of binding) find(value, origCell);
     } else if (isRecord(binding) && !isLink(binding)) {
-      for (const value of Object.values(binding)) find(value, origDoc);
+      for (const value of Object.values(binding)) find(value, origCell);
     }
   }
-  find(binding, doc);
-  return docs;
+  find(binding, cell);
+  return seen;
 }

@@ -2,6 +2,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell, type MemorySpace } from "./cell.ts";
+import { type IRuntime } from "./runtime.ts";
 import {
   type JSONCellLink,
   type LegacyAlias,
@@ -451,6 +452,25 @@ function parseToLegacyCellLinkWithMaybeACell(
 }
 
 /**
+ * Parse a normalized full link to a legacy doc cell link
+ *
+ * @deprecated
+ *
+ * @param link - The normalized full link to parse
+ * @param runtime - The runtime to use for getting the cell
+ * @returns The parsed legacy doc cell link
+ */
+export function parseNormalizedFullLinktoLegacyDocCellLink(
+  link: NormalizedFullLink,
+  runtime: IRuntime,
+): LegacyDocCellLink {
+  return {
+    cell: runtime.getCellFromLink(link).getDoc(),
+    path: link.path,
+  } satisfies LegacyDocCellLink;
+}
+
+/**
  * Compare two link values for equality, supporting all link formats
  */
 export function areLinksSame(
@@ -472,11 +492,18 @@ export function areLinksSame(
   if (!link1 || !link2) return false;
 
   // Compare normalized links
-  return (
-    link1.id === link2.id &&
-    link1.space === link2.space &&
-    arrayEqual(link1.path, link2.path)
-  );
+  return areNormalizedLinksSame(link1, link2);
+}
+
+/**
+ * Compare two normalized links for equality
+ */
+export function areNormalizedLinksSame(
+  link1: NormalizedLink,
+  link2: NormalizedLink,
+): boolean {
+  return link1.id === link2.id && link1.space === link2.space &&
+    arrayEqual(link1.path, link2.path);
 }
 
 export function createSigilLinkFromParsedLink(
