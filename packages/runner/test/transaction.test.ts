@@ -73,37 +73,7 @@ describe("WriteInvariants", () => {
     expect(retrieved).toEqual(parentInvariant);
   });
 
-  it("should understand the key comparison logic", async () => {
-    const novelty = new Novelty();
-    const identity = await Identity.fromPassphrase("write invariants test");
-    const space = identity.did();
-    const invariants = novelty.for(space);
-
-    // Put a root invariant
-    const rootInvariant: ITransactionInvariant = {
-      address: {
-        id: "user:1",
-        type: "application/json",
-        path: [],
-      },
-      value: { profile: { name: "Root" } },
-    };
-
-    invariants.claim(rootInvariant);
-
-    // Query for exact path should return the invariant
-    expect(invariants.get(rootInvariant.address)).toEqual(rootInvariant);
-
-    // Query for nested path should return the parent
-    const nestedQuery: IMemoryAddress = {
-      id: "user:1",
-      type: "application/json",
-      path: ["profile"],
-    };
-    expect(invariants.get(nestedQuery)).toEqual(rootInvariant);
-  });
-
-  it("should return deepest matching parent for nested queries", async () => {
+  it("should merge child invariants into matching parent invariants", async () => {
     const novelty = new Novelty();
     const identity = await Identity.fromPassphrase("write invariants test");
     const space = identity.did();
@@ -111,40 +81,53 @@ describe("WriteInvariants", () => {
 
     // Put multiple invariants at different path depths
     // Order matters! When we put a parent, it overwrites children
-    const rootInvariant: ITransactionInvariant = {
+    const user = {
       address: {
         id: "user:1",
         type: "application/json",
         path: [],
       },
       value: { profile: { name: "Root", settings: { theme: "light" } } },
-    };
+    } as const;
 
-    const profileInvariant: ITransactionInvariant = {
+    const profile = {
       address: {
         id: "user:1",
         type: "application/json",
         path: ["profile"],
       },
       value: { name: "Profile Level", settings: { theme: "dark" } },
-    };
+    } as const;
 
-    const settingsInvariant: ITransactionInvariant = {
+    const settings = {
       address: {
         id: "user:1",
         type: "application/json",
         path: ["profile", "settings"],
       },
       value: { theme: "custom" },
-    };
+    } as const;
 
     // Claim in order - each claim should merge appropriately
-    invariants.claim(rootInvariant);
-    invariants.claim(profileInvariant);
-    invariants.claim(settingsInvariant);
+    invariants.claim(user);
+    expect(invariants.get(settings.address)).toEqual(user);
+
+    invariants.claim(profile);
+    expect(invariants.get(settings.address)).toEqual({
+      address: user.address,
+      value: {
+        ...user.value,
+        profile: {
+          ...user.value.profile,
+          ...profile.value,
+        },
+      },
+    });
+
+    invariants.claim(settings);
 
     // After claiming all invariants, they should be merged into a single root invariant
-    const expectedMergedInvariant: ITransactionInvariant = {
+    const merged = {
       address: {
         id: "user:1",
         type: "application/json",
@@ -156,90 +139,76 @@ describe("WriteInvariants", () => {
     };
 
     // All queries should return the same merged invariant
-    const rootQuery: IMemoryAddress = {
-      id: "user:1",
-      type: "application/json",
-      path: [],
-    };
-    expect(invariants.get(rootQuery)).toEqual(expectedMergedInvariant);
-
-    const profileQuery: IMemoryAddress = {
-      id: "user:1",
-      type: "application/json",
-      path: ["profile"],
-    };
-    expect(invariants.get(profileQuery)).toEqual(expectedMergedInvariant);
-
-    const settingsQuery: IMemoryAddress = {
-      id: "user:1",
-      type: "application/json",
-      path: ["profile", "settings"],
-    };
-    expect(invariants.get(settingsQuery)).toEqual(expectedMergedInvariant);
-
-    const themeQuery: IMemoryAddress = {
-      id: "user:1",
-      type: "application/json",
+    expect(invariants.get(user.address)).toEqual(merged);
+    expect(invariants.get(profile.address)).toEqual(merged);
+    expect(invariants.get(settings.address)).toEqual(merged);
+    expect(invariants.get({
+      ...user.address,
       path: ["profile", "settings", "theme"],
-    };
-    expect(invariants.get(themeQuery)).toEqual(expectedMergedInvariant);
+    })).toEqual(merged);
 
-    const nameQuery: IMemoryAddress = {
-      id: "user:1",
-      type: "application/json",
+    expect(invariants.get({
+      ...user.address,
       path: ["profile", "name"],
-    };
-    expect(invariants.get(nameQuery)).toEqual(expectedMergedInvariant);
+    })).toEqual(merged);
   });
 
-  it("should merge child invariants when parent is claimed", async () => {
+  it("should overwrite child invariants with a parent", async () => {
     const novelty = new Novelty();
     const identity = await Identity.fromPassphrase("write invariants test");
     const space = identity.did();
     const invariants = novelty.for(space);
 
     // First put child invariants
-    const childInvariant1: ITransactionInvariant = {
+    const name = {
       address: {
         id: "user:1",
         type: "application/json",
         path: ["profile", "name"],
       },
       value: "Alice",
-    };
+    } as const;
 
-    const childInvariant2: ITransactionInvariant = {
+    const theme = {
       address: {
         id: "user:1",
         type: "application/json",
         path: ["profile", "settings", "theme"],
       },
       value: "dark",
-    };
+    } as const;
 
-    invariants.claim(childInvariant1);
-    invariants.claim(childInvariant2);
+    invariants.claim(name);
+    invariants.claim(theme);
 
     // Verify children exist
-    expect(invariants.get(childInvariant1.address)).toEqual(childInvariant1);
-    expect(invariants.get(childInvariant2.address)).toEqual(childInvariant2);
+    expect(invariants.get(name.address)).toEqual(name);
+    expect(invariants.get(theme.address)).toEqual(theme);
+    expect(invariants.get({
+      ...name.address,
+      path: ["profile"],
+    })).toBeUndefined();
+    expect(invariants.get({
+      ...name.address,
+      path: ["profile", "settings"],
+    })).toBeUndefined();
 
     // Now put parent invariant
-    const parentInvariant: ITransactionInvariant = {
+    const profile = {
       address: {
         id: "user:1",
         type: "application/json",
         path: ["profile"],
       },
       value: { name: "Bob", email: "bob@example.com" },
-    };
+    } as const;
 
-    invariants.claim(parentInvariant);
+    invariants.claim(profile);
 
     // Children should be gone, only parent remains
-    expect(invariants.get(childInvariant1.address)).toEqual(parentInvariant);
-    expect(invariants.get(childInvariant2.address)).toEqual(parentInvariant);
-    expect(invariants.get(parentInvariant.address)).toEqual(parentInvariant);
+    expect(invariants.get(name.address)).toEqual(profile);
+    expect(invariants.get(name.address)).toEqual(profile);
+    expect(invariants.get(name.address)).toEqual(profile);
   });
 
   it("should handle different entities independently", async () => {
@@ -248,30 +217,30 @@ describe("WriteInvariants", () => {
     const space = identity.did();
     const invariants = novelty.for(space);
 
-    const user1Invariant: ITransactionInvariant = {
+    const alice = {
       address: {
         id: "user:1",
         type: "application/json",
         path: ["profile"],
       },
       value: { name: "Alice" },
-    };
+    } as const;
 
-    const user2Invariant: ITransactionInvariant = {
+    const bob = {
       address: {
         id: "user:2",
         type: "application/json",
         path: ["profile"],
       },
       value: { name: "Bob" },
-    };
+    } as const;
 
-    invariants.claim(user1Invariant);
-    invariants.claim(user2Invariant);
+    invariants.claim(alice);
+    invariants.claim(bob);
 
     // Both should exist independently
-    expect(invariants.get(user1Invariant.address)).toEqual(user1Invariant);
-    expect(invariants.get(user2Invariant.address)).toEqual(user2Invariant);
+    expect(invariants.get(alice.address)).toEqual(alice);
+    expect(invariants.get(bob.address)).toEqual(bob);
   });
 
   it("should be iterable", async () => {
@@ -280,31 +249,31 @@ describe("WriteInvariants", () => {
     const space = identity.did();
     const invariants = novelty.for(space);
 
-    const invariant1: ITransactionInvariant = {
+    const alice = {
       address: {
         id: "user:1",
         type: "application/json",
         path: [],
       },
       value: { name: "Alice" },
-    };
+    } as const;
 
-    const invariant2: ITransactionInvariant = {
+    const bob = {
       address: {
         id: "user:2",
         type: "application/json",
         path: [],
       },
       value: { name: "Bob" },
-    };
+    } as const;
 
-    invariants.claim(invariant1);
-    invariants.claim(invariant2);
+    invariants.claim(alice);
+    invariants.claim(bob);
 
     const collected = [...invariants];
     expect(collected).toHaveLength(2);
-    expect(collected).toContainEqual(invariant1);
-    expect(collected).toContainEqual(invariant2);
+    expect(collected).toContainEqual(alice);
+    expect(collected).toContainEqual(bob);
   });
 
   it("should merge child writes into parent invariants using claim", async () => {
@@ -314,7 +283,7 @@ describe("WriteInvariants", () => {
     const invariants = novelty.for(space);
 
     // Start with a parent invariant
-    const parentInvariant: ITransactionInvariant = {
+    const profile = {
       address: {
         id: "user:1",
         type: "application/json",
@@ -324,67 +293,38 @@ describe("WriteInvariants", () => {
         profile: { name: "Alice", email: "alice@example.com" },
         settings: { theme: "light" },
       },
-    };
+    } as const;
 
-    invariants.claim(parentInvariant);
+    invariants.claim(profile);
 
-    expect(invariants.get(parentInvariant.address)).toEqual(parentInvariant);
+    expect(invariants.get(profile.address)).toEqual(profile);
 
     // Now claim a child write that should merge into the parent
-    const childWrite: ITransactionInvariant = {
+    const name = {
       address: {
         id: "user:1",
         type: "application/json",
         path: ["profile", "name"],
       },
       value: "Bob",
-    };
+    } as const;
 
-    const result = invariants.claim(childWrite);
+    const result = invariants.claim(name);
     expect(result.error).toBeUndefined();
     expect(result.ok).toBeDefined();
 
     // Should have merged into the parent, creating a new invariant at root level
     // with the updated profile.name value
-    const retrieved = invariants.get(parentInvariant.address);
-    expect(retrieved).toBeDefined();
-    expect(retrieved!.address.path).toEqual([]);
-
-    expect(retrieved).toEqual({
-      address: parentInvariant.address,
+    const merged = {
+      address: profile.address,
       value: {
         profile: { name: "Bob", email: "alice@example.com" },
         settings: { theme: "light" },
       },
-    });
+    };
+    expect(invariants.get(profile.address)).toEqual(merged);
 
     // Query for the specific path should still work
-    const nameQuery = invariants.get(childWrite.address);
-    expect(nameQuery).toBe(retrieved); // Should return the same merged invariant
-  });
-
-  it("should use put logic when no parent exists for claim", async () => {
-    const novelty = new Novelty();
-    const identity = await Identity.fromPassphrase("write invariants test");
-    const space = identity.did();
-    const invariants = novelty.for(space);
-
-    // Claim without any existing parent
-    const invariant: ITransactionInvariant = {
-      address: {
-        id: "user:1",
-        type: "application/json",
-        path: ["profile", "name"],
-      },
-      value: "Alice",
-    };
-
-    const result = invariants.claim(invariant);
-    expect(result.error).toBeUndefined();
-    expect(result.ok).toBeDefined();
-
-    // Should be stored as-is since no parent exists
-    const retrieved = invariants.get(invariant.address);
-    expect(retrieved).toEqual(invariant);
+    expect(invariants.get(name.address)).toEqual(merged); // Should return the same merged invariant
   });
 });

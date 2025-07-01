@@ -2396,9 +2396,9 @@ const write = (
       : JSON.parse(JSON.stringify(state.is));
 
     const [...at] = path;
-    const key = path.pop()!;
+    const key = at.pop()!;
 
-    const { ok, error } = resolve({ the, of, is }, { ...address, path });
+    const { ok, error } = resolve({ the, of, is }, { ...address, path: at });
     if (error) {
       return { error };
     } else {
