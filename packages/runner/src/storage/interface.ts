@@ -384,7 +384,7 @@ export interface IMemoryAddress {
    * Path to the {@link JSONValue} being reference by this address. It is path
    * within the `is` field of the fact in memory protocol.
    */
-  path: MemoryAddressPathComponent[];
+  path: readonly MemoryAddressPathComponent[];
 }
 
 export interface IMemorySpaceAddress extends IMemoryAddress {

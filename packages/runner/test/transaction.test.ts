@@ -512,6 +512,397 @@ describe("WriteInvariants", () => {
     expect(invariants.get(name.address)).toEqual(profile);
     expect(invariants.get(email.address)).toEqual(profile);
   });
+
+  it("should fail to claim when trying to write to non-object", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent with a primitive value at a path
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: { name: "Alice" }, // name is a string
+    } as const;
+
+    invariants.claim(parent);
+
+    // Try to claim a child that would require writing to the string "Alice"
+    const invalidChild = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["name", "firstName"], // trying to access "Alice".firstName
+      },
+      value: "Alice",
+    } as const;
+
+    const result = invariants.claim(invalidChild);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("NotFoundError");
+    expect(result.error?.message).toContain("target is not an object");
+  });
+
+  it("should fail to claim when trying to write to null", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent with null value
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: { data: null },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Try to claim a child that would require writing to null
+    const invalidChild = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["data", "field"],
+      },
+      value: "value",
+    } as const;
+
+    const result = invariants.claim(invalidChild);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("NotFoundError");
+    expect(result.error?.message).toContain("target is not an object");
+  });
+
+  it("should fail to claim when trying to write to array.length", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent with an array
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: { items: ["a", "b", "c"] },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Try to claim a child that would access array.length (which returns undefined)
+    const invalidChild = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["items", "length", "something"],
+      },
+      value: "value",
+    } as const;
+
+    const result = invariants.claim(invalidChild);
+    expect(result.error).toBeDefined();
+    expect(result.error?.name).toBe("NotFoundError");
+    expect(result.error?.message).toContain("target is not an object");
+  });
+
+  it("should succeed when adding new property to existing object", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent with an existing object
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: {
+        profile: { name: "Alice" },
+        settings: { theme: "light" },
+      },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Add a new property to the profile object
+    const newProperty = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "email"], // adding email property that doesn't exist
+      },
+      value: "alice@example.com",
+    } as const;
+
+    const result = invariants.claim(newProperty);
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBeDefined();
+
+    // Verify the merged result includes the new property
+    const merged = invariants.get(parent.address);
+    expect(merged?.value).toEqual({
+      profile: {
+        name: "Alice",
+        email: "alice@example.com", // new property added
+      },
+      settings: { theme: "light" },
+    });
+
+    // Verify querying for the new property returns the merged parent
+    expect(invariants.get(newProperty.address)).toBe(merged);
+  });
+
+  it("should delete property when undefined is assigned", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent with multiple properties
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: {
+        profile: {
+          name: "Alice",
+          email: "alice@example.com",
+          age: 30,
+        },
+        settings: { theme: "light" },
+      },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Delete the email property by assigning undefined
+    const deleteProperty = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "email"],
+      },
+      value: undefined,
+    } as const;
+
+    const result = invariants.claim(deleteProperty);
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBeDefined();
+
+    // Verify the email property has been deleted
+    const merged = invariants.get(parent.address);
+    expect(merged?.value).toEqual({
+      profile: {
+        name: "Alice",
+        age: 30,
+        // email property should be gone
+      },
+      settings: { theme: "light" },
+    });
+
+    // Verify the deleted property is not present in the merged object
+    expect((merged?.value as any)?.profile?.email).toBeUndefined();
+  });
+
+  it("should delete nested object when undefined is assigned", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent with nested objects
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: {
+        profile: {
+          name: "Alice",
+          contact: {
+            email: "alice@example.com",
+            phone: "123-456-7890",
+          },
+        },
+        settings: { theme: "light" },
+      },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Delete the entire contact object by assigning undefined
+    const deleteContact = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "contact"],
+      },
+      value: undefined,
+    } as const;
+
+    const result = invariants.claim(deleteContact);
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBeDefined();
+
+    // Verify the contact object has been deleted
+    const merged = invariants.get(parent.address);
+    expect(merged?.value).toEqual({
+      profile: {
+        name: "Alice",
+        // contact object should be gone
+      },
+      settings: { theme: "light" },
+    });
+
+    // Verify the deleted contact object is not present
+    expect((merged?.value as any)?.profile?.contact).toBeUndefined();
+  });
+
+  it("should handle deleting non-existent property gracefully", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent object
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: {
+        profile: { name: "Alice" },
+        settings: { theme: "light" },
+      },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Try to delete a property that doesn't exist
+    const deleteNonExistent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "nonExistentProperty"],
+      },
+      value: undefined,
+    } as const;
+
+    const result = invariants.claim(deleteNonExistent);
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBeDefined();
+
+    // Verify the object remains unchanged (no-op)
+    const merged = invariants.get(parent.address);
+    expect(merged?.value).toEqual({
+      profile: { name: "Alice" },
+      settings: { theme: "light" },
+    });
+  });
+
+  it("should delete property and return unchanged object when same value", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim a parent where a property is already undefined
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: {
+        profile: {
+          name: "Alice",
+          email: undefined as any, // explicitly undefined
+        },
+      },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Try to "delete" the already undefined property
+    const deleteAlreadyUndefined = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: ["profile", "email"],
+      },
+      value: undefined,
+    } as const;
+
+    const result = invariants.claim(deleteAlreadyUndefined);
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBeDefined();
+
+    // Should be no-op since target value is already undefined
+    const merged = invariants.get(parent.address);
+    expect(merged).toEqual(parent); // Should return the original unchanged object
+  });
+
+  it("should delete entire object when undefined is assigned to root path", async () => {
+    const novelty = new Novelty();
+    const identity = await Identity.fromPassphrase("write invariants test");
+    const space = identity.did();
+    const invariants = novelty.for(space);
+
+    // First claim an object at root path
+    const parent = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      },
+      value: {
+        profile: { name: "Alice" },
+        settings: { theme: "light" },
+      },
+    } as const;
+
+    invariants.claim(parent);
+
+    // Delete the entire object by assigning undefined to root path
+    const deleteRoot = {
+      address: {
+        id: "user:1",
+        type: "application/json",
+        path: [], // root path
+      },
+      value: undefined,
+    } as const;
+
+    const result = invariants.claim(deleteRoot);
+    expect(result.error).toBeUndefined();
+    expect(result.ok).toBeDefined();
+
+    // Verify the entire object has been deleted (value is undefined)
+    const merged = invariants.get(parent.address);
+    expect(merged?.value).toBeUndefined();
+
+    // The invariant should still exist but with undefined value
+    expect(merged).toEqual({
+      address: parent.address,
+      value: undefined,
+    });
+  });
 });
 
 describe("ReadInvariants", () => {
