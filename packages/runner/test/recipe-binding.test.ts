@@ -9,8 +9,6 @@ import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { areLinksSame } from "../src/link-utils.ts";
-import { LINK_V1_TAG } from "../src/sigil-types.ts";
-
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
