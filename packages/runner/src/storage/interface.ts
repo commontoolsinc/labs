@@ -43,6 +43,7 @@ export type {
   State,
   Unit,
   URI,
+  Variant,
 };
 
 // This type is used to tag a document with any important metadata.
@@ -90,6 +91,7 @@ export interface LocalStorageOptions {
 }
 
 export interface IStorageProvider {
+  replica: ISpaceReplica;
   /**
    * Send a value to storage.
    *
@@ -327,6 +329,8 @@ export interface IStorageTransactionInconsistent extends Error {
   name: "StorageTransactionInconsistent";
 
   address: IMemoryAddress;
+
+  from(space: MemorySpace): IStorageTransactionInconsistent;
 }
 
 /**
@@ -471,45 +475,15 @@ export interface ITransactionJournal {
     space: MemorySpace,
   ): Result<ITransactionReader, InactiveTransactionError>;
 
-  /**
-   * Reads requested address from the memory space. If journal already performed
-   * a read from which requested read can be fulfilled result is derived from
-   * the prior read response, otherwise reads from the provided `replica` and
-   * captures invariant.
-   *
-   * Please note that read may also cause underlying transaction to fail
-   * producing `IStorageTransactionInconsistent` error, when reading from the
-   * parent path of the prior read which returned inconsistent value.
-   */
-  read(
-    at: IMemoryAddress,
-    replica: ISpaceReplica,
-  ): Result<IAttestation, ReadError>;
-
-  /**
-   * Write request to addressed memory space is captured. If journal already has
-   * overlapping write it will be owerwritten. Reading from journal within the
-   * written address will return data that was written. Write will error if
-   * journal is already closed or aborted. It can also fail with `INotFoundError`
-   * if writing into an invalid path, e.g. writing `.foo` property of the
-   * `"hello"` string or when whriting into `.foo.bar` of the object that has
-   * no `foo` property.
-   *
-   * Please note that writing `.foo.bar` may succeed, but later fail commit if
-   * target had no `foo` property that is because invariants get validated on
-   * commit as thoes may change through the transaction lifecycle.
-   */
-  write(
-    at: IMemoryAddress,
-    value: JSONValue | undefined,
-    replica: ISpace,
-  ): Result<IAttestation, WriteError>;
+  writer(
+    space: MemorySpace,
+  ): Result<ITransactionWriter, InactiveTransactionError>;
 
   /**
    * Closes underlying transaction, making it non-editable going forward. Any
    * attempts to edit it will fail.
    */
-  close(): Result<IStorageEdit, InactiveTransactionError>;
+  end(): Result<Map<MemorySpace, ITransaction>, InactiveTransactionError>;
 
   /**
    * Aborts underlying transaction, making it non-editable going forward. Any
@@ -518,6 +492,12 @@ export interface ITransactionJournal {
   abort<Reason extends Unit>(
     reason?: Reason,
   ): Result<Unit, InactiveTransactionError>;
+}
+
+export interface EditableJournal {
+  activity(): Iterable<Activity>;
+  novelty: Iterable<IAttestation>;
+  history(): Iterable<IAttestation>;
 }
 
 export interface ITransaction {

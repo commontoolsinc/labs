@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import {
-  StorageManager,
-  TransactionJournal,
-} from "@commontools/runner/storage/cache.deno";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as Chronicle from "../src/storage/transaction/chronicle.ts";
 import { assert } from "@commontools/memory/fact";
 
@@ -12,19 +9,16 @@ const signer = await Identity.fromPassphrase("chronicle test");
 const space = signer.did();
 
 describe("Chronicle", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let journal: TransactionJournal;
+  let storage: ReturnType<typeof StorageManager.emulate>;
   let replica: any;
 
   beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    journal = new TransactionJournal(storageManager);
-    // Get replica through journal reader
-    replica = journal.reader(space).ok!.replica;
+    storage = StorageManager.emulate({ as: signer });
+    replica = storage.open(space).replica;
   });
 
   afterEach(async () => {
-    await storageManager?.close();
+    await storage?.close();
   });
 
   describe("Basic Operations", () => {

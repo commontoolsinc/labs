@@ -23,7 +23,7 @@ import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
 
-class Chronicle {
+export class Chronicle {
   #replica: ISpaceReplica;
   #history: History;
   #novelty: Novelty;
@@ -37,11 +37,11 @@ class Chronicle {
     return this.#replica.did();
   }
 
-  novelty() {
+  novelty(): Iterable<IAttestation> {
     return this.#novelty.changes();
   }
 
-  *history() {
+  *history(): Iterable<IAttestation> {
     yield* this.#history;
   }
 
