@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { derive, h, recipe, schema, UI } from "commontools";
 
 const model = schema({
