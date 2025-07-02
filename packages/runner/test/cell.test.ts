@@ -1286,10 +1286,10 @@ describe("asCell with schema", () => {
 
     // Verify each cell was read using equals()
     const readCells = log.reads.map((r) => r.cell.asCell());
-    expect(readCells.some((cell) => cell.equals(cell))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(ref3Cell))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(ref2Cell))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(innerCell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(cell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(ref3Cell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(ref2Cell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(innerCell))).toBe(true);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });

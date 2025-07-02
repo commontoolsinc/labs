@@ -284,7 +284,6 @@ export function createDoc<T>(
         schema,
         rootSchema,
       }, log),
-    //    ) => createCell<Q>(self, path || [], log, schema, rootSchema),
     send: (newValue: T, log?: ReactivityLog) =>
       self.setAtPath([], newValue, log),
     updates: (
