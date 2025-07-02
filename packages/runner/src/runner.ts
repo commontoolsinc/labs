@@ -1,3 +1,4 @@
+import { refer } from "merkle-reference";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
   isModule,
@@ -41,7 +42,11 @@ import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
 import { isCell } from "./cell.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
+import {
+  type LegacyDocCellLink,
+  LINK_V1_TAG,
+  SigilLink,
+} from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 
 export class Runner implements IRunner {
@@ -103,6 +108,7 @@ export class Runner implements IRunner {
 
     type ProcessCellData = {
       [TYPE]: string;
+      spell?: SigilLink;
       argument?: T;
       internal?: JSONValue;
       resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
@@ -220,6 +226,7 @@ export class Runner implements IRunner {
       [TYPE]: recipeId || "unknown",
       resultRef: resultDoc.getAsLegacyCellLink(),
       internal,
+      ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
     if (argument) {
       diffAndUpdate(
@@ -819,6 +826,12 @@ export class Runner implements IRunner {
     // this as TODO.
     addCancel(this.cancels.get(resultCell.getSourceCell()!.getDoc()));
   }
+}
+
+// This takes a recipe id and returns a sigil link with the corresponding entity.
+function getSpellLink(recipeId: string): SigilLink {
+  const id = refer({ causal: { recipeId, type: "recipe" } }).toJSON()["/"];
+  return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
 }
 
 function containsOpaqueRef(value: unknown): boolean {
