@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { recipe, handler, toSchema, h, UI, NAME, str } from "commontools";
 // Define types using TypeScript interfaces
 interface TodoItem {
