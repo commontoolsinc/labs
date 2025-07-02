@@ -1,0 +1,14 @@
+{
+  "name": "@commontools/felt",
+  "tasks": {
+    "cli": "deno run ./cli.ts",
+    "test": "echo 'No tests defined.'"
+  },
+  "exports": {
+    ".": "./mod.ts",
+    "./cli": "./cli.ts"
+  },
+  "imports": {
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7"
+  }
+}

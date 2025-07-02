@@ -6,6 +6,7 @@
     "./packages/cli",
     "./packages/deno-vite-plugin",
     "./packages/deno-web-test",
+    "./packages/felt",
     "./packages/html",
     "./packages/identity",
     "./packages/iframe-sandbox",
@@ -16,6 +17,7 @@
     "./packages/memory",
     "./packages/runner",
     "./packages/seeder",
+    "./packages/shell",
     "./packages/static",
     "./packages/toolshed",
     "./packages/ui",
@@ -39,7 +41,8 @@
     ],
     "types": [
       "./packages/jumble/src/global.d.ts"
-    ]
+    ],
+    "experimentalDecorators": true
   },
   "exclude": [
     "packages/jumble/.vite/deps/",

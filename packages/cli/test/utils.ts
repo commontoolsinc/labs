@@ -1,9 +1,16 @@
 import { decode } from "@commontools/utils/encoding";
 import { join } from "@std/path";
+import { expect } from "@std/expect/expect";
 
 // Decodes a `Uint8Array` into an array of strings for each line.
 export function bytesToLines(stream: Uint8Array): string[] {
   return decode(stream).split("\n").filter(Boolean);
+}
+
+export function checkStderr(stderr: string[]) {
+  expect(stderr.length).toBe(2);
+  expect(stderr[0]).toMatch(/deno run /);
+  expect(stderr[1]).toMatch(/experimentalDecorators compiler option/);
 }
 
 // Executes the `ct` command via CLI

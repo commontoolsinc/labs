@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { exists } from "@std/fs/exists";
-import { ct } from "./utils.ts";
+import { checkStderr, ct } from "./utils.ts";
 
 describe("cli init", () => {
   it("Initializes workspace", async () => {
@@ -14,7 +14,7 @@ describe("cli init", () => {
 
     try {
       const { code, stdout, stderr } = await ct("init");
-      expect(stderr.length).toBe(1); // deno run etc.
+      checkStderr(stderr);
       expect(stdout.length).toBe(0);
       expect(code).toBe(0);
 
