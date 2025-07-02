@@ -1,6 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { TreeOperations, EditingOperations, KeyboardCommands } from "./ct-outliner.ts";
+import { TreeOperations } from "./tree-operations.ts";
+import { KeyboardCommands } from "./keyboard-commands.ts";
+import { EditingOperations } from "./editing-operations.ts";
+import type { OutlineNode } from "./types.ts";
 
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {
@@ -371,7 +374,7 @@ describe("CTOutliner Logic Tests", () => {
     it("gets all visible nodes respecting collapsed state", () => {
       const visibleNodes = TreeOperations.getAllVisibleNodes(sampleNodes);
       expect(visibleNodes).toHaveLength(3);
-      expect(visibleNodes.map(n => n.id)).toEqual(["node-1", "node-2", "node-3"]);
+      expect(visibleNodes.map((n: OutlineNode) => n.id)).toEqual(["node-1", "node-2", "node-3"]);
     });
 
     it("hides children when parent is collapsed", () => {
@@ -385,12 +388,12 @@ describe("CTOutliner Logic Tests", () => {
       
       const visibleNodes = TreeOperations.getAllVisibleNodes(collapsedNodes);
       expect(visibleNodes).toHaveLength(2);
-      expect(visibleNodes.map(n => n.id)).toEqual(["node-1", "node-3"]);
+      expect(visibleNodes.map((n: OutlineNode) => n.id)).toEqual(["node-1", "node-3"]);
     });
 
     it("creates nodes with correct structure", () => {
-      const node = TreeOperations.createNode("Test Content", 2, 42);
-      expect(node.id).toBe("node-42");
+      const node = TreeOperations.createNode({ content: "Test Content", level: 2 });
+      expect(node.id).toBeTruthy(); // UUID will be different each time
       expect(node.content).toBe("Test Content");
       expect(node.level).toBe(2);
       expect(node.collapsed).toBe(false);

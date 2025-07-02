@@ -4,6 +4,18 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
 
+import type {
+  CharmReference,
+  EditingState,
+  KeyboardContext,
+  MentionableItem,
+  NodeCreationOptions,
+  OutlineNode,
+} from "./types.ts";
+import { TreeOperations } from "./tree-operations.ts";
+import { executeKeyboardCommand } from "./keyboard-commands.ts";
+import { EditingOperations } from "./editing-operations.ts";
+
 /**
  * CTOutliner - An outliner component for hierarchical markdown bullet points
  *
@@ -20,543 +32,15 @@ import { marked } from "marked";
  * <ct-outliner value="- Item 1\n  - Subitem 1\n  - Subitem 2\n- Item 2"></ct-outliner>
  */
 
-/**
- * Represents a reference to a charm object with optional identifying properties
- */
-export interface CharmReference {
-  id?: string;
-  _id?: string;
-  charmId?: string;
-  title?: string;
-  name?: string;
-  [key: string]: unknown;
-}
-
-/**
- * Represents an item that can be mentioned using @ syntax
- */
-export interface MentionableItem {
-  name: string;
-  charm: CharmReference;
-}
-
-/**
- * Core data structure for outline nodes, separate from UI state
- */
-export interface OutlineNodeData {
-  readonly id: string;
-  readonly content: string;
-  readonly children: readonly OutlineNodeData[];
-  readonly level: number;
-}
-
-/**
- * UI state separate from the core data structure
- */
-export interface OutlineUIState {
-  readonly collapsedNodes: ReadonlySet<string>;
-  readonly focusedNodeId: string | null;
-  readonly editingNodeId: string | null;
-  readonly editingContent: string;
-  readonly showingMentions: boolean;
-  readonly mentionQuery: string;
-  readonly selectedMentionIndex: number;
-}
-
-/**
- * Working interface that combines data and UI state for compatibility
- * TODO: Eventually migrate to use OutlineNodeData + OutlineUIState separately
- */
-interface OutlineNode {
-  id: string;
-  content: string;
-  children: OutlineNode[];
-  collapsed: boolean;
-  level: number;
-}
-
-/**
- * Pure functional operations for tree manipulation and traversal
- */
-export const TreeOperations = {
-  /**
-   * Find a node by ID in a tree structure
-   */
-  findNode(nodes: readonly OutlineNode[], id: string): OutlineNode | null {
-    for (const node of nodes) {
-      if (node.id === id) return node;
-      const found = TreeOperations.findNode(node.children, id);
-      if (found) return found;
-    }
-    return null;
-  },
-
-  /**
-   * Find the parent array containing a node with the given ID
-   */
-  findNodeParent(
-    nodes: readonly OutlineNode[], 
-    id: string, 
-    parent: readonly OutlineNode[] | null = null
-  ): readonly OutlineNode[] | null {
-    for (const node of nodes) {
-      if (node.id === id) return parent;
-      const found = TreeOperations.findNodeParent(node.children, id, node.children);
-      if (found) return found;
-    }
-    return null;
-  },
-
-  /**
-   * Find the parent node (not array) containing a child with the given ID
-   */
-  findParentNode(nodes: readonly OutlineNode[], id: string): OutlineNode | null {
-    for (const node of nodes) {
-      if (node.children.some(child => child.id === id)) {
-        return node;
-      }
-      const found = TreeOperations.findParentNode(node.children, id);
-      if (found) return found;
-    }
-    return null;
-  },
-
-  /**
-   * Get the index of a node in its parent array
-   */
-  getNodeIndex(nodes: readonly OutlineNode[], id: string): number {
-    return nodes.findIndex(node => node.id === id);
-  },
-
-  /**
-   * Get all visible nodes (respecting collapsed state) in depth-first order
-   */
-  getAllVisibleNodes(nodes: readonly OutlineNode[]): OutlineNode[] {
-    const result: OutlineNode[] = [];
-    for (const node of nodes) {
-      result.push(node);
-      if (!node.collapsed) {
-        result.push(...TreeOperations.getAllVisibleNodes(node.children));
-      }
-    }
-    return result;
-  },
-
-  /**
-   * Update the level of a node and all its descendants
-   */
-  updateNodeLevels(node: OutlineNode): void {
-    const updateChildren = (children: OutlineNode[], parentLevel: number) => {
-      for (const child of children) {
-        child.level = parentLevel + 1;
-        updateChildren(child.children, child.level);
-      }
-    };
-    updateChildren(node.children, node.level);
-  },
-
-  /**
-   * Create a new node with given content and level
-   */
-  createNode(content: string, level: number, nodeIdCounter: number): OutlineNode {
-    return {
-      id: `node-${nodeIdCounter}`,
-      content,
-      children: [],
-      collapsed: false,
-      level,
-    };
-  },
-
-  /**
-   * Move a node up among its siblings (returns new tree)
-   */
-  moveNodeUp(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
-    const parentArray = TreeOperations.findNodeParent(nodes, nodeId) || nodes;
-    const currentIndex = TreeOperations.getNodeIndex(parentArray, nodeId);
-
-    if (currentIndex <= 0) {
-      return { success: false, nodes }; // Can't move up if first or not found
-    }
-
-    // Create new array with swapped positions
-    const newParentArray = [...parentArray];
-    const node = newParentArray[currentIndex];
-    newParentArray.splice(currentIndex, 1);
-    newParentArray.splice(currentIndex - 1, 0, node);
-
-    return { success: true, nodes: [...nodes] }; // Return new tree reference
-  },
-
-  /**
-   * Move a node down among its siblings (returns new tree)
-   */
-  moveNodeDown(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
-    const parentArray = TreeOperations.findNodeParent(nodes, nodeId) || nodes;
-    const currentIndex = TreeOperations.getNodeIndex(parentArray, nodeId);
-
-    if (currentIndex === -1 || currentIndex >= parentArray.length - 1) {
-      return { success: false, nodes }; // Can't move down if last or not found
-    }
-
-    // Create new array with swapped positions
-    const newParentArray = [...parentArray];
-    const node = newParentArray[currentIndex];
-    newParentArray.splice(currentIndex, 1);
-    newParentArray.splice(currentIndex + 1, 0, node);
-
-    return { success: true, nodes: [...nodes] }; // Return new tree reference
-  },
-
-  /**
-   * Indent a node (make it a child of its previous sibling)
-   */
-  indentNode(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
-    const node = TreeOperations.findNode(nodes, nodeId);
-    if (!node) return { success: false, nodes };
-
-    const parentArray = TreeOperations.findNodeParent(nodes, nodeId) || nodes;
-    const currentIndex = TreeOperations.getNodeIndex(parentArray, nodeId);
-
-    if (currentIndex <= 0) {
-      return { success: false, nodes }; // Cannot indent if first child or not found
-    }
-
-    // Get previous sibling
-    const prevSibling = parentArray[currentIndex - 1];
-
-    // Remove from current position and add as child of previous sibling
-    const newParentArray = [...parentArray];
-    newParentArray.splice(currentIndex, 1);
-    
-    prevSibling.children.push(node);
-    node.level = prevSibling.level + 1;
-    prevSibling.collapsed = false;
-
-    // Update levels of all descendants
-    TreeOperations.updateNodeLevels(node);
-
-    return { success: true, nodes: [...nodes] }; // Return new tree reference
-  },
-
-  /**
-   * Outdent a node (move it up one level in the hierarchy)
-   */
-  outdentNode(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
-    const node = TreeOperations.findNode(nodes, nodeId);
-    if (!node) return { success: false, nodes };
-
-    const parentNode = TreeOperations.findParentNode(nodes, nodeId);
-    if (!parentNode) {
-      return { success: false, nodes }; // Already at root level
-    }
-
-    const grandparentArray = TreeOperations.findNodeParent(nodes, parentNode.id) || nodes;
-    const parentIndex = TreeOperations.getNodeIndex(grandparentArray, parentNode.id);
-    const nodeIndex = TreeOperations.getNodeIndex(parentNode.children, nodeId);
-
-    // Remove from current parent
-    const newParentChildren = [...parentNode.children];
-    newParentChildren.splice(nodeIndex, 1);
-    parentNode.children = newParentChildren;
-
-    // Insert after the parent in grandparent array
-    const newGrandparentArray = [...grandparentArray];
-    newGrandparentArray.splice(parentIndex + 1, 0, node);
-
-    // Update level
-    node.level = parentNode.level;
-
-    // Update levels of all descendants
-    TreeOperations.updateNodeLevels(node);
-
-    return { success: true, nodes: [...nodes] }; // Return new tree reference
-  }
-};
-
-/**
- * Command interface for keyboard actions
- */
-interface KeyboardCommand {
-  execute(context: KeyboardContext): void;
-}
-
-/**
- * Context object passed to keyboard commands
- */
-interface KeyboardContext {
-  readonly event: KeyboardEvent;
-  readonly component: CTOutliner;
-  readonly allNodes: OutlineNode[];
-  readonly currentIndex: number;
-  readonly focusedNodeId: string | null;
-}
-
-/**
- * Keyboard command implementations
- */
-export const KeyboardCommands = {
-  ArrowUp: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.event.altKey) {
-        // Alt+Up moves node up among siblings
-        ctx.component.moveNodeUp(ctx.focusedNodeId);
-      } else {
-        if (ctx.currentIndex > 0) {
-          ctx.component.focusedNodeId = ctx.allNodes[ctx.currentIndex - 1].id;
-        } else if (ctx.currentIndex === -1 && ctx.allNodes.length > 0) {
-          // If nothing is focused, start from the last node
-          ctx.component.focusedNodeId = ctx.allNodes[ctx.allNodes.length - 1].id;
-        }
-      }
-    }
-  },
-
-  ArrowDown: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.event.altKey) {
-        // Alt+Down moves node down among siblings
-        ctx.component.moveNodeDown(ctx.focusedNodeId);
-      } else {
-        if (ctx.currentIndex < ctx.allNodes.length - 1) {
-          ctx.component.focusedNodeId = ctx.allNodes[ctx.currentIndex + 1].id;
-        } else if (ctx.currentIndex === -1 && ctx.allNodes.length > 0) {
-          // If nothing is focused, start from the first node
-          ctx.component.focusedNodeId = ctx.allNodes[0].id;
-        }
-      }
-    }
-  },
-
-  ArrowLeft: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.event.altKey) {
-        // Alt+Left collapses current node
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node && node.children.length > 0) {
-            node.collapsed = true;
-            ctx.component.requestUpdate();
-          }
-        }
-      } else {
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node) {
-            if (node.children.length > 0 && !node.collapsed) {
-              // Collapse node if expanded
-              node.collapsed = true;
-              ctx.component.requestUpdate();
-            } else {
-              // Move to parent if collapsed or leaf
-              const parentNode = ctx.component.findParentNode(ctx.focusedNodeId);
-              if (parentNode) {
-                ctx.component.focusedNodeId = parentNode.id;
-              }
-            }
-          }
-        }
-      }
-    }
-  },
-
-  ArrowRight: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.event.altKey) {
-        // Alt+Right expands current node
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node && node.children.length > 0) {
-            node.collapsed = false;
-            ctx.component.requestUpdate();
-          }
-        }
-      } else {
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node) {
-            if (node.children.length > 0) {
-              if (node.collapsed) {
-                // Expand node if collapsed
-                node.collapsed = false;
-                ctx.component.requestUpdate();
-              } else {
-                // Move to first child if expanded
-                ctx.component.focusedNodeId = node.children[0].id;
-              }
-            }
-          }
-        }
-      }
-    }
-  },
-
-  Home: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.allNodes.length > 0) {
-        ctx.component.focusedNodeId = ctx.allNodes[0].id;
-      }
-    }
-  },
-
-  End: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.allNodes.length > 0) {
-        ctx.component.focusedNodeId = ctx.allNodes[ctx.allNodes.length - 1].id;
-      }
-    }
-  },
-
-  Enter: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.focusedNodeId) {
-        if (ctx.event.shiftKey) {
-          // Shift+Enter creates new sibling node below current
-          ctx.component.createNewNodeAfter(ctx.focusedNodeId);
-        } else if (ctx.event.altKey) {
-          // Alt+Enter creates new child node
-          ctx.component.createChildNode(ctx.focusedNodeId);
-        } else {
-          // Enter starts editing
-          ctx.component.startEditing(ctx.focusedNodeId);
-        }
-      }
-    }
-  },
-
-  Backspace: {
-    execute(ctx: KeyboardContext): void {
-      // Only delete nodes when Cmd/Ctrl is held down
-      if (ctx.event.metaKey || ctx.event.ctrlKey) {
-        ctx.event.preventDefault();
-        if (ctx.focusedNodeId) {
-          ctx.component.deleteNode(ctx.focusedNodeId);
-        }
-      }
-    }
-  },
-
-  Delete: {
-    execute(ctx: KeyboardContext): void {
-      // Only delete nodes when Cmd/Ctrl is held down
-      if (ctx.event.metaKey || ctx.event.ctrlKey) {
-        ctx.event.preventDefault();
-        if (ctx.focusedNodeId) {
-          ctx.component.deleteNode(ctx.focusedNodeId);
-        }
-      }
-    }
-  },
-
-  Tab: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.focusedNodeId) {
-        if (ctx.event.shiftKey) {
-          ctx.component.outdentNode(ctx.focusedNodeId);
-        } else {
-          ctx.component.indentNode(ctx.focusedNodeId);
-        }
-      }
-    }
-  },
-
-  Space: {
-    execute(ctx: KeyboardContext): void {
-      // Space toggles expand/collapse on parent nodes
-      ctx.event.preventDefault();
-      if (ctx.focusedNodeId) {
-        const node = ctx.component.findNode(ctx.focusedNodeId);
-        if (node && node.children.length > 0) {
-          node.collapsed = !node.collapsed;
-          ctx.component.requestUpdate();
-        }
-      }
-    }
-  }
-};
-
-/**
- * Pure data transformation functions for editing operations
- */
-export const EditingOperations = {
-  /**
-   * Apply edit completion to a node - pure data transformation
-   */
-  completeEdit(
-    nodes: OutlineNode[], 
-    nodeId: string, 
-    newContent: string
-  ): { updatedNodes: OutlineNode[]; success: boolean } {
-    const node = TreeOperations.findNode(nodes, nodeId);
-    if (!node) {
-      return { updatedNodes: nodes, success: false };
-    }
-
-    // Create updated node with new content
-    const updatedNode = { ...node, content: newContent };
-    
-    // For simplicity, we'll mutate in place for now, but this could be made immutable
-    node.content = newContent;
-    
-    return { updatedNodes: nodes, success: true };
-  },
-
-  /**
-   * Prepare state for editing - pure data transformation
-   */
-  prepareEditingState(
-    currentEditingNodeId: string | null,
-    currentEditingContent: string,
-    nodeId: string,
-    nodeContent: string
-  ): {
-    editingNodeId: string;
-    editingContent: string;
-    showingMentions: boolean;
-  } {
-    return {
-      editingNodeId: nodeId,
-      editingContent: nodeContent,
-      showingMentions: false,
-    };
-  },
-
-  /**
-   * Clear editing state - pure data transformation
-   */
-  clearEditingState(): {
-    editingNodeId: null;
-    editingContent: string;
-    showingMentions: boolean;
-  } {
-    return {
-      editingNodeId: null,
-      editingContent: "",
-      showingMentions: false,
-    };
-  }
-};
-
-/**
- * Side effect operations for outliner
- */
 export const OutlinerEffects = {
   /**
    * Focus the outliner element for keyboard navigation
    */
   focusOutliner(shadowRoot: ShadowRoot | null): void {
     if (!shadowRoot) return;
-    
+
     setTimeout(() => {
-      const outliner = shadowRoot.querySelector('.outliner') as HTMLElement;
+      const outliner = shadowRoot.querySelector(".outliner") as HTMLElement;
       outliner?.focus();
     }, 0);
   },
@@ -566,9 +50,11 @@ export const OutlinerEffects = {
    */
   focusEditor(shadowRoot: ShadowRoot | null, nodeId: string): void {
     if (!shadowRoot) return;
-    
+
     setTimeout(() => {
-      const editor = shadowRoot.querySelector(`#editor-${nodeId}`) as HTMLTextAreaElement;
+      const editor = shadowRoot.querySelector(
+        `#editor-${nodeId}`,
+      ) as HTMLTextAreaElement;
       if (editor) {
         editor.focus();
         editor.select();
@@ -580,20 +66,22 @@ export const OutlinerEffects = {
    * Set cursor position in an editor
    */
   setCursorPosition(
-    shadowRoot: ShadowRoot | null, 
-    nodeId: string, 
-    position: number
+    shadowRoot: ShadowRoot | null,
+    nodeId: string,
+    position: number,
   ): void {
     if (!shadowRoot) return;
-    
+
     setTimeout(() => {
-      const editor = shadowRoot.querySelector(`#editor-${nodeId}`) as HTMLTextAreaElement;
+      const editor = shadowRoot.querySelector(
+        `#editor-${nodeId}`,
+      ) as HTMLTextAreaElement;
       if (editor) {
         editor.setSelectionRange(position, position);
         editor.focus();
       }
     }, 0);
-  }
+  },
 };
 
 export class CTOutliner extends BaseElement {
@@ -615,7 +103,7 @@ export class CTOutliner extends BaseElement {
   set value(newValue: string) {
     const oldValue = this._value;
     this._value = newValue;
-    
+
     // Only parse markdown if this is an external change
     if (!this._internalChange && oldValue !== newValue) {
       this.nodes = this.parseMarkdown(newValue);
@@ -627,10 +115,10 @@ export class CTOutliner extends BaseElement {
         this.focusedNodeId = this.nodes[0].id;
       }
     }
-    
+
     this.requestUpdate("value", oldValue);
   }
-  
+
   declare readonly: boolean;
   declare mentionable: MentionableItem[];
   declare nodes: OutlineNode[];
@@ -639,7 +127,6 @@ export class CTOutliner extends BaseElement {
   declare mentionQuery: string;
   declare selectedMentionIndex: number;
 
-  private nodeIdCounter = 0;
   private editingNodeId: string | null = null;
   private editingContent: string = "";
   private _internalChange = false;
@@ -649,12 +136,18 @@ export class CTOutliner extends BaseElement {
     return {
       editingNodeId: this.editingNodeId,
       editingContent: this.editingContent,
-      createNode: (content: string, level: number) => this.createNode(content, level),
+      createNode: (content: string, level: number) =>
+        this.createNode(content, level),
       nodesToMarkdown: (nodes: OutlineNode[]) => this.nodesToMarkdown(nodes),
       emitChange: () => this.emitChange(),
       startEditing: (nodeId: string) => this.startEditing(nodeId),
       handleKeyDown: (event: KeyboardEvent) => this.handleKeyDown(event),
-      handleEditorKeyDown: (event: KeyboardEvent) => this.handleEditorKeyDown(event),
+      handleEditorKeyDown: (event: KeyboardEvent) =>
+        this.handleEditorKeyDown(event),
+      handleMentionKeyDown: (event: KeyboardEvent) =>
+        this.handleMentionKeyDown(event),
+      handleNormalEditorKeyDown: (event: KeyboardEvent) =>
+        this.handleNormalEditorKeyDown(event),
     };
   }
 
@@ -902,7 +395,7 @@ export class CTOutliner extends BaseElement {
   }
 
   private createNode(content: string, level: number): OutlineNode {
-    return TreeOperations.createNode(content, level, this.nodeIdCounter++);
+    return TreeOperations.createNode({ content, level });
   }
 
   private parseMarkdown(markdown: string): OutlineNode[] {
@@ -958,11 +451,17 @@ export class CTOutliner extends BaseElement {
     return TreeOperations.findNode(nodes, id);
   }
 
-  private findNodeParent(id: string, nodes: OutlineNode[] = this.nodes): OutlineNode[] | null {
+  private findNodeParent(
+    id: string,
+    nodes: OutlineNode[] = this.nodes,
+  ): OutlineNode[] | null {
     return TreeOperations.findNodeParent(nodes, id) as OutlineNode[] | null;
   }
 
-  findParentNode(id: string, nodes: OutlineNode[] = this.nodes): OutlineNode | null {
+  findParentNode(
+    id: string,
+    nodes: OutlineNode[] = this.nodes,
+  ): OutlineNode | null {
     return TreeOperations.findParentNode(nodes, id);
   }
 
@@ -1006,7 +505,7 @@ export class CTOutliner extends BaseElement {
       this.editingNodeId,
       this.editingContent,
       nodeId,
-      node.content
+      node.content,
     );
 
     // Apply new state
@@ -1024,22 +523,22 @@ export class CTOutliner extends BaseElement {
 
     // Pure data transformation - update node content
     const result = EditingOperations.completeEdit(
-      this.nodes, 
-      this.editingNodeId, 
-      this.editingContent
+      this.nodes,
+      this.editingNodeId,
+      this.editingContent,
     );
-    
+
     if (!result.success) return;
 
     // Save node ID for focus before clearing editing state
     const nodeId = this.editingNodeId;
-    
+
     // Pure data transformation - clear editing state
     const clearState = EditingOperations.clearEditingState();
     this.editingNodeId = clearState.editingNodeId;
     this.editingContent = clearState.editingContent;
     this.showingMentions = clearState.showingMentions;
-    
+
     // Maintain focus on the node we just edited
     this.focusedNodeId = nodeId;
 
@@ -1048,22 +547,24 @@ export class CTOutliner extends BaseElement {
     this.emitChange();
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
-  
+
   private cancelEditing() {
     if (this.editingNodeId) {
       const nodeId = this.editingNodeId;
       this.editingNodeId = null;
       this.editingContent = "";
       this.showingMentions = false;
-      
+
       // Keep focus on the node we were editing
       this.focusedNodeId = nodeId;
-      
+
       this.requestUpdate();
-      
+
       // Restore focus to the outliner element for keyboard navigation
       setTimeout(() => {
-        const outliner = this.shadowRoot?.querySelector('.outliner') as HTMLElement;
+        const outliner = this.shadowRoot?.querySelector(
+          ".outliner",
+        ) as HTMLElement;
         outliner?.focus();
       }, 0);
     }
@@ -1138,7 +639,7 @@ export class CTOutliner extends BaseElement {
 
     // Focus previous node or next node
     const allNodes = this.getAllNodes();
-    
+
     // If no nodes remain, create a new root node
     if (allNodes.length === 0) {
       const newNode = this.createNode("", 0);
@@ -1148,7 +649,7 @@ export class CTOutliner extends BaseElement {
       this.emitChange();
       return;
     }
-    
+
     const deletedIndex = allNodes.findIndex((n) => n.id === nodeToDelete.id);
     if (deletedIndex > 0) {
       this.focusedNodeId = allNodes[deletedIndex - 1].id;
@@ -1164,8 +665,8 @@ export class CTOutliner extends BaseElement {
     if (!this.editingNodeId) return;
 
     const allNodes = this.getAllNodes();
-    const currentIndex = allNodes.findIndex(n => n.id === this.editingNodeId);
-    
+    const currentIndex = allNodes.findIndex((n) => n.id === this.editingNodeId);
+
     if (currentIndex === -1 || currentIndex >= allNodes.length - 1) return;
 
     const currentNode = allNodes[currentIndex];
@@ -1248,8 +749,8 @@ export class CTOutliner extends BaseElement {
     } else {
       // Check if the new focus target is within the outliner
       const relatedTarget = event.relatedTarget as HTMLElement;
-      const outliner = this.shadowRoot?.querySelector('.outliner');
-      
+      const outliner = this.shadowRoot?.querySelector(".outliner");
+
       // Only finish editing if focus is leaving the outliner entirely
       if (!outliner?.contains(relatedTarget)) {
         this.finishEditing();
@@ -1391,74 +892,89 @@ export class CTOutliner extends BaseElement {
   }
 
   private handleEditorKeyDown(event: KeyboardEvent) {
-    const target = event.target as HTMLTextAreaElement;
-
-    // Handle mention navigation when dropdown is showing
     if (this.showingMentions) {
-      const filteredMentions = this.getFilteredMentions();
+      this.handleMentionKeyDown(event);
+      return;
+    }
+    this.handleNormalEditorKeyDown(event);
+  }
 
-      if (event.key === "ArrowDown") {
+  private handleMentionKeyDown(event: KeyboardEvent) {
+    const filteredMentions = this.getFilteredMentions();
+
+    switch (event.key) {
+      case "ArrowDown":
         event.preventDefault();
         this.selectedMentionIndex = Math.min(
           this.selectedMentionIndex + 1,
           filteredMentions.length - 1,
         );
         this.requestUpdate();
-        return;
-      } else if (event.key === "ArrowUp") {
+        break;
+      case "ArrowUp":
         event.preventDefault();
         this.selectedMentionIndex = Math.max(this.selectedMentionIndex - 1, 0);
         this.requestUpdate();
-        return;
-      } else if (event.key === "Enter") {
+        break;
+      case "Enter":
         event.preventDefault();
         if (filteredMentions[this.selectedMentionIndex]) {
           this.insertMention(filteredMentions[this.selectedMentionIndex]);
         }
-        return;
-      } else if (event.key === "Escape") {
+        break;
+      case "Escape":
         event.preventDefault();
         this.showingMentions = false;
         this.requestUpdate();
-        return;
-      }
+        break;
     }
+  }
 
-    // Normal editor key handling
-    if (event.key === "Enter") {
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.metaKey || event.ctrlKey) {
-        // Cmd/Ctrl+Enter creates new sibling node (same as Shift+Enter)
-        this.finishEditingAndCreateNew();
-      } else {
-        // Enter confirms edit and returns to read mode
-        this.finishEditing();
-      }
-      return;
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      // Cancel edit, revert to original text
-      this.cancelEditing();
-    } else if (event.key === "Tab") {
-      event.preventDefault();
-      this.handleIndentation(event.shiftKey);
-    } else if (event.key === "Backspace") {
-      if (this.editingContent === "" || (target.selectionStart === 0 && this.editingContent === "")) {
+  private handleNormalEditorKeyDown(event: KeyboardEvent) {
+    const target = event.target as HTMLTextAreaElement;
+
+    switch (event.key) {
+      case "Enter":
         event.preventDefault();
-        this.deleteCurrentNode();
-      }
-    } else if (event.key === "Delete") {
-      // Check if at end of node and there's a next node to merge with
-      if (target.selectionStart === this.editingContent.length) {
-        const allNodes = this.getAllNodes();
-        const currentNodeIndex = allNodes.findIndex(n => n.id === this.editingNodeId);
-        if (currentNodeIndex !== -1 && currentNodeIndex < allNodes.length - 1) {
-          event.preventDefault();
-          this.mergeWithNextNode();
+        event.stopPropagation();
+        if (event.metaKey || event.ctrlKey) {
+          this.finishEditingAndCreateNew();
+        } else {
+          this.finishEditing();
         }
-      }
+        break;
+      case "Escape":
+        event.preventDefault();
+        event.stopPropagation();
+        this.cancelEditing();
+        break;
+      case "Tab":
+        event.preventDefault();
+        this.handleIndentation(event.shiftKey);
+        break;
+      case "Backspace":
+        if (
+          this.editingContent === "" ||
+          (target.selectionStart === 0 && this.editingContent === "")
+        ) {
+          event.preventDefault();
+          this.deleteCurrentNode();
+        }
+        break;
+      case "Delete":
+        if (target.selectionStart === this.editingContent.length) {
+          const allNodes = this.getAllNodes();
+          const currentNodeIndex = allNodes.findIndex((n) =>
+            n.id === this.editingNodeId
+          );
+          if (
+            currentNodeIndex !== -1 && currentNodeIndex < allNodes.length - 1
+          ) {
+            event.preventDefault();
+            this.mergeWithNextNode();
+          }
+        }
+        break;
     }
   }
 
@@ -1478,10 +994,7 @@ export class CTOutliner extends BaseElement {
       focusedNodeId: this.focusedNodeId,
     };
 
-    const command = KeyboardCommands[event.key as keyof typeof KeyboardCommands];
-    if (command) {
-      command.execute(context);
-    }
+    executeKeyboardCommand(event.key, context);
   }
 
   private emitChange() {
@@ -1517,7 +1030,7 @@ export class CTOutliner extends BaseElement {
 
     const newNode = this.createNode("", node.level + 1);
     node.children.push(newNode);
-    
+
     // Ensure parent is expanded
     node.collapsed = false;
 
@@ -1531,44 +1044,18 @@ export class CTOutliner extends BaseElement {
   }
 
   deleteNode(nodeId: string) {
-    const parentArray = this.findNodeParent(nodeId) || this.nodes;
-    const currentIndex = this.getNodeIndex(nodeId, parentArray);
+    const result = TreeOperations.deleteNode(this.nodes, nodeId);
 
-    if (currentIndex === -1) return;
+    if (!result.success) return;
 
-    // Don't delete if it's the only node
-    if (this.nodes.length === 1 && this.nodes[0].children.length === 0) {
-      return;
-    }
-
-    const nodeToDelete = parentArray[currentIndex];
-
-    // Move children up to parent level if any
-    if (nodeToDelete.children.length > 0) {
-      const adjustedChildren = nodeToDelete.children.map((child) => ({
-        ...child,
-        level: nodeToDelete.level,
-      }));
-      parentArray.splice(currentIndex, 1, ...adjustedChildren);
+    // Handle focus after deletion
+    if (result.newFocusId) {
+      this.focusedNodeId = result.newFocusId;
     } else {
-      parentArray.splice(currentIndex, 1);
-    }
-
-    // Focus previous node or next node
-    const allNodes = this.getAllNodes();
-    
-    // If no nodes remain, create a new root node
-    if (allNodes.length === 0) {
+      // No nodes remain, create a new root node
       const newNode = this.createNode("", 0);
       this.nodes = [newNode];
       this.focusedNodeId = newNode.id;
-    } else {
-      const deletedIndex = allNodes.findIndex((n) => n.id === nodeToDelete.id);
-      if (deletedIndex > 0) {
-        this.focusedNodeId = allNodes[Math.max(0, deletedIndex - 1)].id;
-      } else if (this.nodes.length > 0) {
-        this.focusedNodeId = this.getAllNodes()[0].id;
-      }
     }
 
     this.requestUpdate();
@@ -1578,103 +1065,36 @@ export class CTOutliner extends BaseElement {
   moveNodeUp(nodeId: string | null) {
     if (!nodeId) return;
 
-    const parentArray = this.findNodeParent(nodeId) || this.nodes;
-    const currentIndex = this.getNodeIndex(nodeId, parentArray);
-
-    if (currentIndex <= 0) return; // Can't move up if first or not found
-
-    // Swap with previous sibling
-    const node = parentArray[currentIndex];
-    parentArray.splice(currentIndex, 1);
-    parentArray.splice(currentIndex - 1, 0, node);
-
-    this.requestUpdate();
-    this.emitChange();
+    const success = TreeOperations.moveNodeUp(this.nodes, nodeId);
+    if (success) {
+      this.requestUpdate();
+      this.emitChange();
+    }
   }
 
   moveNodeDown(nodeId: string | null) {
     if (!nodeId) return;
 
-    const parentArray = this.findNodeParent(nodeId) || this.nodes;
-    const currentIndex = this.getNodeIndex(nodeId, parentArray);
-
-    if (currentIndex === -1 || currentIndex >= parentArray.length - 1) return; // Can't move down if last or not found
-
-    // Swap with next sibling
-    const node = parentArray[currentIndex];
-    parentArray.splice(currentIndex, 1);
-    parentArray.splice(currentIndex + 1, 0, node);
-
-    this.requestUpdate();
-    this.emitChange();
+    const success = TreeOperations.moveNodeDown(this.nodes, nodeId);
+    if (success) {
+      this.requestUpdate();
+      this.emitChange();
+    }
   }
 
   indentNode(nodeId: string) {
-    const node = this.findNode(nodeId);
-    if (!node) return;
-
-    const parentArray = this.findNodeParent(nodeId) || this.nodes;
-    const currentIndex = this.getNodeIndex(nodeId, parentArray);
-
-    if (currentIndex <= 0) return; // Cannot indent if first child or not found
-
-    // Get previous sibling
-    const prevSibling = parentArray[currentIndex - 1];
-
-    // Remove from current position
-    parentArray.splice(currentIndex, 1);
-
-    // Add as child of previous sibling
-    prevSibling.children.push(node);
-    node.level = prevSibling.level + 1;
-
-    // Ensure previous sibling is expanded
-    prevSibling.collapsed = false;
-
-    // Update levels of all descendants
-    this.updateNodeLevels(node);
-
-    this.requestUpdate();
-    this.emitChange();
+    const success = TreeOperations.indentNode(this.nodes, nodeId);
+    if (success) {
+      this.requestUpdate();
+      this.emitChange();
+    }
   }
 
   outdentNode(nodeId: string) {
-    const node = this.findNode(nodeId);
-    if (!node || node.level === 0) return; // Cannot outdent root level
-
-    const parentNode = this.findParentNode(nodeId);
-    if (!parentNode) return;
-
-    const parentArray = parentNode.children;
-    const currentIndex = this.getNodeIndex(nodeId, parentArray);
-    if (currentIndex === -1) return;
-
-    // Find grandparent array
-    const grandParentArray = this.findNodeParent(parentNode.id) || this.nodes;
-    const parentIndex = this.getNodeIndex(parentNode.id, grandParentArray);
-
-    // Remove from current position
-    parentArray.splice(currentIndex, 1);
-
-    // Move any following siblings as children of this node
-    const followingSiblings = parentArray.splice(currentIndex);
-    node.children.push(...followingSiblings);
-
-    // Insert after parent
-    grandParentArray.splice(parentIndex + 1, 0, node);
-    node.level = parentNode.level;
-
-    // Update levels of all descendants
-    this.updateNodeLevels(node);
-
-    this.requestUpdate();
-    this.emitChange();
-  }
-
-  private updateNodeLevels(node: OutlineNode) {
-    for (const child of node.children) {
-      child.level = node.level + 1;
-      this.updateNodeLevels(child);
+    const success = TreeOperations.outdentNode(this.nodes, nodeId);
+    if (success) {
+      this.requestUpdate();
+      this.emitChange();
     }
   }
 
@@ -1723,7 +1143,9 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private decodeCharmFromHref(href: string | null): CharmReference | string | null {
+  private decodeCharmFromHref(
+    href: string | null,
+  ): CharmReference | string | null {
     if (!href) return null;
 
     try {
