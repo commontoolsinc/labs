@@ -908,6 +908,7 @@ export function redactCommitData(
     }
     // We treat all labels as unclassified
     if (fact.the === LABEL_THE) {
+      set(newChanges, fact.of, fact.the, fact.cause, fact.value);
       continue;
     }
     const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
