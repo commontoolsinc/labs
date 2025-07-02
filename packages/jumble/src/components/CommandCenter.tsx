@@ -486,7 +486,7 @@ export function CommandCenter() {
         handleNavigateToCharm as EventListener,
       );
     };
-  }, [focusedCharmId, allCommands, navigate, focusedReplicaId]);
+  }, [focusedCharmId, allCommands, navigate, focusedReplicaId, charmManager]);
 
   const handleBack = () => {
     if (commandPathIds.length === 1) {
