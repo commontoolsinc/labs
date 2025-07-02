@@ -35,7 +35,7 @@ describe("Provider Reconnection", () => {
   });
 
   describe("reestablishSubscriptions", () => {
-    it("should re-issue sync for all tracked subscriptions", async () => {
+    it("should re-issue pull for all tracked subscriptions", async () => {
       const schema1: SchemaContext = {
         schema: { type: "object", properties: { name: { type: "string" } } },
         rootSchema: {
@@ -56,38 +56,49 @@ describe("Provider Reconnection", () => {
       await provider.sync(entityId1, true, schema1);
       await provider.sync(entityId2, true, schema2);
 
-      // Override the provider's sync function to our version that also tracks the documents that its sync'ing on
-      const syncCalls: Array<
-        { entityId: EntityId; schemaContext?: SchemaContext }
-      > = [];
-      const originalSync = provider.sync.bind(provider);
-      (provider as any).sync = function (
-        entityId: EntityId,
-        expectedInStorage?: boolean,
-        schemaContext?: SchemaContext,
+      // Override the workspace's pull function to track calls
+      const pullCalls: Array<[any, any?][]> = [];
+      const originalPull = provider.workspace.pull.bind(provider.workspace);
+      (provider.workspace as any).pull = function (
+        entries: [any, any?][],
       ) {
-        syncCalls.push({ entityId, schemaContext });
-        return originalSync(entityId, expectedInStorage, schemaContext);
+        pullCalls.push(entries);
+        return originalPull(entries);
       };
 
       // Call reestablishSubscriptions to test the logic
       await provider.reestablishSubscriptions();
 
-      // Make sure both subscriptions were re-established
-      expect(syncCalls.length).toBe(2);
+      // Should have made one pull call
+      expect(pullCalls.length).toBe(1);
 
-      // Check first subscription
-      const call1 = syncCalls.find((c) => c.entityId["/"] === "user-1");
-      expect(call1).toBeDefined();
-      expect(call1?.schemaContext).toEqual(schema1);
+      const pullEntries = pullCalls[0];
+      // Should include space commit object + 2 subscriptions
+      expect(pullEntries.length).toBe(3);
 
-      // Check second subscription
-      const call2 = syncCalls.find((c) => c.entityId["/"] === "user-2");
-      expect(call2).toBeDefined();
-      expect(call2?.schemaContext).toEqual(schema2);
+      // First entry should be space commit object
+      expect(pullEntries[0][0]).toEqual({
+        the: "application/commit+json",
+        of: signer.did(),
+      });
+      expect(pullEntries[0][1]).toBeUndefined();
+
+      // Check user-1 subscription
+      const user1Entry = pullEntries.find(
+        ([addr]) => addr.of === "of:user-1" && addr.the === "application/json",
+      );
+      expect(user1Entry).toBeDefined();
+      expect(user1Entry![1]).toEqual(schema1);
+
+      // Check user-2 subscription
+      const user2Entry = pullEntries.find(
+        ([addr]) => addr.of === "of:user-2" && addr.the === "application/json",
+      );
+      expect(user2Entry).toBeDefined();
+      expect(user2Entry![1]).toEqual(schema2);
     });
 
-    it("should handle sync failures gracefully", async () => {
+    it("should handle pull failures gracefully", async () => {
       const schema: SchemaContext = {
         schema: { type: "object" },
         rootSchema: { type: "object" },
@@ -96,35 +107,28 @@ describe("Provider Reconnection", () => {
       await provider.sync({ "/": "good-entity" }, true, schema);
       await provider.sync({ "/": "bad-entity" }, true, schema);
 
-      // Make sync fail for one entity
-      const originalSync = provider.sync.bind(provider);
-      let callCount = 0;
-      (provider as any).sync = function (
-        entityId: EntityId,
-        expectedInStorage?: boolean,
-        schemaContext?: SchemaContext,
+      // Make pull fail
+      const originalPull = provider.workspace.pull.bind(provider.workspace);
+      let pullCalled = false;
+      (provider.workspace as any).pull = function (
+        entries: [any, any?][],
       ) {
-        if (entityId["/"] === "bad-entity") {
-          throw new Error("Network error");
-        }
-        callCount++;
-        return originalSync(entityId, expectedInStorage, schemaContext);
+        pullCalled = true;
+        throw new Error("Network error");
       };
 
       // Capture console.error
       const errors: string[] = [];
       const originalError = console.error;
-      console.error = (msg: string) => errors.push(msg);
+      console.error = (...args: any[]) => errors.push(args.join(" "));
 
       // Call our function
       await provider.reestablishSubscriptions();
       console.error = originalError;
 
-      expect(callCount).toBe(1); // Only "good-entity" succeeded
+      expect(pullCalled).toBe(true);
       expect(errors.length).toBe(1);
-      expect(errors[0]).toContain(
-        "Failed to re-establish subscription for bad-entity",
-      );
+      expect(errors[0]).toContain("Failed to re-establish subscriptions");
     });
   });
 });
