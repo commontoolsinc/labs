@@ -4,12 +4,14 @@ Review the code we have written with these priorities:
 
 ## Core Principles
 
-**Channel the spirit of Rich Hickey**: Embrace simplicity, embrace immutability, embrace data over actions.
+**Channel the spirit of Rich Hickey**: Embrace simplicity, embrace immutability, embrace data.
+Also consider the lessons of: Erlang (Joe Armstrong), Elixir (José Valim), Elm (Evan Czaplicki) and Rust.
 
 ## Specific Focus Areas
 
 ### Code Structure
 - **Extract pure functions** for common logic and reusable operations
+- **Pay attention to the story parameters and names tell** use the code as a self-documenting structure
 - **Examine similar code** to ensure consistency and avoid duplication
 - **Use consistent naming conventions** that clearly express intent
 
@@ -19,19 +21,14 @@ Review the code we have written with these priorities:
 - **Make invalid states unrepresentable** - follow the CLAUDE.md guidelines on avoiding ambiguous types
 
 ### Error Handling
-- **Handle errors gracefully, or do not model them at all**
+- **Handle errors gracefully, or avoid them entirely**
 - Prefer throwing over silent failures or unclear undefined returns
 - Follow the error handling patterns outlined in CLAUDE.md
 
 ### Functional Style
-- **Prefer a functional programming style** over imperative approaches
-- Favor immutable data transformations
+- **Prefer a pure, functional programming style** over imperative approaches
+- Favor immutable data transformations in library code
 - Minimize side effects and make them explicit when necessary
 
-## Repository Standards
-
-Ensure code adheres to the patterns and practices documented in CLAUDE.md:
-- Avoid singletons
-- Keep the module graph clean
-- Follow formatting rules (80 chars, 2 spaces, semicolons, double quotes)
-- Use appropriate imports grouping and exports
+### Functional-Reactive programming
+- When working on recipes, favor functional-reactive programming patterns to handle asynchronous data streams and side effects. See @recipe-dev.md.
