@@ -57,7 +57,7 @@ describe("Provider Reconnection", () => {
       await provider.sync(entityId2, true, schema2);
 
       // Override the workspace's pull function to track calls
-      let pullCalls: Array<[any, any?][]> = [];
+      const pullCalls: Array<[any, any?][]> = [];
       const originalPull = provider.workspace.pull.bind(provider.workspace);
       (provider.workspace as any).pull = function (
         entries: [any, any?][],
