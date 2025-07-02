@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { checkWouldTransform, transformSource } from "./test-utils.ts";
 import { cache } from "@commontools/static";
+import { getTypeScriptEnvironmentTypes, TypeScriptCompiler } from "../mod.ts";
 
 const commonToolsTypes = await cache.getText("types/commontools.d.ts");
 
@@ -340,19 +341,23 @@ const result = count + 10;
   });
 
   describe("CTS-Enable Directive", () => {
-    it("skips transformation without /// <cts-enable /> directive", async () => {
+    it("transformers work correctly when applied by test utility", async () => {
       const source = `
 import { OpaqueRef, derive } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count > 5 ? "yes" : "no";
 const sum = count + 1;
 `;
+      // Note: The directive check is now in the compiler, not the transformers
+      // The transformSource test utility applies transformers directly, so it will
+      // always transform regardless of the directive
       const transformed = await transformSource(source, { types });
-      // Should NOT transform without the directive
-      expect(transformed).toContain('count > 5 ? "yes" : "no"');
-      expect(transformed).toContain("count + 1");
-      expect(transformed).not.toContain("ifElse");
-      expect(transformed).not.toContain("_v1 =>");
+      
+      // When transformers are applied, they should transform the code
+      expect(transformed).toContain("ifElse");
+      expect(transformed).toContain("derive");
+      expect(transformed).toContain("_v1 =>");
+      expect(transformed).not.toContain('count > 5 ? "yes" : "no"');
     });
 
     it("transforms with /// <cts-enable /> directive", async () => {
