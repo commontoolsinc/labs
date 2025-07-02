@@ -80,17 +80,6 @@ export class Chronicle {
       return read(written, address);
     }
 
-    // If we previously read overlapping memory address we can read from it
-    // and apply our writes on top.
-    const prior = this.#history.get(address);
-    if (prior) {
-      const { error, ok: merged } = this.rebase(prior);
-      if (error) {
-        return { error };
-      } else {
-        return read(merged, address);
-      }
-    }
 
     // If we have not read nor written into overlapping memory address so
     // we'll read it from the local replica.

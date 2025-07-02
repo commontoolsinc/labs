@@ -1,26 +1,23 @@
 import type {
   Activity,
+  IAttestation,
   IMemoryAddress,
   InactiveTransactionError,
   IStorageManager,
   IStorageTransactionAborted,
   IStorageTransactionComplete,
   IStorageTransactionInconsistent,
-  ITransaction,
+  ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
+  JournalArchive,
   JSONValue,
   MemorySpace,
+  ReadError,
   Result,
+  WriteError,
 } from "../interface.ts";
 import * as Chronicle from "./chronicle.ts";
-
-/**
- * Archive of the journal keyed by memory space. Each read attestation
- * are represented as `claims` and write attestation are represented as
- * `facts`.
- */
-export type Archive = Map<MemorySpace, ITransaction>;
 
 export interface UnknownState {
   branches: Map<MemorySpace, Chronicle.Chronicle>;
@@ -37,7 +34,7 @@ export interface OpenState extends UnknownState {
 export interface ClosedState extends UnknownState {
   status: "closed";
   reason: Result<
-    Archive,
+    JournalArchive,
     IStorageTransactionAborted | IStorageTransactionInconsistent
   >;
 }
@@ -45,12 +42,13 @@ export interface ClosedState extends UnknownState {
 export type State = OpenState | ClosedState;
 export type IJournal = { state: State };
 
+export type { Journal };
 /**
  * Class for maintaining lifecycle of the storage transaction. It's job is to
  * have central place to manage state of the transaction and prevent readers /
  * writers from making to mutate transaction after it's being commited.
  */
-class Journal implements IJournal {
+class Journal implements IJournal, ITransactionJournal {
   #state: State;
   constructor(state: State) {
     this.#state = state;
@@ -58,6 +56,10 @@ class Journal implements IJournal {
 
   get state() {
     return this.#state;
+  }
+
+  set state(newState: State) {
+    this.#state = newState;
   }
 
   get status() {
@@ -100,7 +102,7 @@ export const read = (
   journal: IJournal,
   space: MemorySpace,
   address: IMemoryAddress,
-) => {
+): Result<IAttestation, ReadError> => {
   const { ok: branch, error } = checkout(journal, space);
   if (error) {
     return { error };
@@ -119,7 +121,7 @@ export const write = (
   space: MemorySpace,
   address: IMemoryAddress,
   value?: JSONValue,
-) => {
+): Result<IAttestation, WriteError> => {
   const { ok: branch, error } = checkout(journal, space);
   if (error) {
     return { error };
@@ -169,7 +171,10 @@ const edit = (
   }
 };
 
-export const reader = (journal: IJournal, space: MemorySpace) => {
+export const reader = (
+  journal: IJournal,
+  space: MemorySpace,
+): Result<TransactionReader, InactiveTransactionError> => {
   const { ok: open, error } = edit(journal);
   if (error) {
     return { error };
@@ -189,7 +194,10 @@ export const reader = (journal: IJournal, space: MemorySpace) => {
   }
 };
 
-export const writer = (journal: IJournal, space: MemorySpace) => {
+export const writer = (
+  journal: IJournal,
+  space: MemorySpace,
+): Result<TransactionWriter, InactiveTransactionError> => {
   // Obtait edit session for this journal, if it fails journal is
   // no longer open, in which case we propagate error.
   const { ok: open, error } = edit(journal);
@@ -204,9 +212,9 @@ export const writer = (journal: IJournal, space: MemorySpace) => {
     } else {
       const writer = new TransactionWriter(journal, space);
 
-      // Store reader so that subsequent attempts calls of this method.
+      // Store writer so that subsequent attempts calls of this method.
       open.writers.set(space, writer);
-      return { ok: reader };
+      return { ok: writer };
     }
   }
 };
@@ -232,7 +240,7 @@ export const close = (journal: IJournal) => {
   if (error) {
     return { error };
   } else {
-    const archive: Archive = new Map();
+    const archive: JournalArchive = new Map();
     for (const [space, chronicle] of open.branches) {
       const { error, ok } = chronicle.commit();
       if (error) {

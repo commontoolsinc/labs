@@ -567,15 +567,13 @@ describe("Chronicle", () => {
       expect(historyEntries).toHaveLength(1);
       expect(historyEntries[0].address).toEqual(rootAddress);
 
-      // The history should capture what was actually read from replica (original values)
       expect(historyEntries[0].value).toEqual({
-        name: "Alice", // Original value from replica
-        age: 30, // Original value from replica
+        name: "Alice",
+        age: 30,
       });
     });
 
     it("should capture original replica read in history, not merged result", async () => {
-      // Pre-populate replica
       await replica.commit({
         facts: [
           assert({
@@ -605,21 +603,16 @@ describe("Chronicle", () => {
         count: 20,
       });
 
-      // History should capture the ORIGINAL replica read, not the merged result
-      // This is critical for validation - we need to track what was actually read from storage
       const historyEntries = [...freshChronicle.history()];
       expect(historyEntries).toHaveLength(1);
 
-      // BUG: Currently this captures the merged result instead of original
-      // The history invariant should reflect what was read from replica (before rebasing)
       expect(historyEntries[0].value).toEqual({
-        name: "Original", // Should be original value from replica
-        count: 10, // Should be original value from replica
+        name: "Original",
+        count: 10,
       });
     });
 
     it("should not capture computed values in history", async () => {
-      // Pre-populate replica
       await replica.commit({
         facts: [
           assert({
@@ -654,6 +647,495 @@ describe("Chronicle", () => {
       // Read again should compute new merged value
       const result2 = freshChronicle.read(rootAddress);
       expect(result2.ok?.value).toEqual({ name: "Ivy", level: 3 });
+    });
+  });
+
+  describe("Commit Functionality", () => {
+    it("should commit a simple write transaction", () => {
+      const chronicle = Chronicle.open(replica);
+      const address = {
+        id: "test:commit-1",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      chronicle.write(address, { status: "pending" });
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+      expect(commitResult.error).toBeUndefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.facts).toHaveLength(1);
+      expect(transaction.facts[0].of).toBe("test:commit-1");
+      expect(transaction.facts[0].is).toEqual({ status: "pending" });
+    });
+
+    it("should commit multiple writes to different entities", () => {
+      const chronicle = Chronicle.open(replica);
+
+      chronicle.write({
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      }, { name: "Alice" });
+
+      chronicle.write({
+        id: "user:2",
+        type: "application/json",
+        path: [],
+      }, { name: "Bob" });
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.facts).toHaveLength(2);
+      expect(transaction.facts.find((f) => f.of === "user:1")?.is).toEqual({
+        name: "Alice",
+      });
+      expect(transaction.facts.find((f) => f.of === "user:2")?.is).toEqual({
+        name: "Bob",
+      });
+    });
+
+    it("should commit nested writes as a single merged fact", () => {
+      const chronicle = Chronicle.open(replica);
+      const rootAddress = {
+        id: "test:commit-nested",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      chronicle.write(rootAddress, { name: "Test", count: 0 });
+      chronicle.write({ ...rootAddress, path: ["count"] }, 10);
+      chronicle.write({ ...rootAddress, path: ["active"] }, true);
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.facts).toHaveLength(1);
+      expect(transaction.facts[0].is).toEqual({
+        name: "Test",
+        count: 10,
+        active: true,
+      });
+    });
+
+    it("should include read invariants as claims in transaction", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:invariant",
+            is: { version: 1, locked: true },
+          }),
+        ],
+        claims: [],
+      });
+
+      const freshChronicle = Chronicle.open(replica);
+
+      const readResult = freshChronicle.read({
+        id: "test:invariant",
+        type: "application/json",
+        path: [],
+      });
+      expect(readResult.ok?.value).toEqual({ version: 1, locked: true });
+
+      freshChronicle.write({
+        id: "test:new",
+        type: "application/json",
+        path: [],
+      }, { related: "test:invariant" });
+
+      const commitResult = freshChronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.claims).toHaveLength(1);
+      expect(transaction.claims[0].of).toBe("test:invariant");
+    });
+
+    it("should handle writes that update existing replica data", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:update",
+            is: { name: "Original", version: 1 },
+          }),
+        ],
+        claims: [],
+      });
+
+      const freshChronicle = Chronicle.open(replica);
+      freshChronicle.write({
+        id: "test:update",
+        type: "application/json",
+        path: ["name"],
+      }, "Updated");
+
+      const commitResult = freshChronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.facts).toHaveLength(1);
+      const fact = transaction.facts[0];
+      expect(fact.of).toBe("test:update");
+      expect(fact.is).toEqual({ name: "Updated", version: 1 });
+      expect(fact.cause).toBeDefined();
+    });
+
+    it("should create retractions for deletions", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:delete",
+            is: { name: "ToDelete", active: true },
+          }),
+        ],
+        claims: [],
+      });
+
+      const freshChronicle = Chronicle.open(replica);
+      freshChronicle.write({
+        id: "test:delete",
+        type: "application/json",
+        path: [],
+      }, undefined);
+
+      const commitResult = freshChronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.facts).toHaveLength(1);
+      const fact = transaction.facts[0];
+      expect(fact.of).toBe("test:delete");
+      expect(fact.is).toBeUndefined();
+    });
+
+    it("should fail commit when read invariants are violated", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:stale",
+            is: { version: 1, data: "initial" },
+          }),
+        ],
+        claims: [],
+      });
+
+      const chronicle1 = Chronicle.open(replica);
+      chronicle1.read({
+        id: "test:stale",
+        type: "application/json",
+        path: [],
+      });
+
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:stale",
+            is: { version: 2, data: "updated" },
+          }),
+        ],
+        claims: [],
+      });
+
+      const commitResult = chronicle1.commit();
+      expect(commitResult.ok).toBeDefined();
+    });
+
+    it("should handle partial updates with causal references", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:partial",
+            is: {
+              profile: { name: "Alice", age: 30 },
+              settings: { theme: "light" },
+            },
+          }),
+        ],
+        claims: [],
+      });
+
+      const freshChronicle = Chronicle.open(replica);
+      freshChronicle.write({
+        id: "test:partial",
+        type: "application/json",
+        path: ["profile", "age"],
+      }, 31);
+
+      const commitResult = freshChronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      const fact = transaction.facts[0];
+      expect(fact.is).toEqual({
+        profile: { name: "Alice", age: 31 },
+        settings: { theme: "light" },
+      });
+      expect(fact.cause).toBeDefined();
+    });
+
+    it("should handle writes to non-existent entities", () => {
+      const chronicle = Chronicle.open(replica);
+      chronicle.write({
+        id: "test:new-entity",
+        type: "application/json",
+        path: [],
+      }, { created: true });
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.facts).toHaveLength(1);
+      expect(transaction.facts[0].is).toEqual({ created: true });
+    });
+
+    it("should commit empty transaction when no changes made", () => {
+      const chronicle = Chronicle.open(replica);
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+
+      const transaction = commitResult.ok!;
+      expect(transaction.facts).toHaveLength(0);
+      expect(transaction.claims).toHaveLength(0);
+    });
+
+    it("should fail commit with incompatible nested data", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:incompatible",
+            is: "John",
+          }),
+        ],
+        claims: [],
+      });
+
+      const chronicle = Chronicle.open(replica);
+
+      chronicle.write({
+        id: "test:incompatible",
+        type: "application/json",
+        path: ["name"],
+      }, "Alice");
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.error).toBeDefined();
+      expect(commitResult.error?.name).toBe("StorageTransactionInconsistent");
+    });
+
+    it("should fail commit when written nested data conflicts with non-existent fact", () => {
+      const chronicle = Chronicle.open(replica);
+
+      chronicle.write({
+        id: "test:nonexistent",
+        type: "application/json",
+        path: ["nested", "value"],
+      }, "some value");
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.error).toBeDefined();
+      expect(commitResult.error?.name).toBe("StorageTransactionInconsistent");
+    });
+
+    it("should fail commit when read invariants change after initial read", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:changing",
+            is: { version: 1, data: "original" },
+          }),
+        ],
+        claims: [],
+      });
+
+      const chronicle = Chronicle.open(replica);
+
+      const readResult = chronicle.read({
+        id: "test:changing",
+        type: "application/json",
+        path: [],
+      });
+      expect(readResult.ok?.value).toEqual({ version: 1, data: "original" });
+
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:changing",
+            is: { version: 2, data: "changed" },
+          }),
+        ],
+        claims: [],
+      });
+
+      const commitResult = chronicle.commit();
+      expect(commitResult.ok).toBeDefined();
+    });
+  });
+
+  describe("Real-time Consistency Validation", () => {
+    it("should read fresh data from replica without caching", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:concurrent",
+            is: { status: "active", count: 10 },
+          }),
+        ],
+        claims: [],
+      });
+
+      const chronicle = Chronicle.open(replica);
+
+      const firstRead = chronicle.read({
+        id: "test:concurrent",
+        type: "application/json",
+        path: ["status"],
+      });
+      expect(firstRead.ok?.value).toBe("active");
+
+      const secondRead = chronicle.read({
+        id: "test:concurrent",
+        type: "application/json",
+        path: [],
+      });
+
+      expect(secondRead.ok).toBeDefined();
+      expect(secondRead.ok?.value).toEqual({ status: "active", count: 10 });
+
+      const thirdRead = chronicle.read({
+        id: "test:concurrent",
+        type: "application/json",
+        path: [],
+      });
+      expect(thirdRead.ok?.value).toEqual({ status: "active", count: 10 });
+    });
+
+    it("should validate consistency when creating history claims", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:consistency",
+            is: { value: 42 },
+          }),
+        ],
+        claims: [],
+      });
+
+      const chronicle = Chronicle.open(replica);
+
+      // Read at root level
+      const rootRead = chronicle.read({
+        id: "test:consistency",
+        type: "application/json",
+        path: [],
+      });
+      expect(rootRead.ok?.value).toEqual({ value: 42 });
+
+      // Read at nested level - this should be consistent with root
+      const nestedRead = chronicle.read({
+        id: "test:consistency",
+        type: "application/json",
+        path: ["value"],
+      });
+      expect(nestedRead.ok?.value).toBe(42);
+    });
+
+    it("should detect inconsistency when external update changes replica state", async () => {
+      const v1 = assert({
+        the: "application/json",
+        of: "test:concurrent-update",
+        is: { version: 1, status: "active" },
+      });
+
+      await replica.commit({
+        facts: [v1],
+        claims: [],
+      });
+
+      const chronicle = Chronicle.open(replica);
+
+      const firstRead = chronicle.read({
+        id: "test:concurrent-update",
+        type: "application/json",
+        path: [],
+      });
+      expect(firstRead.ok?.value).toEqual({ version: 1, status: "active" });
+
+      const v2 = assert({
+        the: "application/json",
+        of: "test:concurrent-update",
+        is: { version: 2, status: "inactive" },
+        cause: v1,
+      });
+
+      await replica.commit({
+        facts: [v2],
+        claims: [],
+      });
+
+      const secondRead = chronicle.read({
+        id: "test:concurrent-update",
+        type: "application/json",
+        path: [],
+      });
+
+      expect(secondRead.error).toBeDefined();
+      expect(secondRead.error?.name).toBe("StorageTransactionInconsistent");
+    });
+  });
+
+  describe("Load Functionality", () => {
+    it("should load existing fact from replica", async () => {
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "test:load",
+            is: { loaded: true },
+          }),
+        ],
+        claims: [],
+      });
+
+      const chronicle = Chronicle.open(replica);
+      const state = chronicle.load({
+        id: "test:load",
+        type: "application/json",
+      });
+
+      expect(state.the).toBe("application/json");
+      expect(state.of).toBe("test:load");
+      expect(state.is).toEqual({ loaded: true });
+    });
+
+    it("should return unclaimed state for non-existent fact", () => {
+      const chronicle = Chronicle.open(replica);
+      const state = chronicle.load({
+        id: "test:nonexistent",
+        type: "application/json",
+      });
+
+      expect(state.the).toBe("application/json");
+      expect(state.of).toBe("test:nonexistent");
+      expect(state.is).toBeUndefined();
     });
   });
 

@@ -468,8 +468,18 @@ export interface IStoreError extends Error {
   cause: Error;
 }
 
+/**
+ * Archive of the journal keyed by memory space. Each read attestation
+ * are represented as `claims` and write attestation are represented as
+ * `facts`.
+ */
+export type JournalArchive = Map<MemorySpace, ITransaction>;
+
 export interface ITransactionJournal {
   activity(): Iterable<Activity>;
+
+  novelty(space: MemorySpace): Iterable<IAttestation>;
+  history(space: MemorySpace): Iterable<IAttestation>;
 
   reader(
     space: MemorySpace,
@@ -483,15 +493,13 @@ export interface ITransactionJournal {
    * Closes underlying transaction, making it non-editable going forward. Any
    * attempts to edit it will fail.
    */
-  end(): Result<Map<MemorySpace, ITransaction>, InactiveTransactionError>;
+  close(): Result<Map<MemorySpace, ITransaction>, InactiveTransactionError>;
 
   /**
    * Aborts underlying transaction, making it non-editable going forward. Any
    * attempts to edit it will fail.
    */
-  abort<Reason extends Unit>(
-    reason?: Reason,
-  ): Result<Unit, InactiveTransactionError>;
+  abort(reason?: unknown): Result<Unit, InactiveTransactionError>;
 }
 
 export interface EditableJournal {
