@@ -14,6 +14,7 @@ Also consider the lessons of: Erlang (Joe Armstrong), Elixir (José Valim), Elm 
 - **Pay attention to the story parameters and names tell** use the code as a self-documenting structure
 - **Examine similar code** to ensure consistency and avoid duplication
 - **Use consistent naming conventions** that clearly express intent
+- **Decoupled modules**: consider inversion of control, decomposition and breaking apart large files by extracting clear domains
 
 ### Type Safety & Data
 - **Declare types for repeated shapes** - avoid inline type definitions

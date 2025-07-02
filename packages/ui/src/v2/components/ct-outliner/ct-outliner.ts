@@ -20,6 +20,53 @@ import { marked } from "marked";
  * <ct-outliner value="- Item 1\n  - Subitem 1\n  - Subitem 2\n- Item 2"></ct-outliner>
  */
 
+/**
+ * Represents a reference to a charm object with optional identifying properties
+ */
+export interface CharmReference {
+  id?: string;
+  _id?: string;
+  charmId?: string;
+  title?: string;
+  name?: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Represents an item that can be mentioned using @ syntax
+ */
+export interface MentionableItem {
+  name: string;
+  charm: CharmReference;
+}
+
+/**
+ * Core data structure for outline nodes, separate from UI state
+ */
+export interface OutlineNodeData {
+  readonly id: string;
+  readonly content: string;
+  readonly children: readonly OutlineNodeData[];
+  readonly level: number;
+}
+
+/**
+ * UI state separate from the core data structure
+ */
+export interface OutlineUIState {
+  readonly collapsedNodes: ReadonlySet<string>;
+  readonly focusedNodeId: string | null;
+  readonly editingNodeId: string | null;
+  readonly editingContent: string;
+  readonly showingMentions: boolean;
+  readonly mentionQuery: string;
+  readonly selectedMentionIndex: number;
+}
+
+/**
+ * Working interface that combines data and UI state for compatibility
+ * TODO: Eventually migrate to use OutlineNodeData + OutlineUIState separately
+ */
 interface OutlineNode {
   id: string;
   content: string;
@@ -27,6 +74,527 @@ interface OutlineNode {
   collapsed: boolean;
   level: number;
 }
+
+/**
+ * Pure functional operations for tree manipulation and traversal
+ */
+export const TreeOperations = {
+  /**
+   * Find a node by ID in a tree structure
+   */
+  findNode(nodes: readonly OutlineNode[], id: string): OutlineNode | null {
+    for (const node of nodes) {
+      if (node.id === id) return node;
+      const found = TreeOperations.findNode(node.children, id);
+      if (found) return found;
+    }
+    return null;
+  },
+
+  /**
+   * Find the parent array containing a node with the given ID
+   */
+  findNodeParent(
+    nodes: readonly OutlineNode[], 
+    id: string, 
+    parent: readonly OutlineNode[] | null = null
+  ): readonly OutlineNode[] | null {
+    for (const node of nodes) {
+      if (node.id === id) return parent;
+      const found = TreeOperations.findNodeParent(node.children, id, node.children);
+      if (found) return found;
+    }
+    return null;
+  },
+
+  /**
+   * Find the parent node (not array) containing a child with the given ID
+   */
+  findParentNode(nodes: readonly OutlineNode[], id: string): OutlineNode | null {
+    for (const node of nodes) {
+      if (node.children.some(child => child.id === id)) {
+        return node;
+      }
+      const found = TreeOperations.findParentNode(node.children, id);
+      if (found) return found;
+    }
+    return null;
+  },
+
+  /**
+   * Get the index of a node in its parent array
+   */
+  getNodeIndex(nodes: readonly OutlineNode[], id: string): number {
+    return nodes.findIndex(node => node.id === id);
+  },
+
+  /**
+   * Get all visible nodes (respecting collapsed state) in depth-first order
+   */
+  getAllVisibleNodes(nodes: readonly OutlineNode[]): OutlineNode[] {
+    const result: OutlineNode[] = [];
+    for (const node of nodes) {
+      result.push(node);
+      if (!node.collapsed) {
+        result.push(...TreeOperations.getAllVisibleNodes(node.children));
+      }
+    }
+    return result;
+  },
+
+  /**
+   * Update the level of a node and all its descendants
+   */
+  updateNodeLevels(node: OutlineNode): void {
+    const updateChildren = (children: OutlineNode[], parentLevel: number) => {
+      for (const child of children) {
+        child.level = parentLevel + 1;
+        updateChildren(child.children, child.level);
+      }
+    };
+    updateChildren(node.children, node.level);
+  },
+
+  /**
+   * Create a new node with given content and level
+   */
+  createNode(content: string, level: number, nodeIdCounter: number): OutlineNode {
+    return {
+      id: `node-${nodeIdCounter}`,
+      content,
+      children: [],
+      collapsed: false,
+      level,
+    };
+  },
+
+  /**
+   * Move a node up among its siblings (returns new tree)
+   */
+  moveNodeUp(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
+    const parentArray = TreeOperations.findNodeParent(nodes, nodeId) || nodes;
+    const currentIndex = TreeOperations.getNodeIndex(parentArray, nodeId);
+
+    if (currentIndex <= 0) {
+      return { success: false, nodes }; // Can't move up if first or not found
+    }
+
+    // Create new array with swapped positions
+    const newParentArray = [...parentArray];
+    const node = newParentArray[currentIndex];
+    newParentArray.splice(currentIndex, 1);
+    newParentArray.splice(currentIndex - 1, 0, node);
+
+    return { success: true, nodes: [...nodes] }; // Return new tree reference
+  },
+
+  /**
+   * Move a node down among its siblings (returns new tree)
+   */
+  moveNodeDown(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
+    const parentArray = TreeOperations.findNodeParent(nodes, nodeId) || nodes;
+    const currentIndex = TreeOperations.getNodeIndex(parentArray, nodeId);
+
+    if (currentIndex === -1 || currentIndex >= parentArray.length - 1) {
+      return { success: false, nodes }; // Can't move down if last or not found
+    }
+
+    // Create new array with swapped positions
+    const newParentArray = [...parentArray];
+    const node = newParentArray[currentIndex];
+    newParentArray.splice(currentIndex, 1);
+    newParentArray.splice(currentIndex + 1, 0, node);
+
+    return { success: true, nodes: [...nodes] }; // Return new tree reference
+  },
+
+  /**
+   * Indent a node (make it a child of its previous sibling)
+   */
+  indentNode(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
+    const node = TreeOperations.findNode(nodes, nodeId);
+    if (!node) return { success: false, nodes };
+
+    const parentArray = TreeOperations.findNodeParent(nodes, nodeId) || nodes;
+    const currentIndex = TreeOperations.getNodeIndex(parentArray, nodeId);
+
+    if (currentIndex <= 0) {
+      return { success: false, nodes }; // Cannot indent if first child or not found
+    }
+
+    // Get previous sibling
+    const prevSibling = parentArray[currentIndex - 1];
+
+    // Remove from current position and add as child of previous sibling
+    const newParentArray = [...parentArray];
+    newParentArray.splice(currentIndex, 1);
+    
+    prevSibling.children.push(node);
+    node.level = prevSibling.level + 1;
+    prevSibling.collapsed = false;
+
+    // Update levels of all descendants
+    TreeOperations.updateNodeLevels(node);
+
+    return { success: true, nodes: [...nodes] }; // Return new tree reference
+  },
+
+  /**
+   * Outdent a node (move it up one level in the hierarchy)
+   */
+  outdentNode(nodes: OutlineNode[], nodeId: string): { success: boolean; nodes: OutlineNode[] } {
+    const node = TreeOperations.findNode(nodes, nodeId);
+    if (!node) return { success: false, nodes };
+
+    const parentNode = TreeOperations.findParentNode(nodes, nodeId);
+    if (!parentNode) {
+      return { success: false, nodes }; // Already at root level
+    }
+
+    const grandparentArray = TreeOperations.findNodeParent(nodes, parentNode.id) || nodes;
+    const parentIndex = TreeOperations.getNodeIndex(grandparentArray, parentNode.id);
+    const nodeIndex = TreeOperations.getNodeIndex(parentNode.children, nodeId);
+
+    // Remove from current parent
+    const newParentChildren = [...parentNode.children];
+    newParentChildren.splice(nodeIndex, 1);
+    parentNode.children = newParentChildren;
+
+    // Insert after the parent in grandparent array
+    const newGrandparentArray = [...grandparentArray];
+    newGrandparentArray.splice(parentIndex + 1, 0, node);
+
+    // Update level
+    node.level = parentNode.level;
+
+    // Update levels of all descendants
+    TreeOperations.updateNodeLevels(node);
+
+    return { success: true, nodes: [...nodes] }; // Return new tree reference
+  }
+};
+
+/**
+ * Command interface for keyboard actions
+ */
+interface KeyboardCommand {
+  execute(context: KeyboardContext): void;
+}
+
+/**
+ * Context object passed to keyboard commands
+ */
+interface KeyboardContext {
+  readonly event: KeyboardEvent;
+  readonly component: CTOutliner;
+  readonly allNodes: OutlineNode[];
+  readonly currentIndex: number;
+  readonly focusedNodeId: string | null;
+}
+
+/**
+ * Keyboard command implementations
+ */
+export const KeyboardCommands = {
+  ArrowUp: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.event.altKey) {
+        // Alt+Up moves node up among siblings
+        ctx.component.moveNodeUp(ctx.focusedNodeId);
+      } else {
+        if (ctx.currentIndex > 0) {
+          ctx.component.focusedNodeId = ctx.allNodes[ctx.currentIndex - 1].id;
+        } else if (ctx.currentIndex === -1 && ctx.allNodes.length > 0) {
+          // If nothing is focused, start from the last node
+          ctx.component.focusedNodeId = ctx.allNodes[ctx.allNodes.length - 1].id;
+        }
+      }
+    }
+  },
+
+  ArrowDown: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.event.altKey) {
+        // Alt+Down moves node down among siblings
+        ctx.component.moveNodeDown(ctx.focusedNodeId);
+      } else {
+        if (ctx.currentIndex < ctx.allNodes.length - 1) {
+          ctx.component.focusedNodeId = ctx.allNodes[ctx.currentIndex + 1].id;
+        } else if (ctx.currentIndex === -1 && ctx.allNodes.length > 0) {
+          // If nothing is focused, start from the first node
+          ctx.component.focusedNodeId = ctx.allNodes[0].id;
+        }
+      }
+    }
+  },
+
+  ArrowLeft: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.event.altKey) {
+        // Alt+Left collapses current node
+        if (ctx.focusedNodeId) {
+          const node = ctx.component.findNode(ctx.focusedNodeId);
+          if (node && node.children.length > 0) {
+            node.collapsed = true;
+            ctx.component.requestUpdate();
+          }
+        }
+      } else {
+        if (ctx.focusedNodeId) {
+          const node = ctx.component.findNode(ctx.focusedNodeId);
+          if (node) {
+            if (node.children.length > 0 && !node.collapsed) {
+              // Collapse node if expanded
+              node.collapsed = true;
+              ctx.component.requestUpdate();
+            } else {
+              // Move to parent if collapsed or leaf
+              const parentNode = ctx.component.findParentNode(ctx.focusedNodeId);
+              if (parentNode) {
+                ctx.component.focusedNodeId = parentNode.id;
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  ArrowRight: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.event.altKey) {
+        // Alt+Right expands current node
+        if (ctx.focusedNodeId) {
+          const node = ctx.component.findNode(ctx.focusedNodeId);
+          if (node && node.children.length > 0) {
+            node.collapsed = false;
+            ctx.component.requestUpdate();
+          }
+        }
+      } else {
+        if (ctx.focusedNodeId) {
+          const node = ctx.component.findNode(ctx.focusedNodeId);
+          if (node) {
+            if (node.children.length > 0) {
+              if (node.collapsed) {
+                // Expand node if collapsed
+                node.collapsed = false;
+                ctx.component.requestUpdate();
+              } else {
+                // Move to first child if expanded
+                ctx.component.focusedNodeId = node.children[0].id;
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  Home: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.allNodes.length > 0) {
+        ctx.component.focusedNodeId = ctx.allNodes[0].id;
+      }
+    }
+  },
+
+  End: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.allNodes.length > 0) {
+        ctx.component.focusedNodeId = ctx.allNodes[ctx.allNodes.length - 1].id;
+      }
+    }
+  },
+
+  Enter: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.focusedNodeId) {
+        if (ctx.event.shiftKey) {
+          // Shift+Enter creates new sibling node below current
+          ctx.component.createNewNodeAfter(ctx.focusedNodeId);
+        } else if (ctx.event.altKey) {
+          // Alt+Enter creates new child node
+          ctx.component.createChildNode(ctx.focusedNodeId);
+        } else {
+          // Enter starts editing
+          ctx.component.startEditing(ctx.focusedNodeId);
+        }
+      }
+    }
+  },
+
+  Backspace: {
+    execute(ctx: KeyboardContext): void {
+      // Only delete nodes when Cmd/Ctrl is held down
+      if (ctx.event.metaKey || ctx.event.ctrlKey) {
+        ctx.event.preventDefault();
+        if (ctx.focusedNodeId) {
+          ctx.component.deleteNode(ctx.focusedNodeId);
+        }
+      }
+    }
+  },
+
+  Delete: {
+    execute(ctx: KeyboardContext): void {
+      // Only delete nodes when Cmd/Ctrl is held down
+      if (ctx.event.metaKey || ctx.event.ctrlKey) {
+        ctx.event.preventDefault();
+        if (ctx.focusedNodeId) {
+          ctx.component.deleteNode(ctx.focusedNodeId);
+        }
+      }
+    }
+  },
+
+  Tab: {
+    execute(ctx: KeyboardContext): void {
+      ctx.event.preventDefault();
+      if (ctx.focusedNodeId) {
+        if (ctx.event.shiftKey) {
+          ctx.component.outdentNode(ctx.focusedNodeId);
+        } else {
+          ctx.component.indentNode(ctx.focusedNodeId);
+        }
+      }
+    }
+  },
+
+  Space: {
+    execute(ctx: KeyboardContext): void {
+      // Space toggles expand/collapse on parent nodes
+      ctx.event.preventDefault();
+      if (ctx.focusedNodeId) {
+        const node = ctx.component.findNode(ctx.focusedNodeId);
+        if (node && node.children.length > 0) {
+          node.collapsed = !node.collapsed;
+          ctx.component.requestUpdate();
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Pure data transformation functions for editing operations
+ */
+export const EditingOperations = {
+  /**
+   * Apply edit completion to a node - pure data transformation
+   */
+  completeEdit(
+    nodes: OutlineNode[], 
+    nodeId: string, 
+    newContent: string
+  ): { updatedNodes: OutlineNode[]; success: boolean } {
+    const node = TreeOperations.findNode(nodes, nodeId);
+    if (!node) {
+      return { updatedNodes: nodes, success: false };
+    }
+
+    // Create updated node with new content
+    const updatedNode = { ...node, content: newContent };
+    
+    // For simplicity, we'll mutate in place for now, but this could be made immutable
+    node.content = newContent;
+    
+    return { updatedNodes: nodes, success: true };
+  },
+
+  /**
+   * Prepare state for editing - pure data transformation
+   */
+  prepareEditingState(
+    currentEditingNodeId: string | null,
+    currentEditingContent: string,
+    nodeId: string,
+    nodeContent: string
+  ): {
+    editingNodeId: string;
+    editingContent: string;
+    showingMentions: boolean;
+  } {
+    return {
+      editingNodeId: nodeId,
+      editingContent: nodeContent,
+      showingMentions: false,
+    };
+  },
+
+  /**
+   * Clear editing state - pure data transformation
+   */
+  clearEditingState(): {
+    editingNodeId: null;
+    editingContent: string;
+    showingMentions: boolean;
+  } {
+    return {
+      editingNodeId: null,
+      editingContent: "",
+      showingMentions: false,
+    };
+  }
+};
+
+/**
+ * Side effect operations for outliner
+ */
+export const OutlinerEffects = {
+  /**
+   * Focus the outliner element for keyboard navigation
+   */
+  focusOutliner(shadowRoot: ShadowRoot | null): void {
+    if (!shadowRoot) return;
+    
+    setTimeout(() => {
+      const outliner = shadowRoot.querySelector('.outliner') as HTMLElement;
+      outliner?.focus();
+    }, 0);
+  },
+
+  /**
+   * Focus and select text in an editor
+   */
+  focusEditor(shadowRoot: ShadowRoot | null, nodeId: string): void {
+    if (!shadowRoot) return;
+    
+    setTimeout(() => {
+      const editor = shadowRoot.querySelector(`#editor-${nodeId}`) as HTMLTextAreaElement;
+      if (editor) {
+        editor.focus();
+        editor.select();
+      }
+    }, 0);
+  },
+
+  /**
+   * Set cursor position in an editor
+   */
+  setCursorPosition(
+    shadowRoot: ShadowRoot | null, 
+    nodeId: string, 
+    position: number
+  ): void {
+    if (!shadowRoot) return;
+    
+    setTimeout(() => {
+      const editor = shadowRoot.querySelector(`#editor-${nodeId}`) as HTMLTextAreaElement;
+      if (editor) {
+        editor.setSelectionRange(position, position);
+        editor.focus();
+      }
+    }, 0);
+  }
+};
 
 export class CTOutliner extends BaseElement {
   static override properties = {
@@ -64,7 +632,7 @@ export class CTOutliner extends BaseElement {
   }
   
   declare readonly: boolean;
-  declare mentionable: Array<{ name: string; charm: any }>;
+  declare mentionable: MentionableItem[];
   declare nodes: OutlineNode[];
   declare focusedNodeId: string | null;
   declare showingMentions: boolean;
@@ -334,13 +902,7 @@ export class CTOutliner extends BaseElement {
   }
 
   private createNode(content: string, level: number): OutlineNode {
-    return {
-      id: `node-${this.nodeIdCounter++}`,
-      content,
-      children: [],
-      collapsed: false,
-      level,
-    };
+    return TreeOperations.createNode(content, level, this.nodeIdCounter++);
   }
 
   private parseMarkdown(markdown: string): OutlineNode[] {
@@ -392,58 +954,24 @@ export class CTOutliner extends BaseElement {
       .join("\n");
   }
 
-  private findNode(
-    id: string,
-    nodes: OutlineNode[] = this.nodes,
-  ): OutlineNode | null {
-    for (const node of nodes) {
-      if (node.id === id) return node;
-      const found = this.findNode(id, node.children);
-      if (found) return found;
-    }
-    return null;
+  findNode(id: string, nodes: OutlineNode[] = this.nodes): OutlineNode | null {
+    return TreeOperations.findNode(nodes, id);
   }
 
-  private findNodeParent(
-    id: string,
-    nodes: OutlineNode[] = this.nodes,
-    parent: OutlineNode[] | null = null,
-  ): OutlineNode[] | null {
-    for (const node of nodes) {
-      if (node.id === id) return parent;
-      const found = this.findNodeParent(id, node.children, node.children);
-      if (found) return found;
-    }
-    return null;
+  private findNodeParent(id: string, nodes: OutlineNode[] = this.nodes): OutlineNode[] | null {
+    return TreeOperations.findNodeParent(nodes, id) as OutlineNode[] | null;
   }
 
-  private findParentNode(
-    id: string,
-    nodes: OutlineNode[] = this.nodes,
-  ): OutlineNode | null {
-    for (const node of nodes) {
-      if (node.children.some(child => child.id === id)) {
-        return node;
-      }
-      const found = this.findParentNode(id, node.children);
-      if (found) return found;
-    }
-    return null;
+  findParentNode(id: string, nodes: OutlineNode[] = this.nodes): OutlineNode | null {
+    return TreeOperations.findParentNode(nodes, id);
   }
 
   private getNodeIndex(id: string, nodes: OutlineNode[]): number {
-    return nodes.findIndex((node) => node.id === id);
+    return TreeOperations.getNodeIndex(nodes, id);
   }
 
   private getAllNodes(nodes: OutlineNode[] = this.nodes): OutlineNode[] {
-    const result: OutlineNode[] = [];
-    for (const node of nodes) {
-      result.push(node);
-      if (!node.collapsed) {
-        result.push(...this.getAllNodes(node.children));
-      }
-    }
-    return result;
+    return TreeOperations.getAllVisibleNodes(nodes);
   }
 
   private handleNodeClick(nodeId: string, event: MouseEvent) {
@@ -469,48 +997,56 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private startEditing(nodeId: string) {
+  startEditing(nodeId: string) {
     const node = this.findNode(nodeId);
-    if (node) {
-      this.editingNodeId = nodeId;
-      this.editingContent = node.content;
-      this.requestUpdate();
+    if (!node) return;
 
-      setTimeout(() => {
-        const editor = this.shadowRoot?.querySelector(
-          `#editor-${nodeId}`,
-        ) as HTMLTextAreaElement;
-        if (editor) {
-          editor.focus();
-          editor.select();
-        }
-      }, 0);
-    }
+    // Pure data transformation - prepare editing state
+    const editingState = EditingOperations.prepareEditingState(
+      this.editingNodeId,
+      this.editingContent,
+      nodeId,
+      node.content
+    );
+
+    // Apply new state
+    this.editingNodeId = editingState.editingNodeId;
+    this.editingContent = editingState.editingContent;
+    this.showingMentions = editingState.showingMentions;
+
+    // Side effects
+    this.requestUpdate();
+    OutlinerEffects.focusEditor(this.shadowRoot, nodeId);
   }
 
   private finishEditing() {
-    if (this.editingNodeId) {
-      const node = this.findNode(this.editingNodeId);
-      if (node) {
-        node.content = this.editingContent;
-        const nodeId = this.editingNodeId; // Save for focus
-        this.editingNodeId = null;
-        this.editingContent = "";
-        this.showingMentions = false;
-        
-        // Maintain focus on the node we just edited
-        this.focusedNodeId = nodeId;
+    if (!this.editingNodeId) return;
 
-        this.requestUpdate();
-        this.emitChange();
-        
-        // Restore focus to the outliner element for keyboard navigation
-        setTimeout(() => {
-          const outliner = this.shadowRoot?.querySelector('.outliner') as HTMLElement;
-          outliner?.focus();
-        }, 0);
-      }
-    }
+    // Pure data transformation - update node content
+    const result = EditingOperations.completeEdit(
+      this.nodes, 
+      this.editingNodeId, 
+      this.editingContent
+    );
+    
+    if (!result.success) return;
+
+    // Save node ID for focus before clearing editing state
+    const nodeId = this.editingNodeId;
+    
+    // Pure data transformation - clear editing state
+    const clearState = EditingOperations.clearEditingState();
+    this.editingNodeId = clearState.editingNodeId;
+    this.editingContent = clearState.editingContent;
+    this.showingMentions = clearState.showingMentions;
+    
+    // Maintain focus on the node we just edited
+    this.focusedNodeId = nodeId;
+
+    // Side effects
+    this.requestUpdate();
+    this.emitChange();
+    OutlinerEffects.focusOutliner(this.shadowRoot);
   }
   
   private cancelEditing() {
@@ -788,7 +1324,7 @@ export class CTOutliner extends BaseElement {
     textarea.focus();
   }
 
-  private safeCharmStringify(charm: any): string {
+  private safeCharmStringify(charm: CharmReference): string {
     if (!charm) return "";
 
     // Try to get a meaningful identifier from the charm first
@@ -934,170 +1470,17 @@ export class CTOutliner extends BaseElement {
       node.id === this.focusedNodeId
     );
 
-    switch (event.key) {
-      case "ArrowUp":
-        event.preventDefault();
-        if (event.altKey) {
-          // Alt+Up moves node up among siblings
-          this.moveNodeUp(this.focusedNodeId);
-        } else {
-          if (currentIndex > 0) {
-            this.focusedNodeId = allNodes[currentIndex - 1].id;
-          } else if (currentIndex === -1 && allNodes.length > 0) {
-            // If nothing is focused, start from the last node
-            this.focusedNodeId = allNodes[allNodes.length - 1].id;
-          }
-        }
-        break;
+    const context: KeyboardContext = {
+      event,
+      component: this,
+      allNodes,
+      currentIndex,
+      focusedNodeId: this.focusedNodeId,
+    };
 
-      case "ArrowDown":
-        event.preventDefault();
-        if (event.altKey) {
-          // Alt+Down moves node down among siblings
-          this.moveNodeDown(this.focusedNodeId);
-        } else {
-          if (currentIndex < allNodes.length - 1) {
-            this.focusedNodeId = allNodes[currentIndex + 1].id;
-          } else if (currentIndex === -1 && allNodes.length > 0) {
-            // If nothing is focused, start from the first node
-            this.focusedNodeId = allNodes[0].id;
-          }
-        }
-        break;
-
-      case "ArrowLeft":
-        event.preventDefault();
-        if (event.altKey) {
-          // Alt+Left collapses current node
-          if (this.focusedNodeId) {
-            const node = this.findNode(this.focusedNodeId);
-            if (node && node.children.length > 0) {
-              node.collapsed = true;
-              this.requestUpdate();
-            }
-          }
-        } else {
-          if (this.focusedNodeId) {
-            const node = this.findNode(this.focusedNodeId);
-            if (node) {
-              if (node.children.length > 0 && !node.collapsed) {
-                // Collapse node if expanded
-                node.collapsed = true;
-                this.requestUpdate();
-              } else {
-                // Move to parent if collapsed or leaf
-                const parentNode = this.findParentNode(this.focusedNodeId);
-                if (parentNode) {
-                  this.focusedNodeId = parentNode.id;
-                }
-              }
-            }
-          }
-        }
-        break;
-
-      case "ArrowRight":
-        event.preventDefault();
-        if (event.altKey) {
-          // Alt+Right expands current node
-          if (this.focusedNodeId) {
-            const node = this.findNode(this.focusedNodeId);
-            if (node && node.children.length > 0) {
-              node.collapsed = false;
-              this.requestUpdate();
-            }
-          }
-        } else {
-          if (this.focusedNodeId) {
-            const node = this.findNode(this.focusedNodeId);
-            if (node) {
-              if (node.children.length > 0) {
-                if (node.collapsed) {
-                  // Expand node if collapsed
-                  node.collapsed = false;
-                  this.requestUpdate();
-                } else {
-                  // Move to first child if expanded
-                  this.focusedNodeId = node.children[0].id;
-                }
-              }
-            }
-          }
-        }
-        break;
-
-      case "Home":
-        event.preventDefault();
-        if (allNodes.length > 0) {
-          this.focusedNodeId = allNodes[0].id;
-        }
-        break;
-
-      case "End":
-        event.preventDefault();
-        if (allNodes.length > 0) {
-          this.focusedNodeId = allNodes[allNodes.length - 1].id;
-        }
-        break;
-
-      case "Enter":
-        event.preventDefault();
-        if (this.focusedNodeId) {
-          if (event.shiftKey) {
-            // Shift+Enter creates new sibling node below current
-            this.createNewNodeAfter(this.focusedNodeId);
-          } else if (event.altKey) {
-            // Alt+Enter creates new child node
-            this.createChildNode(this.focusedNodeId);
-          } else {
-            // Enter starts editing
-            this.startEditing(this.focusedNodeId);
-          }
-        }
-        break;
-
-      case "Backspace":
-        // Only delete nodes when Cmd/Ctrl is held down
-        if (event.metaKey || event.ctrlKey) {
-          event.preventDefault();
-          if (this.focusedNodeId) {
-            this.deleteNode(this.focusedNodeId);
-          }
-        }
-        break;
-        
-      case "Delete":
-        // Only delete nodes when Cmd/Ctrl is held down
-        if (event.metaKey || event.ctrlKey) {
-          event.preventDefault();
-          if (this.focusedNodeId) {
-            this.deleteNode(this.focusedNodeId);
-          }
-        }
-        break;
-
-      case "Tab":
-        event.preventDefault();
-        if (this.focusedNodeId) {
-          if (event.shiftKey) {
-            this.outdentNode(this.focusedNodeId);
-          } else {
-            this.indentNode(this.focusedNodeId);
-          }
-        }
-        break;
-
-      case " ":
-        // Space toggles expand/collapse on parent nodes
-        event.preventDefault();
-        if (this.focusedNodeId) {
-          const node = this.findNode(this.focusedNodeId);
-          if (node && node.children.length > 0) {
-            node.collapsed = !node.collapsed;
-            this.requestUpdate();
-          }
-        }
-        break;
+    const command = KeyboardCommands[event.key as keyof typeof KeyboardCommands];
+    if (command) {
+      command.execute(context);
     }
   }
 
@@ -1109,7 +1492,7 @@ export class CTOutliner extends BaseElement {
     this.emit("ct-change", { value: newValue });
   }
 
-  private createNewNodeAfter(nodeId: string) {
+  createNewNodeAfter(nodeId: string) {
     const node = this.findNode(nodeId);
     if (!node) return;
 
@@ -1128,7 +1511,7 @@ export class CTOutliner extends BaseElement {
     }, 0);
   }
 
-  private createChildNode(nodeId: string) {
+  createChildNode(nodeId: string) {
     const node = this.findNode(nodeId);
     if (!node) return;
 
@@ -1147,7 +1530,7 @@ export class CTOutliner extends BaseElement {
     }, 0);
   }
 
-  private deleteNode(nodeId: string) {
+  deleteNode(nodeId: string) {
     const parentArray = this.findNodeParent(nodeId) || this.nodes;
     const currentIndex = this.getNodeIndex(nodeId, parentArray);
 
@@ -1192,7 +1575,7 @@ export class CTOutliner extends BaseElement {
     this.emitChange();
   }
 
-  private moveNodeUp(nodeId: string | null) {
+  moveNodeUp(nodeId: string | null) {
     if (!nodeId) return;
 
     const parentArray = this.findNodeParent(nodeId) || this.nodes;
@@ -1209,7 +1592,7 @@ export class CTOutliner extends BaseElement {
     this.emitChange();
   }
 
-  private moveNodeDown(nodeId: string | null) {
+  moveNodeDown(nodeId: string | null) {
     if (!nodeId) return;
 
     const parentArray = this.findNodeParent(nodeId) || this.nodes;
@@ -1226,7 +1609,7 @@ export class CTOutliner extends BaseElement {
     this.emitChange();
   }
 
-  private indentNode(nodeId: string) {
+  indentNode(nodeId: string) {
     const node = this.findNode(nodeId);
     if (!node) return;
 
@@ -1255,7 +1638,7 @@ export class CTOutliner extends BaseElement {
     this.emitChange();
   }
 
-  private outdentNode(nodeId: string) {
+  outdentNode(nodeId: string) {
     const node = this.findNode(nodeId);
     if (!node || node.level === 0) return; // Cannot outdent root level
 
@@ -1340,7 +1723,7 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private decodeCharmFromHref(href: string | null): any {
+  private decodeCharmFromHref(href: string | null): CharmReference | string | null {
     if (!href) return null;
 
     try {

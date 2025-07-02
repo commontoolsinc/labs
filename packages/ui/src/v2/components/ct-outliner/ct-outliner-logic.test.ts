@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { TreeOperations, EditingOperations, KeyboardCommands } from "./ct-outliner.ts";
 
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {
@@ -322,6 +323,186 @@ describe("CTOutliner Logic Tests", () => {
       expect(nodes).toHaveLength(2);
       expect(nodes[0]?.content).toBe("Valid item");
       expect(nodes[1]?.content).toBe("Another valid item");
+    });
+  });
+
+  describe("TreeOperations Module", () => {
+    const sampleNodes = [
+      {
+        id: "node-1",
+        content: "Root 1",
+        level: 0,
+        collapsed: false,
+        children: [
+          {
+            id: "node-2",
+            content: "Child 1",
+            level: 1,
+            collapsed: false,
+            children: [],
+          },
+        ],
+      },
+      {
+        id: "node-3", 
+        content: "Root 2",
+        level: 0,
+        collapsed: false,
+        children: [],
+      },
+    ];
+
+    it("finds nodes by ID", () => {
+      const node = TreeOperations.findNode(sampleNodes, "node-2");
+      expect(node?.content).toBe("Child 1");
+      expect(node?.level).toBe(1);
+    });
+
+    it("returns null for non-existent nodes", () => {
+      const node = TreeOperations.findNode(sampleNodes, "non-existent");
+      expect(node).toBe(null);
+    });
+
+    it("finds parent node correctly", () => {
+      const parent = TreeOperations.findParentNode(sampleNodes, "node-2");
+      expect(parent?.id).toBe("node-1");
+    });
+
+    it("gets all visible nodes respecting collapsed state", () => {
+      const visibleNodes = TreeOperations.getAllVisibleNodes(sampleNodes);
+      expect(visibleNodes).toHaveLength(3);
+      expect(visibleNodes.map(n => n.id)).toEqual(["node-1", "node-2", "node-3"]);
+    });
+
+    it("hides children when parent is collapsed", () => {
+      const collapsedNodes = [
+        {
+          ...sampleNodes[0],
+          collapsed: true,
+        },
+        sampleNodes[1],
+      ];
+      
+      const visibleNodes = TreeOperations.getAllVisibleNodes(collapsedNodes);
+      expect(visibleNodes).toHaveLength(2);
+      expect(visibleNodes.map(n => n.id)).toEqual(["node-1", "node-3"]);
+    });
+
+    it("creates nodes with correct structure", () => {
+      const node = TreeOperations.createNode("Test Content", 2, 42);
+      expect(node.id).toBe("node-42");
+      expect(node.content).toBe("Test Content");
+      expect(node.level).toBe(2);
+      expect(node.collapsed).toBe(false);
+      expect(node.children).toHaveLength(0);
+    });
+  });
+
+  describe("EditingOperations Module", () => {
+    const sampleNodes = [
+      {
+        id: "node-1",
+        content: "Original Content",
+        level: 0,
+        collapsed: false,
+        children: [],
+      },
+    ];
+
+    it("completes edit successfully", () => {
+      const result = EditingOperations.completeEdit(
+        sampleNodes,
+        "node-1",
+        "Updated Content"
+      );
+      
+      expect(result.success).toBe(true);
+      expect(sampleNodes[0].content).toBe("Updated Content");
+    });
+
+    it("fails to edit non-existent node", () => {
+      const result = EditingOperations.completeEdit(
+        sampleNodes,
+        "non-existent",
+        "New Content"
+      );
+      
+      expect(result.success).toBe(false);
+    });
+
+    it("prepares editing state correctly", () => {
+      const state = EditingOperations.prepareEditingState(
+        null,
+        "",
+        "node-1",
+        "Node Content"
+      );
+      
+      expect(state.editingNodeId).toBe("node-1");
+      expect(state.editingContent).toBe("Node Content");
+      expect(state.showingMentions).toBe(false);
+    });
+
+    it("clears editing state correctly", () => {
+      const state = EditingOperations.clearEditingState();
+      
+      expect(state.editingNodeId).toBe(null);
+      expect(state.editingContent).toBe("");
+      expect(state.showingMentions).toBe(false);
+    });
+  });
+
+  describe("KeyboardCommands Module", () => {
+    // Mock context for testing commands
+    const createMockContext = (focusedNodeId: string | null = "node-1") => ({
+      event: { 
+        preventDefault: () => {}, 
+        key: "ArrowUp",
+        altKey: false,
+        shiftKey: false,
+        metaKey: false,
+        ctrlKey: false,
+      } as KeyboardEvent,
+      component: {
+        focusedNodeId,
+        findNode: () => ({ id: "node-1", content: "Test", level: 0, children: [], collapsed: false }),
+        requestUpdate: () => {},
+      } as any,
+      allNodes: [
+        { id: "node-1", content: "First", level: 0, children: [], collapsed: false },
+        { id: "node-2", content: "Second", level: 0, children: [], collapsed: false },
+      ],
+      currentIndex: 0,
+      focusedNodeId,
+    });
+
+    it("ArrowDown command moves focus to next node", () => {
+      const ctx = createMockContext("node-1");
+      KeyboardCommands.ArrowDown.execute(ctx);
+      
+      expect(ctx.component.focusedNodeId).toBe("node-2");
+    });
+
+    it("ArrowUp command moves focus to previous node", () => {
+      const ctx = createMockContext("node-2");
+      ctx.currentIndex = 1;
+      KeyboardCommands.ArrowUp.execute(ctx);
+      
+      expect(ctx.component.focusedNodeId).toBe("node-1");
+    });
+
+    it("Home command moves focus to first node", () => {
+      const ctx = createMockContext("node-2");
+      KeyboardCommands.Home.execute(ctx);
+      
+      expect(ctx.component.focusedNodeId).toBe("node-1");
+    });
+
+    it("End command moves focus to last node", () => {
+      const ctx = createMockContext("node-1");
+      KeyboardCommands.End.execute(ctx);
+      
+      expect(ctx.component.focusedNodeId).toBe("node-2");
     });
   });
 });
