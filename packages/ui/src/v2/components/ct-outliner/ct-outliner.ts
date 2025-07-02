@@ -40,7 +40,29 @@ export class CTOutliner extends BaseElement {
     selectedMentionIndex: { type: Number, state: true },
   };
 
-  declare value: string;
+  private _value = "";
+  get value() {
+    return this._value;
+  }
+  set value(newValue: string) {
+    const oldValue = this._value;
+    this._value = newValue;
+    
+    // Only parse markdown if this is an external change
+    if (!this._internalChange && oldValue !== newValue) {
+      this.nodes = this.parseMarkdown(newValue);
+      if (this.nodes.length === 0) {
+        this.nodes = [this.createNode("", 0)];
+      }
+      // Maintain focus on first node if needed
+      if (!this.focusedNodeId && this.nodes.length > 0) {
+        this.focusedNodeId = this.nodes[0].id;
+      }
+    }
+    
+    this.requestUpdate("value", oldValue);
+  }
+  
   declare readonly: boolean;
   declare mentionable: Array<{ name: string; charm: any }>;
   declare nodes: OutlineNode[];
@@ -52,6 +74,21 @@ export class CTOutliner extends BaseElement {
   private nodeIdCounter = 0;
   private editingNodeId: string | null = null;
   private editingContent: string = "";
+  private _internalChange = false;
+
+  // Test helpers - expose some internal state for testing
+  get _testHelpers() {
+    return {
+      editingNodeId: this.editingNodeId,
+      editingContent: this.editingContent,
+      createNode: (content: string, level: number) => this.createNode(content, level),
+      nodesToMarkdown: (nodes: OutlineNode[]) => this.nodesToMarkdown(nodes),
+      emitChange: () => this.emitChange(),
+      startEditing: (nodeId: string) => this.startEditing(nodeId),
+      handleKeyDown: (event: KeyboardEvent) => this.handleKeyDown(event),
+      handleEditorKeyDown: (event: KeyboardEvent) => this.handleEditorKeyDown(event),
+    };
+  }
 
   static override styles = css`
     :host {
@@ -273,13 +310,16 @@ export class CTOutliner extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.nodes = this.parseMarkdown(this.value);
-    if (this.nodes.length === 0) {
-      this.nodes = [this.createNode("", 0)];
-    }
-    // Set initial focus to first node if we have nodes
-    if (this.nodes.length > 0 && !this.focusedNodeId) {
-      this.focusedNodeId = this.nodes[0].id;
+    // Only initialize nodes if they haven't been set yet
+    if (!this.nodes || this.nodes.length === 0) {
+      this.nodes = this.parseMarkdown(this.value);
+      if (this.nodes.length === 0) {
+        this.nodes = [this.createNode("", 0)];
+      }
+      // Set initial focus to first node if we have nodes
+      if (this.nodes.length > 0 && !this.focusedNodeId) {
+        this.focusedNodeId = this.nodes[0].id;
+      }
     }
   }
 
@@ -287,22 +327,9 @@ export class CTOutliner extends BaseElement {
     super.updated(changedProperties);
 
     if (changedProperties.has("value") && !this.editingNodeId) {
-      const previousNodes = this.nodes;
-      this.nodes = this.parseMarkdown(this.value);
-
-      if (this.nodes.length === 0) {
-        this.nodes = [this.createNode("", 0)];
-      }
-
-      // Preserve focus if possible, otherwise focus first node
-      if (this.focusedNodeId) {
-        const focusedNode = this.findNode(this.focusedNodeId);
-        if (!focusedNode && this.nodes.length > 0) {
-          this.focusedNodeId = this.nodes[0].id;
-        }
-      } else if (this.nodes.length > 0) {
-        this.focusedNodeId = this.nodes[0].id;
-      }
+      // Don't update nodes from value if we're internally managing them
+      // This prevents focus loss when we programmatically update the value
+      return;
     }
   }
 
@@ -390,6 +417,20 @@ export class CTOutliner extends BaseElement {
     return null;
   }
 
+  private findParentNode(
+    id: string,
+    nodes: OutlineNode[] = this.nodes,
+  ): OutlineNode | null {
+    for (const node of nodes) {
+      if (node.children.some(child => child.id === id)) {
+        return node;
+      }
+      const found = this.findParentNode(id, node.children);
+      if (found) return found;
+    }
+    return null;
+  }
+
   private getNodeIndex(id: string, nodes: OutlineNode[]): number {
     return nodes.findIndex((node) => node.id === id);
   }
@@ -452,15 +493,43 @@ export class CTOutliner extends BaseElement {
       const node = this.findNode(this.editingNodeId);
       if (node) {
         node.content = this.editingContent;
+        const nodeId = this.editingNodeId; // Save for focus
         this.editingNodeId = null;
         this.editingContent = "";
         this.showingMentions = false;
+        
+        // Maintain focus on the node we just edited
+        this.focusedNodeId = nodeId;
 
-        const newValue = this.nodesToMarkdown(this.nodes);
-        this.value = newValue;
-
-        this.emit("ct-change", { value: newValue });
+        this.requestUpdate();
+        this.emitChange();
+        
+        // Restore focus to the outliner element for keyboard navigation
+        setTimeout(() => {
+          const outliner = this.shadowRoot?.querySelector('.outliner') as HTMLElement;
+          outliner?.focus();
+        }, 0);
       }
+    }
+  }
+  
+  private cancelEditing() {
+    if (this.editingNodeId) {
+      const nodeId = this.editingNodeId;
+      this.editingNodeId = null;
+      this.editingContent = "";
+      this.showingMentions = false;
+      
+      // Keep focus on the node we were editing
+      this.focusedNodeId = nodeId;
+      
+      this.requestUpdate();
+      
+      // Restore focus to the outliner element for keyboard navigation
+      setTimeout(() => {
+        const outliner = this.shadowRoot?.querySelector('.outliner') as HTMLElement;
+        outliner?.focus();
+      }, 0);
     }
   }
 
@@ -533,6 +602,17 @@ export class CTOutliner extends BaseElement {
 
     // Focus previous node or next node
     const allNodes = this.getAllNodes();
+    
+    // If no nodes remain, create a new root node
+    if (allNodes.length === 0) {
+      const newNode = this.createNode("", 0);
+      this.nodes = [newNode];
+      this.focusedNodeId = newNode.id;
+      this.requestUpdate();
+      this.emitChange();
+      return;
+    }
+    
     const deletedIndex = allNodes.findIndex((n) => n.id === nodeToDelete.id);
     if (deletedIndex > 0) {
       this.focusedNodeId = allNodes[deletedIndex - 1].id;
@@ -544,75 +624,64 @@ export class CTOutliner extends BaseElement {
     this.emitChange();
   }
 
-  private handleIndentation(outdent: boolean) {
+  private mergeWithNextNode() {
     if (!this.editingNodeId) return;
 
-    const node = this.findNode(this.editingNodeId);
-    const parentArray = this.findNodeParent(this.editingNodeId) || this.nodes;
-    const currentIndex = this.getNodeIndex(this.editingNodeId, parentArray);
+    const allNodes = this.getAllNodes();
+    const currentIndex = allNodes.findIndex(n => n.id === this.editingNodeId);
+    
+    if (currentIndex === -1 || currentIndex >= allNodes.length - 1) return;
 
-    if (!node || currentIndex === -1) return;
+    const currentNode = allNodes[currentIndex];
+    const nextNode = allNodes[currentIndex + 1];
+
+    // Only merge if nodes are at the same level
+    if (currentNode.level !== nextNode.level) return;
+
+    // Store cursor position
+    const cursorPos = this.editingContent.length;
+
+    // Merge content
+    currentNode.content = this.editingContent + nextNode.content;
+    this.editingContent = currentNode.content;
+
+    // Move next node's children to current node
+    currentNode.children.push(...nextNode.children);
+
+    // Delete the next node
+    const nextParentArray = this.findNodeParent(nextNode.id) || this.nodes;
+    const nextIndex = this.getNodeIndex(nextNode.id, nextParentArray);
+    if (nextIndex !== -1) {
+      nextParentArray.splice(nextIndex, 1);
+    }
+
+    // Update the editor and set cursor position
+    this.requestUpdate();
+    this.emitChange();
+
+    setTimeout(() => {
+      const editor = this.shadowRoot?.querySelector(
+        `#editor-${this.editingNodeId}`,
+      ) as HTMLTextAreaElement;
+      if (editor) {
+        editor.value = this.editingContent;
+        editor.setSelectionRange(cursorPos, cursorPos);
+        editor.focus();
+      }
+    }, 0);
+  }
+
+  private handleIndentation(outdent: boolean) {
+    if (!this.editingNodeId) return;
 
     // Store the node ID to maintain focus after indentation
     const nodeId = this.editingNodeId;
 
     if (outdent) {
-      // Outdent (move left)
-      if (node.level > 0) {
-        // Find the grandparent array
-        let grandParentArray = this.nodes;
-        let parentNode = null;
-
-        // Find the actual parent node
-        const findParentNode = (nodes: OutlineNode[]): OutlineNode | null => {
-          for (const n of nodes) {
-            if (n.children.includes(node)) return n;
-            const found = findParentNode(n.children);
-            if (found) return found;
-          }
-          return null;
-        };
-
-        parentNode = findParentNode(this.nodes);
-        if (parentNode) {
-          grandParentArray = this.findNodeParent(parentNode.id) || this.nodes;
-          const parentIndex = this.getNodeIndex(
-            parentNode.id,
-            grandParentArray,
-          );
-
-          // Remove from current position
-          parentArray.splice(currentIndex, 1);
-
-          // Insert after parent
-          grandParentArray.splice(parentIndex + 1, 0, node);
-          node.level = parentNode.level;
-
-          // Move any following siblings as children of this node
-          const followingSiblings = parentArray.splice(currentIndex);
-          node.children.push(...followingSiblings);
-          followingSiblings.forEach((child) => child.level = node.level + 1);
-        }
-      }
+      this.outdentNode(this.editingNodeId);
     } else {
-      // Indent (move right)
-      if (currentIndex > 0) {
-        const prevSibling = parentArray[currentIndex - 1];
-
-        // Remove from current position
-        parentArray.splice(currentIndex, 1);
-
-        // Add as child of previous sibling
-        prevSibling.children.push(node);
-        node.level = prevSibling.level + 1;
-
-        // Ensure previous sibling is expanded
-        prevSibling.collapsed = false;
-      }
+      this.indentNode(this.editingNodeId);
     }
-
-    this.requestUpdate();
-    this.emitChange();
 
     // Restore focus to the editor after indentation
     setTimeout(() => {
@@ -630,7 +699,7 @@ export class CTOutliner extends BaseElement {
     this.checkForMentions(event.target as HTMLTextAreaElement);
   }
 
-  private handleEditorBlur = () => {
+  private handleEditorBlur = (event: FocusEvent) => {
     // If mentions are showing, delay the blur to allow clicking on mention items
     if (this.showingMentions) {
       setTimeout(() => {
@@ -641,7 +710,14 @@ export class CTOutliner extends BaseElement {
         }
       }, 150);
     } else {
-      this.finishEditing();
+      // Check if the new focus target is within the outliner
+      const relatedTarget = event.relatedTarget as HTMLElement;
+      const outliner = this.shadowRoot?.querySelector('.outliner');
+      
+      // Only finish editing if focus is leaving the outliner entirely
+      if (!outliner?.contains(relatedTarget)) {
+        this.finishEditing();
+      }
     }
   };
 
@@ -813,21 +889,40 @@ export class CTOutliner extends BaseElement {
     }
 
     // Normal editor key handling
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter") {
       event.preventDefault();
-      this.finishEditingAndCreateNew();
+      event.stopPropagation();
+      if (event.metaKey || event.ctrlKey) {
+        // Cmd/Ctrl+Enter creates new sibling node (same as Shift+Enter)
+        this.finishEditingAndCreateNew();
+      } else {
+        // Enter confirms edit and returns to read mode
+        this.finishEditing();
+      }
+      return;
     } else if (event.key === "Escape") {
       event.preventDefault();
-      this.editingNodeId = null;
-      this.editingContent = "";
-      this.showingMentions = false;
-      this.requestUpdate();
+      event.stopPropagation();
+      // Cancel edit, revert to original text
+      this.cancelEditing();
     } else if (event.key === "Tab") {
       event.preventDefault();
       this.handleIndentation(event.shiftKey);
-    } else if (event.key === "Backspace" && this.editingContent === "") {
-      event.preventDefault();
-      this.deleteCurrentNode();
+    } else if (event.key === "Backspace") {
+      if (this.editingContent === "" || (target.selectionStart === 0 && this.editingContent === "")) {
+        event.preventDefault();
+        this.deleteCurrentNode();
+      }
+    } else if (event.key === "Delete") {
+      // Check if at end of node and there's a next node to merge with
+      if (target.selectionStart === this.editingContent.length) {
+        const allNodes = this.getAllNodes();
+        const currentNodeIndex = allNodes.findIndex(n => n.id === this.editingNodeId);
+        if (currentNodeIndex !== -1 && currentNodeIndex < allNodes.length - 1) {
+          event.preventDefault();
+          this.mergeWithNextNode();
+        }
+      }
     }
   }
 
@@ -842,43 +937,106 @@ export class CTOutliner extends BaseElement {
     switch (event.key) {
       case "ArrowUp":
         event.preventDefault();
-        if (currentIndex > 0) {
-          this.focusedNodeId = allNodes[currentIndex - 1].id;
-        } else if (currentIndex === -1 && allNodes.length > 0) {
-          // If nothing is focused, start from the last node
-          this.focusedNodeId = allNodes[allNodes.length - 1].id;
+        if (event.altKey) {
+          // Alt+Up moves node up among siblings
+          this.moveNodeUp(this.focusedNodeId);
+        } else {
+          if (currentIndex > 0) {
+            this.focusedNodeId = allNodes[currentIndex - 1].id;
+          } else if (currentIndex === -1 && allNodes.length > 0) {
+            // If nothing is focused, start from the last node
+            this.focusedNodeId = allNodes[allNodes.length - 1].id;
+          }
         }
         break;
 
       case "ArrowDown":
         event.preventDefault();
-        if (currentIndex < allNodes.length - 1) {
-          this.focusedNodeId = allNodes[currentIndex + 1].id;
-        } else if (currentIndex === -1 && allNodes.length > 0) {
-          // If nothing is focused, start from the first node
-          this.focusedNodeId = allNodes[0].id;
+        if (event.altKey) {
+          // Alt+Down moves node down among siblings
+          this.moveNodeDown(this.focusedNodeId);
+        } else {
+          if (currentIndex < allNodes.length - 1) {
+            this.focusedNodeId = allNodes[currentIndex + 1].id;
+          } else if (currentIndex === -1 && allNodes.length > 0) {
+            // If nothing is focused, start from the first node
+            this.focusedNodeId = allNodes[0].id;
+          }
         }
         break;
 
       case "ArrowLeft":
         event.preventDefault();
-        if (this.focusedNodeId) {
-          const node = this.findNode(this.focusedNodeId);
-          if (node && node.children.length > 0 && !node.collapsed) {
-            node.collapsed = true;
-            this.requestUpdate();
+        if (event.altKey) {
+          // Alt+Left collapses current node
+          if (this.focusedNodeId) {
+            const node = this.findNode(this.focusedNodeId);
+            if (node && node.children.length > 0) {
+              node.collapsed = true;
+              this.requestUpdate();
+            }
+          }
+        } else {
+          if (this.focusedNodeId) {
+            const node = this.findNode(this.focusedNodeId);
+            if (node) {
+              if (node.children.length > 0 && !node.collapsed) {
+                // Collapse node if expanded
+                node.collapsed = true;
+                this.requestUpdate();
+              } else {
+                // Move to parent if collapsed or leaf
+                const parentNode = this.findParentNode(this.focusedNodeId);
+                if (parentNode) {
+                  this.focusedNodeId = parentNode.id;
+                }
+              }
+            }
           }
         }
         break;
 
       case "ArrowRight":
         event.preventDefault();
-        if (this.focusedNodeId) {
-          const node = this.findNode(this.focusedNodeId);
-          if (node && node.children.length > 0 && node.collapsed) {
-            node.collapsed = false;
-            this.requestUpdate();
+        if (event.altKey) {
+          // Alt+Right expands current node
+          if (this.focusedNodeId) {
+            const node = this.findNode(this.focusedNodeId);
+            if (node && node.children.length > 0) {
+              node.collapsed = false;
+              this.requestUpdate();
+            }
           }
+        } else {
+          if (this.focusedNodeId) {
+            const node = this.findNode(this.focusedNodeId);
+            if (node) {
+              if (node.children.length > 0) {
+                if (node.collapsed) {
+                  // Expand node if collapsed
+                  node.collapsed = false;
+                  this.requestUpdate();
+                } else {
+                  // Move to first child if expanded
+                  this.focusedNodeId = node.children[0].id;
+                }
+              }
+            }
+          }
+        }
+        break;
+
+      case "Home":
+        event.preventDefault();
+        if (allNodes.length > 0) {
+          this.focusedNodeId = allNodes[0].id;
+        }
+        break;
+
+      case "End":
+        event.preventDefault();
+        if (allNodes.length > 0) {
+          this.focusedNodeId = allNodes[allNodes.length - 1].id;
         }
         break;
 
@@ -886,8 +1044,11 @@ export class CTOutliner extends BaseElement {
         event.preventDefault();
         if (this.focusedNodeId) {
           if (event.shiftKey) {
-            // Shift+Enter creates new node after current
+            // Shift+Enter creates new sibling node below current
             this.createNewNodeAfter(this.focusedNodeId);
+          } else if (event.altKey) {
+            // Alt+Enter creates new child node
+            this.createChildNode(this.focusedNodeId);
           } else {
             // Enter starts editing
             this.startEditing(this.focusedNodeId);
@@ -896,38 +1057,44 @@ export class CTOutliner extends BaseElement {
         break;
 
       case "Backspace":
+        // Only delete nodes when Cmd/Ctrl is held down
+        if (event.metaKey || event.ctrlKey) {
+          event.preventDefault();
+          if (this.focusedNodeId) {
+            this.deleteNode(this.focusedNodeId);
+          }
+        }
+        break;
+        
       case "Delete":
-        event.preventDefault();
-        if (this.focusedNodeId) {
-          this.deleteNode(this.focusedNodeId);
+        // Only delete nodes when Cmd/Ctrl is held down
+        if (event.metaKey || event.ctrlKey) {
+          event.preventDefault();
+          if (this.focusedNodeId) {
+            this.deleteNode(this.focusedNodeId);
+          }
         }
         break;
 
       case "Tab":
         event.preventDefault();
         if (this.focusedNodeId) {
-          const node = this.findNode(this.focusedNodeId);
-          const parent = this.findNodeParent(this.focusedNodeId) || this.nodes;
-          const index = this.getNodeIndex(this.focusedNodeId, parent);
+          if (event.shiftKey) {
+            this.outdentNode(this.focusedNodeId);
+          } else {
+            this.indentNode(this.focusedNodeId);
+          }
+        }
+        break;
 
-          if (node && index >= 0) {
-            if (event.shiftKey) {
-              if (node.level > 0) {
-                node.level--;
-                this.requestUpdate();
-                this.emitChange();
-              }
-            } else {
-              if (index > 0) {
-                const prevSibling = parent[index - 1];
-                parent.splice(index, 1);
-                prevSibling.children.push(node);
-                node.level = prevSibling.level + 1;
-                prevSibling.collapsed = false;
-                this.requestUpdate();
-                this.emitChange();
-              }
-            }
+      case " ":
+        // Space toggles expand/collapse on parent nodes
+        event.preventDefault();
+        if (this.focusedNodeId) {
+          const node = this.findNode(this.focusedNodeId);
+          if (node && node.children.length > 0) {
+            node.collapsed = !node.collapsed;
+            this.requestUpdate();
           }
         }
         break;
@@ -936,7 +1103,9 @@ export class CTOutliner extends BaseElement {
 
   private emitChange() {
     const newValue = this.nodesToMarkdown(this.nodes);
+    this._internalChange = true;
     this.value = newValue;
+    this._internalChange = false;
     this.emit("ct-change", { value: newValue });
   }
 
@@ -949,6 +1118,25 @@ export class CTOutliner extends BaseElement {
 
     const newNode = this.createNode("", node.level);
     parentArray.splice(currentIndex + 1, 0, newNode);
+
+    this.focusedNodeId = newNode.id;
+    this.requestUpdate();
+    this.emitChange();
+
+    setTimeout(() => {
+      this.startEditing(newNode.id);
+    }, 0);
+  }
+
+  private createChildNode(nodeId: string) {
+    const node = this.findNode(nodeId);
+    if (!node) return;
+
+    const newNode = this.createNode("", node.level + 1);
+    node.children.push(newNode);
+    
+    // Ensure parent is expanded
+    node.collapsed = false;
 
     this.focusedNodeId = newNode.id;
     this.requestUpdate();
@@ -985,15 +1173,126 @@ export class CTOutliner extends BaseElement {
 
     // Focus previous node or next node
     const allNodes = this.getAllNodes();
-    const deletedIndex = allNodes.findIndex((n) => n.id === nodeToDelete.id);
-    if (deletedIndex > 0) {
-      this.focusedNodeId = allNodes[Math.max(0, deletedIndex - 1)].id;
-    } else if (this.nodes.length > 0) {
-      this.focusedNodeId = this.getAllNodes()[0].id;
+    
+    // If no nodes remain, create a new root node
+    if (allNodes.length === 0) {
+      const newNode = this.createNode("", 0);
+      this.nodes = [newNode];
+      this.focusedNodeId = newNode.id;
+    } else {
+      const deletedIndex = allNodes.findIndex((n) => n.id === nodeToDelete.id);
+      if (deletedIndex > 0) {
+        this.focusedNodeId = allNodes[Math.max(0, deletedIndex - 1)].id;
+      } else if (this.nodes.length > 0) {
+        this.focusedNodeId = this.getAllNodes()[0].id;
+      }
     }
 
     this.requestUpdate();
     this.emitChange();
+  }
+
+  private moveNodeUp(nodeId: string | null) {
+    if (!nodeId) return;
+
+    const parentArray = this.findNodeParent(nodeId) || this.nodes;
+    const currentIndex = this.getNodeIndex(nodeId, parentArray);
+
+    if (currentIndex <= 0) return; // Can't move up if first or not found
+
+    // Swap with previous sibling
+    const node = parentArray[currentIndex];
+    parentArray.splice(currentIndex, 1);
+    parentArray.splice(currentIndex - 1, 0, node);
+
+    this.requestUpdate();
+    this.emitChange();
+  }
+
+  private moveNodeDown(nodeId: string | null) {
+    if (!nodeId) return;
+
+    const parentArray = this.findNodeParent(nodeId) || this.nodes;
+    const currentIndex = this.getNodeIndex(nodeId, parentArray);
+
+    if (currentIndex === -1 || currentIndex >= parentArray.length - 1) return; // Can't move down if last or not found
+
+    // Swap with next sibling
+    const node = parentArray[currentIndex];
+    parentArray.splice(currentIndex, 1);
+    parentArray.splice(currentIndex + 1, 0, node);
+
+    this.requestUpdate();
+    this.emitChange();
+  }
+
+  private indentNode(nodeId: string) {
+    const node = this.findNode(nodeId);
+    if (!node) return;
+
+    const parentArray = this.findNodeParent(nodeId) || this.nodes;
+    const currentIndex = this.getNodeIndex(nodeId, parentArray);
+
+    if (currentIndex <= 0) return; // Cannot indent if first child or not found
+
+    // Get previous sibling
+    const prevSibling = parentArray[currentIndex - 1];
+
+    // Remove from current position
+    parentArray.splice(currentIndex, 1);
+
+    // Add as child of previous sibling
+    prevSibling.children.push(node);
+    node.level = prevSibling.level + 1;
+
+    // Ensure previous sibling is expanded
+    prevSibling.collapsed = false;
+
+    // Update levels of all descendants
+    this.updateNodeLevels(node);
+
+    this.requestUpdate();
+    this.emitChange();
+  }
+
+  private outdentNode(nodeId: string) {
+    const node = this.findNode(nodeId);
+    if (!node || node.level === 0) return; // Cannot outdent root level
+
+    const parentNode = this.findParentNode(nodeId);
+    if (!parentNode) return;
+
+    const parentArray = parentNode.children;
+    const currentIndex = this.getNodeIndex(nodeId, parentArray);
+    if (currentIndex === -1) return;
+
+    // Find grandparent array
+    const grandParentArray = this.findNodeParent(parentNode.id) || this.nodes;
+    const parentIndex = this.getNodeIndex(parentNode.id, grandParentArray);
+
+    // Remove from current position
+    parentArray.splice(currentIndex, 1);
+
+    // Move any following siblings as children of this node
+    const followingSiblings = parentArray.splice(currentIndex);
+    node.children.push(...followingSiblings);
+
+    // Insert after parent
+    grandParentArray.splice(parentIndex + 1, 0, node);
+    node.level = parentNode.level;
+
+    // Update levels of all descendants
+    this.updateNodeLevels(node);
+
+    this.requestUpdate();
+    this.emitChange();
+  }
+
+  private updateNodeLevels(node: OutlineNode) {
+    for (const child of node.children) {
+      child.level = node.level + 1;
+      this.updateNodeLevels(child);
+    }
   }
 
   override render() {
