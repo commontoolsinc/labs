@@ -273,7 +273,7 @@ export interface ITransactionReader {
   read(
     address: IMemoryAddress,
   ): Result<
-    ITransactionInvariant,
+    IAttestation,
     ReadError
   >;
 }
@@ -288,7 +288,7 @@ export interface ITransactionWriter extends ITransactionReader {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<ITransactionInvariant, WriteError>;
+  ): Result<IAttestation, WriteError>;
 }
 
 /**
@@ -325,6 +325,8 @@ export interface IStorageTransactionAborted extends Error {
  */
 export interface IStorageTransactionInconsistent extends Error {
   name: "StorageTransactionInconsistent";
+
+  address: IMemoryAddress;
 }
 
 /**
@@ -366,7 +368,19 @@ export type CommitError = StorageTransactionFailed;
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
 }
-export interface INotFoundError extends Error {}
+export interface INotFoundError extends Error {
+  name: "NotFoundError";
+
+  /**
+   * Source in which address could not be resolved.
+   */
+  source: IAttestation;
+
+  /**
+   * Address that we could not resolve.
+   */
+  address: IMemoryAddress;
+}
 export type IStorageTransactionProgress = Variant<{
   edit: ITransactionJournal;
   pending: ITransactionJournal;
@@ -470,7 +484,7 @@ export interface ITransactionJournal {
   read(
     at: IMemoryAddress,
     replica: ISpaceReplica,
-  ): Result<ITransactionInvariant, ReadError>;
+  ): Result<IAttestation, ReadError>;
 
   /**
    * Write request to addressed memory space is captured. If journal already has
@@ -489,7 +503,7 @@ export interface ITransactionJournal {
     at: IMemoryAddress,
     value: JSONValue | undefined,
     replica: ISpace,
-  ): Result<ITransactionInvariant, WriteError>;
+  ): Result<IAttestation, WriteError>;
 
   /**
    * Closes underlying transaction, making it non-editable going forward. Any
@@ -540,9 +554,10 @@ export interface IStorageTransactionWriteIsolationError extends Error {
 }
 
 /**
- * Describes write invariant of the underlaying transaction.
+ * Describes either observed or desired state of the memory at a specific
+ * address.
  */
-export interface ITransactionInvariant {
+export interface IAttestation {
   readonly address: IMemoryAddress;
   readonly value?: JSONValue;
 }

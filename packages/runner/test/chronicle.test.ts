@@ -45,29 +45,32 @@ describe("Chronicle", () => {
         type: "application/json",
         path: ["profile", "name"],
       } as const;
-      
+
       // Write root
       const rootWrite = chronicle.write(rootAddress, {
         profile: { name: "Bob", bio: "Developer" },
         posts: [],
       });
       console.log("Root write result:", rootWrite);
-      
+
       // Write nested
       const nestedWrite = chronicle.write(nestedAddress, "Robert");
       console.log("Nested write result:", nestedWrite);
-      
+
       // Debug novelty state
-      console.log("Novelty entries:", [...chronicle.novelty()].map(n => ({
-        path: n.address.path,
-        value: n.value
-      })));
-      
+      console.log(
+        "Novelty entries:",
+        [...chronicle.novelty()].map((n) => ({
+          path: n.address.path,
+          value: n.value,
+        })),
+      );
+
       // Read root
       const rootRead = chronicle.read(rootAddress);
       console.log("Root read result:", rootRead);
       console.log("Root read value:", rootRead.ok?.value);
-      
+
       expect(rootRead.ok?.value).toBeDefined();
     });
 
@@ -434,7 +437,7 @@ describe("Chronicle", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("NotFoundError");
+      expect(result.error?.name).toBe("StorageTransactionInconsistent");
     });
 
     it("should handle writing to invalid nested paths", () => {
@@ -455,7 +458,7 @@ describe("Chronicle", () => {
       );
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("NotFoundError");
+      expect(result.error?.name).toBe("StorageTransactionInconsistent");
     });
 
     it("should handle deleting properties with undefined", () => {

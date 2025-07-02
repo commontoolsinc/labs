@@ -1,16 +1,22 @@
 import type {
+  IAttestation,
   IMemoryAddress,
-  INotFoundError,
   ISpaceReplica,
   IStorageTransactionInconsistent,
   ITransaction,
-  ITransactionInvariant,
   JSONValue,
   MemorySpace,
   Result,
-  Unit,
+  State,
 } from "../interface.ts";
-import * as TransactionInvariant from "./invariant.ts";
+import * as Address from "./address.ts";
+import {
+  attest,
+  claim,
+  read,
+  StateInconsistency,
+  write,
+} from "./attestation.ts";
 import { unclaimed } from "@commontools/memory/fact";
 import { refer } from "merkle-reference";
 import * as Edit from "./edit.ts";
@@ -40,9 +46,22 @@ class Chronicle {
   }
 
   /**
-   * Applies all the overlapping write invariants onto a given source invariant.
+   * Loads a fact correstate to passed memory address from the underlying
+   * replica. If fact is not found in the replica return unclaimed state
+   * assuming no such fact exists yet.
    */
-  rebase(source: ITransactionInvariant) {
+  load(address: Omit<IMemoryAddress, "path">): State {
+    const [the, of] = [address.type, address.id];
+    // If we have not read nor written into overlapping memory address so
+    // we'll read it from the local replica.
+    return this.#replica.get({ the, of }) ?? unclaimed({ the, of });
+  }
+
+  /**
+   * Takes an invariant and applies all the changes that were written to this
+   * chonicle that fall under the given source.
+   */
+  rebase(source: IAttestation) {
     const changes = this.#novelty.select(source.address);
     return changes ? changes.rebase(source) : { ok: source };
   }
@@ -51,23 +70,14 @@ class Chronicle {
     return this.#novelty.claim({ address, value });
   }
 
-  load(address: Omit<IMemoryAddress, "path">) {
-    const [the, of] = [address.type, address.id];
-    // If we have not read nor written into overlapping memory address so
-    // we'll read it from the local replica.
-    return this.#replica.get({ the, of }) ?? unclaimed({ the, of });
-  }
   read(
     address: IMemoryAddress,
-  ): Result<
-    ITransactionInvariant,
-    INotFoundError | IStorageTransactionInconsistent
-  > {
+  ): Result<IAttestation, IStorageTransactionInconsistent> {
     // If we previously wrote into overlapping memory address we simply
     // read from it.
     const written = this.#novelty.get(address);
     if (written) {
-      return TransactionInvariant.read(written, address);
+      return read(written, address);
     }
 
     // If we previously read overlapping memory address we can read from it
@@ -78,29 +88,29 @@ class Chronicle {
       if (error) {
         return { error };
       } else {
-        return TransactionInvariant.read(merged, address);
+        return read(merged, address);
       }
     }
 
     // If we have not read nor written into overlapping memory address so
     // we'll read it from the local replica.
-    const loaded = TransactionInvariant.from(this.load(address));
-    const { error, ok: invariant } = TransactionInvariant.read(loaded, address);
+    const loaded = attest(this.load(address));
+    const { error, ok: invariant } = read(loaded, address);
     if (error) {
       return { error };
     } else {
       // Capture the original replica read in history (for validation)
-      const { error } = this.#history.claim(invariant);
-      if (error) {
-        return { error };
+      const claim = this.#history.claim(invariant);
+      if (claim.error) {
+        return claim;
       }
 
       // Apply any overlapping writes from novelty and return merged result
-      const { error: rebaseError, ok: merged } = this.rebase(invariant);
-      if (rebaseError) {
-        return { error: rebaseError };
+      const rebase = this.rebase(invariant);
+      if (rebase.error) {
+        return rebase;
       } else {
-        return TransactionInvariant.read(merged, address);
+        return read(rebase.ok, address);
       }
     }
   }
@@ -113,17 +123,14 @@ class Chronicle {
    */
   commit(): Result<
     ITransaction,
-    IStorageTransactionInconsistent | INotFoundError
+    IStorageTransactionInconsistent
   > {
     const edit = Edit.create();
     const replica = this.#replica;
     // Go over all read invariants, verify their consistency and add them as
     // edit claims.
     for (const invariant of this.history()) {
-      const { ok: state, error } = TransactionInvariant.claim(
-        invariant,
-        replica,
-      );
+      const { ok: state, error } = claim(invariant, replica);
 
       if (error) {
         return { error };
@@ -134,7 +141,7 @@ class Chronicle {
 
     for (const changes of this.#novelty) {
       const loaded = this.load(changes.address);
-      const source = TransactionInvariant.from(loaded);
+      const source = attest(loaded);
       const { error, ok: merged } = changes.rebase(source);
       if (error) {
         return { error };
@@ -164,7 +171,7 @@ class Chronicle {
 }
 
 class History {
-  #model: Map<string, ITransactionInvariant> = new Map();
+  #model: Map<string, IAttestation> = new Map();
   #space: MemorySpace;
   constructor(space: MemorySpace) {
     this.#space = space;
@@ -178,7 +185,7 @@ class History {
   }
 
   /**
-   * Gets {@link TransactionInvariant} for the given `address` from which we
+   * Gets {@link Attestation} for the given `address` from which we
    * could read out the value. Note that returned invariant may not have exact
    * same `path` as the provided by the address, but if one is returned it will
    * have either exact same path or a parent path.
@@ -201,15 +208,13 @@ class History {
    * }) === alice
    * ```
    */
-  get(address: IMemoryAddress) {
-    const at = TransactionInvariant.toKey(address);
-    let candidate: undefined | ITransactionInvariant = undefined;
+  get(address: IMemoryAddress): IAttestation | undefined {
+    let candidate: undefined | IAttestation = undefined;
     for (const invariant of this) {
-      const key = TransactionInvariant.toKey(invariant.address);
       // If `address` is contained in inside an invariant address it is a
       // candidate invariant. If this candidate has longer path than previous
       // candidate this is a better match so we pick this one.
-      if (at.startsWith(key)) {
+      if (Address.includes(address, invariant.address)) {
         if (!candidate) {
           candidate = invariant;
         } else if (
@@ -228,62 +233,71 @@ class History {
    * privous invariants.
    */
   claim(
-    invariant: ITransactionInvariant,
-  ): Result<ITransactionInvariant, IStorageTransactionInconsistent> {
-    const at = TransactionInvariant.toKey(invariant.address);
-
+    attestation: IAttestation,
+  ): Result<IAttestation, IStorageTransactionInconsistent> {
     // Track which invariants to delete after consistency check
-    const obsolete = new Set<string>();
+    const obsolete = new Set<IAttestation>();
 
     for (const candidate of this) {
-      const key = TransactionInvariant.toKey(candidate.address);
       // If we have an existing invariant that is either child or a parent of
       // the new one two must be consistent with one another otherwise we are in
       // an inconsistent state.
-      if (at.startsWith(key) || key.startsWith(at)) {
+      if (Address.intersect(attestation.address, candidate.address)) {
         // Always read at the more specific (longer) path for consistency check
-        const address = at.length > key.length
-          ? { ...invariant.address, space: this.space }
-          : { ...candidate.address, space: this.space };
+        const address =
+          attestation.address.path.length > candidate.address.path.length
+            ? attestation.address
+            : candidate.address;
 
-        const expect = TransactionInvariant.read(candidate, address).ok?.value;
-        const actual = TransactionInvariant.read(invariant, address).ok?.value;
+        const expected = read(candidate, address).ok?.value;
+        const actual = read(attestation, address).ok?.value;
 
-        if (JSON.stringify(expect) !== JSON.stringify(actual)) {
-          return { error: new Inconsistency([candidate, invariant]) };
+        if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+          return {
+            error: new StateInconsistency({
+              address,
+              expected,
+              actual,
+            }),
+          };
         }
 
         // If consistent, determine which invariant(s) to keep
-        if (at === key) {
+        if (attestation.address.path.length === candidate.address.path.length) {
           // Same exact address - replace the existing invariant
           // No need to mark as obsolete, just overwrite
           continue;
-        } else if (at.startsWith(key)) {
+        } else if (candidate.address === address) {
           // New invariant is a child of existing candidate (candidate is parent)
           // Drop the child invariant as it's redundant with the parent
-          obsolete.add(at);
-        } else if (key.startsWith(at)) {
+          obsolete.add(attestation);
+        } else if (attestation.address === address) {
           // New invariant is a parent of existing candidate (candidate is child)
           // Delete the child candidate as it's redundant with the new parent
-          obsolete.add(key);
+          obsolete.add(candidate);
         }
       }
     }
 
-    if (!obsolete.has(at)) {
-      this.#model.set(at, invariant);
+    if (!obsolete.has(attestation)) {
+      this.put(attestation);
     }
 
     // Delete redundant child invariants
-    for (const key of obsolete) {
-      this.#model.delete(key);
+    for (const attestation of obsolete) {
+      this.delete(attestation);
     }
 
-    return { ok: invariant };
+    return { ok: attestation };
+  }
+
+  put(attestation: IAttestation) {
+    this.#model.set(Address.toString(attestation.address), attestation);
+  }
+  delete(attestation: IAttestation) {
+    this.#model.delete(Address.toString(attestation.address));
   }
 }
-
-const NONE = Object.freeze(new Map());
 
 class Novelty {
   #model: Map<string, Changes> = new Map();
@@ -316,16 +330,15 @@ class Novelty {
    * when possible instead of keeping both parent and child separately.
    */
   claim(
-    invariant: ITransactionInvariant,
-  ): Result<ITransactionInvariant, INotFoundError> {
-    const at = TransactionInvariant.toKey(invariant.address);
+    invariant: IAttestation,
+  ): Result<IAttestation, IStorageTransactionInconsistent> {
     const candidates = this.edit(invariant.address);
 
     for (const candidate of candidates) {
       // If the candidate is a parent of the new invariant, merge the new invariant
       // into the existing parent invariant.
-      if (TransactionInvariant.includes(invariant.address, candidate.address)) {
-        const { error, ok: merged } = TransactionInvariant.write(
+      if (Address.includes(invariant.address, candidate.address)) {
+        const { error, ok: merged } = write(
           candidate,
           invariant.address,
           invariant.value,
@@ -343,7 +356,7 @@ class Novelty {
     // If we did not found any parents we may have some children
     // that will be replaced by this invariant
     for (const candidate of candidates) {
-      if (TransactionInvariant.includes(invariant.address, candidate.address)) {
+      if (Address.includes(invariant.address, candidate.address)) {
         candidates.delete(candidate);
       }
     }
@@ -358,7 +371,7 @@ class Novelty {
     return this.#model.values();
   }
 
-  *changes() {
+  *changes(): Iterable<IAttestation> {
     for (const changes of this) {
       yield* changes;
     }
@@ -373,14 +386,14 @@ class Novelty {
 }
 
 class Changes {
-  #model: Map<string, ITransactionInvariant> = new Map();
+  #model: Map<string, IAttestation> = new Map();
   address: IMemoryAddress;
   constructor(address: Omit<IMemoryAddress, "path">) {
     this.address = { ...address, path: [] };
   }
 
-  get(at: IMemoryAddress["path"]) {
-    let candidate: undefined | ITransactionInvariant = undefined;
+  get(at: IMemoryAddress["path"]): IAttestation | undefined {
+    let candidate: undefined | IAttestation = undefined;
     for (const invariant of this.#model.values()) {
       // Check if invariant's path is a prefix of requested path
       const path = invariant.address.path.join("/");
@@ -397,10 +410,10 @@ class Changes {
     return candidate;
   }
 
-  put(invariant: ITransactionInvariant) {
+  put(invariant: IAttestation) {
     this.#model.set(invariant.address.path.join("/"), invariant);
   }
-  delete(invariant: ITransactionInvariant) {
+  delete(invariant: IAttestation) {
     this.#model.delete(invariant.address.path.join("/"));
   }
 
@@ -408,11 +421,13 @@ class Changes {
    * Applies all the overlapping write invariants onto a given source invariant.
    */
 
-  rebase(source: ITransactionInvariant) {
+  rebase(
+    source: IAttestation,
+  ): Result<IAttestation, IStorageTransactionInconsistent> {
     let merged = source;
     for (const change of this.#model.values()) {
-      if (TransactionInvariant.includes(change.address, source.address)) {
-        const { error, ok } = TransactionInvariant.write(
+      if (Address.includes(change.address, source.address)) {
+        const { error, ok } = write(
           merged,
           change.address,
           change.value,
@@ -428,24 +443,7 @@ class Changes {
     return { ok: merged };
   }
 
-  [Symbol.iterator]() {
+  [Symbol.iterator](): IterableIterator<IAttestation> {
     return this.#model.values();
-  }
-}
-
-export class Inconsistency extends RangeError
-  implements IStorageTransactionInconsistent {
-  override name = "StorageTransactionInconsistent" as const;
-  constructor(public inconsitencies: ITransactionInvariant[]) {
-    const details = [`Transaction consistency guarntees have being violated:`];
-    for (const { address, value } of inconsitencies) {
-      details.push(
-        `  - The ${address.type} of ${address.id} at ${
-          address.path.join(".")
-        } has value ${JSON.stringify(value)}`,
-      );
-    }
-
-    super(details.join("\n"));
   }
 }
