@@ -26,12 +26,12 @@ const anyNegative = x < 0 || y < 0 || z < 0;
 // Mixed operations
 const description = `Sum: ${x + y + z}, Product: ${x * y * z}`;
 
-// TODO: Array operations with OpaqueRef arrays
+// TODO(ja): Array operations with OpaqueRef arrays
 // const items = cell([1, 2, 3]);
 // const doubled = items.map(x => x * 2);  // Not yet supported - needs different transformation approach
 // const filtered = items.filter(x => x > 2); // Not yet supported - needs different transformation approach
 
-// TODO: Async operations with OpaqueRef
+// TODO(ja): Async operations with OpaqueRef
 // const url = cell("https://api.example.com/data");
 // const response = await fetch(url); // Not yet supported - async/await with OpaqueRef needs special handling
 

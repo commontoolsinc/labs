@@ -204,7 +204,7 @@ function typeToJsonSchema(
       }
 
       // Get property schema for the actual type (unwrapped if it was Cell/Stream)
-      let propSchema = typeToJsonSchema(actualPropType, checker);
+      const propSchema = typeToJsonSchema(actualPropType, checker);
 
       // Add asCell/asStream flags
       if (isCell) {
