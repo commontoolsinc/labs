@@ -139,3 +139,13 @@ The `ct charm map` command helps visualize the connections between charms in a s
 - Always use absolute paths or full relative paths to recipes
 - Charm IDs start with "bafy" and are long content hashes
 - Environment variables CT_API_URL and CT_IDENTITY can simplify commands
+
+## Well-Known IDs
+
+CommonTools provides well-known IDs for accessing system-level data:
+
+**allCharms (Charms List):**
+- ID: `baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye`
+- Contains a list of all charms in the current space
+- Common usage: Link to charm inputs that need to access the full charm list
+- Example: `ct charm link baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye targetCharm/allCharms`
