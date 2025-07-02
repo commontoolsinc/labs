@@ -71,10 +71,30 @@ describe("Schema Transformer", () => {
     expect(result.matches).toBe(true);
   });
 
+  it("transforms complex types with toSchema", async () => {
+    const result = await compareFixtureTransformation(
+      "schema-transform/type-to-schema.input.ts",
+      "schema-transform/type-to-schema.expected.ts",
+      { types: { "commontools.d.ts": commontools }, applySchemaTransformer: true }
+    );
+    
+    expect(result.matches).toBe(true);
+  });
+
+  it("transforms recipe with complex types and inheritance", async () => {
+    const result = await compareFixtureTransformation(
+      "schema-transform/recipe-with-types.input.tsx",
+      "schema-transform/recipe-with-types.expected.tsx",
+      { types: { "commontools.d.ts": commontools }, applySchemaTransformer: true }
+    );
+    
+    expect(result.matches).toBe(true);
+  });
+
   it("skips transformation without /// <cts-enable /> directive", async () => {
     // This test needs to check compiled output since we're verifying
     // that the transformation didn't happen
-    const inputContent = await Deno.readTextFile("test/fixtures/schema-transform/no-directive.input.ts");
+    const inputContent = await Deno.readTextFile("fixtures/schema-transform/no-directive.input.ts");
     
     const program = {
       main: "/main.ts",
