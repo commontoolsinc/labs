@@ -290,6 +290,7 @@ describe("Schema Support", () => {
         space,
         schema: current.schema,
         rootSchema: current.rootSchema,
+        type: "application/json",
       });
 
       // .get() the currently selected cell. This should not change when
@@ -313,6 +314,7 @@ describe("Schema Support", () => {
         id: toURI(initialEntityId),
         path: ["foo"],
         space,
+        type: "application/json",
         schema: omitSchema,
         rootSchema: schema,
       });

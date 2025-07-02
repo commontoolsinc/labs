@@ -20,6 +20,7 @@ import {
   isQueryResultForDereferencing,
   QueryResultInternals,
 } from "./query-result-proxy.ts";
+import { type IMemoryAddress } from "./storage/interface.ts";
 
 /**
  * Normalized link structure returned by parsers
@@ -28,22 +29,19 @@ export type NormalizedLink = {
   id?: URI; // URI format with "of:" prefix
   path: string[];
   space?: MemorySpace;
+  type?: string; // Default is "application/json"
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
   overwrite?: "redirect"; // "this" gets normalized away to undefined
 };
 
 /**
- * Normalized link with required id and space (when base Cell is provided)
+ * Full normalized link that from a complete link, i.e. with required id, space
+ * and type. Gets created by parseLink if a base is provided.
+ *
+ * Any such link can be used as a memory address.
  */
-export type NormalizedFullLink = {
-  id: URI; // URI format with "of:" prefix
-  path: string[];
-  space: MemorySpace;
-  schema?: JSONSchema;
-  rootSchema?: JSONSchema;
-  overwrite?: "redirect"; // "this" gets normalized away to undefined
-};
+export type NormalizedFullLink = NormalizedLink & IMemoryAddress;
 
 /**
  * A type reflecting all possible link formats, including cells themselves.
@@ -175,6 +173,7 @@ export function isNormalizedFullLink(value: any): value is NormalizedFullLink {
     isRecord(value) &&
     typeof value.id === "string" &&
     typeof value.space === "string" &&
+    typeof value.type === "string" &&
     Array.isArray(value.path)
   );
 }
@@ -248,6 +247,7 @@ export function parseLink(
       id: toURI(value.getDoc().entityId),
       path: value.path.map((p) => p.toString()),
       space: value.space,
+      type: "application/json",
       schema: value.schema,
       rootSchema: value.rootSchema,
     };
@@ -259,6 +259,7 @@ export function parseLink(
       id: toURI(value.entityId),
       path: [],
       space: value.space,
+      type: "application/json",
     };
   }
 
@@ -280,6 +281,7 @@ export function parseLink(
       id: id,
       path: path.map((p) => p.toString()),
       space: resolvedSpace,
+      type: "application/json",
       schema: link.schema,
       rootSchema: link.rootSchema,
       overwrite: link.overwrite === "redirect" ? "redirect" : undefined,
@@ -292,6 +294,7 @@ export function parseLink(
       id: toURI(value.cell.entityId),
       path: value.path.map((p) => p.toString()),
       space: value.cell.space,
+      type: "application/json",
       schema: value.schema,
       rootSchema: value.rootSchema,
     };
@@ -303,6 +306,7 @@ export function parseLink(
       id: toURI(value.cell["/"]),
       path: value.path.map((p) => p.toString()),
       space: base?.space, // Space must come from context for JSON links
+      type: "application/json",
     };
   }
 
@@ -311,6 +315,7 @@ export function parseLink(
       id: toURI(value["/"]),
       path: [],
       space: base?.space, // Space must come from context for JSON links
+      type: "application/json",
     };
   }
 
@@ -341,6 +346,7 @@ export function parseLink(
         ? alias.path.map((p) => p.toString())
         : [],
       space: resolvedSpace,
+      type: "application/json",
       schema: alias.schema as JSONSchema | undefined,
       rootSchema: alias.rootSchema as JSONSchema | undefined,
     };
@@ -503,7 +509,8 @@ export function areNormalizedLinksSame(
   link2: NormalizedLink,
 ): boolean {
   return link1.id === link2.id && link1.space === link2.space &&
-    arrayEqual(link1.path, link2.path);
+    arrayEqual(link1.path, link2.path) &&
+    (link1.type ?? "application/json") === (link2.type ?? "application/json");
 }
 
 export function createSigilLinkFromParsedLink(
