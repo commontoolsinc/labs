@@ -66,7 +66,7 @@ export default recipe(
   InputSchema,
   OutputSchema,
   ({ code }) => {
-    const { result, error } = compileAndRun({
+    const { result, error, errors } = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
     });
@@ -83,6 +83,7 @@ export default recipe(
             source={code}
             language="text/x.typescript"
             onChange={updateCode({ code })}
+            errors={errors}
           />
           {ifElse(
             error,

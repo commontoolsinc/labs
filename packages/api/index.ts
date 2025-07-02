@@ -264,6 +264,13 @@ export interface BuiltInCompileAndRunState<T> {
   pending: boolean;
   result?: T;
   error?: any;
+  errors?: Array<{
+    line: number;
+    column: number;
+    message: string;
+    type: string;
+    file?: string;
+  }>;
 }
 
 // Function type definitions
