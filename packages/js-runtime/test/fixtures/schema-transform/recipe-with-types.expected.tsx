@@ -56,6 +56,12 @@ const inputSchema = {
 const outputSchema = {
     type: "object",
     properties: {
+        completedCount: {
+            type: "number"
+        },
+        pendingCount: {
+            type: "number"
+        },
         todos: {
             type: "array",
             items: {
@@ -78,15 +84,9 @@ const outputSchema = {
                 required: ["id", "text", "completed", "createdAt"]
             },
             asCell: true
-        },
-        completedCount: {
-            type: "number"
-        },
-        pendingCount: {
-            type: "number"
         }
     },
-    required: ["todos", "completedCount", "pendingCount"]
+    required: ["completedCount", "pendingCount", "todos"]
 } as const satisfies JSONSchema;
 const addTodoSchema = {
     type: "object",
@@ -123,9 +123,11 @@ const addTodo = handler(addTodoSchema, inputSchema, (event: AddTodoEvent, state:
     });
 });
 const toggleTodo = handler(toggleTodoSchema, inputSchema, (event: ToggleTodoEvent, state: TodoInput) => {
-    const todo = state.todos.find(t => t.id === event.id);
+    const todos = state.todos.get();
+    const todo = todos.find(t => t.id === event.id);
     if (todo) {
         todo.completed = !todo.completed;
+        state.todos.set(todos);
     }
 });
 // Recipe with derived values
@@ -133,7 +135,7 @@ export default recipe(inputSchema, outputSchema, ({ todos }) => {
     const completedCount = derive(todos, todos => todos.filter(t => t.completed).length);
     const pendingCount = derive(todos, todos => todos.filter(t => !t.completed).length);
     return {
-        [NAME]: str`Todo List (${pendingCount} pending)`,
+        [NAME]: str `Todo List (${pendingCount} pending)`,
         [UI]: (<div>
         <form onSubmit={e => {
                 e.preventDefault();

@@ -14,27 +14,60 @@ interface RecipeOutput {
 const updaterSchema = {
     type: "object",
     properties: {
-        newValues: { type: "array", items: { type: "string" } }
+        newValues: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        }
     },
     required: ["newValues"],
     title: "Update Values",
     description: "Append `newValues` to the list.",
-    example: { newValues: ["foo", "bar"] },
-    default: { newValues: [] }
+    example: {
+        newValues: ["foo", "bar"]
+    },
+    default: {
+        newValues: []
+    }
 } as const satisfies JSONSchema;
 const inputSchema = {
     type: "object",
     properties: {
-        values: { type: "array", items: { type: "string" }, asCell: true }
+        values: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: true
+        }
     },
     required: ["values"],
-    default: { values: [] }
+    default: {
+        values: []
+    }
 } as const satisfies JSONSchema;
 const outputSchema = {
     type: "object",
     properties: {
-        values: { type: "array", items: { type: "string" } },
-        updater: { ...{ type: "object", properties: { newValues: { type: "array", items: { type: "string" } } }, required: ["newValues"] }, asStream: true }
+        values: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
+        updater: { ...{
+                type: "object",
+                properties: {
+                    newValues: {
+                        type: "array",
+                        items: {
+                            type: "string"
+                        }
+                    }
+                },
+                required: ["newValues"]
+            }, asStream: true }
     },
     required: ["values", "updater"]
 } as const satisfies JSONSchema;
@@ -58,15 +91,32 @@ interface User {
 const userSchema = {
     type: "object",
     properties: {
-        name: { type: "string" },
-        age: { type: "number" },
-        email: { type: "string" },
-        tags: { type: "array", items: { type: "string" } },
+        name: {
+            type: "string"
+        },
+        age: {
+            type: "number"
+        },
+        email: {
+            type: "string"
+        },
+        tags: {
+            type: "array",
+            items: {
+                type: "string"
+            }
+        },
         metadata: {
             type: "object",
             properties: {
-                created: { type: "string", format: "date-time" },
-                updated: { type: "string", format: "date-time" }
+                created: {
+                    type: "string",
+                    format: "date-time"
+                },
+                updated: {
+                    type: "string",
+                    format: "date-time"
+                }
             },
             required: ["created", "updated"]
         }
