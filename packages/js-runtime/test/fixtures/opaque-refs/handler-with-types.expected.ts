@@ -16,10 +16,10 @@ const simpleHandler = handler(toSchema<EventType>(), toSchema<StateType>(), (eve
 // Test case 2: Handler with Cell types
 interface CellEvent {
     data: string;
-    cellValue: Cell<number>; // @asCell
+    cellValue: Cell<number>;
 }
 interface CellState {
-    count: Cell<number>; // @asCell
+    count: Cell<number>;
     messages: string[];
 }
 const cellHandler = handler(toSchema<CellEvent>(), toSchema<CellState>(), (event, state) => {

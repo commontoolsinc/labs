@@ -67,7 +67,7 @@ interface UserState {
     email: string;
   }>;
   lastAction: string;
-  count: Cell<number>; // @asCell
+  count: Cell<number>;
 }
 
 const userHandler = handler<UserEvent, UserState>((event, state) => {
