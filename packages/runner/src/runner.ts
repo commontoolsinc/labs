@@ -735,7 +735,7 @@ export class Runner implements IRunner {
       (result: any) =>
         sendValueToBinding(processCell, mappedOutputBindings, result),
       addCancel,
-      inputCells, // cause
+      { inputs: inputsCell, parents: processCell.getDoc() },
       processCell,
       this.runtime,
     );

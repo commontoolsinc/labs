@@ -251,7 +251,7 @@ export class CharmManager {
     return this.charms;
   }
 
-  private async add(newCharms: Cell<Charm>[]) {
+  async add(newCharms: Cell<Charm>[]) {
     await this.syncCharms(this.charms);
     await this.runtime.idle();
 

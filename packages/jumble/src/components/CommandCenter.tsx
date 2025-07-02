@@ -436,7 +436,15 @@ export function CommandCenter() {
     };
 
     const handleNavigateToCharm = (event: CustomEvent) => {
-      const { charmId, replicaName } = event.detail || {};
+      const { charmId, charm, replicaName } = event.detail || {};
+
+      // If we have a charm object, ensure it's added to the charm manager
+      if (charm && charmManager) {
+        charmManager.add([charm]).catch((err) => {
+          console.error("Failed to add charm to manager:", err);
+        });
+      }
+
       if (charmId && replicaName) {
         navigate(
           createPath("charmShow", {
@@ -478,7 +486,7 @@ export function CommandCenter() {
         handleNavigateToCharm as EventListener,
       );
     };
-  }, [focusedCharmId, allCommands, navigate, focusedReplicaId]);
+  }, [focusedCharmId, allCommands, navigate, focusedReplicaId, charmManager]);
 
   const handleBack = () => {
     if (commandPathIds.length === 1) {
