@@ -2,13 +2,14 @@ import {
   Charm,
   charmId,
   compileAndRunRecipe,
+  compileRecipe,
   extractVersionTag,
   getIframeRecipe,
   getRecipeIdFromCharm,
   modifyCharm,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
-import { isCell, isStream, Runtime } from "@commontools/runner";
+import { isCell, isStream, Runtime, RuntimeProgram } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 import {
   CheckboxToggle,
@@ -719,8 +720,20 @@ const CodeTab = () => {
   const [showFullCode, setShowFullCode] = useState(false);
   const { loading, setLoading } = useCharmOperationContext();
   const [regularRecipeSource, setRegularRecipeSource] = useState<string>("");
-  const [workingRegularRecipeSource, setWorkingRegularRecipeSource] = useState<string>("");
+  const [workingRegularRecipeSource, setWorkingRegularRecipeSource] = useState<
+    string
+  >("");
   const [isRegularRecipe, setIsRegularRecipe] = useState(false);
+  const [isMultiFileRecipe, setIsMultiFileRecipe] = useState(false);
+  const [recipeFiles, setRecipeFiles] = useState<
+    Array<{ name: string; contents: string }>
+  >([]);
+  const [workingRecipeFiles, setWorkingRecipeFiles] = useState<
+    Array<{ name: string; contents: string }>
+  >([]);
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+  const [mainFile, setMainFile] = useState<string>("/main.tsx");
+  const [mainExport, setMainExport] = useState<string | undefined>();
   const navigate = useNavigate();
   const { replicaName } = useParams<CharmRouteParams>();
 
@@ -729,17 +742,29 @@ const CodeTab = () => {
     function loadRegularRecipeSource() {
       if (!charm || iframeRecipe) {
         setIsRegularRecipe(false);
+        setIsMultiFileRecipe(false);
         return;
       }
-      
+
       // This is a regular recipe
       setIsRegularRecipe(true);
-      
+
       try {
         const recipeId = getRecipeIdFromCharm(charm);
         if (recipeId) {
           const recipeMeta = runtime.recipeManager.getRecipeMeta({ recipeId });
-          if (recipeMeta?.src) {
+
+          // Check if it's a multi-file recipe
+          if (recipeMeta?.program) {
+            setIsMultiFileRecipe(true);
+            setRecipeFiles(recipeMeta.program.files);
+            setWorkingRecipeFiles([...recipeMeta.program.files]);
+            setMainFile(recipeMeta.program.main);
+            setMainExport(recipeMeta.program.mainExport);
+            setSelectedFileIndex(0);
+          } else if (recipeMeta?.src) {
+            // Single file recipe
+            setIsMultiFileRecipe(false);
             setRegularRecipeSource(recipeMeta.src);
             setWorkingRegularRecipeSource(recipeMeta.src);
           }
@@ -748,7 +773,7 @@ const CodeTab = () => {
         console.error("Error loading regular recipe source:", error);
       }
     }
-    
+
     loadRegularRecipeSource();
   }, [charm, iframeRecipe, runtime]);
 
@@ -823,14 +848,21 @@ const CodeTab = () => {
     return activeSchema === "argument" ? "argumentSchema" : "resultSchema";
   };
 
-  // For regular recipes, just show a full code editor
+  // For regular recipes, show either single or multi-file editor
   if (isRegularRecipe) {
+    // Check if changes have been made
+    const hasChanges = isMultiFileRecipe
+      ? JSON.stringify(workingRecipeFiles) !== JSON.stringify(recipeFiles)
+      : workingRegularRecipeSource !== regularRecipeSource;
+
     return (
       <div className="h-full flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-4 pb-2">
-          <div className="text-sm font-semibold">Recipe Code</div>
+          <div className="text-sm font-semibold">
+            {isMultiFileRecipe ? "Recipe Files" : "Recipe Code"}
+          </div>
           {/* Save button for regular recipes */}
-          {workingRegularRecipeSource !== regularRecipeSource && (
+          {hasChanges && (
             <button
               type="button"
               onClick={async () => {
@@ -839,22 +871,52 @@ const CodeTab = () => {
                 try {
                   // Get the recipe spec and argument from the current charm
                   const recipeId = getRecipeIdFromCharm(charm);
-                  const recipeMeta = runtime.recipeManager.getRecipeMeta({ recipeId });
+                  const recipeMeta = runtime.recipeManager.getRecipeMeta({
+                    recipeId,
+                  });
                   const spec = recipeMeta?.spec || "";
                   const argument = charmManager.getArgument(charm);
-                  
-                  // Compile and run the updated recipe
-                  const newCharm = await compileAndRunRecipe(
-                    charmManager,
-                    workingRegularRecipeSource,
-                    spec,
-                    argument,
-                    recipeId ? [recipeId] : undefined,
-                  );
-                  
+
+                  let newCharm;
+                  if (isMultiFileRecipe) {
+                    // For multi-file recipes, we need to use compileRecipe directly
+                    const program: RuntimeProgram = {
+                      main: mainFile,
+                      files: workingRecipeFiles,
+                      ...(mainExport && { mainExport }),
+                    };
+
+                    // Use compileRecipe which accepts RuntimeProgram
+                    const recipe = await compileRecipe(
+                      program,
+                      spec,
+                      runtime,
+                      charmManager.getSpace(),
+                      recipeId ? [recipeId] : undefined,
+                    );
+
+                    // Run the recipe
+                    newCharm = await charmManager.runPersistent(
+                      recipe,
+                      argument,
+                    );
+                  } else {
+                    // Single file recipe - use the existing compileAndRunRecipe
+                    newCharm = await compileAndRunRecipe(
+                      charmManager,
+                      workingRegularRecipeSource,
+                      spec,
+                      argument,
+                      recipeId ? [recipeId] : undefined,
+                    );
+                  }
+
                   if (newCharm && replicaName) {
                     navigate(
-                      createPath("charmShow", { charmId: charmId(newCharm)!, replicaName }),
+                      createPath("charmShow", {
+                        charmId: charmId(newCharm)!,
+                        replicaName,
+                      }),
                     );
                   }
                 } catch (error) {
@@ -886,15 +948,51 @@ const CodeTab = () => {
             </button>
           )}
         </div>
-        
+
+        {/* File tabs for multi-file recipes */}
+        {isMultiFileRecipe && (
+          <div className="px-4 pb-2">
+            <div className="flex gap-2 overflow-x-auto">
+              {workingRecipeFiles.map((file, index) => (
+                <button
+                  key={file.name}
+                  type="button"
+                  onClick={() => setSelectedFileIndex(index)}
+                  className={`px-3 py-1 text-sm border ${
+                    selectedFileIndex === index
+                      ? "bg-black text-white border-black"
+                      : "bg-white text-black border-gray-300 hover:border-black"
+                  }`}
+                >
+                  {file.name.substring(1)} {/* Remove leading slash */}
+                  {file.name === mainFile && " (main)"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="px-4 flex-grow flex flex-col overflow-hidden">
           <CharmCodeEditor
             docs={[
               {
                 key: "code",
-                label: "Recipe Code",
-                value: workingRegularRecipeSource,
-                onChange: setWorkingRegularRecipeSource,
+                label: isMultiFileRecipe
+                  ? workingRecipeFiles[selectedFileIndex]?.name.substring(1)
+                  : "Recipe Code",
+                value: isMultiFileRecipe
+                  ? workingRecipeFiles[selectedFileIndex]?.contents || ""
+                  : workingRegularRecipeSource,
+                onChange: isMultiFileRecipe
+                  ? (newContent: string) => {
+                    const updatedFiles = [...workingRecipeFiles];
+                    updatedFiles[selectedFileIndex] = {
+                      ...updatedFiles[selectedFileIndex],
+                      contents: newContent,
+                    };
+                    setWorkingRecipeFiles(updatedFiles);
+                  }
+                  : setWorkingRegularRecipeSource,
                 language: "javascript" as const,
                 readOnly: false,
               },
