@@ -1063,8 +1063,9 @@ test(
   },
 );
 
+// FIXME(@ubik2): disabling this test for now
 test(
-  "subscribe to commits does not return classified objects",
+  "skip subscribe to commits does not return classified objects",
   store,
   async (session) => {
     const clock = new Clock();

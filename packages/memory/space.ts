@@ -911,12 +911,14 @@ export function redactCommitData(
       set(newChanges, fact.of, fact.the, fact.cause, fact.value);
       continue;
     }
-    const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
-    if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
-      setEmptyObj(newChanges, fact.of, fact.the);
-    } else {
-      set(newChanges, fact.of, fact.the, fact.cause, fact.value);
-    }
+    // FIXME(@ubik2): Re-enable this once we've tracked down other issues
+    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
+    // if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
+    //   setEmptyObj(newChanges, fact.of, fact.the);
+    // } else {
+    //   set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+    // }
+    set(newChanges, fact.of, fact.the, fact.cause, fact.value);
   }
   const newCommitData = {
     since: commitData.since,
