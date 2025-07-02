@@ -19,11 +19,11 @@ const allPositive = commontools_1.derive({ x, y, z }, ({ x: _v1, y: _v2, z: _v3 
 const anyNegative = commontools_1.derive({ x, y, z }, ({ x: _v1, y: _v2, z: _v3 }) => _v1 < 0 || _v2 < 0 || _v3 < 0);
 // Mixed operations
 const description = commontools_1.derive({ x, y, z }, ({ x: _v1, y: _v2, z: _v3 }) => `Sum: ${_v1 + _v2 + _v3}, Product: ${_v1 * _v2 * _v3}`);
-// TODO: Array operations with OpaqueRef arrays
+// TODO(ja): Array operations with OpaqueRef arrays
 // const items = cell([1, 2, 3]);
 // const doubled = items.map(x => x * 2);  // Not yet supported - needs different transformation approach
 // const filtered = items.filter(x => x > 2); // Not yet supported - needs different transformation approach
-// TODO: Async operations with OpaqueRef
+// TODO(ja): Async operations with OpaqueRef
 // const url = cell("https://api.example.com/data");
 // const response = await fetch(url); // Not yet supported - async/await with OpaqueRef needs special handling
 // Nested object property access with multiple refs
