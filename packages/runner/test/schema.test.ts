@@ -256,7 +256,6 @@ describe("Schema Support", () => {
         value: "root",
         current: { $alias: linkCell.key("foo").getAsLegacyCellLink() },
       });
-      const docEntityId = docCell.entityId!;
       const root = docCell.asSchema(schema);
 
       const rootValues: any[] = [];

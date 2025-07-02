@@ -6,7 +6,7 @@ import { type IRuntime } from "./runtime.ts";
 import {
   type JSONCellLink,
   type LegacyAlias,
-  type LegacyDocCellLink as LegacyDocCellLink,
+  type LegacyDocCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilValue,
@@ -219,7 +219,8 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
 export function parseLink(
   value:
     | Cell<any>
-    | DocImpl<any>,
+    | DocImpl<any>
+    | LegacyDocCellLink,
   base?: Cell | NormalizedLink,
 ): NormalizedFullLink;
 export function parseLink(
