@@ -199,18 +199,26 @@ export interface IStorage {
 export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
-  generateRecipeId(recipe: any, src?: string | RuntimeProgram): string;
+  registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
   loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
   compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
-  registerRecipe(
+  saveRecipe(
     params: {
       recipeId: string;
       space: MemorySpace;
-      recipe: Recipe | Module;
-      recipeMeta: RecipeMeta;
+      recipe?: Recipe | Module;
+      recipeMeta?: RecipeMeta;
     },
-  ): Promise<boolean>;
+  ): boolean;
+  saveAndSyncRecipe(
+    params: {
+      recipeId: string;
+      space: MemorySpace;
+      recipe?: Recipe | Module;
+      recipeMeta?: RecipeMeta;
+    },
+  ): Promise<void>;
 }
 
 export interface IModuleRegistry {
@@ -279,6 +287,7 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { isCell } from "./cell.ts";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
@@ -570,7 +579,15 @@ export class Runtime implements IRuntime {
     argument: T,
     resultCell: DocImpl<R> | Cell<R>,
   ): DocImpl<R> | Cell<R> {
-    return this.runner.run(recipeOrModule, argument, resultCell as any);
+    if (isCell(resultCell)) {
+      return this.runner.run<T, R>(recipeOrModule, argument, resultCell);
+    } else {
+      return this.runner.run<T, R>(
+        recipeOrModule,
+        argument,
+        resultCell as DocImpl<R>,
+      );
+    }
   }
 
   runSynced(

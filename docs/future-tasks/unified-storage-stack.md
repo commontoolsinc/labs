@@ -102,15 +102,15 @@ Specifically we have:
 This plan should be entirely incremental and can be rolled out step by step.
 
 - [x] Ephemeral storage provider + Get rid of `VolatileStorageProvider` CT-420
-- [ ] Schema queries for everything + Source support CT-174 CT-428
+- [x] Schema queries for everything + Source support CT-174 CT-428
   - See design note on cache, but that's not blocking progress on the rest
-- [ ] Turn off "crawler" mode in storage.ts, make sure things still work
+- [x] Turn off "crawler" mode in storage.ts, make sure things still work
   - The crawler is in `storage.ts:_processCurrentBatch()` (lines 478-577) which
     recursively loads dependencies
   - Key areas: loading promises map (line 84), dependency tracking, and batch
     processing
   - Watch for the FIXME at line 84 about keying by doc+schema combination
-- [x] When connection is dropped, re-establish all schema queries again
+- [x] When connection is dropped, re-establish all schema queries again CT-442
 - [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now) CT-446

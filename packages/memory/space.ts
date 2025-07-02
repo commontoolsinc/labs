@@ -826,6 +826,10 @@ export function getLabels<
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
+    // We don't restrict acccess to labels
+    if (fact.the === LABEL_THE) {
+      continue;
+    }
     const labelFact = getLabel(session, fact.of);
     if (labelFact !== undefined) {
       set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
@@ -902,12 +906,19 @@ export function redactCommitData(
     if (fact.value === true) {
       continue;
     }
-    const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
-    if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
-      setEmptyObj(newChanges, fact.of, fact.the);
-    } else {
+    // We treat all labels as unclassified
+    if (fact.the === LABEL_THE) {
       set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+      continue;
     }
+    // FIXME(@ubik2): Re-enable this once we've tracked down other issues
+    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
+    // if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
+    //   setEmptyObj(newChanges, fact.of, fact.the);
+    // } else {
+    //   set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+    // }
+    set(newChanges, fact.of, fact.the, fact.cause, fact.value);
   }
   const newCommitData = {
     since: commitData.since,

@@ -1,7 +1,6 @@
 /**
  * Factory function to create builder functions with runtime dependency injection
  */
-
 import { getCellLinkOrThrow, type Runtime } from "../index.ts";
 import type {
   BuilderFunctionsAndConstants,
@@ -14,6 +13,7 @@ import {
   h,
   ID,
   ID_FIELD,
+  isRecipe,
   NAME,
   schema,
   TYPE,
@@ -33,6 +33,7 @@ import {
   streamData,
 } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
+import type { RuntimeProgram } from "../harness/harness.ts";
 
 /**
  * Creates a set of builder functions with the given runtime
@@ -41,7 +42,10 @@ import { getRecipeEnvironment } from "./env.ts";
  */
 export const createBuilder = (
   runtime: Runtime,
-): BuilderFunctionsAndConstants => {
+): {
+  commontools: BuilderFunctionsAndConstants;
+  exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
+} => {
   // Implementation of createCell moved from runner/harness
   const createCell: CreateCellFunction = function createCell<T = any>(
     schema?: JSONSchema,
@@ -77,50 +81,65 @@ export const createBuilder = (
     return cell;
   } as CreateCellFunction;
 
+  // Associate runtime programs with recipes after compilation and initial eval
+  // and before compilation returns, so before any e.g. recipe would be
+  // instantiated. This way they get saved with a way to rehydrate them.
+  const exportsCallback = (exports: Map<any, RuntimeProgram>) => {
+    for (const [value, program] of exports) {
+      if (isRecipe(value)) {
+        // This will associate the program with the recipe
+        runtime.recipeManager.registerRecipe(value, program);
+      }
+    }
+  };
+
   return {
-    // Recipe creation
-    recipe,
+    commontools: {
+      // Recipe creation
+      recipe,
 
-    // Module creation
-    lift,
-    handler,
-    derive,
-    compute,
-    render,
+      // Module creation
+      lift,
+      handler,
+      derive,
+      compute,
+      render,
 
-    // Built-in modules
-    str,
-    ifElse,
-    llm,
-    generateObject,
-    fetchData,
-    streamData,
-    compileAndRun,
-    navigateTo,
+      // Built-in modules
+      str,
+      ifElse,
+      llm,
+      generateObject,
+      fetchData,
+      streamData,
+      compileAndRun,
+      navigateTo,
 
-    // Cell creation
-    createCell,
-    cell: opaqueRef,
-    stream,
+      // Cell creation
+      createCell,
+      cell: opaqueRef,
+      stream,
 
-    // Utility
-    byRef,
+      // Utility
+      byRef,
 
-    // Environment
-    getRecipeEnvironment,
+      // Environment
+      getRecipeEnvironment,
 
-    // Constants
-    ID,
-    ID_FIELD,
-    TYPE,
-    NAME,
-    UI,
+      // Constants
+      ID,
+      ID_FIELD,
+      TYPE,
+      NAME,
+      UI,
 
-    // Schema utilities
-    schema,
-    AuthSchema,
+      // Schema utilities
+      schema,
+      AuthSchema,
 
-    // Render utils
-    h,
+      // Render utils
+      h,
+    },
+    exportsCallback,
   };
 };

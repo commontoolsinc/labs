@@ -86,4 +86,8 @@ export class CompilerError extends Error {
     super(message);
     this.#errors = errors;
   }
+
+  get errors(): CompilationError[] {
+    return this.#errors;
+  }
 }
