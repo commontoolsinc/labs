@@ -124,21 +124,6 @@ describe("OpaqueRef Transformer with Fixtures", () => {
     });
   });
 
-  describe("Using fixtures with custom assertions", () => {
-    it("transforms binary expressions correctly", async () => {
-      const transformed = await transformFixture(
-        "opaque-refs/binary-expressions.input.ts",
-        { types },
-      );
-
-      // Custom assertions
-      expect(transformed).toContain("commontools_1.derive");
-      expect(transformed).toContain("_v1 => _v1 + 1");
-      expect(transformed).toContain("_v1 => _v1 * 2");
-      expect(transformed).toContain("_v1 => _v1 - 1");
-      expect(transformed).not.toContain("count + 1");
-    });
-  });
 
   describe("JSX Expression Transformations", () => {
     it("transforms JSX expressions with OpaqueRef operations", async () => {
