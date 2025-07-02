@@ -212,6 +212,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
+        type: "application/json",
         schema: undefined,
         rootSchema: undefined,
       });
@@ -227,6 +228,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested"],
         space: space,
+        type: "application/json",
         schema: undefined,
         rootSchema: undefined,
       });
@@ -241,6 +243,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
+        type: "application/json",
       });
     });
 
@@ -262,6 +265,7 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
+        type: "application/json",
         schema: { type: "number" },
         rootSchema: { type: "object" },
       });
@@ -286,6 +290,7 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
+        type: "application/json",
         schema: { type: "number" },
         rootSchema: { type: "object" },
       });
@@ -298,6 +303,7 @@ describe("link-utils", () => {
             id: "of:test",
             path: ["nested", "value"],
             space: space,
+            type: "application/json",
             schema: { type: "number" },
             rootSchema: { type: "object" },
             overwrite: "redirect",
@@ -310,6 +316,7 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
+        type: "application/json",
         schema: { type: "number" },
         rootSchema: { type: "object" },
         overwrite: "redirect",
@@ -332,6 +339,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
+        type: "application/json",
         schema: undefined,
         rootSchema: undefined,
       });
@@ -346,6 +354,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: [],
         space: space,
+        type: "application/json",
         schema: undefined,
         rootSchema: undefined,
       });
@@ -363,6 +372,7 @@ describe("link-utils", () => {
         id: "of:test",
         path: ["nested", "value"],
         space: space,
+        type: "application/json",
       });
     });
 
@@ -382,6 +392,7 @@ describe("link-utils", () => {
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
         space: space,
+        type: "application/json",
         schema: { type: "number" },
         rootSchema: { type: "object" },
       });
@@ -399,6 +410,7 @@ describe("link-utils", () => {
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
         path: ["nested", "value"],
+        type: "application/json",
         space: space,
         schema: undefined,
         rootSchema: undefined,
