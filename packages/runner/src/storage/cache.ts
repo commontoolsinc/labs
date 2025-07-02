@@ -1415,9 +1415,6 @@ export class Provider implements IStorageProvider {
     // Reset the existing Replica to clear its state
     this.workspace.reset();
 
-    // Start polling again with the same session
-    this.workspace.poll();
-
     // Re-establish subscriptions
     const need: [FactAddress, SchemaContext?][] = [];
 
@@ -1433,7 +1430,11 @@ export class Provider implements IStorageProvider {
       need.push([factAddress, selector.schemaContext]);
     }
 
-    await this.workspace.pull(need);
+    try {
+      await this.workspace.pull(need);
+    } catch (error) {
+      console.error("Failed to re-establish subscriptions:", error);
+    }
   }
 
   getReplica(): string {
