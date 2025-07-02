@@ -18,6 +18,7 @@ describe("Recipe Transformation", () => {
           name: "/main.tsx",
           contents: `/// <cts-enable />
 import {
+  Cell,
   derive,
   generateObject,
   h,
@@ -32,7 +33,7 @@ import {
 } from "commontools";
 
 interface InputState {
-  number: number; // @asCell
+  number: Cell<number>;
 }
 
 interface OutputState {

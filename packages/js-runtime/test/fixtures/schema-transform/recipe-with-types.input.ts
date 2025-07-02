@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, handler, toSchema, h, UI, NAME, str } from "commontools";
+import { recipe, handler, toSchema, h, UI, NAME, str, Cell } from "commontools";
 
 // Define types using TypeScript interfaces
 interface TodoItem {
@@ -10,7 +10,7 @@ interface TodoItem {
 }
 
 interface TodoInput {
-  todos: TodoItem[]; // @asCell
+  todos: Cell<TodoItem[]>;
 }
 
 interface TodoOutput extends TodoInput {
@@ -62,9 +62,11 @@ const toggleTodo = handler(
   toggleTodoSchema,
   inputSchema,
   (event: ToggleTodoEvent, state: TodoInput) => {
-    const todo = state.todos.find(t => t.id === event.id);
+    const todos = state.todos.get();
+    const todo = todos.find(t => t.id === event.id);
     if (todo) {
       todo.completed = !todo.completed;
+      state.todos.set(todos);
     }
   }
 );

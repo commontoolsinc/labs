@@ -1,4 +1,4 @@
-import { recipe, handler, toSchema } from "commontools";
+import { recipe, handler, toSchema, Cell, Stream } from "commontools";
 
 // Define types using TypeScript - more compact!
 interface UpdaterInput {
@@ -6,12 +6,12 @@ interface UpdaterInput {
 }
 
 interface RecipeInput {
-  values: string[]; // @asCell
+  values: Cell<string[]>;
 }
 
 interface RecipeOutput {
   values: string[];
-  updater: UpdaterInput; // @asStream
+  updater: Stream<UpdaterInput>;
 }
 
 // Transform to schema at compile time

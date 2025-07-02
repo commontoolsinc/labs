@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, handler, toSchema, h, UI, NAME, str } from "commontools";
+import { recipe, handler, toSchema, h, UI, NAME, str, Cell } from "commontools";
 // Define types using TypeScript interfaces
 interface TodoItem {
     id: string;
@@ -8,7 +8,7 @@ interface TodoItem {
     createdAt: Date;
 }
 interface TodoInput {
-    todos: TodoItem[]; // @asCell
+    todos: Cell<TodoItem[]>;
 }
 interface TodoOutput extends TodoInput {
     completedCount: number;
