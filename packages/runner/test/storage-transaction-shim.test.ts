@@ -40,7 +40,7 @@ describe("StorageTransaction", () => {
       space,
       id: "of:test-entity",
       type: "application/json",
-      path: [],
+      path: ["value"],
     }, {});
 
     expect(rootWriteResult.ok).toBeDefined();
@@ -50,7 +50,7 @@ describe("StorageTransaction", () => {
       space,
       id: "of:test-entity",
       type: "application/json",
-      path: ["name"],
+      path: ["value", "name"],
     }, "John Doe");
 
     expect(writeResult.ok).toBeDefined();
@@ -61,7 +61,7 @@ describe("StorageTransaction", () => {
       space,
       id: "of:test-entity",
       type: "application/json",
-      path: ["name"],
+      path: ["value", "name"],
     });
 
     expect(readResult.ok).toBeDefined();
@@ -72,7 +72,7 @@ describe("StorageTransaction", () => {
       space,
       id: "of:test-entity",
       type: "application/json",
-      path: ["address", "city"],
+      path: ["value", "address", "city"],
     });
 
     expect(readNonExistentResult.error).toBeDefined();
@@ -84,7 +84,7 @@ describe("StorageTransaction", () => {
       space,
       id: "of:test-entity",
       type: "application/json",
-      path: ["address"],
+      path: ["value", "address"],
     }, { street: "123 Main St" });
 
     expect(writeResult2.ok).toBeDefined();
@@ -95,7 +95,7 @@ describe("StorageTransaction", () => {
       space,
       id: "of:test-entity",
       type: "application/json",
-      path: ["address", "country", "countryCode"],
+      path: ["value", "address", "country", "countryCode"],
     });
 
     expect(readNonExistentResult2.error).toBeDefined();
@@ -149,7 +149,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: [],
+        path: ["value"],
       }, { name: "test" });
 
       expect(result.error).toBeUndefined();
@@ -164,7 +164,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: [],
+        path: ["value"],
       }, "not a record");
 
       // Try to write to a nested path
@@ -172,12 +172,12 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: ["a"],
+        path: ["value", "a"],
       }, "value");
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain(
-        "Document not found or not a record",
+        "not a record",
       );
     });
 
@@ -189,7 +189,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: [],
+        path: ["value"],
       }, { a: "not a record" });
 
       // Try to write to a deeply nested path
@@ -197,7 +197,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: ["a", "b"],
+        path: ["value", "a", "b"],
       }, "value");
 
       expect(result.error).toBeDefined();
@@ -214,7 +214,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: [],
+        path: ["value"],
       }, { a: {} });
 
       // Write to a nested path
@@ -222,7 +222,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: ["a", "b"],
+        path: ["value", "a", "b"],
       }, "value");
 
       expect(result.error).toBeUndefined();
@@ -237,7 +237,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: [],
+        path: ["value"],
       }, { a: { b: { c: {} } } });
 
       // Write to a deeply nested path
@@ -245,7 +245,7 @@ describe("StorageTransaction", () => {
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: ["a", "b", "c", "d"],
+        path: ["value", "a", "b", "c", "d"],
       }, "deep value");
 
       expect(result.error).toBeUndefined();
@@ -256,25 +256,140 @@ describe("StorageTransaction", () => {
       const transaction = runtime.edit();
 
       // First write a record to the document
-      transaction.write({
+      const writeResult = transaction.write({
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: [],
+        path: ["value"],
       }, { existing: "value" });
+      expect(writeResult.ok).toBeDefined();
 
       // Try to write to a path where parent doesn't exist
       const result = transaction.write({
         space,
         id: "of:test-entity",
         type: "application/json",
-        path: ["missing", "nested"],
+        path: ["value", "missing", "nested"],
       }, "value");
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain(
         "parent path [missing] does not exist or is not a record",
       );
+    });
+  });
+
+  describe("source path behavior", () => {
+    it("should write and read the sourceCell via the 'source' path", () => {
+      const transaction = runtime.edit();
+      // Create two docs
+      const doc1Id = "of:doc1";
+      const doc2Id = "of:doc2";
+      // Write to root of both docs
+      expect(
+        transaction.write({
+          space,
+          id: doc1Id,
+          type: "application/json",
+          path: ["value"],
+        }, { foo: 1 }).ok,
+      ).toBeDefined();
+      expect(
+        transaction.write({
+          space,
+          id: doc2Id,
+          type: "application/json",
+          path: ["value"],
+        }, { bar: 2 }).ok,
+      ).toBeDefined();
+      // Set doc1's sourceCell to doc2
+      const setSource = transaction.write({
+        space,
+        id: doc1Id,
+        type: "application/json",
+        path: ["source"],
+      }, doc2Id);
+      expect(setSource.ok).toBeDefined();
+      // Read back the sourceCell
+      const readSource = transaction.read({
+        space,
+        id: doc1Id,
+        type: "application/json",
+        path: ["source"],
+      });
+      expect(readSource.ok).toBeDefined();
+      expect(readSource.ok?.value).toBe(doc2Id);
+    });
+
+    it("should error if path beyond 'source' is used", () => {
+      const transaction = runtime.edit();
+      const doc1Id = "of:doc1";
+      expect(
+        transaction.write({
+          space,
+          id: doc1Id,
+          type: "application/json",
+          path: ["value"],
+        }, {}).ok,
+      ).toBeDefined();
+      const result = transaction.write({
+        space,
+        id: doc1Id,
+        type: "application/json",
+        path: ["source", "extra"],
+      }, "of:doc2");
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+      const readResult = transaction.read({
+        space,
+        id: doc1Id,
+        type: "application/json",
+        path: ["source", "extra"],
+      });
+      expect(readResult.error).toBeDefined();
+      expect(readResult.error?.name).toBe("NotFoundError");
+    });
+
+    it("should error if source doc does not exist", () => {
+      const transaction = runtime.edit();
+      const doc1Id = "of:doc1";
+      expect(
+        transaction.write({
+          space,
+          id: doc1Id,
+          type: "application/json",
+          path: ["value"],
+        }, {}).ok,
+      ).toBeDefined();
+      const result = transaction.write({
+        space,
+        id: doc1Id,
+        type: "application/json",
+        path: ["source"],
+      }, "of:nonexistent");
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
+    });
+
+    it("should error if value for 'source' is not a URI string", () => {
+      const transaction = runtime.edit();
+      const doc1Id = "of:doc1";
+      expect(
+        transaction.write({
+          space,
+          id: doc1Id,
+          type: "application/json",
+          path: ["value"],
+        }, {}).ok,
+      ).toBeDefined();
+      const result = transaction.write({
+        space,
+        id: doc1Id,
+        type: "application/json",
+        path: ["source"],
+      }, 12345);
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("NotFoundError");
     });
   });
 });
