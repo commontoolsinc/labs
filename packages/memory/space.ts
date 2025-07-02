@@ -826,6 +826,10 @@ export function getLabels<
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
+    // We don't restrict acccess to labels
+    if (fact.the === LABEL_THE) {
+      continue;
+    }
     const labelFact = getLabel(session, fact.of);
     if (labelFact !== undefined) {
       set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
@@ -900,6 +904,11 @@ export function redactCommitData(
   // Add any non-redacted changes to the newCommitData
   for (const fact of iterate(commitData.transaction.args.changes)) {
     if (fact.value === true) {
+      continue;
+    }
+    // We treat all labels as unclassified
+    if (fact.the === LABEL_THE) {
+      set(newChanges, fact.of, fact.the, fact.cause, fact.value);
       continue;
     }
     const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
