@@ -1,6 +1,5 @@
 import {
   Compiler,
-  isProgram,
   JsScript,
   Program,
   ProgramResolver,
@@ -304,17 +303,36 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       throw new Error("Missing main source.");
     }
 
+    // Check if the main source file has the /// <cts-enable /> directive
+    const hasCtsEnableDirective = (sourceFile: SourceFile): boolean => {
+      const text = sourceFile.getFullText();
+      const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
+
+      for (const comment of tripleSlashDirectives) {
+        const commentText = text.substring(comment.pos, comment.end);
+        if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Only apply transformers if the file has the directive
+    const transformers = hasCtsEnableDirective(mainSource)
+      ? {
+          before: [
+            createSchemaTransformer(tsProgram, { debug: true }),
+            createOpaqueRefTransformer(tsProgram, { debug: true }),
+          ],
+        }
+      : undefined;
+
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       mainSource,
       undefined,
       undefined,
       undefined,
-      {
-        before: [
-          createSchemaTransformer(tsProgram, { debug: true }),
-          createOpaqueRefTransformer(tsProgram, { debug: true }),
-        ],
-      },
+      transformers,
     );
     checker.check(diagnostics);
 
