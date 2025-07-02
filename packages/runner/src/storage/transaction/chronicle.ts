@@ -66,7 +66,19 @@ export class Chronicle {
     return changes ? changes.rebase(source) : { ok: source };
   }
 
-  write(address: IMemoryAddress, value?: JSONValue) {
+  write(address: IMemoryAddress, value?: JSONValue): Result<IAttestation, IStorageTransactionInconsistent> {
+    // Validate against current state (replica + any overlapping novelty)
+    const loaded = attest(this.load(address));
+    const rebase = this.rebase(loaded);
+    if (rebase.error) {
+      return rebase;
+    }
+    
+    const { error } = write(rebase.ok, address, value);
+    if (error) {
+      return { error };
+    }
+    
     return this.#novelty.claim({ address, value });
   }
 

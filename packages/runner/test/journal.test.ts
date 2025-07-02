@@ -194,18 +194,26 @@ describe("Journal", () => {
 
     it("should track novelty changes", () => {
       const { ok: writer } = journal.writer(space);
-      const address = {
+      const rootAddress = {
+        id: "test:3",
+        type: "application/json",
+        path: [],
+      } as const;
+      const nestedAddress = {
         id: "test:3",
         type: "application/json",
         path: ["name"],
       } as const;
 
-      writer!.write(address, "Alice");
+      // First create the parent object
+      writer!.write(rootAddress, { name: "Initial" });
+      // Then write to nested path
+      writer!.write(nestedAddress, "Alice");
 
       const noveltyEntries = [...journal.novelty(space)];
       expect(noveltyEntries).toHaveLength(1);
-      expect(noveltyEntries[0].address.path).toEqual(["name"]);
-      expect(noveltyEntries[0].value).toBe("Alice");
+      expect(noveltyEntries[0].address.path).toEqual([]);
+      expect(noveltyEntries[0].value).toEqual({ name: "Alice" });
     });
   });
 
