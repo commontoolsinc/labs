@@ -1142,7 +1142,11 @@ test(
                       changes: {
                         [doc]: {
                           "application/json": {},
-                          "application/label+json": {},
+                          "application/label+json": {
+                            [v3_label.cause.toString()]: {
+                              is: { classification: ["confidential"] },
+                            },
+                          },
                         },
                       },
                     },
