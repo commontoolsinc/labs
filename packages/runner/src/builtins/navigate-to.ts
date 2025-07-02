@@ -20,6 +20,8 @@ export function navigateTo(
       throw new Error("navigateCallback is not set");
     }
 
-    runtime.navigateCallback(target);
+    if (target && target.get()) {
+      runtime.navigateCallback(target);
+    }
   };
 }

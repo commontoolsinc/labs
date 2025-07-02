@@ -55,10 +55,17 @@ const updateCode = handler<{ detail: { value: string } }, { code: string }>(
 
 const visit = handler<
   { detail: { value: string } },
-  { result: { [UI]: any; [NAME]: string } }
+  { code: string }
 >(
   (_, state) => {
-    return navigateTo(state.result);
+    const { result } = compileAndRun({
+      files: [{ name: "/main.tsx", contents: state.code }],
+      main: "/main.tsx",
+    });
+
+    console.log("result", result);
+
+    return navigateTo(result);
   },
 );
 
@@ -66,13 +73,9 @@ export default recipe(
   InputSchema,
   OutputSchema,
   ({ code }) => {
-    const { result, error, errors } = compileAndRun({
+    const { error, errors } = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
-    });
-
-    derive(result, (result) => {
-      console.log("result", result);
     });
 
     return {
@@ -87,9 +90,9 @@ export default recipe(
           />
           {ifElse(
             error,
-            <pre>{error}</pre>,
+            <b>fix the errors</b>,
             <common-button
-              onClick={visit({ result })}
+              onClick={visit({ code })}
             >
               Navigate To Charm
             </common-button>,
