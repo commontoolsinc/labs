@@ -124,7 +124,12 @@ export interface Retract {
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
 const fromKey = (key: string): FactAddress => {
-  const [of, the] = key.split("/");
+  const separatorIndex = key.indexOf("/");
+  if (separatorIndex === -1) {
+    throw new Error(`Invalid key format: ${key}`);
+  }
+  const of = key.substring(0, separatorIndex);
+  const the = key.substring(separatorIndex + 1);
   return { of: of as Entity, the };
 };
 
@@ -746,7 +751,10 @@ export class Replica {
       // transactions that already were built upon our facts they will also fail.
       if (result.error) {
         for (const fact of facts) {
-          this.pendingNurseryChanges.delete(toKey(fact));
+          this.pendingNurseryChanges.deleteValue(
+            toKey(fact),
+            fact.cause.toString(),
+          );
           this.seenNurseryChanges.delete(toKey(fact));
         }
         this.nursery.merge(facts, Nursery.delete);
@@ -856,6 +864,28 @@ export class Replica {
       }
     }
     return matches;
+  }
+
+  /**
+   * Resets the Replica's internal state for reconnection scenarios.
+   * Clears nursery tracking, heap facts, and selector tracking while
+   * preserving heap subscribers.
+   */
+  reset() {
+    // Clear nursery tracking
+    this.pendingNurseryChanges = new MapSet<string, string>();
+    this.seenNurseryChanges = new MapSet<string, string>();
+    // Clear the nursery itself
+    this.nursery = new Nursery();
+    // Save subscribers before clearing heap
+    const savedSubscribers = new Map(this.heap.subscribers);
+    // Clear heap and restore subscribers
+    this.heap = new Heap();
+    this.heap.subscribers = savedSubscribers;
+    // Clear selector tracker to ensure fresh schema queries
+    this.selectorTracker = new SelectorTracker();
+    // Clear the pull queue
+    this.queue = new PullQueue();
   }
 }
 
@@ -1031,10 +1061,15 @@ class ProviderConnection implements IStorageProvider {
       connect: { attempt: this.connectionCount },
     });
 
-    // If we did have connection
+    // If we did have connection, schedule reestablishment without blocking
     if (this.connectionCount > 1) {
-      this.provider.poll();
-      await this.provider.reestablishSubscriptions();
+      // Use queueMicrotask to ensure message pump starts first
+      queueMicrotask(() => {
+        this.provider.poll();
+        this.provider.reestablishSubscriptions().catch((error) => {
+          console.error("Failed to reestablish subscriptions:", error);
+        });
+      });
     }
 
     while (this.connection === socket) {
@@ -1044,25 +1079,16 @@ class ProviderConnection implements IStorageProvider {
         queue.delete(command);
       }
 
-      // Next read next command from the session.
+      // Then read next command
       const next = await reader.read();
-      // If session is closed we're done.
-      if (next.done) {
-        this.close();
-      }
-
-      const command = next.value!;
-
-      // Now we make sure that our socket is still a current connection as we
-      // may have lost connection while waiting to read a command.
-      if (this.connection === socket) {
-        this.post(command);
-      } // If it is no longer our connection we simply add the command into a
-      // queue so it will be send once connection is reopen.
-      else {
-        this.queue.add(command);
+      // if our connection changed while we were waiting on read we bail out
+      // and let the reconnection logic pick up.
+      if (this.connection !== socket || next.done) {
         break;
       }
+      // otherwise we pass the command via web-socket.
+      const command = next.value;
+      this.post(command);
     }
   }
 
@@ -1209,7 +1235,8 @@ export class Provider implements IStorageProvider {
   }
 
   static connect(options: ConnectionOptions & RemoteStorageProviderOptions) {
-    return this.open(options).connect(options);
+    const provider = this.open(options);
+    return provider.connect(options);
   }
 
   constructor({
@@ -1375,22 +1402,38 @@ export class Provider implements IStorageProvider {
   async reestablishSubscriptions(): Promise<void> {
     const subscriptions = this.serverSubscriptions.getAllSubscriptions();
 
+    // Try to clear pending invocations from the consumer session
+    try {
+      const consumerSession = (this.workspace.remote as any).session;
+      if (consumerSession?.invocations) {
+        consumerSession.invocations.clear();
+      }
+    } catch (error) {
+      // Ignore error
+    }
+
+    // Reset the existing Replica to clear its state
+    this.workspace.reset();
+
+    // Start polling again with the same session
+    this.workspace.poll();
+
     // Re-establish subscriptions
     const need: [FactAddress, SchemaContext?][] = [];
+
+    // Always include the space commit object to ensure proper query context
+    const spaceCommitAddress: FactAddress = {
+      the: "application/commit+json",
+      of: this.workspace.space,
+    };
+    need.push([spaceCommitAddress, undefined]);
+
+    // Add all tracked subscriptions
     for (const { factAddress, selector } of subscriptions) {
       need.push([factAddress, selector.schemaContext]);
     }
-    try {
-      console.log("re-establishing subs for", JSON.stringify(need));
-      const result = await this.workspace.pull(need);
-      console.log("pull returned", result);
-    } catch (error) {
-      // catch error so we can continue with other subscriptions
-      console.error(
-        `Failed to re-establish subscriptions`,
-        error,
-      );
-    }
+
+    await this.workspace.pull(need);
   }
 
   getReplica(): string {

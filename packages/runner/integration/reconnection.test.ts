@@ -26,7 +26,7 @@ const signer = await Identity.fromPassphrase("test operator");
 const storageManager1 = StorageManager.open({
   as: signer,
   address: new URL(MEMORY_WS_URL),
-  id: "reconnection-integration-test",
+  id: "provider1-reconnect-test",
 });
 
 // Open provider
@@ -58,21 +58,39 @@ interface UpdateValue {
   timestamp: string;
 }
 
-// Track updates
-let updateCount = 0;
-const updates: UpdateValue[] = [];
+// Track updates for each provider
+let updateCount1 = 0;
+const updates1: UpdateValue[] = [];
+let updateCount3 = 0;
+const updates3: UpdateValue[] = [];
+
+// Create a third provider that stays connected (control)
+const storageManager3 = StorageManager.open({
+  as: signer,
+  address: new URL(MEMORY_WS_URL),
+  id: "provider3-control-test",
+});
+const provider3 = storageManager3.open(signer.did());
+console.log(`Provider3 (control) connected to memory server`);
 
 // Listen for updates on the test-reconnection-counter document
 // Note: this is not the schema subscription, its just a client-side listener
 provider1.sink({ "/": TEST_DOC_ID }, (value) => {
-  updateCount++;
-  updates.push(value.value);
-  console.log(`Update #${updateCount}:`, value.value);
+  updateCount1++;
+  updates1.push(value.value);
+  console.log(`Provider1 Update #${updateCount1}:`, value.value);
+});
+
+provider3.sink({ "/": TEST_DOC_ID }, (value) => {
+  updateCount3++;
+  updates3.push(value.value);
+  console.log(`Provider3 Update #${updateCount3}:`, value.value);
 });
 
 // Establish server-side subscription with schema
-console.log("Establishing subscription...");
+console.log("Establishing subscriptions...");
 await provider1.sync({ "/": TEST_DOC_ID }, true, testSchema);
+await provider3.sync({ "/": TEST_DOC_ID }, true, testSchema);
 
 // Send initial value to server
 console.log("Sending initial value...");
@@ -89,13 +107,15 @@ await provider1.send([{
 // Wait to give server time to send us back the update
 await new Promise((resolve) => setTimeout(resolve, 1000));
 
-// Check if our listener was called via the subscription
-if (updateCount === 0) {
-  console.error("FAILED: No initial update received");
+// Check if our listeners were called via the subscription
+if (updateCount1 === 0 || updateCount3 === 0) {
+  console.error(
+    `FAILED: No initial update received. Provider1: ${updateCount1}, Provider3: ${updateCount3}`,
+  );
   Deno.exit(1);
 }
 
-console.log("Initial update received");
+console.log("Initial updates received by both providers");
 
 // Test reconnection behavior
 console.log("\nTesting reconnection behavior...");
@@ -116,7 +136,8 @@ if (providerSocket) {
 
 // Monitor reconnection and updates
 let testValue = 100; // Use values over 100 to show the value happens after reconnection
-const preDisconnectCount = updateCount;
+const preDisconnectCount1 = updateCount1;
+const preDisconnectCount3 = updateCount3;
 
 // Give it a moment to reconnect
 await new Promise((resolve) => setTimeout(resolve, 10000));
@@ -125,7 +146,7 @@ await new Promise((resolve) => setTimeout(resolve, 10000));
 const storageManager2 = StorageManager.open({
   as: signer,
   address: new URL(MEMORY_WS_URL),
-  id: "reconnection-integration-test",
+  id: "provider2-reconnect-test",
 });
 
 // Open provider
@@ -154,19 +175,46 @@ const intervalId = setInterval(async () => {
     console.log(result);
 
     // Check if we've received updates with value >= 100 (post-reconnection)
-    const postReconnectUpdates = updates.filter((u) => u.value >= 100);
+    const postReconnectUpdates1 = updates1.filter((u) => u.value >= 100);
+    const postReconnectUpdates3 = updates3.filter((u) => u.value >= 100);
 
-    if (postReconnectUpdates.length >= 3) {
-      console.log("RECONNECTED! Subscription is working again.");
-      console.log("SUCCESS: Received updates after reconnection");
-      console.log(`Total updates: ${updateCount}`);
-      console.log(`Updates before disconnect: ${preDisconnectCount}`);
-      console.log(`Post-reconnect updates: ${postReconnectUpdates.length}`);
+    console.log(
+      `Status - Provider1 post-reconnect updates: ${postReconnectUpdates1.length}, Provider3: ${postReconnectUpdates3.length}`,
+    );
+
+    if (
+      postReconnectUpdates1.length >= 3 && postReconnectUpdates3.length >= 3
+    ) {
+      console.log(
+        "SUCCESS: Both providers received updates after reconnection!",
+      );
+      console.log(
+        `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
+      );
+      console.log(
+        `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
+      );
 
       clearInterval(intervalId);
       storageManager1.close();
       storageManager2.close();
+      storageManager3.close();
       Deno.exit(0);
+    } else if (
+      postReconnectUpdates3.length >= 3 && postReconnectUpdates1.length === 0
+    ) {
+      console.log(
+        `Provider1 - Total: ${updateCount1}, Pre-disconnect: ${preDisconnectCount1}, Post-reconnect: ${postReconnectUpdates1.length}`,
+      );
+      console.log(
+        `Provider3 - Total: ${updateCount3}, Pre-disconnect: ${preDisconnectCount3}, Post-reconnect: ${postReconnectUpdates3.length}`,
+      );
+
+      clearInterval(intervalId);
+      storageManager1.close();
+      storageManager2.close();
+      storageManager3.close();
+      Deno.exit(1);
     }
   } catch (error) {
     console.log(
@@ -176,12 +224,16 @@ const intervalId = setInterval(async () => {
   }
 }, 1000);
 
-// Timeout after 60 seconds
+// Timeout after 30 seconds
 setTimeout(() => {
-  console.error("TIMEOUT: Test did not complete within 60 seconds");
+  console.error("TIMEOUT: Test did not complete within 30 seconds");
+  console.log(
+    `Final status - Provider1: ${updateCount1} updates, Provider3: ${updateCount3} updates`,
+  );
   clearInterval(intervalId);
   storageManager1.close();
   storageManager2.close();
+  storageManager3.close();
   Deno.exit(1);
 }, 30000);
 
