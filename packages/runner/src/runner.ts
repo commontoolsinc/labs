@@ -108,7 +108,7 @@ export class Runner implements IRunner {
 
     type ProcessCellData = {
       [TYPE]: string;
-      recipe?: SigilLink;
+      spell?: SigilLink;
       argument?: T;
       internal?: JSONValue;
       resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
@@ -226,7 +226,7 @@ export class Runner implements IRunner {
       [TYPE]: recipeId || "unknown",
       resultRef: resultDoc.getAsLegacyCellLink(),
       internal,
-      ...(recipeId !== undefined) ? { recipe: getFullRecipeId(recipeId) } : {},
+      ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
     if (argument) {
       diffAndUpdate(
@@ -828,12 +828,8 @@ export class Runner implements IRunner {
   }
 }
 
-// Default recipe id is the base32 encoding of the all but the first byte of the array.
-// Our entity ids are the base32 encoding of all the bytes of the array, including `1`.
-// This takes a `ba4...` id and returns a link with a `bae...` id.
-// In this case, the recipe id is only loosely linked, because the place where we save
-// the recipe is based on references to causes derived from the id, instead of just the id
-function getFullRecipeId(recipeId: string): SigilLink {
+// This takes a recipe id and returns a sigil link with the corresponding entity.
+function getSpellLink(recipeId: string): SigilLink {
   const id = refer({ causal: { recipeId, type: "recipe" } }).toJSON()["/"];
   return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
 }
