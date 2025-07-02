@@ -61,7 +61,10 @@ export const write = (
         return { ok: patch };
       } else {
         return {
-          error: new NotFound({ path, value }, address),
+          error: new NotFound(
+            { address: { ...address, path }, value },
+            address,
+          ),
         };
       }
     }
@@ -197,7 +200,13 @@ export const resolve = (
         : (value as Record<string, JSONValue>)[key];
     } else {
       return {
-        error: new NotFound({ path: path.slice(0, at), value }, address),
+        error: new NotFound({
+          address: {
+            ...address,
+            path: path.slice(0, at),
+          },
+          value,
+        }, address),
       };
     }
   }
@@ -221,10 +230,7 @@ export class NotFound extends RangeError implements INotFoundError {
   override name = "NotFoundError" as const;
 
   constructor(
-    public actual: {
-      path: IMemoryAddress["path"];
-      value: JSONValue | undefined;
-    },
+    public source: ITransactionInvariant,
     public address: IMemoryAddress,
     public space?: MemorySpace,
   ) {
@@ -233,14 +239,16 @@ export class NotFound extends RangeError implements INotFoundError {
         address.path.join(".")
       }"`,
       space ? ` from "${space}"` : "",
-      `, because encountered following non-object at ${actual.path.join(".")}:`,
-      actual.value === undefined ? actual.value : JSON.stringify(actual.value),
+      `, because encountered following non-object at ${
+        source.address.path.join(".")
+      }:`,
+      source.value === undefined ? source.value : JSON.stringify(source.value),
     ].join("");
 
     super(message);
   }
 
   from(space: MemorySpace) {
-    return new NotFound(this.actual, this.address, space);
+    return new NotFound(this.source, this.address, space);
   }
 }
