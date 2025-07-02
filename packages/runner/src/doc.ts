@@ -20,6 +20,7 @@ import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { Labels, MemorySpace } from "./storage.ts";
 import { arrayEqual } from "./path-utils.ts";
+import { toURI } from "./uri-utils.ts";
 
 /**
  * Lowest level cell implementation.
@@ -274,7 +275,16 @@ export function createDoc<T>(
       log?: ReactivityLog,
       schema?: JSONSchema,
       rootSchema?: JSONSchema,
-    ) => createCell<Q>(self, path || [], log, schema, rootSchema),
+    ) =>
+      createCell(runtime, {
+        space,
+        id: toURI(entityId),
+        path: path?.map(String) ?? [],
+        type: "application/json",
+        schema,
+        rootSchema,
+      }, log),
+    //    ) => createCell<Q>(self, path || [], log, schema, rootSchema),
     send: (newValue: T, log?: ReactivityLog) =>
       self.setAtPath([], newValue, log),
     updates: (

@@ -590,7 +590,9 @@ export class Runner implements IRunner {
         }
       };
 
-      addCancel(this.runtime.scheduler.addEventHandler(handler, stream));
+      addCancel(
+        this.runtime.scheduler.addEventHandler(handler, parseLink(streamRef)),
+      );
     } else {
       if (isRecord(inputs) && "$event" in inputs) {
         throw new Error(

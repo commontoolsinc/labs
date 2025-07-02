@@ -7,6 +7,7 @@ import { createCell, isCell } from "./cell.ts";
 import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
+import { toURI } from "./uri-utils.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -103,19 +104,29 @@ function processDefaultValue(
       }, doc.space);
       newDoc.freeze("schema asCell immutable");
       return createCell(
-        newDoc,
-        [],
+        doc.runtime,
+        {
+          space: newDoc.space,
+          id: toURI(newDoc.entityId),
+          path: [],
+          type: "application/json",
+          schema: resolvedSchema,
+          rootSchema,
+        },
         log,
-        resolvedSchema,
-        rootSchema,
       );
     } else {
       return createCell(
-        doc,
-        path,
+        doc.runtime,
+        {
+          space: doc.space,
+          id: toURI(doc.entityId),
+          path: path.map(String),
+          type: "application/json",
+          schema: mergeDefaults(resolvedSchema, defaultValue),
+          rootSchema,
+        },
         log,
-        mergeDefaults(resolvedSchema, defaultValue),
-        rootSchema,
       );
     }
   }
@@ -356,15 +367,25 @@ export function validateAndTransform(
           newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
         }
         return createCell(
-          doc.runtime.documentMap.getDocByEntityId(link.space, link.id, true),
-          newPath,
+          doc.runtime,
+          {
+            ...link,
+            path: newPath.map(String),
+            schema: newSchema,
+            rootSchema,
+          },
           log,
-          newSchema,
-          rootSchema,
         );
       }
     }
-    return createCell(doc, path, log, resolvedSchema, rootSchema);
+    return createCell(doc.runtime, {
+      space: doc.space,
+      id: toURI(doc.entityId),
+      path: path.map(String),
+      type: "application/json",
+      schema: resolvedSchema,
+      rootSchema,
+    }, log);
   }
 
   // If there is no schema, return as raw data via query result proxy

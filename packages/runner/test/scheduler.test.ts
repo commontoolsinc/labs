@@ -373,11 +373,11 @@ describe("event handling", () => {
 
     runtime.scheduler.addEventHandler(
       eventHandler,
-      eventCell.getAsLegacyCellLink(),
+      eventCell.getAsNormalizedFullLink(),
     );
 
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
 
     await runtime.idle();
 
@@ -401,10 +401,10 @@ describe("event handling", () => {
 
     const removeHandler = runtime.scheduler.addEventHandler(
       eventHandler,
-      eventCell.getAsLegacyCellLink(),
+      eventCell.getAsNormalizedFullLink(),
     );
 
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
     await runtime.idle();
 
     expect(eventCount).toBe(1);
@@ -412,7 +412,7 @@ describe("event handling", () => {
 
     removeHandler();
 
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
     await runtime.idle();
 
     expect(eventCount).toBe(1);
@@ -433,11 +433,11 @@ describe("event handling", () => {
 
     runtime.scheduler.addEventHandler(
       eventHandler,
-      parentCell.key("child").key("value").getAsLegacyCellLink(),
+      parentCell.key("child").key("value").getAsNormalizedFullLink(),
     );
 
     runtime.scheduler.queueEvent(
-      parentCell.key("child").key("value").getAsLegacyCellLink(),
+      parentCell.key("child").key("value").getAsNormalizedFullLink(),
       42,
     );
     await runtime.idle();
@@ -459,12 +459,12 @@ describe("event handling", () => {
 
     runtime.scheduler.addEventHandler(
       eventHandler,
-      eventCell.getAsLegacyCellLink(),
+      eventCell.getAsNormalizedFullLink(),
     );
 
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 3);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 3);
 
     await runtime.idle();
 
@@ -499,12 +499,12 @@ describe("event handling", () => {
 
     runtime.scheduler.addEventHandler(
       eventHandler,
-      eventCell.getAsLegacyCellLink(),
+      eventCell.getAsNormalizedFullLink(),
     );
 
     expect(actionCount).toBe(1);
 
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 1);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
     await runtime.idle();
 
     expect(eventCount).toBe(1);
@@ -512,7 +512,7 @@ describe("event handling", () => {
 
     expect(actionCount).toBe(2);
 
-    runtime.scheduler.queueEvent(eventCell.getAsLegacyCellLink(), 2);
+    runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 2);
     await runtime.idle();
 
     expect(eventCount).toBe(2);

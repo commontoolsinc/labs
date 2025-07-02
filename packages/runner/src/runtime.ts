@@ -30,6 +30,7 @@ import {
   isLegacyCellLink,
   isLink,
   isNormalizedFullLink,
+  type NormalizedFullLink,
   type NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
@@ -180,8 +181,8 @@ export interface IScheduler {
   unschedule(action: Action): void;
   onConsole(fn: ConsoleHandler): void;
   onError(fn: ErrorHandler): void;
-  queueEvent(eventRef: LegacyDocCellLink, event: any): void;
-  addEventHandler(handler: EventHandler, ref: LegacyDocCellLink): Cancel;
+  queueEvent(eventRef: NormalizedFullLink, event: any): void;
+  addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel;
   runningPromise: Promise<unknown> | undefined;
 }
 

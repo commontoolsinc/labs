@@ -642,7 +642,7 @@ describe("asCell", () => {
         eventCount++;
         lastEventSeen = event;
       },
-      { cell: c.getDoc(), path: ["stream"] },
+      streamCell.getAsNormalizedFullLink(),
     );
 
     streamCell.send({ $stream: true });
@@ -1229,50 +1229,50 @@ describe("asCell with schema", () => {
     );
     innerCell.set({ value: 42 });
 
-    const ref1 = innerCell.getAsLegacyCellLink();
+    const ref1 = innerCell.getAsLink();
 
     const ref2Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref2",
     );
     ref2Cell.set({ ref: ref1 });
-    const ref2 = ref2Cell.key("ref").getAsLegacyCellLink();
+    const ref2 = ref2Cell.key("ref").getAsLink();
 
     const ref3Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref3",
     );
     ref3Cell.setRaw({ ref: ref2 });
-    const ref3 = ref3Cell.key("ref").getAsLegacyCellLink();
+    const ref3 = ref3Cell.key("ref").getAsLink();
+
+    const log = { reads: [], writes: [] } as ReactivityLog;
 
     // Create a cell that uses the nested reference
-    const c = runtime.getCell<{
+    const cell = runtime.getCell<{
       context: {
         nested: any;
       };
     }>(
       space,
       "should handle nested references main",
+      {
+        type: "object",
+        properties: {
+          context: {
+            type: "object",
+            additionalProperties: { asCell: true },
+          },
+        },
+        required: ["context"],
+      } as const satisfies JSONSchema,
+      log,
     );
-    c.set({
+    cell.set({
       context: {
         nested: ref3,
       },
     });
 
-    const schema = {
-      type: "object",
-      properties: {
-        context: {
-          type: "object",
-          additionalProperties: { asCell: true },
-        },
-      },
-      required: ["context"],
-    } as const satisfies JSONSchema;
-
-    const log = { reads: [], writes: [] } as ReactivityLog;
-    const cell = c.asSchema(schema).withLog(log);
     const value = cell.get() as any;
 
     // The nested reference should be followed all the way to the inner value
@@ -1281,11 +1281,12 @@ describe("asCell with schema", () => {
 
     // Check that 4 unique documents were read (by entity ID)
     const readEntityIds = new Set(log.reads.map((r) => r.cell.entityId));
+    console.log(log.reads.map((r) => [r.cell.entityId, r.path]));
     expect(readEntityIds.size).toBe(4);
 
     // Verify each cell was read using equals()
     const readCells = log.reads.map((r) => r.cell.asCell());
-    expect(readCells.some((cell) => cell.equals(c))).toBe(true);
+    expect(readCells.some((cell) => cell.equals(cell))).toBe(true);
     expect(readCells.some((cell) => cell.equals(ref3Cell))).toBe(true);
     expect(readCells.some((cell) => cell.equals(ref2Cell))).toBe(true);
     expect(readCells.some((cell) => cell.equals(innerCell))).toBe(true);
@@ -1752,13 +1753,8 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink();
     const json = cell.toJSON();
 
-    // Debug: log actual values
-    console.log("getAsLink result:", JSON.stringify(link, null, 2));
-    console.log("toJSON result:", JSON.stringify(json, null, 2));
-
     // getAsLink returns new sigil format
     expect(link).toHaveProperty("/");
-    console.log("getAsLink result /:", JSON.stringify(link["/"], null, 2));
     expect(link["/"][LINK_V1_TAG]).toBeDefined();
 
     // toJSON returns old format for backward compatibility

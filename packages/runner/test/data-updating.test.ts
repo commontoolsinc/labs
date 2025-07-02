@@ -14,6 +14,7 @@ import {
   isAnyCellLink,
   isLegacyCellLink,
   isLegacyDocCellLink,
+  parseLink,
 } from "../src/link-utils.ts";
 import type { LegacyDocCellLink } from "../src/sigil-types.ts";
 import { arrayEqual } from "../src/path-utils.ts";
@@ -299,9 +300,19 @@ describe("data-updating", () => {
         $alias: { path: ["value2"] },
       });
 
+      console.log(
+        JSON.stringify(current, null, 2),
+        JSON.stringify(changes2, null, 2),
+      );
       applyChangeSet(changes2);
 
       expect(changes2.length).toBe(1);
+      console.log(
+        JSON.stringify(testCell.getRaw(), null, 2),
+        parseLink(current),
+        parseLink(changes2[0].location),
+        parseLink(testCell.key("alias")),
+      );
       expect(areLinksSame(changes2[0].location, testCell.key("alias"))).toBe(
         true,
       );
@@ -385,7 +396,7 @@ describe("data-updating", () => {
       // Should create an entity and return changes to that entity
       expect(changes.length).toBe(3);
       expect(changes[0].location.cell.asCell().equals(testCell)).toBe(true);
-      expect(changes[0].location.path).toEqual(["items", 0]);
+      expect(changes[0].location.path).toEqual(["items", "0"]);
       expect(changes[1].location.cell).not.toBe(changes[0].location.cell);
       expect(changes[1].location.path).toEqual([]);
       expect(changes[2].location.cell).toBe(changes[1].location.cell);

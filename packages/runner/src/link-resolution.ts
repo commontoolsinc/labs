@@ -14,6 +14,7 @@ import {
   parseLink,
   parseToLegacyCellLink,
 } from "./link-utils.ts";
+import { toURI } from "./uri-utils.ts";
 
 /**
  * Track visited cell links and memoize results during path resolution
@@ -210,10 +211,13 @@ export function followLinks(
       ? parseToLegacyCellLink(
         target,
         createCell(
-          result.cell,
-          [], // Use empty path to reference the document itself
-          undefined,
-          undefined,
+          result.cell.runtime,
+          {
+            space: result.cell.space,
+            id: toURI(result.cell.entityId),
+            path: [], // Use empty path to reference to document itself
+            type: "application/json",
+          },
           undefined,
           true,
         ),

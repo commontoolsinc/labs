@@ -16,6 +16,10 @@ import type {
   IScheduler,
   MemorySpace,
 } from "./runtime.ts";
+import {
+  areNormalizedLinksSame,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -39,7 +43,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
   private eventQueue: (() => any)[] = [];
-  private eventHandlers: [LegacyDocCellLink, EventHandler][] = [];
+  private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   private dirty = new Set<DocImpl<any>>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel[]>();
@@ -179,20 +183,16 @@ export class Scheduler implements IScheduler {
     });
   }
 
-  queueEvent(eventRef: LegacyDocCellLink, event: any): void {
-    for (const [ref, handler] of this.eventHandlers) {
-      if (
-        ref.cell === eventRef.cell &&
-        ref.path.length === eventRef.path.length &&
-        ref.path.every((p, i) => p === eventRef.path[i])
-      ) {
+  queueEvent(eventLink: NormalizedFullLink, event: any): void {
+    for (const [link, handler] of this.eventHandlers) {
+      if (areNormalizedLinksSame(link, eventLink)) {
         this.queueExecution();
         this.eventQueue.push(() => handler(event));
       }
     }
   }
 
-  addEventHandler(handler: EventHandler, ref: LegacyDocCellLink): Cancel {
+  addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel {
     this.eventHandlers.push([ref, handler]);
     return () => {
       const index = this.eventHandlers.findIndex(([r, h]) =>
