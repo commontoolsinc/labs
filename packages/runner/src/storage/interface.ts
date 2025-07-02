@@ -18,7 +18,7 @@ import type {
   Variant,
 } from "@commontools/memory/interface";
 
-export type { MemorySpace, Result, SchemaContext, Unit };
+export type { JSONValue, MemorySpace, Result, SchemaContext, Unit };
 
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
@@ -160,6 +160,15 @@ export interface IStorageTransaction {
    * @returns Result containing the read value or an error.
    */
   read(address: IMemoryAddress): Result<Read, IReaderError>;
+
+  /**
+   * Reads a value from a (local) memory address and throws on error, except for
+   * `NotFoundError` which is returned as undefined.
+   *
+   * @param address - Memory address to read from.
+   * @returns The read value.
+   */
+  readValueOrThrow(address: IMemoryAddress): JSONValue | undefined;
 
   /**
    * Creates a memory space writer for this transaction. Fails if transaction is
