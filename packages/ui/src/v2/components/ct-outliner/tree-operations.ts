@@ -1,49 +1,41 @@
 import type { 
   Tree, 
   Node, 
-  Block, 
   Attachment, 
-  BlockCreationOptions, 
   NodeCreationOptions 
 } from "./types.ts";
 
 /**
  * Pure functional operations for Tree manipulation
  * 
- * This module handles the new data structure where:
- * - Nodes define the tree structure and reference blocks by ID
- * - Blocks contain the actual content and attachments
- * - The same block can appear multiple times in the tree (Roam-style block references)
+ * This module handles the simplified data structure where:
+ * - Nodes contain both structure and content
+ * - No IDs or separate blocks are needed
+ * - Operations work directly with node references
  */
 export const TreeOperations = {
-  /**
-   * Create a unique ID for nodes and blocks
-   */
-  createId(): string {
-    return crypto.randomUUID();
-  },
-
   /**
    * Transform nodes in a tree based on a predicate and transformation function
    */
   transformTree(
     tree: Tree,
-    predicate: (node: Node) => boolean,
-    transform: (node: Node) => Node
+    predicate: (node: Node, path: Node[]) => boolean,
+    transform: (node: Node, path: Node[]) => Node,
+    path: Node[] = []
   ): Tree {
-    const updateNode = (node: Node): Node => {
-      if (predicate(node)) {
-        return transform(node);
+    const updateNode = (node: Node, currentPath: Node[]): Node => {
+      const nodePath = [...currentPath, node];
+      if (predicate(node, currentPath)) {
+        return transform(node, currentPath);
       }
       return {
         ...node,
-        children: node.children.map(updateNode)
+        children: node.children.map(child => updateNode(child, nodePath))
       };
     };
 
     return {
-      ...tree,
-      root: updateNode(tree.root)
+      root: updateNode(tree.root, path)
     };
   },
 
@@ -54,33 +46,22 @@ export const TreeOperations = {
     tree: Tree,
     parentNode: Node,
     deletedIndex: number
-  ): string | null {
+  ): Node | null {
     const siblings = parentNode.children;
     
     // Try previous sibling first
     if (deletedIndex > 0 && siblings[deletedIndex - 1]) {
-      return siblings[deletedIndex - 1].id;
+      return siblings[deletedIndex - 1];
     }
     
     // Try next sibling
     if (deletedIndex < siblings.length && siblings[deletedIndex + 1]) {
-      return siblings[deletedIndex + 1].id;
+      return siblings[deletedIndex + 1];
     }
     
     // Fall back to first visible node
     const allNodes = TreeOperations.getAllVisibleNodes(tree.root, new Set());
-    return allNodes.length > 0 ? allNodes[0].id : null;
-  },
-
-  /**
-   * Create a new block with given options
-   */
-  createBlock(options: BlockCreationOptions): Block {
-    return {
-      id: options.id || TreeOperations.createId(),
-      body: options.body,
-      attachments: options.attachments || [],
-    };
+    return allNodes.length > 0 ? allNodes[0] : null;
   },
 
   /**
@@ -88,41 +69,29 @@ export const TreeOperations = {
    */
   createNode(options: NodeCreationOptions): Node {
     return {
-      id: options.id || TreeOperations.createId(),
+      body: options.body,
       children: options.children || [],
+      attachments: options.attachments || [],
     };
   },
 
   /**
-   * Create an empty tree with a single root node and block
+   * Create an empty tree with a single root node
    */
   createEmptyTree(): Tree {
-    const blockId = TreeOperations.createId();
-    const rootBlock = TreeOperations.createBlock({ body: "", id: blockId });
-    const rootNode = TreeOperations.createNode({ id: blockId });
-
     return {
-      root: rootNode,
-      blocks: [rootBlock],
-      attachments: [],
+      root: TreeOperations.createNode({ body: "" })
     };
   },
 
   /**
-   * Find a block by ID in the tree
+   * Find a node in the tree structure
    */
-  findBlock(tree: Tree, blockId: string): Block | null {
-    return tree.blocks.find(block => block.id === blockId) || null;
-  },
-
-  /**
-   * Find a node by ID in the tree structure
-   */
-  findNode(node: Node, nodeId: string): Node | null {
-    if (node.id === nodeId) return node;
+  findNode(node: Node, targetNode: Node): Node | null {
+    if (node === targetNode) return node;
     
     for (const child of node.children) {
-      const found = TreeOperations.findNode(child, nodeId);
+      const found = TreeOperations.findNode(child, targetNode);
       if (found) return found;
     }
     
@@ -130,15 +99,15 @@ export const TreeOperations = {
   },
 
   /**
-   * Find the parent node containing a child with the given ID
+   * Find the parent node containing a child
    */
-  findParentNode(node: Node, targetId: string): Node | null {
-    if (node.children.some(child => child.id === targetId)) {
+  findParentNode(node: Node, targetNode: Node): Node | null {
+    if (node.children.includes(targetNode)) {
       return node;
     }
     
     for (const child of node.children) {
-      const found = TreeOperations.findParentNode(child, targetId);
+      const found = TreeOperations.findParentNode(child, targetNode);
       if (found) return found;
     }
     
@@ -159,51 +128,28 @@ export const TreeOperations = {
   /**
    * Get the index of a node in its parent's children array
    */
-  getNodeIndex(parent: Node, nodeId: string): number {
-    return parent.children.findIndex(child => child.id === nodeId);
+  getNodeIndex(parent: Node, targetNode: Node): number {
+    return parent.children.indexOf(targetNode);
   },
 
   /**
-   * Update a block's content
+   * Update a node's content
    */
-  updateBlock(tree: Tree, blockId: string, newBody: string): Tree {
-    const updatedBlocks = tree.blocks.map(block =>
-      block.id === blockId ? { ...block, body: newBody } : block
+  updateNodeBody(tree: Tree, targetNode: Node, newBody: string): Tree {
+    return TreeOperations.transformTree(
+      tree,
+      (node) => node === targetNode,
+      (node) => ({ ...node, body: newBody })
     );
-
-    return {
-      ...tree,
-      blocks: updatedBlocks,
-    };
-  },
-
-  /**
-   * Add a new block to the tree
-   */
-  addBlock(tree: Tree, block: Block): Tree {
-    return {
-      ...tree,
-      blocks: [...tree.blocks, block],
-    };
-  },
-
-  /**
-   * Remove a block from the tree
-   */
-  removeBlock(tree: Tree, blockId: string): Tree {
-    return {
-      ...tree,
-      blocks: tree.blocks.filter(block => block.id !== blockId),
-    };
   },
 
   /**
    * Insert a new node as a child of the specified parent at the given index
    */
-  insertNode(tree: Tree, parentId: string, newNode: Node, index: number): Tree {
+  insertNode(tree: Tree, parentNode: Node, newNode: Node, index: number): Tree {
     return TreeOperations.transformTree(
       tree,
-      (node) => node.id === parentId,
+      (node) => node === parentNode,
       (node) => {
         const newChildren = [...node.children];
         newChildren.splice(index, 0, newNode);
@@ -215,18 +161,17 @@ export const TreeOperations = {
   /**
    * Remove a node from the tree
    */
-  removeNode(tree: Tree, nodeId: string): Tree {
+  removeNode(tree: Tree, targetNode: Node): Tree {
     const removeFromNode = (node: Node): Node => {
       return {
         ...node,
         children: node.children
-          .filter(child => child.id !== nodeId)
+          .filter(child => child !== targetNode)
           .map(removeFromNode),
       };
     };
 
     return {
-      ...tree,
       root: removeFromNode(tree.root),
     };
   },
@@ -234,17 +179,17 @@ export const TreeOperations = {
   /**
    * Move a node up among its siblings
    */
-  moveNodeUp(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
+  moveNodeUp(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
     let movePerformed = false;
     
     const newTree = TreeOperations.transformTree(
       tree,
       (node) => {
-        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        const childIndex = node.children.indexOf(targetNode);
         return childIndex > 0;
       },
       (node) => {
-        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        const childIndex = node.children.indexOf(targetNode);
         if (childIndex > 0) {
           movePerformed = true;
           const newChildren = [...node.children];
@@ -262,17 +207,17 @@ export const TreeOperations = {
   /**
    * Move a node down among its siblings
    */
-  moveNodeDown(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
+  moveNodeDown(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
     let movePerformed = false;
     
     const newTree = TreeOperations.transformTree(
       tree,
       (node) => {
-        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        const childIndex = node.children.indexOf(targetNode);
         return childIndex !== -1 && childIndex < node.children.length - 1;
       },
       (node) => {
-        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        const childIndex = node.children.indexOf(targetNode);
         if (childIndex !== -1 && childIndex < node.children.length - 1) {
           movePerformed = true;
           const newChildren = [...node.children];
@@ -290,11 +235,11 @@ export const TreeOperations = {
   /**
    * Get all visible nodes in the tree (respecting collapsed state)
    */
-  getAllVisibleNodes(node: Node, collapsedNodes: Set<string>): Node[] {
+  getAllVisibleNodes(node: Node, collapsedNodes: Set<Node>): Node[] {
     const result: Node[] = [];
     const traverse = (currentNode: Node) => {
       result.push(currentNode);
-      if (!collapsedNodes.has(currentNode.id)) {
+      if (!collapsedNodes.has(currentNode)) {
         for (const child of currentNode.children) {
           traverse(child);
         }
@@ -309,31 +254,30 @@ export const TreeOperations = {
   /**
    * Delete a node from the tree
    */
-  deleteNode(tree: Tree, nodeId: string): { success: boolean; tree: Tree; newFocusId: string | null } {
-    const parentNode = TreeOperations.findParentNode(tree.root, nodeId);
+  deleteNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree; newFocusNode: Node | null } {
+    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) {
       // Can't delete root
-      return { success: false, tree, newFocusId: null };
+      return { success: false, tree, newFocusNode: null };
     }
 
-    const nodeIndex = parentNode.children.findIndex(child => child.id === nodeId);
+    const nodeIndex = parentNode.children.indexOf(targetNode);
     if (nodeIndex === -1) {
-      return { success: false, tree, newFocusId: null };
+      return { success: false, tree, newFocusNode: null };
     }
 
-    const nodeToDelete = parentNode.children[nodeIndex];
     const newChildren = [...parentNode.children];
     
     // Move children up to parent level if any
-    if (nodeToDelete.children.length > 0) {
-      newChildren.splice(nodeIndex, 1, ...nodeToDelete.children);
+    if (targetNode.children.length > 0) {
+      newChildren.splice(nodeIndex, 1, ...targetNode.children);
     } else {
       newChildren.splice(nodeIndex, 1);
     }
 
     // Update the tree
     const updateNode = (node: Node): Node => {
-      if (node.id === parentNode.id) {
+      if (node === parentNode) {
         return { ...node, children: newChildren };
       }
       return {
@@ -343,33 +287,29 @@ export const TreeOperations = {
     };
 
     const updatedTree = {
-      ...tree,
-      root: updateNode(tree.root),
-      // Remove the block as well
-      blocks: tree.blocks.filter(block => block.id !== nodeId)
+      root: updateNode(tree.root)
     };
 
     // Determine new focus
-    const newFocusId = TreeOperations.determineFocusAfterDeletion(
+    const newFocusNode = TreeOperations.determineFocusAfterDeletion(
       updatedTree,
       parentNode,
       nodeIndex
     );
 
-    return { success: true, tree: updatedTree, newFocusId };
+    return { success: true, tree: updatedTree, newFocusNode };
   },
 
   /**
    * Indent a node (make it a child of the previous sibling)
    */
-  indentNode(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
-    const parentNode = TreeOperations.findParentNode(tree.root, nodeId);
+  indentNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
+    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) return { success: false, tree };
 
-    const nodeIndex = parentNode.children.findIndex(child => child.id === nodeId);
+    const nodeIndex = parentNode.children.indexOf(targetNode);
     if (nodeIndex <= 0) return { success: false, tree }; // Can't indent first child
 
-    const nodeToIndent = parentNode.children[nodeIndex];
     const previousSibling = parentNode.children[nodeIndex - 1];
 
     // Remove node from current position
@@ -379,14 +319,14 @@ export const TreeOperations = {
     // Add as child of previous sibling
     const newPreviousSibling = {
       ...previousSibling,
-      children: [...previousSibling.children, nodeToIndent]
+      children: [...previousSibling.children, targetNode]
     };
     newParentChildren[nodeIndex - 1] = newPreviousSibling;
 
     // Update the tree
     const updatedTree = TreeOperations.transformTree(
       tree,
-      (node) => node.id === parentNode.id,
+      (node) => node === parentNode,
       (node) => ({ ...node, children: newParentChildren })
     );
 
@@ -396,19 +336,17 @@ export const TreeOperations = {
   /**
    * Outdent a node (move it up to parent's level)
    */
-  outdentNode(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
-    const parentNode = TreeOperations.findParentNode(tree.root, nodeId);
+  outdentNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
+    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) return { success: false, tree };
 
-    const grandParentNode = TreeOperations.findParentNode(tree.root, parentNode.id);
+    const grandParentNode = TreeOperations.findParentNode(tree.root, parentNode);
     if (!grandParentNode) return { success: false, tree }; // Already at root level
 
-    const nodeIndex = parentNode.children.findIndex(child => child.id === nodeId);
-    const parentIndex = grandParentNode.children.findIndex(child => child.id === parentNode.id);
+    const nodeIndex = parentNode.children.indexOf(targetNode);
+    const parentIndex = grandParentNode.children.indexOf(parentNode);
     
     if (nodeIndex === -1 || parentIndex === -1) return { success: false, tree };
-
-    const nodeToOutdent = parentNode.children[nodeIndex];
 
     // Remove from parent
     const newParentChildren = [...parentNode.children];
@@ -416,14 +354,14 @@ export const TreeOperations = {
 
     // Add to grandparent after parent
     const newGrandParentChildren = [...grandParentNode.children];
-    newGrandParentChildren.splice(parentIndex + 1, 0, nodeToOutdent);
+    newGrandParentChildren.splice(parentIndex + 1, 0, targetNode);
 
     // Update the tree - we need a custom approach here since we're updating two levels
     const updateNode = (node: Node): Node => {
-      if (node.id === parentNode.id) {
+      if (node === parentNode) {
         return { ...node, children: newParentChildren };
       }
-      if (node.id === grandParentNode.id) {
+      if (node === grandParentNode) {
         return { ...node, children: newGrandParentChildren };
       }
       return {
@@ -432,7 +370,7 @@ export const TreeOperations = {
       };
     };
 
-    return { success: true, tree: { ...tree, root: updateNode(tree.root) } };
+    return { success: true, tree: { root: updateNode(tree.root) } };
   },
 
   /**
@@ -440,10 +378,8 @@ export const TreeOperations = {
    */
   toMarkdown(tree: Tree): string {
     const renderNode = (node: Node, level: number = 0): string => {
-      const block = tree.blocks.find(b => b.id === node.id);
-      const content = block?.body || "";
       const indent = "  ".repeat(level);
-      const line = `${indent}- ${content}`;
+      const line = `${indent}- ${node.body}`;
       
       const childLines = node.children.map(child => renderNode(child, level + 1)).join("\n");
       return childLines ? `${line}\n${childLines}` : line;
@@ -452,5 +388,76 @@ export const TreeOperations = {
     return tree.root.children.map(child => renderNode(child)).join("\n");
   },
 
-  // Legacy conversion methods removed - no backward compatibility needed
+  /**
+   * Parse markdown string to tree structure
+   */
+  parseMarkdownToTree(markdown: string): Tree {
+    if (!markdown.trim()) return TreeOperations.createEmptyTree();
+
+    const lines = markdown.split("\n");
+    const nodeMap = new Map<Node, Node[]>(); // Track children for each node
+    const stack: { node: Node; level: number }[] = [];
+    const rootChildren: Node[] = [];
+
+    for (const line of lines) {
+      const match = line.match(/^(\s*)-\s(.*)$/);
+      if (!match) continue;
+
+      const [, indent, content] = match;
+      const level = Math.floor(indent.length / 2);
+      const newNode = TreeOperations.createNode({ body: content });
+      nodeMap.set(newNode, []);
+
+      // Remove items from stack that are at same or deeper level
+      while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+        stack.pop();
+      }
+
+      if (stack.length === 0) {
+        // This is a root level node
+        rootChildren.push(newNode);
+      } else {
+        // Add as child of the parent
+        const parent = stack[stack.length - 1].node;
+        const parentChildren = nodeMap.get(parent) || [];
+        nodeMap.set(parent, [...parentChildren, newNode]);
+      }
+
+      stack.push({ node: newNode, level });
+    }
+
+    // Build the final tree structure with the children
+    const buildNode = (node: Node): Node => {
+      const children = nodeMap.get(node) || [];
+      return {
+        ...node,
+        children: children.map(buildNode)
+      };
+    };
+
+    const finalRootChildren = rootChildren.map(buildNode);
+
+    return {
+      root: TreeOperations.createNode({
+        body: "",
+        children: finalRootChildren
+      })
+    };
+  },
+
+  /**
+   * Find the path to a node (list of nodes from root to target)
+   */
+  findNodePath(root: Node, targetNode: Node, path: Node[] = []): Node[] | null {
+    if (root === targetNode) {
+      return [...path, root];
+    }
+
+    for (const child of root.children) {
+      const result = TreeOperations.findNodePath(child, targetNode, [...path, root]);
+      if (result) return result;
+    }
+
+    return null;
+  }
 };

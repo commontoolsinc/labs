@@ -23,7 +23,7 @@ export interface MentionableItem {
 }
 
 /**
- * Attachment to a block - for future extensibility
+ * Attachment to a node - for future extensibility
  */
 export interface Attachment {
   name: string;
@@ -31,38 +31,28 @@ export interface Attachment {
 }
 
 /**
- * Block - the backing data for nodes, containing content and attachments
+ * Node - represents both the tree structure and content
  */
-export interface Block {
-  readonly id: string;
+export interface Node {
   readonly body: string;
+  readonly children: readonly Node[];
   readonly attachments: readonly Attachment[];
 }
 
 /**
- * Node - represents the tree structure, referencing blocks by ID
- */
-export interface Node {
-  readonly id: string;
-  readonly children: readonly Node[];
-}
-
-/**
- * Complete tree structure with nodes and their backing blocks
+ * Complete tree structure
  */
 export interface Tree {
   readonly root: Node;
-  readonly blocks: readonly Block[];
-  readonly attachments: readonly Attachment[];
 }
 
 /**
  * UI state separate from the core data structure
  */
 export interface OutlineUIState {
-  readonly collapsedNodes: ReadonlySet<string>;
-  readonly focusedNodeId: string | null;
-  readonly editingNodeId: string | null;
+  readonly collapsedNodes: ReadonlySet<Node>;
+  readonly focusedNode: Node | null;
+  readonly editingNode: Node | null;
   readonly editingContent: string;
   readonly showingMentions: boolean;
   readonly mentionQuery: string;
@@ -79,7 +69,7 @@ export interface KeyboardContext {
   readonly component: any; // Will be typed properly when we extract commands
   readonly allNodes: Node[];
   readonly currentIndex: number;
-  readonly focusedNodeId: string | null;
+  readonly focusedNode: Node | null;
 }
 
 /**
@@ -88,7 +78,7 @@ export interface KeyboardContext {
 export interface EditingKeyboardContext {
   readonly event: KeyboardEvent;
   readonly component: any;
-  readonly editingNodeId: string;
+  readonly editingNode: Node;
   readonly editingContent: string;
   readonly textarea: HTMLTextAreaElement;
 }
@@ -104,26 +94,18 @@ export interface KeyboardCommand {
  * Editing state for pure transformations
  */
 export interface EditingState {
-  editingNodeId: string | null;
+  editingNode: Node | null;
   editingContent: string;
   showingMentions: boolean;
-}
-
-/**
- * Options for creating a new block
- */
-export interface BlockCreationOptions {
-  readonly body: string;
-  readonly id?: string;
-  readonly attachments?: readonly Attachment[];
 }
 
 /**
  * Options for creating a new node
  */
 export interface NodeCreationOptions {
-  readonly id?: string;
+  readonly body: string;
   readonly children?: readonly Node[];
+  readonly attachments?: readonly Attachment[];
 }
 
 /**
@@ -138,7 +120,7 @@ export type OperationResult<T> =
  */
 export type TreeUpdateResult = OperationResult<{
   readonly tree: Tree;
-  readonly newFocusId?: string | null;
+  readonly newFocusNode?: Node | null;
 }>;
 
 /**
