@@ -564,6 +564,37 @@ describe("Journal", () => {
   });
 
   describe("History and Novelty Tracking", () => {
+    it("should track detailed activity for reads and writes", () => {
+      const { ok: writer } = journal.writer(space);
+      const { ok: reader } = journal.reader(space);
+
+      const address = {
+        id: "user:activity",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      // Initial activity should be empty
+      const initialActivity = [...journal.activity()];
+      expect(initialActivity).toHaveLength(0);
+
+      // Write operation
+      writer!.write(address, { name: "David" });
+
+      // Read operation
+      reader!.read(address);
+
+      // Check activity log
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(2);
+
+      expect(activity[0]).toHaveProperty("write");
+      expect(activity[0].write).toEqual({ ...address, space });
+
+      expect(activity[1]).toHaveProperty("read");
+      expect(activity[1].read).toEqual({ ...address, space });
+    });
+
     it("should track read invariants in history", async () => {
       // Pre-populate replica
       const replica = storage.open(space).replica;

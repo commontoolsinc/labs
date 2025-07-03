@@ -111,6 +111,8 @@ export const read = (
     if (result.error) {
       return { error: result.error.from(space) };
     } else {
+      // Track read activity
+      journal.state.activity.push({ read: { ...address, space } });
       return result;
     }
   }
@@ -130,6 +132,8 @@ export const write = (
     if (result.error) {
       return { error: result.error.from(space) };
     } else {
+      // Track write activity
+      journal.state.activity.push({ write: { ...address, space } });
       return result;
     }
   }
