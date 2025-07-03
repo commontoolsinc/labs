@@ -15,7 +15,10 @@ export type {
   Block,
   Attachment,
   BlockCreationOptions,
-  NodeCreationOptions
+  NodeCreationOptions,
+  OperationResult,
+  TreeUpdateResult,
+  TreeMoveResult
 } from "./types.ts";
 export { TreeOperations } from "./tree-operations.ts";
 // Legacy TreeOperations file and MigrationBridge removed - using TreeOperations exclusively

@@ -126,4 +126,26 @@ export interface NodeCreationOptions {
   readonly children?: readonly Node[];
 }
 
+/**
+ * Result type for operations that can succeed or fail
+ */
+export type OperationResult<T> = 
+  | { readonly success: true; readonly data: T }
+  | { readonly success: false; readonly error: string };
+
+/**
+ * Result type for tree update operations
+ */
+export type TreeUpdateResult = OperationResult<{
+  readonly tree: Tree;
+  readonly newFocusId?: string | null;
+}>;
+
+/**
+ * Result type for tree movement operations
+ */
+export type TreeMoveResult = OperationResult<{
+  readonly tree: Tree;
+}>;
+
 // LegacyNodeCreationOptions removed

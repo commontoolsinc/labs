@@ -33,5 +33,12 @@ Also consider the lessons of Erlang (Joe Armstrong), Elixir (José Valim), Elm (
 - Favor immutable data transformations in library code
 - Minimize side effects and make them explicit when necessary
 
+
+### Testing
+- Test all pure functions
+- Use tests to cement expectations, not to create busywork and upkeep
+- Aim for code coverage but do not worry about complex integration tests
+- Ensure tests are always kept up to date during refactors
+
 ### Functional-Reactive Programming
 - When working on recipes, favor functional-reactive programming patterns to handle asynchronous data streams and side effects. See @recipe-dev.md.

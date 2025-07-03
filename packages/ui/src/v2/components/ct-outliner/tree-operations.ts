@@ -24,6 +24,55 @@ export const TreeOperations = {
   },
 
   /**
+   * Transform nodes in a tree based on a predicate and transformation function
+   */
+  transformTree(
+    tree: Tree,
+    predicate: (node: Node) => boolean,
+    transform: (node: Node) => Node
+  ): Tree {
+    const updateNode = (node: Node): Node => {
+      if (predicate(node)) {
+        return transform(node);
+      }
+      return {
+        ...node,
+        children: node.children.map(updateNode)
+      };
+    };
+
+    return {
+      ...tree,
+      root: updateNode(tree.root)
+    };
+  },
+
+  /**
+   * Determine appropriate focus after deleting a node
+   */
+  determineFocusAfterDeletion(
+    tree: Tree,
+    parentNode: Node,
+    deletedIndex: number
+  ): string | null {
+    const siblings = parentNode.children;
+    
+    // Try previous sibling first
+    if (deletedIndex > 0 && siblings[deletedIndex - 1]) {
+      return siblings[deletedIndex - 1].id;
+    }
+    
+    // Try next sibling
+    if (deletedIndex < siblings.length && siblings[deletedIndex + 1]) {
+      return siblings[deletedIndex + 1].id;
+    }
+    
+    // Fall back to first visible node
+    const allNodes = TreeOperations.getAllVisibleNodes(tree.root, new Set());
+    return allNodes.length > 0 ? allNodes[0].id : null;
+  },
+
+  /**
    * Create a new block with given options
    */
   createBlock(options: BlockCreationOptions): Block {
@@ -152,23 +201,15 @@ export const TreeOperations = {
    * Insert a new node as a child of the specified parent at the given index
    */
   insertNode(tree: Tree, parentId: string, newNode: Node, index: number): Tree {
-    const updateNodeChildren = (node: Node): Node => {
-      if (node.id === parentId) {
+    return TreeOperations.transformTree(
+      tree,
+      (node) => node.id === parentId,
+      (node) => {
         const newChildren = [...node.children];
         newChildren.splice(index, 0, newNode);
         return { ...node, children: newChildren };
       }
-      
-      return {
-        ...node,
-        children: node.children.map(updateNodeChildren),
-      };
-    };
-
-    return {
-      ...tree,
-      root: updateNodeChildren(tree.root),
-    };
+    );
   },
 
   /**
@@ -194,58 +235,56 @@ export const TreeOperations = {
    * Move a node up among its siblings
    */
   moveNodeUp(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
-    const updateNode = (node: Node): Node => {
-      const childIndex = node.children.findIndex(child => child.id === nodeId);
-      
-      if (childIndex > 0) {
-        const newChildren = [...node.children];
-        [newChildren[childIndex - 1], newChildren[childIndex]] = 
-          [newChildren[childIndex], newChildren[childIndex - 1]];
-        return { ...node, children: newChildren };
-      }
-      
-      return {
-        ...node,
-        children: node.children.map(updateNode),
-      };
-    };
-
-    const newTree = {
-      ...tree,
-      root: updateNode(tree.root),
-    };
+    let movePerformed = false;
     
-    const success = JSON.stringify(newTree) !== JSON.stringify(tree);
-    return { success, tree: newTree };
+    const newTree = TreeOperations.transformTree(
+      tree,
+      (node) => {
+        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        return childIndex > 0;
+      },
+      (node) => {
+        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        if (childIndex > 0) {
+          movePerformed = true;
+          const newChildren = [...node.children];
+          [newChildren[childIndex - 1], newChildren[childIndex]] = 
+            [newChildren[childIndex], newChildren[childIndex - 1]];
+          return { ...node, children: newChildren };
+        }
+        return node;
+      }
+    );
+    
+    return { success: movePerformed, tree: newTree };
   },
 
   /**
    * Move a node down among its siblings
    */
   moveNodeDown(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
-    const updateNode = (node: Node): Node => {
-      const childIndex = node.children.findIndex(child => child.id === nodeId);
-      
-      if (childIndex !== -1 && childIndex < node.children.length - 1) {
-        const newChildren = [...node.children];
-        [newChildren[childIndex], newChildren[childIndex + 1]] = 
-          [newChildren[childIndex + 1], newChildren[childIndex]];
-        return { ...node, children: newChildren };
-      }
-      
-      return {
-        ...node,
-        children: node.children.map(updateNode),
-      };
-    };
-
-    const newTree = {
-      ...tree,
-      root: updateNode(tree.root),
-    };
+    let movePerformed = false;
     
-    const success = JSON.stringify(newTree) !== JSON.stringify(tree);
-    return { success, tree: newTree };
+    const newTree = TreeOperations.transformTree(
+      tree,
+      (node) => {
+        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        return childIndex !== -1 && childIndex < node.children.length - 1;
+      },
+      (node) => {
+        const childIndex = node.children.findIndex(child => child.id === nodeId);
+        if (childIndex !== -1 && childIndex < node.children.length - 1) {
+          movePerformed = true;
+          const newChildren = [...node.children];
+          [newChildren[childIndex], newChildren[childIndex + 1]] = 
+            [newChildren[childIndex + 1], newChildren[childIndex]];
+          return { ...node, children: newChildren };
+        }
+        return node;
+      }
+    );
+    
+    return { success: movePerformed, tree: newTree };
   },
 
   /**
@@ -311,18 +350,11 @@ export const TreeOperations = {
     };
 
     // Determine new focus
-    const allNodes = TreeOperations.getAllVisibleNodes(updatedTree.root, new Set());
-    let newFocusId: string | null = null;
-    
-    if (allNodes.length > 0) {
-      if (nodeIndex > 0 && parentNode.children[nodeIndex - 1]) {
-        newFocusId = parentNode.children[nodeIndex - 1].id;
-      } else if (parentNode.children[nodeIndex + 1]) {
-        newFocusId = parentNode.children[nodeIndex + 1].id;
-      } else {
-        newFocusId = allNodes[0].id;
-      }
-    }
+    const newFocusId = TreeOperations.determineFocusAfterDeletion(
+      updatedTree,
+      parentNode,
+      nodeIndex
+    );
 
     return { success: true, tree: updatedTree, newFocusId };
   },
@@ -352,17 +384,13 @@ export const TreeOperations = {
     newParentChildren[nodeIndex - 1] = newPreviousSibling;
 
     // Update the tree
-    const updateNode = (node: Node): Node => {
-      if (node.id === parentNode.id) {
-        return { ...node, children: newParentChildren };
-      }
-      return {
-        ...node,
-        children: node.children.map(updateNode)
-      };
-    };
+    const updatedTree = TreeOperations.transformTree(
+      tree,
+      (node) => node.id === parentNode.id,
+      (node) => ({ ...node, children: newParentChildren })
+    );
 
-    return { success: true, tree: { ...tree, root: updateNode(tree.root) } };
+    return { success: true, tree: updatedTree };
   },
 
   /**
@@ -390,7 +418,7 @@ export const TreeOperations = {
     const newGrandParentChildren = [...grandParentNode.children];
     newGrandParentChildren.splice(parentIndex + 1, 0, nodeToOutdent);
 
-    // Update the tree
+    // Update the tree - we need a custom approach here since we're updating two levels
     const updateNode = (node: Node): Node => {
       if (node.id === parentNode.id) {
         return { ...node, children: newParentChildren };
