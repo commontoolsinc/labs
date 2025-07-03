@@ -133,8 +133,6 @@ export function isSigilWriteRedirectLink(
 /**
  * Check if value is any kind of cell link format.
  *
- * @deprecated Switch to isLink instead.
- *
  * @param {any} value - The value to check.
  * @returns {boolean}
  */

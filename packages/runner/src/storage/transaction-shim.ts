@@ -381,8 +381,8 @@ class TransactionWriter extends TransactionReader
  * Implementation of IStorageTransaction that uses DocImpl and runtime.documentMap
  */
 export class StorageTransaction implements IStorageTransaction {
-  private log = new StorageTransactionLog();
-  private currentStatus: IStorageTransactionProgress = { open: this.log };
+  private txLog = new StorageTransactionLog();
+  private currentStatus: IStorageTransactionProgress = { open: this.txLog };
   private readers = new Map<string, ITransactionReader>();
   private writers = new Map<string, ITransactionWriter>();
 
@@ -390,6 +390,10 @@ export class StorageTransaction implements IStorageTransaction {
 
   status(): Result<IStorageTransactionProgress, IStorageTransactionError> {
     return { ok: this.currentStatus };
+  }
+
+  log(): IStorageTransactionLog {
+    return this.txLog;
   }
 
   reader(space: string): Result<ITransactionReader, IReaderError> {
@@ -406,7 +410,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     let reader = this.readers.get(space);
     if (!reader) {
-      reader = new TransactionReader(this.runtime, this.log);
+      reader = new TransactionReader(this.runtime, this.txLog);
       this.readers.set(space, reader);
     }
 
@@ -460,7 +464,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     let writer = this.writers.get(space);
     if (!writer) {
-      writer = new TransactionWriter(this.runtime, this.log);
+      writer = new TransactionWriter(this.runtime, this.txLog);
       this.writers.set(space, writer);
     }
 
@@ -493,7 +497,7 @@ export class StorageTransaction implements IStorageTransaction {
     }
 
     // Set status to done with the current log to indicate the transaction is complete
-    this.currentStatus = { done: this.log };
+    this.currentStatus = { done: this.txLog };
     return { ok: undefined };
   }
 
@@ -507,7 +511,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     // For now, just mark as done since we're only implementing basic read/write
     // In a real implementation, this would send the transaction to upstream storage
-    this.currentStatus = { done: this.log };
+    this.currentStatus = { done: this.txLog };
     return Promise.resolve({ ok: undefined });
   }
 }

@@ -178,6 +178,7 @@ export type DocImpl<T> = {
    * @returns Entity ID.
    */
   entityId: EntityId;
+  "/": string;
 
   /**
    * Get and set the source cell, that is the cell that populates this cell.
@@ -343,6 +344,9 @@ export function createDoc<T>(
         : ((entityId as { "/": string }) ?? { "/": "" }),
     get value(): T {
       return value as T;
+    },
+    get "/"(): string {
+      return typeof entityId.toJSON === "function" ? entityId.toJSON()["/"] : (entityId["/"] as string);
     },
     get entityId(): EntityId {
       return entityId;
