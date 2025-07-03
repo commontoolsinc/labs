@@ -30,7 +30,12 @@ export async function ct(
     cwd: join(import.meta.dirname!, ".."),
     args: [
       "task",
-      "cli",
+      // Deno tasks run with PWD set to wherever the deno.json manifest is.
+      // The `cli` task in this package overrides that to use the shell's PWD.
+      // As these tests run within a test task, we can't override that PWD.
+      // For tests, use a version of the cli task that does *not* override
+      // user/deno's PWD.
+      "cli-no-pwd-override",
       ...args,
     ],
   }).output();
