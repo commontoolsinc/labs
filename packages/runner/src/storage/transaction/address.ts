@@ -12,9 +12,9 @@ export const includes = (
 ) =>
   source.id === candidate.id &&
   source.type === candidate.type &&
-  source.path.join("/").startsWith(candidate.path.join("/"));
+  candidate.path.join("/").startsWith(source.path.join("/"));
 
-export const intersect = (
+export const intersects = (
   source: IMemoryAddress,
   candidate: IMemoryAddress,
 ) => {

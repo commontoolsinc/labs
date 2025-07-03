@@ -46,53 +46,26 @@ import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import { type Cancel, type EntityId } from "@commontools/runner";
 import type {
-  Activity,
   Assert,
   Claim,
-  CommitError,
-  IAttestation,
-  IClaim,
-  IMemoryAddress,
-  IMemorySpaceAddress,
-  InactiveTransactionError,
-  INotFoundError,
   IRemoteStorageProviderSettings,
-  ISpace,
-  ISpaceReplica,
-  IStorageEdit,
-  IStorageInvariant,
   IStorageManager,
   IStorageManagerV2,
   IStorageProvider,
+  IStorageProviderWithReplica,
   IStorageTransaction,
-  IStorageTransactionAborted,
-  IStorageTransactionComplete,
-  IStorageTransactionInconsistent,
-  IStorageTransactionProgress,
-  IStorageTransactionRejected,
-  IStorageTransactionWriteIsolationError,
   IStoreError,
   ITransaction,
-  ITransactionJournal,
-  ITransactionReader,
-  ITransactionWriter,
-  MediaType,
-  MemoryAddressPathComponent,
   PushError,
-  ReaderError,
-  ReadError,
   Retract,
-  StorageTransactionFailed,
   StorageValue,
-  URI,
-  WriteError,
-  WriterError,
 } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
 import { SchemaNone } from "@commontools/memory/schema";
+import * as Transaction from "./transaction.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -1343,16 +1316,12 @@ export interface Options {
   settings?: IRemoteStorageProviderSettings;
 }
 
-interface Differential<T>
-  extends Iterable<[undefined, T] | [T, undefined] | [T, T]> {
-}
-
 export class StorageManager implements IStorageManager, IStorageManagerV2 {
   address: URL;
   as: Signer;
   id: string;
   settings: IRemoteStorageProviderSettings;
-  #providers: Map<string, IStorageProvider> = new Map();
+  #providers: Map<string, IStorageProviderWithReplica> = new Map();
 
   static open(options: Options) {
     if (options.address.protocol === "memory:") {
@@ -1389,7 +1358,7 @@ export class StorageManager implements IStorageManager, IStorageManagerV2 {
     return provider;
   }
 
-  protected connect(space: MemorySpace): IStorageProvider {
+  protected connect(space: MemorySpace): IStorageProviderWithReplica {
     const { id, address, as, settings } = this;
     return Provider.connect({
       id,
@@ -1415,7 +1384,7 @@ export class StorageManager implements IStorageManager, IStorageManagerV2 {
    * multiple spaces but writing only to one space.
    */
   edit(): IStorageTransaction {
-    return new StorageTransaction(this);
+    return Transaction.create(this);
   }
 }
 
@@ -1446,204 +1415,3 @@ const getSchema = (
   }
   return undefined;
 };
-
-/**
- * Storage transaction implementation that maintains consistency guarantees
- * for reads and writes across memory spaces.
- */
-class StorageTransaction implements IStorageTransaction {
-  #journal: TransactionJournal;
-  #writer?: MemorySpace;
-  #result?: Promise<
-    Result<Unit, StorageTransactionFailed>
-  >;
-
-  constructor(manager: StorageManager) {
-    this.#journal = new TransactionJournal(manager);
-  }
-
-  status(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
-    return this.#journal.state();
-  }
-
-  reader(
-    space: MemorySpace,
-  ): Result<ITransactionReader, ReaderError> {
-    return this.#journal.reader(space);
-  }
-
-  writer(
-    space: MemorySpace,
-  ): Result<TransactionWriter, WriterError> {
-    const writer = this.#writer;
-    if (writer && writer !== space) {
-      return {
-        error: new WriteIsolationError({
-          open: writer,
-          requested: space,
-        }),
-      };
-    } else {
-      const { ok: writer, error } = this.#journal.writer(space);
-      if (error) {
-        return { error };
-      } else {
-        this.#writer = space;
-        return { ok: writer };
-      }
-    }
-  }
-
-  read(address: IMemorySpaceAddress) {
-    const { ok: reader, error } = this.reader(address.space);
-    if (error) {
-      return { error };
-    } else {
-      return reader.read(address);
-    }
-  }
-
-  write(
-    address: IMemorySpaceAddress,
-    value: JSONValue | undefined,
-  ) {
-    const { ok: writer, error } = this.writer(address.space);
-    if (error) {
-      return { error };
-    } else {
-      return writer.write(address, value);
-    }
-  }
-
-  abort(reason?: Unit): Result<Unit, InactiveTransactionError> {
-    return this.#journal.abort(reason);
-  }
-
-  commit(): Promise<
-    Result<Unit, CommitError>
-  > {
-    // Return cached promise if commit was already called
-    if (this.#result) {
-      return this.#result;
-    }
-
-    // Check transaction state
-    const { ok: edit, error } = this.#journal.close();
-    if (error) {
-      this.status();
-      this.#result = Promise.resolve(
-        // End can fail if we are in non-edit mode however if we are in non-edit
-        // mode we would have result already.
-        { error } as { error: StorageTransactionFailed },
-      );
-    } else if (this.#writer) {
-      const { ok: writer, error } = this.#journal.writer(this.#writer);
-      if (error) {
-        this.#result = Promise.resolve({
-          error: error as IStorageTransactionRejected,
-        });
-      } else {
-        this.#result = writer.replica.commit(edit.for(this.#writer));
-      }
-    } else {
-      this.#result = Promise.resolve({ ok: {} });
-    }
-
-    return this.#result;
-  }
-}
-
-class StorageEdit implements IStorageEdit {
-  #transactions: Map<MemorySpace, SpaceTransaction> = new Map();
-
-  for(space: MemorySpace) {
-    const transaction = this.#transactions.get(space);
-    if (transaction) {
-      return transaction;
-    } else {
-      const transaction = new SpaceTransaction();
-      this.#transactions.set(space, transaction);
-      return transaction;
-    }
-  }
-}
-
-class SpaceTransaction implements ITransaction {
-  #claims: IClaim[] = [];
-  #facts: Fact[] = [];
-
-  claim(state: State) {
-    this.#claims.push({
-      the: state.the,
-      of: state.of,
-      fact: refer(state),
-    });
-  }
-  retract(fact: Assertion) {
-    this.#facts.push(retract(fact));
-  }
-
-  assert(fact: Assertion) {
-    this.#facts.push(fact);
-  }
-
-  get claims() {
-    return this.#claims;
-  }
-  get facts() {
-    return this.#facts;
-  }
-}
-
-export class TransactionCompleteError extends RangeError
-  implements IStorageTransactionComplete {
-  override name = "StorageTransactionCompleteError" as const;
-}
-
-export class TransactionAborted extends RangeError
-  implements IStorageTransactionAborted {
-  override name = "StorageTransactionAborted" as const;
-  reason: unknown;
-
-  constructor(reason?: unknown) {
-    super("Transaction was aborted");
-    this.reason = reason;
-  }
-}
-
-export class WriteIsolationError extends RangeError
-  implements IStorageTransactionWriteIsolationError {
-  override name = "StorageTransactionWriteIsolationError" as const;
-  open: MemorySpace;
-  requested: MemorySpace;
-  constructor(
-    { open, requested }: { open: MemorySpace; requested: MemorySpace },
-  ) {
-    super(
-      `Can not open transaction writer for ${requested} beacuse transaction has writer open for ${open}`,
-    );
-    this.open = open;
-    this.requested = requested;
-  }
-}
-
-export class NotFound extends RangeError implements INotFoundError {
-  override name = "NotFoundError" as const;
-}
-
-class Inconsistency extends RangeError
-  implements IStorageTransactionInconsistent {
-  override name = "StorageTransactionInconsistent" as const;
-  constructor(public inconsitencies: IAttestation[]) {
-    const details = [`Transaction consistency guarntees have being violated:`];
-    for (const { address, value } of inconsitencies) {
-      details.push(
-        `  - The ${address.type} of ${address.id} at ${
-          address.path.join(".")
-        } has value ${JSON.stringify(value)}`,
-      );
-    }
-
-    super(details.join("\n"));
-  }
-}

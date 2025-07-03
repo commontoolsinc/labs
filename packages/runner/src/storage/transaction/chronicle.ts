@@ -66,19 +66,22 @@ export class Chronicle {
     return changes ? changes.rebase(source) : { ok: source };
   }
 
-  write(address: IMemoryAddress, value?: JSONValue): Result<IAttestation, IStorageTransactionInconsistent> {
+  write(
+    address: IMemoryAddress,
+    value?: JSONValue,
+  ): Result<IAttestation, IStorageTransactionInconsistent> {
     // Validate against current state (replica + any overlapping novelty)
     const loaded = attest(this.load(address));
     const rebase = this.rebase(loaded);
     if (rebase.error) {
       return rebase;
     }
-    
+
     const { error } = write(rebase.ok, address, value);
     if (error) {
       return { error };
     }
-    
+
     return this.#novelty.claim({ address, value });
   }
 
@@ -91,7 +94,6 @@ export class Chronicle {
     if (written) {
       return read(written, address);
     }
-
 
     // If we have not read nor written into overlapping memory address so
     // we'll read it from the local replica.
@@ -215,7 +217,7 @@ class History {
       // If `address` is contained in inside an invariant address it is a
       // candidate invariant. If this candidate has longer path than previous
       // candidate this is a better match so we pick this one.
-      if (Address.includes(address, invariant.address)) {
+      if (Address.includes(invariant.address, address)) {
         if (!candidate) {
           candidate = invariant;
         } else if (
@@ -243,7 +245,7 @@ class History {
       // If we have an existing invariant that is either child or a parent of
       // the new one two must be consistent with one another otherwise we are in
       // an inconsistent state.
-      if (Address.intersect(attestation.address, candidate.address)) {
+      if (Address.intersects(attestation.address, candidate.address)) {
         // Always read at the more specific (longer) path for consistency check
         const address =
           attestation.address.path.length > candidate.address.path.length
@@ -338,7 +340,7 @@ class Novelty {
     for (const candidate of candidates) {
       // If the candidate is a parent of the new invariant, merge the new invariant
       // into the existing parent invariant.
-      if (Address.includes(invariant.address, candidate.address)) {
+      if (Address.includes(candidate.address, invariant.address)) {
         const { error, ok: merged } = write(
           candidate,
           invariant.address,
@@ -357,7 +359,7 @@ class Novelty {
     // If we did not found any parents we may have some children
     // that will be replaced by this invariant
     for (const candidate of candidates) {
-      if (Address.includes(invariant.address, candidate.address)) {
+      if (Address.includes(candidate.address, invariant.address)) {
         candidates.delete(candidate);
       }
     }
@@ -427,7 +429,7 @@ class Changes {
   ): Result<IAttestation, IStorageTransactionInconsistent> {
     let merged = source;
     for (const change of this.#model.values()) {
-      if (Address.includes(change.address, source.address)) {
+      if (Address.includes(source.address, change.address)) {
         const { error, ok } = write(
           merged,
           change.address,

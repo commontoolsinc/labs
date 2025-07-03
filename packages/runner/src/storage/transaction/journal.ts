@@ -292,6 +292,9 @@ export class TransactionReader implements ITransactionReader {
     this.#journal = journal;
     this.#space = space;
   }
+  did(): MemorySpace {
+    return this.#space;
+  }
 
   read(address: IMemoryAddress) {
     return read(this.#journal, this.#space, address);
@@ -312,6 +315,9 @@ export class TransactionWriter implements ITransactionWriter {
   ) {
     this.#journal = journal;
     this.#space = space;
+  }
+  did(): MemorySpace {
+    return this.#space;
   }
 
   read(address: IMemoryAddress) {

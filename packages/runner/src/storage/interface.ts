@@ -62,7 +62,7 @@ export interface StorageValue<T = any> {
 
 export interface IStorageManager {
   id: string;
-  open(space: MemorySpace): IStorageProvider;
+  open(space: MemorySpace): IStorageProviderWithReplica;
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -91,7 +91,6 @@ export interface LocalStorageOptions {
 }
 
 export interface IStorageProvider {
-  replica: ISpaceReplica;
   /**
    * Send a value to storage.
    *
@@ -152,6 +151,10 @@ export interface IStorageProvider {
   getReplica(): string | undefined;
 }
 
+export interface IStorageProviderWithReplica extends IStorageProvider {
+  replica: ISpaceReplica;
+}
+
 export interface IStorageManagerV2 {
   /**
    * Creates a storage transaction that can be used to read / write data into
@@ -160,6 +163,16 @@ export interface IStorageManagerV2 {
    */
   edit(): IStorageTransaction;
 }
+
+export type StorageTransactionStatus = Result<
+  IStorageTransactionProgress,
+  StorageTransactionFailed
+>;
+
+export type IStorageTransactionProgress =
+  | { status: "ready"; journal: ITransactionJournal }
+  | { status: "pending"; journal: ITransactionJournal }
+  | { status: "done"; journal: ITransactionJournal };
 
 /**
  * Representation of a storage transaction, which can be used to query facts and
@@ -187,10 +200,13 @@ export interface IStorageTransaction {
    * This allows transactor to cancel and recreate transaction with a current
    * state without having to build up a whole transaction and commiting it.
    */
-  status(): Result<
-    IStorageTransactionProgress,
-    StorageTransactionFailed
-  >;
+  status(): StorageTransactionStatus;
+
+  read(adddress: IMemorySpaceAddress): Result<IAttestation, ReadError>;
+  write(
+    address: IMemorySpaceAddress,
+    value?: JSONValue,
+  ): Result<IAttestation, WriterError | WriteError>;
 
   /**
    * Creates a memory space reader for inside this transaction. Fails if
@@ -209,7 +225,7 @@ export interface IStorageTransaction {
    */
   writer(
     space: MemorySpace,
-  ): Result<ITransactionWriter, WriteError>;
+  ): Result<ITransactionWriter, WriterError>;
 
   /**
    * Transaction can be cancelled which causes storage provider to stop keeping
@@ -217,7 +233,7 @@ export interface IStorageTransaction {
    * produce {@link InactiveTransactionError}. Aborted transactions will produce
    * {@link IStorageTransactionAborted} error on attempt to commit.
    */
-  abort(reason?: Unit): Result<Unit, InactiveTransactionError>;
+  abort(reason?: unknown): Result<Unit, InactiveTransactionError>;
 
   /**
    * Commits transaction. If transaction is no longer active, this will
@@ -237,10 +253,11 @@ export interface IStorageTransaction {
    * exact value as on first call and no execution will take place on subsequent
    * calls.
    */
-  commit(): Promise<Result<Unit, StorageTransactionFailed>>;
+  commit(): Promise<Result<Unit, CommitError>>;
 }
 
 export interface ITransactionReader {
+  did(): MemorySpace;
   /**
    * Reads a value from a (local) memory address and captures corresponding
    * `Read` in the the transaction invariants. If value was written in read
@@ -353,6 +370,10 @@ export type IStorageTransactionRejected =
   | IConnectionError
   | IAuthorizationError;
 
+export type CommitError =
+  | InactiveTransactionError
+  | IStorageTransactionRejected;
+
 export type ReadError =
   | INotFoundError
   | InactiveTransactionError;
@@ -366,8 +387,6 @@ export type ReaderError = InactiveTransactionError;
 export type WriterError =
   | InactiveTransactionError
   | IStorageTransactionWriteIsolationError;
-
-export type CommitError = StorageTransactionFailed;
 
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
@@ -385,11 +404,6 @@ export interface INotFoundError extends Error {
    */
   address: IMemoryAddress;
 }
-export type IStorageTransactionProgress = Variant<{
-  edit: ITransactionJournal;
-  pending: ITransactionJournal;
-  done: ITransactionJournal;
-}>;
 
 /**
  * Represents adddress within the memory space which is like pointer inside the
@@ -452,7 +466,9 @@ export interface ISpaceReplica extends ISpace {
    */
   get(entry: FactAddress): State | undefined;
 
-  commit(transaction: ITransaction): Promise<Result<Unit, CommitError>>;
+  commit(
+    transaction: ITransaction,
+  ): Promise<Result<Unit, IStorageTransactionRejected>>;
 }
 
 export type PushError =
