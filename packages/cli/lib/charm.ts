@@ -8,6 +8,7 @@ import {
   RecipeMeta,
   Runtime,
   RuntimeProgram,
+  UI,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
@@ -404,16 +405,22 @@ function createShortId(id: string): string {
 
 function createCharmConnection(
   charm: { id: string; name?: string },
-  details?: { name?: string; readingFrom: Array<{ id: string }>; readBy: Array<{ id: string }> },
+  details?: {
+    name?: string;
+    readingFrom: Array<{ id: string }>;
+    readBy: Array<{ id: string }>;
+  },
 ): CharmConnection {
   return {
     name: details?.name || charm.name || createShortId(charm.id),
-    readingFrom: details?.readingFrom.map(c => c.id) || [],
-    readBy: details?.readBy.map(c => c.id) || [],
+    readingFrom: details?.readingFrom.map((c) => c.id) || [],
+    readBy: details?.readBy.map((c) => c.id) || [],
   };
 }
 
-async function buildConnectionMap(config: SpaceConfig): Promise<CharmConnectionMap> {
+async function buildConnectionMap(
+  config: SpaceConfig,
+): Promise<CharmConnectionMap> {
   const charms = await listCharms(config);
   const connections: CharmConnectionMap = new Map();
 
@@ -424,7 +431,11 @@ async function buildConnectionMap(config: SpaceConfig): Promise<CharmConnectionM
       connections.set(charm.id, createCharmConnection(charm, details));
     } catch (error) {
       // Skip charms that can't be inspected, but include them with no connections
-      console.error(`Warning: Could not inspect charm ${charm.id}: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(
+        `Warning: Could not inspect charm ${charm.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       connections.set(charm.id, createCharmConnection(charm));
     }
   }
@@ -441,35 +452,37 @@ function generateAsciiMap(connections: CharmConnectionMap): string {
 
   // Sort charms by connection count for better visualization
   const sortedCharms = Array.from(connections.entries()).sort(
-    ([, a], [, b]) => 
-      (b.readingFrom.length + b.readBy.length) - 
-      (a.readingFrom.length + a.readBy.length)
+    ([, a], [, b]) =>
+      (b.readingFrom.length + b.readBy.length) -
+      (a.readingFrom.length + a.readBy.length),
   );
 
   for (const [id, info] of sortedCharms) {
     const shortId = createShortId(id);
     output += `📦 ${info.name} [${shortId}]\n`;
-    
+
     if (info.readingFrom.length > 0) {
       output += "  ← reads from:\n";
       for (const sourceId of info.readingFrom) {
-        const sourceName = connections.get(sourceId)?.name || createShortId(sourceId);
+        const sourceName = connections.get(sourceId)?.name ||
+          createShortId(sourceId);
         output += `    • ${sourceName}\n`;
       }
     }
-    
+
     if (info.readBy.length > 0) {
       output += "  → read by:\n";
       for (const targetId of info.readBy) {
-        const targetName = connections.get(targetId)?.name || createShortId(targetId);
+        const targetName = connections.get(targetId)?.name ||
+          createShortId(targetId);
         output += `    • ${targetName}\n`;
       }
     }
-    
+
     if (info.readingFrom.length === 0 && info.readBy.length === 0) {
       output += "  (no connections)\n";
     }
-    
+
     output += "\n";
   }
 
@@ -504,11 +517,16 @@ export enum MapFormat {
   DOT = "dot",
 }
 
-export async function getCharmConnections(config: SpaceConfig): Promise<CharmConnectionMap> {
+export async function getCharmConnections(
+  config: SpaceConfig,
+): Promise<CharmConnectionMap> {
   return await buildConnectionMap(config);
 }
 
-export function formatSpaceMap(connections: CharmConnectionMap, format: MapFormat): string {
+export function formatSpaceMap(
+  connections: CharmConnectionMap,
+  format: MapFormat,
+): string {
   switch (format) {
     case MapFormat.ASCII:
       return generateAsciiMap(connections);
@@ -519,7 +537,10 @@ export function formatSpaceMap(connections: CharmConnectionMap, format: MapForma
   }
 }
 
-export async function generateSpaceMap(config: SpaceConfig, format: MapFormat = MapFormat.ASCII): Promise<string> {
+export async function generateSpaceMap(
+  config: SpaceConfig,
+  format: MapFormat = MapFormat.ASCII,
+): Promise<string> {
   const connections = await getCharmConnections(config);
   return formatSpaceMap(connections, format);
 }
@@ -577,4 +598,40 @@ export async function inspectCharm(
     readingFrom,
     readBy,
   };
+}
+
+export async function getCharmView(
+  config: CharmConfig,
+): Promise<unknown> {
+  const data = await inspectCharm(config);
+  return data.result?.[UI];
+}
+
+export function formatViewTree(view: unknown): string {
+  const isVNode = (v: any): v is { name: string; children: any[] } => {
+    return v && typeof v === "object" && v.type === "vnode" && v.name;
+  };
+
+  const format = (
+    node: unknown,
+    prefix: string,
+    last: boolean,
+  ): string => {
+    const branch = last ? "└─ " : "├─ ";
+    if (!isVNode(node)) {
+      return `${prefix}${branch}${String(node)}`;
+    }
+
+    const children = Array.isArray(node.children) ? node.children : [];
+    let output = `${prefix}${branch}${node.name}`;
+    const nextPrefix = prefix + (last ? "   " : "│  ");
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      const isLast = i === children.length - 1;
+      output += "\n" + format(child, nextPrefix, isLast);
+    }
+    return output;
+  };
+
+  return format(view, "", true);
 }
