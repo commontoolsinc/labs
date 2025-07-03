@@ -28,7 +28,7 @@ export type Opaque<T> = OpaqueRef<T> | (T extends Array<infer U> ? Array<Opaque<
     [K in keyof T]: Opaque<T[K]>;
 } : T);
 export interface OpaqueRefMethods<T> {
-    get(): OpaqueRef<T>;
+    get(): T;
     set(value: Opaque<T> | T): void;
     key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
     setDefault(value: Opaque<T> | T): void;
@@ -257,6 +257,7 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[] : T ext
     -readonly [P in keyof T]: Mutable<T[P]>;
 }) : T;
 export declare const schema: <T extends JSONSchema>(schema: T) => T;
+export declare const toSchema: <T>(options?: Partial<JSONSchema>) => JSONSchema;
 export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : T extends {
     asCell: true;
 } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>> : T extends {
