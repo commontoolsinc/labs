@@ -2,9 +2,8 @@ import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
-import { type DocImpl } from "./doc.ts";
 import { createCell, isCell } from "./cell.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink, LINK_V1_TAG } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
 import { toURI } from "./uri-utils.ts";
@@ -84,13 +83,14 @@ function resolveSchema(
  * For `required` objects and arrays assume {} and [] as default value.
  */
 function processDefaultValue(
-  doc: DocImpl<any>,
-  path: PropertyKey[] = [],
+  runtime: IRuntime,
+  tx: IStorageTransaction,
+  link: NormalizedFullLink,
   defaultValue: any,
-  schema?: JSONSchema,
   log?: ReactivityLog,
-  rootSchema: JSONSchema | undefined = schema,
 ): any {
+  const schema = link.schema;
+  const rootSchema = link.rootSchema ?? schema;
   if (!schema) return defaultValue;
 
   const resolvedSchema = resolveSchema(schema, rootSchema, true);
@@ -102,12 +102,12 @@ function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (!defaultValue && resolvedSchema?.default !== undefined) {
-      const newDoc = doc.runtime.documentMap.getDoc(resolvedSchema.default, {
+      const newDoc = runtime.documentMap.getDoc(resolvedSchema.default, {
         immutable: resolvedSchema.default,
-      }, doc.space);
+      }, link.space);
       newDoc.freeze("schema asCell immutable");
       return createCell(
-        doc.runtime,
+        runtime,
         {
           space: newDoc.space,
           id: toURI(newDoc.entityId),
@@ -120,12 +120,9 @@ function processDefaultValue(
       );
     } else {
       return createCell(
-        doc.runtime,
+        runtime,
         {
-          space: doc.space,
-          id: toURI(doc.entityId),
-          path: path.map(String),
-          type: "application/json",
+          ...link,
           schema: mergeDefaults(resolvedSchema, defaultValue),
           rootSchema,
         },
@@ -140,8 +137,8 @@ function processDefaultValue(
     );
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
-    return doc.runtime.getImmutableCell(
-      doc.space,
+    return runtime.getImmutableCell(
+      link.space,
       { $stream: true },
       resolvedSchema,
       log,
@@ -162,44 +159,40 @@ function processDefaultValue(
       ) {
         if (key in defaultValue) {
           result[key] = processDefaultValue(
-            doc,
-            [...path, key],
+            runtime,
+            tx,
+            { ...link, schema: propSchema, path: [...link.path, key] },
             defaultValue[key as keyof typeof defaultValue],
-            propSchema,
             log,
-            rootSchema,
           );
           processedKeys.add(key);
         } else if (propSchema.asCell) {
           // asCell are always created, it's their value that can be `undefined`
           result[key] = processDefaultValue(
-            doc,
-            [...path, key],
+            runtime,
+            tx,
+            { ...link, schema: propSchema, path: [...link.path, key] },
             undefined,
-            propSchema,
             log,
-            rootSchema,
           );
         } else if (propSchema.default !== undefined) {
           result[key] = processDefaultValue(
-            doc,
-            [...path, key],
+            runtime,
+            tx,
+            { ...link, schema: propSchema, path: [...link.path, key] },
             propSchema.default,
-            propSchema,
             log,
-            rootSchema,
           );
         } else if (
           resolvedSchema?.required?.includes(key) &&
           (propSchema.type === "object" || propSchema.type === "array")
         ) {
           result[key] = processDefaultValue(
-            doc,
-            [...path, key],
+            runtime,
+            tx,
+            { ...link, schema: propSchema, path: [...link.path, key] },
             propSchema.type === "object" ? {} : [],
-            propSchema,
             log,
-            rootSchema,
           );
         }
       }
@@ -216,12 +209,15 @@ function processDefaultValue(
         if (!processedKeys.has(key)) {
           processedKeys.add(key);
           result[key] = processDefaultValue(
-            doc,
-            [...path, key],
+            runtime,
+            tx,
+            {
+              ...link,
+              schema: additionalPropertiesSchema,
+              path: [...link.path, key],
+            },
             defaultValue[key as keyof typeof defaultValue],
-            additionalPropertiesSchema,
             log,
-            rootSchema,
           );
         }
       }
@@ -237,12 +233,15 @@ function processDefaultValue(
   ) {
     return defaultValue.map((item, i) =>
       processDefaultValue(
-        doc,
-        [...path, i],
+        runtime,
+        tx,
+        {
+          ...link,
+          schema: resolvedSchema.items,
+          path: [...link.path, String(i)],
+        },
         item,
-        resolvedSchema.items,
         log,
-        rootSchema,
       )
     );
   }
@@ -296,6 +295,13 @@ export function validateAndTransform(
   );
   const doc = resolvedRef.cell;
   const path = resolvedRef.path.map(String);
+
+  // Use schema from alias if provided and no explicit schema was set
+  if (!resolvedSchema && resolvedRef.schema) {
+    resolvedSchema = resolvedRef.schema;
+    rootSchema = resolvedRef.rootSchema || resolvedRef.schema;
+  }
+
   link = {
     ...link,
     id: toURI(doc.entityId),
@@ -303,12 +309,6 @@ export function validateAndTransform(
     schema: resolvedSchema,
     rootSchema,
   };
-
-  // Use schema from alias if provided and no explicit schema was set
-  if (!resolvedSchema && resolvedRef.schema) {
-    resolvedSchema = resolvedRef.schema;
-    rootSchema = resolvedRef.rootSchema || resolvedRef.schema;
-  }
 
   // Check if we've seen this exact cell/path/schema combination before
   const seenKey = JSON.stringify(link);
@@ -339,51 +339,62 @@ export function validateAndTransform(
     // Start with -1 so that the first iteration is for the empty path, i.e.
     // the top of the current doc is already a reference.
     for (let i = -1; i < path.length; i++) {
-      const value = doc.getAtPath(path.slice(0, i + 1));
-      if (isWriteRedirectLink(value)) {
-        throw new Error(
-          "Unexpected write redirect in path, should have been handled by resolvePath",
-        );
-      }
-      if (isAnyCellLink(value)) {
-        const parsedLink = parseLink(value, doc.asCell());
-        log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
-        const extraPath = [...path.slice(i + 1)];
-        const newPath = [...parsedLink.path, ...extraPath];
-        const cfc = doc.runtime.cfc;
-        let newSchema;
-        if (parsedLink.schema !== undefined) {
-          newSchema = cfc.getSchemaAtPath(
-            parsedLink.schema,
-            extraPath.map((key) => key.toString()),
-            rootSchema,
+      const readSubPath = (extraPath: string[]) => {
+        return tx.readValueOrThrow({
+          ...link,
+          path: ["value", ...path.slice(0, i + 1), ...extraPath],
+        });
+      };
+
+      // We're first checking for the deeper link paths, so that we're not
+      // reactive to other changes in the doc. If it looks like it could be a
+      // link, read the whole value, which might include siblings to the "/" and
+      // thus make the link invalid. In these cases, we do need to be ractive to
+      // all changes there.
+      if (
+        readSubPath(["/", LINK_V1_TAG]) ||
+        readSubPath(["cell", "/"]) ||
+        readSubPath(["$alias", "cell", "/"])
+      ) {
+        const value = readSubPath([]);
+
+        if (isWriteRedirectLink(value)) {
+          throw new Error(
+            "Unexpected write redirect in path, should have been handled by resolvePath",
           );
-        } else if (i === path.length - 1) {
-          // we don't have a schema provided directly for this cell link,
-          // but we can apply the one from our parent, since we are at
-          // the end of the path.
-          newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
         }
-        return createCell(
-          doc.runtime,
-          {
-            ...parsedLink,
-            path: newPath.map(String),
-            schema: newSchema,
-            rootSchema,
-          },
-          log,
-        );
+        if (isAnyCellLink(value)) {
+          const parsedLink = parseLink(value, link);
+          const extraPath = [...path.slice(i + 1)];
+          const newPath = [...parsedLink.path, ...extraPath];
+          const cfc = runtime.cfc;
+          let newSchema;
+          if (parsedLink.schema !== undefined) {
+            newSchema = cfc.getSchemaAtPath(
+              parsedLink.schema,
+              extraPath.map((key) => key.toString()),
+              rootSchema,
+            );
+          } else if (i === path.length - 1) {
+            // we don't have a schema provided directly for this cell link,
+            // but we can apply the one from our parent, since we are at
+            // the end of the path.
+            newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
+          }
+          return createCell(
+            runtime,
+            {
+              ...parsedLink,
+              path: newPath.map(String),
+              schema: newSchema,
+              rootSchema,
+            },
+            log,
+          );
+        }
       }
     }
-    return createCell(doc.runtime, {
-      space: doc.space,
-      id: toURI(doc.entityId),
-      path: path.map(String),
-      type: "application/json",
-      schema: resolvedSchema,
-      rootSchema,
-    }, log);
+    return createCell(runtime, link, log);
   }
 
   // If there is no schema, return as raw data via query result proxy
@@ -407,12 +418,11 @@ export function validateAndTransform(
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
     const result = processDefaultValue(
-      doc,
-      path,
+      runtime,
+      tx,
+      { ...link, schema: resolvedSchema },
       resolvedSchema.default,
-      resolvedSchema,
       log,
-      rootSchema,
     );
     seen.push([seenKey, result]);
     return result;
@@ -594,12 +604,11 @@ export function validateAndTransform(
         } else if (childSchema.default !== undefined) {
           // Process default value for missing properties that have defaults
           result[key] = processDefaultValue(
-            doc,
-            [...path, key],
+            runtime,
+            tx,
+            { ...link, path: [...path, key], schema: childSchema },
             childSchema.default,
-            childSchema,
             log,
-            rootSchema,
           );
         }
       }
@@ -660,12 +669,11 @@ export function validateAndTransform(
   // For primitive types, return as is
   if (value === undefined && resolvedSchema.default !== undefined) {
     const result = processDefaultValue(
-      doc,
-      path,
+      runtime,
+      tx,
+      { ...link, schema: resolvedSchema },
       resolvedSchema.default,
-      resolvedSchema,
       log,
-      rootSchema,
     );
     seen.push([seenKey, result]);
     return result;

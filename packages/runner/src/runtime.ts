@@ -421,18 +421,18 @@ export class Runtime implements IRuntime {
   }
 
   // Cell factory methods
-  getCell<T>(
-    space: MemorySpace,
-    cause: any,
-    schema?: JSONSchema,
-    log?: ReactivityLog,
-  ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     cause: any,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
+  getCell<T>(
+    space: MemorySpace,
+    cause: any,
+    schema?: JSONSchema,
+    log?: ReactivityLog,
+  ): Cell<T>;
   getCell(
     space: MemorySpace,
     cause: any,
