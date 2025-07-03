@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, toSchema } from "commontools";
+import { Cell, toSchema, JSONSchema } from "commontools";
 interface State {
     count: Cell<number>;
     name: Cell<string>;

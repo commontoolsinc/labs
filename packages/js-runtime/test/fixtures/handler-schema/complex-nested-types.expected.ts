@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, Cell, toSchema } from "commontools";
+import { handler, Cell, toSchema, JSONSchema } from "commontools";
 interface UserEvent {
     user: {
         name: string;

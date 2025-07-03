@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { addCommonToolsImport, hasCommonToolsImport } from "./imports.ts";
 
 /**
  * Transformer that converts TypeScript types to JSONSchema objects.
@@ -13,6 +14,7 @@ export function createSchemaTransformer(
 
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
+      let needsJSONSchemaImport = false;
 
       const visit: ts.Visitor = (node) => {
         // Look for toSchema<T>() calls
@@ -65,13 +67,25 @@ export function createSchemaTransformer(
             ),
           );
 
+          // Mark that we need JSONSchema import
+          if (!hasCommonToolsImport(sourceFile, "JSONSchema")) {
+            needsJSONSchemaImport = true;
+          }
+
           return satisfiesExpression;
         }
 
         return ts.visitEachChild(node, visit, context);
       };
 
-      return ts.visitNode(sourceFile, visit) as ts.SourceFile;
+      let result = ts.visitNode(sourceFile, visit) as ts.SourceFile;
+      
+      // Add JSONSchema import if needed
+      if (needsJSONSchemaImport) {
+        result = addCommonToolsImport(result, context.factory, "JSONSchema");
+      }
+      
+      return result;
     };
   };
 }
