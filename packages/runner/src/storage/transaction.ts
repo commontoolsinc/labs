@@ -89,7 +89,7 @@ class StorageTransaction implements IStorageTransaction {
   }
 
   write(address: IMemorySpaceAddress, value?: JSONValue) {
-    return write(this, address);
+    return write(this, address, value);
   }
 
   abort(reason?: unknown): Result<Unit, InactiveTransactionError> {
@@ -204,7 +204,8 @@ export const read = (
   if (error) {
     return { error };
   } else {
-    return space.read(address);
+    const { space: _, ...memoryAddress } = address;
+    return space.read(memoryAddress);
   }
 };
 
@@ -217,7 +218,8 @@ export const write = (
   if (error) {
     return { error };
   } else {
-    return space.write(address, value);
+    const { space: _, ...memoryAddress } = address;
+    return space.write(memoryAddress, value);
   }
 };
 
