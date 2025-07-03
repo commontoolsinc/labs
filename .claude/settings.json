@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(deno test:*)",
+      "Bash(deno task test:*)",
+      "Bash(find:*)",
+      "Bash(deno lint:*)",
+      "Bash(rg:*)"
+    ],
+    "deny": []
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/scripts/block-node.py"
+          }
+        ]
+      }
+    ]
+  }
+}

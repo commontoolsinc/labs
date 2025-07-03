@@ -16,3 +16,4 @@ packages/seeder/results
 .claude-prompt.tmp
 .pr-desc.tmp
 dist/
+.claude/settings.local.json
