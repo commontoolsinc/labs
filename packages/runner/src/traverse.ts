@@ -614,7 +614,10 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       if (!deepEqual(nextDoc.path, nextSelector!.path)) {
         throw new Error("New doc path doesn't match selector path");
       }
-      this.traverseWithSchemaContext(nextDoc, nextSelector!.schemaContext!);
+      return this.traverseWithSchemaContext(
+        nextDoc,
+        nextSelector!.schemaContext!,
+      );
     }
   }
 
@@ -664,7 +667,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       if (this.isValidType(schemaObj, "array")) {
         if (this.tracker.enter(doc.value)) {
           try {
-            this.traverseArrayWithSchema(doc, {
+            return this.traverseArrayWithSchema(doc, {
               schema: schemaObj,
               rootSchema: schemaContext.rootSchema,
             });
@@ -688,7 +691,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       } else if (this.isValidType(schemaObj, "object")) {
         if (this.tracker.enter(doc.value)) {
           try {
-            this.traverseObjectWithSchema(doc, {
+            return this.traverseObjectWithSchema(doc, {
               schema: schemaObj,
               rootSchema: schemaContext.rootSchema,
             });

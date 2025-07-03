@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import { refer } from "merkle-reference";
-import { SchemaContext } from "@commontools/runner";
+import { JSONSchema, SchemaContext } from "@commontools/runner";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Fact from "../fact.ts";
@@ -2010,6 +2010,108 @@ test(
     assertExists(
       getResultForDoc(result, space.did(), doc2),
       "doc2 should be in the result",
+    );
+  },
+);
+
+test(
+  "returns all entries from charm list",
+  DB,
+  async (session) => {
+    const charmSchema = {
+      type: "object",
+      properties: {
+        ["$NAME"]: { type: "string" },
+        ["$UI"]: { type: "object" },
+      },
+      required: ["$UI", "$NAME"],
+    } as const satisfies JSONSchema;
+
+    const charmListSchema = {
+      type: "array",
+      items: { ...charmSchema, asCell: true },
+    } as const satisfies JSONSchema;
+
+    const c1 = Fact.assert({
+      the,
+      of: doc1,
+      is: {
+        "value": { "$NAME": "test 1", "$UI": { "type": "vnode" } },
+      },
+    });
+
+    const c2 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "value": { "$NAME": "test 2", "$UI": { "type": "vnode" } },
+      },
+    });
+
+    const c_list = Fact.assert({
+      the,
+      of: doc3,
+      is: {
+        "value": [
+          {
+            "space": space.did(),
+            "cell": { "/": doc1.slice(3) },
+            "path": [],
+            "schema": charmSchema,
+          },
+          {
+            "space": space.did(),
+            "cell": { "/": doc2.slice(3) },
+            "path": [],
+            "schema": charmSchema,
+          },
+        ],
+      },
+    });
+
+    const tr1 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([c1, c2, c_list]),
+    });
+    const write1 = await session.transact(tr1);
+    assert(write1.ok);
+
+    const schemaSelector: SchemaSelector = {
+      [doc3]: {
+        [the]: {
+          _: {
+            path: [],
+            schemaContext: {
+              schema: charmListSchema,
+              rootSchema: charmListSchema,
+            },
+          },
+        },
+      },
+    };
+
+    const result = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: schemaSelector,
+      },
+      prf: [],
+    });
+
+    assertExists(
+      getResultForDoc(result, space.did(), doc1),
+      "doc1 should be in the result",
+    );
+    assertExists(
+      getResultForDoc(result, space.did(), doc2),
+      "doc2 should be in the result",
+    );
+    assertExists(
+      getResultForDoc(result, space.did(), doc3),
+      "doc3 should be in the result",
     );
   },
 );
