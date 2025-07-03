@@ -3,7 +3,9 @@ import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
   CharmConfig,
+  formatViewTree,
   generateSpaceMap,
+  getCharmView,
   inspectCharm,
   linkCharms,
   listCharms,
@@ -229,6 +231,33 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
 
     render(output);
   })
+  /* charm view */
+  .command("view", "Display the rendered view for a charm")
+  .usage(charmUsage)
+  .example(
+    `ct charm view ${EX_ID} ${EX_COMP_CHARM}`,
+    `Display the view for charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `ct charm view ${EX_ID} ${EX_URL}`,
+    `Display the view for charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--json", "Output raw JSON data")
+  .action(async (options) => {
+    const charmConfig = parseCharmOptions(options);
+    const view = await getCharmView(charmConfig);
+    if (options.json) {
+      render(view ?? null, { json: true });
+      return;
+    }
+    if (view) {
+      const tree = formatViewTree(view);
+      render(tree);
+    } else {
+      render("<no view data>");
+    }
+  })
   /* charm link */
   .command("link", "Link a field from one charm to another")
   .usage(spaceUsage)
@@ -299,7 +328,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .action(async (options) => {
     const spaceConfig = parseSpaceOptions(options);
     const format = options.format === "dot" ? MapFormat.DOT : MapFormat.ASCII;
-    
+
     const map = await generateSpaceMap(spaceConfig, format);
     render(map);
   });
