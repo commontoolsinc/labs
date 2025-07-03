@@ -69,25 +69,7 @@ export interface OutlineUIState {
   readonly selectedMentionIndex: number;
 }
 
-/**
- * Legacy interface - keeping for backward compatibility during transition
- * @deprecated Use Node + Block structure instead
- */
-export interface OutlineNode {
-  id: string;
-  content: string;
-  children: OutlineNode[];
-  collapsed: boolean;
-  level: number;
-}
-
-/**
- * Result type for tree operations that may fail
- */
-export interface TreeOperationResult<T = OutlineNode[]> {
-  success: boolean;
-  data: T;
-}
+// Legacy types removed - using Tree/Node/Block structure exclusively
 
 /**
  * Context object passed to keyboard commands
@@ -144,12 +126,4 @@ export interface NodeCreationOptions {
   readonly children?: readonly Node[];
 }
 
-/**
- * Legacy node creation options - for backward compatibility
- * @deprecated Use BlockCreationOptions + NodeCreationOptions instead
- */
-export interface LegacyNodeCreationOptions {
-  content: string;
-  level: number;
-  id?: string;
-}
+// LegacyNodeCreationOptions removed

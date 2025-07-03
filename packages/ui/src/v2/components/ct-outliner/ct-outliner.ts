@@ -10,15 +10,15 @@ import type {
   KeyboardContext,
   EditingKeyboardContext,
   MentionableItem,
-  LegacyNodeCreationOptions,
-  OutlineNode,
+  // LegacyNodeCreationOptions removed
+  // OutlineNode removed - using Tree structure
   Tree,
   Node as OutlineTreeNode,
   Block,
 } from "./types.ts";
 // TreeOperations removed - using BlockOperations exclusively
 import { executeKeyboardCommand, executeEditingKeyboardCommand } from "./keyboard-commands.ts";
-import { EditingOperations } from "./editing-operations.ts";
+// EditingOperations removed - using direct state management
 // MigrationBridge removed - working directly with Tree
 import { BlockOperations } from "./block-operations.ts";
 
@@ -168,7 +168,7 @@ export class CTOutliner extends BaseElement {
       editingNodeId: this.editingNodeId,
       editingContent: this.editingContent,
       // createNode method removed
-      nodesToMarkdown: (nodes: OutlineNode[]) => this.nodesToMarkdown(nodes),
+      // nodesToMarkdown removed - use BlockOperations.toMarkdown(tree)
       emitChange: () => this.emitChange(),
       startEditing: (nodeId: string) => this.startEditing(nodeId),
       handleKeyDown: (event: KeyboardEvent) => this.handleKeyDown(event),
@@ -528,20 +528,7 @@ export class CTOutliner extends BaseElement {
 
   // Legacy parseMarkdown method removed - using parseMarkdownToTree directly
 
-  private nodesToMarkdown(nodes: OutlineNode[], baseLevel = 0): string {
-    return nodes
-      .map((node) => {
-        const indent = "  ".repeat(node.level);
-        const block = this.tree.blocks.find(b => b.id === node.id);
-        const content = block?.body || "";
-        const line = `${indent}- ${content}`;
-        const childLines = node.children.length > 0
-          ? "\n" + this.nodesToMarkdown(node.children, node.level + 1)
-          : "";
-        return line + childLines;
-      })
-      .join("\n");
-  }
+  // nodesToMarkdown method removed - using BlockOperations.toMarkdown directly
 
   findNode(id: string): OutlineTreeNode | null {
     return BlockOperations.findNode(this.tree.root, id);
@@ -617,11 +604,10 @@ export class CTOutliner extends BaseElement {
     // Save node ID for focus before clearing editing state
     const nodeId = this.editingNodeId;
 
-    // Pure data transformation - clear editing state
-    const clearState = EditingOperations.clearEditingState();
-    this.editingNodeId = clearState.editingNodeId;
-    this.editingContent = clearState.editingContent;
-    this.showingMentions = clearState.showingMentions;
+    // Clear editing state
+    this.editingNodeId = null;
+    this.editingContent = "";
+    this.showingMentions = false;
 
     // Maintain focus on the node we just edited
     this.focusedNodeId = nodeId;

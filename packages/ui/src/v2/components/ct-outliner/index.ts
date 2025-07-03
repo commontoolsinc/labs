@@ -7,19 +7,15 @@ export { CTOutliner };
 export type {
   CharmReference,
   MentionableItem,
-  OutlineNode,
-  OutlineUIState,
   KeyboardContext,
   KeyboardCommand,
   EditingState,
-  NodeCreationOptions,
-  LegacyNodeCreationOptions,
-  TreeOperationResult,
   Tree,
   Node,
   Block,
   Attachment,
-  BlockCreationOptions
+  BlockCreationOptions,
+  NodeCreationOptions
 } from "./types.ts";
 export { BlockOperations } from "./block-operations.ts";
 // TreeOperations and MigrationBridge removed - using BlockOperations exclusively
