@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, toSchema } from "commontools";
+import { handler, toSchema, JSONSchema } from "commontools";
 interface CounterEvent {
     increment: number;
 }
