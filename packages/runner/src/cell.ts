@@ -380,12 +380,10 @@ function createRegularCell<T>(
     get: () => {
       const tx = runtime.edit();
       const value = validateAndTransform(
+        runtime,
         tx,
-        doc,
-        path,
-        schema,
+        link,
         log,
-        rootSchema,
       );
       tx.commit();
       if (log) appendTxToReactivityLog(log, tx, runtime);
@@ -518,7 +516,7 @@ function createRegularCell<T>(
       ),
     withLog: (newLog: ReactivityLog) => createCell(runtime, link, newLog),
     sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, doc, path, schema, rootSchema),
+      subscribeToReferencedDocs(callback, runtime, link),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsLegacyCellLink: (): LegacyDocCellLink => {
@@ -603,10 +601,8 @@ function createRegularCell<T>(
 
 function subscribeToReferencedDocs<T>(
   callback: (value: T) => Cancel | undefined,
-  doc: DocImpl<any>,
-  path: PropertyKey[],
-  schema: JSONSchema | undefined,
-  rootSchema: JSONSchema | undefined,
+  runtime: IRuntime,
+  link: NormalizedFullLink,
 ): Cancel {
   const initialLog = {
     reads: [],
@@ -614,26 +610,24 @@ function subscribeToReferencedDocs<T>(
   } satisfies ReactivityLog;
 
   // Get the value once to determine all the docs that need to be subscribed to.
-  const tx = doc.runtime.edit();
+  const tx = runtime.edit();
   const value = validateAndTransform(
+    runtime,
     tx,
-    doc,
-    path,
-    schema,
+    link,
     initialLog,
-    rootSchema,
   ) as T;
   tx.commit();
-  appendTxToReactivityLog(initialLog, tx, doc.runtime);
+  appendTxToReactivityLog(initialLog, tx, runtime);
 
   // Call the callback once with initial value if requested.
   let cleanup: Cancel | undefined = callback(value);
 
   // Subscribe to the docs that are read (via logs), call callback on next change.
-  if (!doc.runtime) {
+  if (!runtime) {
     throw new Error("No runtime available for subscribe");
   }
-  const cancel = doc.runtime.scheduler.subscribe((log) => {
+  const cancel = runtime.scheduler.subscribe((log) => {
     const newLog = {
       reads: [],
       writes: [],
@@ -641,14 +635,12 @@ function subscribeToReferencedDocs<T>(
 
     if (isCancel(cleanup)) cleanup();
 
-    const tx = doc.runtime.edit();
+    const tx = runtime.edit();
     const newValue = validateAndTransform(
+      runtime,
       tx,
-      doc,
-      path,
-      schema,
+      link,
       newLog,
-      rootSchema,
     ) as T;
 
     // Copy reads to log _before_ calling the callback, as we're only interested
@@ -656,7 +648,7 @@ function subscribeToReferencedDocs<T>(
     // read. The callback is responsible for calling sink on those cells if it
     // wants to stay updated.
     log.reads.push(...newLog.reads);
-    appendTxToReactivityLog(log, tx, doc.runtime);
+    appendTxToReactivityLog(log, tx, runtime);
     cleanup = callback(newValue);
     tx.commit();
   }, initialLog);

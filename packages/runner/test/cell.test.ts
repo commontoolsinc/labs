@@ -11,7 +11,8 @@ import { addCommonIDfromObjectID } from "../src/data-updating.ts";
 import { isLegacyCellLink } from "../src/link-utils.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { areLinksSame } from "../src/link-utils.ts";
+import { areLinksSame, isAnyCellLink, parseLink } from "../src/link-utils.ts";
+import { areNormalizedLinksSame } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1541,30 +1542,31 @@ describe("asCell with schema", () => {
   });
 
   it("should transparently update ids when context changes", () => {
-    const schema = {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          name: { type: "string" },
-          nested: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { id: { type: "string" }, value: { type: "number" } },
+    const testCell = runtime.getCell<any>(
+      space,
+      "should transparently update ids when context changes",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            nested: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  value: { type: "number" },
+                },
+              },
             },
           },
         },
-      },
-    } as const satisfies JSONSchema;
-
-    const testDoc = runtime.getCell<any>(
-      space,
-      "should transparently update ids when context changes",
+      } as const satisfies JSONSchema,
     );
-    testDoc.set(undefined);
-    const testCell = testDoc.asSchema(schema);
+    testCell.set(undefined);
 
     const initialData = [
       {
@@ -1589,12 +1591,19 @@ describe("asCell with schema", () => {
     testCell.set(initialDataCopy);
     popFrame(frame1);
 
-    expect(isLegacyCellLink(testDoc.getRaw()[0])).toBe(true);
-    expect(isLegacyCellLink(testDoc.getRaw()[1])).toBe(true);
-    expect(testDoc.getRaw()[0].cell.get().name).toEqual("First Item");
-    expect(testDoc.getRaw()[1].cell.get().name).toEqual("Second Item");
+    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(testCell.get()[0].name).toEqual("First Item");
+    expect(testCell.get()[1].name).toEqual("Second Item");
+    expect(testCell.key("0").key("nested").key("0").key("id").get()).toEqual(
+      "nested1",
+    );
+    expect(testCell.get()[0].nested[0].id).toEqual("nested1");
+    expect(testCell.get()[0].nested[1].id).toEqual("nested2");
+    expect(testCell.get()[1].nested[0].id).toEqual("nested1");
+    expect(testCell.get()[1].nested[1].id).toEqual("nested2");
 
-    const docFromContext1 = testDoc.getRaw()[0].cell;
+    const linkFromContext1 = parseLink(testCell.getRaw()[0], testCell)!;
 
     const returnedData = testCell.get();
     addCommonIDfromObjectID(returnedData);
@@ -1607,16 +1616,18 @@ describe("asCell with schema", () => {
     testCell.set(returnedData);
     popFrame(frame2);
 
-    expect(isLegacyCellLink(testDoc.getRaw()[0])).toBe(true);
-    expect(isLegacyCellLink(testDoc.getRaw()[1])).toBe(true);
-    expect(testDoc.getRaw()[0].cell.get().name).toEqual("First Item");
-    expect(testDoc.getRaw()[1].cell.get().name).toEqual("Second Item");
+    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(testCell.get()[0].name).toEqual("First Item");
+    expect(testCell.get()[1].name).toEqual("Second Item");
 
-    // Let's make sure we got a different doc with the different context
-    expect(testDoc.getRaw()[0].cell).not.toBe(docFromContext1);
-    expect(JSON.stringify(testDoc.getRaw()[0].cell.entityId)).not.toBe(
-      JSON.stringify(docFromContext1.entityId),
-    );
+    // Let's make sure we got a different ids with the different context
+    expect(
+      areNormalizedLinksSame(
+        parseLink(testCell.getRaw()[0], testCell)!,
+        linkFromContext1,
+      ),
+    ).toBe(false);
 
     expect(testCell.get()).toEqual(initialData);
   });

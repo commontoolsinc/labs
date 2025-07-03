@@ -9,6 +9,8 @@ import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
 import { toURI } from "./uri-utils.ts";
 import { type IStorageTransaction } from "./storage/interface.ts";
+import { type IRuntime } from "./runtime.ts";
+import { type NormalizedFullLink } from "./link-utils.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -271,36 +273,36 @@ function mergeDefaults(
 }
 
 export function validateAndTransform(
+  runtime: IRuntime,
   tx: IStorageTransaction,
-  doc: DocImpl<any>,
-  path: PropertyKey[] = [],
-  schema?: JSONSchema,
+  link: NormalizedFullLink,
   log?: ReactivityLog,
-  rootSchema: JSONSchema | undefined = schema,
-  seen: Array<
-    {
-      cell: DocImpl<any>;
-      path: PropertyKey[];
-      schema?: JSONSchema;
-      rootSchema?: JSONSchema;
-      value: any;
-    }
-  > = [],
+  seen: Array<[string, any]> = [],
 ): any {
+  // Reconstruct doc, path, schema, rootSchema from link and runtime
+  const schema = link.schema;
+  let rootSchema = link.rootSchema ?? schema;
   let resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
   const resolvedRef = resolveLinkToWriteRedirect(
-    doc,
-    path,
+    runtime.documentMap.getDocByEntityId(link.space, link.id),
+    link.path,
     log,
     resolvedSchema,
     rootSchema,
   );
-  doc = resolvedRef.cell;
-  path = resolvedRef.path;
+  const doc = resolvedRef.cell;
+  const path = resolvedRef.path.map(String);
+  link = {
+    ...link,
+    id: toURI(doc.entityId),
+    path: path,
+    schema: resolvedSchema,
+    rootSchema,
+  };
 
   // Use schema from alias if provided and no explicit schema was set
   if (!resolvedSchema && resolvedRef.schema) {
@@ -309,16 +311,10 @@ export function validateAndTransform(
   }
 
   // Check if we've seen this exact cell/path/schema combination before
-  const seenEntry = seen.find(
-    (entry) =>
-      JSON.stringify(entry.cell) === JSON.stringify(doc) &&
-      entry.path.length === path.length &&
-      entry.path.every((p, i) => p === path[i]) &&
-      JSON.stringify(entry.schema) === JSON.stringify(resolvedSchema) &&
-      JSON.stringify(entry.rootSchema) === JSON.stringify(rootSchema),
-  );
+  const seenKey = JSON.stringify(link);
+  const seenEntry = seen.find((entry) => entry[0] === seenKey);
   if (seenEntry) {
-    return seenEntry.value;
+    return seenEntry[1];
   }
 
   // If this should be a reference, return as a Cell of resolvedSchema
@@ -350,15 +346,15 @@ export function validateAndTransform(
         );
       }
       if (isAnyCellLink(value)) {
-        const link = parseLink(value, doc.asCell());
+        const parsedLink = parseLink(value, doc.asCell());
         log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         const extraPath = [...path.slice(i + 1)];
-        const newPath = [...link.path, ...extraPath];
+        const newPath = [...parsedLink.path, ...extraPath];
         const cfc = doc.runtime.cfc;
         let newSchema;
-        if (link.schema !== undefined) {
+        if (parsedLink.schema !== undefined) {
           newSchema = cfc.getSchemaAtPath(
-            link.schema,
+            parsedLink.schema,
             extraPath.map((key) => key.toString()),
             rootSchema,
           );
@@ -371,7 +367,7 @@ export function validateAndTransform(
         return createCell(
           doc.runtime,
           {
-            ...link,
+            ...parsedLink,
             path: newPath.map(String),
             schema: newSchema,
             rootSchema,
@@ -418,13 +414,7 @@ export function validateAndTransform(
       log,
       rootSchema,
     );
-    seen.push({
-      cell: doc,
-      path,
-      schema: resolvedSchema,
-      rootSchema,
-      value: result,
-    });
+    seen.push([seenKey, result]);
     return result;
   }
 
@@ -446,12 +436,10 @@ export function validateAndTransform(
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1) {
         return validateAndTransform(
+          runtime,
           tx,
-          doc,
-          path,
-          arrayOptions[0],
+          { ...link, schema: arrayOptions[0] },
           log,
-          rootSchema,
           seen,
         );
       }
@@ -463,14 +451,11 @@ export function validateAndTransform(
           merged.push(...option.items.anyOf);
         } else if (option.items) merged.push(option.items);
       }
-
       return validateAndTransform(
+        runtime,
         tx,
-        doc,
-        path,
-        { type: "array", items: { anyOf: merged } },
+        { ...link, schema: { type: "array", items: { anyOf: merged } } },
         log,
-        rootSchema,
         seen,
       );
     } else if (isRecord(value)) {
@@ -487,11 +472,8 @@ export function validateAndTransform(
           .filter((option) => option.asCell)
           .map((option) =>
             (option.anyOf ?? [option]).map((branch) => {
-              const {
-                asCell: _filteredOut,
-                asStream: _filteredOut2,
-                ...rest
-              } = branch as any;
+              const { asCell: _filteredOut, asStream: _filteredOut2, ...rest } =
+                branch as any;
               return rest;
             })
           )
@@ -509,26 +491,17 @@ export function validateAndTransform(
           return {
             schema: option,
             result: validateAndTransform(
+              runtime,
               tx,
-              doc,
-              path,
-              option,
+              { ...link, schema: option },
               extraLog,
-              rootSchema,
               candidateSeen,
             ),
             extraLog,
           };
         });
-
       if (candidates.length === 0) {
-        seen.push({
-          cell: doc,
-          path,
-          schema: resolvedSchema,
-          rootSchema,
-          value: undefined,
-        });
+        seen.push([seenKey, undefined]);
         return undefined;
       }
 
@@ -550,13 +523,7 @@ export function validateAndTransform(
         }
       }
       log?.reads.push(...extraReads);
-      seen.push({
-        cell: doc,
-        path,
-        schema: resolvedSchema,
-        rootSchema,
-        value: merged,
-      });
+      seen.push([seenKey, merged]);
       return merged;
     } else {
       // For primitive types, try each option that matches the type
@@ -571,17 +538,14 @@ export function validateAndTransform(
           return {
             schema: option,
             result: validateAndTransform(
+              runtime,
               tx,
-              doc,
-              path,
-              option,
+              { ...link, schema: option },
               log,
-              rootSchema,
               candidateSeen,
             ),
           };
         });
-
       if (candidates.length === 0) return undefined;
       if (candidates.length === 1) return candidates[0].result;
 
@@ -589,12 +553,10 @@ export function validateAndTransform(
       const anyTypeOption = options.find((option) => option.type === undefined);
       if (anyTypeOption) {
         return validateAndTransform(
+          runtime,
           tx,
-          doc,
-          path,
-          anyTypeOption,
+          { ...link, schema: anyTypeOption },
           log,
-          rootSchema,
           seen,
         );
       } else return candidates[0].result;
@@ -605,14 +567,9 @@ export function validateAndTransform(
     if (!isRecord(value)) value = {};
 
     const result: Record<string, any> = {};
+
     // Add to seen before processing children to handle self-referential structures
-    seen.push({
-      cell: doc,
-      path,
-      schema: resolvedSchema,
-      rootSchema,
-      value: result,
-    });
+    seen.push([seenKey, result]);
 
     // Handle explicitly defined properties
     const cfc = new ContextualFlowControl();
@@ -628,12 +585,10 @@ export function validateAndTransform(
         }
         if (childSchema.asCell || childSchema.asStream || key in value) {
           result[key] = validateAndTransform(
+            runtime,
             tx,
-            doc,
-            [...path, key],
-            childSchema,
+            { ...link, path: [...path, key], schema: childSchema },
             log,
-            rootSchema,
             seen,
           );
         } else if (childSchema.default !== undefined) {
@@ -663,12 +618,10 @@ export function validateAndTransform(
           continue;
         }
         result[key] = validateAndTransform(
+          runtime,
           tx,
-          doc,
-          [...path, key],
-          childSchema,
+          { ...link, path: [...path, key], schema: childSchema },
           log,
-          rootSchema,
           seen,
         );
       }
@@ -677,35 +630,27 @@ export function validateAndTransform(
     return result;
   }
 
-  if (resolvedSchema.type === "array" && resolvedSchema.items) {
+  if (resolvedSchema.type === "array") {
     if (!Array.isArray(value)) {
       const result: any[] = [];
-      seen.push({
-        cell: doc,
-        path,
-        schema: resolvedSchema,
-        rootSchema,
-        value: result,
-      });
+      seen.push([seenKey, result]);
       return result;
     }
     const result: any[] = [];
-    seen.push({
-      cell: doc,
-      path,
-      schema: resolvedSchema,
-      rootSchema,
-      value: result,
-    });
+    seen.push([seenKey, result]);
+
     // Now process elements after adding the array to seen
     for (let i = 0; i < value.length; i++) {
       result[i] = validateAndTransform(
+        runtime,
         tx,
-        doc,
-        [...path, i],
-        resolvedSchema.items!,
+        {
+          ...link,
+          path: [...path, String(i)],
+          // TOOD(seefeld): Should be `false` instead of `{}`
+          schema: resolvedSchema.items ?? {},
+        },
         log,
-        rootSchema,
         seen,
       );
     }
@@ -722,17 +667,11 @@ export function validateAndTransform(
       log,
       rootSchema,
     );
-    seen.push({
-      cell: doc,
-      path,
-      schema: resolvedSchema,
-      rootSchema,
-      value: result,
-    });
+    seen.push([seenKey, result]);
     return result;
   }
 
   // Add the current value to seen before returning
-  seen.push({ cell: doc, path, schema: resolvedSchema, rootSchema, value });
+  seen.push([seenKey, value]);
   return value;
 }
