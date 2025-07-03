@@ -10,6 +10,17 @@
     "test": "echo 'No tests to run.'"
   },
   "imports": {
-    "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1"
+    "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1",
+    "marked": "npm:marked@^4.0.0",
+    "codemirror": "npm:codemirror@^6.0.1",
+    "@codemirror/state": "npm:@codemirror/state@^6.5.1",
+    "@codemirror/view": "npm:@codemirror/view@^6.26.0",
+    "@codemirror/language": "npm:@codemirror/language@^6.10.8",
+    "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
+    "@codemirror/lang-markdown": "npm:@codemirror/lang-markdown@^6.3.0",
+    "@codemirror/lang-css": "npm:@codemirror/lang-css@^6.3.1",
+    "@codemirror/lang-html": "npm:@codemirror/lang-html@^6.4.9",
+    "@codemirror/lang-json": "npm:@codemirror/lang-json@^6.0.1",
+    "@codemirror/theme-one-dark": "npm:@codemirror/theme-one-dark@^6.1.2"
   }
 }

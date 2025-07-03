@@ -9,23 +9,38 @@ import type { RecipeEnvironment } from "./builder/env.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
+  IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell } from "./cell.ts";
-import { type JSONCellLink, type LegacyCellLink } from "./sigil-types.ts";
+import { type JSONCellLink, type LegacyDocCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
 import { type EntityId, getEntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
-import type { Harness } from "./harness/harness.ts";
+import type { Harness, RuntimeProgram } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
-import { isCellLink, type NormalizedLink } from "./link-utils.ts";
+import { StorageTransaction } from "./storage/transaction-shim.ts";
+import {
+  type CellLink,
+  isLegacyCellLink,
+  isLink,
+  isNormalizedFullLink,
+  type NormalizedFullLink,
+  type NormalizedLink,
+  parseLink,
+} from "./link-utils.ts";
 
-export type { IStorageManager, IStorageProvider, MemorySpace };
+export type {
+  IExtendedStorageTransaction,
+  IStorageManager,
+  IStorageProvider,
+  MemorySpace,
+};
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -41,6 +56,8 @@ export type ConsoleHandler = (
 ) => any[];
 export type ErrorHandler = (error: ErrorWithContext) => void;
 
+export type NavigateCallback = (target: Cell<any>) => void;
+
 export interface CharmMetadata {
   name?: string;
   description?: string;
@@ -54,6 +71,7 @@ export interface RuntimeOptions {
   errorHandlers?: ErrorHandler[];
   blobbyServerUrl: string;
   recipeEnvironment?: RecipeEnvironment;
+  navigateCallback?: NavigateCallback;
   debug?: boolean;
 }
 
@@ -67,10 +85,14 @@ export interface IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
+
+  // Storage transaction method
+  edit(): IExtendedStorageTransaction;
 
   // Cell factory methods
   getCell<T>(
@@ -100,12 +122,12 @@ export interface IRuntime {
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink<T>(
-    cellLink: LegacyCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: LegacyCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
@@ -159,8 +181,8 @@ export interface IScheduler {
   unschedule(action: Action): void;
   onConsole(fn: ConsoleHandler): void;
   onError(fn: ErrorHandler): void;
-  queueEvent(eventRef: LegacyCellLink, event: any): void;
-  addEventHandler(handler: EventHandler, ref: LegacyCellLink): Cancel;
+  queueEvent(eventRef: NormalizedFullLink, event: any): void;
+  addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel;
   runningPromise: Promise<unknown> | undefined;
 }
 
@@ -178,18 +200,26 @@ export interface IStorage {
 export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
-  generateRecipeId(recipe: any, src?: string | Program): string;
+  registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
   loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
-  compileRecipe(input: string | Program): Promise<Recipe>;
+  compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
-  registerRecipe(
+  saveRecipe(
     params: {
       recipeId: string;
       space: MemorySpace;
-      recipe: Recipe | Module;
-      recipeMeta: RecipeMeta;
+      recipe?: Recipe | Module;
+      recipeMeta?: RecipeMeta;
     },
-  ): Promise<boolean>;
+  ): boolean;
+  saveAndSyncRecipe(
+    params: {
+      recipeId: string;
+      space: MemorySpace;
+      recipe?: Recipe | Module;
+      recipeMeta?: RecipeMeta;
+    },
+  ): Promise<void>;
 }
 
 export interface IModuleRegistry {
@@ -258,7 +288,7 @@ import { ModuleRegistry } from "./module.ts";
 import { DocumentMap } from "./doc-map.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-import { Program } from "@commontools/js-runtime";
+import { isCell } from "./cell.ts";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
@@ -290,6 +320,7 @@ export class Runtime implements IRuntime {
   readonly harness: Harness;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
+  readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
 
   constructor(options: RuntimeOptions) {
@@ -327,6 +358,9 @@ export class Runtime implements IRuntime {
       "/api/storage/blobby",
       options.blobbyServerUrl,
     ).toString();
+
+    // Set the navigate callback
+    this.navigateCallback = options.navigateCallback;
 
     // Handle recipe environment configuration
     if (options.recipeEnvironment) {
@@ -377,19 +411,28 @@ export class Runtime implements IRuntime {
     // Removed setCurrentRuntime call - no longer using singleton pattern
   }
 
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IExtendedStorageTransaction {
+    return new StorageTransaction(this);
+  }
+
   // Cell factory methods
-  getCell<T>(
-    space: MemorySpace,
-    cause: any,
-    schema?: JSONSchema,
-    log?: ReactivityLog,
-  ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
     space: MemorySpace,
     cause: any,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
+  getCell<T>(
+    space: MemorySpace,
+    cause: any,
+    schema?: JSONSchema,
+    log?: ReactivityLog,
+  ): Cell<T>;
   getCell(
     space: MemorySpace,
     cause: any,
@@ -427,52 +470,65 @@ export class Runtime implements IRuntime {
   }
 
   getCellFromLink<T>(
-    cellLink: LegacyCellLink | JSONCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    cellLink: LegacyCellLink | JSONCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema: S,
     log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink(
-    cellLink: LegacyCellLink | NormalizedLink,
+    cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
     log?: ReactivityLog,
   ): Cell<any> {
     let doc;
 
-    if (isCellLink(cellLink)) {
+    if (isLegacyCellLink(cellLink)) {
+      const link = cellLink as LegacyDocCellLink;
       if (isDoc(cellLink.cell)) {
         doc = cellLink.cell;
-      } else if (cellLink.space) {
+      } else if (link.space) {
         doc = this.documentMap.getDocByEntityId(
-          cellLink.space as MemorySpace,
+          link.space,
           getEntityId(cellLink.cell)!,
           true,
         )!;
         if (!doc) {
-          throw new Error(`Can't find ${cellLink.space}/${cellLink.cell}!`);
+          throw new Error(`Can't find ${link.space}/${link.cell}!`);
         }
       } else {
         throw new Error("Cell link has no space");
       }
+
+      // If we aren't passed a schema, use the one in the cellLink
+      return doc.asCell(
+        link.path,
+        log,
+        schema ?? link.schema,
+        schema ? undefined : link.rootSchema,
+      );
     } else {
+      const link = isLink(cellLink)
+        ? parseLink(cellLink)
+        : isNormalizedFullLink(cellLink)
+        ? cellLink
+        : undefined;
+      if (!link) throw new Error("Invalid cell link");
       doc = this.documentMap.getDocByEntityId(
-        cellLink.space as MemorySpace,
-        getEntityId((cellLink as NormalizedLink).id)!,
+        link.space as MemorySpace,
+        getEntityId(link.id)!,
         true,
       )!;
+      return doc.asCell(
+        link.path,
+        log,
+        schema ?? link.schema,
+        schema ? undefined : link.rootSchema,
+      );
     }
-
-    // If we aren't passed a schema, use the one in the cellLink
-    return doc.asCell(
-      cellLink.path,
-      log,
-      schema ?? cellLink.schema,
-      schema ? undefined : cellLink.rootSchema,
-    );
   }
 
   getImmutableCell<T>(
@@ -524,7 +580,15 @@ export class Runtime implements IRuntime {
     argument: T,
     resultCell: DocImpl<R> | Cell<R>,
   ): DocImpl<R> | Cell<R> {
-    return this.runner.run(recipeOrModule, argument, resultCell as any);
+    if (isCell(resultCell)) {
+      return this.runner.run<T, R>(recipeOrModule, argument, resultCell);
+    } else {
+      return this.runner.run<T, R>(
+        recipeOrModule,
+        argument,
+        resultCell as DocImpl<R>,
+      );
+    }
   }
 
   runSynced(

@@ -2,7 +2,7 @@ import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
 import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
-import { type LegacyCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
@@ -16,6 +16,10 @@ import type {
   IScheduler,
   MemorySpace,
 } from "./runtime.ts";
+import {
+  areNormalizedLinksSame,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -30,16 +34,16 @@ export type EventHandler = (event: any) => any;
  * dependencies and to topologically sort pending actions before executing them.
  */
 export type ReactivityLog = {
-  reads: LegacyCellLink[];
-  writes: LegacyCellLink[];
+  reads: LegacyDocCellLink[];
+  writes: LegacyDocCellLink[];
 };
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
-  private eventQueue: (() => void)[] = [];
-  private eventHandlers: [LegacyCellLink, EventHandler][] = [];
+  private eventQueue: (() => any)[] = [];
+  private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   private dirty = new Set<DocImpl<any>>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel[]>();
@@ -116,7 +120,7 @@ export class Scheduler implements IScheduler {
     this.cancels.set(
       action,
       reads.map(({ cell: doc, path }) =>
-        doc.updates((_newValue: any, changedPath: PropertyKey[]) => {
+        doc.updates((_newValue: any, changedPath: readonly PropertyKey[]) => {
           if (pathAffected(changedPath, path)) {
             this.dirty.add(doc);
             this.queueExecution();
@@ -179,20 +183,16 @@ export class Scheduler implements IScheduler {
     });
   }
 
-  queueEvent(eventRef: LegacyCellLink, event: any): void {
-    for (const [ref, handler] of this.eventHandlers) {
-      if (
-        ref.cell === eventRef.cell &&
-        ref.path.length === eventRef.path.length &&
-        ref.path.every((p, i) => p === eventRef.path[i])
-      ) {
+  queueEvent(eventLink: NormalizedFullLink, event: any): void {
+    for (const [link, handler] of this.eventHandlers) {
+      if (areNormalizedLinksSame(link, eventLink)) {
         this.queueExecution();
         this.eventQueue.push(() => handler(event));
       }
     }
   }
 
-  addEventHandler(handler: EventHandler, ref: LegacyCellLink): Cancel {
+  addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel {
     this.eventHandlers.push([ref, handler]);
     return () => {
       const index = this.eventHandlers.findIndex(([r, h]) =>
@@ -219,7 +219,7 @@ export class Scheduler implements IScheduler {
   private setDependencies(
     action: Action,
     log: ReactivityLog,
-  ): LegacyCellLink[] {
+  ): LegacyDocCellLink[] {
     const reads = compactifyPaths(log.reads);
     const writes = compactifyPaths(log.writes);
     this.dependencies.set(action, { reads, writes });
@@ -227,11 +227,6 @@ export class Scheduler implements IScheduler {
   }
 
   private handleError(error: Error, action: any) {
-    // Since most errors come from `eval`ed code, let's fix the stack trace.
-    if (error.stack) {
-      error.stack = this.runtime.harness.mapStackTrace(error.stack);
-    }
-
     const { charmId, recipeId, space } = getCharmMetadataFromFrame() ?? {};
 
     const errorWithContext = error as ErrorWithContext;
@@ -261,7 +256,9 @@ export class Scheduler implements IScheduler {
     const handler = this.eventQueue.shift();
     if (handler) {
       try {
-        this.runningPromise = Promise.resolve(handler()).catch((error) => {
+        this.runningPromise = Promise.resolve(
+          this.runtime.harness.invoke(handler),
+        ).catch((error) => {
           this.handleError(error as Error, handler);
         });
         await this.runningPromise;
@@ -426,7 +423,9 @@ function topologicalSort(
 }
 
 // Remove longer paths already covered by shorter paths
-export function compactifyPaths(entries: LegacyCellLink[]): LegacyCellLink[] {
+export function compactifyPaths(
+  entries: LegacyDocCellLink[],
+): LegacyDocCellLink[] {
   // First group by doc via a Map
   const docToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
   for (const { cell: doc, path } of entries) {
@@ -437,7 +436,7 @@ export function compactifyPaths(entries: LegacyCellLink[]): LegacyCellLink[] {
 
   // For each cell, sort the paths by length, then only return those that don't
   // have a prefix earlier in the list
-  const result: LegacyCellLink[] = [];
+  const result: LegacyDocCellLink[] = [];
   for (const [doc, paths] of docToPaths.entries()) {
     paths.sort((a, b) => a.length - b.length);
     for (let i = 0; i < paths.length; i++) {
@@ -455,7 +454,10 @@ export function compactifyPaths(entries: LegacyCellLink[]): LegacyCellLink[] {
   return result;
 }
 
-function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+function pathAffected(
+  changedPath: readonly PropertyKey[],
+  path: readonly PropertyKey[],
+) {
   changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
   return (
     (changedPath.length <= path.length &&

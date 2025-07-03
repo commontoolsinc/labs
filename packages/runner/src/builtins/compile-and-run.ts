@@ -1,9 +1,11 @@
-import { type DocImpl } from "../doc.ts";
+import { type BuiltInCompileAndRunParams } from "commontools";
+import { refer } from "merkle-reference/json";
+import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import { refer } from "merkle-reference";
 import { type ReactivityLog } from "../scheduler.ts";
-import { BuiltInCompileAndRunParams } from "@commontools/api";
 import type { IRuntime } from "../runtime.ts";
+import type { Program } from "@commontools/js-runtime";
+import { CompilerError } from "@commontools/js-runtime/typescript";
 
 /**
  * Compile a recipe/module and run it.
@@ -12,52 +14,86 @@ import type { IRuntime } from "../runtime.ts";
  * @param main - The name of the main recipe to run.
  * @param input - Inputs passed to the recipe once compiled.
  *
- * @returns { result?: any, error?: string, compiling: boolean }
+ * @returns { result?: any, error?: string, errors?: Array<{line: number, column: number, message: string, type: string, file?: string}>, pending: boolean }
  *   - `result` is the result of the recipe, or undefined.
- *   - `error` error that occurred during compilation or execution, or
+ *   - `error` error string that occurred during compilation or execution, or
  *     undefined.
- *   - `compiling` is true if the recipe is still being compiled.
+ *   - `errors` structured error array with line/column/file information for
+ *     compilation errors.
+ *   - `pending` is true if the recipe is still being compiled.
  *
  * Note that if an error occurs during execution, both `result` and `error` can
  * be defined. (Note: Runtime errors are not currently handled).
  */
 export function compileAndRun(
-  inputsDoc: DocImpl<BuiltInCompileAndRunParams<any>>,
+  inputsCell: Cell<BuiltInCompileAndRunParams<any>>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
-  parentDoc: DocImpl<any>,
+  parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  const compiling = runtime.documentMap.getDoc<boolean>(
-    false,
-    { compile: { compiling: cause } },
-    parentDoc.space,
+  const pending = runtime.getCell<boolean>(
+    parentCell.space,
+    { compile: { pending: cause } },
   );
-  const result = runtime.documentMap.getDoc<string | undefined>(
-    undefined,
+  pending.send(false);
+
+  const result = runtime.getCell<string | undefined>(
+    parentCell.space,
     { compile: { result: cause } },
-    parentDoc.space,
-  );
-  const error = runtime.documentMap.getDoc<string | undefined>(
-    undefined,
-    { compile: { error: cause } },
-    parentDoc.space,
   );
 
-  sendResult({ compiling, result, error });
+  const error = runtime.getCell<string | undefined>(
+    parentCell.space,
+    { compile: { error: cause } },
+  );
+
+  const errors = runtime.getCell<
+    | Array<{ line: number; column: number; message: string; type: string; file?: string }>
+    | undefined
+  >(
+    parentCell.space,
+    { compile: { errors: cause } },
+  );
+
+  sendResult({ pending, result, error, errors });
 
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
 
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
+    const pendingWithLog = pending.withLog(log);
+    const resultWithLog = result.withLog(log);
+    const errorWithLog = error.withLog(log);
+    const errorsWithLog = errors.withLog(log);
 
-    const { files, main } = inputsDoc.getAsQueryResult([], log) ?? {};
-    const input = inputsDoc.asCell().withLog(log).key("input");
+    // TODO(seefeld): Ideally, this cell already has this schema, because we set
+    // it on the node itself.
+    const program: Program = inputsCell.asSchema({
+      type: "object",
+      properties: {
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              contents: { type: "string" },
+            },
+            required: ["name", "contents"],
+            additionalProperties: false,
+          },
+        },
+        main: { type: "string" },
+      },
+      required: ["files", "main"],
+      additionalProperties: false,
+    }).withLog(log).get();
+    const input = inputsCell.withLog(log).key("input");
 
-    const hash = refer({ files: JSON.stringify(files ?? {}), main: main ?? "" })
-      .toString();
+    const hash = refer(program ?? { files: [], main: "" }).toString();
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
@@ -66,46 +102,58 @@ export function compileAndRun(
     previousCallHash = hash;
 
     runtime.runner.stop(result);
-    result.setAtPath([], undefined, log);
-    error.setAtPath([], undefined, log);
+    resultWithLog.set(undefined);
+    errorWithLog.set(undefined);
+    errorsWithLog.set(undefined);
 
     // Undefined inputs => Undefined output, not pending
-    if (!main || !files) {
-      compiling.setAtPath([], false, log);
+    if (!program.main || !program.files) {
+      pendingWithLog.set(false);
       return;
     }
 
     // Main file not found => Error, not pending
-    if (!(main in files)) {
-      error.setAtPath([], `"${main}" not found in files`, log);
-      compiling.setAtPath([], false, log);
+    if (!program.files.some((file) => file.name === program.main)) {
+      errorWithLog.set(`"${program.main}" not found in files`);
+      pendingWithLog.set(false);
       return;
     }
 
     // Now we're sure that we have a new file to compile
-    compiling.setAtPath([], true, log);
+    pendingWithLog.set(true);
 
-    const compilePromise = runtime.harness.run(
-      files[main],
-    )
+    const compilePromise = runtime.harness.run(program)
       .catch(
-        (error) => {
+        (err) => {
           if (thisRun !== currentRun) return;
-          error.setAtPath(
-            [],
-            error.message + (error.stack ? "\n" + error.stack : ""),
-            log,
+          errorWithLog.set(
+            err.message + (err.stack ? "\n" + err.stack : ""),
           );
+
+          // Extract structured errors if this is a CompilerError
+          if (err instanceof CompilerError) {
+            const structuredErrors = err.errors.map((e) => ({
+              line: e.line ?? 1,
+              column: e.column ?? 1,
+              message: e.message,
+              type: e.type,
+              file: e.file,
+            }));
+            errorsWithLog.set(structuredErrors);
+          }
         },
       ).finally(() => {
         if (thisRun !== currentRun) return;
-        compiling.setAtPath([], false, log);
+        pendingWithLog.set(false);
       });
 
     compilePromise.then(async (recipe) => {
       if (thisRun !== currentRun) return;
       if (recipe) {
-        await runtime.runSynced(result.asCell(), recipe, input);
+        // TODO(ja): to support editting of existing charms / running with
+        // inputs from other charms, we will need to think more about
+        // how we pass input into the builtin.
+        await runtime.runSynced(result, recipe, input.get());
       }
       // TODO(seefeld): Add capturing runtime errors.
     });

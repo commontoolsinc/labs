@@ -84,7 +84,7 @@ declare module "@commontools/api" {
     connect(node: NodeRef): void;
     export(): {
       cell: OpaqueRef<any>;
-      path: PropertyKey[];
+      path: readonly PropertyKey[];
       value?: Opaque<T>;
       defaultValue?: Opaque<T>;
       nodes: Set<NodeRef>;
@@ -96,7 +96,7 @@ declare module "@commontools/api" {
     };
     unsafe_bindToRecipeAndPath(
       recipe: Recipe,
-      path: PropertyKey[],
+      path: readonly PropertyKey[],
     ): void;
     unsafe_getExternal(): OpaqueRef<T>;
     map<S>(
@@ -181,7 +181,9 @@ declare module "@commontools/api" {
     nodes: Node[];
     [unsafe_originalRecipe]?: Recipe;
     [unsafe_parentRecipe]?: Recipe;
-    [unsafe_materializeFactory]?: (log: any) => (path: PropertyKey[]) => any;
+    [unsafe_materializeFactory]?: (
+      log: any,
+    ) => (path: readonly PropertyKey[]) => any;
   }
 }
 
@@ -228,7 +230,7 @@ export function isShadowRef(value: unknown): value is ShadowRef {
 
 export type UnsafeBinding = {
   recipe: Recipe;
-  materialize: (path: PropertyKey[]) => any;
+  materialize: (path: readonly PropertyKey[]) => any;
   parent?: UnsafeBinding;
 };
 

@@ -4,7 +4,7 @@ import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
   type LegacyAlias,
-  type LegacyCellLink,
+  type LegacyDocCellLink,
   type SigilWriteRedirectLink,
 } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
@@ -14,6 +14,7 @@ import {
   parseLink,
   parseToLegacyCellLink,
 } from "./link-utils.ts";
+import { toURI } from "./uri-utils.ts";
 
 /**
  * Track visited cell links and memoize results during path resolution
@@ -21,11 +22,11 @@ import {
  */
 interface Visits {
   /** Tracks visited cell links to detect cycles */
-  seen: LegacyCellLink[];
+  seen: LegacyDocCellLink[];
   /** Cache for resolvePath results */
-  resolvePathCache: Map<string, LegacyCellLink>;
+  resolvePathCache: Map<string, LegacyDocCellLink>;
   /** Cache for followLinks results */
-  followLinksCache: Map<string, LegacyCellLink>;
+  followLinksCache: Map<string, LegacyDocCellLink>;
 }
 
 /**
@@ -44,7 +45,7 @@ export function createVisits(): Visits {
  */
 function createPathCacheKey<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   aliases: boolean = false,
 ): string {
   return JSON.stringify([doc.space, doc.toJSON(), path, aliases]);
@@ -52,11 +53,11 @@ function createPathCacheKey<T>(
 
 export function resolveLinkToValue<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
-): LegacyCellLink {
+): LegacyDocCellLink {
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits);
@@ -64,32 +65,32 @@ export function resolveLinkToValue<T>(
 
 export function resolveLinkToWriteRedirect<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
-): LegacyCellLink {
+): LegacyDocCellLink {
   const visits = createVisits();
   const ref = resolvePath(doc, path, log, schema, rootSchema, visits);
   return followLinks(ref, log, visits, true);
 }
 
 export function resolveLinks(
-  ref: LegacyCellLink,
+  ref: LegacyDocCellLink,
   log?: ReactivityLog,
-): LegacyCellLink {
+): LegacyDocCellLink {
   const visits = createVisits();
   return followLinks(ref, log, visits);
 }
 
 function resolvePath<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
   visits: Visits = createVisits(),
-): LegacyCellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
+): LegacyDocCellLink { // Follow aliases, doc links, etc. in path, so that we end up on the right
   // doc, meaning the one that contains the value we want to access without any
   // redirects in between.
   //
@@ -113,7 +114,7 @@ function resolvePath<T>(
   }
 
   // Try to find a cached result for a shorter path
-  let startRef: LegacyCellLink = { cell: doc, path: [] };
+  let startRef: LegacyDocCellLink = { cell: doc, path: [] };
   let keys = [...path];
 
   // Look for the longest matching prefix path in the cache
@@ -171,11 +172,11 @@ function resolvePath<T>(
 // log all taken links, so not the returned one, and thus nothing if the ref
 // already pointed to a value.
 export function followLinks(
-  ref: LegacyCellLink,
+  ref: LegacyDocCellLink,
   log: ReactivityLog | undefined,
   visits: Visits,
   onlyWriteRedirects = false,
-): LegacyCellLink {
+): LegacyDocCellLink {
   // Check if we already followed these links
   const cacheKey = createPathCacheKey(ref.cell, ref.path, onlyWriteRedirects);
   const cached = visits.followLinksCache.get(cacheKey);
@@ -183,7 +184,7 @@ export function followLinks(
     return cached;
   }
 
-  let nextRef: LegacyCellLink | undefined;
+  let nextRef: LegacyDocCellLink | undefined;
   let result = ref;
 
   do {
@@ -210,10 +211,13 @@ export function followLinks(
       ? parseToLegacyCellLink(
         target,
         createCell(
-          result.cell,
-          [], // Use empty path to reference the document itself
-          undefined,
-          undefined,
+          result.cell.runtime,
+          {
+            space: result.cell.space,
+            id: toURI(result.cell.entityId),
+            path: [], // Use empty path to reference to document itself
+            type: "application/json",
+          },
           undefined,
           true,
         ),
@@ -262,7 +266,7 @@ export function followWriteRedirects<T = any>(
   writeRedirect: LegacyAlias | SigilWriteRedirectLink,
   base: DocImpl<T> | Cell<T>,
   log?: ReactivityLog,
-): LegacyCellLink {
+): LegacyDocCellLink {
   if (isDoc(base)) base = base.asCell();
   else base = base as Cell<T>; // Makes TS happy
 
@@ -278,7 +282,7 @@ export function followWriteRedirects<T = any>(
         space: link.space,
         schema: link.schema,
         rootSchema: link.rootSchema,
-      } as LegacyCellLink,
+      } as LegacyDocCellLink,
       log,
       createVisits(),
       true,

@@ -13,8 +13,8 @@ const space = signer.did();
 describe("Schema Lineage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let recipe: ReturnType<typeof createBuilder>["recipe"];
-  let UI: ReturnType<typeof createBuilder>["UI"];
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -24,8 +24,8 @@ describe("Schema Lineage", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
-    const builder = createBuilder(runtime);
-    ({ recipe, UI } = builder);
+    const { commontools } = createBuilder(runtime);
+    ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {
@@ -236,8 +236,8 @@ describe("Schema Lineage", () => {
 describe("Schema propagation end-to-end example", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let recipe: ReturnType<typeof createBuilder>["recipe"];
-  let UI: ReturnType<typeof createBuilder>["UI"];
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -247,8 +247,8 @@ describe("Schema propagation end-to-end example", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
-    const builder = createBuilder(runtime);
-    ({ recipe, UI } = builder);
+    const { commontools } = createBuilder(runtime);
+    ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {

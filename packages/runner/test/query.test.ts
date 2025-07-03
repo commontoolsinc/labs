@@ -16,7 +16,7 @@ import type { Entity } from "@commontools/memory/interface";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
-import { ClientObjectManager } from "../src/storage/query.ts";
+import { StoreObjectManager } from "../src/storage/query.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -28,7 +28,7 @@ describe("Query", () => {
     string,
     Revision<State>
   >();
-  let manager: ClientObjectManager;
+  let manager: StoreObjectManager;
   let tracker: CycleTracker<JSONValue>;
 
   beforeEach(() => {
@@ -39,7 +39,7 @@ describe("Query", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
-    manager = new ClientObjectManager(store);
+    manager = new StoreObjectManager(store);
     tracker = new CycleTracker<JSONValue>();
   });
 

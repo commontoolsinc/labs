@@ -28,6 +28,7 @@ IDENTITY=$(mktemp)
 SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
 RECIPE_SRC="$SCRIPT_DIR/recipe/main.tsx"
 WORK_DIR=$(mktemp -d)
+CUSTOM_EXPORT="customRecipeExport" # for testing this feature
 
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
@@ -42,8 +43,8 @@ if [ "$(ct charm ls $SPACE_ARGS)" != "" ]; then
   error "Space not empty." 
 fi
 
-# Create a new charm with {value:5} as input
-CHARM_ID=$(ct charm new $SPACE_ARGS $RECIPE_SRC)
+# Create a new charm using custom default export as input
+CHARM_ID=$(ct charm new --main-export $CUSTOM_EXPORT $SPACE_ARGS $RECIPE_SRC)
 echo "Created charm: $CHARM_ID"
 
 echo "Fetching charm source to $WORK_DIR"
@@ -62,7 +63,7 @@ echo "Updating charm source."
 
 # Update the charm's source code
 replace 's/Simple counter:/Simple counter 2:/g' "$WORK_DIR/main.tsx"
-ct charm setsrc $SPACE_ARGS --charm $CHARM_ID $WORK_DIR/main.tsx
+ct charm setsrc --main-export $CUSTOM_EXPORT $SPACE_ARGS --charm $CHARM_ID $WORK_DIR/main.tsx
 
 # (Again) Retrieve the source code for $CHARM_ID to $WORK_DIR
 rm "$WORK_DIR/main.tsx"

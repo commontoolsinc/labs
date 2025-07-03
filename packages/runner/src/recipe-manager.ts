@@ -2,7 +2,7 @@ import { JSONSchema, Module, Recipe, Schema } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
-import { Program } from "@commontools/js-runtime";
+import { RuntimeProgram } from "./harness/harness.ts";
 
 export const recipeMetaSchema = {
   type: "object",
@@ -17,6 +17,7 @@ export const recipeMetaSchema = {
       type: "object",
       properties: {
         main: { type: "string" },
+        mainExport: { type: "string" },
         files: {
           type: "array",
           items: {
@@ -40,21 +41,20 @@ export type RecipeMeta = Schema<typeof recipeMetaSchema>;
 export class RecipeManager implements IRecipeManager {
   private inProgressCompilations = new Map<string, Promise<Recipe>>();
   private recipeMetaMap = new WeakMap<Recipe, Cell<RecipeMeta>>();
+  private recipeProgramMap = new WeakMap<Recipe, string | RuntimeProgram>();
   private recipeIdMap = new Map<string, Recipe>();
 
   constructor(readonly runtime: IRuntime) {}
 
-  private async getRecipeMetaCell(
+  private getRecipeMetaCell(
     { recipeId, space }: { recipeId: string; space: MemorySpace },
-  ): Promise<Cell<RecipeMeta>> {
+  ): Cell<RecipeMeta> {
     const cell = this.runtime.getCell(
       space,
       { recipeId, type: "recipe" },
       recipeMetaSchema,
     );
 
-    await this.runtime.storage.syncCell(cell);
-    await this.runtime.scheduler.idle();
     return cell;
   }
 
@@ -69,7 +69,10 @@ export class RecipeManager implements IRecipeManager {
     return this.recipeMetaMap.get(input as Recipe)?.get()!;
   }
 
-  generateRecipeId(recipe: Recipe | Module, src?: string | Program): string {
+  registerRecipe(
+    recipe: Recipe | Module,
+    src?: string | RuntimeProgram,
+  ): string {
     const id = this.recipeMetaMap.get(recipe as Recipe)?.get()?.id;
     if (id) {
       return id;
@@ -79,34 +82,64 @@ export class RecipeManager implements IRecipeManager {
       ? createRef({ src }, "recipe source").toString()
       : createRef(recipe, "recipe").toString();
 
+    this.recipeIdMap.set(generatedId, recipe as Recipe);
+    if (src) this.recipeProgramMap.set(recipe as Recipe, src);
+
     return generatedId;
   }
 
-  async registerRecipe(
+  saveRecipe(
+    { recipeId, space, recipe, recipeMeta }: {
+      recipeId: string;
+      space: MemorySpace;
+      recipe?: Recipe | Module;
+      recipeMeta?: RecipeMeta;
+    },
+  ): boolean {
+    // FIXME(ja): should we update the recipeMeta if it already exists? when does this happen?
+    if (this.recipeMetaMap.has(recipe as Recipe)) {
+      return true;
+    }
+
+    if (!recipe) {
+      recipe = this.recipeById(recipeId);
+      if (!recipe) {
+        throw new Error(`Recipe ${recipeId} not loaded`);
+      }
+    }
+
+    if (!recipeMeta) {
+      const src = this.recipeProgramMap.get(recipe as Recipe);
+      recipeMeta = {
+        id: recipeId,
+        src: typeof src === "string" ? src : undefined,
+        program: typeof src === "object" ? src : undefined,
+      };
+    }
+
+    if (!recipeMeta.src && !recipeMeta.program) {
+      return false;
+    }
+
+    const recipeMetaCell = this.getRecipeMetaCell({ recipeId, space });
+    recipeMetaCell.set(recipeMeta);
+    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
+    return true;
+  }
+
+  async saveAndSyncRecipe(
     { recipeId, space, recipe, recipeMeta }: {
       recipeId: string;
       space: MemorySpace;
       recipe: Recipe | Module;
       recipeMeta: RecipeMeta;
     },
-  ): Promise<boolean> {
-    if (!recipeMeta.src && !recipeMeta.program) {
-      return false;
+  ) {
+    if (this.saveRecipe({ recipeId, space, recipe, recipeMeta })) {
+      await this.runtime.storage.syncCell(
+        this.getRecipeMetaCell({ recipeId, space }),
+      );
     }
-
-    // FIXME(ja): should we update the recipeMeta if it already exists? when does this happen?
-    if (this.recipeMetaMap.has(recipe as Recipe)) {
-      return true;
-    }
-
-    const recipeMetaCell = await this.getRecipeMetaCell({ recipeId, space });
-    recipeMetaCell.set(recipeMeta);
-    await this.runtime.storage.syncCell(recipeMetaCell);
-    await this.runtime.storage.synced();
-
-    this.recipeIdMap.set(recipeId, recipe as Recipe);
-    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
-    return true;
   }
 
   // returns a recipe already loaded
@@ -114,8 +147,8 @@ export class RecipeManager implements IRecipeManager {
     return this.recipeIdMap.get(recipeId);
   }
 
-  async compileRecipe(input: string | Program): Promise<Recipe> {
-    let program: Program | undefined;
+  async compileRecipe(input: string | RuntimeProgram): Promise<Recipe> {
+    let program: RuntimeProgram | undefined;
     if (typeof input === "string") {
       program = {
         main: "/main.tsx",
@@ -133,7 +166,8 @@ export class RecipeManager implements IRecipeManager {
     recipeId: string,
     space: MemorySpace,
   ): Promise<Recipe> {
-    const metaCell = await this.getRecipeMetaCell({ recipeId, space });
+    const metaCell = this.getRecipeMetaCell({ recipeId, space });
+    await this.runtime.storage.syncCell(metaCell);
     const recipeMeta = metaCell.get();
 
     if (!recipeMeta.src && !recipeMeta.program) {
@@ -141,7 +175,7 @@ export class RecipeManager implements IRecipeManager {
     }
 
     const source = recipeMeta.program
-      ? (recipeMeta.program as Program)
+      ? (recipeMeta.program as RuntimeProgram)
       : recipeMeta.src!;
     const recipe = await this.compileRecipe(source);
     this.recipeIdMap.set(recipeId, recipe);

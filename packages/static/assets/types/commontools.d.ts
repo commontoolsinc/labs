@@ -126,6 +126,11 @@ export interface BuiltInLLMParams {
     system?: string;
     stop?: string;
     maxTokens?: number;
+    /**
+     * Specifies the mode of operation for the LLM.
+     * - `"json"`: Indicates that the LLM should process and return data in JSON format.
+     * This parameter is optional and defaults to undefined, which may result in standard behavior.
+     */
     mode?: "json";
 }
 export interface BuiltInLLMState<T> {
@@ -144,7 +149,10 @@ export interface BuiltInGenerateObjectParams {
     metadata?: Record<string, string | undefined | object>;
 }
 export interface BuiltInCompileAndRunParams<T> {
-    files: Record<string, string>;
+    files: Array<{
+        name: string;
+        contents: string;
+    }>;
     main: string;
     input?: T;
 }
@@ -152,6 +160,13 @@ export interface BuiltInCompileAndRunState<T> {
     pending: boolean;
     result?: T;
     error?: any;
+    errors?: Array<{
+        line: number;
+        column: number;
+        message: string;
+        type: string;
+        file?: string;
+    }>;
 }
 export type RecipeFunction = {
     <S extends JSONSchema>(argumentSchema: S, fn: (input: OpaqueRef<Required<SchemaWithoutCell<S>>>) => any): RecipeFactory<SchemaWithoutCell<S>, ReturnType<typeof fn>>;

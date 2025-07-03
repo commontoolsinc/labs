@@ -1,6 +1,11 @@
 import { Recipe } from "../builder/types.ts";
 import { Console } from "./console.ts";
-import { Harness, HarnessedFunction } from "./harness.ts";
+import {
+  Harness,
+  HarnessedFunction,
+  RuntimeProgram,
+  TypeScriptHarnessProcessOptions,
+} from "./harness.ts";
 import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
@@ -24,11 +29,7 @@ declare global {
   var [RUNTIME_ENGINE_CONSOLE_HOOK]: any;
 }
 
-export interface EngineProcessOptions {
-  noCheck?: boolean;
-  noRun?: boolean;
-  filename?: string;
-}
+type Exports = Record<string, any>;
 
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
@@ -74,6 +75,10 @@ interface Internals {
   runtime: UnsafeEvalRuntime;
   isolate: UnsafeEvalIsolate;
   runtimeExports: Record<string, any> | undefined;
+  // Callback will be called with a map of exported values to `RuntimeProgram`
+  // after compilation and initial eval and before compilation returns, so
+  // before any e.g. recipe would be instantiated.
+  exportsCallback: (exports: Map<any, RuntimeProgram>) => void;
 }
 
 export class Engine extends EventTarget implements Harness {
@@ -92,8 +97,10 @@ export class Engine extends EventTarget implements Harness {
     const compiler = new TypeScriptCompiler(environmentTypes);
     const runtime = new UnsafeEvalRuntime();
     const isolate = runtime.getIsolate("");
-    const runtimeExports = await RuntimeModules.getExports(this.ctRuntime);
-    return { compiler, runtime, isolate, runtimeExports };
+    const { runtimeExports, exportsCallback } = await RuntimeModules.getExports(
+      this.ctRuntime,
+    );
+    return { compiler, runtime, isolate, runtimeExports, exportsCallback };
   }
 
   // Resolve a `ProgramResolver` into a `Program`.
@@ -106,51 +113,93 @@ export class Engine extends EventTarget implements Harness {
 
   // Compile and run a `Program`, returning the export default recipe.
   async run(
-    program: Program,
-    options: EngineProcessOptions = {},
+    program: RuntimeProgram,
+    options: TypeScriptHarnessProcessOptions = {},
   ): Promise<Recipe> {
-    const { exports } = await this.process(program, options);
+    const { main: exports, exportMap: _ } = await this.process(
+      program,
+      options,
+    );
 
-    if (exports && !("default" in exports)) {
-      throw new Error("No default export found in compiled recipe.");
+    const exportName = program.mainExport ?? "default";
+    if (exports && !(exportName in exports)) {
+      throw new Error(`No "${exportName}" export found in compiled recipe.`);
     }
 
-    return exports!.default as Recipe;
+    return exports![exportName] as Recipe;
   }
 
   // Compile and run a `Program` with options, returning the compiled
   // result and evaluated exports.
   async process(
     program: Program,
-    options: EngineProcessOptions = {},
-  ): Promise<{ exports?: object; output: JsScript }> {
+    options: TypeScriptHarnessProcessOptions = {},
+  ): Promise<
+    { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
+  > {
     const resolver = new EngineProgramResolver(program);
 
-    const { compiler, isolate, runtimeExports } = await this.getInternals();
+    const { compiler, isolate, runtimeExports, exportsCallback } = await this
+      .getInternals();
     const resolvedProgram = await this.resolve(resolver);
 
-    const compiled = await compiler.compile(resolvedProgram, {
+    const output = await compiler.compile(resolvedProgram, {
       filename: options.filename ?? computeFilename(resolvedProgram),
       noCheck: options.noCheck,
       injectedScript: INJECTED_SCRIPT,
       runtimeModules: Engine.runtimeModuleNames(),
+      bundleExportAll: true,
     });
 
-    let exports;
     if (!options.noRun) {
-      exports = isolate.execute(compiled).invoke(runtimeExports)
+      const result = isolate.execute(output).invoke(runtimeExports)
         .inner();
+      if (
+        result && typeof result === "object" && "main" in result &&
+        "exportMap" in result
+      ) {
+        const main = result.main as Exports;
+        const exportMap = result.exportMap as Record<string, Exports>;
+
+        // Create a map from exported values to `RuntimeProgram` that can
+        // generate them and pass to the callback from the exports.
+        const exportsByValue = new Map<any, RuntimeProgram>();
+        for (const [fileName, exports] of Object.entries(exportMap)) {
+          for (const [exportName, exportValue] of Object.entries(exports)) {
+            exportsByValue.set(exportValue, {
+              main: fileName,
+              mainExport: exportName,
+              // TODO(seefeld): Sending all `program.files` is sub-optimal, as
+              // it is the super set of files actually needed by main. We should
+              // only send the files actually needed by main.
+              files: program.files,
+            });
+          }
+        }
+        exportsCallback(exportsByValue);
+
+        return { output, main, exportMap };
+      }
     }
-    return { exports, output: compiled };
+    return { output };
+  }
+
+  // Invokes a function that should've came from this isolate (unverifiable).
+  // We use this to hook into the isolate's source mapping functionality.
+  invoke(fn: () => any): any {
+    // Scheduler dictates this is a synchronous function,
+    // and if we have functions from this source, this should already
+    // be set up.
+    // Some tests invoke values outside of this isolate, so just
+    // execute and return if internals have not been initialized.
+    if (!this.internals) {
+      return fn();
+    }
+    return this.internals.isolate.value(fn).invoke().inner();
   }
 
   getInvocation(source: string): HarnessedFunction {
     return eval(source);
-  }
-
-  mapStackTrace(stack: string): string {
-    //return mapSourceMapsOnStacktrace(stack);
-    return stack;
   }
 
   // Returns a map of runtime module types.

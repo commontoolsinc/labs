@@ -55,17 +55,20 @@ export const getTypes = (() => {
 })();
 
 export async function getExports(runtime: IRuntime) {
-  const builder = createBuilder(runtime);
+  const { commontools, exportsCallback } = createBuilder(runtime);
   const DOMParser = await getDOMParser();
   return {
-    "commontools": builder,
-    "dom-parser": { DOMParser },
-    // __esModule lets this load in the AMD loader
-    // when finding the "default"
-    "turndown": { default: turndown, __esModule: true },
-    "@commontools/html": builder,
-    "@commontools/builder": builder,
-    "@commontools/runner": builder,
+    runtimeExports: {
+      "commontools": commontools,
+      "dom-parser": { DOMParser },
+      // __esModule lets this load in the AMD loader
+      // when finding the "default"
+      "turndown": { default: turndown, __esModule: true },
+      "@commontools/html": commontools,
+      "@commontools/builder": commontools,
+      "@commontools/runner": commontools,
+    },
+    exportsCallback,
   };
 }
 

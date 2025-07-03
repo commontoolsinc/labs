@@ -6,6 +6,7 @@
     "./packages/cli",
     "./packages/deno-vite-plugin",
     "./packages/deno-web-test",
+    "./packages/felt",
     "./packages/html",
     "./packages/identity",
     "./packages/iframe-sandbox",
@@ -16,6 +17,7 @@
     "./packages/memory",
     "./packages/runner",
     "./packages/seeder",
+    "./packages/shell",
     "./packages/static",
     "./packages/toolshed",
     "./packages/ui",
@@ -23,6 +25,7 @@
   ],
   "tasks": {
     "check": "./tasks/check.sh",
+    "ct": "ROOT=$(pwd) && cd $INIT_CWD && deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env \"$ROOT/packages/cli/mod.ts\"",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
@@ -39,7 +42,8 @@
     ],
     "types": [
       "./packages/jumble/src/global.d.ts"
-    ]
+    ],
+    "experimentalDecorators": true
   },
   "exclude": [
     "packages/jumble/.vite/deps/",

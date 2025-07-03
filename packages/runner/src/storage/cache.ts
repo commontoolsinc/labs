@@ -1,10 +1,3 @@
-import { fromString, refer } from "merkle-reference";
-import { isBrowser } from "@commontools/utils/env";
-import { isObject } from "@commontools/utils/types";
-import { type JSONSchema } from "../builder/types.ts";
-import { ContextualFlowControl } from "../cfc.ts";
-import { deepEqual } from "../path-utils.ts";
-import { MapSet } from "../traverse.ts";
 import type {
   Assertion,
   AuthorizationError,
@@ -45,6 +38,13 @@ import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import { type Cancel, type EntityId } from "@commontools/runner";
+import type { JSONSchema } from "../builder/types.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { deepEqual } from "../path-utils.ts";
+import { MapSet } from "../traverse.ts";
+import { fromString, refer } from "merkle-reference";
+import { isBrowser } from "@commontools/utils/env";
+import { isObject } from "@commontools/utils/types";
 import type {
   Assert,
   Claim,
@@ -129,6 +129,15 @@ interface NotFoundError extends Error {
 }
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
+const fromKey = (key: string): FactAddress => {
+  const separatorIndex = key.indexOf("/");
+  if (separatorIndex === -1) {
+    throw new Error(`Invalid key format: ${key}`);
+  }
+  const of = key.substring(0, separatorIndex);
+  const the = key.substring(separatorIndex + 1);
+  return { of: of as Entity, the };
+};
 
 export class NoCache<Model extends object, Address>
   implements AsyncStore<Model, Address> {
@@ -210,7 +219,11 @@ class Heap implements SyncPush<Revision<State>> {
     return this.store.get(toKey(entry));
   }
 
-  merge(entries: Iterable<Revision<State>>, merge: Merge<Revision<State>>) {
+  merge(
+    entries: Iterable<Revision<State>>,
+    merge: Merge<Revision<State>>,
+    notifyFilter?: (state: Revision<State> | undefined) => boolean,
+  ) {
     const updated = new Set<string>();
     for (const entry of entries) {
       const key = toKey(entry);
@@ -227,14 +240,10 @@ class Heap implements SyncPush<Revision<State>> {
 
     // Notify all the subscribers
     for (const key of updated) {
-      for (const subscriber of this.subscribers.get(key) ?? []) {
-        subscriber(this.store.get(key));
-      }
-
-      for (
-        const subscriber of this.subscribers.get(Heap.SUBSCRIBE_TO_ALL) ?? []
-      ) {
-        subscriber(this.store.get(key));
+      if (notifyFilter === undefined || notifyFilter(this.store.get(key))) {
+        for (const subscriber of this.subscribers.get(key) ?? []) {
+          subscriber(this.store.get(key));
+        }
       }
     }
 
@@ -355,6 +364,29 @@ class SelectorTracker {
       this.selectors.get(selectorRef)!
     );
   }
+
+  /**
+   * Return all tracked subscriptions as an array of {factAddress, selector} pairs
+   */
+  getAllSubscriptions(): {
+    factAddress: FactAddress;
+    selector: SchemaPathSelector;
+  }[] {
+    const subscriptions: {
+      factAddress: FactAddress;
+      selector: SchemaPathSelector;
+    }[] = [];
+    for (const [factKey, selectorRefs] of this.refTracker) {
+      const factAddress = fromKey(factKey);
+      for (const selectorRef of selectorRefs) {
+        const selector = this.selectors.get(selectorRef);
+        if (selector) {
+          subscriptions.push({ factAddress, selector });
+        }
+      }
+    }
+    return subscriptions;
+  }
 }
 
 export class Replica {
@@ -389,6 +421,10 @@ export class Replica {
   /** */
   static open() {
   }
+
+  // Track the causes of pending nursery changes
+  private pendingNurseryChanges = new MapSet<string, string>();
+  private seenNurseryChanges = new MapSet<string, string>();
 
   constructor(
     /**
@@ -471,7 +507,7 @@ export class Replica {
   /**
    * Pulls requested entries from the remote source and updates both in memory
    * cache and local store so they will be available for future reads. If
-   * entries are not provided it will pull entries that have being loaded from
+   * entries are not provided it will pull entries that have been loaded from
    * local store in this session.
    */
   async pull(
@@ -527,13 +563,14 @@ export class Replica {
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {
-        console.error("query failure", error);
+        console.error("query failure", queryArgs, error);
         return { error };
       }
       fetchedEntries = query.schemaFacts;
-      // TODO(@ubik2) verify that we're dealing with this subscription
-      // I know we're sending updates over from the provider, but make sure
-      // we're incorporating those in the cache.
+      // FIXME(@ubik2) we're not actually handling the data from this
+      // subscription properly. We get the data through the commit changes,
+      // because the server knows we're watching, but we should be able
+      // to use the data from the subscription instead.
     }
     // Now run our regular queries (this will include our commit+json)
     if (Object.entries(querySelector).length > 0) {
@@ -553,7 +590,7 @@ export class Replica {
     // `unclaimed` revisions for those that we store. By doing this we can avoid
     // network round trips if such are pulled again in the future.
     const notFound = [];
-    const revisions = new Map();
+    const revisions = new Map<FactAddress, Revision<State>>();
     if (fetched.length < entries.length) {
       for (const [entry, _schema] of entries) {
         if (!this.get(entry)) {
@@ -737,12 +774,65 @@ export class Replica {
     // Store facts in a nursery so that subsequent changes will be build
     // optimistically assuming that push will succeed.
     this.nursery.merge(facts, Nursery.put);
+    // Track all our pending changes
+    facts.map((fact) =>
+      this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
+    );
 
     // These push transaction that will commit desired state to a remote.
     const result = await this.remote.transact({
       changes: getChanges([...claims, ...facts] as Statement[]),
     });
 
+    // If transaction fails we delete facts from the nursery so that new
+    // changes will not build upon rejected state. If there are other inflight
+    // transactions that already were built upon our facts they will also fail.
+    if (result.error) {
+      for (const fact of facts) {
+        this.pendingNurseryChanges.deleteValue(
+          toKey(fact),
+          fact.cause.toString(),
+        );
+        this.seenNurseryChanges.delete(toKey(fact));
+      }
+      this.nursery.merge(facts, Nursery.delete);
+      const fact = result.error.name === "ConflictError" &&
+        result.error.conflict.actual;
+      // We also update heap so it holds latest record
+      if (fact) {
+        this.heap.merge([fact], Replica.update);
+      }
+    } //
+    // If transaction succeeded we promote facts from nursery into a heap.
+    else {
+      const commit = toRevision(result.ok);
+      const { since } = commit.is;
+      // Turn facts into revisions corresponding with the commit.
+      const revisions = [
+        ...facts.map((fact) => ({ ...fact, since })),
+        // We strip transaction info so we don't duplicate same data
+        { ...commit, is: { since: commit.is.since } },
+      ];
+      // Avoid sending out updates to subscribers if it's a fact we already
+      // know about in the nursery.
+      const localFacts = this.getLocalFacts(revisions);
+      this.heap.merge(
+        revisions,
+        Replica.put,
+        (revision) => !localFacts.has(revision),
+      );
+      // We only delete from the nursery when we've seen all of our pending
+      // facts (or gotten a conflict).
+      // Server facts may have newer nursery changes that we want to keep.
+      const freshFacts = revisions.filter((revision) =>
+        this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0 === 0
+      );
+      this.nursery.merge(freshFacts, Nursery.delete);
+      for (const fact of freshFacts) {
+        this.pendingNurseryChanges.delete(toKey(fact));
+        this.seenNurseryChanges.delete(toKey(fact));
+      }
+    }
     // If transaction fails we delete facts from the nursery so that new
     // changes will not build upon rejected state. If there are other inflight
     // transactions that already were built upon our facts they will also fail.
@@ -795,8 +885,16 @@ export class Replica {
       ...toChanges(commit),
     ];
 
-    // Store newer revisions into the heap,
-    this.heap.merge(revisions, Replica.update);
+    // Store newer revisions into the heap.
+    // It's possible to get the same fact (including cause) twice, and we'll
+    // have a new since field on the second, so we can't clear them from
+    // tracking when we see them.
+    const resolvedFacts = this.getLocalFacts(revisions);
+    this.heap.merge(
+      revisions,
+      Replica.update,
+      (state) => !resolvedFacts.has(state),
+    );
     return this.cache.merge(revisions, Replica.update);
   }
 
@@ -807,6 +905,75 @@ export class Replica {
   get(entry: FactAddress): State | undefined {
     return this.nursery.get(entry) ?? this.heap.get(entry);
   }
+
+  /**
+   * Gets facts that have an entry in the pending or seen MapSet
+   * This will also update the pending and seen sets
+   *
+   * @param revisions the facts we received from the server
+   * @returns the set of these facts that are in the pending or seen lists
+   */
+  private getLocalFacts(
+    revisions: (Revision<State> | undefined)[],
+  ) {
+    const matches = new Set();
+    for (const revision of revisions) {
+      if (revision === undefined || revision.cause === undefined) {
+        continue;
+      }
+      const factKey = toKey(revision);
+      const factCause = revision.cause.toString();
+      if (this.pendingNurseryChanges.hasValue(factKey, factCause)) {
+        this.seenNurseryChanges.add(factKey, factCause);
+        this.pendingNurseryChanges.deleteValue(factKey, factCause);
+      }
+      if (this.seenNurseryChanges.hasValue(factKey, factCause)) {
+        matches.add(revision);
+      }
+    }
+    return matches;
+  }
+
+  /**
+   * Resets the Replica's internal state for reconnection scenarios.
+   * Clears nursery tracking, heap facts, and selector tracking while
+   * preserving heap subscribers.
+   */
+  reset() {
+    // Clear nursery tracking
+    this.pendingNurseryChanges = new MapSet<string, string>();
+    this.seenNurseryChanges = new MapSet<string, string>();
+    // Clear the nursery itself
+    this.nursery = new Nursery();
+    // Save subscribers before clearing heap
+    const savedSubscribers = new Map(this.heap.subscribers);
+    // Clear heap and restore subscribers
+    this.heap = new Heap();
+    this.heap.subscribers = savedSubscribers;
+    // Clear selector tracker to ensure fresh schema queries
+    this.selectorTracker = new SelectorTracker();
+    // Clear the pull queue
+    this.queue = new PullQueue();
+  }
+}
+
+export interface RemoteStorageProviderSettings {
+  /**
+   * Number of subscriptions remote storage provider is allowed to have per
+   * space.
+   */
+  maxSubscriptionsPerSpace: number;
+
+  /**
+   * Amount of milliseconds we will spend waiting on WS connection before we
+   * abort.
+   */
+  connectionTimeout: number;
+
+  /**
+   * Flag to enable or disable remote schema subscriptions
+   */
+  useSchemaQueries: boolean;
 }
 
 export interface RemoteStorageProviderOptions {
@@ -965,9 +1132,15 @@ class ProviderConnection implements IStorageProvider {
       connect: { attempt: this.connectionCount },
     });
 
-    // If we did have connection
+    // If we did have connection, schedule reestablishment without blocking
     if (this.connectionCount > 1) {
-      this.provider.poll();
+      // Use queueMicrotask to ensure message pump starts first
+      queueMicrotask(() => {
+        this.provider.poll();
+        this.provider.reestablishSubscriptions().catch((error) => {
+          console.error("Failed to reestablish subscriptions:", error);
+        });
+      });
     }
 
     while (this.connection === socket) {
@@ -977,25 +1150,16 @@ class ProviderConnection implements IStorageProvider {
         queue.delete(command);
       }
 
-      // Next read next command from the session.
+      // Then read next command
       const next = await reader.read();
-      // If session is closed we're done.
-      if (next.done) {
-        this.close();
-      }
-
-      const command = next.value!;
-
-      // Now we make sure that our socket is still a current connection as we
-      // may have lost connection while waiting to read a command.
-      if (this.connection === socket) {
-        this.post(command);
-      } // If it is no longer our connection we simply add the command into a
-      // queue so it will be send once connection is reopen.
-      else {
-        this.queue.add(command);
+      // if our connection changed while we were waiting on read we bail out
+      // and let the reconnection logic pick up.
+      if (this.connection !== socket || next.done) {
         break;
       }
+      // otherwise we pass the command via web-socket.
+      const command = next.value;
+      this.post(command);
     }
   }
 
@@ -1134,13 +1298,16 @@ export class Provider implements IStorageProvider {
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
+  // Tracks server-side subscriptions so we can re-establish them after reconnection
+  private serverSubscriptions = new SelectorTracker();
 
   static open(options: RemoteStorageProviderOptions) {
     return new this(options);
   }
 
   static connect(options: ConnectionOptions & RemoteStorageProviderOptions) {
-    return this.open(options).connect(options);
+    const provider = this.open(options);
+    return provider.connect(options);
   }
 
   constructor({
@@ -1173,7 +1340,8 @@ export class Provider implements IStorageProvider {
       return replica;
     } else {
       const session = this.session.mount(space);
-      const replica = new Replica(space, session);
+      // FIXME(@ubik2): Disabling the cache while I ensure things work correctly
+      const replica = new Replica(space, session, new NoCache());
       replica.useSchemaQueries = this.settings.useSchemaQueries;
       replica.poll();
       this.spaces.set(space, replica);
@@ -1187,13 +1355,16 @@ export class Provider implements IStorageProvider {
   ): Cancel {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
+    // Capture workspace locally, so that if it changes later, our cancel
+    // will unsubscribe with the same object.
     const { workspace } = this;
     const address = { the, of };
     const subscriber = (revision?: Revision<State>) => {
-      if (revision) {
+      // If since is -1, this is not a real revision, so don't notify subscribers
+      if (revision && revision.since !== -1) {
         // ⚠️ We may not have a value because fact was retracted or
         // (less likely) deleted altogether. We still need to notify sink
-        // but we do is empty object per
+        // but we do this with the empty object per
         // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
         // TODO(@seefeldb): Make compatible `sink` API change
         callback((revision?.is ?? {}) as unknown as StorageValue<T>);
@@ -1201,7 +1372,7 @@ export class Provider implements IStorageProvider {
     };
 
     workspace.subscribe(address, subscriber);
-    this.workspace.load([[address, undefined]]);
+    workspace.load([[address, undefined]]);
 
     return () => workspace.unsubscribe(address, subscriber);
   }
@@ -1213,7 +1384,17 @@ export class Provider implements IStorageProvider {
   ) {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
-    return this.workspace.load([[{ the, of }, schemaContext]]);
+    const factAddress = { the, of };
+
+    // Track this server subscription, and don't re-issue it
+    if (schemaContext) {
+      const selector = { path: [], schemaContext: schemaContext };
+      if (this.serverSubscriptions.hasSelector(factAddress, selector)) {
+        return Promise.resolve({ ok: {} });
+      }
+      this.serverSubscriptions.add(factAddress, selector);
+    }
+    return this.workspace.load([[factAddress, schemaContext]]);
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
@@ -1224,6 +1405,7 @@ export class Provider implements IStorageProvider {
 
     return entity?.is as StorageValue<T> | undefined;
   }
+
   async send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[],
   ): Promise<
@@ -1283,6 +1465,49 @@ export class Provider implements IStorageProvider {
   poll() {
     for (const space of this.spaces.values()) {
       space.poll();
+    }
+  }
+
+  /**
+   * Re-establishes all tracked schema query subscriptions.
+   * Called after WebSocket reconnection
+   * See `ProviderConnection.onOpen()`
+   */
+  async reestablishSubscriptions(): Promise<void> {
+    const subscriptions = this.serverSubscriptions.getAllSubscriptions();
+
+    // Try to clear pending invocations from the consumer session
+    try {
+      const consumerSession = (this.workspace.remote as any).session;
+      if (consumerSession?.invocations) {
+        consumerSession.invocations.clear();
+      }
+    } catch (error) {
+      // Ignore error
+    }
+
+    // Reset the existing Replica to clear its state
+    this.workspace.reset();
+
+    // Re-establish subscriptions
+    const need: [FactAddress, SchemaContext?][] = [];
+
+    // Always include the space commit object to ensure proper query context
+    const spaceCommitAddress: FactAddress = {
+      the: "application/commit+json",
+      of: this.workspace.space,
+    };
+    need.push([spaceCommitAddress, undefined]);
+
+    // Add all tracked subscriptions
+    for (const { factAddress, selector } of subscriptions) {
+      need.push([factAddress, selector.schemaContext]);
+    }
+
+    try {
+      await this.workspace.pull(need);
+    } catch (error) {
+      console.error("Failed to re-establish subscriptions:", error);
     }
   }
 

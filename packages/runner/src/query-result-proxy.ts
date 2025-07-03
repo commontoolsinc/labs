@@ -2,10 +2,11 @@ import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
 import { toOpaqueRef } from "./builder/types.ts";
 import { type DocImpl, makeOpaqueRef } from "./doc.ts";
-import { type LegacyCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
 import { resolveLinkToValue } from "./link-resolution.ts";
+import { parseLink } from "./link-utils.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
@@ -97,7 +98,10 @@ export function createQueryResultProxy<T>(
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
         if (prop === getCellLink) {
-          return { cell: valueCell, path: valuePath } satisfies LegacyCellLink;
+          return {
+            cell: valueCell,
+            path: valuePath,
+          } satisfies LegacyDocCellLink;
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(valueCell, valuePath);
         }
@@ -192,21 +196,21 @@ export function createQueryResultProxy<T>(
               if (!valueCell.runtime) {
                 throw new Error("No runtime available in document for getDoc");
               }
-              const resultCell = valueCell.runtime.documentMap.getDoc<any[]>(
+              const resultDoc = valueCell.runtime.documentMap.getDoc<any[]>(
                 undefined as unknown as any[],
                 cause,
                 valueCell.space,
               );
-              resultCell.send(result);
+              resultDoc.send(result);
 
               diffAndUpdate(
-                { cell: resultCell, path: [] },
+                { cell: resultDoc, path: [] },
                 result,
                 log,
                 cause,
               );
 
-              result = resultCell.getAsQueryResult([], log);
+              result = resultDoc.getAsQueryResult([], log);
             }
 
             return result;
@@ -240,10 +244,15 @@ export function createQueryResultProxy<T>(
           ) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
             if (valueCell.runtime) {
-              valueCell.runtime.scheduler.queueEvent({
-                cell: valueCell,
-                path: [...valuePath, i],
-              }, undefined);
+              valueCell.runtime.scheduler.queueEvent(
+                parseLink(
+                  {
+                    cell: valueCell,
+                    path: [...valuePath, i],
+                  } as LegacyDocCellLink,
+                ),
+                undefined,
+              );
             }
           }
         }
@@ -299,24 +308,13 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
 }
 
 /**
- * Get cell link or return values as is if not a cell value proxy.
- *
- * @param {any} value - The value to get the cell link or value from.
- * @returns {LegacyCellLink | any}
- */
-export function getCellLinkOrValue(value: any): LegacyCellLink {
-  if (isQueryResult(value)) return value[getCellLink];
-  else return value;
-}
-
-/**
  * Get cell link or throw if not a cell value proxy.
  *
  * @param {any} value - The value to get the cell link from.
- * @returns {LegacyCellLink}
+ * @returns {LegacyDocCellLink}
  * @throws {Error} If the value is not a cell value proxy.
  */
-export function getCellLinkOrThrow(value: any): LegacyCellLink {
+export function getCellLinkOrThrow(value: any): LegacyDocCellLink {
   if (isQueryResult(value)) return value[getCellLink];
   else throw new Error("Value is not a cell proxy");
 }
@@ -347,7 +345,7 @@ export function isQueryResultForDereferencing(
 }
 
 export type QueryResultInternals = {
-  [getCellLink]: LegacyCellLink;
+  [getCellLink]: LegacyDocCellLink;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;

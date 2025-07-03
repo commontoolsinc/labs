@@ -9,10 +9,15 @@ import {
 import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell } from "./cell.ts";
-import { type LegacyCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
+import {
+  areNormalizedLinksSame,
+  isWriteRedirectLink,
+  type NormalizedFullLink,
+  parseLink,
+} from "./link-utils.ts";
 
 /**
  * Sends a value to a binding. If the binding is an array or object, it'll
@@ -144,28 +149,42 @@ export function unsafe_createParentBindings(
   }
 }
 
-// Traverses binding and returns all docs reacheable through legacy aliases.
-// TODO(seefeld): Transition to all write redirects once recipes use those.
-export function findAllLegacyAliasedCells<T>(
+/**
+ * Traverses binding and returns all cells reachable through write redirects.
+ *
+ * @param binding - The binding to traverse.
+ * @param baseCell - The base cell to use for resolving links.
+ * @returns All links reachable through write redirects.
+ */
+export function findAllWriteRedirectCells<T>(
   binding: unknown,
-  doc: DocImpl<T>,
-): LegacyCellLink[] {
-  const docs: LegacyCellLink[] = [];
-  function find(binding: unknown, origDoc: DocImpl<T>): void {
-    if (isLegacyAlias(binding)) {
+  baseCell: Cell<T>,
+): NormalizedFullLink[] {
+  const seen: NormalizedFullLink[] = [];
+  function find(binding: unknown, baseCell: Cell<T>): void {
+    if (isLegacyAlias(binding) && typeof binding.$alias.cell === "number") {
       // Numbered docs are yet to be unwrapped nested recipes. Ignore them.
-      if (typeof binding.$alias.cell === "number") return;
-      const doc = (binding.$alias.cell ?? origDoc) as DocImpl<T>;
-      const path = binding.$alias.path;
-      if (docs.find((c) => c.cell === doc && c.path === path)) return;
-      docs.push({ cell: doc as DocImpl<unknown>, path });
-      find(doc.getAtPath(path), doc);
+      return;
+    } else if (isWriteRedirectLink(binding)) {
+      // If the binding is a write redirect, add the link to the seen list and
+      // recurse into the linked cell.
+      const link = parseLink(binding, baseCell);
+      if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
+      seen.push(link);
+      const linkCell = baseCell.getDoc().runtime.getCellFromLink(link);
+      if (!linkCell) throw new Error("Link cell not found");
+      find(linkCell.getRaw(), baseCell);
+    } else if (isLink(binding)) {
+      // Links that are not write redirects: Ignore them.
+      return;
     } else if (Array.isArray(binding)) {
-      for (const value of binding) find(value, origDoc);
+      // If the binding is an array, recurse into each element.
+      for (const value of binding) find(value, baseCell);
     } else if (isRecord(binding) && !isLink(binding)) {
-      for (const value of Object.values(binding)) find(value, origDoc);
+      // If the binding is an object, recurse into each value.
+      for (const value of Object.values(binding)) find(value, baseCell);
     }
   }
-  find(binding, doc);
-  return docs;
+  find(binding, baseCell);
+  return seen;
 }

@@ -26,22 +26,35 @@ import type {
 export type {
   Assertion,
   Fact,
-  IAuthorizationError,
   IClaim,
-  IConflictError,
-  IConnectionError,
-  IQueryError,
   JSONValue,
-  MediaType,
   MemorySpace,
   Result,
-  Retraction,
   SchemaContext,
   State,
   Unit,
-  URI,
-  Variant,
 };
+
+/**
+ * @deprecated - Use IAttestation instead
+ */
+export type Read = IAttestation;
+/**
+ * @deprecated - Use IAttestation instead
+ */
+export type Write = IAttestation;
+
+export interface IStorageTransactionInvariant {
+  read?: IStorageInvariant;
+  write?: IStorageInvariant;
+}
+
+export interface IStorageTransactionLog {
+  get(address: IMemorySpaceAddress): IStorageTransactionInvariant;
+  addRead(read: IStorageInvariant): void;
+  addWrite(write: IStorageInvariant): void;
+  [Symbol.iterator](): Iterator<IStorageTransactionInvariant>;
+}
 
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
@@ -161,12 +174,17 @@ export interface IStorageManagerV2 {
   edit(): IStorageTransaction;
 }
 
+export type IStorageTransactionProgress = Variant<{
+  open: IStorageTransactionLog;
+  pending: IStorageTransactionLog;
+  done: IStorageTransactionLog;
+}>;
 export type StorageTransactionStatus = Result<
-  IStorageTransactionProgress,
+  IStorageTransactionState,
   StorageTransactionFailed
 >;
 
-export type IStorageTransactionProgress =
+export type IStorageTransactionState =
   | { status: "ready"; journal: ITransactionJournal }
   | { status: "pending"; journal: ITransactionJournal }
   | { status: "done"; journal: ITransactionJournal };
@@ -197,9 +215,33 @@ export interface IStorageTransaction {
    * This allows transactor to cancel and recreate transaction with a current
    * state without having to build up a whole transaction and commiting it.
    */
-  status(): StorageTransactionStatus;
+  // status(): StorageTransactionStatus;
 
+  /**
+   * Helper that is the same as `reader().read()` but more convenient, as it
+   * combines error capturing in one call.
+   *
+   * Reads a value from a (local) memory address and captures corresponding
+   * `Read` in the transaction invariants. If value was written in read memory
+   * address in this transaction read will return value that was written as
+   * opposed to value stored.
+   *
+   * @param address - Memory address to read from.
+   * @returns Result containing the read value or an error.
+   */
   read(adddress: IMemorySpaceAddress): Result<IAttestation, ReadError>;
+
+  /**
+   * Helper that is the same as `writer().write()` but more convenient, as it
+   * combines error capturing in one call.
+   *
+   * Writes a value into a storage at a given address & captures it in the
+   * transaction invariants.
+   *
+   * @param address - Memory address to write to.
+   * @param value - Value to write.
+   * @returns Result containing the written value or an error.
+   */
   write(
     address: IMemorySpaceAddress,
     value?: JSONValue,
@@ -212,7 +254,7 @@ export interface IStorageTransaction {
    */
   reader(
     space: MemorySpace,
-  ): Result<ITransactionReader, ReadError>;
+  ): Result<ITransactionReader, ReaderError>;
 
   /**
    * Creates a memory space writer for this transaction. Fails if transaction is
@@ -253,6 +295,46 @@ export interface IStorageTransaction {
   commit(): Promise<Result<Unit, CommitError>>;
 }
 
+export interface IExtendedStorageTransaction extends IStorageTransaction {
+  /**
+   * Describes current status of the transaction. If transaction has failed
+   * or was cancelled result will be an error with a corresponding error variant.
+   * If transaction is being built it will have `open` status, if commit was
+   * called but promise has not resolved yet it will be `pending`. If commit
+   * successfully completed it will be `done`.
+   *
+   * Please note that if storage was updated since transaction was created such
+   * that any of the invariants have changed status will be change to
+   * `IStorageConsistencyError` even though transaction has not being commited.
+   * This allows transactor to cancel and recreate transaction with a current
+   * state without having to build up a whole transaction and commiting it.
+   */
+  status(): Result<IStorageTransactionProgress, StorageTransactionFailed>;
+
+  /**
+   * Reads a value from a (local) memory address and throws on error, except for
+   * `NotFoundError` which is returned as undefined.
+   *
+   * @param address - Memory address to read from.
+   * @returns The read value.
+   */
+  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined;
+
+  /**
+   * Returns the log of the transaction.
+   *
+   * The log is a list of changes that have been made to the transaction.
+   * It is used to track the dependencies of the transaction.
+   *
+   * If the transaction is aborted, the log reflects the attempted reads and
+   * writes. If the transaction is committed, the log reflects the actual reads
+   * and writes.
+   *
+   * @deprecated
+   */
+  log(): IStorageTransactionLog;
+}
+
 export interface ITransactionReader {
   did(): MemorySpace;
   /**
@@ -269,7 +351,7 @@ export interface ITransactionReader {
    * captured however to ensure that assumption about non existence is upheld.
    *
    * ```ts
-   *  const w = tx.write({ the, of, at: [] }, {
+   *  const w = tx.write({ type, id, path: [] }, {
    *    title: "Hello world",
    *    content: [
    *       { text: "Beautiful day", format: "bold" }
@@ -277,8 +359,8 @@ export interface ITransactionReader {
    *  })
    *  assert(w.ok)
    *
-   *  assert(tx.read({ the, of, at: ['author'] }).ok === undefined)
-   *  assert(tx.read({ the, of, at: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type, id, path:: ['author'] }).ok === undefined)
+   *  assert(tx.read({ type, id, path:: ['author', 'address'] }).error.name === 'NotFoundError')
    *  // JS specific getters are not supported
    *  assert(tx.read({ the, of, at: ['content', 'length'] }).ok.is === undefined)
    *  assert(tx.read({ the, of, at: ['title'] }).ok.is === "Hello world")
@@ -286,12 +368,7 @@ export interface ITransactionReader {
    *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
    * ```
    */
-  read(
-    address: IMemoryAddress,
-  ): Result<
-    IAttestation,
-    ReadError
-  >;
+  read(address: IMemoryAddress): Result<IAttestation, ReadError>;
 }
 
 export interface ITransactionWriter extends ITransactionReader {
@@ -371,12 +448,35 @@ export type CommitError =
   | InactiveTransactionError
   | IStorageTransactionRejected;
 
+export interface INotFoundError extends Error {
+  name: "NotFoundError";
+  path?: MemoryAddressPathComponent[];
+}
+
+/**
+ * Error returned when the media type is not supported by the storage transaction.
+ */
+export interface IUnsupportedMediaTypeError extends Error {
+  name: "UnsupportedMediaTypeError";
+}
+
+/**
+ * Error returned when a data URI is invalid or cannot be parsed.
+ */
+export interface IInvalidDataURIError extends Error {
+  name: "InvalidDataURIError";
+  cause: Error;
+}
+
 export type ReadError =
   | INotFoundError
-  | InactiveTransactionError;
+  | InactiveTransactionError
+  | IInvalidDataURIError
+  | IUnsupportedMediaTypeError;
 
 export type WriteError =
   | INotFoundError
+  | IUnsupportedMediaTypeError
   | InactiveTransactionError;
 
 export type ReaderError = InactiveTransactionError;
@@ -524,7 +624,7 @@ export interface EditableJournal {
 export interface ITransaction {
   claims: IClaim[];
 
-  facts: State[];
+  facts: Fact[];
 }
 
 export interface IStorageEdit {

@@ -16,6 +16,15 @@ export type EntityId = {
   toJSON?: () => { "/": string };
 };
 
+export function entityIdStr(entityId: EntityId) {
+  const slashVal = entityId["/"];
+  if (typeof slashVal === "string") {
+    return slashVal;
+  } else {
+    return entityId.toJSON!()["/"];
+  }
+}
+
 /**
  * Generates an entity ID.
  *
@@ -37,7 +46,7 @@ export function createRef(
     seen.add(obj);
 
     // Don't traverse into ids.
-    if (isRecord(obj) && "/" in obj) return obj;
+    if (isRecord(obj) && "/" in obj && !isDoc(obj)) return obj;
 
     // If there is a .toJSON method, replace obj with it, then descend.
     // TODO(seefeld): We have to accept functions for now as the recipe factory

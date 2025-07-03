@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type Cell, isCell, isStream } from "../src/cell.ts";
-import { LegacyCellLink } from "../src/sigil-types.ts";
+import { LegacyDocCellLink } from "../src/sigil-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -56,10 +56,10 @@ describe("Schema Support", () => {
       // This is what the system (or someone manually) would create to remap
       // data to match the desired schema
       const mappingCell = runtime.getCell<{
-        id: LegacyCellLink;
-        changes: LegacyCellLink[];
-        kind: LegacyCellLink;
-        tag: LegacyCellLink;
+        id: LegacyDocCellLink;
+        changes: LegacyDocCellLink[];
+        kind: LegacyDocCellLink;
+        tag: LegacyDocCellLink;
       }>(
         space,
         "allows mapping of fields via interim cells 2",
@@ -98,38 +98,33 @@ describe("Schema Support", () => {
     });
 
     it("should support nested sinks via asCell", async () => {
-      const schema = {
-        type: "object",
-        properties: {
-          value: { type: "string" },
-          current: {
-            type: "object",
-            properties: { label: { type: "string" } },
-            required: ["label"],
-            asCell: true,
-          },
-        },
-        required: ["value", "current"],
-      } as const satisfies JSONSchema;
-
       const innerCell = runtime.getCell<{ label: string }>(
         space,
         "should support nested sinks 1",
       );
       innerCell.set({ label: "first" });
 
-      const c = runtime.getCell<{
-        value: string;
-        current: LegacyCellLink;
-      }>(
+      const cell = runtime.getCell(
         space,
         "should support nested sinks 2",
+        {
+          type: "object",
+          properties: {
+            value: { type: "string" },
+            current: {
+              type: "object",
+              properties: { label: { type: "string" } },
+              required: ["label"],
+              asCell: true,
+            },
+          },
+          required: ["value", "current"],
+        } as const satisfies JSONSchema,
       );
-      c.setRaw({
+      cell.setRaw({
         value: "root",
         current: innerCell.getAsLegacyCellLink(),
       });
-      const cWithSchema = c.asSchema(schema);
 
       const rootValues: string[] = [];
       const currentValues: string[] = [];
@@ -137,7 +132,7 @@ describe("Schema Support", () => {
       const currentByGetValues: string[] = [];
 
       // Nested traversal of data
-      cWithSchema.sink((value) => {
+      cell.sink((value) => {
         rootValues.push(value.value);
         const cancel = value.current.sink((value) => {
           currentValues.push(value.label);
@@ -149,14 +144,14 @@ describe("Schema Support", () => {
       });
 
       // Querying for a value tied to the currently selected sub-document
-      cWithSchema.key("current")
+      cell.key("current")
         .key("label")
         .sink((value) => {
           currentByKeyValues.push(value);
         });
 
       // .get() the currently selected cell
-      cWithSchema.key("current")
+      cell.key("current")
         .get()
         .sink((value) => {
           currentByGetValues.push(value.label);
@@ -165,7 +160,7 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       // Find the currently selected cell and update it
-      const first = cWithSchema.key("current").get();
+      const first = cell.key("current").get();
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       first.set({ label: "first - update" });
@@ -173,12 +168,17 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       // Now change the currently selected cell
-      const second = runtime.getCell<{ label: string }>(
+      const second = runtime.getCell(
         space,
         "should support nested sinks 3",
+        {
+          type: "object",
+          properties: { label: { type: "string" } },
+          required: ["label"],
+        } as const satisfies JSONSchema,
       );
       second.set({ label: "second" });
-      cWithSchema.key("current").set(second);
+      cell.key("current").set(second);
 
       await runtime.idle();
 
@@ -256,7 +256,6 @@ describe("Schema Support", () => {
         value: "root",
         current: { $alias: linkCell.key("foo").getAsLegacyCellLink() },
       });
-      const docEntityId = docCell.entityId!;
       const root = docCell.asSchema(schema);
 
       const rootValues: any[] = [];
@@ -290,6 +289,7 @@ describe("Schema Support", () => {
         space,
         schema: current.schema,
         rootSchema: current.rootSchema,
+        type: "application/json",
       });
 
       // .get() the currently selected cell. This should not change when
@@ -313,12 +313,13 @@ describe("Schema Support", () => {
         id: toURI(initialEntityId),
         path: ["foo"],
         space,
+        type: "application/json",
         schema: omitSchema,
         rootSchema: schema,
       });
       expect(log.reads.length).toEqual(4);
       expect(
-        log.reads.map((r: LegacyCellLink) => ({
+        log.reads.map((r: LegacyDocCellLink) => ({
           cell: toURI(r.cell.entityId!),
           path: r.path,
         })),

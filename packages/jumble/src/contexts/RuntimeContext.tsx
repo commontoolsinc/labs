@@ -11,6 +11,7 @@ import {
   StorageManager,
 } from "@commontools/runner/storage/cache";
 import { useAuthentication } from "./AuthenticationContext.tsx";
+import { navigateToCharm } from "@/utils/navigation.ts";
 import { setupIframe } from "@/iframe-ctx.ts";
 import * as Sentry from "@sentry/react";
 interface RuntimeContextType {
@@ -53,8 +54,7 @@ export function RuntimeProvider({
             "Uncaught error in recipe: " + error.message + "\n" + error.stack,
           );
         }
-        console.error("Uncaught error in recipe:", error.message);
-        console.error("Stack trace:", error.stack);
+        console.error(error);
         // Also send to Sentry
         Sentry.captureException(error);
       }],
@@ -67,6 +67,7 @@ export function RuntimeProvider({
         }
         return [`Console [${method}]:`, ...args];
       },
+      navigateCallback: (target) => navigateToCharm(target),
     });
 
     setupIframe(runtime);

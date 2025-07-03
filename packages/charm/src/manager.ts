@@ -25,7 +25,7 @@ import { isObject, isRecord } from "@commontools/utils/types";
  * @param charm - The charm to extract ID from
  * @returns The charm ID string, or undefined if no ID is found
  */
-export function charmId(charm: Charm): string | undefined {
+export function charmId(charm: Cell<Charm>): string | undefined {
   const id = getEntityId(charm);
   if (!id) return undefined;
   const idValue = id["/"];
@@ -67,6 +67,7 @@ export const charmSourceCellSchema = {
   type: "object",
   properties: {
     [TYPE]: { type: "string" },
+    spell: { type: "object" },
     lineage: {
       type: "array",
       items: charmLineageSchema,
@@ -81,6 +82,7 @@ export const processSchema = {
   properties: {
     argument: { type: "object" },
     [TYPE]: { type: "string" },
+    spell: { type: "object" },
   },
   required: [TYPE],
 } as const satisfies JSONSchema;
@@ -249,7 +251,7 @@ export class CharmManager {
     return this.charms;
   }
 
-  private async add(newCharms: Cell<Charm>[]) {
+  async add(newCharms: Cell<Charm>[]) {
     await this.syncCharms(this.charms);
     await this.runtime.idle();
 
@@ -340,7 +342,7 @@ export class CharmManager {
     if (isCell(id)) charm = id;
     else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
 
-    await this.runtime.storage.syncCell(charm);
+    await this.runtime.storage.syncCell(charm.asSchema(charmSchema));
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) throw new Error("recipeId is required");
@@ -427,13 +429,9 @@ export class CharmManager {
 
       // Get the raw argument value
       let argumentValue: any;
-      let argumentLink: any;
 
       try {
-        argumentLink = argumentCell.getAsLegacyCellLink();
-        if (!argumentLink || !argumentLink.cell) return result;
-
-        argumentValue = argumentLink.cell.getAtPath(argumentLink.path);
+        argumentValue = argumentCell.getRaw();
       } catch (err) {
         console.debug("Error getting argument value:", err);
         return result;
@@ -593,7 +591,7 @@ export class CharmManager {
       if (argumentValue && typeof argumentValue === "object") {
         processValue(
           argumentValue,
-          this.runtime.getCellFromLink(argumentLink),
+          argumentCell,
           new Set(),
           0,
         );
@@ -927,7 +925,10 @@ export class CharmManager {
   async syncRecipe(charm: Cell<Charm>) {
     await this.runtime.storage.syncCell(charm);
 
+    // When we subscribe to a doc, our subscription includes the doc's source,
+    // so get that.
     const sourceCell = charm.getSourceCell();
+    if (!sourceCell) throw new Error("charm missing source cell");
     await this.runtime.storage.syncCell(sourceCell);
 
     const recipeId = sourceCell.get()?.[TYPE];
@@ -954,5 +955,7 @@ export class CharmManager {
 }
 
 export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
-  return charm.getSourceCell(processSchema)?.get()?.[TYPE];
+  const sourceCell = charm.getSourceCell(processSchema);
+  if (!sourceCell) throw new Error("charm missing source cell");
+  return sourceCell.get()?.[TYPE]!;
 };

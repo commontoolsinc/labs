@@ -33,9 +33,9 @@ export async function searchCharms(
           const recipe = await charmManager.syncRecipe(charm);
 
           return {
-            title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
+            title: title + ` (#${charmId(charm)!.slice(-4)})`,
             description: (recipe as Recipe).argumentSchema.description,
-            id: charmId(charm.entityId!)!,
+            id: charmId(charm)!,
             value: charm.entityId!,
           };
         } catch (error) {
@@ -44,7 +44,7 @@ export async function searchCharms(
           return {
             title: "Error loading charm",
             description: "Failed to load charm details",
-            id: charm.entityId ? charmId(charm.entityId)! : "unknown",
+            id: charm.entityId ? charmId(charm)! : "unknown",
             value: charm.entityId || "unknown",
           };
         }

@@ -123,7 +123,9 @@ describe("StorageTransaction", () => {
       // Read value
       const readResult = transaction.read(address);
       expect(readResult.ok).toBeDefined();
-      expect(readResult.ok?.value).toEqual(value);
+      if (readResult.ok) {
+        expect(readResult.ok.value).toEqual(value);
+      }
     });
 
     it("should handle cross-space operations", () => {
@@ -152,7 +154,9 @@ describe("StorageTransaction", () => {
       // But reading from second space should work
       const read2 = transaction.read(address2);
       expect(read2.ok).toBeDefined();
-      expect(read2.ok?.value).toBeUndefined(); // No data written
+      if (read2.ok) {
+        expect(read2.ok.value).toBeUndefined(); // No data written
+      }
     });
   });
 
@@ -246,7 +250,11 @@ describe("StorageTransaction", () => {
         type: "application/json",
         path: [],
       });
-      expect(verifyResult.ok?.value).toEqual({ committed: true });
+      if (verifyResult.ok) {
+        expect(verifyResult.ok.value).toEqual({ committed: true });
+      } else {
+        expect(verifyResult.ok).toBeDefined();
+      }
     });
 
     it("should transition through pending state", async () => {
@@ -327,7 +335,11 @@ describe("StorageTransaction", () => {
 
       // Read to establish invariant (this locks in the expected value)
       const readResult = freshTransaction.read(address);
-      expect(readResult.ok?.value).toEqual({ name: "Initial", version: 1 });
+      if (readResult.ok) {
+        expect(readResult.ok.value).toEqual({ name: "Initial", version: 1 });
+      } else {
+        expect(readResult.ok).toBeDefined();
+      }
 
       // Modify the replica outside the transaction with proper causal reference
       const v2 = assert({
@@ -385,7 +397,9 @@ describe("StorageTransaction", () => {
 
       const result = freshTransaction.read(address);
       expect(result.ok).toBeDefined();
-      expect(result.ok?.value).toEqual({ name: "Bob", status: "active" });
+      if (result.ok) {
+        expect(result.ok.value).toEqual({ name: "Bob", status: "active" });
+      }
     });
 
     it("should handle nested path reads from replica", async () => {
@@ -417,7 +431,11 @@ describe("StorageTransaction", () => {
       } as const;
 
       const result = freshTransaction.read(nestedAddress);
-      expect(result.ok?.value).toBe("admin");
+      if (result.ok) {
+        expect(result.ok.value).toBe("admin");
+      } else {
+        expect(result.ok).toBeDefined();
+      }
     });
   });
 
@@ -502,7 +520,11 @@ describe("StorageTransaction", () => {
 
       // Read should not have the deleted property
       const result = transaction.read(rootAddress);
-      expect(result.ok?.value).toEqual({ name: "Eve" });
+      if (result.ok) {
+        expect(result.ok.value).toEqual({ name: "Eve" });
+      } else {
+        expect(result.ok).toBeDefined();
+      }
     });
 
     it("should handle array operations", () => {
@@ -523,7 +545,11 @@ describe("StorageTransaction", () => {
       transaction.write(itemAddress, "B");
 
       const result = transaction.read(address);
-      expect(result.ok?.value).toEqual({ items: ["a", "B", "c"] });
+      if (result.ok) {
+        expect(result.ok.value).toEqual({ items: ["a", "B", "c"] });
+      } else {
+        expect(result.ok).toBeDefined();
+      }
     });
   });
 });

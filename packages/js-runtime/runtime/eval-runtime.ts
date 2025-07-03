@@ -66,6 +66,12 @@ export class UnsafeEvalIsolate implements JsIsolate {
     const result = this.internals.exec(() => eval(js));
     return new UnsafeEvalJsValue(this.internals, result);
   }
+
+  // Make a new `UnsafeEvalJsValue` for this isolate from input.
+  // Does not verify the providence of input.
+  value<T>(value: T) {
+    return new UnsafeEvalJsValue(this.internals, value);
+  }
 }
 
 export class UnsafeEvalRuntime extends EventTarget implements JsRuntime {

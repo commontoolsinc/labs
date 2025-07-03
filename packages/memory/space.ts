@@ -617,7 +617,7 @@ const swap = <Space extends MemorySpace>(
   // matching `cause`. It may be because `cause` referenced implicit fact
   // in which case which case `IMPORT_MEMORY` provisioned desired record and
   // update would not have applied. Or it could be that `cause` in the database
-  // is different from the one being asserted. We will asses this by pulling
+  // is different from the one being asserted. We will assess this by pulling
   // the record and comparing it to desired state.
   if (updated === 0) {
     const revision = recall(session, { the, of });
@@ -826,6 +826,10 @@ export function getLabels<
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
+    // We don't restrict acccess to labels
+    if (fact.the === LABEL_THE) {
+      continue;
+    }
     const labelFact = getLabel(session, fact.of);
     if (labelFact !== undefined) {
       set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
@@ -902,12 +906,19 @@ export function redactCommitData(
     if (fact.value === true) {
       continue;
     }
-    const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
-    if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
-      setEmptyObj(newChanges, fact.of, fact.the);
-    } else {
+    // We treat all labels as unclassified
+    if (fact.the === LABEL_THE) {
       set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+      continue;
     }
+    // FIXME(@ubik2): Re-enable this once we've tracked down other issues
+    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
+    // if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
+    //   setEmptyObj(newChanges, fact.of, fact.the);
+    // } else {
+    //   set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+    // }
+    set(newChanges, fact.of, fact.the, fact.cause, fact.value);
   }
   const newCommitData = {
     since: commitData.since,

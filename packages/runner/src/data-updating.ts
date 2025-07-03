@@ -5,7 +5,7 @@ import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { isCell } from "./cell.ts";
 import { isAnyCellLink } from "./link-utils.ts";
-import { type LegacyCellLink } from "./sigil-types.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
@@ -24,7 +24,7 @@ import {
 // if there was no change.
 export function setNestedValue<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   value: unknown,
   log?: ReactivityLog,
 ): boolean {
@@ -97,7 +97,7 @@ export function setNestedValue<T>(
  * @returns Whether any changes were made.
  */
 export function diffAndUpdate(
-  current: LegacyCellLink,
+  current: LegacyDocCellLink,
   newValue: unknown,
   log?: ReactivityLog,
   context?: unknown,
@@ -107,7 +107,7 @@ export function diffAndUpdate(
   return changes.length > 0;
 }
 
-type ChangeSet = { location: LegacyCellLink; value: unknown }[];
+type ChangeSet = { location: LegacyDocCellLink; value: unknown }[];
 
 /**
  * Traverses objects and returns an array of changes that should be written. An
@@ -131,7 +131,7 @@ type ChangeSet = { location: LegacyCellLink; value: unknown }[];
  * @returns An array of changes that should be written.
  */
 export function normalizeAndDiff(
-  current: LegacyCellLink,
+  current: LegacyDocCellLink,
   newValue: unknown,
   log?: ReactivityLog,
   context?: unknown,
@@ -187,7 +187,7 @@ export function normalizeAndDiff(
   }
 
   if (isDoc(newValue)) {
-    newValue = { cell: newValue, path: [] } satisfies LegacyCellLink;
+    newValue = { cell: newValue, path: [] } satisfies LegacyDocCellLink;
   }
   if (isCell(newValue)) newValue = newValue.getAsLegacyCellLink();
 

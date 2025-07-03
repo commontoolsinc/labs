@@ -1,3 +1,4 @@
+import { refer } from "merkle-reference";
 // TODO(@ubik2): Ideally this would use the following, but rollup has issues
 //import { isNumber, isObject, isString } from "@commontools/utils/types";
 import {
@@ -14,14 +15,8 @@ import type {
   SchemaContext,
 } from "./builder/types.ts";
 import { deepEqual } from "./path-utils.ts";
-import {
-  isLegacyAlias,
-  isSigilLink,
-  type NormalizedLink,
-  parseLink,
-} from "./link-utils.ts";
-import { fromURI } from "./uri-utils.ts";
-import { type JSONCellLink } from "./sigil-types.ts";
+import { isAnyCellLink, parseLink } from "./link-utils.ts";
+import type { URI } from "./sigil-types.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -53,6 +48,31 @@ export class MapSet<K, V> {
 
   public has(key: K): boolean {
     return this.map.has(key);
+  }
+
+  public hasValue(key: K, value: V): boolean {
+    const values = this.map.get(key);
+    return (values !== undefined && values.has(value));
+  }
+
+  public deleteValue(key: K, value: V): boolean {
+    if (!this.map.has(key)) {
+      return false;
+    } else {
+      return this.map.get(key)!.delete(value);
+    }
+  }
+
+  public delete(key: K) {
+    this.map.delete(key);
+  }
+  /**
+   * iterable
+   */
+  *[Symbol.iterator](): IterableIterator<[K, Set<V>]> {
+    for (const [key, values] of this.map) {
+      yield [key, values];
+    }
   }
 }
 
@@ -94,7 +114,7 @@ export interface ObjectStorageManager<K, S, V> {
   addRead(doc: K, value: V, source: S): void;
   addWrite(doc: K, value: V, source: S): void;
   // get the key for the doc pointed to by the cell target
-  getTarget(value: CellTarget): K;
+  getTarget(uri: URI): K;
   // load the object for the specified key
   load(doc: K): ValueEntry<S, V | undefined> | null;
 }
@@ -124,29 +144,24 @@ export abstract class BaseObjectManager<K, S, V>
   constructor(
     protected readValues = new Map<string, ValueEntry<S, V>>(),
     protected writeValues = new Map<string, ValueEntry<S, V>>(),
-    protected readDependentDocs = new Map<string, Set<S>>(),
-    protected writeDependentDocs = new Map<string, Set<S>>(),
   ) {}
 
   addRead(doc: K, value: V, source: S) {
     const key = this.toKey(doc);
-    const dependencies = this.readDependentDocs.get(key) ?? new Set<S>();
-    dependencies.add(source);
-    this.readDependentDocs.set(key, dependencies);
     this.readValues.set(key, { value: value, source: source });
   }
 
   addWrite(doc: K, value: V, source: S) {
     const key = this.toKey(doc);
-    const dependencies = this.writeDependentDocs.get(key) ?? new Set<S>();
-    dependencies.add(source);
-    this.writeDependentDocs.set(key, dependencies);
     this.writeValues.set(key, { value: value, source: source });
   }
-  abstract getTarget(value: CellTarget): K;
+  abstract getTarget(uri: URI): K;
+  // load the doc from the underlying system.
+  // implementations are responsible for adding this to the readValues
   abstract load(doc: K): ValueEntry<S, V | undefined> | null;
   // get a string version of a key
   abstract toKey(doc: K): string;
+  abstract toAddress(str: string): K;
 }
 
 export type OptJSONValue =
@@ -201,11 +216,12 @@ export abstract class BaseObjectTraverser<K, S> {
           tracker.exit(doc.value);
         }
       } else {
+        console.log("Cycle detected", JSON.stringify(doc));
         return null;
       }
     } else if (isObject(doc.value)) {
       // First, see if we need special handling
-      if (isPointer(doc.value)) {
+      if (isAnyCellLink(doc.value)) {
         const [newDoc, _] = getAtPath(
           this.manager,
           doc,
@@ -241,6 +257,7 @@ export abstract class BaseObjectTraverser<K, S> {
             tracker.exit(doc.value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -277,7 +294,7 @@ export function getAtPath<K, S>(
   // we may mutate curDoc's value and path, so copy the object and the path
   let curDoc = { ...doc, path: [...doc.path] };
   let remaining = [...path];
-  while (isPointer(curDoc.value)) {
+  while (isAnyCellLink(curDoc.value)) {
     [curDoc, selector] = followPointer(
       manager,
       curDoc,
@@ -307,7 +324,7 @@ export function getAtPath<K, S>(
       return [{ ...curDoc, path: [], value: undefined }, selector];
     }
     // If this next value is a pointer, use the pointer resolution code
-    while (isPointer(curDoc.value)) {
+    while (isAnyCellLink(curDoc.value)) {
       [curDoc, selector] = followPointer(
         manager,
         curDoc,
@@ -343,12 +360,13 @@ function followPointer<K, S>(
   selector?: SchemaPathSelector,
 ): [ValueAtPath<K>, SchemaPathSelector | undefined] {
   if (!tracker.enter(doc.value!)) {
+    console.log("Cycle detected", JSON.stringify(doc));
     return [{ ...doc, path: [], value: undefined }, selector];
   }
   try {
-    const cellTarget = getPointerInfo(doc.value as Immutable<JSONObject>);
-    const target = (cellTarget.cellTarget !== undefined)
-      ? manager.getTarget(cellTarget)
+    const link = parseLink(doc.value)!;
+    const target = (link.id !== undefined)
+      ? manager.getTarget(link.id)
       : doc.doc;
     let [targetDoc, targetDocRoot] = [doc.doc, doc.docRoot];
     if (selector !== undefined) {
@@ -357,20 +375,14 @@ function followPointer<K, S>(
       // Also insert the portions of cellTarget.path, so selector is relative to new target doc
       // We do this even if the target doc is the same doc, since we want the
       // selector path to match.
-      selector = narrowSchema(doc.path, selector, cellTarget.path);
+      selector = narrowSchema(doc.path, selector, link.path as string[]);
     }
-    if (cellTarget.cellTarget !== undefined) {
+    if (link.id !== undefined) {
       // We have a reference to a different cell, so track the dependency
       // and update our targetDoc and targetDocRoot
       const valueEntry = manager.load(target);
       if (valueEntry === null) {
         return [{ ...doc, path: [], value: undefined }, selector];
-      }
-      if (
-        valueEntry !== null && valueEntry.value !== undefined &&
-        valueEntry.source && valueEntry.value !== doc.docRoot
-      ) {
-        manager.addRead(doc.doc, valueEntry.value, valueEntry.source);
       }
       if (schemaTracker !== undefined && selector !== undefined) {
         schemaTracker.add(manager.toKey(target), selector);
@@ -387,8 +399,17 @@ function followPointer<K, S>(
       // an assertion fact.is will be an object with a value property, and
       // that's what our schema is relative to.
       targetDoc = target;
-      targetDocRoot = (valueEntry.value as Immutable<JSONObject>)["value"];
+      const targetObj = valueEntry.value as Immutable<JSONObject>;
+      targetDocRoot = targetObj["value"];
+      // Load any sources (recursively) if they exist and any linked recipes
+      loadSource(
+        manager,
+        valueEntry,
+        new Set<string>(),
+        schemaTracker,
+      );
     }
+
     // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
     // then the provided path from the arguments.
     return getAtPath(
@@ -399,13 +420,81 @@ function followPointer<K, S>(
         path: [],
         value: targetDocRoot,
       },
-      [...cellTarget.path, ...path],
+      [...link.path, ...path] as string[],
       tracker,
       schemaTracker,
       selector,
     );
   } finally {
     tracker.exit(doc.value!);
+  }
+}
+
+// Recursively load the source from the doc ()
+// This will also load any recipes linked by the doc.
+export function loadSource<K, S>(
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
+  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+  cycleCheck: Set<string> = new Set<string>(),
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+) {
+  loadLinkedRecipe(manager, valueEntry, schemaTracker);
+  if (!isObject(valueEntry.value)) {
+    return;
+  }
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!(isObject(targetObj) || !("source" in targetObj))) {
+    return;
+  }
+  // We also want to include the source cells
+  const source = targetObj["source"];
+  if (!isObject(source) || !("/" in source) || !isString(source["/"])) {
+    return;
+  }
+  const of: string = source["/"];
+  if (cycleCheck.has(of)) {
+    return;
+  }
+  cycleCheck.add(of);
+  const entryDoc = manager.toAddress(of);
+  const entry = manager.load(entryDoc);
+  if (entry === null || entry.value === undefined || !entry.source) {
+    return;
+  }
+  if (schemaTracker !== undefined) {
+    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+  }
+  loadSource(manager, entry, cycleCheck, schemaTracker);
+}
+
+// Load the linked recipe from the doc ()
+// We don't recurse, since that's not required for recipe links
+function loadLinkedRecipe<K, S>(
+  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
+  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+  schemaTracker?: MapSet<string, SchemaPathSelector>,
+) {
+  if (!isObject(valueEntry.value)) {
+    return;
+  }
+  const targetObj = valueEntry.value as Immutable<JSONObject>;
+  if (!(isObject(targetObj) || !("value" in targetObj))) {
+    return;
+  }
+  // We also want to include the source cells
+  const value = targetObj["value"];
+  if (!isObject(value) || !("$TYPE" in value) || !isString(value["$TYPE"])) {
+    return;
+  }
+  const recipeId = value["$TYPE"];
+  const entityId = refer({ causal: { recipeId, type: "recipe" } });
+  const entryDoc = manager.toAddress(entityId.toJSON()["/"]);
+  const entry = manager.load(entryDoc);
+  if (entry === null || entry.value === undefined || !entry.source) {
+    return;
+  }
+  if (schemaTracker !== undefined) {
+    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
   }
 }
 
@@ -416,7 +505,7 @@ function followPointer<K, S>(
 function narrowSchema(
   docPath: string[],
   selector: SchemaPathSelector,
-  targetPath: string[],
+  targetPath: readonly string[],
 ): SchemaPathSelector {
   let docPathIndex = 0;
   while (docPathIndex < docPath.length && docPathIndex < selector.path.length) {
@@ -450,39 +539,6 @@ function narrowSchema(
       schemaContext: selector.schemaContext,
     };
   }
-}
-
-/**
- * Extract the path and cellTarget from an Alias, JSONCellLink, or sigil value
- *
- * @param value - The JSON object that might contain pointer information
- * @returns A CellTarget object containing:
- *   - path: An array of string segments representing the path to the target
- *   - cellTarget: The target cell identifier as a string, or undefined if it refers to the current document
- */
-export function getPointerInfo(value: Immutable<JSONObject>): CellTarget {
-  const link = parseLink(value, {} as NormalizedLink);
-  if (!link) return { path: [], cellTarget: undefined };
-  return {
-    path: link.path ?? [],
-    cellTarget: link.id ? fromURI(link.id) : undefined,
-  };
-}
-
-export function isPointer(value: unknown): boolean {
-  return (isSigilLink(value) || isJSONCellLink(value) || isLegacyAlias(value));
-}
-
-/**
- * Check if value is a cell link. Unlike the isCellLink version, this does not check for a marker symbol, since that won't exist in the JSON object.
- *
- * @param {unknown} value - The value to check.
- * @returns {boolean}
- */
-function isJSONCellLink(value: unknown): value is JSONCellLink {
-  return (isObject(value) && "cell" in value && isObject(value.cell) &&
-    "/" in value.cell && "path" in value &&
-    Array.isArray(value.path));
 }
 
 function indexFromPath(
@@ -616,12 +672,13 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             this.tracker.exit(doc.value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
       return undefined;
     } else if (isObject(doc.value)) {
-      if (isPointer(doc.value)) {
+      if (isAnyCellLink(doc.value)) {
         return this.traversePointerWithSchema(doc, {
           schema: schemaObj,
           rootSchema: schemaContext.rootSchema,
@@ -639,6 +696,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
             this.tracker.exit(doc.value);
           }
         } else {
+          console.log("Cycle detected", JSON.stringify(doc));
           return null;
         }
       }
@@ -771,6 +829,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         this.tracker.exit(doc.value!);
       }
     } else {
+      console.log("Cycle detected", JSON.stringify(doc));
       return null;
     }
   }

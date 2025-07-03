@@ -8,10 +8,11 @@ import { ID, JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
-import { isCellLink } from "../src/link-utils.ts";
+import { isLegacyCellLink } from "../src/link-utils.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { areLinksSame } from "../src/link-utils.ts";
+import { areLinksSame, isAnyCellLink, parseLink } from "../src/link-utils.ts";
+import { areNormalizedLinksSame } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -216,8 +217,8 @@ describe("Cell utility functions", () => {
     );
     c.set({ x: 10 });
     const ref = c.key("x").getAsLegacyCellLink();
-    expect(isCellLink(ref)).toBe(true);
-    expect(isCellLink({})).toBe(false);
+    expect(isLegacyCellLink(ref)).toBe(true);
+    expect(isLegacyCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
@@ -642,7 +643,7 @@ describe("asCell", () => {
         eventCount++;
         lastEventSeen = event;
       },
-      { cell: c.getDoc(), path: ["stream"] },
+      streamCell.getAsNormalizedFullLink(),
     );
 
     streamCell.send({ $stream: true });
@@ -1229,50 +1230,50 @@ describe("asCell with schema", () => {
     );
     innerCell.set({ value: 42 });
 
-    const ref1 = innerCell.getAsLegacyCellLink();
+    const ref1 = innerCell.getAsLink();
 
     const ref2Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref2",
     );
     ref2Cell.set({ ref: ref1 });
-    const ref2 = ref2Cell.key("ref").getAsLegacyCellLink();
+    const ref2 = ref2Cell.key("ref").getAsLink();
 
     const ref3Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref3",
     );
     ref3Cell.setRaw({ ref: ref2 });
-    const ref3 = ref3Cell.key("ref").getAsLegacyCellLink();
+    const ref3 = ref3Cell.key("ref").getAsLink();
+
+    const log = { reads: [], writes: [] } as ReactivityLog;
 
     // Create a cell that uses the nested reference
-    const c = runtime.getCell<{
+    const cell = runtime.getCell<{
       context: {
         nested: any;
       };
     }>(
       space,
       "should handle nested references main",
+      {
+        type: "object",
+        properties: {
+          context: {
+            type: "object",
+            additionalProperties: { asCell: true },
+          },
+        },
+        required: ["context"],
+      } as const satisfies JSONSchema,
+      log,
     );
-    c.set({
+    cell.set({
       context: {
         nested: ref3,
       },
     });
 
-    const schema = {
-      type: "object",
-      properties: {
-        context: {
-          type: "object",
-          additionalProperties: { asCell: true },
-        },
-      },
-      required: ["context"],
-    } as const satisfies JSONSchema;
-
-    const log = { reads: [], writes: [] } as ReactivityLog;
-    const cell = c.asSchema(schema).withLog(log);
     const value = cell.get() as any;
 
     // The nested reference should be followed all the way to the inner value
@@ -1281,14 +1282,15 @@ describe("asCell with schema", () => {
 
     // Check that 4 unique documents were read (by entity ID)
     const readEntityIds = new Set(log.reads.map((r) => r.cell.entityId));
+    console.log(log.reads.map((r) => [r.cell.entityId, r.path]));
     expect(readEntityIds.size).toBe(4);
 
     // Verify each cell was read using equals()
     const readCells = log.reads.map((r) => r.cell.asCell());
-    expect(readCells.some((cell) => cell.equals(c))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(ref3Cell))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(ref2Cell))).toBe(true);
-    expect(readCells.some((cell) => cell.equals(innerCell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(cell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(ref3Cell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(ref2Cell))).toBe(true);
+    expect(readCells.some((c2) => c2.equals(innerCell))).toBe(true);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });
@@ -1540,30 +1542,31 @@ describe("asCell with schema", () => {
   });
 
   it("should transparently update ids when context changes", () => {
-    const schema = {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          name: { type: "string" },
-          nested: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: { id: { type: "string" }, value: { type: "number" } },
+    const testCell = runtime.getCell<any>(
+      space,
+      "should transparently update ids when context changes",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            nested: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  value: { type: "number" },
+                },
+              },
             },
           },
         },
-      },
-    } as const satisfies JSONSchema;
-
-    const testDoc = runtime.getCell<any>(
-      space,
-      "should transparently update ids when context changes",
+      } as const satisfies JSONSchema,
     );
-    testDoc.set(undefined);
-    const testCell = testDoc.asSchema(schema);
+    testCell.set(undefined);
 
     const initialData = [
       {
@@ -1588,12 +1591,19 @@ describe("asCell with schema", () => {
     testCell.set(initialDataCopy);
     popFrame(frame1);
 
-    expect(isCellLink(testDoc.getRaw()[0])).toBe(true);
-    expect(isCellLink(testDoc.getRaw()[1])).toBe(true);
-    expect(testDoc.getRaw()[0].cell.get().name).toEqual("First Item");
-    expect(testDoc.getRaw()[1].cell.get().name).toEqual("Second Item");
+    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(testCell.get()[0].name).toEqual("First Item");
+    expect(testCell.get()[1].name).toEqual("Second Item");
+    expect(testCell.key("0").key("nested").key("0").key("id").get()).toEqual(
+      "nested1",
+    );
+    expect(testCell.get()[0].nested[0].id).toEqual("nested1");
+    expect(testCell.get()[0].nested[1].id).toEqual("nested2");
+    expect(testCell.get()[1].nested[0].id).toEqual("nested1");
+    expect(testCell.get()[1].nested[1].id).toEqual("nested2");
 
-    const docFromContext1 = testDoc.getRaw()[0].cell;
+    const linkFromContext1 = parseLink(testCell.getRaw()[0], testCell)!;
 
     const returnedData = testCell.get();
     addCommonIDfromObjectID(returnedData);
@@ -1606,16 +1616,18 @@ describe("asCell with schema", () => {
     testCell.set(returnedData);
     popFrame(frame2);
 
-    expect(isCellLink(testDoc.getRaw()[0])).toBe(true);
-    expect(isCellLink(testDoc.getRaw()[1])).toBe(true);
-    expect(testDoc.getRaw()[0].cell.get().name).toEqual("First Item");
-    expect(testDoc.getRaw()[1].cell.get().name).toEqual("Second Item");
+    expect(isAnyCellLink(testCell.getRaw()[0])).toBe(true);
+    expect(isAnyCellLink(testCell.getRaw()[1])).toBe(true);
+    expect(testCell.get()[0].name).toEqual("First Item");
+    expect(testCell.get()[1].name).toEqual("Second Item");
 
-    // Let's make sure we got a different doc with the different context
-    expect(testDoc.getRaw()[0].cell).not.toBe(docFromContext1);
-    expect(JSON.stringify(testDoc.getRaw()[0].cell.entityId)).not.toBe(
-      JSON.stringify(docFromContext1.entityId),
-    );
+    // Let's make sure we got a different ids with the different context
+    expect(
+      areNormalizedLinksSame(
+        parseLink(testCell.getRaw()[0], testCell)!,
+        linkFromContext1,
+      ),
+    ).toBe(false);
 
     expect(testCell.get()).toEqual(initialData);
   });
@@ -1677,8 +1689,8 @@ describe("asCell with schema", () => {
     arrayCell.push({ [ID]: "test", value: 43 });
     expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
     popFrame(frame);
-    expect(isCellLink(c.getRaw().items[0])).toBe(true);
-    expect(isCellLink(c.getRaw().items[1])).toBe(true);
+    expect(isLegacyCellLink(c.getRaw().items[0])).toBe(true);
+    expect(isLegacyCellLink(c.getRaw().items[1])).toBe(true);
     expect(arrayCell.get()).toEqual([{ value: 42 }, { value: 43 }]);
   });
 });
@@ -1752,13 +1764,8 @@ describe("getAsLink method", () => {
     const link = cell.getAsLink();
     const json = cell.toJSON();
 
-    // Debug: log actual values
-    console.log("getAsLink result:", JSON.stringify(link, null, 2));
-    console.log("toJSON result:", JSON.stringify(json, null, 2));
-
     // getAsLink returns new sigil format
     expect(link).toHaveProperty("/");
-    console.log("getAsLink result /:", JSON.stringify(link["/"], null, 2));
     expect(link["/"][LINK_V1_TAG]).toBeDefined();
 
     // toJSON returns old format for backward compatibility

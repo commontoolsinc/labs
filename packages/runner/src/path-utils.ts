@@ -29,7 +29,7 @@ export function setValueAtPath(
   return true;
 }
 
-export function getValueAtPath(obj: any, path: PropertyKey[]): any {
+export function getValueAtPath(obj: any, path: readonly PropertyKey[]): any {
   let current = obj;
   for (const key of path) {
     if (current === undefined || current === null) return undefined;
@@ -65,7 +65,10 @@ export const deepEqual = (a: any, b: any): boolean => {
   return a !== a && b !== b; // NaN check
 };
 
-export function arrayEqual(a?: PropertyKey[], b?: PropertyKey[]): boolean {
+export function arrayEqual(
+  a?: readonly PropertyKey[],
+  b?: readonly PropertyKey[],
+): boolean {
   if (!a || !b) return a === b;
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;

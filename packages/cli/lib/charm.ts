@@ -3,23 +3,32 @@ import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
 import {
   Cell,
-  getEntityId,
   NAME,
   Recipe,
   RecipeMeta,
   Runtime,
+  RuntimeProgram,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
+  buildFullRecipe,
   Charm,
   charmId,
   CharmManager,
   compileRecipe,
+  extractUserCode,
+  getIframeRecipe,
   getRecipeIdFromCharm,
+  injectUserCode,
   processSchema,
 } from "@commontools/charm";
-import { dirname, join } from "@std/path";
+import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
+
+export interface EntryConfig {
+  mainPath: string;
+  mainExport?: string;
+}
 
 export interface SpaceConfig {
   apiUrl: string;
@@ -97,14 +106,40 @@ async function getRecipeMeta(
   ) as RecipeMeta;
 }
 
-async function getRecipeFromFile(
+async function getIframeRecipeFromFile(
   manager: CharmManager,
   mainPath: string,
+  charmId: string,
+): Promise<Recipe> {
+  const charm = await manager.get(charmId);
+  if (!charm) {
+    throw new Error(`Charm "${charmId}" not found.`);
+  }
+  const iframeRecipe = getIframeRecipe(charm, manager.runtime);
+  if (!iframeRecipe.iframe) {
+    throw new Error(`Expected charm "${charmId}" to be an iframe recipe.`);
+  }
+  iframeRecipe.iframe.src = injectUserCode(await Deno.readTextFile(mainPath));
+  return await compileRecipe(
+    buildFullRecipe(iframeRecipe.iframe),
+    "recipe",
+    manager.runtime,
+    manager.getSpace(),
+    undefined,
+  );
+}
+
+async function getRecipeFromFile(
+  manager: CharmManager,
+  entry: EntryConfig,
 ): Promise<Recipe> {
   // Walk entry file and collect all sources from fs.
-  const program = await manager.runtime.harness.resolve(
-    new CliProgram(mainPath),
+  const program: RuntimeProgram = await manager.runtime.harness.resolve(
+    new CliProgram(entry.mainPath),
   );
+  if (entry.mainExport) {
+    program.mainExport = entry.mainExport;
+  }
   return await compileRecipe(
     program,
     "recipe",
@@ -119,6 +154,10 @@ async function getRecipeFromService(
   charmId: string,
 ): Promise<Recipe> {
   const charm = await manager.get(charmId, false);
+  if (!charm) {
+    throw new Error(`Charm "${charmId}" not found`);
+  }
+
   const recipeId = getRecipeIdFromCharm(charm!);
   return await manager.runtime.recipeManager.loadRecipe(
     recipeId,
@@ -167,23 +206,32 @@ export async function listCharms(
 // Creates a new charm from source code and optional input.
 export async function newCharm(
   config: SpaceConfig,
-  mainPath: string,
+  entry: EntryConfig,
 ): Promise<string> {
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromFile(manager, mainPath);
+  const recipe = await getRecipeFromFile(manager, entry);
   const charm = await exec({ manager, recipe });
   return getCharmIdSafe(charm);
 }
 
 export async function setCharmRecipe(
   config: CharmConfig,
-  mainPath: string,
+  entry: EntryConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromFile(
-    manager,
-    mainPath,
-  );
+  let recipe;
+  if (entry.mainPath.endsWith(".iframe.js")) {
+    recipe = await getIframeRecipeFromFile(
+      manager,
+      entry.mainPath,
+      config.charm,
+    );
+  } else {
+    recipe = await getRecipeFromFile(
+      manager,
+      entry,
+    );
+  }
   await exec({ manager, recipe, charmId: config.charm });
 }
 
@@ -193,9 +241,27 @@ export async function saveCharmRecipe(
 ): Promise<void> {
   await ensureDir(outPath);
   const manager = await loadManager(config);
-  const meta = await getRecipeMeta(manager, config.charm);
+  const recipe = await getRecipeFromService(manager, config.charm);
+  const meta = manager.runtime.recipeManager.getRecipeMeta(
+    recipe,
+  ) as RecipeMeta;
 
-  if (meta.src) {
+  const charm = await manager.get(config.charm);
+  if (!charm) {
+    throw new Error(`Charm ${config.charm} not found.`);
+  }
+
+  const iframeRecipe = getIframeRecipe(charm, manager.runtime);
+  if (iframeRecipe.iframe) {
+    const userCode = extractUserCode(iframeRecipe.iframe.src);
+    if (!userCode) {
+      throw new Error(`No user code found in iframe recipe "${config.charm}".`);
+    }
+    await Deno.writeTextFile(
+      join(outPath, "main.iframe.js"),
+      userCode,
+    );
+  } else if (meta.src) {
     // Write the main source file
     await Deno.writeTextFile(join(outPath, "main.tsx"), meta.src);
   } else if (meta.program) {
@@ -312,6 +378,150 @@ export async function linkCharms(
 
   await manager.runtime.idle();
   await manager.synced();
+}
+
+// Constants for charm mapping
+const SHORT_ID_LENGTH = 8;
+
+// Types for charm mapping
+export interface CharmConnection {
+  name: string;
+  readingFrom: string[];
+  readBy: string[];
+}
+
+export type CharmConnectionMap = Map<string, CharmConnection>;
+
+// Helper functions for charm mapping
+function createShortId(id: string): string {
+  if (id.length <= SHORT_ID_LENGTH * 2 + 3) {
+    return id; // Don't truncate if it's already short enough
+  }
+  const start = id.slice(0, SHORT_ID_LENGTH);
+  const end = id.slice(-SHORT_ID_LENGTH);
+  return `${start}...${end}`;
+}
+
+function createCharmConnection(
+  charm: { id: string; name?: string },
+  details?: { name?: string; readingFrom: Array<{ id: string }>; readBy: Array<{ id: string }> },
+): CharmConnection {
+  return {
+    name: details?.name || charm.name || createShortId(charm.id),
+    readingFrom: details?.readingFrom.map(c => c.id) || [],
+    readBy: details?.readBy.map(c => c.id) || [],
+  };
+}
+
+async function buildConnectionMap(config: SpaceConfig): Promise<CharmConnectionMap> {
+  const charms = await listCharms(config);
+  const connections: CharmConnectionMap = new Map();
+
+  for (const charm of charms) {
+    const charmConfig: CharmConfig = { ...config, charm: charm.id };
+    try {
+      const details = await inspectCharm(charmConfig);
+      connections.set(charm.id, createCharmConnection(charm, details));
+    } catch (error) {
+      // Skip charms that can't be inspected, but include them with no connections
+      console.error(`Warning: Could not inspect charm ${charm.id}: ${error instanceof Error ? error.message : String(error)}`);
+      connections.set(charm.id, createCharmConnection(charm));
+    }
+  }
+
+  return connections;
+}
+
+function generateAsciiMap(connections: CharmConnectionMap): string {
+  if (connections.size === 0) {
+    return "No charms found in space.";
+  }
+
+  let output = "=== Charm Space Map ===\n\n";
+
+  // Sort charms by connection count for better visualization
+  const sortedCharms = Array.from(connections.entries()).sort(
+    ([, a], [, b]) => 
+      (b.readingFrom.length + b.readBy.length) - 
+      (a.readingFrom.length + a.readBy.length)
+  );
+
+  for (const [id, info] of sortedCharms) {
+    const shortId = createShortId(id);
+    output += `📦 ${info.name} [${shortId}]\n`;
+    
+    if (info.readingFrom.length > 0) {
+      output += "  ← reads from:\n";
+      for (const sourceId of info.readingFrom) {
+        const sourceName = connections.get(sourceId)?.name || createShortId(sourceId);
+        output += `    • ${sourceName}\n`;
+      }
+    }
+    
+    if (info.readBy.length > 0) {
+      output += "  → read by:\n";
+      for (const targetId of info.readBy) {
+        const targetName = connections.get(targetId)?.name || createShortId(targetId);
+        output += `    • ${targetName}\n`;
+      }
+    }
+    
+    if (info.readingFrom.length === 0 && info.readBy.length === 0) {
+      output += "  (no connections)\n";
+    }
+    
+    output += "\n";
+  }
+
+  return output;
+}
+
+function generateDotMap(connections: CharmConnectionMap): string {
+  let dot = "digraph CharmSpace {\n";
+  dot += "  rankdir=LR;\n";
+  dot += "  node [shape=box];\n\n";
+
+  // Add nodes
+  for (const [id, info] of connections) {
+    const shortId = createShortId(id);
+    dot += `  "${id}" [label="${info.name}\\n${shortId}"];\n`;
+  }
+  dot += "\n";
+
+  // Add edges
+  for (const [id, info] of connections) {
+    for (const targetId of info.readingFrom) {
+      dot += `  "${targetId}" -> "${id}";\n`;
+    }
+  }
+
+  dot += "}";
+  return dot;
+}
+
+export enum MapFormat {
+  ASCII = "ascii",
+  DOT = "dot",
+}
+
+export async function getCharmConnections(config: SpaceConfig): Promise<CharmConnectionMap> {
+  return await buildConnectionMap(config);
+}
+
+export function formatSpaceMap(connections: CharmConnectionMap, format: MapFormat): string {
+  switch (format) {
+    case MapFormat.ASCII:
+      return generateAsciiMap(connections);
+    case MapFormat.DOT:
+      return generateDotMap(connections);
+    default:
+      throw new Error(`Unsupported format: ${format}`);
+  }
+}
+
+export async function generateSpaceMap(config: SpaceConfig, format: MapFormat = MapFormat.ASCII): Promise<string> {
+  const connections = await getCharmConnections(config);
+  return formatSpaceMap(connections, format);
 }
 
 export async function inspectCharm(

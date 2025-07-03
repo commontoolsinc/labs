@@ -1,8 +1,8 @@
 // deno-lint-ignore-file jsx-no-useless-fragment
 import { derive, h, NAME, recipe, str, UI } from "commontools";
-import { model, increment, decrement } from "./utils.ts";
+import { decrement, increment, model } from "./utils.ts";
 
-export default recipe(model, model, (cell) => {
+export const customRecipeExport = recipe(model, model, (cell) => {
   return {
     [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
     [UI]: (
