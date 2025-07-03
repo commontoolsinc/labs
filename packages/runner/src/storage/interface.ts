@@ -141,6 +141,18 @@ export interface IStorageTransaction {
   >;
 
   /**
+   * Returns the log of the transaction.
+   *
+   * The log is a list of changes that have been made to the transaction.
+   * It is used to track the dependencies of the transaction.
+   *
+   * If the transaction is aborted, the log reflects the attempted reads and
+   * writes. If the transaction is committed, the log reflects the actual reads
+   * and writes.
+   */
+  log(): IStorageTransactionLog;
+
+  /**
    * Creates a memory space reader for inside this transaction. Fails if
    * transaction is no longer in progress. Requesting a reader for the same
    * memory space will return same reader instance.
@@ -410,7 +422,7 @@ export interface IMemoryAddress {
   path: MemoryAddressPathComponent[];
 }
 
-export type MemoryAddressPathComponent = string | number;
+export type MemoryAddressPathComponent = string;
 
 export interface IStorageTransactionLog
   extends Iterable<IStorageTransactionInvariant> {

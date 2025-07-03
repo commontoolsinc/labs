@@ -8,6 +8,7 @@ import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
 import { toURI } from "./uri-utils.ts";
+import { type IStorageTransaction } from "./storage/interface.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -270,6 +271,7 @@ function mergeDefaults(
 }
 
 export function validateAndTransform(
+  tx: IStorageTransaction,
   doc: DocImpl<any>,
   path: PropertyKey[] = [],
   schema?: JSONSchema,
@@ -444,6 +446,7 @@ export function validateAndTransform(
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1) {
         return validateAndTransform(
+          tx,
           doc,
           path,
           arrayOptions[0],
@@ -462,6 +465,7 @@ export function validateAndTransform(
       }
 
       return validateAndTransform(
+        tx,
         doc,
         path,
         { type: "array", items: { anyOf: merged } },
@@ -505,6 +509,7 @@ export function validateAndTransform(
           return {
             schema: option,
             result: validateAndTransform(
+              tx,
               doc,
               path,
               option,
@@ -566,6 +571,7 @@ export function validateAndTransform(
           return {
             schema: option,
             result: validateAndTransform(
+              tx,
               doc,
               path,
               option,
@@ -583,6 +589,7 @@ export function validateAndTransform(
       const anyTypeOption = options.find((option) => option.type === undefined);
       if (anyTypeOption) {
         return validateAndTransform(
+          tx,
           doc,
           path,
           anyTypeOption,
@@ -621,6 +628,7 @@ export function validateAndTransform(
         }
         if (childSchema.asCell || childSchema.asStream || key in value) {
           result[key] = validateAndTransform(
+            tx,
             doc,
             [...path, key],
             childSchema,
@@ -655,6 +663,7 @@ export function validateAndTransform(
           continue;
         }
         result[key] = validateAndTransform(
+          tx,
           doc,
           [...path, key],
           childSchema,
@@ -691,6 +700,7 @@ export function validateAndTransform(
     // Now process elements after adding the array to seen
     for (let i = 0; i < value.length; i++) {
       result[i] = validateAndTransform(
+        tx,
         doc,
         [...path, i],
         resolvedSchema.items!,
