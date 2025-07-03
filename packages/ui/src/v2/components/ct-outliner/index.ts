@@ -17,8 +17,8 @@ export type {
   BlockCreationOptions,
   NodeCreationOptions
 } from "./types.ts";
-export { BlockOperations } from "./block-operations.ts";
-// TreeOperations and MigrationBridge removed - using BlockOperations exclusively
+export { TreeOperations } from "./tree-operations.ts";
+// Legacy TreeOperations file and MigrationBridge removed - using TreeOperations exclusively
 export { KeyboardCommands, executeKeyboardCommand } from "./keyboard-commands.ts";
 
 // Auto-register the custom element

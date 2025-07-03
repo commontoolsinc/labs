@@ -16,11 +16,11 @@ import type {
   Node as OutlineTreeNode,
   Block,
 } from "./types.ts";
-// TreeOperations removed - using BlockOperations exclusively
+// Legacy TreeOperations file removed - using TreeOperations exclusively
 import { executeKeyboardCommand, executeEditingKeyboardCommand } from "./keyboard-commands.ts";
 // EditingOperations removed - using direct state management
 // MigrationBridge removed - working directly with Tree
-import { BlockOperations } from "./block-operations.ts";
+import { TreeOperations } from "./tree-operations.ts";
 
 /**
  * CTOutliner - A block-based outliner component with hierarchical tree structure
@@ -125,14 +125,14 @@ export class CTOutliner extends BaseElement {
           this.focusedNodeId = this.tree.root.children[0].id;
         }
       } else {
-        this.tree = BlockOperations.createEmptyTree();
+        this.tree = TreeOperations.createEmptyTree();
         this.collapsedNodes = new Set<string>();
         
         // Create initial node if tree is empty
         if (this.tree.root.children.length === 0) {
-          const nodeId = BlockOperations.createId();
-          const block = BlockOperations.createBlock({ id: nodeId, body: "" });
-          const node = BlockOperations.createNode({ id: nodeId });
+          const nodeId = TreeOperations.createId();
+          const block = TreeOperations.createBlock({ id: nodeId, body: "" });
+          const node = TreeOperations.createNode({ id: nodeId });
           
           this.tree = {
             ...this.tree,
@@ -168,7 +168,7 @@ export class CTOutliner extends BaseElement {
       editingNodeId: this.editingNodeId,
       editingContent: this.editingContent,
       // createNode method removed
-      // nodesToMarkdown removed - use BlockOperations.toMarkdown(tree)
+      // nodesToMarkdown removed - use TreeOperations.toMarkdown(tree)
       emitChange: () => this.emitChange(),
       startEditing: (nodeId: string) => this.startEditing(nodeId),
       handleKeyDown: (event: KeyboardEvent) => this.handleKeyDown(event),
@@ -402,7 +402,7 @@ export class CTOutliner extends BaseElement {
     super();
     this.readonly = false;
     this.mentionable = [];
-    this.tree = BlockOperations.createEmptyTree();
+    this.tree = TreeOperations.createEmptyTree();
     this.collapsedNodes = new Set<string>();
     // Legacy property removed
     this.focusedNodeId = null;
@@ -418,7 +418,7 @@ export class CTOutliner extends BaseElement {
     if (!this.tree || this.tree.root.children.length === 0) {
       // Initialize with empty tree if no value provided
       if (!this.value) {
-        this.value = BlockOperations.createEmptyTree();
+        this.value = TreeOperations.createEmptyTree();
       }
       // Set initial focus to first node if we have nodes
       if (this.tree.root.children.length > 0 && !this.focusedNodeId) {
@@ -437,19 +437,19 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  // createNode method removed - using BlockOperations directly
+  // createNode method removed - using TreeOperations directly
 
   /**
    * Helper methods for working with Tree structure
    */
   private findNodeInTree(nodeId: string): OutlineTreeNode | null {
     if (!this.tree) return null;
-    return BlockOperations.findNode(this.tree.root, nodeId);
+    return TreeOperations.findNode(this.tree.root, nodeId);
   }
 
   private findBlockInTree(blockId: string): Block | null {
     if (!this.tree) return null;
-    return BlockOperations.findBlock(this.tree, blockId);
+    return TreeOperations.findBlock(this.tree, blockId);
   }
 
   private getNodeContent(nodeId: string): string {
@@ -459,13 +459,13 @@ export class CTOutliner extends BaseElement {
 
   private updateNodeContent(nodeId: string, content: string): void {
     if (!this.tree) return;
-    this.tree = BlockOperations.updateBlock(this.tree, nodeId, content);
+    this.tree = TreeOperations.updateBlock(this.tree, nodeId, content);
     // Update legacy nodes for compatibility
     // Tree conversion removed - working directly with Tree
   }
 
   private parseMarkdownToTree(markdown: string): Tree {
-    if (!markdown.trim()) return BlockOperations.createEmptyTree();
+    if (!markdown.trim()) return TreeOperations.createEmptyTree();
 
     const lines = markdown.split("\n");
     const blocks: Block[] = [];
@@ -480,10 +480,10 @@ export class CTOutliner extends BaseElement {
 
       const [, indent, content] = match;
       const level = Math.floor(indent.length / 2);
-      const nodeId = BlockOperations.createId();
+      const nodeId = TreeOperations.createId();
       
       // Create block for this content
-      const block = BlockOperations.createBlock({ id: nodeId, body: content });
+      const block = TreeOperations.createBlock({ id: nodeId, body: content });
       blocks.push(block);
 
       // Remove items from stack that are at same or deeper level
@@ -517,7 +517,7 @@ export class CTOutliner extends BaseElement {
       };
     };
 
-    const root = rootNodeId ? buildNode(rootNodeId) : BlockOperations.createNode({ id: BlockOperations.createId() });
+    const root = rootNodeId ? buildNode(rootNodeId) : TreeOperations.createNode({ id: TreeOperations.createId() });
 
     return {
       root,
@@ -528,18 +528,18 @@ export class CTOutliner extends BaseElement {
 
   // Legacy parseMarkdown method removed - using parseMarkdownToTree directly
 
-  // nodesToMarkdown method removed - using BlockOperations.toMarkdown directly
+  // nodesToMarkdown method removed - using TreeOperations.toMarkdown directly
 
   findNode(id: string): OutlineTreeNode | null {
-    return BlockOperations.findNode(this.tree.root, id);
+    return TreeOperations.findNode(this.tree.root, id);
   }
 
   private findNodeParent(id: string): OutlineTreeNode | null {
-    return BlockOperations.findParentNode(this.tree.root, id);
+    return TreeOperations.findParentNode(this.tree.root, id);
   }
 
   findParentNode(id: string): OutlineTreeNode | null {
-    return BlockOperations.findParentNode(this.tree.root, id);
+    return TreeOperations.findParentNode(this.tree.root, id);
   }
 
   private getNodeIndex(id: string, parentNode: OutlineTreeNode): number {
@@ -547,7 +547,7 @@ export class CTOutliner extends BaseElement {
   }
 
   private getAllNodes(): OutlineTreeNode[] {
-    return BlockOperations.getAllVisibleNodes(this.tree.root, this.collapsedNodes);
+    return TreeOperations.getAllVisibleNodes(this.tree.root, this.collapsedNodes);
   }
 
   private handleNodeClick(nodeId: string, event: MouseEvent) {
@@ -599,7 +599,7 @@ export class CTOutliner extends BaseElement {
     if (!this.editingNodeId) return;
 
     // Update block content
-    this.tree = BlockOperations.updateBlock(this.tree, this.editingNodeId, this.editingContent);
+    this.tree = TreeOperations.updateBlock(this.tree, this.editingNodeId, this.editingContent);
 
     // Save node ID for focus before clearing editing state
     const nodeId = this.editingNodeId;
@@ -647,7 +647,7 @@ export class CTOutliner extends BaseElement {
     if (!currentNode) return;
 
     // Update current node content
-    this.tree = BlockOperations.updateBlock(this.tree, this.editingNodeId, this.editingContent);
+    this.tree = TreeOperations.updateBlock(this.tree, this.editingNodeId, this.editingContent);
 
     // Create new node after current one
     this.createNewNodeAfter(this.editingNodeId);
@@ -661,7 +661,7 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    const result = BlockOperations.deleteNode(this.tree, this.editingNodeId);
+    const result = TreeOperations.deleteNode(this.tree, this.editingNodeId);
     if (!result.success) return;
 
     this.tree = result.tree;
@@ -676,9 +676,9 @@ export class CTOutliner extends BaseElement {
       this.focusedNodeId = result.newFocusId;
     } else {
       // No nodes remain, create a new root node
-      const newNodeId = BlockOperations.createId();
-      const newBlock = BlockOperations.createBlock({ id: newNodeId, body: "" });
-      const newNode = BlockOperations.createNode({ id: newNodeId });
+      const newNodeId = TreeOperations.createId();
+      const newBlock = TreeOperations.createBlock({ id: newNodeId, body: "" });
+      const newNode = TreeOperations.createNode({ id: newNodeId });
       
       this.tree = {
         ...this.tree,
@@ -717,7 +717,7 @@ export class CTOutliner extends BaseElement {
     this.editingContent = mergedContent;
     
     // Update current block with merged content
-    this.tree = BlockOperations.updateBlock(this.tree, currentNode.id, mergedContent);
+    this.tree = TreeOperations.updateBlock(this.tree, currentNode.id, mergedContent);
 
     // Move next node's children to current node
     const updatedCurrentNode = {
@@ -771,8 +771,8 @@ export class CTOutliner extends BaseElement {
 
     // Perform the indentation without emitting changes
     const result = outdent 
-      ? BlockOperations.outdentNode(this.tree, this.editingNodeId)
-      : BlockOperations.indentNode(this.tree, this.editingNodeId);
+      ? TreeOperations.outdentNode(this.tree, this.editingNodeId)
+      : TreeOperations.indentNode(this.tree, this.editingNodeId);
     
     if (result.success) {
       this.tree = result.tree;
@@ -837,7 +837,7 @@ export class CTOutliner extends BaseElement {
       newContent = firstParsedBlock.body;
     }
     
-    this.tree = BlockOperations.updateBlock(this.tree, this.editingNodeId, newContent);
+    this.tree = TreeOperations.updateBlock(this.tree, this.editingNodeId, newContent);
     this.editingContent = newContent;
 
     // Add blocks and update tree structure if there are children or siblings
@@ -1193,7 +1193,7 @@ export class CTOutliner extends BaseElement {
    * This provides a way to manually get markdown output for copy/export operations
    */
   toMarkdown(): string {
-    return BlockOperations.toMarkdown(this.tree);
+    return TreeOperations.toMarkdown(this.tree);
   }
 
   createNewNodeAfter(nodeId: string) {
@@ -1201,18 +1201,18 @@ export class CTOutliner extends BaseElement {
     if (!nodeToFind) return;
 
     // Create new node and block
-    const newNodeId = BlockOperations.createId();
-    const newBlock = BlockOperations.createBlock({ id: newNodeId, body: "" });
-    const newNode = BlockOperations.createNode({ id: newNodeId });
+    const newNodeId = TreeOperations.createId();
+    const newBlock = TreeOperations.createBlock({ id: newNodeId, body: "" });
+    const newNode = TreeOperations.createNode({ id: newNodeId });
 
     // Add block to tree
-    this.tree = BlockOperations.addBlock(this.tree, newBlock);
+    this.tree = TreeOperations.addBlock(this.tree, newBlock);
 
     // Insert node after the current one
     const parentNode = this.findNodeParent(nodeId);
     if (parentNode) {
       const currentIndex = this.getNodeIndex(nodeId, parentNode);
-      this.tree = BlockOperations.insertNode(this.tree, parentNode.id, newNode, currentIndex + 1);
+      this.tree = TreeOperations.insertNode(this.tree, parentNode.id, newNode, currentIndex + 1);
     } else {
       // Add to root level
       const rootIndex = this.getNodeIndex(nodeId, this.tree.root);
@@ -1235,15 +1235,15 @@ export class CTOutliner extends BaseElement {
     if (!node) return;
 
     // Create new node and block
-    const newNodeId = BlockOperations.createId();
-    const newBlock = BlockOperations.createBlock({ id: newNodeId, body: "" });
-    const newNode = BlockOperations.createNode({ id: newNodeId });
+    const newNodeId = TreeOperations.createId();
+    const newBlock = TreeOperations.createBlock({ id: newNodeId, body: "" });
+    const newNode = TreeOperations.createNode({ id: newNodeId });
 
     // Add block to tree
-    this.tree = BlockOperations.addBlock(this.tree, newBlock);
+    this.tree = TreeOperations.addBlock(this.tree, newBlock);
 
     // Add as child
-    this.tree = BlockOperations.insertNode(this.tree, nodeId, newNode, node.children.length);
+    this.tree = TreeOperations.insertNode(this.tree, nodeId, newNode, node.children.length);
 
     // Ensure parent is expanded
     this.collapsedNodes.delete(nodeId);
@@ -1258,7 +1258,7 @@ export class CTOutliner extends BaseElement {
   }
 
   deleteNode(nodeId: string) {
-    const result = BlockOperations.deleteNode(this.tree, nodeId);
+    const result = TreeOperations.deleteNode(this.tree, nodeId);
 
     if (!result.success) return;
 
@@ -1269,9 +1269,9 @@ export class CTOutliner extends BaseElement {
       this.focusedNodeId = result.newFocusId;
     } else {
       // No nodes remain, create a new root node
-      const newNodeId = BlockOperations.createId();
-      const newBlock = BlockOperations.createBlock({ id: newNodeId, body: "" });
-      const newNode = BlockOperations.createNode({ id: newNodeId });
+      const newNodeId = TreeOperations.createId();
+      const newBlock = TreeOperations.createBlock({ id: newNodeId, body: "" });
+      const newNode = TreeOperations.createNode({ id: newNodeId });
       
       this.tree = {
         ...this.tree,
@@ -1288,7 +1288,7 @@ export class CTOutliner extends BaseElement {
   moveNodeUp(nodeId: string | null) {
     if (!nodeId) return;
 
-    const result = BlockOperations.moveNodeUp(this.tree, nodeId);
+    const result = TreeOperations.moveNodeUp(this.tree, nodeId);
     if (result.success) {
       this.tree = result.tree;
       this.requestUpdate();
@@ -1299,7 +1299,7 @@ export class CTOutliner extends BaseElement {
   moveNodeDown(nodeId: string | null) {
     if (!nodeId) return;
 
-    const result = BlockOperations.moveNodeDown(this.tree, nodeId);
+    const result = TreeOperations.moveNodeDown(this.tree, nodeId);
     if (result.success) {
       this.tree = result.tree;
       this.requestUpdate();
@@ -1308,7 +1308,7 @@ export class CTOutliner extends BaseElement {
   }
 
   indentNode(nodeId: string) {
-    const result = BlockOperations.indentNode(this.tree, nodeId);
+    const result = TreeOperations.indentNode(this.tree, nodeId);
     if (result.success) {
       this.tree = result.tree;
       this.requestUpdate();
@@ -1317,7 +1317,7 @@ export class CTOutliner extends BaseElement {
   }
 
   outdentNode(nodeId: string) {
-    const result = BlockOperations.outdentNode(this.tree, nodeId);
+    const result = TreeOperations.outdentNode(this.tree, nodeId);
     if (result.success) {
       this.tree = result.tree;
       this.requestUpdate();
@@ -1368,9 +1368,9 @@ export class CTOutliner extends BaseElement {
       event.preventDefault();
       
       // Create new node and block
-      const nodeId = BlockOperations.createId();
-      const block = BlockOperations.createBlock({ id: nodeId, body: "" });
-      const node = BlockOperations.createNode({ id: nodeId });
+      const nodeId = TreeOperations.createId();
+      const block = TreeOperations.createBlock({ id: nodeId, body: "" });
+      const node = TreeOperations.createNode({ id: nodeId });
       
       this.tree = {
         ...this.tree,

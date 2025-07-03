@@ -1,17 +1,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { BlockOperations } from "./block-operations.ts";
+import { TreeOperations } from "./tree-operations.ts";
 import { KeyboardCommands } from "./keyboard-commands.ts";
 import type { Tree, Node, Block } from "./types.ts";
 
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {
-  // Test Tree structure and BlockOperations
+  // Test Tree structure and TreeOperations
   describe("Tree Operations", () => {
     function createTestTree(): Tree {
-      const rootId = BlockOperations.createId();
-      const child1Id = BlockOperations.createId();
-      const child2Id = BlockOperations.createId();
+      const rootId = TreeOperations.createId();
+      const child1Id = TreeOperations.createId();
+      const child2Id = TreeOperations.createId();
       
       return {
         root: {
@@ -30,7 +30,7 @@ describe("CTOutliner Logic Tests", () => {
     }
 
     it("should create empty tree", () => {
-      const tree = BlockOperations.createEmptyTree();
+      const tree = TreeOperations.createEmptyTree();
       expect(tree.root.children).toHaveLength(0);
       expect(tree.blocks).toHaveLength(1); // Has one empty root block
       expect(tree.attachments).toHaveLength(0);
@@ -40,7 +40,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should find nodes by ID", () => {
       const tree = createTestTree();
       const child1Id = tree.root.children[0].id;
-      const foundNode = BlockOperations.findNode(tree.root, child1Id);
+      const foundNode = TreeOperations.findNode(tree.root, child1Id);
       expect(foundNode).toBeTruthy();
       expect(foundNode!.id).toBe(child1Id);
     });
@@ -48,7 +48,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should find blocks by ID", () => {
       const tree = createTestTree();
       const blockId = tree.blocks[0].id;
-      const foundBlock = BlockOperations.findBlock(tree, blockId);
+      const foundBlock = TreeOperations.findBlock(tree, blockId);
       expect(foundBlock).toBeTruthy();
       expect(foundBlock!.body).toBe("First item");
     });
@@ -56,15 +56,15 @@ describe("CTOutliner Logic Tests", () => {
     it("should update block content", () => {
       const tree = createTestTree();
       const blockId = tree.blocks[0].id;
-      const updatedTree = BlockOperations.updateBlock(tree, blockId, "Updated content");
-      const updatedBlock = BlockOperations.findBlock(updatedTree, blockId);
+      const updatedTree = TreeOperations.updateBlock(tree, blockId, "Updated content");
+      const updatedBlock = TreeOperations.findBlock(updatedTree, blockId);
       expect(updatedBlock!.body).toBe("Updated content");
     });
 
     it("should move nodes up", () => {
       const tree = createTestTree();
       const secondChildId = tree.root.children[1].id;
-      const result = BlockOperations.moveNodeUp(tree, secondChildId);
+      const result = TreeOperations.moveNodeUp(tree, secondChildId);
       
       expect(result.success).toBe(true);
       expect(result.tree.root.children[0].id).toBe(secondChildId);
@@ -73,7 +73,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should move nodes down", () => {
       const tree = createTestTree();
       const firstChildId = tree.root.children[0].id;
-      const result = BlockOperations.moveNodeDown(tree, firstChildId);
+      const result = TreeOperations.moveNodeDown(tree, firstChildId);
       
       expect(result.success).toBe(true);
       expect(result.tree.root.children[1].id).toBe(firstChildId);
@@ -82,7 +82,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should delete nodes", () => {
       const tree = createTestTree();
       const child1Id = tree.root.children[0].id;
-      const result = BlockOperations.deleteNode(tree, child1Id);
+      const result = TreeOperations.deleteNode(tree, child1Id);
       
       expect(result.success).toBe(true);
       expect(result.tree.root.children).toHaveLength(1);
@@ -93,7 +93,7 @@ describe("CTOutliner Logic Tests", () => {
 
   describe("Markdown Parsing", () => {
     function parseMarkdownToTree(markdown: string): Tree {
-      if (!markdown.trim()) return BlockOperations.createEmptyTree();
+      if (!markdown.trim()) return TreeOperations.createEmptyTree();
 
       const lines = markdown.split("\n");
       const blocks: Block[] = [];
@@ -107,10 +107,10 @@ describe("CTOutliner Logic Tests", () => {
 
         const [, indent, content] = match;
         const level = Math.floor(indent.length / 2);
-        const nodeId = BlockOperations.createId();
+        const nodeId = TreeOperations.createId();
         
         // Create block for this content
-        const block = BlockOperations.createBlock({ id: nodeId, body: content });
+        const block = TreeOperations.createBlock({ id: nodeId, body: content });
         blocks.push(block);
 
         // Remove items from stack that are at same or deeper level
@@ -143,7 +143,7 @@ describe("CTOutliner Logic Tests", () => {
       };
 
       const root = {
-        id: BlockOperations.createId(),
+        id: TreeOperations.createId(),
         children: rootChildren.map(buildNode)
       };
 
@@ -173,7 +173,7 @@ describe("CTOutliner Logic Tests", () => {
       const parentBlock = tree.blocks.find(b => b.body === "Parent");
       expect(parentBlock).toBeTruthy();
       
-      const parentNode = BlockOperations.findNode(tree.root, parentBlock!.id);
+      const parentNode = TreeOperations.findNode(tree.root, parentBlock!.id);
       expect(parentNode!.children).toHaveLength(2);
       
       const child1Block = tree.blocks.find(b => b.body === "Child 1");
@@ -208,12 +208,12 @@ describe("CTOutliner Logic Tests", () => {
 
   describe("Markdown Generation", () => {
     it("converts simple tree to markdown", () => {
-      const child1Id = BlockOperations.createId();
-      const child2Id = BlockOperations.createId();
+      const child1Id = TreeOperations.createId();
+      const child2Id = TreeOperations.createId();
       
       const tree: Tree = {
         root: {
-          id: BlockOperations.createId(),
+          id: TreeOperations.createId(),
           children: [
             { id: child1Id, children: [] },
             { id: child2Id, children: [] }
@@ -226,18 +226,18 @@ describe("CTOutliner Logic Tests", () => {
         attachments: []
       };
 
-      const markdown = BlockOperations.toMarkdown(tree);
+      const markdown = TreeOperations.toMarkdown(tree);
       expect(markdown).toBe("- Item 1\n- Item 2");
     });
 
     it("converts nested tree to markdown", () => {
-      const parentId = BlockOperations.createId();
-      const child1Id = BlockOperations.createId();
-      const child2Id = BlockOperations.createId();
+      const parentId = TreeOperations.createId();
+      const child1Id = TreeOperations.createId();
+      const child2Id = TreeOperations.createId();
       
       const tree: Tree = {
         root: {
-          id: BlockOperations.createId(),
+          id: TreeOperations.createId(),
           children: [
             { 
               id: parentId, 
@@ -256,16 +256,16 @@ describe("CTOutliner Logic Tests", () => {
         attachments: []
       };
 
-      const markdown = BlockOperations.toMarkdown(tree);
+      const markdown = TreeOperations.toMarkdown(tree);
       expect(markdown).toBe("- Parent\n  - Child 1\n  - Child 2");
     });
   });
 
   describe("Node Navigation Logic", () => {
     it("gets all visible nodes", () => {
-      const tree = BlockOperations.createEmptyTree();
-      const child1Id = BlockOperations.createId();
-      const child2Id = BlockOperations.createId();
+      const tree = TreeOperations.createEmptyTree();
+      const child1Id = TreeOperations.createId();
+      const child2Id = TreeOperations.createId();
       
       const updatedTree: Tree = {
         ...tree,
@@ -283,7 +283,7 @@ describe("CTOutliner Logic Tests", () => {
       };
 
       const collapsedNodes = new Set<string>();
-      const visibleNodes = BlockOperations.getAllVisibleNodes(updatedTree.root, collapsedNodes);
+      const visibleNodes = TreeOperations.getAllVisibleNodes(updatedTree.root, collapsedNodes);
       
       expect(visibleNodes).toHaveLength(2);
       expect(visibleNodes[0].id).toBe(child1Id);
@@ -291,12 +291,12 @@ describe("CTOutliner Logic Tests", () => {
     });
 
     it("respects collapsed state", () => {
-      const parentId = BlockOperations.createId();
-      const childId = BlockOperations.createId();
+      const parentId = TreeOperations.createId();
+      const childId = TreeOperations.createId();
       
       const tree: Tree = {
         root: {
-          id: BlockOperations.createId(),
+          id: TreeOperations.createId(),
           children: [
             { 
               id: parentId, 
@@ -314,7 +314,7 @@ describe("CTOutliner Logic Tests", () => {
       };
 
       const collapsedNodes = new Set([parentId]);
-      const visibleNodes = BlockOperations.getAllVisibleNodes(tree.root, collapsedNodes);
+      const visibleNodes = TreeOperations.getAllVisibleNodes(tree.root, collapsedNodes);
       
       expect(visibleNodes).toHaveLength(1);
       expect(visibleNodes[0].id).toBe(parentId);
