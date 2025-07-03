@@ -126,14 +126,17 @@ export const KeyboardCommands = {
       ctx.event.preventDefault();
       if (ctx.focusedNodeId) {
         if (ctx.event.shiftKey) {
-          // Shift+Enter creates new sibling node below current
-          ctx.component.createNewNodeAfter(ctx.focusedNodeId);
+          // Shift+Enter creates new child node
+          ctx.component.createChildNode(ctx.focusedNodeId);
+        } else if (ctx.event.metaKey || ctx.event.ctrlKey) {
+          // Cmd/Ctrl+Enter starts editing
+          ctx.component.startEditing(ctx.focusedNodeId);
         } else if (ctx.event.altKey) {
-          // Alt+Enter creates new child node
+          // Alt+Enter creates new child node (keeping this for compatibility)
           ctx.component.createChildNode(ctx.focusedNodeId);
         } else {
-          // Enter starts editing
-          ctx.component.startEditing(ctx.focusedNodeId);
+          // Enter creates new sibling node below current
+          ctx.component.createNewNodeAfter(ctx.focusedNodeId);
         }
       }
     }

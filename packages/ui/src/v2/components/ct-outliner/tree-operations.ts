@@ -1,4 +1,4 @@
-import type { OutlineNode, TreeOperationResult, NodeCreationOptions } from "./types.ts";
+import type { OutlineNode, TreeOperationResult, LegacyNodeCreationOptions } from "./types.ts";
 
 /**
  * Pure functional operations for tree manipulation and traversal
@@ -14,7 +14,7 @@ export const TreeOperations = {
   /**
    * Create a new node with given options
    */
-  createNode(options: NodeCreationOptions): OutlineNode {
+  createNode(options: LegacyNodeCreationOptions): OutlineNode {
     return {
       id: options.id || TreeOperations.createNodeId(),
       content: options.content,

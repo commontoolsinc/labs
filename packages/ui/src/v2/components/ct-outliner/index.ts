@@ -8,15 +8,22 @@ export type {
   CharmReference,
   MentionableItem,
   OutlineNode,
-  OutlineNodeData,
   OutlineUIState,
   KeyboardContext,
   KeyboardCommand,
   EditingState,
   NodeCreationOptions,
-  TreeOperationResult
+  LegacyNodeCreationOptions,
+  TreeOperationResult,
+  Tree,
+  Node,
+  Block,
+  Attachment,
+  BlockCreationOptions
 } from "./types.ts";
 export { TreeOperations } from "./tree-operations.ts";
+export { BlockOperations } from "./block-operations.ts";
+export { MigrationBridge } from "./migration-bridge.ts";
 export { KeyboardCommands, executeKeyboardCommand } from "./keyboard-commands.ts";
 
 // Auto-register the custom element

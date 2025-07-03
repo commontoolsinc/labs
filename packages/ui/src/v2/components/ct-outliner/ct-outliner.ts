@@ -10,19 +10,24 @@ import type {
   KeyboardContext,
   EditingKeyboardContext,
   MentionableItem,
-  NodeCreationOptions,
+  LegacyNodeCreationOptions,
   OutlineNode,
+  Tree,
+  Node as OutlineTreeNode,
+  Block,
 } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import { executeKeyboardCommand, executeEditingKeyboardCommand } from "./keyboard-commands.ts";
 import { EditingOperations } from "./editing-operations.ts";
+import { MigrationBridge } from "./migration-bridge.ts";
+import { BlockOperations } from "./block-operations.ts";
 
 /**
- * CTOutliner - An outliner component for hierarchical markdown bullet points
+ * CTOutliner - A block-based outliner component with hierarchical tree structure
  *
  * @element ct-outliner
  *
- * @attr {string} value - Markdown content with bullet points
+ * @attr {Tree} value - Tree structure with nodes and blocks
  * @attr {boolean} readonly - Whether the outliner is read-only
  * @attr {Array} mentionable - Array of mentionable items with {name, charm} structure
  *
@@ -30,7 +35,8 @@ import { EditingOperations } from "./editing-operations.ts";
  * @fires charm-link-click - Fired when a charm link is clicked with detail: { href, text, charm }
  *
  * @example
- * <ct-outliner value="- Item 1\n  - Subitem 1\n  - Subitem 2\n- Item 2"></ct-outliner>
+ * const tree = { root: { id: "1", children: [] }, blocks: [{ id: "1", body: "Item 1", attachments: [] }], attachments: [] };
+ * <ct-outliner .value=${tree}></ct-outliner>
  */
 
 export const OutlinerEffects = {
@@ -87,33 +93,47 @@ export const OutlinerEffects = {
 
 export class CTOutliner extends BaseElement {
   static override properties = {
-    value: { type: String },
+    value: { type: Object },
     readonly: { type: Boolean },
     mentionable: { type: Array },
-    nodes: { type: Array, state: true },
+    tree: { type: Object, state: true },
+    collapsedNodes: { type: Object, state: true },
     focusedNodeId: { type: String, state: true },
     showingMentions: { type: Boolean, state: true },
     mentionQuery: { type: String, state: true },
     selectedMentionIndex: { type: Number, state: true },
   };
 
-  private _value = "";
-  get value() {
+  private _value: Tree | null = null;
+
+  get value(): Tree | null {
     return this._value;
   }
-  set value(newValue: string) {
+
+  set value(newValue: Tree | null) {
     const oldValue = this._value;
     this._value = newValue;
 
-    // Only parse markdown if this is an external change
+    // Only update internal state if this is an external change
     if (!this._internalChange && oldValue !== newValue) {
-      this.nodes = this.parseMarkdown(newValue);
-      if (this.nodes.length === 0) {
+      if (newValue) {
+        this.tree = newValue;
+        this.collapsedNodes = new Set<string>();
+        
+        // Convert tree to legacy nodes for compatibility during transition
+        this.nodes = MigrationBridge.treeToLegacyNodes(newValue);
+        
+        // Maintain focus on first node if needed
+        if (!this.focusedNodeId && this.nodes.length > 0) {
+          this.focusedNodeId = this.nodes[0].id;
+        }
+      } else {
+        this.tree = BlockOperations.createEmptyTree();
+        this.collapsedNodes = new Set<string>();
         this.nodes = [this.createNode("", 0)];
-      }
-      // Maintain focus on first node if needed
-      if (!this.focusedNodeId && this.nodes.length > 0) {
-        this.focusedNodeId = this.nodes[0].id;
+        if (this.nodes.length > 0) {
+          this.focusedNodeId = this.nodes[0].id;
+        }
       }
     }
 
@@ -122,11 +142,15 @@ export class CTOutliner extends BaseElement {
 
   declare readonly: boolean;
   declare mentionable: MentionableItem[];
-  declare nodes: OutlineNode[];
+  declare tree: Tree;
+  declare collapsedNodes: Set<string>;
   declare focusedNodeId: string | null;
   declare showingMentions: boolean;
   declare mentionQuery: string;
   declare selectedMentionIndex: number;
+
+  // Legacy nodes property - keeping temporarily for gradual migration
+  declare nodes: OutlineNode[];
 
   private editingNodeId: string | null = null;
   private editingContent: string = "";
@@ -371,23 +395,25 @@ export class CTOutliner extends BaseElement {
 
   constructor() {
     super();
-    this.value = "";
     this.readonly = false;
     this.mentionable = [];
-    this.nodes = [];
+    this.tree = BlockOperations.createEmptyTree();
+    this.collapsedNodes = new Set<string>();
+    this.nodes = []; // Legacy property
     this.focusedNodeId = null;
     this.showingMentions = false;
     this.mentionQuery = "";
     this.selectedMentionIndex = 0;
+    this.value = this.tree;
   }
 
   override connectedCallback() {
     super.connectedCallback();
     // Only initialize nodes if they haven't been set yet
     if (!this.nodes || this.nodes.length === 0) {
-      this.nodes = this.parseMarkdown(this.value);
-      if (this.nodes.length === 0) {
-        this.nodes = [this.createNode("", 0)];
+      // Initialize with empty tree if no value provided
+      if (!this.value) {
+        this.value = BlockOperations.createEmptyTree();
       }
       // Set initial focus to first node if we have nodes
       if (this.nodes.length > 0 && !this.focusedNodeId) {
@@ -410,12 +436,40 @@ export class CTOutliner extends BaseElement {
     return TreeOperations.createNode({ content, level });
   }
 
-  private parseMarkdown(markdown: string): OutlineNode[] {
-    if (!markdown.trim()) return [];
+  /**
+   * Helper methods for working with Tree structure
+   */
+  private findNodeInTree(nodeId: string): OutlineTreeNode | null {
+    if (!this.tree) return null;
+    return BlockOperations.findNode(this.tree.root, nodeId);
+  }
+
+  private findBlockInTree(blockId: string): Block | null {
+    if (!this.tree) return null;
+    return BlockOperations.findBlock(this.tree, blockId);
+  }
+
+  private getNodeContent(nodeId: string): string {
+    const block = this.findBlockInTree(nodeId);
+    return block?.body || "";
+  }
+
+  private updateNodeContent(nodeId: string, content: string): void {
+    if (!this.tree) return;
+    this.tree = BlockOperations.updateBlock(this.tree, nodeId, content);
+    // Update legacy nodes for compatibility
+    this.nodes = MigrationBridge.treeToLegacyNodes(this.tree);
+  }
+
+  private parseMarkdownToTree(markdown: string): Tree {
+    if (!markdown.trim()) return BlockOperations.createEmptyTree();
 
     const lines = markdown.split("\n");
-    const root: OutlineNode[] = [];
-    const stack: { node: OutlineNode; parent: OutlineNode[] }[] = [];
+    const blocks: Block[] = [];
+    const stack: { nodeId: string; level: number }[] = [];
+    const nodeChildren: Map<string, string[]> = new Map();
+
+    let rootNodeId: string | null = null;
 
     for (const line of lines) {
       const match = line.match(/^(\s*)-\s(.*)$/);
@@ -423,27 +477,56 @@ export class CTOutliner extends BaseElement {
 
       const [, indent, content] = match;
       const level = Math.floor(indent.length / 2);
-      const node = this.createNode(content, level);
+      const nodeId = BlockOperations.createId();
+      
+      // Create block for this content
+      const block = BlockOperations.createBlock({ id: nodeId, body: content });
+      blocks.push(block);
 
-      while (stack.length > 0 && stack[stack.length - 1].node.level >= level) {
+      // Remove items from stack that are at same or deeper level
+      while (stack.length > 0 && stack[stack.length - 1].level >= level) {
         stack.pop();
       }
 
       if (stack.length === 0) {
-        root.push(node);
+        // This is a root level node
+        if (rootNodeId === null) {
+          rootNodeId = nodeId;
+        }
       } else {
-        stack[stack.length - 1].node.children.push(node);
+        // Add as child of the parent
+        const parentId = stack[stack.length - 1].nodeId;
+        if (!nodeChildren.has(parentId)) {
+          nodeChildren.set(parentId, []);
+        }
+        nodeChildren.get(parentId)!.push(nodeId);
       }
 
-      stack.push({
-        node,
-        parent: stack.length === 0
-          ? root
-          : stack[stack.length - 1].node.children,
-      });
+      stack.push({ nodeId, level });
     }
 
-    return root;
+    // Build the node tree
+    const buildNode = (nodeId: string): OutlineTreeNode => {
+      const children = nodeChildren.get(nodeId) || [];
+      return {
+        id: nodeId,
+        children: children.map(buildNode),
+      };
+    };
+
+    const root = rootNodeId ? buildNode(rootNodeId) : BlockOperations.createNode({ id: BlockOperations.createId() });
+
+    return {
+      root,
+      blocks,
+      attachments: [],
+    };
+  }
+
+  // Legacy method for backward compatibility during transition
+  private parseMarkdown(markdown: string): OutlineNode[] {
+    const tree = this.parseMarkdownToTree(markdown);
+    return MigrationBridge.treeToLegacyNodes(tree);
   }
 
   private nodesToMarkdown(nodes: OutlineNode[], baseLevel = 0): string {
@@ -1108,11 +1191,26 @@ export class CTOutliner extends BaseElement {
   }
 
   private emitChange() {
-    const newValue = this.nodesToMarkdown(this.nodes);
+    // Sync the tree with current legacy nodes (temporary during transition)
+    if (this.nodes.length > 0) {
+      this.tree = MigrationBridge.legacyNodesToTree(this.nodes);
+    } else {
+      this.tree = BlockOperations.createEmptyTree();
+    }
+    
+    // Update value and emit change
     this._internalChange = true;
-    this.value = newValue;
+    this._value = this.tree;
     this._internalChange = false;
-    this.emit("ct-change", { value: newValue });
+    this.emit("ct-change", { value: this.tree });
+  }
+
+  /**
+   * Export the current tree content as markdown string
+   * This provides a way to manually get markdown output for copy/export operations
+   */
+  toMarkdown(): string {
+    return this.nodesToMarkdown(this.nodes);
   }
 
   createNewNodeAfter(nodeId: string) {

@@ -23,13 +23,37 @@ export interface MentionableItem {
 }
 
 /**
- * Core data structure for outline nodes, separate from UI state
+ * Attachment to a block - for future extensibility
  */
-export interface OutlineNodeData {
+export interface Attachment {
+  name: string;
+  charm: CharmReference;
+}
+
+/**
+ * Block - the backing data for nodes, containing content and attachments
+ */
+export interface Block {
   readonly id: string;
-  readonly content: string;
-  readonly children: readonly OutlineNodeData[];
-  readonly level: number;
+  readonly body: string;
+  readonly attachments: readonly Attachment[];
+}
+
+/**
+ * Node - represents the tree structure, referencing blocks by ID
+ */
+export interface Node {
+  readonly id: string;
+  readonly children: readonly Node[];
+}
+
+/**
+ * Complete tree structure with nodes and their backing blocks
+ */
+export interface Tree {
+  readonly root: Node;
+  readonly blocks: readonly Block[];
+  readonly attachments: readonly Attachment[];
 }
 
 /**
@@ -46,8 +70,8 @@ export interface OutlineUIState {
 }
 
 /**
- * Working interface that combines data and UI state for compatibility
- * TODO: Eventually migrate to use OutlineNodeData + OutlineUIState separately
+ * Legacy interface - keeping for backward compatibility during transition
+ * @deprecated Use Node + Block structure instead
  */
 export interface OutlineNode {
   id: string;
@@ -104,9 +128,27 @@ export interface EditingState {
 }
 
 /**
- * Node creation options
+ * Options for creating a new block
+ */
+export interface BlockCreationOptions {
+  readonly body: string;
+  readonly id?: string;
+  readonly attachments?: readonly Attachment[];
+}
+
+/**
+ * Options for creating a new node
  */
 export interface NodeCreationOptions {
+  readonly id?: string;
+  readonly children?: readonly Node[];
+}
+
+/**
+ * Legacy node creation options - for backward compatibility
+ * @deprecated Use BlockCreationOptions + NodeCreationOptions instead
+ */
+export interface LegacyNodeCreationOptions {
   content: string;
   level: number;
   id?: string;
