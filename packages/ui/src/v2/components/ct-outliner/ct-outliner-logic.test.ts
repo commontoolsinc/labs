@@ -4,30 +4,32 @@ import { TreeOperations } from "./tree-operations.ts";
 import { KeyboardCommands } from "./keyboard-commands.ts";
 import type { Tree, Node, Block } from "./types.ts";
 
+// Test helper function
+function createTestTree(): Tree {
+  const rootId = TreeOperations.createId();
+  const child1Id = TreeOperations.createId();
+  const child2Id = TreeOperations.createId();
+  
+  return {
+    root: {
+      id: rootId,
+      children: [
+        { id: child1Id, children: [] },
+        { id: child2Id, children: [] }
+      ]
+    },
+    blocks: [
+      { id: child1Id, body: "First item", attachments: [] },
+      { id: child2Id, body: "Second item", attachments: [] }
+    ],
+    attachments: []
+  };
+}
+
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {
   // Test Tree structure and TreeOperations
   describe("Tree Operations", () => {
-    function createTestTree(): Tree {
-      const rootId = TreeOperations.createId();
-      const child1Id = TreeOperations.createId();
-      const child2Id = TreeOperations.createId();
-      
-      return {
-        root: {
-          id: rootId,
-          children: [
-            { id: child1Id, children: [] },
-            { id: child2Id, children: [] }
-          ]
-        },
-        blocks: [
-          { id: child1Id, body: "First item", attachments: [] },
-          { id: child2Id, body: "Second item", attachments: [] }
-        ],
-        attachments: []
-      };
-    }
 
     it("should create empty tree", () => {
       const tree = TreeOperations.createEmptyTree();
@@ -88,6 +90,301 @@ describe("CTOutliner Logic Tests", () => {
       expect(result.tree.root.children).toHaveLength(1);
       expect(result.tree.blocks).toHaveLength(1);
       expect(result.tree.blocks[0].id).toBe(tree.root.children[1].id);
+    });
+
+    it("should handle transformTree utility", () => {
+      const tree = createTestTree();
+      const firstChildId = tree.root.children[0].id;
+      
+      const result = TreeOperations.transformTree(
+        tree,
+        (node) => node.id === firstChildId,
+        (node) => ({ ...node, children: [{ id: "new-child", children: [] }] })
+      );
+      
+      const transformedNode = TreeOperations.findNode(result.root, firstChildId);
+      expect(transformedNode!.children).toHaveLength(1);
+      expect(transformedNode!.children[0].id).toBe("new-child");
+    });
+
+    it("should determine focus after deletion correctly", () => {
+      const tree = createTestTree();
+      const parentNode = tree.root;
+      
+      // Test with middle index (should focus previous)
+      const newFocusId = TreeOperations.determineFocusAfterDeletion(tree, parentNode, 1);
+      expect(newFocusId).toBe(tree.root.children[0].id);
+      
+      // Test with first index (should focus next)
+      const newFocusId2 = TreeOperations.determineFocusAfterDeletion(tree, parentNode, 0);
+      expect(newFocusId2).toBe(tree.root.children[1].id);
+    });
+
+    it("should add and remove blocks", () => {
+      const tree = createTestTree();
+      const newBlock = TreeOperations.createBlock({ body: "New block" });
+      
+      // Add block
+      const updatedTree = TreeOperations.addBlock(tree, newBlock);
+      expect(updatedTree.blocks).toHaveLength(3);
+      expect(TreeOperations.findBlock(updatedTree, newBlock.id)).toBeTruthy();
+      
+      // Remove block
+      const removedTree = TreeOperations.removeBlock(updatedTree, newBlock.id);
+      expect(removedTree.blocks).toHaveLength(2);
+      expect(TreeOperations.findBlock(removedTree, newBlock.id)).toBeNull();
+    });
+
+    it("should insert and remove nodes", () => {
+      const tree = createTestTree();
+      const newNode = TreeOperations.createNode({ id: "new-node" });
+      const parentId = tree.root.id;
+      
+      // Insert node
+      const insertedTree = TreeOperations.insertNode(tree, parentId, newNode, 1);
+      expect(insertedTree.root.children).toHaveLength(3);
+      expect(insertedTree.root.children[1].id).toBe("new-node");
+      
+      // Remove node
+      const removedTree = TreeOperations.removeNode(insertedTree, "new-node");
+      expect(removedTree.root.children).toHaveLength(2);
+      expect(TreeOperations.findNode(removedTree.root, "new-node")).toBeNull();
+    });
+
+    it("should handle indent/outdent operations", () => {
+      const tree = createTestTree();
+      const secondChildId = tree.root.children[1].id;
+      
+      // Test indent (make second child a child of first)
+      const indentResult = TreeOperations.indentNode(tree, secondChildId);
+      expect(indentResult.success).toBe(true);
+      expect(indentResult.tree.root.children).toHaveLength(1);
+      expect(indentResult.tree.root.children[0].children).toHaveLength(1);
+      expect(indentResult.tree.root.children[0].children[0].id).toBe(secondChildId);
+      
+      // Test outdent (move it back)
+      const outdentResult = TreeOperations.outdentNode(indentResult.tree, secondChildId);
+      expect(outdentResult.success).toBe(true);
+      expect(outdentResult.tree.root.children).toHaveLength(2);
+    });
+
+    it("should handle getAllNodes", () => {
+      const tree = createTestTree();
+      const allNodes = TreeOperations.getAllNodes(tree.root);
+      
+      // Should include root + 2 children
+      expect(allNodes).toHaveLength(3);
+      expect(allNodes[0]).toBe(tree.root);
+      expect(allNodes[1]).toBe(tree.root.children[0]);
+      expect(allNodes[2]).toBe(tree.root.children[1]);
+    });
+
+    it("should handle getNodeIndex", () => {
+      const tree = createTestTree();
+      const parentNode = tree.root;
+      const firstChildId = tree.root.children[0].id;
+      const secondChildId = tree.root.children[1].id;
+      
+      expect(TreeOperations.getNodeIndex(parentNode, firstChildId)).toBe(0);
+      expect(TreeOperations.getNodeIndex(parentNode, secondChildId)).toBe(1);
+      expect(TreeOperations.getNodeIndex(parentNode, "nonexistent")).toBe(-1);
+    });
+
+    it("should handle findParentNode", () => {
+      const tree = createTestTree();
+      const firstChildId = tree.root.children[0].id;
+      
+      const parent = TreeOperations.findParentNode(tree.root, firstChildId);
+      expect(parent).toBe(tree.root);
+      
+      const nonexistentParent = TreeOperations.findParentNode(tree.root, "nonexistent");
+      expect(nonexistentParent).toBeNull();
+    });
+  });
+
+  describe("Edge Cases and Error Handling", () => {
+    it("should handle movement operations on invalid nodes", () => {
+      const tree = TreeOperations.createEmptyTree();
+      
+      // Try to move nonexistent node
+      const moveUpResult = TreeOperations.moveNodeUp(tree, "nonexistent");
+      expect(moveUpResult.success).toBe(false);
+      
+      const moveDownResult = TreeOperations.moveNodeDown(tree, "nonexistent");
+      expect(moveDownResult.success).toBe(false);
+    });
+
+    it("should handle first/last node movement restrictions", () => {
+      const tree = createTestTree();
+      const firstChildId = tree.root.children[0].id;
+      const lastChildId = tree.root.children[1].id;
+      
+      // Can't move first node up
+      const moveUpFirst = TreeOperations.moveNodeUp(tree, firstChildId);
+      expect(moveUpFirst.success).toBe(false);
+      
+      // Can't move last node down
+      const moveDownLast = TreeOperations.moveNodeDown(tree, lastChildId);
+      expect(moveDownLast.success).toBe(false);
+    });
+
+    it("should handle indent/outdent restrictions", () => {
+      const tree = createTestTree();
+      const firstChildId = tree.root.children[0].id;
+      
+      // Can't indent first child (no previous sibling)
+      const indentFirst = TreeOperations.indentNode(tree, firstChildId);
+      expect(indentFirst.success).toBe(false);
+      
+      // Can't outdent root-level node (no grandparent)
+      const outdentRoot = TreeOperations.outdentNode(tree, firstChildId);
+      expect(outdentRoot.success).toBe(false);
+    });
+
+    it("should handle deleteNode restrictions", () => {
+      const tree = TreeOperations.createEmptyTree();
+      
+      // Can't delete root node
+      const deleteRoot = TreeOperations.deleteNode(tree, tree.root.id);
+      expect(deleteRoot.success).toBe(false);
+      
+      // Can't delete nonexistent node
+      const deleteNonexistent = TreeOperations.deleteNode(tree, "nonexistent");
+      expect(deleteNonexistent.success).toBe(false);
+    });
+
+    it("should handle deleteNode with children (promoting children)", () => {
+      // Create tree with grandchildren
+      const grandChildId = TreeOperations.createId();
+      const childId = TreeOperations.createId();
+      const parentId = TreeOperations.createId();
+      
+      const tree: Tree = {
+        root: {
+          id: TreeOperations.createId(),
+          children: [{
+            id: parentId,
+            children: [{
+              id: childId,
+              children: [{
+                id: grandChildId,
+                children: []
+              }]
+            }]
+          }]
+        },
+        blocks: [
+          { id: parentId, body: "Parent", attachments: [] },
+          { id: childId, body: "Child", attachments: [] },
+          { id: grandChildId, body: "Grandchild", attachments: [] }
+        ],
+        attachments: []
+      };
+      
+      // Delete the middle child - grandchild should be promoted
+      const result = TreeOperations.deleteNode(tree, childId);
+      expect(result.success).toBe(true);
+      
+      const parentNode = TreeOperations.findNode(result.tree.root, parentId);
+      expect(parentNode!.children).toHaveLength(1);
+      expect(parentNode!.children[0].id).toBe(grandChildId);
+    });
+
+    it("should handle empty tree operations", () => {
+      const emptyTree = TreeOperations.createEmptyTree();
+      
+      // Should handle operations on empty tree gracefully
+      const visibleNodes = TreeOperations.getAllVisibleNodes(emptyTree.root, new Set());
+      expect(visibleNodes).toHaveLength(0);
+      
+      const markdown = TreeOperations.toMarkdown(emptyTree);
+      expect(markdown).toBe("");
+      
+      const nonexistentBlock = TreeOperations.findBlock(emptyTree, "nonexistent");
+      expect(nonexistentBlock).toBeNull();
+      
+      const nonexistentNode = TreeOperations.findNode(emptyTree.root, "nonexistent");
+      expect(nonexistentNode).toBeNull();
+    });
+
+    it("should handle transformTree with no matching nodes", () => {
+      const tree = createTestTree();
+      
+      const result = TreeOperations.transformTree(
+        tree,
+        (node) => node.id === "nonexistent",
+        (node) => ({ ...node, children: [] })
+      );
+      
+      // Tree should be unchanged
+      expect(result).toEqual(tree);
+    });
+
+    it("should create consistent IDs", () => {
+      const id1 = TreeOperations.createId();
+      const id2 = TreeOperations.createId();
+      
+      expect(id1).toBeTruthy();
+      expect(id2).toBeTruthy();
+      expect(id1).not.toBe(id2);
+      expect(typeof id1).toBe("string");
+      expect(typeof id2).toBe("string");
+    });
+
+    it("should handle focus determination edge cases", () => {
+      const tree = createTestTree();
+      const parentNode = tree.root;
+      
+      // Test with out-of-bounds index (should still find a valid focus)
+      const focusId = TreeOperations.determineFocusAfterDeletion(tree, parentNode, 99);
+      expect(focusId).toBeTruthy(); // Should fall back to first visible node
+      
+      // Test with empty tree structure (no children)
+      const emptyTree = TreeOperations.createEmptyTree();
+      const emptyParent: Node = { id: "empty", children: [] };
+      const focusId2 = TreeOperations.determineFocusAfterDeletion(emptyTree, emptyParent, 0);
+      expect(focusId2).toBeNull();
+    });
+
+    it("should handle complex nested operations", () => {
+      // Create a deeper tree structure
+      const level3Id = TreeOperations.createId();
+      const level2Id = TreeOperations.createId();
+      const level1Id = TreeOperations.createId();
+      
+      const complexTree: Tree = {
+        root: {
+          id: TreeOperations.createId(),
+          children: [{
+            id: level1Id,
+            children: [{
+              id: level2Id,
+              children: [{
+                id: level3Id,
+                children: []
+              }]
+            }]
+          }]
+        },
+        blocks: [
+          { id: level1Id, body: "Level 1", attachments: [] },
+          { id: level2Id, body: "Level 2", attachments: [] },
+          { id: level3Id, body: "Level 3", attachments: [] }
+        ],
+        attachments: []
+      };
+      
+      // Test deep node operations
+      const allNodes = TreeOperations.getAllNodes(complexTree.root);
+      expect(allNodes).toHaveLength(4); // root + 3 levels
+      
+      // Test find operations at depth
+      const level3Node = TreeOperations.findNode(complexTree.root, level3Id);
+      expect(level3Node).toBeTruthy();
+      expect(level3Node!.children).toHaveLength(0);
+      
+      const level2Parent = TreeOperations.findParentNode(complexTree.root, level3Id);
+      expect(level2Parent!.id).toBe(level2Id);
     });
   });
 
