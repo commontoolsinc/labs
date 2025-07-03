@@ -45,7 +45,9 @@ export type DocImpl<T> = {
    * @param path - Path to follow.
    * @returns Value.
    */
-  getAtPath<Path extends PropertyKey[]>(path: Path): DeepKeyLookup<T, Path>;
+  getAtPath<Path extends readonly PropertyKey[]>(
+    path: Path,
+  ): DeepKeyLookup<T, Path>;
 
   /**
    * Get as value proxy, following query (i.e. aliases) and cell references.
@@ -75,7 +77,7 @@ export type DocImpl<T> = {
    * @param log - Reactivity log.
    * @returns Simple cell.
    */
-  asCell<Q = T, Path extends PropertyKey[] = []>(
+  asCell<Q = T, Path extends readonly PropertyKey[] = []>(
     path?: Path,
     log?: ReactivityLog,
     schema?: JSONSchema,
@@ -117,7 +119,7 @@ export type DocImpl<T> = {
    * @returns Whether the value changed.
    */
   setAtPath(
-    path: PropertyKey[],
+    path: readonly PropertyKey[],
     newValue: any,
     log?: ReactivityLog,
     schema?: JSONSchema,
@@ -130,7 +132,7 @@ export type DocImpl<T> = {
    * @returns Cancel function.
    */
   updates(
-    callback: (value: T, path: PropertyKey[], labels?: Labels) => void,
+    callback: (value: T, path: readonly PropertyKey[], labels?: Labels) => void,
   ): Cancel;
 
   /**
@@ -233,7 +235,8 @@ export type DocImpl<T> = {
   copyTrap: boolean;
 };
 
-export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
+export type DeepKeyLookup<T, Path extends readonly PropertyKey[]> = Path extends
+  [] ? T
   : Path extends [infer First, ...infer Rest]
     ? First extends keyof T
       ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
@@ -293,7 +296,7 @@ export function createDoc<T>(
       callbacks.add(callback);
       return () => callbacks.delete(callback);
     },
-    getAtPath: (path: PropertyKey[]) => getValueAtPath(value, path),
+    getAtPath: (path: readonly PropertyKey[]) => getValueAtPath(value, path),
     setAtPath: (
       path: PropertyKey[],
       newValue: any,
@@ -346,7 +349,9 @@ export function createDoc<T>(
       return value as T;
     },
     get "/"(): string {
-      return typeof entityId.toJSON === "function" ? entityId.toJSON()["/"] : (entityId["/"] as string);
+      return typeof entityId.toJSON === "function"
+        ? entityId.toJSON()["/"]
+        : (entityId["/"] as string);
     },
     get entityId(): EntityId {
       return entityId;
@@ -399,7 +404,10 @@ export function createDoc<T>(
 
 const docLinkToOpaqueRef = new WeakMap<
   Frame,
-  WeakMap<DocImpl<any>, { path: PropertyKey[]; opaqueRef: OpaqueRef<any> }[]>
+  WeakMap<
+    DocImpl<any>,
+    { path: readonly PropertyKey[]; opaqueRef: OpaqueRef<any> }[]
+  >
 >();
 
 // Creates aliases to value, used in recipes to refer to this specific cell. We
@@ -407,7 +415,7 @@ const docLinkToOpaqueRef = new WeakMap<
 // creaeting the recipe.
 export function makeOpaqueRef(
   doc: DocImpl<any>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
 ): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");

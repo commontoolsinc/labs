@@ -5,7 +5,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { INotFoundError } from "../src/storage/interface.ts";
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
-import { IMemoryAddress } from "../src/storage/interface.ts";
+import { IMemorySpaceAddress } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -586,7 +586,7 @@ describe("data: URI behaviors", () => {
       id: `data:application/json,${encoded}`,
       type: "application/json",
       path: ["foo", "bar"],
-    } as IMemoryAddress;
+    } as IMemorySpaceAddress;
     const result = transaction.read(address);
     expect(result.ok).toBeDefined();
     expect(result.ok?.value).toBe(42);
@@ -599,7 +599,7 @@ describe("data: URI behaviors", () => {
       id: "data:application/json", // missing data
       type: "application/json",
       path: [],
-    } as IMemoryAddress;
+    } as IMemorySpaceAddress;
     const result = transaction.read(address);
     expect(result.error).toBeDefined();
     expect(result.error?.name).toBe("InvalidDataURIError");
@@ -616,7 +616,7 @@ describe("data: URI behaviors", () => {
       id: `data:application/json,${invalidJson}`,
       type: "application/json",
       path: [],
-    } as IMemoryAddress;
+    } as IMemorySpaceAddress;
     const result = transaction.read(address);
     expect(result.error).toBeDefined();
     expect(result.error?.name).toBe("InvalidDataURIError");
@@ -632,7 +632,7 @@ describe("data: URI behaviors", () => {
       id: "data:application/json,%7B%7D",
       type: "application/json",
       path: [],
-    } as IMemoryAddress;
+    } as IMemorySpaceAddress;
     const result = transaction.write(address, {});
     expect(result.error).toBeDefined();
     expect(result.error?.name).toBe("UnsupportedMediaTypeError");

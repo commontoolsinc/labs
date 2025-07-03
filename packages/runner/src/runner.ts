@@ -249,8 +249,9 @@ export class Runner implements IRunner {
 
     // [unsafe closures:] For recipes from closures, add a materialize factory
     if (recipe[unsafe_originalRecipe]) {
-      recipe[unsafe_materializeFactory] = (log: any) => (path: PropertyKey[]) =>
-        processCell.getAsQueryResult(path, log);
+      recipe[unsafe_materializeFactory] =
+        (log: any) => (path: readonly PropertyKey[]) =>
+          processCell.getAsQueryResult(path, log);
     }
 
     for (const node of recipe.nodes) {
@@ -551,7 +552,7 @@ export class Runner implements IRunner {
 
         const frame = pushFrameFromCause(cause, {
           recipe,
-          materialize: (path: PropertyKey[]) =>
+          materialize: (path: readonly PropertyKey[]) =>
             processCell.getAsQueryResult(path),
         });
 
@@ -618,7 +619,7 @@ export class Runner implements IRunner {
           { inputs, outputs, fn: fn.toString() },
           {
             recipe,
-            materialize: (path: PropertyKey[]) =>
+            materialize: (path: readonly PropertyKey[]) =>
               processCell.getAsQueryResult(path, log),
           } satisfies UnsafeBinding,
         );

@@ -120,7 +120,7 @@ export class Scheduler implements IScheduler {
     this.cancels.set(
       action,
       reads.map(({ cell: doc, path }) =>
-        doc.updates((_newValue: any, changedPath: PropertyKey[]) => {
+        doc.updates((_newValue: any, changedPath: readonly PropertyKey[]) => {
           if (pathAffected(changedPath, path)) {
             this.dirty.add(doc);
             this.queueExecution();
@@ -454,7 +454,10 @@ export function compactifyPaths(
   return result;
 }
 
-function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+function pathAffected(
+  changedPath: readonly PropertyKey[],
+  path: readonly PropertyKey[],
+) {
   changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
   return (
     (changedPath.length <= path.length &&

@@ -1,9 +1,7 @@
-import { fromString, refer } from "merkle-reference";
-import { isBrowser } from "@commontools/utils/env";
-import { isObject } from "@commontools/utils/types";
 import type {
+  Assertion,
   AuthorizationError,
-  Changes,
+  Changes as MemoryChanges,
   Commit,
   ConflictError,
   ConnectionError,
@@ -11,12 +9,18 @@ import type {
   Entity,
   Fact,
   FactAddress,
+  Invariant,
+  JSONValue,
   MemorySpace,
   Protocol,
   ProviderCommand,
+  ProviderSession,
   QueryError,
+  Reference,
   Result,
   Revision,
+  SchemaContext,
+  SchemaPathSelector,
   SchemaQueryArgs,
   Signer,
   State,
@@ -25,25 +29,44 @@ import type {
   TransactionError,
   UCAN,
   Unit,
+  Variant,
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import { assert, claim, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toChanges, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
-import { SchemaNone } from "@commontools/memory/schema";
 import { type Cancel, type EntityId } from "@commontools/runner";
-import type { JSONSchema, JSONValue, SchemaContext } from "../builder/types.ts";
+import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
-import { MapSet, type SchemaPathSelector } from "../traverse.ts";
-import type { IStorageProvider, StorageValue } from "./interface.ts";
+import { MapSet } from "../traverse.ts";
+import { fromString, refer } from "merkle-reference";
+import { isBrowser } from "@commontools/utils/env";
+import { isObject } from "@commontools/utils/types";
+import type {
+  Assert,
+  Claim,
+  IRemoteStorageProviderSettings,
+  IStorageManager,
+  IStorageManagerV2,
+  IStorageProvider,
+  IStorageProviderWithReplica,
+  IStorageTransaction,
+  IStoreError,
+  ITransaction,
+  PushError,
+  Retract,
+  StorageValue,
+} from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
-import { Channel, RawCommand } from "./inspector.ts";
-
 export * from "@commontools/memory/interface";
+import { Channel, RawCommand } from "./inspector.ts";
+import { SchemaNone } from "@commontools/memory/schema";
+import * as Transaction from "./transaction.ts";
+
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
 }
@@ -66,7 +89,7 @@ export interface AsyncPull<Model, Address> {
   pull(
     selector: Selector<Address>,
   ): Promise<
-    Result<Selection<Address, Model>, StoreError>
+    Result<Selection<Address, Model>, IStoreError>
   >;
 }
 
@@ -74,7 +97,7 @@ export interface AsyncPush<Model> {
   merge(
     entries: Iterable<Model>,
     merge: Merge<Model>,
-  ): Promise<Result<Unit, StoreError>>;
+  ): Promise<Result<Unit, IStoreError>>;
 }
 
 export interface AsyncStore<Model, Address>
@@ -85,7 +108,7 @@ export interface SyncPull<Model, Address> {
   pull(
     selector: Selector<Address>,
   ): Promise<
-    Result<Selection<Address, Model>, StoreError>
+    Result<Selection<Address, Model>, IStoreError>
   >;
 }
 
@@ -93,7 +116,7 @@ export interface SyncPush<Model> {
   merge(
     entries: Iterable<Model>,
     merge: Merge<Model>,
-  ): Result<Unit, StoreError>;
+  ): Result<Unit, IStoreError>;
 }
 
 export interface SyncStore<Model, Address>
@@ -103,23 +126,6 @@ export interface SyncStore<Model, Address>
 interface NotFoundError extends Error {
   name: "NotFound";
   address: FactAddress;
-}
-
-interface StoreError extends Error {
-  name: "StoreError";
-  cause: Error;
-}
-
-export interface Assert {
-  the: The;
-  of: Entity;
-  is: JSONValue;
-}
-
-export interface Retract {
-  the: The;
-  of: Entity;
-  is?: void;
 }
 
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
@@ -140,7 +146,7 @@ export class NoCache<Model extends object, Address>
    */
   async pull(
     selector: Selector<Address>,
-  ): Promise<Result<Selection<Address, Model>, StoreError>> {
+  ): Promise<Result<Selection<Address, Model>, IStoreError>> {
     return await { ok: new Map() };
   }
 
@@ -158,6 +164,24 @@ class Nursery implements SyncPush<State> {
   }
   static delete() {
     return undefined;
+  }
+
+  /**
+   * If state `before` and `after` are the same that implies that remote has
+   * caught up with `nursery` so we evict record from nursery allowing reads
+   * to fall through to `heap`. If `after` is `undefined` that is very unusual,
+   * yet we keep value from `before` as nursery is more likely ahead. If
+   * `before` is `undefined` keep it as is because reads would fall through
+   * to `heap` anyway.
+   */
+  static evict(before?: State, after?: State) {
+    return before == undefined
+      ? undefined
+      : after === undefined
+      ? before
+      : JSON.stringify(before) === JSON.stringify(after)
+      ? undefined
+      : before;
   }
 
   constructor(public store: Map<string, State> = new Map()) {
@@ -442,6 +466,10 @@ export class Replica {
     this.pull = this.pull.bind(this);
   }
 
+  did(): MemorySpace {
+    return this.space;
+  }
+
   async poll() {
     // Poll re-fetches the commit log, then subscribes to that
     // We don't use the autosubscribing query, since we want the
@@ -470,7 +498,7 @@ export class Replica {
       if (next.done) {
         break;
       }
-      this.merge(next.value[this.space] as unknown as Commit);
+      this.integrate(next.value[this.space] as unknown as Commit);
     }
   }
 
@@ -485,7 +513,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | AuthorizationError | ConnectionError
+      IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // If requested entry list is empty there is nothing to fetch so we return
@@ -603,7 +631,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | AuthorizationError | ConnectionError
+      IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // First we identify entries that we need to load from the store.
@@ -689,16 +717,11 @@ export class Replica {
    * would assume state that is rejected.
    */
   async push(
-    changes: (Assert | Retract)[],
+    changes: (Assert | Retract | Claim)[],
   ): Promise<
     Result<
       Commit,
-      | StoreError
-      | QueryError
-      | ConnectionError
-      | ConflictError
-      | TransactionError
-      | AuthorizationError
+      PushError
     >
   > {
     // First we pull all the affected entries into heap so we can build a
@@ -712,10 +735,18 @@ export class Replica {
       // Collect facts so that we can derive desired state and a corresponding
       // transaction
       const facts: Fact[] = [];
-      for (const { the, of, is } of changes) {
+      const claims: Invariant[] = [];
+      for (const { the, of, is, claim } of changes) {
         const fact = this.get({ the, of });
-        // If `is` is `undefined` we want to retract the fact.
-        if (is === undefined) {
+
+        if (claim) {
+          claims.push({
+            the,
+            of,
+            fact: refer(fact),
+          });
+        } else if (is === undefined) {
+          // If `is` is `undefined` we want to retract the fact.
           // If local `is` in the local state is also `undefined` desired state
           // matches current state in which case we omit this change from the
           // transaction, otherwise we retract fact.
@@ -733,71 +764,104 @@ export class Replica {
         }
       }
 
-      // Store facts in a nursery so that subsequent changes will be build
-      // optimistically assuming that push will succeed.
-      this.nursery.merge(facts, Nursery.put);
-      // Track all our pending changes
-      facts.map((fact) =>
-        this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
-      );
-
       // These push transaction that will commit desired state to a remote.
-      const result = await this.remote.transact({
-        changes: getChanges(facts),
-      });
-
-      // If transaction fails we delete facts from the nursery so that new
-      // changes will not build upon rejected state. If there are other inflight
-      // transactions that already were built upon our facts they will also fail.
-      if (result.error) {
-        for (const fact of facts) {
-          this.pendingNurseryChanges.deleteValue(
-            toKey(fact),
-            fact.cause.toString(),
-          );
-          this.seenNurseryChanges.delete(toKey(fact));
-        }
-        this.nursery.merge(facts, Nursery.delete);
-        const fact = result.error.name === "ConflictError" &&
-          result.error.conflict.actual;
-        // We also update heap so it holds latest record
-        if (fact) {
-          this.heap.merge([fact], Replica.update);
-        }
-      } //
-      // If transaction succeeded we promote facts from nursery into a heap.
-      else {
-        const commit = toRevision(result.ok);
-        const { since } = commit.is;
-        // Turn facts into revisions corresponding with the commit.
-        const revisions = [
-          ...facts.map((fact) => ({ ...fact, since })),
-          // We strip transaction info so we don't duplicate same data
-          { ...commit, is: { since: commit.is.since } },
-        ];
-        // Avoid sending out updates to subscribers if it's a fact we already
-        // know about in the nursery.
-        const localFacts = this.getLocalFacts(revisions);
-        this.heap.merge(
-          revisions,
-          Replica.put,
-          (revision) => !localFacts.has(revision),
-        );
-        // We only delete from the nursery when we've seen all of our pending
-        // facts (or gotten a conflict).
-        // Server facts may have newer nursery changes that we want to keep.
-        const freshFacts = revisions.filter((revision) =>
-          this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0 === 0
-        );
-        this.nursery.merge(freshFacts, Nursery.delete);
-        for (const fact of freshFacts) {
-          this.pendingNurseryChanges.delete(toKey(fact));
-          this.seenNurseryChanges.delete(toKey(fact));
-        }
-      }
-
-      return result;
+      return this.commit({ facts, claims });
     }
+  }
+
+  async commit({ facts, claims }: ITransaction) {
+    // Store facts in a nursery so that subsequent changes will be build
+    // optimistically assuming that push will succeed.
+    this.nursery.merge(facts, Nursery.put);
+    // Track all our pending changes
+    facts.map((fact) =>
+      this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
+    );
+
+    // These push transaction that will commit desired state to a remote.
+    const result = await this.remote.transact({
+      changes: getChanges([...claims, ...facts] as Statement[]),
+    });
+
+    // If transaction fails we delete facts from the nursery so that new
+    // changes will not build upon rejected state. If there are other inflight
+    // transactions that already were built upon our facts they will also fail.
+    if (result.error) {
+      for (const fact of facts) {
+        this.pendingNurseryChanges.deleteValue(
+          toKey(fact),
+          fact.cause.toString(),
+        );
+        this.seenNurseryChanges.delete(toKey(fact));
+      }
+      this.nursery.merge(facts, Nursery.delete);
+      const fact = result.error.name === "ConflictError" &&
+        result.error.conflict.actual;
+      // We also update heap so it holds latest record
+      if (fact) {
+        this.heap.merge([fact], Replica.update);
+      }
+    } //
+    // If transaction succeeded we promote facts from nursery into a heap.
+    else {
+      const commit = toRevision(result.ok);
+      const { since } = commit.is;
+      // Turn facts into revisions corresponding with the commit.
+      const revisions = [
+        ...facts.map((fact) => ({ ...fact, since })),
+        // We strip transaction info so we don't duplicate same data
+        { ...commit, is: { since: commit.is.since } },
+      ];
+      // Avoid sending out updates to subscribers if it's a fact we already
+      // know about in the nursery.
+      const localFacts = this.getLocalFacts(revisions);
+      this.heap.merge(
+        revisions,
+        Replica.put,
+        (revision) => !localFacts.has(revision),
+      );
+      // We only delete from the nursery when we've seen all of our pending
+      // facts (or gotten a conflict).
+      // Server facts may have newer nursery changes that we want to keep.
+      const freshFacts = revisions.filter((revision) =>
+        this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0 === 0
+      );
+      this.nursery.merge(freshFacts, Nursery.delete);
+      for (const fact of freshFacts) {
+        this.pendingNurseryChanges.delete(toKey(fact));
+        this.seenNurseryChanges.delete(toKey(fact));
+      }
+    }
+    // If transaction fails we delete facts from the nursery so that new
+    // changes will not build upon rejected state. If there are other inflight
+    // transactions that already were built upon our facts they will also fail.
+    if (result.error) {
+      this.nursery.merge(facts, Nursery.delete);
+      const fact = result.error.name === "ConflictError" &&
+        result.error.conflict.actual;
+      // We also update heap so it holds latest record
+      if (fact) {
+        this.heap.merge([fact], Replica.update);
+      }
+    } //
+    // If transaction succeeded we promote facts from nursery into a heap.
+    else {
+      const commit = toRevision(result.ok);
+      const { since } = commit.is;
+      const revisions = [
+        ...facts.map((fact) => ({ ...fact, since })),
+        // We strip transaction info so we don't duplicate same data
+        { ...commit, is: { since: commit.is.since } },
+      ];
+      // Turn facts into revisions corresponding with the commit.
+      this.heap.merge(revisions, Replica.put);
+      // Evict redundant facts which we just merged into `heap` so that reads
+      // will occur from `heap`. This way future changes upstream we not get
+      // shadowed by prior local changes.
+      this.nursery.merge(facts, Nursery.evict);
+    }
+
+    return result;
   }
 
   subscribe(entry: FactAddress, subscriber: (value?: Revision<State>) => void) {
@@ -810,7 +874,7 @@ export class Replica {
     this.heap.unsubscribe(entry, subscriber);
   }
 
-  merge(commit: Commit) {
+  integrate(commit: Commit) {
     const { the, of, cause, is, since } = toRevision(commit);
     const revisions = [
       { the, of, cause, is: { since: is.since }, since },
@@ -834,7 +898,7 @@ export class Replica {
    * Returns state corresponding to the requested entry. If there is a pending
    * state returns it otherwise returns recent state.
    */
-  get(entry: FactAddress) {
+  get(entry: FactAddress): State | undefined {
     return this.nursery.get(entry) ?? this.heap.get(entry);
   }
 
@@ -912,10 +976,10 @@ export interface RemoteStorageProviderOptions {
   session: Consumer.MemoryConsumer<MemorySpace>;
   space: MemorySpace;
   the?: string;
-  settings?: RemoteStorageProviderSettings;
+  settings?: IRemoteStorageProviderSettings;
 }
 
-export const defaultSettings: RemoteStorageProviderSettings = {
+export const defaultSettings: IRemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
   useSchemaQueries: true,
@@ -972,6 +1036,9 @@ class ProviderConnection implements IStorageProvider {
   }
   get settings() {
     return this.provider.settings;
+  }
+  get replica() {
+    return this.provider.replica;
   }
   connect() {
     const { connection } = this;
@@ -1111,7 +1178,7 @@ class ProviderConnection implements IStorageProvider {
           break;
         }
         default:
-          throw new Error(`Unknown event type: ${event.type}`);
+          throw new RangeError(`Unknown event type: ${event.type}`);
       }
 
       this.connect();
@@ -1223,7 +1290,7 @@ export class Provider implements IStorageProvider {
   the: string;
   session: Consumer.MemoryConsumer<MemorySpace>;
   spaces: Map<string, Replica>;
-  settings: RemoteStorageProviderSettings;
+  settings: IRemoteStorageProviderSettings;
 
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
@@ -1258,6 +1325,9 @@ export class Provider implements IStorageProvider {
       provider: this,
       address: options.address,
     });
+  }
+  get replica() {
+    return this.workspace;
   }
 
   mount(space: MemorySpace): Replica {
@@ -1342,7 +1412,7 @@ export class Provider implements IStorageProvider {
       | ConnectionError
       | AuthorizationError
       | QueryError
-      | StoreError
+      | IStoreError
     >
   > {
     const { the, workspace } = this;
@@ -1464,26 +1534,15 @@ export interface Options {
   /**
    * Various settings to configure storage provider.
    */
-  settings?: RemoteStorageProviderSettings;
+  settings?: IRemoteStorageProviderSettings;
 }
 
-export interface IStorageManager {
-  id: string;
-  open(space: string): IStorageProvider;
-}
-
-export interface LocalStorageOptions {
-  as: Signer;
-  id?: string;
-  settings?: RemoteStorageProviderSettings;
-}
-
-export class StorageManager implements IStorageManager {
+export class StorageManager implements IStorageManager, IStorageManagerV2 {
   address: URL;
   as: Signer;
   id: string;
-  settings: RemoteStorageProviderSettings;
-  #providers: Map<string, IStorageProvider> = new Map();
+  settings: IRemoteStorageProviderSettings;
+  #providers: Map<string, IStorageProviderWithReplica> = new Map();
 
   static open(options: Options) {
     if (options.address.protocol === "memory:") {
@@ -1520,7 +1579,7 @@ export class StorageManager implements IStorageManager {
     return provider;
   }
 
-  protected connect(space: MemorySpace): IStorageProvider {
+  protected connect(space: MemorySpace): IStorageProviderWithReplica {
     const { id, address, as, settings } = this;
     return Provider.connect({
       id,
@@ -1539,16 +1598,21 @@ export class StorageManager implements IStorageManager {
 
     await Promise.all(promises);
   }
+
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IStorageTransaction {
+    return Transaction.create(this);
+  }
 }
 
-export const getChanges = <
-  T extends The,
-  Of extends Entity,
-  Is extends JSONValue,
->(
+export const getChanges = (
   statements: Iterable<Statement>,
 ) => {
-  const changes = {} as Changes<T, Of, Is>;
+  const changes = {} as MemoryChanges;
   for (const statement of statements) {
     if (statement.cause) {
       const cause = statement.cause.toString();
@@ -1563,7 +1627,9 @@ export const getChanges = <
 };
 
 // Given an Assert statement with labels, return a SchemaContext with the ifc tags
-const getSchema = (change: Assert | Retract): SchemaContext | undefined => {
+const getSchema = (
+  change: Assert | Retract | Claim,
+): SchemaContext | undefined => {
   if (isObject(change?.is) && "labels" in change.is) {
     const schema = { ifc: change.is.labels } as JSONSchema;
     return { schema: schema, rootSchema: schema };

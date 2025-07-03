@@ -9,9 +9,9 @@ import type { RecipeEnvironment } from "./builder/env.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
+  IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
-  IStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell } from "./cell.ts";
@@ -36,9 +36,9 @@ import {
 } from "./link-utils.ts";
 
 export type {
+  IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
-  IStorageTransaction,
   MemorySpace,
 };
 
@@ -92,7 +92,7 @@ export interface IRuntime {
   dispose(): Promise<void>;
 
   // Storage transaction method
-  edit(): IStorageTransaction;
+  edit(): IExtendedStorageTransaction;
 
   // Cell factory methods
   getCell<T>(
@@ -416,7 +416,7 @@ export class Runtime implements IRuntime {
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    */
-  edit(): IStorageTransaction {
+  edit(): IExtendedStorageTransaction {
     return new StorageTransaction(this);
   }
 

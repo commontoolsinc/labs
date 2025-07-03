@@ -24,7 +24,7 @@ import {
 // if there was no change.
 export function setNestedValue<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   value: unknown,
   log?: ReactivityLog,
 ): boolean {

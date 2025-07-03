@@ -20,7 +20,7 @@ export const LINK_V1_TAG = "link@1" as const;
 export type LinkV1 = {
   [LINK_V1_TAG]: {
     id?: URI;
-    path?: string[];
+    path?: readonly string[];
     space?: MemorySpace;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
@@ -71,7 +71,7 @@ export type LegacyDocCellLink = {
 export type LegacyAlias = {
   $alias: {
     cell?: DocImpl<any> | ShadowRef | number;
-    path: PropertyKey[];
+    path: readonly PropertyKey[];
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
   };

@@ -7,7 +7,7 @@ import { type LegacyDocCellLink, LINK_V1_TAG } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
 import { toURI } from "./uri-utils.ts";
-import { type IStorageTransaction } from "./storage/interface.ts";
+import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 
@@ -84,7 +84,7 @@ function resolveSchema(
  */
 function processDefaultValue(
   runtime: IRuntime,
-  tx: IStorageTransaction,
+  tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   defaultValue: any,
   log?: ReactivityLog,
@@ -273,7 +273,7 @@ function mergeDefaults(
 
 export function validateAndTransform(
   runtime: IRuntime,
-  tx: IStorageTransaction,
+  tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   log?: ReactivityLog,
   seen: Array<[string, any]> = [],

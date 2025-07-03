@@ -20,14 +20,17 @@ import {
   isQueryResultForDereferencing,
   QueryResultInternals,
 } from "./query-result-proxy.ts";
-import { type IMemoryAddress } from "./storage/interface.ts";
+import type {
+  IMemorySpaceAddress,
+  MemoryAddressPathComponent,
+} from "./storage/interface.ts";
 
 /**
  * Normalized link structure returned by parsers
  */
 export type NormalizedLink = {
   id?: URI; // URI format with "of:" prefix
-  path: string[];
+  path: readonly MemoryAddressPathComponent[];
   space?: MemorySpace;
   type?: string; // Default is "application/json"
   schema?: JSONSchema;
@@ -41,7 +44,7 @@ export type NormalizedLink = {
  *
  * Any such link can be used as a memory address.
  */
-export type NormalizedFullLink = NormalizedLink & IMemoryAddress;
+export type NormalizedFullLink = NormalizedLink & IMemorySpaceAddress;
 
 /**
  * A type reflecting all possible link formats, including cells themselves.
@@ -449,7 +452,7 @@ function parseToLegacyCellLinkWithMaybeACell(
 
   return {
     cell: cellValue,
-    path: link.path ?? [],
+    path: link.path as string[] ?? [],
     space: link.space,
     schema: link.schema,
     rootSchema: link.rootSchema,
@@ -471,7 +474,7 @@ export function parseNormalizedFullLinktoLegacyDocCellLink(
 ): LegacyDocCellLink {
   return {
     cell: runtime.getCellFromLink(link).getDoc(),
-    path: link.path,
+    path: link.path as string[],
   } satisfies LegacyDocCellLink;
 }
 
@@ -519,7 +522,7 @@ export function createSigilLinkFromParsedLink(
   const sigilLink: SigilLink = {
     "/": {
       [LINK_V1_TAG]: {
-        path: link.path,
+        path: link.path as string[],
         schema: link.schema,
         rootSchema: link.rootSchema,
       },

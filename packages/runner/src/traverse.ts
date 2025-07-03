@@ -375,7 +375,7 @@ function followPointer<K, S>(
       // Also insert the portions of cellTarget.path, so selector is relative to new target doc
       // We do this even if the target doc is the same doc, since we want the
       // selector path to match.
-      selector = narrowSchema(doc.path, selector, link.path);
+      selector = narrowSchema(doc.path, selector, link.path as string[]);
     }
     if (link.id !== undefined) {
       // We have a reference to a different cell, so track the dependency
@@ -420,7 +420,7 @@ function followPointer<K, S>(
         path: [],
         value: targetDocRoot,
       },
-      [...link.path, ...path],
+      [...link.path, ...path] as string[],
       tracker,
       schemaTracker,
       selector,
@@ -505,7 +505,7 @@ function loadLinkedRecipe<K, S>(
 function narrowSchema(
   docPath: string[],
   selector: SchemaPathSelector,
-  targetPath: string[],
+  targetPath: readonly string[],
 ): SchemaPathSelector {
   let docPathIndex = 0;
   while (docPathIndex < docPath.length && docPathIndex < selector.path.length) {

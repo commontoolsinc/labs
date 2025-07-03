@@ -2,13 +2,12 @@ import { refer } from "@commontools/memory/reference";
 import { isRecord } from "@commontools/utils/types";
 import type {
   IInvalidDataURIError,
-  IMemoryAddress,
+  IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
-  IReaderError,
+  IStorageInvariant,
   IStorageTransaction,
   IStorageTransactionComplete,
-  IStorageTransactionError,
   IStorageTransactionInconsistent,
   IStorageTransactionInvariant,
   IStorageTransactionLog,
@@ -16,12 +15,17 @@ import type {
   ITransactionReader,
   ITransactionWriter,
   IUnsupportedMediaTypeError,
-  IWriterError,
   JSONValue,
   MemoryAddressPathComponent,
+  MemorySpace,
   Read,
+  ReaderError,
+  ReadError,
   Result,
+  StorageTransactionFailed,
   Write,
+  WriteError,
+  WriterError,
 } from "./interface.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { DocImpl } from "../doc.ts";
@@ -44,7 +48,7 @@ function uriToEntityId(uri: string): EntityId {
  */
 function validateParentPath(
   value: any,
-  path: MemoryAddressPathComponent[],
+  path: readonly MemoryAddressPathComponent[],
 ): INotFoundError | null {
   if (path.length === 0) {
     return null; // Root write, no validation needed
@@ -102,15 +106,15 @@ function validateParentPath(
 class StorageTransactionLog implements IStorageTransactionLog {
   private log: IStorageTransactionInvariant[] = [];
 
-  get(_address: IMemoryAddress): IStorageTransactionInvariant {
+  get(_address: IMemorySpaceAddress): IStorageTransactionInvariant {
     throw new Error("Not implemented");
   }
 
-  addRead(read: Read): void {
+  addRead(read: IStorageInvariant): void {
     this.log.push({ read });
   }
 
-  addWrite(write: Write): void {
+  addWrite(write: IStorageInvariant): void {
     this.log.push({ write });
   }
 
@@ -125,12 +129,17 @@ class StorageTransactionLog implements IStorageTransactionLog {
 class TransactionReader implements ITransactionReader {
   constructor(
     protected runtime: IRuntime,
+    protected space: MemorySpace,
     protected log: StorageTransactionLog,
   ) {}
 
+  did() {
+    return this.space;
+  }
+
   read(
-    address: IMemoryAddress,
-  ): Result<Read, IReaderError> {
+    address: IMemorySpaceAddress,
+  ): Result<Read, ReadError> {
     if (address.type !== "application/json") {
       const error = new Error(
         "Unsupported media type",
@@ -155,10 +164,9 @@ class TransactionReader implements ITransactionReader {
 
         const value = getValueAtPath(json, address.path);
 
-        const read: Read = {
+        const read: IStorageInvariant = {
           address,
           value,
-          cause: refer("shim does not care"),
         };
         this.log.addRead(read);
 
@@ -211,10 +219,9 @@ class TransactionReader implements ITransactionReader {
       }
       // Read from doc itself
       const value = doc.getAtPath(rest);
-      const read: Read = {
+      const read: IStorageInvariant = {
         address,
         value,
-        cause: refer("shim does not care"),
       };
       this.log.addRead(read);
       return { ok: read };
@@ -234,10 +241,9 @@ class TransactionReader implements ITransactionReader {
         // Convert EntityId to URI string
         value = `of:${JSON.parse(JSON.stringify(sourceCell.entityId))["/"]}`;
       }
-      const read: Read = {
+      const read: IStorageInvariant = {
         address,
         value,
-        cause: refer("shim does not care"),
       };
       this.log.addRead(read);
       return { ok: read };
@@ -257,14 +263,13 @@ class TransactionReader implements ITransactionReader {
 class TransactionWriter extends TransactionReader
   implements ITransactionWriter {
   write(
-    address: IMemoryAddress,
+    address: IMemorySpaceAddress,
     value?: any,
   ): Result<
     Write,
     | INotFoundError
     | InactiveTransactionError
     | IUnsupportedMediaTypeError
-    | IInvalidDataURIError
   > {
     if (address.type !== "application/json") {
       const error = new Error(
@@ -321,10 +326,9 @@ class TransactionWriter extends TransactionReader
       }
       // Write to doc itself
       doc.setAtPath(rest, value);
-      const write: Write = {
+      const write: IStorageInvariant = {
         address,
         value,
-        cause: refer(address.id),
       };
       this.log.addWrite(write);
       return { ok: write };
@@ -360,10 +364,9 @@ class TransactionWriter extends TransactionReader
         return { ok: undefined, error: notFoundError };
       }
       doc.sourceCell = sourceDoc;
-      const write: Write = {
+      const write: IStorageInvariant = {
         address,
         value,
-        cause: refer(address.id),
       };
       this.log.addWrite(write);
       return { ok: write };
@@ -388,7 +391,7 @@ export class StorageTransaction implements IStorageTransaction {
 
   constructor(private runtime: IRuntime) {}
 
-  status(): Result<IStorageTransactionProgress, IStorageTransactionError> {
+  status(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
     return { ok: this.currentStatus };
   }
 
@@ -396,7 +399,7 @@ export class StorageTransaction implements IStorageTransaction {
     return this.txLog;
   }
 
-  reader(space: string): Result<ITransactionReader, IReaderError> {
+  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
     if (this.currentStatus.open === undefined) {
       const error = new Error(
         "Storage transaction complete",
@@ -410,14 +413,14 @@ export class StorageTransaction implements IStorageTransaction {
 
     let reader = this.readers.get(space);
     if (!reader) {
-      reader = new TransactionReader(this.runtime, this.txLog);
+      reader = new TransactionReader(this.runtime, space, this.txLog);
       this.readers.set(space, reader);
     }
 
     return { ok: reader };
   }
 
-  read(address: IMemoryAddress): Result<Read, IReaderError> {
+  read(address: IMemorySpaceAddress): Result<Read, ReadError> {
     const readerResult = this.reader(address.space);
     if (readerResult.error) {
       return { ok: undefined, error: readerResult.error };
@@ -425,12 +428,12 @@ export class StorageTransaction implements IStorageTransaction {
 
     const readResult = readerResult.ok!.read(address);
     if (readResult.error) {
-      return { ok: undefined, error: readResult.error as IReaderError };
+      return { ok: undefined, error: readResult.error };
     }
     return { ok: readResult.ok };
   }
 
-  readValueOrThrow(address: IMemoryAddress): JSONValue | undefined {
+  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
     const readResult = this.read(address);
     if (readResult.error && readResult.error.name !== "NotFoundError") {
       throw readResult.error;
@@ -438,7 +441,7 @@ export class StorageTransaction implements IStorageTransaction {
     return readResult.ok?.value;
   }
 
-  writer(space: string): Result<ITransactionWriter, IWriterError> {
+  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
     if (this.currentStatus.open === undefined) {
       const error = new Error(
         "Storage transaction complete",
@@ -464,14 +467,17 @@ export class StorageTransaction implements IStorageTransaction {
 
     let writer = this.writers.get(space);
     if (!writer) {
-      writer = new TransactionWriter(this.runtime, this.txLog);
+      writer = new TransactionWriter(this.runtime, space, this.txLog);
       this.writers.set(space, writer);
     }
 
     return { ok: writer };
   }
 
-  write(address: IMemoryAddress, value: any): Result<Write, IWriterError> {
+  write(
+    address: IMemorySpaceAddress,
+    value: any,
+  ): Result<Write, WriteError | WriterError> {
     const writerResult = this.writer(address.space);
     if (writerResult.error) {
       return { ok: undefined, error: writerResult.error };
@@ -479,7 +485,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     const writeResult = writerResult.ok!.write(address, value);
     if (writeResult.error) {
-      return { ok: undefined, error: writeResult.error as IWriterError };
+      return { ok: undefined, error: writeResult.error as WriteError };
     }
     return { ok: writeResult.ok };
   }
@@ -501,7 +507,7 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: undefined };
   }
 
-  commit(): Promise<Result<any, IStorageTransactionError>> {
+  commit(): Promise<Result<any, StorageTransactionFailed>> {
     if (this.currentStatus.open === undefined) {
       const error: any = new Error("Transaction already aborted");
       error.name = "StorageTransactionAborted";

@@ -45,7 +45,7 @@ export function createVisits(): Visits {
  */
 function createPathCacheKey<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   aliases: boolean = false,
 ): string {
   return JSON.stringify([doc.space, doc.toJSON(), path, aliases]);
@@ -53,7 +53,7 @@ function createPathCacheKey<T>(
 
 export function resolveLinkToValue<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
@@ -65,7 +65,7 @@ export function resolveLinkToValue<T>(
 
 export function resolveLinkToWriteRedirect<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
@@ -85,7 +85,7 @@ export function resolveLinks(
 
 function resolvePath<T>(
   doc: DocImpl<T>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
   log?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
