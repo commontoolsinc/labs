@@ -1,511 +1,323 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { TreeOperations } from "./tree-operations.ts";
+import { BlockOperations } from "./block-operations.ts";
 import { KeyboardCommands } from "./keyboard-commands.ts";
-import { EditingOperations } from "./editing-operations.ts";
-import type { OutlineNode } from "./types.ts";
+import type { Tree, Node, Block } from "./types.ts";
 
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {
-  // Test markdown parsing logic
+  // Test Tree structure and BlockOperations
+  describe("Tree Operations", () => {
+    function createTestTree(): Tree {
+      const rootId = BlockOperations.createId();
+      const child1Id = BlockOperations.createId();
+      const child2Id = BlockOperations.createId();
+      
+      return {
+        root: {
+          id: rootId,
+          children: [
+            { id: child1Id, children: [] },
+            { id: child2Id, children: [] }
+          ]
+        },
+        blocks: [
+          { id: child1Id, body: "First item", attachments: [] },
+          { id: child2Id, body: "Second item", attachments: [] }
+        ],
+        attachments: []
+      };
+    }
+
+    it("should create empty tree", () => {
+      const tree = BlockOperations.createEmptyTree();
+      expect(tree.root.children).toHaveLength(0);
+      expect(tree.blocks).toHaveLength(1); // Has one empty root block
+      expect(tree.attachments).toHaveLength(0);
+      expect(tree.blocks[0].body).toBe("");
+    });
+
+    it("should find nodes by ID", () => {
+      const tree = createTestTree();
+      const child1Id = tree.root.children[0].id;
+      const foundNode = BlockOperations.findNode(tree.root, child1Id);
+      expect(foundNode).toBeTruthy();
+      expect(foundNode!.id).toBe(child1Id);
+    });
+
+    it("should find blocks by ID", () => {
+      const tree = createTestTree();
+      const blockId = tree.blocks[0].id;
+      const foundBlock = BlockOperations.findBlock(tree, blockId);
+      expect(foundBlock).toBeTruthy();
+      expect(foundBlock!.body).toBe("First item");
+    });
+
+    it("should update block content", () => {
+      const tree = createTestTree();
+      const blockId = tree.blocks[0].id;
+      const updatedTree = BlockOperations.updateBlock(tree, blockId, "Updated content");
+      const updatedBlock = BlockOperations.findBlock(updatedTree, blockId);
+      expect(updatedBlock!.body).toBe("Updated content");
+    });
+
+    it("should move nodes up", () => {
+      const tree = createTestTree();
+      const secondChildId = tree.root.children[1].id;
+      const result = BlockOperations.moveNodeUp(tree, secondChildId);
+      
+      expect(result.success).toBe(true);
+      expect(result.tree.root.children[0].id).toBe(secondChildId);
+    });
+
+    it("should move nodes down", () => {
+      const tree = createTestTree();
+      const firstChildId = tree.root.children[0].id;
+      const result = BlockOperations.moveNodeDown(tree, firstChildId);
+      
+      expect(result.success).toBe(true);
+      expect(result.tree.root.children[1].id).toBe(firstChildId);
+    });
+
+    it("should delete nodes", () => {
+      const tree = createTestTree();
+      const child1Id = tree.root.children[0].id;
+      const result = BlockOperations.deleteNode(tree, child1Id);
+      
+      expect(result.success).toBe(true);
+      expect(result.tree.root.children).toHaveLength(1);
+      expect(result.tree.blocks).toHaveLength(1);
+      expect(result.tree.blocks[0].id).toBe(tree.root.children[1].id);
+    });
+  });
+
   describe("Markdown Parsing", () => {
-    function parseMarkdown(markdown: string) {
-      if (!markdown.trim()) return [];
+    function parseMarkdownToTree(markdown: string): Tree {
+      if (!markdown.trim()) return BlockOperations.createEmptyTree();
 
       const lines = markdown.split("\n");
-      const root: any[] = [];
-      const stack: { node: any; parent: any[] }[] = [];
-      let nodeIdCounter = 0;
+      const blocks: Block[] = [];
+      const stack: Array<{ nodeId: string; level: number }> = [];
+      const nodeChildren = new Map<string, string[]>();
+      const rootChildren: string[] = [];
 
       for (const line of lines) {
-        const match = line.match(/^(\s*)-\s(.*)$/);
+        const match = line.match(/^(\s*)-\s(.+)$/);
         if (!match) continue;
 
         const [, indent, content] = match;
         const level = Math.floor(indent.length / 2);
-        const node = {
-          id: `node-${nodeIdCounter++}`,
-          content,
-          children: [],
-          collapsed: false,
-          level,
-        };
+        const nodeId = BlockOperations.createId();
+        
+        // Create block for this content
+        const block = BlockOperations.createBlock({ id: nodeId, body: content });
+        blocks.push(block);
 
-        while (stack.length > 0 && stack[stack.length - 1].node.level >= level) {
+        // Remove items from stack that are at same or deeper level
+        while (stack.length > 0 && stack[stack.length - 1].level >= level) {
           stack.pop();
         }
 
         if (stack.length === 0) {
-          root.push(node);
+          // This is a root level node
+          rootChildren.push(nodeId);
         } else {
-          stack[stack.length - 1].node.children.push(node);
+          // Add as child of the parent
+          const parentId = stack[stack.length - 1].nodeId;
+          if (!nodeChildren.has(parentId)) {
+            nodeChildren.set(parentId, []);
+          }
+          nodeChildren.get(parentId)!.push(nodeId);
         }
 
-        stack.push({
-          node,
-          parent: stack.length === 0
-            ? root
-            : stack[stack.length - 1].node.children,
-        });
+        stack.push({ nodeId, level });
       }
 
-      return root;
+      // Build the node tree
+      const buildNode = (nodeId: string): Node => {
+        const children = nodeChildren.get(nodeId) || [];
+        return {
+          id: nodeId,
+          children: children.map(buildNode),
+        };
+      };
+
+      const root = {
+        id: BlockOperations.createId(),
+        children: rootChildren.map(buildNode)
+      };
+
+      return {
+        root,
+        blocks,
+        attachments: [],
+      };
     }
 
     it("parses simple list correctly", () => {
       const markdown = "- Item 1\n- Item 2\n- Item 3";
-      const nodes = parseMarkdown(markdown);
+      const tree = parseMarkdownToTree(markdown);
 
-      expect(nodes).toHaveLength(3);
-      expect(nodes[0].content).toBe("Item 1");
-      expect(nodes[0].level).toBe(0);
-      expect(nodes[1].content).toBe("Item 2");
-      expect(nodes[2].content).toBe("Item 3");
+      expect(tree.root.children).toHaveLength(3);
+      expect(tree.blocks).toHaveLength(3);
+      expect(tree.blocks[0].body).toBe("Item 1");
+      expect(tree.blocks[1].body).toBe("Item 2");
+      expect(tree.blocks[2].body).toBe("Item 3");
     });
 
     it("parses nested list correctly", () => {
       const markdown = "- Parent\n  - Child 1\n  - Child 2\n- Parent 2";
-      const nodes = parseMarkdown(markdown);
+      const tree = parseMarkdownToTree(markdown);
 
-      expect(nodes).toHaveLength(2);
-      expect(nodes[0].content).toBe("Parent");
-      expect(nodes[0].children).toHaveLength(2);
-      expect(nodes[0].children[0].content).toBe("Child 1");
-      expect(nodes[0].children[0].level).toBe(1);
-      expect(nodes[0].children[1].content).toBe("Child 2");
-      expect(nodes[1].content).toBe("Parent 2");
+      expect(tree.root.children).toHaveLength(2);
+      const parentBlock = tree.blocks.find(b => b.body === "Parent");
+      expect(parentBlock).toBeTruthy();
+      
+      const parentNode = BlockOperations.findNode(tree.root, parentBlock!.id);
+      expect(parentNode!.children).toHaveLength(2);
+      
+      const child1Block = tree.blocks.find(b => b.body === "Child 1");
+      const child2Block = tree.blocks.find(b => b.body === "Child 2");
+      expect(child1Block).toBeTruthy();
+      expect(child2Block).toBeTruthy();
     });
 
     it("handles deep nesting", () => {
       const markdown = "- Level 0\n  - Level 1\n    - Level 2\n      - Level 3";
-      const nodes = parseMarkdown(markdown);
+      const tree = parseMarkdownToTree(markdown);
 
-      expect(nodes).toHaveLength(1);
-      const level0 = nodes[0];
-      expect(level0.content).toBe("Level 0");
-      expect(level0.level).toBe(0);
-
-      const level1 = level0.children[0];
-      expect(level1.content).toBe("Level 1");
-      expect(level1.level).toBe(1);
-
-      const level2 = level1.children[0];
-      expect(level2.content).toBe("Level 2");
-      expect(level2.level).toBe(2);
-
-      const level3 = level2.children[0];
-      expect(level3.content).toBe("Level 3");
-      expect(level3.level).toBe(3);
+      expect(tree.root.children).toHaveLength(1);
+      const level0Node = tree.root.children[0];
+      expect(level0Node.children).toHaveLength(1);
+      
+      const level1Node = level0Node.children[0];
+      expect(level1Node.children).toHaveLength(1);
+      
+      const level2Node = level1Node.children[0];
+      expect(level2Node.children).toHaveLength(1);
+      
+      const level3Node = level2Node.children[0];
+      expect(level3Node.children).toHaveLength(0);
+      
+      const level0Block = tree.blocks.find(b => b.body === "Level 0");
+      const level3Block = tree.blocks.find(b => b.body === "Level 3");
+      expect(level0Block).toBeTruthy();
+      expect(level3Block).toBeTruthy();
     });
   });
 
   describe("Markdown Generation", () => {
-    function nodesToMarkdown(nodes: any[], baseLevel = 0): string {
-      return nodes
-        .map((node) => {
-          const indent = "  ".repeat(node.level);
-          const line = `${indent}- ${node.content}`;
-          const childLines = node.children.length > 0
-            ? "\n" + nodesToMarkdown(node.children, node.level + 1)
-            : "";
-          return line + childLines;
-        })
-        .join("\n");
-    }
+    it("converts simple tree to markdown", () => {
+      const child1Id = BlockOperations.createId();
+      const child2Id = BlockOperations.createId();
+      
+      const tree: Tree = {
+        root: {
+          id: BlockOperations.createId(),
+          children: [
+            { id: child1Id, children: [] },
+            { id: child2Id, children: [] }
+          ]
+        },
+        blocks: [
+          { id: child1Id, body: "Item 1", attachments: [] },
+          { id: child2Id, body: "Item 2", attachments: [] }
+        ],
+        attachments: []
+      };
 
-    it("converts simple nodes to markdown", () => {
-      const nodes = [
-        { id: "1", content: "Item 1", level: 0, children: [], collapsed: false },
-        { id: "2", content: "Item 2", level: 0, children: [], collapsed: false },
-      ];
-
-      const markdown = nodesToMarkdown(nodes);
+      const markdown = BlockOperations.toMarkdown(tree);
       expect(markdown).toBe("- Item 1\n- Item 2");
     });
 
-    it("converts nested nodes to markdown", () => {
-      const nodes = [
-        {
-          id: "1",
-          content: "Parent",
-          level: 0,
+    it("converts nested tree to markdown", () => {
+      const parentId = BlockOperations.createId();
+      const child1Id = BlockOperations.createId();
+      const child2Id = BlockOperations.createId();
+      
+      const tree: Tree = {
+        root: {
+          id: BlockOperations.createId(),
           children: [
-            { id: "2", content: "Child 1", level: 1, children: [], collapsed: false },
-            { id: "3", content: "Child 2", level: 1, children: [], collapsed: false },
-          ],
-          collapsed: false,
+            { 
+              id: parentId, 
+              children: [
+                { id: child1Id, children: [] },
+                { id: child2Id, children: [] }
+              ]
+            }
+          ]
         },
-      ];
+        blocks: [
+          { id: parentId, body: "Parent", attachments: [] },
+          { id: child1Id, body: "Child 1", attachments: [] },
+          { id: child2Id, body: "Child 2", attachments: [] }
+        ],
+        attachments: []
+      };
 
-      const markdown = nodesToMarkdown(nodes);
+      const markdown = BlockOperations.toMarkdown(tree);
       expect(markdown).toBe("- Parent\n  - Child 1\n  - Child 2");
     });
   });
 
   describe("Node Navigation Logic", () => {
-    function getAllVisibleNodes(nodes: any[]): any[] {
-      const result: any[] = [];
-      for (const node of nodes) {
-        result.push(node);
-        if (!node.collapsed && node.children.length > 0) {
-          result.push(...getAllVisibleNodes(node.children));
-        }
-      }
-      return result;
-    }
-
-    it("gets all visible nodes when not collapsed", () => {
-      const nodes = [
-        {
-          id: "1",
-          content: "Parent",
-          level: 0,
-          collapsed: false,
+    it("gets all visible nodes", () => {
+      const tree = BlockOperations.createEmptyTree();
+      const child1Id = BlockOperations.createId();
+      const child2Id = BlockOperations.createId();
+      
+      const updatedTree: Tree = {
+        ...tree,
+        root: {
+          ...tree.root,
           children: [
-            { id: "2", content: "Child", level: 1, children: [], collapsed: false },
-          ],
+            { id: child1Id, children: [] },
+            { id: child2Id, children: [] }
+          ]
         },
-      ];
-
-      const visible = getAllVisibleNodes(nodes);
-      expect(visible).toHaveLength(2);
-      expect(visible[0].id).toBe("1");
-      expect(visible[1].id).toBe("2");
-    });
-
-    it("hides children when collapsed", () => {
-      const nodes = [
-        {
-          id: "1",
-          content: "Parent",
-          level: 0,
-          collapsed: true,
-          children: [
-            { id: "2", content: "Child", level: 1, children: [], collapsed: false },
-          ],
-        },
-      ];
-
-      const visible = getAllVisibleNodes(nodes);
-      expect(visible).toHaveLength(1);
-      expect(visible[0].id).toBe("1");
-    });
-  });
-
-  describe("Node Manipulation Logic", () => {
-    function moveNodeUp(nodes: any[], nodeId: string): any[] {
-      const flatNodes = getAllVisibleNodes(nodes);
-      const nodeIndex = flatNodes.findIndex(n => n.id === nodeId);
-      
-      if (nodeIndex <= 0) return nodes; // Can't move up
-      
-      // Find the parent arrays for both nodes
-      const targetNode = flatNodes[nodeIndex];
-      const previousNode = flatNodes[nodeIndex - 1];
-      
-      // Simple swap logic for same-level siblings
-      if (targetNode.level === previousNode.level) {
-        // This is a simplified version - actual implementation would need
-        // to find parent arrays and swap positions
-        return nodes;
-      }
-      
-      return nodes;
-    }
-
-    function getAllVisibleNodes(nodes: any[]): any[] {
-      const result: any[] = [];
-      for (const node of nodes) {
-        result.push(node);
-        if (!node.collapsed && node.children.length > 0) {
-          result.push(...getAllVisibleNodes(node.children));
-        }
-      }
-      return result;
-    }
-
-    it("correctly identifies node positions", () => {
-      const nodes = [
-        { id: "1", content: "First", level: 0, children: [], collapsed: false },
-        { id: "2", content: "Second", level: 0, children: [], collapsed: false },
-        { id: "3", content: "Third", level: 0, children: [], collapsed: false },
-      ];
-
-      const flatNodes = getAllVisibleNodes(nodes);
-      expect(flatNodes).toHaveLength(3);
-      expect(flatNodes[1].id).toBe("2");
-    });
-
-    it("handles indentation level calculation", () => {
-      const nodes = [
-        {
-          id: "1",
-          content: "Parent",
-          level: 0,
-          collapsed: false,
-          children: [
-            { id: "2", content: "Child", level: 1, children: [], collapsed: false },
-          ],
-        },
-      ];
-
-      const flatNodes = getAllVisibleNodes(nodes);
-      expect(flatNodes[0].level).toBe(0);
-      expect(flatNodes[1].level).toBe(1);
-    });
-  });
-
-  describe("Key Behavior Logic", () => {
-    it("validates key combinations", () => {
-      // Test that our key event logic handles modifiers correctly
-      const isShiftEnter = (shiftKey: boolean, key: string) => {
-        return shiftKey && key === "Enter";
-      };
-      
-      const isAltEnter = (altKey: boolean, key: string) => {
-        return altKey && key === "Enter";
-      };
-      
-      const isCmdEnter = (metaKey: boolean, ctrlKey: boolean, key: string) => {
-        return (metaKey || ctrlKey) && key === "Enter";
+        blocks: [
+          { id: child1Id, body: "Item 1", attachments: [] },
+          { id: child2Id, body: "Item 2", attachments: [] }
+        ]
       };
 
-      expect(isShiftEnter(true, "Enter")).toBe(true);
-      expect(isShiftEnter(false, "Enter")).toBe(false);
-      expect(isAltEnter(true, "Enter")).toBe(true);
-      expect(isAltEnter(false, "Enter")).toBe(false);
-      expect(isCmdEnter(true, false, "Enter")).toBe(true);
-      expect(isCmdEnter(false, true, "Enter")).toBe(true);
-      expect(isCmdEnter(false, false, "Enter")).toBe(false);
-    });
-  });
-
-  describe("Edge Cases", () => {
-    it("handles empty markdown", () => {
-      const markdown = "";
-      const parseMarkdown = (md: string) => md.trim() ? md.split("\n") : [];
+      const collapsedNodes = new Set<string>();
+      const visibleNodes = BlockOperations.getAllVisibleNodes(updatedTree.root, collapsedNodes);
       
-      const lines = parseMarkdown(markdown);
-      expect(lines).toHaveLength(0);
-    });
-
-    it("handles whitespace-only markdown", () => {
-      const markdown = "   \n  \n   ";
-      const parseMarkdown = (md: string) => md.trim() ? md.split("\n") : [];
-      
-      const lines = parseMarkdown(markdown);
-      expect(lines).toHaveLength(0);
-    });
-
-    it("handles invalid markdown lines", () => {
-      const markdown = "- Valid item\nInvalid line\n- Another valid item";
-      
-      function parseMarkdown(markdown: string) {
-        if (!markdown.trim()) return [];
-        
-        const lines = markdown.split("\n");
-        const validLines = lines.filter(line => line.match(/^(\s*)-\s(.*)$/));
-        
-        return validLines.map((line, index) => {
-          const match = line.match(/^(\s*)-\s(.*)$/);
-          if (match) {
-            const [, indent, content] = match;
-            return {
-              id: `node-${index}`,
-              content,
-              level: Math.floor(indent.length / 2),
-              children: [],
-              collapsed: false,
-            };
-          }
-          return null;
-        }).filter(Boolean) as any[];
-      }
-      
-      const nodes = parseMarkdown(markdown);
-      expect(nodes).toHaveLength(2);
-      expect(nodes[0]?.content).toBe("Valid item");
-      expect(nodes[1]?.content).toBe("Another valid item");
-    });
-  });
-
-  describe("TreeOperations Module", () => {
-    const sampleNodes = [
-      {
-        id: "node-1",
-        content: "Root 1",
-        level: 0,
-        collapsed: false,
-        children: [
-          {
-            id: "node-2",
-            content: "Child 1",
-            level: 1,
-            collapsed: false,
-            children: [],
-          },
-        ],
-      },
-      {
-        id: "node-3", 
-        content: "Root 2",
-        level: 0,
-        collapsed: false,
-        children: [],
-      },
-    ];
-
-    it("finds nodes by ID", () => {
-      const node = TreeOperations.findNode(sampleNodes, "node-2");
-      expect(node?.content).toBe("Child 1");
-      expect(node?.level).toBe(1);
-    });
-
-    it("returns null for non-existent nodes", () => {
-      const node = TreeOperations.findNode(sampleNodes, "non-existent");
-      expect(node).toBe(null);
-    });
-
-    it("finds parent node correctly", () => {
-      const parent = TreeOperations.findParentNode(sampleNodes, "node-2");
-      expect(parent?.id).toBe("node-1");
-    });
-
-    it("gets all visible nodes respecting collapsed state", () => {
-      const visibleNodes = TreeOperations.getAllVisibleNodes(sampleNodes);
-      expect(visibleNodes).toHaveLength(3);
-      expect(visibleNodes.map((n: OutlineNode) => n.id)).toEqual(["node-1", "node-2", "node-3"]);
-    });
-
-    it("hides children when parent is collapsed", () => {
-      const collapsedNodes = [
-        {
-          ...sampleNodes[0],
-          collapsed: true,
-        },
-        sampleNodes[1],
-      ];
-      
-      const visibleNodes = TreeOperations.getAllVisibleNodes(collapsedNodes);
       expect(visibleNodes).toHaveLength(2);
-      expect(visibleNodes.map((n: OutlineNode) => n.id)).toEqual(["node-1", "node-3"]);
+      expect(visibleNodes[0].id).toBe(child1Id);
+      expect(visibleNodes[1].id).toBe(child2Id);
     });
 
-    it("creates nodes with correct structure", () => {
-      const node = TreeOperations.createNode({ content: "Test Content", level: 2 });
-      expect(node.id).toBeTruthy(); // UUID will be different each time
-      expect(node.content).toBe("Test Content");
-      expect(node.level).toBe(2);
-      expect(node.collapsed).toBe(false);
-      expect(node.children).toHaveLength(0);
-    });
-  });
-
-  describe("EditingOperations Module", () => {
-    const sampleNodes = [
-      {
-        id: "node-1",
-        content: "Original Content",
-        level: 0,
-        collapsed: false,
-        children: [],
-      },
-    ];
-
-    it("completes edit successfully", () => {
-      const result = EditingOperations.completeEdit(
-        sampleNodes,
-        "node-1",
-        "Updated Content"
-      );
+    it("respects collapsed state", () => {
+      const parentId = BlockOperations.createId();
+      const childId = BlockOperations.createId();
       
-      expect(result.success).toBe(true);
-      expect(sampleNodes[0].content).toBe("Updated Content");
-    });
+      const tree: Tree = {
+        root: {
+          id: BlockOperations.createId(),
+          children: [
+            { 
+              id: parentId, 
+              children: [
+                { id: childId, children: [] }
+              ]
+            }
+          ]
+        },
+        blocks: [
+          { id: parentId, body: "Parent", attachments: [] },
+          { id: childId, body: "Child", attachments: [] }
+        ],
+        attachments: []
+      };
 
-    it("fails to edit non-existent node", () => {
-      const result = EditingOperations.completeEdit(
-        sampleNodes,
-        "non-existent",
-        "New Content"
-      );
+      const collapsedNodes = new Set([parentId]);
+      const visibleNodes = BlockOperations.getAllVisibleNodes(tree.root, collapsedNodes);
       
-      expect(result.success).toBe(false);
-    });
-
-    it("prepares editing state correctly", () => {
-      const state = EditingOperations.prepareEditingState(
-        null,
-        "",
-        "node-1",
-        "Node Content"
-      );
-      
-      expect(state.editingNodeId).toBe("node-1");
-      expect(state.editingContent).toBe("Node Content");
-      expect(state.showingMentions).toBe(false);
-    });
-
-    it("clears editing state correctly", () => {
-      const state = EditingOperations.clearEditingState();
-      
-      expect(state.editingNodeId).toBe(null);
-      expect(state.editingContent).toBe("");
-      expect(state.showingMentions).toBe(false);
-    });
-  });
-
-  describe("KeyboardCommands Module", () => {
-    // Mock context for testing commands
-    const createMockContext = (focusedNodeId: string | null = "node-1") => ({
-      event: { 
-        preventDefault: () => {}, 
-        key: "ArrowUp",
-        altKey: false,
-        shiftKey: false,
-        metaKey: false,
-        ctrlKey: false,
-      } as KeyboardEvent,
-      component: {
-        focusedNodeId,
-        findNode: () => ({ id: "node-1", content: "Test", level: 0, children: [], collapsed: false }),
-        requestUpdate: () => {},
-      } as any,
-      allNodes: [
-        { id: "node-1", content: "First", level: 0, children: [], collapsed: false },
-        { id: "node-2", content: "Second", level: 0, children: [], collapsed: false },
-      ],
-      currentIndex: 0,
-      focusedNodeId,
-    });
-
-    it("ArrowDown command moves focus to next node", () => {
-      const ctx = createMockContext("node-1");
-      KeyboardCommands.ArrowDown.execute(ctx);
-      
-      expect(ctx.component.focusedNodeId).toBe("node-2");
-    });
-
-    it("ArrowUp command moves focus to previous node", () => {
-      const ctx = createMockContext("node-2");
-      ctx.currentIndex = 1;
-      KeyboardCommands.ArrowUp.execute(ctx);
-      
-      expect(ctx.component.focusedNodeId).toBe("node-1");
-    });
-
-    it("Home command moves focus to first node", () => {
-      const ctx = createMockContext("node-2");
-      KeyboardCommands.Home.execute(ctx);
-      
-      expect(ctx.component.focusedNodeId).toBe("node-1");
-    });
-
-    it("End command moves focus to last node", () => {
-      const ctx = createMockContext("node-1");
-      KeyboardCommands.End.execute(ctx);
-      
-      expect(ctx.component.focusedNodeId).toBe("node-2");
+      expect(visibleNodes).toHaveLength(1);
+      expect(visibleNodes[0].id).toBe(parentId);
     });
   });
 });

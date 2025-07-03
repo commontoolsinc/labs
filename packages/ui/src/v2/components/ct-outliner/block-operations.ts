@@ -408,6 +408,23 @@ export const BlockOperations = {
   },
 
   /**
+   * Convert Tree structure to markdown string
+   */
+  toMarkdown(tree: Tree): string {
+    const renderNode = (node: Node, level: number = 0): string => {
+      const block = tree.blocks.find(b => b.id === node.id);
+      const content = block?.body || "";
+      const indent = "  ".repeat(level);
+      const line = `${indent}- ${content}`;
+      
+      const childLines = node.children.map(child => renderNode(child, level + 1)).join("\n");
+      return childLines ? `${line}\n${childLines}` : line;
+    };
+    
+    return tree.root.children.map(child => renderNode(child)).join("\n");
+  },
+
+  /**
    * Convert legacy OutlineNode structure to new Tree structure
    */
   fromLegacyNodes(legacyNodes: Array<{id: string, content: string, children: any[], level: number}>): Tree {

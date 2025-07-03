@@ -21,9 +21,8 @@ export type {
   Attachment,
   BlockCreationOptions
 } from "./types.ts";
-export { TreeOperations } from "./tree-operations.ts";
 export { BlockOperations } from "./block-operations.ts";
-export { MigrationBridge } from "./migration-bridge.ts";
+// TreeOperations and MigrationBridge removed - using BlockOperations exclusively
 export { KeyboardCommands, executeKeyboardCommand } from "./keyboard-commands.ts";
 
 // Auto-register the custom element

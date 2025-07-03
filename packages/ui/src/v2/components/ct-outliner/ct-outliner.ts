@@ -16,10 +16,10 @@ import type {
   Node as OutlineTreeNode,
   Block,
 } from "./types.ts";
-import { TreeOperations } from "./tree-operations.ts";
+// TreeOperations removed - using BlockOperations exclusively
 import { executeKeyboardCommand, executeEditingKeyboardCommand } from "./keyboard-commands.ts";
 import { EditingOperations } from "./editing-operations.ts";
-import { MigrationBridge } from "./migration-bridge.ts";
+// MigrationBridge removed - working directly with Tree
 import { BlockOperations } from "./block-operations.ts";
 
 /**
@@ -526,11 +526,7 @@ export class CTOutliner extends BaseElement {
     };
   }
 
-  // Legacy method for backward compatibility during transition
-  private parseMarkdown(markdown: string): OutlineNode[] {
-    const tree = this.parseMarkdownToTree(markdown);
-    return MigrationBridge.treeToLegacyNodes(tree);
-  }
+  // Legacy parseMarkdown method removed - using parseMarkdownToTree directly
 
   private nodesToMarkdown(nodes: OutlineNode[], baseLevel = 0): string {
     return nodes
@@ -598,18 +594,14 @@ export class CTOutliner extends BaseElement {
     const node = this.findNode(nodeId);
     if (!node) return;
 
-    // Pure data transformation - prepare editing state
-    const editingState = EditingOperations.prepareEditingState(
-      this.editingNodeId,
-      this.editingContent,
-      nodeId,
-      node.content,
-    );
+    // Get block content for the node
+    const block = this.findBlockInTree(nodeId);
+    const content = block?.body || "";
 
-    // Apply new state
-    this.editingNodeId = editingState.editingNodeId;
-    this.editingContent = editingState.editingContent;
-    this.showingMentions = editingState.showingMentions;
+    // Apply editing state
+    this.editingNodeId = nodeId;
+    this.editingContent = content;
+    this.showingMentions = false;
 
     // Side effects
     this.requestUpdate();
@@ -1215,9 +1207,7 @@ export class CTOutliner extends BaseElement {
    * This provides a way to manually get markdown output for copy/export operations
    */
   toMarkdown(): string {
-    // Convert Tree to legacy nodes for markdown export
-    const legacyNodes = MigrationBridge.treeToLegacyNodes(this.tree);
-    return this.nodesToMarkdown(legacyNodes);
+    return BlockOperations.toMarkdown(this.tree);
   }
 
   createNewNodeAfter(nodeId: string) {
@@ -1484,7 +1474,7 @@ export class CTOutliner extends BaseElement {
     } else {
       // No focused node, append to the end of root nodes
       // Paste operation updated to work with Tree structure
-      const parsedTree = this.parseMarkdownToTree(text);
+      const parsedTree = this.parseMarkdownToTree(pastedText);
       // Add parsed blocks to current tree
       this.tree = {
         ...this.tree,

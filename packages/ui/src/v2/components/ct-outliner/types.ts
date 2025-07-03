@@ -95,7 +95,7 @@ export interface TreeOperationResult<T = OutlineNode[]> {
 export interface KeyboardContext {
   readonly event: KeyboardEvent;
   readonly component: any; // Will be typed properly when we extract commands
-  readonly allNodes: OutlineNode[];
+  readonly allNodes: Node[];
   readonly currentIndex: number;
   readonly focusedNodeId: string | null;
 }
