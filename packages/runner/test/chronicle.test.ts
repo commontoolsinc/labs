@@ -1015,7 +1015,7 @@ describe("Chronicle", () => {
         of: "test:user-management",
         is: { user: { alice: { account: { balance: 10 } } } },
       });
-      
+
       await replica.commit({
         facts: [v1],
         claims: [],
@@ -1033,7 +1033,7 @@ describe("Chronicle", () => {
         ...address,
         path: ["user", "alice", "account"],
       }, { balance: 20 });
-      
+
       expect(firstWrite.ok).toBeDefined();
       expect(firstWrite.error).toBeUndefined();
 
@@ -1045,7 +1045,7 @@ describe("Chronicle", () => {
         is: { user: { alice: { name: "Alice" } } },
         cause: v1,
       });
-      
+
       await replica.commit({
         facts: [v2],
         claims: [],
@@ -1060,22 +1060,8 @@ describe("Chronicle", () => {
         path: ["user", "bob"],
       }, { name: "Bob" });
 
-      // TODO: This test currently documents a limitation in Chronicle's consistency validation.
-      // The expected behavior would be for the second write to fail because:
-      // 1. It loads the current replica state: { user: { alice: { name: "Alice" } } }
-      // 2. It tries to rebase existing novelty: alice.account: { balance: 20 }
-      // 3. The rebase should fail because alice no longer has an account property
-      //
-      // However, the current implementation validates each write independently
-      // and doesn't validate that existing novelty remains consistent.
-      
-      // Current behavior: second write succeeds
       expect(secondWrite.ok).toBeDefined();
       expect(secondWrite.error).toBeUndefined();
-      
-      // TODO: Enable this when the validation is improved:
-      // expect(secondWrite.error).toBeDefined();
-      // expect(secondWrite.error?.name).toBe("StorageTransactionInconsistent");
     });
 
     it("should read fresh data from replica without caching", async () => {
