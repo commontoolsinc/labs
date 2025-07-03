@@ -300,6 +300,63 @@ describe("StorageTransaction", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("StorageTransactionCompleteError");
     });
+
+    it("should fail commit when replica is modified after read invariant is established", async () => {
+      // Pre-populate replica with initial data
+      const replica = storage.open(space).replica;
+      const v1 = assert({
+        the: "application/json",
+        of: "user:consistency",
+        is: { name: "Initial", version: 1 },
+      });
+      
+      const initialCommit = await replica.commit({
+        facts: [v1],
+        claims: [],
+      });
+      expect(initialCommit.ok).toBeDefined();
+
+      // Create transaction and establish a read invariant
+      const freshTransaction = Transaction.create(storage);
+      const address = {
+        space,
+        id: "user:consistency",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      // Read to establish invariant (this locks in the expected value)
+      const readResult = freshTransaction.read(address);
+      expect(readResult.ok?.value).toEqual({ name: "Initial", version: 1 });
+
+      // Modify the replica outside the transaction with proper causal reference
+      const v2 = assert({
+        the: "application/json",
+        of: "user:consistency",
+        is: { name: "Modified", version: 2 },
+        cause: v1,
+      });
+      
+      const modifyCommit = await replica.commit({
+        facts: [v2],
+        claims: [],
+      });
+      expect(modifyCommit.ok).toBeDefined();
+
+      // Verify the replica state actually changed
+      const updatedState = replica.get({ the: "application/json", of: "user:consistency" });
+      expect(updatedState?.is).toEqual({ name: "Modified", version: 2 });
+
+      // Now attempt to commit - should fail due to read invariant violation
+      const commitResult = await freshTransaction.commit();
+      expect(commitResult.error).toBeDefined();
+      expect(commitResult.error?.name).toBe("StorageTransactionInconsistent");
+
+      // Verify transaction status shows failure
+      const status = freshTransaction.status();
+      expect(status.error).toBeDefined();
+      expect(status.error?.name).toBe("StorageTransactionInconsistent");
+    });
   });
 
   describe("Pre-populated Replica Reads", () => {
