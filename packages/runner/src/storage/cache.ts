@@ -213,8 +213,6 @@ class Heap implements SyncPush<Revision<State>> {
   ) {
   }
 
-  private static SUBSCRIBE_TO_ALL = "_";
-
   get(entry: FactAddress) {
     return this.store.get(toKey(entry));
   }
@@ -251,10 +249,10 @@ class Heap implements SyncPush<Revision<State>> {
   }
 
   subscribe(
-    entry: FactAddress | null,
+    entry: FactAddress,
     subscriber: (value?: Revision<State>) => void,
   ) {
-    const key = entry == null ? Heap.SUBSCRIBE_TO_ALL : toKey(entry);
+    const key = toKey(entry);
     let subscribers = this.subscribers.get(key);
     if (!subscribers) {
       subscribers = new Set();
@@ -265,10 +263,10 @@ class Heap implements SyncPush<Revision<State>> {
   }
 
   unsubscribe(
-    entry: FactAddress | null,
+    entry: FactAddress,
     subscriber: (value?: Revision<State>) => void,
   ) {
-    const key = entry == null ? Heap.SUBSCRIBE_TO_ALL : toKey(entry);
+    const key = toKey(entry);
     const subscribers = this.subscribers.get(key);
     if (subscribers) {
       subscribers.delete(subscriber);
@@ -612,7 +610,8 @@ export class Replica {
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
-    this.heap.merge(notFound, Replica.put);
+    // Don't notify subscribers as if this were a server update.
+    this.heap.merge(notFound, Replica.put, (val) => false);
     const result = await this.cache.merge(revisions.values(), Replica.put);
 
     if (result.error) {
@@ -865,14 +864,11 @@ export class Replica {
     return result;
   }
 
-  subscribe(
-    entry: FactAddress | null,
-    subscriber: (value?: Revision<State>) => void,
-  ) {
+  subscribe(entry: FactAddress, subscriber: (value?: Revision<State>) => void) {
     this.heap.subscribe(entry, subscriber);
   }
   unsubscribe(
-    entry: FactAddress | null,
+    entry: FactAddress,
     subscriber: (value?: Revision<State>) => void,
   ) {
     this.heap.unsubscribe(entry, subscriber);
@@ -1252,11 +1248,11 @@ class ProviderConnection implements IStorageProvider {
       case WebSocket.OPEN:
         return socket;
       case WebSocket.CLOSING:
-        throw new RangeError(`Socket is closing`);
+        throw new Error(`Socket is closing`);
       case WebSocket.CLOSED:
-        throw new RangeError(`Socket is closed`);
+        throw new Error(`Socket is closed`);
       default:
-        throw new RangeError(`Socket is in unknown state`);
+        throw new Error(`Socket is in unknown state`);
     }
   }
 
