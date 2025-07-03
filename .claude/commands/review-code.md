@@ -24,6 +24,7 @@ Also consider the lessons of Erlang (Joe Armstrong), Elixir (José Valim), Elm (
 
 ### Error Handling
 - **Handle errors gracefully, or design APIs that make errors impossible**
+- Prefer consistent result types (Result<T>) to throwing for routinely-fallible operations
 - Prefer throwing over silent failures or unclear undefined returns
 - Follow the error handling patterns outlined in CLAUDE.md
 
