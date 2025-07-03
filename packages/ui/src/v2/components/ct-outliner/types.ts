@@ -77,6 +77,17 @@ export interface KeyboardContext {
 }
 
 /**
+ * Context for editing mode keyboard commands
+ */
+export interface EditingKeyboardContext {
+  readonly event: KeyboardEvent;
+  readonly component: any;
+  readonly editingNodeId: string;
+  readonly editingContent: string;
+  readonly textarea: HTMLTextAreaElement;
+}
+
+/**
  * Command interface for keyboard actions
  */
 export interface KeyboardCommand {

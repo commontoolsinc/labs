@@ -8,12 +8,13 @@ import type {
   CharmReference,
   EditingState,
   KeyboardContext,
+  EditingKeyboardContext,
   MentionableItem,
   NodeCreationOptions,
   OutlineNode,
 } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
-import { executeKeyboardCommand } from "./keyboard-commands.ts";
+import { executeKeyboardCommand, executeEditingKeyboardCommand } from "./keyboard-commands.ts";
 import { EditingOperations } from "./editing-operations.ts";
 
 /**
@@ -224,6 +225,17 @@ export class CTOutliner extends BaseElement {
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
+      opacity: 0.4;
+      transition: opacity 0.1s;
+    }
+
+    .collapse-icon:hover {
+      opacity: 0.8;
+    }
+
+    .collapse-icon.invisible {
+      opacity: 0;
+      cursor: default;
     }
 
     .collapse-icon svg {
@@ -544,7 +556,7 @@ export class CTOutliner extends BaseElement {
 
     // Side effects
     this.requestUpdate();
-    this.emitChange();
+    this.emitChange(); // This will now include any indentation changes made during editing
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
@@ -711,29 +723,114 @@ export class CTOutliner extends BaseElement {
   private handleIndentation(outdent: boolean) {
     if (!this.editingNodeId) return;
 
-    // Store the node ID to maintain focus after indentation
+    // Store the node ID and current editing state
     const nodeId = this.editingNodeId;
+    const currentContent = this.editingContent;
+    const textarea = this.shadowRoot?.querySelector(
+      `#editor-${nodeId}`,
+    ) as HTMLTextAreaElement;
+    const cursorPos = textarea?.selectionStart || 0;
 
-    if (outdent) {
-      this.outdentNode(this.editingNodeId);
-    } else {
-      this.indentNode(this.editingNodeId);
+    // Perform the indentation without emitting changes
+    const success = outdent 
+      ? TreeOperations.outdentNode(this.nodes, this.editingNodeId)
+      : TreeOperations.indentNode(this.nodes, this.editingNodeId);
+    
+    if (success) {
+      // Only update the UI, don't emit change while editing
+      this.requestUpdate();
+      
+      // Maintain edit mode after indentation
+      this.editingNodeId = nodeId;
+      this.editingContent = currentContent;
+
+      // Restore focus/cursor position after render
+      setTimeout(() => {
+        const editor = this.shadowRoot?.querySelector(
+          `#editor-${nodeId}`,
+        ) as HTMLTextAreaElement;
+        if (editor) {
+          editor.value = currentContent;
+          editor.setSelectionRange(cursorPos, cursorPos);
+          editor.focus();
+        }
+      }, 0);
     }
-
-    // Restore focus to the editor after indentation
-    setTimeout(() => {
-      const editor = this.shadowRoot?.querySelector(
-        `#editor-${nodeId}`,
-      ) as HTMLTextAreaElement;
-      if (editor) {
-        editor.focus();
-      }
-    }, 0);
   }
 
   private handleEditorInput(event: Event) {
     this.editingContent = (event.target as HTMLTextAreaElement).value;
     this.checkForMentions(event.target as HTMLTextAreaElement);
+  }
+
+  private handleEditorPaste(event: ClipboardEvent) {
+    const pastedText = event.clipboardData?.getData("text/plain");
+    if (!pastedText || !this.editingNodeId) return;
+
+    // Check if pasted text contains markdown list items
+    const lines = pastedText.split("\n");
+    const listLines = lines.filter(line => line.match(/^(\s*)-\s(.+)$/));
+    
+    // If it's not a markdown list or just a single line, let default paste happen
+    if (listLines.length <= 1) return;
+
+    event.preventDefault();
+    event.stopPropagation(); // Prevent the event from bubbling to the outliner container
+
+    const currentNode = this.findNode(this.editingNodeId);
+    if (!currentNode) return;
+
+    // Parse the pasted markdown into nodes
+    const parsedNodes = this.parseMarkdown(pastedText);
+    if (parsedNodes.length === 0) return;
+
+    // Get the parent array and current index
+    const parentArray = this.findNodeParent(this.editingNodeId) || this.nodes;
+    const currentIndex = this.getNodeIndex(this.editingNodeId, parentArray);
+
+    // If current node has content, update it with the first pasted node's content
+    if (this.editingContent.trim()) {
+      currentNode.content = this.editingContent + " " + parsedNodes[0].content;
+    } else {
+      currentNode.content = parsedNodes[0].content;
+    }
+
+    // Add first node's children to current node
+    if (parsedNodes[0].children.length > 0) {
+      // Adjust children levels to be relative to current node
+      const adjustChildren = (children: OutlineNode[], baseLevel: number) => {
+        children.forEach(child => {
+          child.level = baseLevel + 1;
+          if (child.children.length > 0) {
+            adjustChildren(child.children, child.level);
+          }
+        });
+      };
+      adjustChildren(parsedNodes[0].children, currentNode.level);
+      currentNode.children.push(...parsedNodes[0].children);
+      currentNode.collapsed = false;
+    }
+
+    // Insert remaining nodes after the current node
+    if (parsedNodes.length > 1) {
+      const remainingNodes = parsedNodes.slice(1);
+      // Adjust levels to match current node's level
+      remainingNodes.forEach(node => {
+        node.level = currentNode.level;
+        TreeOperations.updateNodeLevels(node);
+      });
+      parentArray.splice(currentIndex + 1, 0, ...remainingNodes);
+    }
+
+    // Clear editing state and emit change
+    this.editingNodeId = null;
+    this.editingContent = "";
+    this.showingMentions = false;
+    this.focusedNodeId = currentNode.id;
+    
+    this.requestUpdate();
+    this.emitChange();
+    OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
   private handleEditorBlur = (event: FocusEvent) => {
@@ -933,6 +1030,19 @@ export class CTOutliner extends BaseElement {
   private handleNormalEditorKeyDown(event: KeyboardEvent) {
     const target = event.target as HTMLTextAreaElement;
 
+    // Try executing editing keyboard commands first
+    const editingContext: EditingKeyboardContext = {
+      event,
+      component: this,
+      editingNodeId: this.editingNodeId!,
+      editingContent: this.editingContent,
+      textarea: target,
+    };
+
+    if (executeEditingKeyboardCommand(event.key, editingContext)) {
+      return;
+    }
+
     switch (event.key) {
       case "Enter":
         event.preventDefault();
@@ -1104,6 +1214,7 @@ export class CTOutliner extends BaseElement {
         class="outliner"
         @keydown="${this.handleKeyDown}"
         @click="${this.handleOutlinerClick}"
+        @paste="${this.handleOutlinerPaste}"
         tabindex="0"
       >
         ${this.nodes.length === 0
@@ -1141,6 +1252,55 @@ export class CTOutliner extends BaseElement {
       this.startEditing(this.nodes[0].id);
       this.requestUpdate();
     }
+  }
+
+  private handleOutlinerPaste(event: ClipboardEvent) {
+    // Only handle paste when not in edit mode (edit mode has its own paste handler)
+    if (this.editingNodeId) return;
+
+    const pastedText = event.clipboardData?.getData("text/plain");
+    if (!pastedText) return;
+
+    // Check if pasted text contains markdown list items
+    const lines = pastedText.split("\n");
+    const listLines = lines.filter(line => line.match(/^(\s*)-\s(.+)$/));
+    
+    // If it's not a markdown list or just a single line, ignore
+    if (listLines.length <= 1) return;
+
+    event.preventDefault();
+
+    // Parse the pasted markdown into nodes
+    const parsedNodes = this.parseMarkdown(pastedText);
+    if (parsedNodes.length === 0) return;
+
+    // If we have a focused node, insert after it
+    if (this.focusedNodeId) {
+      const focusedNode = this.findNode(this.focusedNodeId);
+      if (focusedNode) {
+        const parentArray = this.findNodeParent(this.focusedNodeId) || this.nodes;
+        const currentIndex = this.getNodeIndex(this.focusedNodeId, parentArray);
+        
+        // Adjust levels to match the focused node's level
+        parsedNodes.forEach(node => {
+          node.level = focusedNode.level;
+          TreeOperations.updateNodeLevels(node);
+        });
+        
+        // Insert the parsed nodes after the focused node
+        parentArray.splice(currentIndex + 1, 0, ...parsedNodes);
+        
+        // Focus the first newly inserted node
+        this.focusedNodeId = parsedNodes[0].id;
+      }
+    } else {
+      // No focused node, append to the end of root nodes
+      this.nodes.push(...parsedNodes);
+      this.focusedNodeId = parsedNodes[0].id;
+    }
+
+    this.requestUpdate();
+    this.emitChange();
   }
 
   private decodeCharmFromHref(
@@ -1188,20 +1348,14 @@ export class CTOutliner extends BaseElement {
           @dblclick="${(e: MouseEvent) =>
         this.handleNodeDoubleClick(node.id, e)}"
         >
-          ${hasChildren
-        ? html`
           <div
-            class="collapse-icon ${node.collapsed ? "collapsed" : ""}"
+            class="collapse-icon ${node.collapsed ? "collapsed" : ""} ${hasChildren ? "" : "invisible"}"
             @click="${(e: MouseEvent) => this.handleCollapseClick(node.id, e)}"
           >
             <svg viewBox="0 0 24 24">
               <path d="M7 10l5 5 5-5H7z" />
             </svg>
           </div>
-        `
-        : html`
-          <div style="width: 1.25rem;"></div>
-        `}
 
           <div class="bullet"></div>
 
@@ -1215,6 +1369,7 @@ export class CTOutliner extends BaseElement {
             @input="${this.handleEditorInput}"
             @keydown="${this.handleEditorKeyDown}"
             @blur="${this.handleEditorBlur}"
+            @paste="${this.handleEditorPaste}"
             rows="1"
           ></textarea>
           ${this.showingMentions ? this.renderMentionsDropdown() : ""}
