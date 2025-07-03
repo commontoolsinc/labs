@@ -3,8 +3,6 @@ import type { Cancel } from "../cancel.ts";
 import type {
   Assertion,
   AuthorizationError as IAuthorizationError,
-  Changes,
-  Commit,
   ConflictError as IConflictError,
   ConnectionError as IConnectionError,
   Entity as URI,
@@ -14,7 +12,6 @@ import type {
   JSONValue,
   MemorySpace,
   QueryError as IQueryError,
-  Reference,
   Result,
   Retraction,
   SchemaContext,
