@@ -346,7 +346,7 @@ export function createDoc<T>(
       return value as T;
     },
     get "/"(): string {
-      return JSON.parse(JSON.stringify(entityId))["/"];
+      return typeof entityId.toJSON === "function" ? entityId.toJSON()["/"] : (entityId["/"] as string);
     },
     get entityId(): EntityId {
       return entityId;
