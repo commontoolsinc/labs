@@ -193,7 +193,7 @@ export const BlockOperations = {
   /**
    * Move a node up among its siblings
    */
-  moveNodeUp(tree: Tree, nodeId: string): Tree {
+  moveNodeUp(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
     const updateNode = (node: Node): Node => {
       const childIndex = node.children.findIndex(child => child.id === nodeId);
       
@@ -210,16 +210,19 @@ export const BlockOperations = {
       };
     };
 
-    return {
+    const newTree = {
       ...tree,
       root: updateNode(tree.root),
     };
+    
+    const success = JSON.stringify(newTree) !== JSON.stringify(tree);
+    return { success, tree: newTree };
   },
 
   /**
    * Move a node down among its siblings
    */
-  moveNodeDown(tree: Tree, nodeId: string): Tree {
+  moveNodeDown(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
     const updateNode = (node: Node): Node => {
       const childIndex = node.children.findIndex(child => child.id === nodeId);
       
@@ -236,10 +239,172 @@ export const BlockOperations = {
       };
     };
 
-    return {
+    const newTree = {
       ...tree,
       root: updateNode(tree.root),
     };
+    
+    const success = JSON.stringify(newTree) !== JSON.stringify(tree);
+    return { success, tree: newTree };
+  },
+
+  /**
+   * Get all visible nodes in the tree (respecting collapsed state)
+   */
+  getAllVisibleNodes(node: Node, collapsedNodes: Set<string>): Node[] {
+    const result: Node[] = [];
+    const traverse = (currentNode: Node) => {
+      result.push(currentNode);
+      if (!collapsedNodes.has(currentNode.id)) {
+        for (const child of currentNode.children) {
+          traverse(child);
+        }
+      }
+    };
+    for (const child of node.children) {
+      traverse(child);
+    }
+    return result;
+  },
+
+  /**
+   * Delete a node from the tree
+   */
+  deleteNode(tree: Tree, nodeId: string): { success: boolean; tree: Tree; newFocusId: string | null } {
+    const parentNode = BlockOperations.findParentNode(tree.root, nodeId);
+    if (!parentNode) {
+      // Can't delete root
+      return { success: false, tree, newFocusId: null };
+    }
+
+    const nodeIndex = parentNode.children.findIndex(child => child.id === nodeId);
+    if (nodeIndex === -1) {
+      return { success: false, tree, newFocusId: null };
+    }
+
+    const nodeToDelete = parentNode.children[nodeIndex];
+    const newChildren = [...parentNode.children];
+    
+    // Move children up to parent level if any
+    if (nodeToDelete.children.length > 0) {
+      newChildren.splice(nodeIndex, 1, ...nodeToDelete.children);
+    } else {
+      newChildren.splice(nodeIndex, 1);
+    }
+
+    // Update the tree
+    const updateNode = (node: Node): Node => {
+      if (node.id === parentNode.id) {
+        return { ...node, children: newChildren };
+      }
+      return {
+        ...node,
+        children: node.children.map(updateNode)
+      };
+    };
+
+    const updatedTree = {
+      ...tree,
+      root: updateNode(tree.root),
+      // Remove the block as well
+      blocks: tree.blocks.filter(block => block.id !== nodeId)
+    };
+
+    // Determine new focus
+    const allNodes = BlockOperations.getAllVisibleNodes(updatedTree.root, new Set());
+    let newFocusId: string | null = null;
+    
+    if (allNodes.length > 0) {
+      if (nodeIndex > 0 && parentNode.children[nodeIndex - 1]) {
+        newFocusId = parentNode.children[nodeIndex - 1].id;
+      } else if (parentNode.children[nodeIndex + 1]) {
+        newFocusId = parentNode.children[nodeIndex + 1].id;
+      } else {
+        newFocusId = allNodes[0].id;
+      }
+    }
+
+    return { success: true, tree: updatedTree, newFocusId };
+  },
+
+  /**
+   * Indent a node (make it a child of the previous sibling)
+   */
+  indentNode(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
+    const parentNode = BlockOperations.findParentNode(tree.root, nodeId);
+    if (!parentNode) return { success: false, tree };
+
+    const nodeIndex = parentNode.children.findIndex(child => child.id === nodeId);
+    if (nodeIndex <= 0) return { success: false, tree }; // Can't indent first child
+
+    const nodeToIndent = parentNode.children[nodeIndex];
+    const previousSibling = parentNode.children[nodeIndex - 1];
+
+    // Remove node from current position
+    const newParentChildren = [...parentNode.children];
+    newParentChildren.splice(nodeIndex, 1);
+
+    // Add as child of previous sibling
+    const newPreviousSibling = {
+      ...previousSibling,
+      children: [...previousSibling.children, nodeToIndent]
+    };
+    newParentChildren[nodeIndex - 1] = newPreviousSibling;
+
+    // Update the tree
+    const updateNode = (node: Node): Node => {
+      if (node.id === parentNode.id) {
+        return { ...node, children: newParentChildren };
+      }
+      return {
+        ...node,
+        children: node.children.map(updateNode)
+      };
+    };
+
+    return { success: true, tree: { ...tree, root: updateNode(tree.root) } };
+  },
+
+  /**
+   * Outdent a node (move it up to parent's level)
+   */
+  outdentNode(tree: Tree, nodeId: string): { success: boolean; tree: Tree } {
+    const parentNode = BlockOperations.findParentNode(tree.root, nodeId);
+    if (!parentNode) return { success: false, tree };
+
+    const grandParentNode = BlockOperations.findParentNode(tree.root, parentNode.id);
+    if (!grandParentNode) return { success: false, tree }; // Already at root level
+
+    const nodeIndex = parentNode.children.findIndex(child => child.id === nodeId);
+    const parentIndex = grandParentNode.children.findIndex(child => child.id === parentNode.id);
+    
+    if (nodeIndex === -1 || parentIndex === -1) return { success: false, tree };
+
+    const nodeToOutdent = parentNode.children[nodeIndex];
+
+    // Remove from parent
+    const newParentChildren = [...parentNode.children];
+    newParentChildren.splice(nodeIndex, 1);
+
+    // Add to grandparent after parent
+    const newGrandParentChildren = [...grandParentNode.children];
+    newGrandParentChildren.splice(parentIndex + 1, 0, nodeToOutdent);
+
+    // Update the tree
+    const updateNode = (node: Node): Node => {
+      if (node.id === parentNode.id) {
+        return { ...node, children: newParentChildren };
+      }
+      if (node.id === grandParentNode.id) {
+        return { ...node, children: newGrandParentChildren };
+      }
+      return {
+        ...node,
+        children: node.children.map(updateNode)
+      };
+    };
+
+    return { success: true, tree: { ...tree, root: updateNode(tree.root) } };
   },
 
   /**
