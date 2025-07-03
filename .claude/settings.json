@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/scripts/block-node.py"
+            "command": "deno run \"$(git rev-parse --show-toplevel)/.claude/scripts/block-node.ts\""
           }
         ]
       }
