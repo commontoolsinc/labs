@@ -17,6 +17,7 @@ import type {
   ITransactionWriter,
   IUnsupportedMediaTypeError,
   IWriterError,
+  JSONValue,
   MemoryAddressPathComponent,
   Read,
   Result,
@@ -53,7 +54,7 @@ function validateParentPath(
   if (path.length === 1) {
     if (value === undefined || !isRecord(value)) {
       const pathError: INotFoundError = new Error(
-        `Cannot write to path [${String(path[0])}] - document is not a record`,
+        `Cannot access path [${String(path[0])}] - document is not a record`,
       ) as INotFoundError;
       pathError.name = "NotFoundError";
       return pathError;
@@ -70,7 +71,7 @@ function validateParentPath(
     value === undefined || parentValue === undefined || !isRecord(parentValue)
   ) {
     const pathError: INotFoundError = new Error(
-      `Cannot write to path [${
+      `Cannot access path [${
         path.map((p) => String(p)).join(", ")
       }] - parent path [${
         parentPath.map((p) => String(p)).join(", ")
@@ -423,6 +424,14 @@ export class StorageTransaction implements IStorageTransaction {
       return { ok: undefined, error: readResult.error as IReaderError };
     }
     return { ok: readResult.ok };
+  }
+
+  readValueOrThrow(address: IMemoryAddress): JSONValue | undefined {
+    const readResult = this.read(address);
+    if (readResult.error && readResult.error.name !== "NotFoundError") {
+      throw readResult.error;
+    }
+    return readResult.ok?.value;
   }
 
   writer(space: string): Result<ITransactionWriter, IWriterError> {

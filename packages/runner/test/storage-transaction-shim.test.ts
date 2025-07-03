@@ -277,6 +277,31 @@ describe("StorageTransaction", () => {
         "parent path [missing] does not exist or is not a record",
       );
     });
+
+    it("should set NotFoundError.path to last valid parent for deeply nested writes", () => {
+      const transaction = runtime.edit();
+
+      // First write a record with a nested structure
+      transaction.write({
+        space,
+        id: "of:test-entity",
+        type: "application/json",
+        path: ["value"],
+      }, { a: { b: { c: "not a record" } } });
+
+      // Try to write to a deeply nested path where parent is not a record
+      const result = transaction.write({
+        space,
+        id: "of:test-entity",
+        type: "application/json",
+        path: ["value", "a", "b", "c", "d"],
+      }, "deep value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error!.name).toBe("NotFoundError");
+      // Should set path to ["a", "b"] (the last valid parent path)
+      expect((result.error as INotFoundError).path).toEqual(["a", "b"]);
+    });
   });
 
   describe("source path behavior", () => {
@@ -391,6 +416,57 @@ describe("StorageTransaction", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("NotFoundError");
     });
+  });
+
+  it("should support readValueOrThrow for value, not found, and error cases", () => {
+    const transaction = runtime.edit();
+
+    // Write a value
+    const writeResult = transaction.write({
+      space,
+      id: "of:test-entity",
+      type: "application/json",
+      path: ["value"],
+    }, { foo: 123 });
+    expect(writeResult.ok).toBeDefined();
+    expect(writeResult.error).toBeUndefined();
+
+    // Should return the value for an existing path
+    const result = transaction.read({
+      space,
+      id: "of:test-entity",
+      type: "application/json",
+      path: ["value", "foo"],
+    });
+    expect(result.ok?.value).toBe(123);
+
+    // Should return the value for an existing path
+    const value = transaction.readValueOrThrow({
+      space,
+      id: "of:test-entity",
+      type: "application/json",
+      path: ["value", "foo"],
+    });
+    expect(value).toBe(123);
+
+    // Should return undefined for a non-existent path (NotFoundError)
+    const notFound = transaction.readValueOrThrow({
+      space,
+      id: "of:test-entity",
+      type: "application/json",
+      path: ["value", "bar"],
+    });
+    expect(notFound).toBeUndefined();
+
+    // Should throw for other errors (e.g., unsupported media type)
+    expect(() =>
+      transaction.readValueOrThrow({
+        space,
+        id: "of:test-entity",
+        type: "unsupported/type",
+        path: ["value"],
+      })
+    ).toThrow("Unsupported media type");
   });
 });
 
