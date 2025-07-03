@@ -469,13 +469,10 @@ function parseUrl(
 }
 
 // We use stdin for charm input which must be an `Object`
-async function drainStdin(): Promise<object | undefined> {
+async function drainStdin(): Promise<object> {
   let out = "";
   for await (const chunk of Deno.stdin.readable) {
     out += decode(chunk);
-  }
-  if (!out) {
-    return;
   }
   try {
     return JSON.parse(out);
