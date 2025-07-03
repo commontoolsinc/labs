@@ -94,7 +94,7 @@ describe("Schema Transformer", () => {
   it("skips transformation without /// <cts-enable /> directive", async () => {
     // This test needs to check compiled output since we're verifying
     // that the transformation didn't happen
-    const inputContent = await Deno.readTextFile("fixtures/schema-transform/no-directive.input.ts");
+    const inputContent = await Deno.readTextFile("test/fixtures/schema-transform/no-directive.input.ts");
     
     const program = {
       main: "/main.ts",
