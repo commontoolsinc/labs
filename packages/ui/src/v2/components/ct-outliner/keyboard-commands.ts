@@ -16,7 +16,7 @@ export const KeyboardCommands = {
         // Alt+Up moves node up among siblings
         if (ctx.focusedNode) {
           const result = TreeOperations.moveNodeUp(
-            ctx.component.tree,
+            ctx.component.value,
             ctx.focusedNode,
           );
           if (result.success) {
@@ -43,7 +43,7 @@ export const KeyboardCommands = {
         // Alt+Down moves node down among siblings
         if (ctx.focusedNode) {
           const result = TreeOperations.moveNodeDown(
-            ctx.component.tree,
+            ctx.component.value,
             ctx.focusedNode,
           );
           if (result.success) {
@@ -84,10 +84,10 @@ export const KeyboardCommands = {
           } else {
             // Move to parent if collapsed or leaf
             const parentNode = TreeOperations.findParentNode(
-              ctx.component.tree.root,
+              ctx.component.value.root,
               ctx.focusedNode,
             );
-            if (parentNode && parentNode !== ctx.component.tree.root) {
+            if (parentNode && parentNode !== ctx.component.value.root) {
               ctx.component.focusedNode = parentNode;
             }
           }

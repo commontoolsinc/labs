@@ -79,7 +79,7 @@ export const setupMockOutliner = () => {
 
   // Setup basic tree
   const tree = createTestTree();
-  outliner.tree = tree;
+  outliner.value = tree;
   outliner.focusedNode = tree.root.children[0];
 
   return { outliner, tree };
@@ -114,7 +114,7 @@ export const createKeyboardContext = (
   outliner: CTOutliner,
 ): KeyboardContext => {
   const allNodes = TreeOperations.getAllVisibleNodes(
-    outliner.tree.root,
+    outliner.value.root,
     new Set(),
   );
   const currentIndex = outliner.focusedNode
