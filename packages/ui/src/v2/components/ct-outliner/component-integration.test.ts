@@ -1,0 +1,195 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { CTOutliner } from "./ct-outliner.ts";
+import { TreeOperations } from "./tree-operations.ts";
+
+// Mock DOM environment for testing
+const mockElement = (tagName: string) => ({
+  tagName,
+  focus: () => {},
+  select: () => {},
+  setSelectionRange: () => {},
+  getBoundingClientRect: () => ({ bottom: 0, left: 0 }),
+  style: {},
+  value: "",
+  selectionStart: 0,
+  selectionEnd: 0,
+  scrollHeight: 20,
+});
+
+const mockShadowRoot = {
+  querySelector: (selector: string) => {
+    if (selector.includes("editor-")) return mockElement("textarea");
+    if (selector === ".outliner") return mockElement("div");
+    return null;
+  }
+};
+
+describe("CTOutliner Component Integration Tests", () => {
+  let outliner: CTOutliner;
+
+  function setupOutliner() {
+    outliner = new CTOutliner();
+    // Mock the shadowRoot
+    Object.defineProperty(outliner, 'shadowRoot', {
+      value: mockShadowRoot,
+      writable: false
+    });
+    
+    // Setup a basic tree
+    const tree = {
+      root: {
+        body: "",
+        children: [
+          { body: "First item", children: [], attachments: [] },
+          { body: "Second item", children: [], attachments: [] }
+        ],
+        attachments: []
+      }
+    };
+    outliner.tree = tree;
+    outliner.focusedNode = tree.root.children[0];
+  }
+
+  describe("Node Creation", () => {
+    it("should create new sibling node with Enter", () => {
+      setupOutliner();
+      const initialCount = outliner.tree.root.children.length;
+      
+      outliner.createNewNodeAfter(outliner.focusedNode!);
+      
+      expect(outliner.tree.root.children.length).toBe(initialCount + 1);
+      expect(outliner.focusedNode!.body).toBe("");
+    });
+
+    it("should create child node with Shift+Enter equivalent", () => {
+      setupOutliner();
+      const parentNode = outliner.focusedNode!;
+      const initialChildCount = parentNode.children.length;
+      
+      outliner.createChildNode(parentNode);
+      
+      // Since tree is mutable, parentNode should have the new child
+      expect(parentNode.children.length).toBe(initialChildCount + 1);
+      expect(outliner.focusedNode!.body).toBe("");
+    });
+  });
+
+  describe("Node Deletion", () => {
+    it("should delete node and update focus", () => {
+      setupOutliner();
+      const nodeToDelete = outliner.tree.root.children[0];
+      const secondNode = outliner.tree.root.children[1];
+      
+      outliner.deleteNode(nodeToDelete);
+      
+      expect(outliner.tree.root.children.length).toBe(1);
+      expect(outliner.tree.root.children[0]).toBe(secondNode);
+    });
+  });
+
+  describe("Node Indentation", () => {
+    it("should indent node correctly", () => {
+      setupOutliner();
+      const secondNode = outliner.tree.root.children[1];
+      const firstNode = outliner.tree.root.children[0];
+      
+      outliner.indentNode(secondNode);
+      
+      expect(outliner.tree.root.children.length).toBe(1);
+      // Since tree is mutable, firstNode should have the new child
+      expect(firstNode.children.length).toBe(1);
+      expect(firstNode.children[0]).toBe(secondNode);
+    });
+
+    it("should outdent node correctly", () => {
+      setupOutliner();
+      // Setup nested structure
+      const tree = {
+        root: {
+          body: "",
+          children: [{
+            body: "Parent",
+            children: [{
+              body: "Child",
+              children: [],
+              attachments: []
+            }],
+            attachments: []
+          }],
+          attachments: []
+        }
+      };
+      outliner.tree = tree;
+      const childNode = tree.root.children[0].children[0];
+      
+      outliner.outdentNode(childNode);
+      
+      expect(outliner.tree.root.children.length).toBe(2);
+      expect(outliner.tree.root.children[1]).toBe(childNode);
+    });
+  });
+
+  describe("Editing Mode", () => {
+    it("should enter edit mode and preserve content", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      
+      outliner.startEditing(node);
+      
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner._testHelpers.editingContent).toBe(node.body);
+    });
+
+    it("should start editing with initial text", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      const initialText = "Hello";
+      
+      outliner.startEditingWithInitialText(node, initialText);
+      
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner._testHelpers.editingContent).toBe(initialText);
+    });
+  });
+
+  describe("Tree Structure Integrity", () => {
+    it("should preserve node references after operations", () => {
+      setupOutliner();
+      const originalFirstNode = outliner.tree.root.children[0];
+      const originalSecondNode = outliner.tree.root.children[1];
+      
+      // Create a new node
+      outliner.createNewNodeAfter(originalFirstNode);
+      
+      // Original nodes should still be present and identifiable
+      expect(outliner.tree.root.children[0]).toBe(originalFirstNode);
+      expect(outliner.tree.root.children[2]).toBe(originalSecondNode);
+    });
+
+    it("should maintain focus correctly after tree modifications", () => {
+      setupOutliner();
+      const firstNode = outliner.tree.root.children[0];
+      
+      // Create new node and verify focus is on new node
+      outliner.createNewNodeAfter(firstNode);
+      expect(outliner.focusedNode!.body).toBe("");
+      expect(outliner.focusedNode).not.toBe(firstNode);
+    });
+  });
+
+  describe("Public API Methods", () => {
+    it("should have all required public methods accessible", () => {
+      setupOutliner();
+      
+      expect(typeof outliner.createNewNodeAfter).toBe("function");
+      expect(typeof outliner.createChildNode).toBe("function");
+      expect(typeof outliner.deleteNode).toBe("function");
+      expect(typeof outliner.indentNode).toBe("function");
+      expect(typeof outliner.outdentNode).toBe("function");
+      expect(typeof outliner.startEditing).toBe("function");
+      expect(typeof outliner.startEditingWithInitialText).toBe("function");
+      expect(typeof outliner.emitChange).toBe("function");
+    });
+  });
+});

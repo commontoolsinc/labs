@@ -13,7 +13,7 @@ export const KeyboardCommands = {
         if (ctx.focusedNode) {
           const result = TreeOperations.moveNodeUp(ctx.component.tree, ctx.focusedNode);
           if (result.success) {
-            ctx.component.tree = result.tree;
+            // Tree is mutated in place, no need to reassign
             ctx.component.emitChange();
             ctx.component.requestUpdate();
           }
@@ -37,7 +37,7 @@ export const KeyboardCommands = {
         if (ctx.focusedNode) {
           const result = TreeOperations.moveNodeDown(ctx.component.tree, ctx.focusedNode);
           if (result.success) {
-            ctx.component.tree = result.tree;
+            // Tree is mutated in place, no need to reassign
             ctx.component.emitChange();
             ctx.component.requestUpdate();
           }
@@ -106,14 +106,6 @@ export const KeyboardCommands = {
     }
   },
 
-  Enter: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.focusedNode) {
-        ctx.component.startEditing(ctx.focusedNode);
-      }
-    }
-  },
 
   ' ': {  // Space key
     execute(ctx: KeyboardContext): void {
@@ -128,13 +120,17 @@ export const KeyboardCommands = {
     execute(ctx: KeyboardContext): void {
       ctx.event.preventDefault();
       if (ctx.focusedNode) {
-        const result = TreeOperations.deleteNode(ctx.component.tree, ctx.focusedNode);
-        if (result.success) {
-          ctx.component.tree = result.tree;
-          ctx.component.focusedNode = result.newFocusNode;
-          ctx.component.emitChange();
-          ctx.component.requestUpdate();
-        }
+        ctx.component.deleteNode(ctx.focusedNode);
+      }
+    }
+  },
+
+  Backspace: {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+backspace deletes node even in read mode
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
+        ctx.event.preventDefault();
+        ctx.component.deleteNode(ctx.focusedNode);
       }
     }
   },
@@ -144,21 +140,9 @@ export const KeyboardCommands = {
       ctx.event.preventDefault();
       if (ctx.focusedNode) {
         if (ctx.event.shiftKey) {
-          // Outdent
-          const result = TreeOperations.outdentNode(ctx.component.tree, ctx.focusedNode);
-          if (result.success) {
-            ctx.component.tree = result.tree;
-            ctx.component.emitChange();
-            ctx.component.requestUpdate();
-          }
+          ctx.component.outdentNode(ctx.focusedNode);
         } else {
-          // Indent
-          const result = TreeOperations.indentNode(ctx.component.tree, ctx.focusedNode);
-          if (result.success) {
-            ctx.component.tree = result.tree;
-            ctx.component.emitChange();
-            ctx.component.requestUpdate();
-          }
+          ctx.component.indentNode(ctx.focusedNode);
         }
       }
     }
@@ -196,7 +180,44 @@ export const KeyboardCommands = {
         ctx.component.createNewNodeAfter(ctx.focusedNode);
       }
     }
+  },
+
+  Enter: {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+enter toggles edit mode
+      if (ctx.event.metaKey || ctx.event.ctrlKey) {
+        ctx.event.preventDefault();
+        if (ctx.focusedNode) {
+          ctx.component.toggleEditMode(ctx.focusedNode);
+        }
+      } else {
+        ctx.event.preventDefault();
+        if (ctx.focusedNode) {
+          if (ctx.event.shiftKey) {
+            // Shift+Enter creates a child node
+            ctx.component.createChildNode(ctx.focusedNode);
+          } else {
+            // Enter creates a sibling node
+            ctx.component.createNewNodeAfter(ctx.focusedNode);
+          }
+        }
+      }
+    }
   }
+};
+
+/**
+ * Handle typing any regular character to enter edit mode
+ */
+export function handleTypingToEdit(key: string, context: KeyboardContext): boolean {
+  // Check if this is a regular typing key (letter, number, punctuation)
+  if (key.length === 1 && !context.event.ctrlKey && !context.event.metaKey && !context.event.altKey) {
+    if (context.focusedNode) {
+      context.component.startEditingWithInitialText(context.focusedNode, key);
+      return true;
+    }
+  }
+  return false;
 };
 
 /**
@@ -208,7 +229,9 @@ export function executeKeyboardCommand(key: string, context: KeyboardContext): b
     command.execute(context);
     return true;
   }
-  return false;
+  
+  // If no specific command, check if it's a typing key
+  return handleTypingToEdit(key, context);
 }
 
 /**

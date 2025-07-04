@@ -400,7 +400,7 @@ export class CTOutliner extends BaseElement {
     return TreeOperations.getAllVisibleNodes(this.tree.root, this.collapsedNodes);
   }
 
-  private emitChange() {
+  emitChange() {
     this._internalChange = true;
     this.value = this.tree;
     this._internalChange = false;
@@ -414,7 +414,7 @@ export class CTOutliner extends BaseElement {
     return TreeOperations.toMarkdown(this.tree);
   }
 
-  private startEditing(node: OutlineTreeNode) {
+  startEditing(node: OutlineTreeNode) {
     if (this.readonly) return;
     this.editingNode = node;
     this.editingContent = node.body;
@@ -692,11 +692,64 @@ export class CTOutliner extends BaseElement {
     const nodeIndex = TreeOperations.getNodeIndex(parentNode, node);
     const newNode = TreeOperations.createNode({ body: "" });
     
-    this.tree = TreeOperations.insertNode(this.tree, parentNode, newNode, nodeIndex + 1);
+    // Tree is mutated in place, no need to reassign
+    TreeOperations.insertNode(this.tree, parentNode, newNode, nodeIndex + 1);
     this.focusedNode = newNode;
     this.requestUpdate();
     this.emitChange();
     this.startEditing(newNode);
+  }
+
+  createChildNode(node: OutlineTreeNode) {
+    const newNode = TreeOperations.createNode({ body: "" });
+    
+    // Insert as first child of the current node - tree is mutated in place
+    TreeOperations.insertNode(this.tree, node, newNode, 0);
+    this.focusedNode = newNode;
+    this.requestUpdate();
+    this.emitChange();
+    this.startEditing(newNode);
+  }
+
+  startEditingWithInitialText(node: OutlineTreeNode, initialText: string) {
+    if (this.readonly) return;
+    this.editingNode = node;
+    this.editingContent = initialText;
+    this.requestUpdate();
+    const nodeIndex = this.getNodeIndex(node);
+    OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
+  }
+
+  deleteNode(node: OutlineTreeNode) {
+    const result = TreeOperations.deleteNode(this.tree, node);
+    if (result.success) {
+      // Tree is mutated in place, no need to reassign
+      this.focusedNode = result.newFocusNode;
+      this.requestUpdate();
+      this.emitChange();
+      
+      if (this.focusedNode) {
+        OutlinerEffects.focusOutliner(this.shadowRoot);
+      }
+    }
+  }
+
+  indentNode(node: OutlineTreeNode) {
+    const result = TreeOperations.indentNode(this.tree, node);
+    if (result.success) {
+      // Tree is mutated in place, no need to reassign
+      this.requestUpdate();
+      this.emitChange();
+    }
+  }
+
+  outdentNode(node: OutlineTreeNode) {
+    const result = TreeOperations.outdentNode(this.tree, node);
+    if (result.success) {
+      // Tree is mutated in place, no need to reassign
+      this.requestUpdate();
+      this.emitChange();
+    }
   }
 
   private deleteCurrentNode() {

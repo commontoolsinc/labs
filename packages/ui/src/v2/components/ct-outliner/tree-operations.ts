@@ -16,6 +16,7 @@ import type {
 export const TreeOperations = {
   /**
    * Transform nodes in a tree based on a predicate and transformation function
+   * Only creates new objects when changes are needed to preserve reference equality
    */
   transformTree(
     tree: Tree,
@@ -28,14 +29,34 @@ export const TreeOperations = {
       if (predicate(node, currentPath)) {
         return transform(node, currentPath);
       }
-      return {
-        ...node,
-        children: node.children.map(child => updateNode(child, nodePath))
-      };
+      
+      // Only update children if any child needs updating
+      let needsUpdate = false;
+      const newChildren = node.children.map(child => {
+        const updatedChild = updateNode(child, nodePath);
+        if (updatedChild !== child) {
+          needsUpdate = true;
+        }
+        return updatedChild;
+      });
+      
+      if (needsUpdate) {
+        return {
+          ...node,
+          children: newChildren
+        };
+      }
+      
+      return node; // Return same reference if no changes
     };
 
+    const newRoot = updateNode(tree.root, path);
+    if (newRoot === tree.root) {
+      return tree; // Return same tree if no changes
+    }
+    
     return {
-      root: updateNode(tree.root, path)
+      root: newRoot
     };
   },
 
@@ -134,102 +155,90 @@ export const TreeOperations = {
 
   /**
    * Update a node's content
+   * Mutates the node directly
    */
   updateNodeBody(tree: Tree, targetNode: Node, newBody: string): Tree {
-    return TreeOperations.transformTree(
-      tree,
-      (node) => node === targetNode,
-      (node) => ({ ...node, body: newBody })
-    );
+    // Cast to mutable to allow direct manipulation
+    const mutableNode = targetNode as any;
+    mutableNode.body = newBody;
+    return tree;
   },
 
   /**
    * Insert a new node as a child of the specified parent at the given index
+   * Mutates the tree structure directly
    */
   insertNode(tree: Tree, parentNode: Node, newNode: Node, index: number): Tree {
-    return TreeOperations.transformTree(
-      tree,
-      (node) => node === parentNode,
-      (node) => {
-        const newChildren = [...node.children];
-        newChildren.splice(index, 0, newNode);
-        return { ...node, children: newChildren };
-      }
-    );
+    // Cast to mutable to allow direct manipulation
+    const mutableParent = parentNode as any;
+    const mutableChildren = [...mutableParent.children];
+    mutableChildren.splice(index, 0, newNode);
+    mutableParent.children = mutableChildren;
+    return tree;
   },
 
   /**
    * Remove a node from the tree
+   * Mutates the tree structure directly
    */
   removeNode(tree: Tree, targetNode: Node): Tree {
-    const removeFromNode = (node: Node): Node => {
-      return {
-        ...node,
-        children: node.children
-          .filter(child => child !== targetNode)
-          .map(removeFromNode),
-      };
+    const removeFromNode = (node: Node): void => {
+      const mutableNode = node as any;
+      mutableNode.children = mutableNode.children.filter((child: Node) => {
+        if (child === targetNode) {
+          return false;
+        }
+        removeFromNode(child);
+        return true;
+      });
     };
 
-    return {
-      root: removeFromNode(tree.root),
-    };
+    removeFromNode(tree.root);
+    return tree;
   },
 
   /**
    * Move a node up among its siblings
+   * Mutates the tree structure directly
    */
   moveNodeUp(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
-    let movePerformed = false;
+    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
+    if (!parentNode) return { success: false, tree };
     
-    const newTree = TreeOperations.transformTree(
-      tree,
-      (node) => {
-        const childIndex = node.children.indexOf(targetNode);
-        return childIndex > 0;
-      },
-      (node) => {
-        const childIndex = node.children.indexOf(targetNode);
-        if (childIndex > 0) {
-          movePerformed = true;
-          const newChildren = [...node.children];
-          [newChildren[childIndex - 1], newChildren[childIndex]] = 
-            [newChildren[childIndex], newChildren[childIndex - 1]];
-          return { ...node, children: newChildren };
-        }
-        return node;
-      }
-    );
+    const childIndex = parentNode.children.indexOf(targetNode);
+    if (childIndex <= 0) return { success: false, tree };
     
-    return { success: movePerformed, tree: newTree };
+    // Mutate the children array directly
+    const mutableParent = parentNode as any;
+    const mutableChildren = [...mutableParent.children];
+    [mutableChildren[childIndex - 1], mutableChildren[childIndex]] = 
+      [mutableChildren[childIndex], mutableChildren[childIndex - 1]];
+    mutableParent.children = mutableChildren;
+    
+    return { success: true, tree };
   },
 
   /**
    * Move a node down among its siblings
+   * Mutates the tree structure directly
    */
   moveNodeDown(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
-    let movePerformed = false;
+    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
+    if (!parentNode) return { success: false, tree };
     
-    const newTree = TreeOperations.transformTree(
-      tree,
-      (node) => {
-        const childIndex = node.children.indexOf(targetNode);
-        return childIndex !== -1 && childIndex < node.children.length - 1;
-      },
-      (node) => {
-        const childIndex = node.children.indexOf(targetNode);
-        if (childIndex !== -1 && childIndex < node.children.length - 1) {
-          movePerformed = true;
-          const newChildren = [...node.children];
-          [newChildren[childIndex], newChildren[childIndex + 1]] = 
-            [newChildren[childIndex + 1], newChildren[childIndex]];
-          return { ...node, children: newChildren };
-        }
-        return node;
-      }
-    );
+    const childIndex = parentNode.children.indexOf(targetNode);
+    if (childIndex === -1 || childIndex >= parentNode.children.length - 1) {
+      return { success: false, tree };
+    }
     
-    return { success: movePerformed, tree: newTree };
+    // Mutate the children array directly
+    const mutableParent = parentNode as any;
+    const mutableChildren = [...mutableParent.children];
+    [mutableChildren[childIndex], mutableChildren[childIndex + 1]] = 
+      [mutableChildren[childIndex + 1], mutableChildren[childIndex]];
+    mutableParent.children = mutableChildren;
+    
+    return { success: true, tree };
   },
 
   /**
@@ -253,6 +262,7 @@ export const TreeOperations = {
 
   /**
    * Delete a node from the tree
+   * Mutates the tree structure directly
    */
   deleteNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree; newFocusNode: Node | null } {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
@@ -266,7 +276,9 @@ export const TreeOperations = {
       return { success: false, tree, newFocusNode: null };
     }
 
-    const newChildren = [...parentNode.children];
+    // Mutate parent's children array directly
+    const mutableParent = parentNode as any;
+    const newChildren = [...mutableParent.children];
     
     // Move children up to parent level if any
     if (targetNode.children.length > 0) {
@@ -274,34 +286,22 @@ export const TreeOperations = {
     } else {
       newChildren.splice(nodeIndex, 1);
     }
-
-    // Update the tree
-    const updateNode = (node: Node): Node => {
-      if (node === parentNode) {
-        return { ...node, children: newChildren };
-      }
-      return {
-        ...node,
-        children: node.children.map(updateNode)
-      };
-    };
-
-    const updatedTree = {
-      root: updateNode(tree.root)
-    };
+    
+    mutableParent.children = newChildren;
 
     // Determine new focus
     const newFocusNode = TreeOperations.determineFocusAfterDeletion(
-      updatedTree,
+      tree,
       parentNode,
       nodeIndex
     );
 
-    return { success: true, tree: updatedTree, newFocusNode };
+    return { success: true, tree, newFocusNode };
   },
 
   /**
    * Indent a node (make it a child of the previous sibling)
+   * Mutates the tree structure directly
    */
   indentNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
@@ -312,29 +312,22 @@ export const TreeOperations = {
 
     const previousSibling = parentNode.children[nodeIndex - 1];
 
-    // Remove node from current position
-    const newParentChildren = [...parentNode.children];
-    newParentChildren.splice(nodeIndex, 1);
+    // Remove targetNode from parent's children
+    const mutableParent = parentNode as any;
+    const mutableChildren = [...mutableParent.children];
+    mutableChildren.splice(nodeIndex, 1);
+    mutableParent.children = mutableChildren;
 
-    // Add as child of previous sibling
-    const newPreviousSibling = {
-      ...previousSibling,
-      children: [...previousSibling.children, targetNode]
-    };
-    newParentChildren[nodeIndex - 1] = newPreviousSibling;
+    // Add targetNode to previous sibling's children
+    const mutableSibling = previousSibling as any;
+    mutableSibling.children = [...mutableSibling.children, targetNode];
 
-    // Update the tree
-    const updatedTree = TreeOperations.transformTree(
-      tree,
-      (node) => node === parentNode,
-      (node) => ({ ...node, children: newParentChildren })
-    );
-
-    return { success: true, tree: updatedTree };
+    return { success: true, tree };
   },
 
   /**
    * Outdent a node (move it up to parent's level)
+   * Mutates the tree structure directly
    */
   outdentNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
@@ -348,29 +341,19 @@ export const TreeOperations = {
     
     if (nodeIndex === -1 || parentIndex === -1) return { success: false, tree };
 
-    // Remove from parent
-    const newParentChildren = [...parentNode.children];
-    newParentChildren.splice(nodeIndex, 1);
+    // Remove targetNode from parent's children
+    const mutableParent = parentNode as any;
+    const mutableParentChildren = [...mutableParent.children];
+    mutableParentChildren.splice(nodeIndex, 1);
+    mutableParent.children = mutableParentChildren;
 
-    // Add to grandparent after parent
-    const newGrandParentChildren = [...grandParentNode.children];
-    newGrandParentChildren.splice(parentIndex + 1, 0, targetNode);
+    // Add targetNode to grandparent after parent
+    const mutableGrandParent = grandParentNode as any;
+    const mutableGrandParentChildren = [...mutableGrandParent.children];
+    mutableGrandParentChildren.splice(parentIndex + 1, 0, targetNode);
+    mutableGrandParent.children = mutableGrandParentChildren;
 
-    // Update the tree - we need a custom approach here since we're updating two levels
-    const updateNode = (node: Node): Node => {
-      if (node === parentNode) {
-        return { ...node, children: newParentChildren };
-      }
-      if (node === grandParentNode) {
-        return { ...node, children: newGrandParentChildren };
-      }
-      return {
-        ...node,
-        children: node.children.map(updateNode)
-      };
-    };
-
-    return { success: true, tree: { root: updateNode(tree.root) } };
+    return { success: true, tree };
   },
 
   /**

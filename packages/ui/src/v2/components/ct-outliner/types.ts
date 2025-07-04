@@ -32,18 +32,20 @@ export interface Attachment {
 
 /**
  * Node - represents both the tree structure and content
+ * Note: This is intentionally mutable for live tree manipulation
  */
 export interface Node {
-  readonly body: string;
-  readonly children: readonly Node[];
-  readonly attachments: readonly Attachment[];
+  body: string;
+  children: Node[];
+  attachments: Attachment[];
 }
 
 /**
  * Complete tree structure
+ * Note: This is intentionally mutable for live tree manipulation
  */
 export interface Tree {
-  readonly root: Node;
+  root: Node;
 }
 
 /**
@@ -103,9 +105,9 @@ export interface EditingState {
  * Options for creating a new node
  */
 export interface NodeCreationOptions {
-  readonly body: string;
-  readonly children?: readonly Node[];
-  readonly attachments?: readonly Attachment[];
+  body: string;
+  children?: Node[];
+  attachments?: Attachment[];
 }
 
 /**
