@@ -4,7 +4,10 @@ import type {
   Attachment, 
   NodeCreationOptions,
   MutableNode,
-  MutableTree
+  MutableTree,
+  TreeMoveResult,
+  NodeDeletionResult,
+  TreeStructureResult
 } from "./types.ts";
 
 /**
@@ -201,12 +204,16 @@ export const TreeOperations = {
    * Move a node up among its siblings
    * Mutates the tree structure directly
    */
-  moveNodeUp(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
+  moveNodeUp(tree: Tree, targetNode: Node): TreeMoveResult {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
-    if (!parentNode) return { success: false, tree };
+    if (!parentNode) {
+      return { success: false, error: "Cannot move node up: node has no parent" };
+    }
     
     const childIndex = parentNode.children.indexOf(targetNode);
-    if (childIndex <= 0) return { success: false, tree };
+    if (childIndex <= 0) {
+      return { success: false, error: "Cannot move node up: already at first position" };
+    }
     
     // Mutate the children array directly
     const mutableParent = parentNode as MutableNode;
@@ -215,20 +222,22 @@ export const TreeOperations = {
       [mutableChildren[childIndex], mutableChildren[childIndex - 1]];
     mutableParent.children = mutableChildren;
     
-    return { success: true, tree };
+    return { success: true, data: { tree } };
   },
 
   /**
    * Move a node down among its siblings
    * Mutates the tree structure directly
    */
-  moveNodeDown(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
+  moveNodeDown(tree: Tree, targetNode: Node): TreeMoveResult {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
-    if (!parentNode) return { success: false, tree };
+    if (!parentNode) {
+      return { success: false, error: "Cannot move node down: node has no parent" };
+    }
     
     const childIndex = parentNode.children.indexOf(targetNode);
     if (childIndex === -1 || childIndex >= parentNode.children.length - 1) {
-      return { success: false, tree };
+      return { success: false, error: "Cannot move node down: already at last position" };
     }
     
     // Mutate the children array directly
@@ -238,7 +247,7 @@ export const TreeOperations = {
       [mutableChildren[childIndex + 1], mutableChildren[childIndex]];
     mutableParent.children = mutableChildren;
     
-    return { success: true, tree };
+    return { success: true, data: { tree } };
   },
 
   /**
@@ -264,16 +273,15 @@ export const TreeOperations = {
    * Delete a node from the tree
    * Mutates the tree structure directly
    */
-  deleteNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree; newFocusNode: Node | null } {
+  deleteNode(tree: Tree, targetNode: Node): NodeDeletionResult {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) {
-      // Can't delete root
-      return { success: false, tree, newFocusNode: null };
+      return { success: false, error: "Cannot delete root node" };
     }
 
     const nodeIndex = parentNode.children.indexOf(targetNode);
     if (nodeIndex === -1) {
-      return { success: false, tree, newFocusNode: null };
+      return { success: false, error: "Node not found in parent" };
     }
 
     // Mutate parent's children array directly
@@ -296,19 +304,23 @@ export const TreeOperations = {
       nodeIndex
     );
 
-    return { success: true, tree, newFocusNode };
+    return { success: true, data: { tree, newFocusNode } };
   },
 
   /**
    * Indent a node (make it a child of the previous sibling)
    * Mutates the tree structure directly
    */
-  indentNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
+  indentNode(tree: Tree, targetNode: Node): TreeStructureResult {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
-    if (!parentNode) return { success: false, tree };
+    if (!parentNode) {
+      return { success: false, error: "Cannot indent node: node has no parent" };
+    }
 
     const nodeIndex = parentNode.children.indexOf(targetNode);
-    if (nodeIndex <= 0) return { success: false, tree }; // Can't indent first child
+    if (nodeIndex <= 0) {
+      return { success: false, error: "Cannot indent first child node" };
+    }
 
     const previousSibling = parentNode.children[nodeIndex - 1];
 
@@ -322,24 +334,30 @@ export const TreeOperations = {
     const mutableSibling = previousSibling as MutableNode;
     mutableSibling.children = [...mutableSibling.children, targetNode];
 
-    return { success: true, tree };
+    return { success: true, data: { tree } };
   },
 
   /**
    * Outdent a node (move it up to parent's level)
    * Mutates the tree structure directly
    */
-  outdentNode(tree: Tree, targetNode: Node): { success: boolean; tree: Tree } {
+  outdentNode(tree: Tree, targetNode: Node): TreeStructureResult {
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
-    if (!parentNode) return { success: false, tree };
+    if (!parentNode) {
+      return { success: false, error: "Cannot outdent node: node has no parent" };
+    }
 
     const grandParentNode = TreeOperations.findParentNode(tree.root, parentNode);
-    if (!grandParentNode) return { success: false, tree }; // Already at root level
+    if (!grandParentNode) {
+      return { success: false, error: "Cannot outdent node: already at root level" };
+    }
 
     const nodeIndex = parentNode.children.indexOf(targetNode);
     const parentIndex = grandParentNode.children.indexOf(parentNode);
     
-    if (nodeIndex === -1 || parentIndex === -1) return { success: false, tree };
+    if (nodeIndex === -1 || parentIndex === -1) {
+      return { success: false, error: "Node structure is inconsistent" };
+    }
 
     // Remove targetNode from parent's children
     const mutableParent = parentNode as MutableNode;
@@ -353,7 +371,7 @@ export const TreeOperations = {
     mutableGrandParentChildren.splice(parentIndex + 1, 0, targetNode);
     mutableGrandParent.children = mutableGrandParentChildren;
 
-    return { success: true, tree };
+    return { success: true, data: { tree } };
   },
 
   /**

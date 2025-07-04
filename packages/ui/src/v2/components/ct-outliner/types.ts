@@ -42,7 +42,10 @@ export interface Node {
 
 /**
  * Mutable type variant of Node for safe mutations in tree operations
- * This eliminates the need for 'any' casting while preserving type safety
+ * 
+ * @description This eliminates the need for 'any' casting while preserving type safety.
+ * Used internally by tree operations that need to mutate node properties directly.
+ * The type removes readonly modifiers from all properties to allow in-place mutations.
  */
 export type MutableNode = {
   -readonly [K in keyof Node]: Node[K] extends readonly unknown[] 
@@ -82,7 +85,10 @@ export interface OutlineUIState {
 
 /**
  * Operations interface for outliner component
- * Provides type-safe access to component methods for keyboard commands
+ * 
+ * @description Provides type-safe access to component methods for keyboard commands.
+ * This interface defines all the methods that keyboard command handlers need to
+ * interact with the outliner component without tight coupling.
  */
 export interface OutlinerOperations {
   readonly tree: Tree;
@@ -171,6 +177,21 @@ export type TreeUpdateResult = OperationResult<{
  * Result type for tree movement operations
  */
 export type TreeMoveResult = OperationResult<{
+  readonly tree: Tree;
+}>;
+
+/**
+ * Result type for node deletion operations
+ */
+export type NodeDeletionResult = OperationResult<{
+  readonly tree: Tree;
+  readonly newFocusNode: Node | null;
+}>;
+
+/**
+ * Result type for tree structure operations (indent/outdent)
+ */
+export type TreeStructureResult = OperationResult<{
   readonly tree: Tree;
 }>;
 

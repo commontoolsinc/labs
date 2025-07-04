@@ -114,11 +114,11 @@ describe("Keyboard Commands", () => {
       
       // Should start editing
       KeyboardCommands.Enter.execute(context);
-      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner.testAPI.editingNode).toBe(node);
       
       // Should stop editing
       KeyboardCommands.Enter.execute(context);
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
     });
 
     it("should exit edit mode with cmd/ctrl+Enter when already editing", () => {
@@ -128,7 +128,7 @@ describe("Keyboard Commands", () => {
       
       // Start editing first
       outliner.startEditing(node);
-      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner.testAPI.editingNode).toBe(node);
       
       // Simulate the editing keyboard handler behavior for cmd/ctrl+Enter
       // This tests the actual flow when in edit mode
@@ -142,10 +142,10 @@ describe("Keyboard Commands", () => {
       Object.defineProperty(event, 'target', { value: mockTextarea });
       
       // Call the editing keyboard handler directly
-      outliner._testHelpers.handleNormalEditorKeyDown(event);
+      outliner.testAPI.handleNormalEditorKeyDown(event);
       
       // Should exit edit mode
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
       // Should NOT create a new node
       expect(outliner.tree.root.children.length).toBe(initialNodeCount);
     });
@@ -159,8 +159,8 @@ describe("Keyboard Commands", () => {
       
       KeyboardCommands[" "].execute(context);
       
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe(node.body);
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe(node.body);
     });
 
     it("should handle Delete key to delete node", () => {
@@ -345,8 +345,8 @@ describe("Keyboard Commands", () => {
       const handled = handleTypingToEdit("a", context);
       
       expect(handled).toBe(true);
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe("a");
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe("a");
     });
 
     it("should not enter edit mode for modifier keys", () => {
@@ -358,7 +358,7 @@ describe("Keyboard Commands", () => {
       const handled = handleTypingToEdit("a", context);
       
       expect(handled).toBe(false);
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
     });
 
     it("should not enter edit mode for special keys", () => {
@@ -370,7 +370,7 @@ describe("Keyboard Commands", () => {
       const handled = handleTypingToEdit("Enter", context);
       
       expect(handled).toBe(false);
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
     });
 
     it("should overwrite existing content when typing", () => {
@@ -383,8 +383,8 @@ describe("Keyboard Commands", () => {
       
       handleTypingToEdit("x", context);
       
-      expect(outliner._testHelpers.editingContent).toBe("x");
-      expect(outliner._testHelpers.editingContent).not.toBe(originalContent);
+      expect(outliner.testAPI.editingContent).toBe("x");
+      expect(outliner.testAPI.editingContent).not.toBe(originalContent);
     });
   });
 
@@ -412,8 +412,8 @@ describe("Keyboard Commands", () => {
       const handled = executeKeyboardCommand("z", context);
       
       expect(handled).toBe(true);
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe("z");
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe("z");
     });
 
     it("should return false for non-actionable keys", () => {
@@ -434,7 +434,7 @@ describe("Keyboard Commands", () => {
       
       // Start editing
       outliner.startEditing(secondNode);
-      expect(outliner._testHelpers.editingNode).toBe(secondNode);
+      expect(outliner.testAPI.editingNode).toBe(secondNode);
       
       // Test indent in edit mode
       const mockTextarea = {
@@ -486,8 +486,8 @@ describe("Keyboard Commands", () => {
       
       // Start editing with some content
       outliner.startEditingWithInitialText(secondNode, editingContent);
-      expect(outliner._testHelpers.editingNode).toBe(secondNode);
-      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+      expect(outliner.testAPI.editingNode).toBe(secondNode);
+      expect(outliner.testAPI.editingContent).toBe(editingContent);
       
       // Indent while in edit mode
       const mockTextarea = {
@@ -510,8 +510,8 @@ describe("Keyboard Commands", () => {
       EditingKeyboardCommands["]"].execute(indentContext);
       
       // Should still be in edit mode after indent
-      expect(outliner._testHelpers.editingNode).toBe(secondNode);
-      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+      expect(outliner.testAPI.editingNode).toBe(secondNode);
+      expect(outliner.testAPI.editingContent).toBe(editingContent);
       
       // Outdent while still in edit mode
       const outdentEvent = createMockKeyboardEvent("[", { metaKey: true });
@@ -528,8 +528,8 @@ describe("Keyboard Commands", () => {
       EditingKeyboardCommands["["].execute(outdentContext);
       
       // Should still be in edit mode after outdent
-      expect(outliner._testHelpers.editingNode).toBe(secondNode);
-      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+      expect(outliner.testAPI.editingNode).toBe(secondNode);
+      expect(outliner.testAPI.editingContent).toBe(editingContent);
     });
 
     it("should preserve cursor position and content during edit mode indentation", () => {
@@ -569,8 +569,8 @@ describe("Keyboard Commands", () => {
       expect(firstNode.children[0]).toBe(secondNode);
       
       // Verify editing state preserved
-      expect(outliner._testHelpers.editingNode).toBe(secondNode);
-      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+      expect(outliner.testAPI.editingNode).toBe(secondNode);
+      expect(outliner.testAPI.editingContent).toBe(editingContent);
     });
   });
 
@@ -593,7 +593,7 @@ describe("Keyboard Commands", () => {
       
       // Regular editing should be blocked
       outliner.startEditing(node);
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
       
       // But cmd+backspace delete should still work
       const event = createMockKeyboardEvent("Backspace", { metaKey: true });

@@ -17,12 +17,17 @@ export type {
   OperationResult,
   TreeUpdateResult,
   TreeMoveResult,
+  NodeDeletionResult,
+  TreeStructureResult,
   MutableNode,
   MutableTree,
   OutlinerOperations,
   EditingKeyboardContext
 } from "./types.ts";
 export { TreeOperations } from "./tree-operations.ts";
+export { NodeUtils } from "./node-utils.ts";
+export { EventUtils } from "./event-utils.ts";
+export { FocusUtils } from "./focus-utils.ts";
 // Legacy TreeOperations file and MigrationBridge removed - using TreeOperations exclusively
 export { KeyboardCommands, executeKeyboardCommand } from "./keyboard-commands.ts";
 

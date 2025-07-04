@@ -51,8 +51,10 @@ describe("CTOutliner Logic Tests", () => {
       const result = TreeOperations.moveNodeUp(tree, secondChild);
       
       expect(result.success).toBe(true);
-      expect(result.tree.root.children[0].body).toBe("Second item");
-      expect(result.tree.root.children[1].body).toBe("First item");
+      if (result.success) {
+        expect(result.data.tree.root.children[0].body).toBe("Second item");
+        expect(result.data.tree.root.children[1].body).toBe("First item");
+      }
     });
 
     it("should move nodes down", () => {
@@ -61,8 +63,10 @@ describe("CTOutliner Logic Tests", () => {
       const result = TreeOperations.moveNodeDown(tree, firstChild);
       
       expect(result.success).toBe(true);
-      expect(result.tree.root.children[0].body).toBe("Second item");
-      expect(result.tree.root.children[1].body).toBe("First item");
+      if (result.success) {
+        expect(result.data.tree.root.children[0].body).toBe("Second item");
+        expect(result.data.tree.root.children[1].body).toBe("First item");
+      }
     });
 
     it("should delete nodes", () => {
@@ -71,8 +75,10 @@ describe("CTOutliner Logic Tests", () => {
       const result = TreeOperations.deleteNode(tree, child1);
       
       expect(result.success).toBe(true);
-      expect(result.tree.root.children).toHaveLength(1);
-      expect(result.tree.root.children[0].body).toBe("Second item");
+      if (result.success) {
+        expect(result.data.tree.root.children).toHaveLength(1);
+        expect(result.data.tree.root.children[0].body).toBe("Second item");
+      }
     });
 
     it("should handle transformTree utility", () => {
@@ -95,9 +101,11 @@ describe("CTOutliner Logic Tests", () => {
       const result = TreeOperations.indentNode(tree, secondChild);
       
       expect(result.success).toBe(true);
-      expect(result.tree.root.children).toHaveLength(1);
-      expect(result.tree.root.children[0].children).toHaveLength(1);
-      expect(result.tree.root.children[0].children[0].body).toBe("Second item");
+      if (result.success) {
+        expect(result.data.tree.root.children).toHaveLength(1);
+        expect(result.data.tree.root.children[0].children).toHaveLength(1);
+        expect(result.data.tree.root.children[0].children[0].body).toBe("Second item");
+      }
     });
 
     it("should outdent nodes", () => {
@@ -121,8 +129,10 @@ describe("CTOutliner Logic Tests", () => {
       const result = TreeOperations.outdentNode(tree, childNode);
       
       expect(result.success).toBe(true);
-      expect(result.tree.root.children).toHaveLength(2);
-      expect(result.tree.root.children[1].body).toBe("Child");
+      if (result.success) {
+        expect(result.data.tree.root.children).toHaveLength(2);
+        expect(result.data.tree.root.children[1].body).toBe("Child");
+      }
     });
 
     it("should convert to markdown", () => {
@@ -322,9 +332,11 @@ describe("CTOutliner Logic Tests", () => {
       const result = TreeOperations.deleteNode(tree, parentNode);
       
       expect(result.success).toBe(true);
-      expect(result.tree.root.children).toHaveLength(2);
-      expect(result.tree.root.children[0].body).toBe("Child 1");
-      expect(result.tree.root.children[1].body).toBe("Child 2");
+      if (result.success) {
+        expect(result.data.tree.root.children).toHaveLength(2);
+        expect(result.data.tree.root.children[0].body).toBe("Child 1");
+        expect(result.data.tree.root.children[1].body).toBe("Child 2");
+      }
     });
 
     it("should not allow deleting root node", () => {
@@ -332,7 +344,9 @@ describe("CTOutliner Logic Tests", () => {
       const result = TreeOperations.deleteNode(tree, tree.root);
       
       expect(result.success).toBe(false);
-      expect(result.tree).toBe(tree);
+      if (!result.success) {
+        expect(result.error).toBe("Cannot delete root node");
+      }
     });
 
     it("should not indent first child", () => {

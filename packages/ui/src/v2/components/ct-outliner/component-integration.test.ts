@@ -137,8 +137,8 @@ describe("CTOutliner Component Integration Tests", () => {
       
       outliner.startEditing(node);
       
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe(node.body);
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe(node.body);
     });
 
     it("should start editing with initial text", () => {
@@ -148,8 +148,8 @@ describe("CTOutliner Component Integration Tests", () => {
       
       outliner.startEditingWithInitialText(node, initialText);
       
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe(initialText);
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe(initialText);
     });
   });
 
@@ -201,11 +201,11 @@ describe("CTOutliner Component Integration Tests", () => {
       
       // Should start editing
       outliner.toggleEditMode(node);
-      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner.testAPI.editingNode).toBe(node);
       
       // Should stop editing
       outliner.toggleEditMode(node);
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
     });
 
     it("should replace content when typing to enter edit mode", () => {
@@ -214,8 +214,8 @@ describe("CTOutliner Component Integration Tests", () => {
       
       outliner.startEditingWithInitialText(node, "x");
       
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe("x");
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe("x");
     });
 
     it("should delete node with cmd/ctrl+backspace in read mode", () => {
@@ -238,8 +238,8 @@ describe("CTOutliner Component Integration Tests", () => {
       
       outliner.startEditing(node);
       
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe(originalContent);
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe(originalContent);
     });
 
     it("should overwrite content when typing to enter edit mode", () => {
@@ -249,8 +249,8 @@ describe("CTOutliner Component Integration Tests", () => {
       // Start editing with initial text - should replace entire content
       outliner.startEditingWithInitialText(node, "new content");
       
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe("new content");
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe("new content");
     });
 
     it("should toggle between editing states correctly", () => {
@@ -258,17 +258,17 @@ describe("CTOutliner Component Integration Tests", () => {
       const node = outliner.focusedNode!;
       
       // Start with no editing
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
       
       // Toggle to start editing
       outliner.toggleEditMode(node);
-      expect(outliner._testHelpers.editingNode).toBe(node);
-      expect(outliner._testHelpers.editingContent).toBe(node.body);
+      expect(outliner.testAPI.editingNode).toBe(node);
+      expect(outliner.testAPI.editingContent).toBe(node.body);
       
       // Toggle to stop editing  
       outliner.toggleEditMode(node);
-      expect(outliner._testHelpers.editingNode).toBe(null);
-      expect(outliner._testHelpers.editingContent).toBe("");
+      expect(outliner.testAPI.editingNode).toBe(null);
+      expect(outliner.testAPI.editingContent).toBe("");
     });
 
     it("should handle switching edit mode between different nodes", () => {
@@ -278,12 +278,12 @@ describe("CTOutliner Component Integration Tests", () => {
       
       // Start editing first node
       outliner.toggleEditMode(firstNode);
-      expect(outliner._testHelpers.editingNode).toBe(firstNode);
+      expect(outliner.testAPI.editingNode).toBe(firstNode);
       
       // Switch to editing second node (should stop editing first)
       outliner.toggleEditMode(secondNode);
-      expect(outliner._testHelpers.editingNode).toBe(secondNode);
-      expect(outliner._testHelpers.editingContent).toBe(secondNode.body);
+      expect(outliner.testAPI.editingNode).toBe(secondNode);
+      expect(outliner.testAPI.editingContent).toBe(secondNode.body);
     });
 
     it("should exit edit mode with cmd/ctrl+enter without creating new node", () => {
@@ -293,7 +293,7 @@ describe("CTOutliner Component Integration Tests", () => {
       
       // Start editing
       outliner.startEditing(node);
-      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner.testAPI.editingNode).toBe(node);
       
       // Simulate cmd/ctrl+Enter in edit mode through the editor keyboard handler
       const mockTextarea = {
@@ -314,10 +314,10 @@ describe("CTOutliner Component Integration Tests", () => {
       } as unknown as KeyboardEvent;
       
       // Call the editor key handler
-      outliner._testHelpers.handleNormalEditorKeyDown(event);
+      outliner.testAPI.handleNormalEditorKeyDown(event);
       
       // Should exit edit mode
-      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner.testAPI.editingNode).toBe(null);
       // Should NOT create a new node
       expect(outliner.tree.root.children.length).toBe(initialNodeCount);
     });

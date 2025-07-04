@@ -15,6 +15,9 @@ import type {
 } from "./types.ts";
 import { executeKeyboardCommand, executeEditingKeyboardCommand } from "./keyboard-commands.ts";
 import { TreeOperations } from "./tree-operations.ts";
+import { NodeUtils } from "./node-utils.ts";
+import { EventUtils } from "./event-utils.ts";
+import { FocusUtils } from "./focus-utils.ts";
 
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
@@ -110,14 +113,13 @@ export class CTOutliner extends BaseElement {
 
   private editingNode: OutlineTreeNode | null = null;
   private editingContent: string = "";
-  private _internalChange = false;
+  private isInternalUpdate = false;
   
-  // Cache node indices for editor IDs
-  private nodeIndexMap = new WeakMap<OutlineTreeNode, number>();
-  private nodeCounter = 0;
+  // Node indexer for stable DOM element IDs
+  private nodeIndexer = NodeUtils.createNodeIndexer();
 
-  // Test helpers - expose some internal state for testing
-  get _testHelpers() {
+  // Test API - expose internal state for testing
+  get testAPI() {
     return {
       editingNode: this.editingNode,
       editingContent: this.editingContent,
@@ -375,45 +377,54 @@ export class CTOutliner extends BaseElement {
     if (changedProperties.has("value") && !this.editingNode) {
       // Don't update tree from value if we're internally managing it
       // This prevents focus loss when we programmatically update the value
-      if (!this._internalChange) {
+      if (!this.isInternalUpdate) {
         this.tree = this.value;
         // Reset focus if the focused node no longer exists
-        if (this.focusedNode && !TreeOperations.findNode(this.tree.root, this.focusedNode)) {
-          this.focusedNode = this.tree.root.children[0] || null;
-        }
+        this.focusedNode = FocusUtils.findValidFocus(this.tree, this.focusedNode);
       }
     }
   }
 
   private getNodeIndex(node: OutlineTreeNode): number {
-    if (!this.nodeIndexMap.has(node)) {
-      this.nodeIndexMap.set(node, this.nodeCounter++);
-    }
-    return this.nodeIndexMap.get(node)!;
+    return this.nodeIndexer.getIndex(node);
   }
 
   private getAllNodes(): OutlineTreeNode[] {
-    return TreeOperations.getAllNodes(this.tree.root).slice(1); // Skip root
+    return NodeUtils.getAllNodesExcludingRoot(this.tree);
   }
 
   getAllVisibleNodes(): OutlineTreeNode[] {
-    return TreeOperations.getAllVisibleNodes(this.tree.root, this.collapsedNodes);
+    return NodeUtils.getVisibleNodes(this.tree, this.collapsedNodes);
   }
 
   emitChange() {
-    this._internalChange = true;
+    this.isInternalUpdate = true;
     this.value = this.tree;
-    this._internalChange = false;
+    this.isInternalUpdate = false;
     this.emit("ct-change", { value: this.tree });
   }
 
   /**
    * Export the current tree content as markdown string
+   * 
+   * @returns Markdown representation of the tree structure
+   * @example
+   * ```typescript
+   * const markdown = outliner.toMarkdown();
+   * console.log(markdown); // "- Item 1\n  - Child item\n- Item 2"
+   * ```
    */
   toMarkdown(): string {
     return TreeOperations.toMarkdown(this.tree);
   }
 
+  /**
+   * Start editing a specific node
+   * 
+   * @param node - The node to start editing
+   * @description Enters edit mode for the specified node, preserving its current content.
+   * If the component is readonly, this method does nothing.
+   */
   startEditing(node: OutlineTreeNode) {
     if (this.readonly) return;
     this.editingNode = node;
@@ -423,6 +434,13 @@ export class CTOutliner extends BaseElement {
     OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
   }
 
+  /**
+   * Toggle edit mode for a specific node
+   * 
+   * @param node - The node to toggle editing for
+   * @description If the node is currently being edited, exits edit mode.
+   * If not editing or editing a different node, starts editing this node.
+   */
   toggleEditMode(node: OutlineTreeNode) {
     if (this.readonly) return;
     
@@ -435,6 +453,12 @@ export class CTOutliner extends BaseElement {
     }
   }
 
+  /**
+   * Finish editing the current node and save changes
+   * 
+   * @description Saves the current editing content to the node body and exits edit mode.
+   * Emits a change event to notify parent components of the update.
+   */
   finishEditing() {
     if (!this.editingNode) return;
     
@@ -619,13 +643,13 @@ export class CTOutliner extends BaseElement {
     const target = event.target as HTMLTextAreaElement;
 
     // Try executing editing keyboard commands first
-    const editingContext: EditingKeyboardContext = {
+    const editingContext = EventUtils.createEditingKeyboardContext(
       event,
-      component: this,
-      editingNode: this.editingNode!,
-      editingContent: this.editingContent,
-      textarea: target,
-    };
+      this,
+      this.editingNode!,
+      this.editingContent,
+      target
+    );
 
     if (executeEditingKeyboardCommand(event.key, editingContext)) {
       return;
@@ -678,16 +702,7 @@ export class CTOutliner extends BaseElement {
   private handleKeyDown(event: KeyboardEvent) {
     if (this.readonly || this.editingNode) return;
 
-    const allNodes = this.getAllVisibleNodes();
-    const currentIndex = this.focusedNode ? allNodes.indexOf(this.focusedNode) : -1;
-
-    const context: KeyboardContext = {
-      event,
-      component: this,
-      allNodes,
-      currentIndex,
-      focusedNode: this.focusedNode,
-    };
+    const context = EventUtils.createKeyboardContext(event, this, this.focusedNode);
 
     executeKeyboardCommand(event.key, context);
   }
@@ -699,6 +714,13 @@ export class CTOutliner extends BaseElement {
     this.createNewNodeAfter(this.focusedNode!);
   }
 
+  /**
+   * Create a new sibling node after the specified node
+   * 
+   * @param node - The node to create a sibling after
+   * @description Creates an empty node as a sibling after the given node,
+   * focuses it, and immediately enters edit mode.
+   */
   createNewNodeAfter(node: OutlineTreeNode) {
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) return;
@@ -714,6 +736,13 @@ export class CTOutliner extends BaseElement {
     this.startEditing(newNode);
   }
 
+  /**
+   * Create a new child node under the specified node
+   * 
+   * @param node - The parent node to create a child under
+   * @description Creates an empty node as the first child of the given node,
+   * focuses it, and immediately enters edit mode.
+   */
   createChildNode(node: OutlineTreeNode) {
     const newNode = TreeOperations.createNode({ body: "" });
     
@@ -739,7 +768,7 @@ export class CTOutliner extends BaseElement {
     const result = TreeOperations.deleteNode(this.tree, node);
     if (result.success) {
       // Tree is mutated in place, no need to reassign
-      this.focusedNode = result.newFocusNode;
+      this.focusedNode = result.data.newFocusNode;
       this.requestUpdate();
       this.emitChange();
       
@@ -843,7 +872,7 @@ export class CTOutliner extends BaseElement {
     
     if (result.success) {
       // Tree is mutated in place, no need to reassign
-      this.focusedNode = result.newFocusNode;
+      this.focusedNode = result.data.newFocusNode;
       this.requestUpdate();
       this.emitChange();
       
@@ -892,14 +921,14 @@ export class CTOutliner extends BaseElement {
       // Outdent
       const result = TreeOperations.outdentNode(this.tree, this.focusedNode!);
       if (result.success) {
-        this.tree = result.tree;
+        // Tree is mutated in place, no need to reassign
         this.emitChange();
       }
     } else {
       // Indent
       const result = TreeOperations.indentNode(this.tree, this.focusedNode!);
       if (result.success) {
-        this.tree = result.tree;
+        // Tree is mutated in place, no need to reassign
         this.emitChange();
       }
     }
