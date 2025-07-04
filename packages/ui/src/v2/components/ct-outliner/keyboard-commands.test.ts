@@ -478,6 +478,59 @@ describe("Keyboard Commands", () => {
       expect(outdentHandled).toBe(true);
       expect(outliner.tree.root.children.length).toBe(2);
     });
+
+    it("should preserve edit mode after indent/outdent operations", () => {
+      setupOutliner();
+      const secondNode = outliner.tree.root.children[1];
+      const editingContent = "editing this node";
+      
+      // Start editing with some content
+      outliner.startEditingWithInitialText(secondNode, editingContent);
+      expect(outliner._testHelpers.editingNode).toBe(secondNode);
+      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+      
+      // Indent while in edit mode
+      const mockTextarea = {
+        selectionStart: 5,
+        selectionEnd: 5,
+        value: editingContent
+      } as HTMLTextAreaElement;
+      
+      const indentEvent = createMockKeyboardEvent("]", { metaKey: true });
+      Object.defineProperty(indentEvent, 'target', { value: mockTextarea });
+      
+      const indentContext = {
+        event: indentEvent,
+        component: outliner,
+        editingNode: secondNode,
+        editingContent: editingContent,
+        textarea: mockTextarea
+      };
+      
+      EditingKeyboardCommands["]"].execute(indentContext);
+      
+      // Should still be in edit mode after indent
+      expect(outliner._testHelpers.editingNode).toBe(secondNode);
+      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+      
+      // Outdent while still in edit mode
+      const outdentEvent = createMockKeyboardEvent("[", { metaKey: true });
+      Object.defineProperty(outdentEvent, 'target', { value: mockTextarea });
+      
+      const outdentContext = {
+        event: outdentEvent,
+        component: outliner,
+        editingNode: secondNode,
+        editingContent: editingContent,
+        textarea: mockTextarea
+      };
+      
+      EditingKeyboardCommands["["].execute(outdentContext);
+      
+      // Should still be in edit mode after outdent
+      expect(outliner._testHelpers.editingNode).toBe(secondNode);
+      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+    });
   });
 
   describe("Edge Cases", () => {

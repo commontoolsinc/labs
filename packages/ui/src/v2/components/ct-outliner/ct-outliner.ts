@@ -750,18 +750,40 @@ export class CTOutliner extends BaseElement {
   }
 
   indentNode(node: OutlineTreeNode) {
+    // Preserve editing state if this node is being edited
+    const wasEditing = this.editingNode === node;
+    const editingContent = wasEditing ? this.editingContent : "";
+    
     const result = TreeOperations.indentNode(this.tree, node);
     if (result.success) {
       // Tree is mutated in place, no need to reassign
+      
+      // Restore editing state if it was being edited
+      if (wasEditing) {
+        this.editingNode = node;
+        this.editingContent = editingContent;
+      }
+      
       this.requestUpdate();
       this.emitChange();
     }
   }
 
   outdentNode(node: OutlineTreeNode) {
+    // Preserve editing state if this node is being edited
+    const wasEditing = this.editingNode === node;
+    const editingContent = wasEditing ? this.editingContent : "";
+    
     const result = TreeOperations.outdentNode(this.tree, node);
     if (result.success) {
       // Tree is mutated in place, no need to reassign
+      
+      // Restore editing state if it was being edited
+      if (wasEditing) {
+        this.editingNode = node;
+        this.editingContent = editingContent;
+      }
+      
       this.requestUpdate();
       this.emitChange();
     }
