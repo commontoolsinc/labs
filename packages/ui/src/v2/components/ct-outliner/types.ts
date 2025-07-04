@@ -23,46 +23,92 @@ export interface MentionableItem {
 }
 
 /**
- * Core data structure for outline nodes, separate from UI state
+ * Attachment to a node - for future extensibility
  */
-export interface OutlineNodeData {
-  readonly id: string;
-  readonly content: string;
-  readonly children: readonly OutlineNodeData[];
-  readonly level: number;
+export interface Attachment {
+  name: string;
+  charm: CharmReference;
 }
+
+/**
+ * Node - represents both the tree structure and content
+ * Note: This is intentionally mutable for live tree manipulation
+ */
+export interface Node {
+  body: string;
+  children: Node[];
+  attachments: Attachment[];
+}
+
+/**
+ * Mutable type variant of Node for safe mutations in tree operations
+ * 
+ * @description This eliminates the need for 'any' casting while preserving type safety.
+ * Used internally by tree operations that need to mutate node properties directly.
+ * The type removes readonly modifiers from all properties to allow in-place mutations.
+ */
+export type MutableNode = {
+  -readonly [K in keyof Node]: Node[K] extends readonly unknown[] 
+    ? Node[K][number][] 
+    : Node[K];
+};
+
+/**
+ * Complete tree structure
+ * Note: This is intentionally mutable for live tree manipulation
+ */
+export interface Tree {
+  root: Node;
+}
+
+/**
+ * Mutable type variant of Tree for safe mutations in tree operations
+ */
+export type MutableTree = {
+  -readonly [K in keyof Tree]: Tree[K] extends Node ? MutableNode : Tree[K];
+};
 
 /**
  * UI state separate from the core data structure
  */
 export interface OutlineUIState {
-  readonly collapsedNodes: ReadonlySet<string>;
-  readonly focusedNodeId: string | null;
-  readonly editingNodeId: string | null;
+  readonly collapsedNodes: ReadonlySet<Node>;
+  readonly focusedNode: Node | null;
+  readonly editingNode: Node | null;
   readonly editingContent: string;
   readonly showingMentions: boolean;
   readonly mentionQuery: string;
   readonly selectedMentionIndex: number;
 }
 
-/**
- * Working interface that combines data and UI state for compatibility
- * TODO: Eventually migrate to use OutlineNodeData + OutlineUIState separately
- */
-export interface OutlineNode {
-  id: string;
-  content: string;
-  children: OutlineNode[];
-  collapsed: boolean;
-  level: number;
-}
+// Legacy types removed - using Tree/Node/Block structure exclusively
 
 /**
- * Result type for tree operations that may fail
+ * Operations interface for outliner component
+ * 
+ * @description Provides type-safe access to component methods for keyboard commands.
+ * This interface defines all the methods that keyboard command handlers need to
+ * interact with the outliner component without tight coupling.
  */
-export interface TreeOperationResult<T = OutlineNode[]> {
-  success: boolean;
-  data: T;
+export interface OutlinerOperations {
+  readonly tree: Tree;
+  focusedNode: Node | null;
+  collapsedNodes: Set<Node>;
+  
+  deleteNode(node: Node): void;
+  indentNode(node: Node): void;
+  outdentNode(node: Node): void;
+  indentNodeWithEditState(node: Node, editingContent: string, cursorPosition: number): void;
+  outdentNodeWithEditState(node: Node, editingContent: string, cursorPosition: number): void;
+  startEditing(node: Node): void;
+  startEditingWithInitialText(node: Node, text: string): void;
+  toggleEditMode(node: Node): void;
+  finishEditing(): void;
+  createNewNodeAfter(node: Node): void;
+  createChildNode(node: Node): void;
+  requestUpdate(): void;
+  emitChange(): void;
+  getAllVisibleNodes(): Node[];
 }
 
 /**
@@ -70,10 +116,21 @@ export interface TreeOperationResult<T = OutlineNode[]> {
  */
 export interface KeyboardContext {
   readonly event: KeyboardEvent;
-  readonly component: any; // Will be typed properly when we extract commands
-  readonly allNodes: OutlineNode[];
+  readonly component: OutlinerOperations;
+  readonly allNodes: Node[];
   readonly currentIndex: number;
-  readonly focusedNodeId: string | null;
+  readonly focusedNode: Node | null;
+}
+
+/**
+ * Context for editing mode keyboard commands
+ */
+export interface EditingKeyboardContext {
+  readonly event: KeyboardEvent;
+  readonly component: OutlinerOperations;
+  readonly editingNode: Node;
+  readonly editingContent: string;
+  readonly textarea: HTMLTextAreaElement;
 }
 
 /**
@@ -87,16 +144,55 @@ export interface KeyboardCommand {
  * Editing state for pure transformations
  */
 export interface EditingState {
-  editingNodeId: string | null;
+  editingNode: Node | null;
   editingContent: string;
   showingMentions: boolean;
 }
 
 /**
- * Node creation options
+ * Options for creating a new node
  */
 export interface NodeCreationOptions {
-  content: string;
-  level: number;
-  id?: string;
+  body: string;
+  children?: Node[];
+  attachments?: Attachment[];
 }
+
+/**
+ * Result type for operations that can succeed or fail
+ */
+export type OperationResult<T> = 
+  | { readonly success: true; readonly data: T }
+  | { readonly success: false; readonly error: string };
+
+/**
+ * Result type for tree update operations
+ */
+export type TreeUpdateResult = OperationResult<{
+  readonly tree: Tree;
+  readonly newFocusNode?: Node | null;
+}>;
+
+/**
+ * Result type for tree movement operations
+ */
+export type TreeMoveResult = OperationResult<{
+  readonly tree: Tree;
+}>;
+
+/**
+ * Result type for node deletion operations
+ */
+export type NodeDeletionResult = OperationResult<{
+  readonly tree: Tree;
+  readonly newFocusNode: Node | null;
+}>;
+
+/**
+ * Result type for tree structure operations (indent/outdent)
+ */
+export type TreeStructureResult = OperationResult<{
+  readonly tree: Tree;
+}>;
+
+// LegacyNodeCreationOptions removed

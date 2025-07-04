@@ -1,4 +1,5 @@
-import type { KeyboardCommand, KeyboardContext } from "./types.ts";
+import type { KeyboardCommand, KeyboardContext, EditingKeyboardContext } from "./types.ts";
+import { TreeOperations } from "./tree-operations.ts";
 
 /**
  * Keyboard command implementations for the outliner
@@ -9,13 +10,20 @@ export const KeyboardCommands = {
       ctx.event.preventDefault();
       if (ctx.event.altKey) {
         // Alt+Up moves node up among siblings
-        ctx.component.moveNodeUp(ctx.focusedNodeId);
+        if (ctx.focusedNode) {
+          const result = TreeOperations.moveNodeUp(ctx.component.tree, ctx.focusedNode);
+          if (result.success) {
+            // Tree is mutated in place, no need to reassign
+            ctx.component.emitChange();
+            ctx.component.requestUpdate();
+          }
+        }
       } else {
         if (ctx.currentIndex > 0) {
-          ctx.component.focusedNodeId = ctx.allNodes[ctx.currentIndex - 1].id;
+          ctx.component.focusedNode = ctx.allNodes[ctx.currentIndex - 1];
         } else if (ctx.currentIndex === -1 && ctx.allNodes.length > 0) {
           // If nothing is focused, start from the last node
-          ctx.component.focusedNodeId = ctx.allNodes[ctx.allNodes.length - 1].id;
+          ctx.component.focusedNode = ctx.allNodes[ctx.allNodes.length - 1];
         }
       }
     }
@@ -26,13 +34,20 @@ export const KeyboardCommands = {
       ctx.event.preventDefault();
       if (ctx.event.altKey) {
         // Alt+Down moves node down among siblings
-        ctx.component.moveNodeDown(ctx.focusedNodeId);
+        if (ctx.focusedNode) {
+          const result = TreeOperations.moveNodeDown(ctx.component.tree, ctx.focusedNode);
+          if (result.success) {
+            // Tree is mutated in place, no need to reassign
+            ctx.component.emitChange();
+            ctx.component.requestUpdate();
+          }
+        }
       } else {
         if (ctx.currentIndex < ctx.allNodes.length - 1) {
-          ctx.component.focusedNodeId = ctx.allNodes[ctx.currentIndex + 1].id;
+          ctx.component.focusedNode = ctx.allNodes[ctx.currentIndex + 1];
         } else if (ctx.currentIndex === -1 && ctx.allNodes.length > 0) {
           // If nothing is focused, start from the first node
-          ctx.component.focusedNodeId = ctx.allNodes[0].id;
+          ctx.component.focusedNode = ctx.allNodes[0];
         }
       }
     }
@@ -43,27 +58,21 @@ export const KeyboardCommands = {
       ctx.event.preventDefault();
       if (ctx.event.altKey) {
         // Alt+Left collapses current node
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node && node.children.length > 0) {
-            node.collapsed = true;
-            ctx.component.requestUpdate();
-          }
+        if (ctx.focusedNode && ctx.focusedNode.children.length > 0) {
+          ctx.component.collapsedNodes.add(ctx.focusedNode);
+          ctx.component.requestUpdate();
         }
       } else {
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node) {
-            if (node.children.length > 0 && !node.collapsed) {
-              // Collapse node if expanded
-              node.collapsed = true;
-              ctx.component.requestUpdate();
-            } else {
-              // Move to parent if collapsed or leaf
-              const parentNode = ctx.component.findParentNode(ctx.focusedNodeId);
-              if (parentNode) {
-                ctx.component.focusedNodeId = parentNode.id;
-              }
+        if (ctx.focusedNode) {
+          if (ctx.focusedNode.children.length > 0 && !ctx.component.collapsedNodes.has(ctx.focusedNode)) {
+            // Collapse node if expanded
+            ctx.component.collapsedNodes.add(ctx.focusedNode);
+            ctx.component.requestUpdate();
+          } else {
+            // Move to parent if collapsed or leaf
+            const parentNode = TreeOperations.findParentNode(ctx.component.tree.root, ctx.focusedNode);
+            if (parentNode && parentNode !== ctx.component.tree.root) {
+              ctx.component.focusedNode = parentNode;
             }
           }
         }
@@ -76,26 +85,20 @@ export const KeyboardCommands = {
       ctx.event.preventDefault();
       if (ctx.event.altKey) {
         // Alt+Right expands current node
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node && node.children.length > 0) {
-            node.collapsed = false;
-            ctx.component.requestUpdate();
-          }
+        if (ctx.focusedNode && ctx.focusedNode.children.length > 0) {
+          ctx.component.collapsedNodes.delete(ctx.focusedNode);
+          ctx.component.requestUpdate();
         }
       } else {
-        if (ctx.focusedNodeId) {
-          const node = ctx.component.findNode(ctx.focusedNodeId);
-          if (node) {
-            if (node.children.length > 0) {
-              if (node.collapsed) {
-                // Expand node if collapsed
-                node.collapsed = false;
-                ctx.component.requestUpdate();
-              } else {
-                // Move to first child if expanded
-                ctx.component.focusedNodeId = node.children[0].id;
-              }
+        if (ctx.focusedNode) {
+          if (ctx.focusedNode.children.length > 0) {
+            if (ctx.component.collapsedNodes.has(ctx.focusedNode)) {
+              // Expand node if collapsed
+              ctx.component.collapsedNodes.delete(ctx.focusedNode);
+              ctx.component.requestUpdate();
+            } else {
+              // Move to first child if expanded
+              ctx.component.focusedNode = ctx.focusedNode.children[0];
             }
           }
         }
@@ -103,62 +106,31 @@ export const KeyboardCommands = {
     }
   },
 
-  Home: {
+
+  ' ': {  // Space key
     execute(ctx: KeyboardContext): void {
       ctx.event.preventDefault();
-      if (ctx.allNodes.length > 0) {
-        ctx.component.focusedNodeId = ctx.allNodes[0].id;
-      }
-    }
-  },
-
-  End: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.allNodes.length > 0) {
-        ctx.component.focusedNodeId = ctx.allNodes[ctx.allNodes.length - 1].id;
-      }
-    }
-  },
-
-  Enter: {
-    execute(ctx: KeyboardContext): void {
-      ctx.event.preventDefault();
-      if (ctx.focusedNodeId) {
-        if (ctx.event.shiftKey) {
-          // Shift+Enter creates new sibling node below current
-          ctx.component.createNewNodeAfter(ctx.focusedNodeId);
-        } else if (ctx.event.altKey) {
-          // Alt+Enter creates new child node
-          ctx.component.createChildNode(ctx.focusedNodeId);
-        } else {
-          // Enter starts editing
-          ctx.component.startEditing(ctx.focusedNodeId);
-        }
-      }
-    }
-  },
-
-  Backspace: {
-    execute(ctx: KeyboardContext): void {
-      // Only delete nodes when Cmd/Ctrl is held down
-      if (ctx.event.metaKey || ctx.event.ctrlKey) {
-        ctx.event.preventDefault();
-        if (ctx.focusedNodeId) {
-          ctx.component.deleteNode(ctx.focusedNodeId);
-        }
+      if (ctx.focusedNode) {
+        ctx.component.startEditing(ctx.focusedNode);
       }
     }
   },
 
   Delete: {
     execute(ctx: KeyboardContext): void {
-      // Only delete nodes when Cmd/Ctrl is held down
-      if (ctx.event.metaKey || ctx.event.ctrlKey) {
+      ctx.event.preventDefault();
+      if (ctx.focusedNode) {
+        ctx.component.deleteNode(ctx.focusedNode);
+      }
+    }
+  },
+
+  Backspace: {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+backspace deletes node even in read mode
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
         ctx.event.preventDefault();
-        if (ctx.focusedNodeId) {
-          ctx.component.deleteNode(ctx.focusedNodeId);
-        }
+        ctx.component.deleteNode(ctx.focusedNode);
       }
     }
   },
@@ -166,42 +138,253 @@ export const KeyboardCommands = {
   Tab: {
     execute(ctx: KeyboardContext): void {
       ctx.event.preventDefault();
-      if (ctx.focusedNodeId) {
+      if (ctx.focusedNode) {
         if (ctx.event.shiftKey) {
-          ctx.component.outdentNode(ctx.focusedNodeId);
+          ctx.component.outdentNode(ctx.focusedNode);
         } else {
-          ctx.component.indentNode(ctx.focusedNodeId);
+          ctx.component.indentNode(ctx.focusedNode);
         }
       }
     }
   },
 
-  Space: {
+  a: {
     execute(ctx: KeyboardContext): void {
-      // Space toggles expand/collapse on parent nodes
+      if (ctx.event.metaKey || ctx.event.ctrlKey) {
+        ctx.event.preventDefault();
+        // Select all nodes
+        // This could be implemented if needed
+      }
+    }
+  },
+
+  c: {
+    execute(ctx: KeyboardContext): void {
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
+        // Copy node as markdown
+        const nodeMarkdown = TreeOperations.toMarkdown({
+          root: TreeOperations.createNode({
+            body: "",
+            children: [ctx.focusedNode]
+          })
+        });
+        navigator.clipboard.writeText(nodeMarkdown);
+      }
+    }
+  },
+
+  n: {
+    execute(ctx: KeyboardContext): void {
       ctx.event.preventDefault();
-      if (ctx.focusedNodeId) {
-        const node = ctx.component.findNode(ctx.focusedNodeId);
-        if (node && node.children.length > 0) {
-          node.collapsed = !node.collapsed;
-          ctx.component.requestUpdate();
+      if (ctx.focusedNode) {
+        ctx.component.createNewNodeAfter(ctx.focusedNode);
+      }
+    }
+  },
+
+  Enter: {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+enter toggles edit mode
+      if (ctx.event.metaKey || ctx.event.ctrlKey) {
+        ctx.event.preventDefault();
+        if (ctx.focusedNode) {
+          ctx.component.toggleEditMode(ctx.focusedNode);
+        }
+      } else {
+        ctx.event.preventDefault();
+        if (ctx.focusedNode) {
+          if (ctx.event.shiftKey) {
+            // Shift+Enter creates a child node
+            ctx.component.createChildNode(ctx.focusedNode);
+          } else {
+            // Enter creates a sibling node
+            ctx.component.createNewNodeAfter(ctx.focusedNode);
+          }
         }
       }
     }
+  },
+
+  "[": {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+[ outdents node
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
+        ctx.event.preventDefault();
+        ctx.component.outdentNode(ctx.focusedNode);
+      }
+    }
+  },
+
+  "]": {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+] indents node
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
+        ctx.event.preventDefault();
+        ctx.component.indentNode(ctx.focusedNode);
+      }
+    }
   }
-} satisfies Record<string, KeyboardCommand>;
+};
 
 /**
- * Execute a keyboard command if it exists
+ * Handle typing any regular character to enter edit mode
+ * When typing, replace the entire content with the new character
  */
-export function executeKeyboardCommand(
-  key: string, 
-  context: KeyboardContext
-): boolean {
+export function handleTypingToEdit(key: string, context: KeyboardContext): boolean {
+  // Check if this is a regular typing key (letter, number, punctuation)
+  if (key.length === 1 && !context.event.ctrlKey && !context.event.metaKey && !context.event.altKey) {
+    if (context.focusedNode) {
+      // Replace entire content with the typed character
+      context.component.startEditingWithInitialText(context.focusedNode, key);
+      return true;
+    }
+  }
+  return false;
+};
+
+/**
+ * Execute a keyboard command based on the key pressed
+ */
+export function executeKeyboardCommand(key: string, context: KeyboardContext): boolean {
   const command = KeyboardCommands[key as keyof typeof KeyboardCommands];
   if (command) {
     command.execute(context);
     return true;
+  }
+  
+  // If no specific command, check if it's a typing key
+  return handleTypingToEdit(key, context);
+}
+
+/**
+ * Editing mode keyboard commands
+ */
+export const EditingKeyboardCommands = {
+  ArrowUp: {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { textarea, event } = ctx;
+      
+      // Check if cursor is at the first line
+      const lines = textarea.value.substring(0, textarea.selectionStart).split('\n');
+      if (lines.length === 1) {
+        event.preventDefault();
+        ctx.component.finishEditing();
+        // Move focus to previous node
+        const allNodes = ctx.component.getAllVisibleNodes();
+        const currentIndex = allNodes.indexOf(ctx.editingNode);
+        if (currentIndex > 0) {
+          ctx.component.focusedNode = allNodes[currentIndex - 1];
+        }
+        ctx.component.requestUpdate();
+        return true;
+      }
+      return false;
+    }
+  },
+
+  ArrowDown: {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { textarea, event } = ctx;
+      
+      // Check if cursor is at the last line
+      const textAfterCursor = textarea.value.substring(textarea.selectionStart);
+      if (!textAfterCursor.includes('\n')) {
+        event.preventDefault();
+        ctx.component.finishEditing();
+        // Move focus to next node
+        const allNodes = ctx.component.getAllVisibleNodes();
+        const currentIndex = allNodes.indexOf(ctx.editingNode);
+        if (currentIndex < allNodes.length - 1) {
+          ctx.component.focusedNode = allNodes[currentIndex + 1];
+        }
+        ctx.component.requestUpdate();
+        return true;
+      }
+      return false;
+    }
+  },
+
+  ArrowLeft: {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { textarea, event } = ctx;
+      
+      // Check if cursor is at the beginning
+      if (textarea.selectionStart === 0 && textarea.selectionEnd === 0) {
+        event.preventDefault();
+        ctx.component.finishEditing();
+        ctx.component.requestUpdate();
+        return true;
+      }
+      return false;
+    }
+  },
+
+  ArrowRight: {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { textarea, event } = ctx;
+      
+      // Check if cursor is at the end
+      if (textarea.selectionStart === textarea.value.length && 
+          textarea.selectionEnd === textarea.value.length) {
+        event.preventDefault();
+        ctx.component.finishEditing();
+        ctx.component.requestUpdate();
+        return true;
+      }
+      return false;
+    }
+  },
+
+  "[": {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { event, textarea } = ctx;
+      
+      // cmd/ctrl+[ outdents node even in edit mode
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault();
+        
+        // Save current editing content and cursor position from textarea
+        const currentContent = textarea.value;
+        const cursorPosition = textarea.selectionStart;
+        
+        // Perform the outdent operation while preserving edit state
+        ctx.component.outdentNodeWithEditState(ctx.editingNode, currentContent, cursorPosition);
+        
+        return true;
+      }
+      return false;
+    }
+  },
+
+  "]": {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { event, textarea } = ctx;
+      
+      // cmd/ctrl+] indents node even in edit mode
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault();
+        
+        // Save current editing content and cursor position from textarea
+        const currentContent = textarea.value;
+        const cursorPosition = textarea.selectionStart;
+        
+        // Perform the indent operation while preserving edit state
+        ctx.component.indentNodeWithEditState(ctx.editingNode, currentContent, cursorPosition);
+        
+        return true;
+      }
+      return false;
+    }
+  }
+};
+
+/**
+ * Execute editing keyboard command
+ */
+export function executeEditingKeyboardCommand(key: string, context: EditingKeyboardContext): boolean {
+  const command = EditingKeyboardCommands[key as keyof typeof EditingKeyboardCommands];
+  if (command) {
+    return command.execute(context);
   }
   return false;
 }

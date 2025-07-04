@@ -7,7 +7,7 @@
   },
   "tasks": {
     "bundle": "../../scripts/bundle.ts src/index.ts",
-    "test": "echo 'No tests to run.'"
+    "test": "deno test --allow-env --allow-ffi --allow-read"
   },
   "imports": {
     "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1",
