@@ -769,6 +769,29 @@ export class CTOutliner extends BaseElement {
     }
   }
 
+  indentNodeWithEditState(node: OutlineTreeNode, editingContent: string, cursorPosition: number) {
+    const result = TreeOperations.indentNode(this.tree, node);
+    if (result.success) {
+      // Maintain edit state
+      this.editingNode = node;
+      this.editingContent = editingContent;
+      
+      this.requestUpdate();
+      this.emitChange();
+      
+      // Restore focus and cursor position after re-render
+      setTimeout(() => {
+        const nodeIndex = this.getNodeIndex(node);
+        const editor = this.shadowRoot?.querySelector(`#editor-${nodeIndex}`) as HTMLTextAreaElement;
+        if (editor) {
+          editor.value = editingContent;
+          editor.focus();
+          editor.setSelectionRange(cursorPosition, cursorPosition);
+        }
+      }, 0);
+    }
+  }
+
   outdentNode(node: OutlineTreeNode) {
     // Preserve editing state if this node is being edited
     const wasEditing = this.editingNode === node;
@@ -786,6 +809,29 @@ export class CTOutliner extends BaseElement {
       
       this.requestUpdate();
       this.emitChange();
+    }
+  }
+
+  outdentNodeWithEditState(node: OutlineTreeNode, editingContent: string, cursorPosition: number) {
+    const result = TreeOperations.outdentNode(this.tree, node);
+    if (result.success) {
+      // Maintain edit state
+      this.editingNode = node;
+      this.editingContent = editingContent;
+      
+      this.requestUpdate();
+      this.emitChange();
+      
+      // Restore focus and cursor position after re-render
+      setTimeout(() => {
+        const nodeIndex = this.getNodeIndex(node);
+        const editor = this.shadowRoot?.querySelector(`#editor-${nodeIndex}`) as HTMLTextAreaElement;
+        if (editor) {
+          editor.value = editingContent;
+          editor.focus();
+          editor.setSelectionRange(cursorPosition, cursorPosition);
+        }
+      }, 0);
     }
   }
 

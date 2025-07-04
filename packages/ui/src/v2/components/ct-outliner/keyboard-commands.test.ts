@@ -531,6 +531,47 @@ describe("Keyboard Commands", () => {
       expect(outliner._testHelpers.editingNode).toBe(secondNode);
       expect(outliner._testHelpers.editingContent).toBe(editingContent);
     });
+
+    it("should preserve cursor position and content during edit mode indentation", () => {
+      setupOutliner();
+      const secondNode = outliner.tree.root.children[1];
+      const firstNode = outliner.tree.root.children[0];
+      const editingContent = "I am editing this text";
+      const cursorPosition = 15; // Position in "editing this text"
+      
+      // Start editing
+      outliner.startEditingWithInitialText(secondNode, editingContent);
+      
+      // Mock textarea with specific cursor position
+      const mockTextarea = {
+        selectionStart: cursorPosition,
+        selectionEnd: cursorPosition,
+        value: editingContent
+      } as HTMLTextAreaElement;
+      
+      // Simulate cmd+] while editing
+      const indentEvent = createMockKeyboardEvent("]", { metaKey: true });
+      Object.defineProperty(indentEvent, 'target', { value: mockTextarea });
+      
+      const indentContext = {
+        event: indentEvent,
+        component: outliner,
+        editingNode: secondNode,
+        editingContent: editingContent,
+        textarea: mockTextarea
+      };
+      
+      EditingKeyboardCommands["]"].execute(indentContext);
+      
+      // Verify tree structure changed (node was indented)
+      expect(outliner.tree.root.children.length).toBe(1);
+      expect(firstNode.children.length).toBe(1);
+      expect(firstNode.children[0]).toBe(secondNode);
+      
+      // Verify editing state preserved
+      expect(outliner._testHelpers.editingNode).toBe(secondNode);
+      expect(outliner._testHelpers.editingContent).toBe(editingContent);
+    });
   });
 
   describe("Edge Cases", () => {

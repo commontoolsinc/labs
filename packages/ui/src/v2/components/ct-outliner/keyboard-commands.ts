@@ -337,12 +337,19 @@ export const EditingKeyboardCommands = {
 
   "[": {
     execute(ctx: EditingKeyboardContext): boolean {
-      const { event } = ctx;
+      const { event, textarea } = ctx;
       
       // cmd/ctrl+[ outdents node even in edit mode
       if (event.metaKey || event.ctrlKey) {
         event.preventDefault();
-        ctx.component.outdentNode(ctx.editingNode);
+        
+        // Save current editing content and cursor position from textarea
+        const currentContent = textarea.value;
+        const cursorPosition = textarea.selectionStart;
+        
+        // Perform the outdent operation while preserving edit state
+        ctx.component.outdentNodeWithEditState(ctx.editingNode, currentContent, cursorPosition);
+        
         return true;
       }
       return false;
@@ -351,12 +358,19 @@ export const EditingKeyboardCommands = {
 
   "]": {
     execute(ctx: EditingKeyboardContext): boolean {
-      const { event } = ctx;
+      const { event, textarea } = ctx;
       
       // cmd/ctrl+] indents node even in edit mode
       if (event.metaKey || event.ctrlKey) {
         event.preventDefault();
-        ctx.component.indentNode(ctx.editingNode);
+        
+        // Save current editing content and cursor position from textarea
+        const currentContent = textarea.value;
+        const cursorPosition = textarea.selectionStart;
+        
+        // Perform the indent operation while preserving edit state
+        ctx.component.indentNodeWithEditState(ctx.editingNode, currentContent, cursorPosition);
+        
         return true;
       }
       return false;
