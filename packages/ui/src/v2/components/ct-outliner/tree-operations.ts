@@ -2,7 +2,9 @@ import type {
   Tree, 
   Node, 
   Attachment, 
-  NodeCreationOptions 
+  NodeCreationOptions,
+  MutableNode,
+  MutableTree
 } from "./types.ts";
 
 /**
@@ -158,8 +160,7 @@ export const TreeOperations = {
    * Mutates the node directly
    */
   updateNodeBody(tree: Tree, targetNode: Node, newBody: string): Tree {
-    // Cast to mutable to allow direct manipulation
-    const mutableNode = targetNode as any;
+    const mutableNode = targetNode as MutableNode;
     mutableNode.body = newBody;
     return tree;
   },
@@ -169,8 +170,7 @@ export const TreeOperations = {
    * Mutates the tree structure directly
    */
   insertNode(tree: Tree, parentNode: Node, newNode: Node, index: number): Tree {
-    // Cast to mutable to allow direct manipulation
-    const mutableParent = parentNode as any;
+    const mutableParent = parentNode as MutableNode;
     const mutableChildren = [...mutableParent.children];
     mutableChildren.splice(index, 0, newNode);
     mutableParent.children = mutableChildren;
@@ -183,7 +183,7 @@ export const TreeOperations = {
    */
   removeNode(tree: Tree, targetNode: Node): Tree {
     const removeFromNode = (node: Node): void => {
-      const mutableNode = node as any;
+      const mutableNode = node as MutableNode;
       mutableNode.children = mutableNode.children.filter((child: Node) => {
         if (child === targetNode) {
           return false;
@@ -209,7 +209,7 @@ export const TreeOperations = {
     if (childIndex <= 0) return { success: false, tree };
     
     // Mutate the children array directly
-    const mutableParent = parentNode as any;
+    const mutableParent = parentNode as MutableNode;
     const mutableChildren = [...mutableParent.children];
     [mutableChildren[childIndex - 1], mutableChildren[childIndex]] = 
       [mutableChildren[childIndex], mutableChildren[childIndex - 1]];
@@ -232,7 +232,7 @@ export const TreeOperations = {
     }
     
     // Mutate the children array directly
-    const mutableParent = parentNode as any;
+    const mutableParent = parentNode as MutableNode;
     const mutableChildren = [...mutableParent.children];
     [mutableChildren[childIndex], mutableChildren[childIndex + 1]] = 
       [mutableChildren[childIndex + 1], mutableChildren[childIndex]];
@@ -277,7 +277,7 @@ export const TreeOperations = {
     }
 
     // Mutate parent's children array directly
-    const mutableParent = parentNode as any;
+    const mutableParent = parentNode as MutableNode;
     const newChildren = [...mutableParent.children];
     
     // Move children up to parent level if any
@@ -313,13 +313,13 @@ export const TreeOperations = {
     const previousSibling = parentNode.children[nodeIndex - 1];
 
     // Remove targetNode from parent's children
-    const mutableParent = parentNode as any;
+    const mutableParent = parentNode as MutableNode;
     const mutableChildren = [...mutableParent.children];
     mutableChildren.splice(nodeIndex, 1);
     mutableParent.children = mutableChildren;
 
     // Add targetNode to previous sibling's children
-    const mutableSibling = previousSibling as any;
+    const mutableSibling = previousSibling as MutableNode;
     mutableSibling.children = [...mutableSibling.children, targetNode];
 
     return { success: true, tree };
@@ -342,13 +342,13 @@ export const TreeOperations = {
     if (nodeIndex === -1 || parentIndex === -1) return { success: false, tree };
 
     // Remove targetNode from parent's children
-    const mutableParent = parentNode as any;
+    const mutableParent = parentNode as MutableNode;
     const mutableParentChildren = [...mutableParent.children];
     mutableParentChildren.splice(nodeIndex, 1);
     mutableParent.children = mutableParentChildren;
 
     // Add targetNode to grandparent after parent
-    const mutableGrandParent = grandParentNode as any;
+    const mutableGrandParent = grandParentNode as MutableNode;
     const mutableGrandParentChildren = [...mutableGrandParent.children];
     mutableGrandParentChildren.splice(parentIndex + 1, 0, targetNode);
     mutableGrandParent.children = mutableGrandParentChildren;

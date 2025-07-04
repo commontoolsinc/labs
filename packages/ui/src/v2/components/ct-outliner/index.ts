@@ -16,7 +16,11 @@ export type {
   NodeCreationOptions,
   OperationResult,
   TreeUpdateResult,
-  TreeMoveResult
+  TreeMoveResult,
+  MutableNode,
+  MutableTree,
+  OutlinerOperations,
+  EditingKeyboardContext
 } from "./types.ts";
 export { TreeOperations } from "./tree-operations.ts";
 // Legacy TreeOperations file and MigrationBridge removed - using TreeOperations exclusively

@@ -41,12 +41,29 @@ export interface Node {
 }
 
 /**
+ * Mutable type variant of Node for safe mutations in tree operations
+ * This eliminates the need for 'any' casting while preserving type safety
+ */
+export type MutableNode = {
+  -readonly [K in keyof Node]: Node[K] extends readonly unknown[] 
+    ? Node[K][number][] 
+    : Node[K];
+};
+
+/**
  * Complete tree structure
  * Note: This is intentionally mutable for live tree manipulation
  */
 export interface Tree {
   root: Node;
 }
+
+/**
+ * Mutable type variant of Tree for safe mutations in tree operations
+ */
+export type MutableTree = {
+  -readonly [K in keyof Tree]: Tree[K] extends Node ? MutableNode : Tree[K];
+};
 
 /**
  * UI state separate from the core data structure
@@ -64,11 +81,36 @@ export interface OutlineUIState {
 // Legacy types removed - using Tree/Node/Block structure exclusively
 
 /**
+ * Operations interface for outliner component
+ * Provides type-safe access to component methods for keyboard commands
+ */
+export interface OutlinerOperations {
+  readonly tree: Tree;
+  focusedNode: Node | null;
+  collapsedNodes: Set<Node>;
+  
+  deleteNode(node: Node): void;
+  indentNode(node: Node): void;
+  outdentNode(node: Node): void;
+  indentNodeWithEditState(node: Node, editingContent: string, cursorPosition: number): void;
+  outdentNodeWithEditState(node: Node, editingContent: string, cursorPosition: number): void;
+  startEditing(node: Node): void;
+  startEditingWithInitialText(node: Node, text: string): void;
+  toggleEditMode(node: Node): void;
+  finishEditing(): void;
+  createNewNodeAfter(node: Node): void;
+  createChildNode(node: Node): void;
+  requestUpdate(): void;
+  emitChange(): void;
+  getAllVisibleNodes(): Node[];
+}
+
+/**
  * Context object passed to keyboard commands
  */
 export interface KeyboardContext {
   readonly event: KeyboardEvent;
-  readonly component: any; // Will be typed properly when we extract commands
+  readonly component: OutlinerOperations;
   readonly allNodes: Node[];
   readonly currentIndex: number;
   readonly focusedNode: Node | null;
@@ -79,7 +121,7 @@ export interface KeyboardContext {
  */
 export interface EditingKeyboardContext {
   readonly event: KeyboardEvent;
-  readonly component: any;
+  readonly component: OutlinerOperations;
   readonly editingNode: Node;
   readonly editingContent: string;
   readonly textarea: HTMLTextAreaElement;

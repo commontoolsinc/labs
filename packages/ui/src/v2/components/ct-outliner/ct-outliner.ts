@@ -396,7 +396,7 @@ export class CTOutliner extends BaseElement {
     return TreeOperations.getAllNodes(this.tree.root).slice(1); // Skip root
   }
 
-  private getAllVisibleNodes(): OutlineTreeNode[] {
+  getAllVisibleNodes(): OutlineTreeNode[] {
     return TreeOperations.getAllVisibleNodes(this.tree.root, this.collapsedNodes);
   }
 
@@ -435,7 +435,7 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private finishEditing() {
+  finishEditing() {
     if (!this.editingNode) return;
     
     // Tree is mutated in place, no need to reassign
