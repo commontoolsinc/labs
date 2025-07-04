@@ -203,6 +203,26 @@ export const KeyboardCommands = {
         }
       }
     }
+  },
+
+  "[": {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+[ outdents node
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
+        ctx.event.preventDefault();
+        ctx.component.outdentNode(ctx.focusedNode);
+      }
+    }
+  },
+
+  "]": {
+    execute(ctx: KeyboardContext): void {
+      // cmd/ctrl+] indents node
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
+        ctx.event.preventDefault();
+        ctx.component.indentNode(ctx.focusedNode);
+      }
+    }
   }
 };
 
@@ -309,6 +329,34 @@ export const EditingKeyboardCommands = {
         event.preventDefault();
         ctx.component.finishEditing();
         ctx.component.requestUpdate();
+        return true;
+      }
+      return false;
+    }
+  },
+
+  "[": {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { event } = ctx;
+      
+      // cmd/ctrl+[ outdents node even in edit mode
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault();
+        ctx.component.outdentNode(ctx.editingNode);
+        return true;
+      }
+      return false;
+    }
+  },
+
+  "]": {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { event } = ctx;
+      
+      // cmd/ctrl+] indents node even in edit mode
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault();
+        ctx.component.indentNode(ctx.editingNode);
         return true;
       }
       return false;

@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { executeKeyboardCommand, handleTypingToEdit, KeyboardCommands } from "./keyboard-commands.ts";
+import { executeKeyboardCommand, handleTypingToEdit, KeyboardCommands, EditingKeyboardCommands } from "./keyboard-commands.ts";
 import { CTOutliner } from "./ct-outliner.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import type { KeyboardContext } from "./types.ts";
@@ -266,6 +266,72 @@ describe("Keyboard Commands", () => {
       
       expect(outliner.focusedNode).toBe(secondNode);
     });
+
+    it("should handle cmd/ctrl+] for indentation", () => {
+      setupOutliner();
+      const secondNode = outliner.tree.root.children[1];
+      const firstNode = outliner.tree.root.children[0];
+      outliner.focusedNode = secondNode;
+      
+      const event = createMockKeyboardEvent("]", { metaKey: true });
+      const context = createKeyboardContext(event);
+      
+      KeyboardCommands["]"].execute(context);
+      
+      expect(outliner.tree.root.children.length).toBe(1);
+      expect(firstNode.children.length).toBe(1);
+      expect(firstNode.children[0]).toBe(secondNode);
+    });
+
+    it("should handle cmd/ctrl+[ for outdentation", () => {
+      setupOutliner();
+      // Setup nested structure first
+      const tree = {
+        root: {
+          body: "",
+          children: [{
+            body: "Parent",
+            children: [{
+              body: "Child",
+              children: [],
+              attachments: []
+            }],
+            attachments: []
+          }],
+          attachments: []
+        }
+      };
+      outliner.tree = tree;
+      const childNode = tree.root.children[0].children[0];
+      outliner.focusedNode = childNode;
+      
+      const event = createMockKeyboardEvent("[", { metaKey: true });
+      const context = createKeyboardContext(event);
+      
+      KeyboardCommands["["].execute(context);
+      
+      expect(outliner.tree.root.children.length).toBe(2);
+      expect(outliner.tree.root.children[1]).toBe(childNode);
+    });
+
+    it("should not indent/outdent without modifiers", () => {
+      setupOutliner();
+      const secondNode = outliner.tree.root.children[1];
+      const initialStructure = JSON.stringify(outliner.tree);
+      
+      // Test ] without modifiers
+      const event1 = createMockKeyboardEvent("]");
+      const context1 = createKeyboardContext(event1);
+      KeyboardCommands["]"].execute(context1);
+      
+      // Test [ without modifiers  
+      const event2 = createMockKeyboardEvent("[");
+      const context2 = createKeyboardContext(event2);
+      KeyboardCommands["["].execute(context2);
+      
+      // Structure should be unchanged
+      expect(JSON.stringify(outliner.tree)).toBe(initialStructure);
+    });
   });
 
   describe("Typing to Edit", () => {
@@ -359,6 +425,58 @@ describe("Keyboard Commands", () => {
       const handled = executeKeyboardCommand("Shift", context);
       
       expect(handled).toBe(false);
+    });
+
+    it("should handle cmd/ctrl+[ and ] in edit mode", () => {
+      setupOutliner();
+      const secondNode = outliner.tree.root.children[1];
+      const firstNode = outliner.tree.root.children[0];
+      
+      // Start editing
+      outliner.startEditing(secondNode);
+      expect(outliner._testHelpers.editingNode).toBe(secondNode);
+      
+      // Test indent in edit mode
+      const mockTextarea = {
+        selectionStart: 0,
+        selectionEnd: 0,
+        value: "test content"
+      } as HTMLTextAreaElement;
+      
+      const indentEvent = createMockKeyboardEvent("]", { metaKey: true });
+      Object.defineProperty(indentEvent, 'target', { value: mockTextarea });
+      
+      const indentContext = {
+        event: indentEvent,
+        component: outliner,
+        editingNode: secondNode,
+        editingContent: "test content",
+        textarea: mockTextarea
+      };
+      
+      const indentHandled = EditingKeyboardCommands["]"].execute(indentContext);
+      
+      expect(indentHandled).toBe(true);
+      expect(outliner.tree.root.children.length).toBe(1);
+      expect(firstNode.children.length).toBe(1);
+      expect(firstNode.children[0]).toBe(secondNode);
+      
+      // Test outdent in edit mode
+      const outdentEvent = createMockKeyboardEvent("[", { metaKey: true });
+      Object.defineProperty(outdentEvent, 'target', { value: mockTextarea });
+      
+      const outdentContext = {
+        event: outdentEvent,
+        component: outliner,
+        editingNode: secondNode,
+        editingContent: "test content",
+        textarea: mockTextarea
+      };
+      
+      const outdentHandled = EditingKeyboardCommands["["].execute(outdentContext);
+      
+      expect(outdentHandled).toBe(true);
+      expect(outliner.tree.root.children.length).toBe(2);
     });
   });
 

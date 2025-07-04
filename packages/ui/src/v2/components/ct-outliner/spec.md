@@ -60,12 +60,14 @@ interface Tree {
 
 ### Tree Structure Commands
 
-| Key | Modifier | Action |
-|-----|----------|--------|
-| `Tab` | - | Indent node (make child of previous sibling) |
-| `Tab` | `Shift` | Outdent node (move to parent level) |
-| `Delete` | - | Delete focused node |
-| `Backspace` | `cmd/ctrl` | Delete focused node (works in readonly mode) |
+| Key | Modifier | Context | Action |
+|-----|----------|---------|--------|
+| `Tab` | - | Read mode | Indent node (make child of previous sibling) |
+| `Tab` | `Shift` | Read mode | Outdent node (move to parent level) |
+| `]` | `cmd/ctrl` | Any mode | Indent node (works in both read and edit mode) |
+| `[` | `cmd/ctrl` | Any mode | Outdent node (works in both read and edit mode) |
+| `Delete` | - | Read mode | Delete focused node |
+| `Backspace` | `cmd/ctrl` | Any mode | Delete focused node (works in readonly mode) |
 
 ### Typing Behavior
 
@@ -77,6 +79,15 @@ interface Tree {
 | Key | Modifier | Action |
 |-----|----------|--------|
 | `c` | `cmd/ctrl` | Copy node as markdown |
+
+### Universal Commands (Work in Both Read and Edit Mode)
+
+| Key | Modifier | Action |
+|-----|----------|--------|
+| `]` | `cmd/ctrl` | Indent node |
+| `[` | `cmd/ctrl` | Outdent node |
+| `Backspace` | `cmd/ctrl` | Delete node |
+| `Enter` | `cmd/ctrl` | Toggle edit mode |
 
 ## Edit Mode Behavior
 
@@ -154,7 +165,7 @@ All tree operations maintain object references where possible and only create ne
 ## Testing Architecture
 
 ### Test Coverage
-- **76 test cases** across 3 test files ensure comprehensive coverage
+- **82 test cases** across 3 test files ensure comprehensive coverage
 - **component-integration.test.ts**: End-to-end component behavior
 - **ct-outliner-logic.test.ts**: Tree operations and business logic  
 - **keyboard-commands.test.ts**: Keyboard command execution
