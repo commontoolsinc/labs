@@ -91,7 +91,7 @@ export interface OutlineUIState {
  * interact with the outliner component without tight coupling.
  */
 export interface OutlinerOperations {
-  readonly tree: Tree;
+  readonly value: Tree;
   focusedNode: Node | null;
   collapsedNodes: Set<Node>;
 
