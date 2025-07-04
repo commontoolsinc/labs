@@ -42,3 +42,7 @@ Also consider the lessons of Erlang (Joe Armstrong), Elixir (José Valim), Elm (
 
 ### Functional-Reactive Programming
 - When working on recipes, favor functional-reactive programming patterns to handle asynchronous data streams and side effects. See @recipe-dev.md.
+
+# Caveats
+
+$ARGUMENTS

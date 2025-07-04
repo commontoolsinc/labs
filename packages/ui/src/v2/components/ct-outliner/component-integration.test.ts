@@ -285,5 +285,41 @@ describe("CTOutliner Component Integration Tests", () => {
       expect(outliner._testHelpers.editingNode).toBe(secondNode);
       expect(outliner._testHelpers.editingContent).toBe(secondNode.body);
     });
+
+    it("should exit edit mode with cmd/ctrl+enter without creating new node", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      const initialNodeCount = outliner.tree.root.children.length;
+      
+      // Start editing
+      outliner.startEditing(node);
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      
+      // Simulate cmd/ctrl+Enter in edit mode through the editor keyboard handler
+      const mockTextarea = {
+        selectionStart: 0,
+        selectionEnd: 0,
+        value: "test content"
+      } as HTMLTextAreaElement;
+      
+      const event = {
+        key: "Enter",
+        metaKey: true,
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        target: mockTextarea,
+        preventDefault: () => {},
+        stopPropagation: () => {}
+      } as unknown as KeyboardEvent;
+      
+      // Call the editor key handler
+      outliner._testHelpers.handleNormalEditorKeyDown(event);
+      
+      // Should exit edit mode
+      expect(outliner._testHelpers.editingNode).toBe(null);
+      // Should NOT create a new node
+      expect(outliner.tree.root.children.length).toBe(initialNodeCount);
+    });
   });
 });

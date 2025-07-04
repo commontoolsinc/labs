@@ -636,7 +636,8 @@ export class CTOutliner extends BaseElement {
         event.preventDefault();
         event.stopPropagation();
         if (event.metaKey || event.ctrlKey) {
-          this.finishEditingAndCreateNew();
+          // cmd/ctrl+Enter should just exit edit mode, not create new node
+          this.finishEditing();
         } else {
           this.finishEditing();
         }

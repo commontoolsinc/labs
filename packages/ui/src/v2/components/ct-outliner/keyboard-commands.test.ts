@@ -130,12 +130,19 @@ describe("Keyboard Commands", () => {
       outliner.startEditing(node);
       expect(outliner._testHelpers.editingNode).toBe(node);
       
-      // Simulate cmd/ctrl+Enter while in edit mode
-      // This should exit edit mode, NOT create a new node
-      const event = createMockKeyboardEvent("Enter", { metaKey: true });
-      const context = createKeyboardContext(event);
+      // Simulate the editing keyboard handler behavior for cmd/ctrl+Enter
+      // This tests the actual flow when in edit mode
+      const mockTextarea = {
+        selectionStart: 0,
+        selectionEnd: 0,
+        value: "test content"
+      } as HTMLTextAreaElement;
       
-      KeyboardCommands.Enter.execute(context);
+      const event = createMockKeyboardEvent("Enter", { metaKey: true });
+      Object.defineProperty(event, 'target', { value: mockTextarea });
+      
+      // Call the editing keyboard handler directly
+      outliner._testHelpers.handleNormalEditorKeyDown(event);
       
       // Should exit edit mode
       expect(outliner._testHelpers.editingNode).toBe(null);
