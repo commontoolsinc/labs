@@ -423,10 +423,23 @@ export class CTOutliner extends BaseElement {
     OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
   }
 
+  toggleEditMode(node: OutlineTreeNode) {
+    if (this.readonly) return;
+    
+    if (this.editingNode === node) {
+      // Currently editing this node - finish editing
+      this.finishEditing();
+    } else {
+      // Not editing or editing different node - start editing
+      this.startEditing(node);
+    }
+  }
+
   private finishEditing() {
     if (!this.editingNode) return;
     
-    this.tree = TreeOperations.updateNodeBody(this.tree, this.editingNode, this.editingContent);
+    // Tree is mutated in place, no need to reassign
+    TreeOperations.updateNodeBody(this.tree, this.editingNode, this.editingContent);
     this.focusedNode = this.editingNode;
     this.editingNode = null;
     this.editingContent = "";
@@ -714,9 +727,10 @@ export class CTOutliner extends BaseElement {
   startEditingWithInitialText(node: OutlineTreeNode, initialText: string) {
     if (this.readonly) return;
     this.editingNode = node;
-    this.editingContent = initialText;
+    this.editingContent = initialText; // Replace entire content with initial text
     this.requestUpdate();
     const nodeIndex = this.getNodeIndex(node);
+    // Focus the editor and select all text so typing replaces content
     OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
   }
 
@@ -759,7 +773,7 @@ export class CTOutliner extends BaseElement {
     const result = TreeOperations.deleteNode(this.tree, this.focusedNode!);
     
     if (result.success) {
-      this.tree = result.tree;
+      // Tree is mutated in place, no need to reassign
       this.focusedNode = result.newFocusNode;
       this.requestUpdate();
       this.emitChange();
@@ -789,7 +803,7 @@ export class CTOutliner extends BaseElement {
     // Delete the next node
     const result = TreeOperations.deleteNode(this.tree, nextNode);
     if (result.success) {
-      this.tree = result.tree;
+      // Tree is mutated in place, no need to reassign
       this.requestUpdate();
       this.emitChange();
       

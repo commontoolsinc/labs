@@ -189,7 +189,101 @@ describe("CTOutliner Component Integration Tests", () => {
       expect(typeof outliner.outdentNode).toBe("function");
       expect(typeof outliner.startEditing).toBe("function");
       expect(typeof outliner.startEditingWithInitialText).toBe("function");
+      expect(typeof outliner.toggleEditMode).toBe("function");
       expect(typeof outliner.emitChange).toBe("function");
+    });
+  });
+
+  describe("Keyboard Commands", () => {
+    it("should toggle edit mode with cmd/ctrl+enter", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      
+      // Should start editing
+      outliner.toggleEditMode(node);
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      
+      // Should stop editing
+      outliner.toggleEditMode(node);
+      expect(outliner._testHelpers.editingNode).toBe(null);
+    });
+
+    it("should replace content when typing to enter edit mode", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      
+      outliner.startEditingWithInitialText(node, "x");
+      
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner._testHelpers.editingContent).toBe("x");
+    });
+
+    it("should delete node with cmd/ctrl+backspace in read mode", () => {
+      setupOutliner();
+      const nodeToDelete = outliner.tree.root.children[0];
+      const secondNode = outliner.tree.root.children[1];
+      outliner.focusedNode = nodeToDelete;
+      
+      // Test deletion works
+      outliner.deleteNode(nodeToDelete);
+      
+      expect(outliner.tree.root.children.length).toBe(1);
+      expect(outliner.tree.root.children[0]).toBe(secondNode);
+    });
+
+    it("should preserve existing content when starting normal edit mode", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      const originalContent = node.body;
+      
+      outliner.startEditing(node);
+      
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner._testHelpers.editingContent).toBe(originalContent);
+    });
+
+    it("should overwrite content when typing to enter edit mode", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      
+      // Start editing with initial text - should replace entire content
+      outliner.startEditingWithInitialText(node, "new content");
+      
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner._testHelpers.editingContent).toBe("new content");
+    });
+
+    it("should toggle between editing states correctly", () => {
+      setupOutliner();
+      const node = outliner.focusedNode!;
+      
+      // Start with no editing
+      expect(outliner._testHelpers.editingNode).toBe(null);
+      
+      // Toggle to start editing
+      outliner.toggleEditMode(node);
+      expect(outliner._testHelpers.editingNode).toBe(node);
+      expect(outliner._testHelpers.editingContent).toBe(node.body);
+      
+      // Toggle to stop editing  
+      outliner.toggleEditMode(node);
+      expect(outliner._testHelpers.editingNode).toBe(null);
+      expect(outliner._testHelpers.editingContent).toBe("");
+    });
+
+    it("should handle switching edit mode between different nodes", () => {
+      setupOutliner();
+      const firstNode = outliner.tree.root.children[0];
+      const secondNode = outliner.tree.root.children[1];
+      
+      // Start editing first node
+      outliner.toggleEditMode(firstNode);
+      expect(outliner._testHelpers.editingNode).toBe(firstNode);
+      
+      // Switch to editing second node (should stop editing first)
+      outliner.toggleEditMode(secondNode);
+      expect(outliner._testHelpers.editingNode).toBe(secondNode);
+      expect(outliner._testHelpers.editingContent).toBe(secondNode.body);
     });
   });
 });

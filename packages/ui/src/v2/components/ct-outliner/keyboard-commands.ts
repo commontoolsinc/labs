@@ -208,11 +208,13 @@ export const KeyboardCommands = {
 
 /**
  * Handle typing any regular character to enter edit mode
+ * When typing, replace the entire content with the new character
  */
 export function handleTypingToEdit(key: string, context: KeyboardContext): boolean {
   // Check if this is a regular typing key (letter, number, punctuation)
   if (key.length === 1 && !context.event.ctrlKey && !context.event.metaKey && !context.event.altKey) {
     if (context.focusedNode) {
+      // Replace entire content with the typed character
       context.component.startEditingWithInitialText(context.focusedNode, key);
       return true;
     }
