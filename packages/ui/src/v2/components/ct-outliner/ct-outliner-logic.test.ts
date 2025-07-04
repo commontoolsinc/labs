@@ -2,21 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { TreeOperations } from "./tree-operations.ts";
 import { KeyboardCommands } from "./keyboard-commands.ts";
+import { createTestTree, createNestedTestTree } from "./test-utils.ts";
 import type { Tree, Node } from "./types.ts";
-
-// Test helper function
-function createTestTree(): Tree {
-  return {
-    root: {
-      body: "",
-      children: [
-        { body: "First item", children: [], attachments: [] },
-        { body: "Second item", children: [], attachments: [] }
-      ],
-      attachments: []
-    }
-  };
-}
 
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {

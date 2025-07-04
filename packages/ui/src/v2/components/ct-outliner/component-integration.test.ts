@@ -1,54 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CTOutliner } from "./ct-outliner.ts";
-import { TreeOperations } from "./tree-operations.ts";
-
-// Mock DOM environment for testing
-const mockElement = (tagName: string) => ({
-  tagName,
-  focus: () => {},
-  select: () => {},
-  setSelectionRange: () => {},
-  getBoundingClientRect: () => ({ bottom: 0, left: 0 }),
-  style: {},
-  value: "",
-  selectionStart: 0,
-  selectionEnd: 0,
-  scrollHeight: 20,
-});
-
-const mockShadowRoot = {
-  querySelector: (selector: string) => {
-    if (selector.includes("editor-")) return mockElement("textarea");
-    if (selector === ".outliner") return mockElement("div");
-    return null;
-  }
-};
+import { setupMockOutliner, createNestedTestTree } from "./test-utils.ts";
 
 describe("CTOutliner Component Integration Tests", () => {
   let outliner: CTOutliner;
 
   function setupOutliner() {
-    outliner = new CTOutliner();
-    // Mock the shadowRoot
-    Object.defineProperty(outliner, 'shadowRoot', {
-      value: mockShadowRoot,
-      writable: false
-    });
-    
-    // Setup a basic tree
-    const tree = {
-      root: {
-        body: "",
-        children: [
-          { body: "First item", children: [], attachments: [] },
-          { body: "Second item", children: [], attachments: [] }
-        ],
-        attachments: []
-      }
-    };
-    outliner.tree = tree;
-    outliner.focusedNode = tree.root.children[0];
+    const setup = setupMockOutliner();
+    outliner = setup.outliner;
+    return setup;
   }
 
   describe("Node Creation", () => {
@@ -97,29 +58,12 @@ describe("CTOutliner Component Integration Tests", () => {
       outliner.indentNode(secondNode);
       
       expect(outliner.tree.root.children.length).toBe(1);
-      // Since tree is mutable, firstNode should have the new child
       expect(firstNode.children.length).toBe(1);
       expect(firstNode.children[0]).toBe(secondNode);
     });
 
     it("should outdent node correctly", () => {
-      setupOutliner();
-      // Setup nested structure
-      const tree = {
-        root: {
-          body: "",
-          children: [{
-            body: "Parent",
-            children: [{
-              body: "Child",
-              children: [],
-              attachments: []
-            }],
-            attachments: []
-          }],
-          attachments: []
-        }
-      };
+      const tree = createNestedTestTree();
       outliner.tree = tree;
       const childNode = tree.root.children[0].children[0];
       
@@ -194,8 +138,8 @@ describe("CTOutliner Component Integration Tests", () => {
     });
   });
 
-  describe("Keyboard Commands", () => {
-    it("should toggle edit mode with cmd/ctrl+enter", () => {
+  describe("Edit Mode State Management", () => {
+    it("should toggle edit mode correctly", () => {
       setupOutliner();
       const node = outliner.focusedNode!;
       
@@ -206,69 +150,6 @@ describe("CTOutliner Component Integration Tests", () => {
       // Should stop editing
       outliner.toggleEditMode(node);
       expect(outliner.testAPI.editingNode).toBe(null);
-    });
-
-    it("should replace content when typing to enter edit mode", () => {
-      setupOutliner();
-      const node = outliner.focusedNode!;
-      
-      outliner.startEditingWithInitialText(node, "x");
-      
-      expect(outliner.testAPI.editingNode).toBe(node);
-      expect(outliner.testAPI.editingContent).toBe("x");
-    });
-
-    it("should delete node with cmd/ctrl+backspace in read mode", () => {
-      setupOutliner();
-      const nodeToDelete = outliner.tree.root.children[0];
-      const secondNode = outliner.tree.root.children[1];
-      outliner.focusedNode = nodeToDelete;
-      
-      // Test deletion works
-      outliner.deleteNode(nodeToDelete);
-      
-      expect(outliner.tree.root.children.length).toBe(1);
-      expect(outliner.tree.root.children[0]).toBe(secondNode);
-    });
-
-    it("should preserve existing content when starting normal edit mode", () => {
-      setupOutliner();
-      const node = outliner.focusedNode!;
-      const originalContent = node.body;
-      
-      outliner.startEditing(node);
-      
-      expect(outliner.testAPI.editingNode).toBe(node);
-      expect(outliner.testAPI.editingContent).toBe(originalContent);
-    });
-
-    it("should overwrite content when typing to enter edit mode", () => {
-      setupOutliner();
-      const node = outliner.focusedNode!;
-      
-      // Start editing with initial text - should replace entire content
-      outliner.startEditingWithInitialText(node, "new content");
-      
-      expect(outliner.testAPI.editingNode).toBe(node);
-      expect(outliner.testAPI.editingContent).toBe("new content");
-    });
-
-    it("should toggle between editing states correctly", () => {
-      setupOutliner();
-      const node = outliner.focusedNode!;
-      
-      // Start with no editing
-      expect(outliner.testAPI.editingNode).toBe(null);
-      
-      // Toggle to start editing
-      outliner.toggleEditMode(node);
-      expect(outliner.testAPI.editingNode).toBe(node);
-      expect(outliner.testAPI.editingContent).toBe(node.body);
-      
-      // Toggle to stop editing  
-      outliner.toggleEditMode(node);
-      expect(outliner.testAPI.editingNode).toBe(null);
-      expect(outliner.testAPI.editingContent).toBe("");
     });
 
     it("should handle switching edit mode between different nodes", () => {
@@ -284,42 +165,6 @@ describe("CTOutliner Component Integration Tests", () => {
       outliner.toggleEditMode(secondNode);
       expect(outliner.testAPI.editingNode).toBe(secondNode);
       expect(outliner.testAPI.editingContent).toBe(secondNode.body);
-    });
-
-    it("should exit edit mode with cmd/ctrl+enter without creating new node", () => {
-      setupOutliner();
-      const node = outliner.focusedNode!;
-      const initialNodeCount = outliner.tree.root.children.length;
-      
-      // Start editing
-      outliner.startEditing(node);
-      expect(outliner.testAPI.editingNode).toBe(node);
-      
-      // Simulate cmd/ctrl+Enter in edit mode through the editor keyboard handler
-      const mockTextarea = {
-        selectionStart: 0,
-        selectionEnd: 0,
-        value: "test content"
-      } as HTMLTextAreaElement;
-      
-      const event = {
-        key: "Enter",
-        metaKey: true,
-        ctrlKey: false,
-        shiftKey: false,
-        altKey: false,
-        target: mockTextarea,
-        preventDefault: () => {},
-        stopPropagation: () => {}
-      } as unknown as KeyboardEvent;
-      
-      // Call the editor key handler
-      outliner.testAPI.handleNormalEditorKeyDown(event);
-      
-      // Should exit edit mode
-      expect(outliner.testAPI.editingNode).toBe(null);
-      // Should NOT create a new node
-      expect(outliner.tree.root.children.length).toBe(initialNodeCount);
     });
   });
 });

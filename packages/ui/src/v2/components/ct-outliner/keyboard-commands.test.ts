@@ -2,82 +2,18 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { executeKeyboardCommand, handleTypingToEdit, KeyboardCommands, EditingKeyboardCommands } from "./keyboard-commands.ts";
 import { CTOutliner } from "./ct-outliner.ts";
-import { TreeOperations } from "./tree-operations.ts";
+import { setupMockOutliner, createMockKeyboardEvent, createKeyboardContext, createNestedTestTree, createMockTextarea } from "./test-utils.ts";
 import type { KeyboardContext } from "./types.ts";
-
-// Mock DOM environment for testing
-const mockElement = (tagName: string) => ({
-  tagName,
-  focus: () => {},
-  select: () => {},
-  setSelectionRange: () => {},
-  getBoundingClientRect: () => ({ bottom: 0, left: 0 }),
-  style: {},
-  value: "",
-  selectionStart: 0,
-  selectionEnd: 0,
-  scrollHeight: 20,
-});
-
-const mockShadowRoot = {
-  querySelector: (selector: string) => {
-    if (selector.includes("editor-")) return mockElement("textarea");
-    if (selector === ".outliner") return mockElement("div");
-    return null;
-  }
-};
 
 describe("Keyboard Commands", () => {
   let outliner: CTOutliner;
-  let mockEvent: KeyboardEvent;
 
   function setupOutliner() {
-    outliner = new CTOutliner();
-    // Mock the shadowRoot
-    Object.defineProperty(outliner, 'shadowRoot', {
-      value: mockShadowRoot,
-      writable: false
-    });
-    
-    // Setup a basic tree
-    const tree = {
-      root: {
-        body: "",
-        children: [
-          { body: "First item", children: [], attachments: [] },
-          { body: "Second item", children: [], attachments: [] }
-        ],
-        attachments: []
-      }
-    };
-    outliner.tree = tree;
-    outliner.focusedNode = tree.root.children[0];
+    const setup = setupMockOutliner();
+    outliner = setup.outliner;
+    return setup;
   }
 
-  function createMockKeyboardEvent(key: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {}): KeyboardEvent {
-    return {
-      key,
-      ctrlKey: modifiers.ctrlKey || false,
-      metaKey: modifiers.metaKey || false,
-      shiftKey: modifiers.shiftKey || false,
-      altKey: modifiers.altKey || false,
-      preventDefault: () => {},
-      stopPropagation: () => {}
-    } as KeyboardEvent;
-  }
-
-  function createKeyboardContext(event: KeyboardEvent): KeyboardContext {
-    const allNodes = TreeOperations.getAllVisibleNodes(outliner.tree.root, new Set());
-    const currentIndex = outliner.focusedNode ? allNodes.indexOf(outliner.focusedNode) : -1;
-    
-    return {
-      event,
-      component: outliner,
-      allNodes,
-      currentIndex,
-      focusedNode: outliner.focusedNode,
-    };
-  }
 
   describe("Basic Commands", () => {
     it("should handle Enter key to create new node", () => {
@@ -85,7 +21,7 @@ describe("Keyboard Commands", () => {
       const initialChildCount = outliner.tree.root.children.length;
       
       const event = createMockKeyboardEvent("Enter");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Enter.execute(context);
       
@@ -98,7 +34,7 @@ describe("Keyboard Commands", () => {
       const initialChildCount = parentNode.children.length;
       
       const event = createMockKeyboardEvent("Enter", { shiftKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Enter.execute(context);
       
@@ -110,7 +46,7 @@ describe("Keyboard Commands", () => {
       const node = outliner.focusedNode!;
       
       const event = createMockKeyboardEvent("Enter", { metaKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       // Should start editing
       KeyboardCommands.Enter.execute(context);
@@ -155,7 +91,7 @@ describe("Keyboard Commands", () => {
       const node = outliner.focusedNode!;
       
       const event = createMockKeyboardEvent(" ");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands[" "].execute(context);
       
@@ -169,7 +105,7 @@ describe("Keyboard Commands", () => {
       const secondNode = outliner.tree.root.children[1];
       
       const event = createMockKeyboardEvent("Delete");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Delete.execute(context);
       
@@ -183,7 +119,7 @@ describe("Keyboard Commands", () => {
       const secondNode = outliner.tree.root.children[1];
       
       const event = createMockKeyboardEvent("Backspace", { metaKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Backspace.execute(context);
       
@@ -196,7 +132,7 @@ describe("Keyboard Commands", () => {
       const initialChildCount = outliner.tree.root.children.length;
       
       const event = createMockKeyboardEvent("Backspace");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Backspace.execute(context);
       
@@ -213,7 +149,7 @@ describe("Keyboard Commands", () => {
       outliner.focusedNode = secondNode;
       
       const event = createMockKeyboardEvent("Tab");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Tab.execute(context);
       
@@ -245,7 +181,7 @@ describe("Keyboard Commands", () => {
       outliner.focusedNode = childNode;
       
       const event = createMockKeyboardEvent("Tab", { shiftKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Tab.execute(context);
       
@@ -260,7 +196,7 @@ describe("Keyboard Commands", () => {
       outliner.focusedNode = firstNode;
       
       const event = createMockKeyboardEvent("ArrowDown");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.ArrowDown.execute(context);
       
@@ -274,7 +210,7 @@ describe("Keyboard Commands", () => {
       outliner.focusedNode = secondNode;
       
       const event = createMockKeyboardEvent("]", { metaKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands["]"].execute(context);
       
@@ -306,7 +242,7 @@ describe("Keyboard Commands", () => {
       outliner.focusedNode = childNode;
       
       const event = createMockKeyboardEvent("[", { metaKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands["["].execute(context);
       
@@ -321,12 +257,12 @@ describe("Keyboard Commands", () => {
       
       // Test ] without modifiers
       const event1 = createMockKeyboardEvent("]");
-      const context1 = createKeyboardContext(event1);
+      const context1 = createKeyboardContext(event1, outliner);
       KeyboardCommands["]"].execute(context1);
       
       // Test [ without modifiers  
       const event2 = createMockKeyboardEvent("[");
-      const context2 = createKeyboardContext(event2);
+      const context2 = createKeyboardContext(event2, outliner);
       KeyboardCommands["["].execute(context2);
       
       // Structure should be unchanged
@@ -340,7 +276,7 @@ describe("Keyboard Commands", () => {
       const node = outliner.focusedNode!;
       
       const event = createMockKeyboardEvent("a");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       const handled = handleTypingToEdit("a", context);
       
@@ -353,7 +289,7 @@ describe("Keyboard Commands", () => {
       setupOutliner();
       
       const event = createMockKeyboardEvent("a", { ctrlKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       const handled = handleTypingToEdit("a", context);
       
@@ -365,7 +301,7 @@ describe("Keyboard Commands", () => {
       setupOutliner();
       
       const event = createMockKeyboardEvent("Enter");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       const handled = handleTypingToEdit("Enter", context);
       
@@ -379,7 +315,7 @@ describe("Keyboard Commands", () => {
       const originalContent = node.body;
       
       const event = createMockKeyboardEvent("x");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       handleTypingToEdit("x", context);
       
@@ -394,7 +330,7 @@ describe("Keyboard Commands", () => {
       const initialChildCount = outliner.tree.root.children.length;
       
       const event = createMockKeyboardEvent("Enter");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       const handled = executeKeyboardCommand("Enter", context);
       
@@ -407,7 +343,7 @@ describe("Keyboard Commands", () => {
       const node = outliner.focusedNode!;
       
       const event = createMockKeyboardEvent("z");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       const handled = executeKeyboardCommand("z", context);
       
@@ -420,7 +356,7 @@ describe("Keyboard Commands", () => {
       setupOutliner();
       
       const event = createMockKeyboardEvent("Shift");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       const handled = executeKeyboardCommand("Shift", context);
       
@@ -437,11 +373,7 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingNode).toBe(secondNode);
       
       // Test indent in edit mode
-      const mockTextarea = {
-        selectionStart: 0,
-        selectionEnd: 0,
-        value: "test content"
-      } as HTMLTextAreaElement;
+      const mockTextarea = createMockTextarea("test content");
       
       const indentEvent = createMockKeyboardEvent("]", { metaKey: true });
       Object.defineProperty(indentEvent, 'target', { value: mockTextarea });
@@ -490,11 +422,7 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingContent).toBe(editingContent);
       
       // Indent while in edit mode
-      const mockTextarea = {
-        selectionStart: 5,
-        selectionEnd: 5,
-        value: editingContent
-      } as HTMLTextAreaElement;
+      const mockTextarea = createMockTextarea(editingContent, 5);
       
       const indentEvent = createMockKeyboardEvent("]", { metaKey: true });
       Object.defineProperty(indentEvent, 'target', { value: mockTextarea });
@@ -543,11 +471,7 @@ describe("Keyboard Commands", () => {
       outliner.startEditingWithInitialText(secondNode, editingContent);
       
       // Mock textarea with specific cursor position
-      const mockTextarea = {
-        selectionStart: cursorPosition,
-        selectionEnd: cursorPosition,
-        value: editingContent
-      } as HTMLTextAreaElement;
+      const mockTextarea = createMockTextarea(editingContent, cursorPosition);
       
       // Simulate cmd+] while editing
       const indentEvent = createMockKeyboardEvent("]", { metaKey: true });
@@ -580,7 +504,7 @@ describe("Keyboard Commands", () => {
       outliner.focusedNode = null;
       
       const event = createMockKeyboardEvent("Enter");
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       // Should not crash
       expect(() => KeyboardCommands.Enter.execute(context)).not.toThrow();
@@ -597,7 +521,7 @@ describe("Keyboard Commands", () => {
       
       // But cmd+backspace delete should still work
       const event = createMockKeyboardEvent("Backspace", { metaKey: true });
-      const context = createKeyboardContext(event);
+      const context = createKeyboardContext(event, outliner);
       
       KeyboardCommands.Backspace.execute(context);
       expect(outliner.tree.root.children.length).toBe(1);
