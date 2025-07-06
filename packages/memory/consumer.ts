@@ -132,10 +132,8 @@ class MemoryConsumerSession<
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
 
-  private sendQueue: {
-    // Promise that is resolved when the message is at the front of the queue
-    deferred: PromiseWithResolvers<void>;
-  }[] = [];
+  // Promises that are resolved when the message is at the front of the queue
+  private sendQueue: PromiseWithResolvers<void>[] = [];
 
   constructor(
     public as: Signer,
@@ -213,9 +211,7 @@ class MemoryConsumerSession<
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
   ) {
-    const queueEntry = {
-      deferred: Promise.withResolvers<void>(),
-    };
+    const queueEntry = Promise.withResolvers<void>();
     // put it in the queue immediately -- messages are sent in the order
     // they are executed, regardless of authorization timing
     this.sendQueue.push(queueEntry);
@@ -226,7 +222,7 @@ class MemoryConsumerSession<
 
     // If we're not at the front of the queue, wait until we are
     if (queueEntry !== this.sendQueue[0]) {
-      await queueEntry.deferred.promise;
+      await queueEntry.promise;
       // Check to see if we've been canceled
       if (this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]) {
         throw new Error("session cancel");
@@ -238,7 +234,7 @@ class MemoryConsumerSession<
       // if that throws, we still want to unblock the queue
       this.sendQueue.shift();
       if (this.sendQueue.length > 0) {
-        this.sendQueue[0].deferred.resolve();
+        this.sendQueue[0].resolve();
       }
     }
   }
@@ -283,7 +279,7 @@ class MemoryConsumerSession<
   }
   cancel() {
     for (const queueEntry of [...this.sendQueue]) {
-      queueEntry.deferred.reject(new Error("session cancel"));
+      queueEntry.reject(new Error("session cancel"));
     }
     this.sendQueue = [];
   }
