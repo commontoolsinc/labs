@@ -10,6 +10,7 @@ import { Provider } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
+// In the transition to TX we had to remove the current push retry logic
 describe.skip("Push conflict", () => {
   let runtime: Runtime;
   let session: Memory.Memory.Memory;
