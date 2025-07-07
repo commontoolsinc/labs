@@ -1,8 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
-import { type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, createCell } from "./cell.ts";
+import { type Cell } from "./cell.ts";
 import {
   type LegacyAlias,
   LINK_V1_TAG,
