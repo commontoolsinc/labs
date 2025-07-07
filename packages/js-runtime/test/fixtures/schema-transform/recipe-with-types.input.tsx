@@ -36,7 +36,7 @@ const outputSchema = toSchema<TodoOutput>();
 const addTodoSchema = toSchema<AddTodoEvent>({
   title: "Add Todo",
   description: "Add a new todo item",
-  example: { text: "Buy groceries" }
+  examples: [{ text: "Buy groceries" }]
 });
 
 const toggleTodoSchema = toSchema<ToggleTodoEvent>({
