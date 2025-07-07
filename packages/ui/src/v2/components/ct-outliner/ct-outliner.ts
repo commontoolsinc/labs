@@ -21,6 +21,7 @@ import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import { FocusUtils } from "./focus-utils.ts";
+import { Cell } from "@commontools/runner";
 
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
@@ -112,7 +113,7 @@ export class CTOutliner extends BaseElement {
     showDebugPanel: { type: Boolean, state: true },
   };
 
-  declare value: Tree;
+  declare value: Cell<Tree>;
   declare readonly: boolean;
   declare mentionable: MentionableItem[];
   declare collapsedNodes: Set<OutlineTreeNode>;
@@ -1504,7 +1505,7 @@ export class CTOutliner extends BaseElement {
 
     if (this.focusedNode) {
       const parentNode = TreeOperations.findParentNode(
-        this.tree.root,
+        this.value.root,
         this.focusedNode,
       );
 
@@ -1516,7 +1517,12 @@ export class CTOutliner extends BaseElement {
 
         // Insert all parsed nodes after the focused node
         parsedTree.root.children.forEach((node, index) => {
-          TreeOperations.insertNode(this.value, parentNode, node, nodeIndex + 1 + index);
+          TreeOperations.insertNode(
+            this.value,
+            parentNode,
+            node,
+            nodeIndex + 1 + index,
+          );
         });
 
         // Focus the first newly inserted node
@@ -1524,7 +1530,11 @@ export class CTOutliner extends BaseElement {
       }
     } else if (this.value.root.children.length === 0) {
       // No nodes exist, replace root children
-      this.value.root.children.splice(0, this.value.root.children.length, ...parsedTree.root.children);
+      this.value.root.children.splice(
+        0,
+        this.value.root.children.length,
+        ...parsedTree.root.children,
+      );
       this.focusedNode = parsedTree.root.children[0];
     } else {
       // No focused node but tree has nodes, append to the end
