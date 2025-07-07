@@ -1,4 +1,4 @@
-import type { JSONValue, SchemaContext } from "./interface.ts";
+import type { Authorization, JSONValue, SchemaContext } from "./interface.ts";
 import {
   Abilities,
   AuthorizationError,
@@ -132,6 +132,9 @@ class MemoryConsumerSession<
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
 
+  // Promises that are resolved when the message is at the front of the queue
+  private sendQueue: PromiseWithResolvers<void>[] = [];
+
   constructor(
     public as: Signer,
     public clock: Clock = Settings.clock,
@@ -208,9 +211,42 @@ class MemoryConsumerSession<
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
   ) {
-    const { error, ok: authorization } = await Access.authorize([
+    const queueEntry = Promise.withResolvers<void>();
+    // put it in the queue immediately -- messages are sent in the order
+    // they are executed, regardless of authorization timing
+    this.sendQueue.push(queueEntry);
+
+    const authorizationResult = await Access.authorize([
       invocation.refer(),
     ], this.as);
+
+    // If we're not at the front of the queue, wait until we are
+    if (queueEntry !== this.sendQueue[0]) {
+      await queueEntry.promise;
+      // We can be resolved, then rejected (noop) via cancel.
+      if (this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]) {
+        throw new Error("session cancel");
+      }
+    }
+    try {
+      this.executeAuthorized(authorizationResult, invocation);
+    } finally {
+      // if that throws, we still want to unblock the queue
+      this.sendQueue.shift();
+      if (this.sendQueue.length > 0) {
+        this.sendQueue[0].resolve();
+      }
+    }
+  }
+
+  private executeAuthorized<
+    Ability extends string,
+    Access extends Reference[],
+  >(
+    authorizationResult: Result<Authorization<Access[number]>, Error>,
+    invocation: ConsumerInvocation<Ability, MemoryProtocol>,
+  ) {
+    const { error, ok: authorization } = authorizationResult;
     if (error) {
       invocation.return({ error });
     } else {
@@ -236,10 +272,17 @@ class MemoryConsumerSession<
       }
     }
   }
+
   close() {
+    this.cancel();
     this.controller?.terminate();
   }
-  cancel() {}
+  cancel() {
+    for (const queueEntry of [...this.sendQueue]) {
+      queueEntry.reject(new Error("session cancel"));
+    }
+    this.sendQueue = [];
+  }
   abort(invocation: InvocationHandle) {
     this.invocations.delete(invocation.toURL());
   }
