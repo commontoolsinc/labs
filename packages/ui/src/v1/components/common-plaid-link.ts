@@ -4,9 +4,7 @@ import { Cell } from "@commontools/runner";
 import { CommonCharmElement } from "./common-charm.ts";
 
 declare global {
-  interface GlobalThis {
-    Plaid: any;
-  }
+  var Plaid: any;
 }
 
 export interface PlaidAuthData {
