@@ -600,6 +600,11 @@ export class Replica {
       }
     }
 
+    for (const [revision, schema] of fetchedEntries) {
+      const factAddress = { the: revision.the, of: revision.of };
+      revisions.set(factAddress, revision);
+    }
+
     // Add notFound entries to the heap and also persist them in the cache.
     // Don't notify subscribers as if this were a server update.
     this.heap.merge(notFound, Replica.put, (val) => false);
@@ -607,7 +612,6 @@ export class Replica {
 
     for (const [revision, schema] of fetchedEntries) {
       const factAddress = { the: revision.the, of: revision.of };
-      revisions.set(factAddress, revision);
       this.selectorTracker.add(factAddress, {
         path: [],
         schemaContext: schema,
