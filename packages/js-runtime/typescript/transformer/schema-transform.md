@@ -63,7 +63,7 @@ const schema = toSchema<User>({
   title: "User Schema",
   description: "A user in the system",
   default: { name: "Anonymous" },
-  example: { name: "John", age: 30 },
+  examples: [{ name: "John", age: 30 }],
 });
 ```
 
