@@ -28,7 +28,11 @@ import {
   upsertPlaidItem,
 } from "./plaid-oauth.utils.ts";
 import { setBGCharm } from "@commontools/background-charm";
-import { type CellLink } from "@commontools/runner";
+import {
+  type NormalizedLink,
+  parseLink,
+  type SigilLink,
+} from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import env from "@/env.ts";
 import { CountryCode } from "plaid";
@@ -193,8 +197,11 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
 
     // Add this charm to the Plaid integration charms cell
     try {
-      const authCellLink = JSON.parse(payload.authCellId) as CellLink;
-      const space = authCellLink.space;
+      const authCellLink = typeof payload.authCellId === "string"
+        ? JSON.parse(payload.authCellId) as SigilLink
+        : payload.authCellId as SigilLink;
+      const parsedLink = parseLink(authCellLink) as NormalizedLink;
+      const space = parsedLink.space;
       const integrationCharmId = payload.integrationCharmId;
 
       if (space && integrationCharmId) {

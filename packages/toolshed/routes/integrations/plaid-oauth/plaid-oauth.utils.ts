@@ -1,4 +1,4 @@
-import { type CellLink } from "@commontools/runner";
+import { type SigilLink } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import { Context } from "@hono/hono";
 import {
@@ -116,7 +116,7 @@ export const createPlaidClient = (): PlaidApi => {
 };
 
 // Helper function to get auth cell
-export async function getAuthCell(docLink: CellLink | string) {
+export async function getAuthCell(docLink: SigilLink | string) {
   try {
     const parsedDocLink = typeof docLink === "string"
       ? JSON.parse(docLink)
@@ -137,7 +137,7 @@ export async function getAuthCell(docLink: CellLink | string) {
 
 // Get auth data from the auth cell
 export async function getAuthData(
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string | SigilLink,
 ): Promise<PlaidAuthData> {
   try {
     const authCell = await getAuthCell(authCellDocLink);
@@ -160,7 +160,7 @@ export async function getAuthData(
 
 // Save auth data to the auth cell
 export async function saveAuthData(
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string | SigilLink,
   authData: PlaidAuthData,
 ) {
   try {
@@ -182,7 +182,7 @@ export async function saveAuthData(
 
 // Add or update an item in the auth data
 export async function upsertPlaidItem(
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string | SigilLink,
   item: PlaidItem,
 ): Promise<PlaidAuthData> {
   try {
@@ -214,7 +214,7 @@ export async function upsertPlaidItem(
 
 // Remove an item from the auth data
 export async function removePlaidItem(
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string | SigilLink,
   itemId: string,
 ): Promise<PlaidAuthData> {
   try {
@@ -235,7 +235,7 @@ export async function removePlaidItem(
 
 // Get a specific item from auth data
 export async function getPlaidItem(
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string | SigilLink,
   itemId: string,
 ): Promise<PlaidItem | null> {
   try {
