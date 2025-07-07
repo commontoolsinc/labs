@@ -258,6 +258,9 @@ for (const config of configsWithFixtures) {
 
               let diffMessage =
                 `\n\nTransformation output does not match expected for: ${testName}\n`;
+              diffMessage += `\nFiles:\n`;
+              diffMessage += `  Input:    test/fixtures/${inputPath}.input${ext}\n`;
+              diffMessage += `  Expected: test/fixtures/${inputPath}.expected${ext}\n`;
               diffMessage += `\n${"=".repeat(80)}\n`;
               diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
               diffMessage += `${"=".repeat(80)}\n`;
@@ -295,6 +298,9 @@ for (const config of configsWithFixtures) {
 
           let diffMessage =
             `\n\nTransformation output does not match expected for: ${testName}\n`;
+          diffMessage += `\nFiles:\n`;
+          diffMessage += `  Input:    test/fixtures/${inputPath}.input${ext}\n`;
+          diffMessage += `  Expected: test/fixtures/${inputPath}.expected${ext}\n`;
           diffMessage += `\n${"=".repeat(80)}\n`;
           diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
           diffMessage += `${"=".repeat(80)}\n`;
