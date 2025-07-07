@@ -6,7 +6,11 @@ import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
 import { resolveLinkToValue } from "./link-resolution.ts";
-import { parseLink } from "./link-utils.ts";
+import {
+  parseLink,
+  parseNormalizedFullLinktoLegacyDocCellLink,
+} from "./link-utils.ts";
+import { appendTxToReactivityLog } from "./cell.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
@@ -71,11 +75,17 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  ({ cell: valueCell, path: valuePath } = resolveLinkToValue(
-    valueCell,
-    valuePath,
-    log,
-  ));
+  const tx = valueCell.runtime.edit();
+  ({ cell: valueCell, path: valuePath } =
+    parseNormalizedFullLinktoLegacyDocCellLink(
+      resolveLinkToValue(
+        tx,
+        parseLink({ cell: valueCell, path: valuePath } as LegacyDocCellLink),
+      ),
+      valueCell.runtime,
+    ));
+  tx.commit();
+  if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
 
   log?.reads.push({ cell: valueCell, path: valuePath });
   const target = valueCell.getAtPath(valuePath) as any;
@@ -243,17 +253,6 @@ export function createQueryResultProxy<T>(
             i++
           ) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
-            if (valueCell.runtime) {
-              valueCell.runtime.scheduler.queueEvent(
-                parseLink(
-                  {
-                    cell: valueCell,
-                    path: [...valuePath, i],
-                  } as LegacyDocCellLink,
-                ),
-                undefined,
-              );
-            }
           }
         }
         return true;

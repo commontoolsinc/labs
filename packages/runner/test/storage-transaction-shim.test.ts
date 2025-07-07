@@ -441,7 +441,7 @@ describe("StorageTransaction", () => {
     expect(result.ok?.value).toBe(123);
 
     // Should return the value for an existing path
-    const value = transaction.readValueOrThrow({
+    const value = transaction.readOrThrow({
       space,
       id: "of:test-entity",
       type: "application/json",
@@ -450,7 +450,7 @@ describe("StorageTransaction", () => {
     expect(value).toBe(123);
 
     // Should return undefined for a non-existent path (NotFoundError)
-    const notFound = transaction.readValueOrThrow({
+    const notFound = transaction.readOrThrow({
       space,
       id: "of:test-entity",
       type: "application/json",
@@ -460,7 +460,7 @@ describe("StorageTransaction", () => {
 
     // Should throw for other errors (e.g., unsupported media type)
     expect(() =>
-      transaction.readValueOrThrow({
+      transaction.readOrThrow({
         space,
         id: "of:test-entity",
         type: "unsupported/type",

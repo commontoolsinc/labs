@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference";
+import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";

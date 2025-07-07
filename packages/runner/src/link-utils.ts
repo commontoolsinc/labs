@@ -4,9 +4,9 @@ import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell, type MemorySpace } from "./cell.ts";
 import { type IRuntime } from "./runtime.ts";
 import {
-  type JSONCellLink,
   type LegacyAlias,
   type LegacyDocCellLink,
+  type LegacyJSONCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilValue,
@@ -55,7 +55,7 @@ export type CellLink =
   | QueryResultInternals
   | DocImpl<any> // @deprecated
   | LegacyDocCellLink // @deprecated
-  | JSONCellLink // @deprecated
+  | LegacyJSONCellLink // @deprecated
   | LegacyAlias // @deprecated
   | { "/": string }; // @deprecated
 
@@ -81,7 +81,7 @@ export function isSigilValue(value: any): value is SigilValue<any> {
  */
 export function isLegacyCellLink(
   value: any,
-): value is LegacyDocCellLink | JSONCellLink {
+): value is LegacyDocCellLink | LegacyJSONCellLink {
   return isLegacyDocCellLink(value) || isJSONCellLink(value);
 }
 
@@ -107,7 +107,7 @@ export function isLegacyDocCellLink(value: any): value is LegacyDocCellLink {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isJSONCellLink(value: any): value is JSONCellLink {
+export function isJSONCellLink(value: any): value is LegacyJSONCellLink {
   return (
     isRecord(value) &&
     isRecord(value.cell) &&
@@ -141,7 +141,7 @@ export function isSigilWriteRedirectLink(
  */
 export function isAnyCellLink(
   value: any,
-): value is LegacyDocCellLink | SigilLink | JSONCellLink | LegacyAlias {
+): value is LegacyDocCellLink | SigilLink | LegacyJSONCellLink | LegacyAlias {
   return isLegacyCellLink(value) || isJSONCellLink(value) ||
     isSigilLink(value) ||
     isLegacyAlias(value);
@@ -232,6 +232,10 @@ export function parseLink(
   value: CellLink,
   base?: Cell | NormalizedLink,
 ): NormalizedLink;
+export function parseLink(
+  value: any,
+  base: Cell | NormalizedFullLink,
+): NormalizedFullLink | undefined;
 export function parseLink(
   value: any,
   base?: Cell | NormalizedLink,

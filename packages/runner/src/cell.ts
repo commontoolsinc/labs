@@ -26,8 +26,8 @@ import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
-  type JSONCellLink,
   type LegacyDocCellLink,
+  type LegacyJSONCellLink,
   LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
@@ -223,7 +223,7 @@ declare module "@commontools/api" {
     setSourceCell(sourceCell: Cell<any>): void;
     freeze(reason: string): void;
     isFrozen(): boolean;
-    toJSON(): JSONCellLink;
+    toJSON(): LegacyJSONCellLink;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
     value: T;
@@ -278,32 +278,25 @@ export function createCell<T>(
   log?: ReactivityLog,
   noResolve = false,
 ): Cell<T> {
-  const doc = runtime.documentMap.getDocByEntityId(link.space, link.id, true);
-  let { path, schema, rootSchema } = link;
+  let { schema, rootSchema } = link;
 
-  // Resolve the path to check whether it's a stream. We're not logging this right now.
-  // The corner case where during it's lifetime this changes from non-stream to stream
-  // or vice versa will not be detected.
-  const ref = noResolve
-    ? { cell: doc, path, schema, rootSchema }
-    : resolveLinkToValue(doc, path, undefined, schema, rootSchema);
+  // Resolve the path to check whether it's a stream. We're not logging this
+  // right now. The corner case where during it's lifetime this changes from
+  // non-stream to stream or vice versa will not be detected.
+  const tx = runtime.edit();
+  const resolvedLink = noResolve ? link : resolveLinkToValue(tx, link);
+  const value = tx.readValueOrThrow(resolvedLink);
+  tx.commit();
   // Use schema from alias if provided and no explicit schema was set
-  if (!schema && ref.schema) {
-    schema = ref.schema;
-    rootSchema = ref.rootSchema || ref.schema;
+  if (!schema && resolvedLink.schema) {
+    schema = resolvedLink.schema;
+    rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
   }
 
-  if (isStreamValue(ref.cell.getAtPath(ref.path))) {
+  if (isStreamValue(value)) {
     return createStreamCell(
       runtime,
-      {
-        ...link,
-        space: ref.cell.space,
-        id: toURI(ref.cell.entityId),
-        path: ref.path as string[],
-        schema,
-        rootSchema,
-      },
+      { ...resolvedLink, schema, rootSchema },
       log,
     ) as unknown as Cell<T>;
   } else {
@@ -347,7 +340,7 @@ function createStreamCell<T>(
   return self;
 }
 
-function appendTxToReactivityLog(
+export function appendTxToReactivityLog(
   log: ReactivityLog,
   tx: IStorageTransaction,
   runtime: IRuntime,
@@ -355,13 +348,15 @@ function appendTxToReactivityLog(
   for (const change of tx.log()) {
     if ("read" in change) {
       log.reads.push(parseNormalizedFullLinktoLegacyDocCellLink(
-        change.read!.address,
+        // Remove "value" prefix
+        { ...change.read!.address, path: change.read!.address.path.slice(1) },
         runtime,
       ));
     }
     if ("write" in change) {
       log.writes.push(parseNormalizedFullLinktoLegacyDocCellLink(
-        change.write!.address,
+        // Remove "value" prefix
+        { ...change.write!.address, path: change.write!.address.path.slice(1) },
         runtime,
       ));
     }
@@ -389,22 +384,32 @@ function createRegularCell<T>(
       if (log) appendTxToReactivityLog(log, tx, runtime);
       return value;
     },
-    set: (newValue: Cellify<T>) =>
+    set: (newValue: Cellify<T>) => {
+      const tx = runtime.edit();
+
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
-      diffAndUpdate(
-        resolveLinkToWriteRedirect(doc, path, log, schema, rootSchema),
+      const changed = diffAndUpdate(
+        parseNormalizedFullLinktoLegacyDocCellLink(
+          resolveLinkToWriteRedirect(tx, link),
+          runtime,
+        ),
         newValue,
         log,
         getTopFrame()?.cause,
-      ),
+      );
+      tx.commit();
+      if (log) appendTxToReactivityLog(log, tx, runtime);
+      return changed;
+    },
     send: (newValue: Cellify<T>) => self.set(newValue),
     update: (values: Cellify<Partial<T>>) => {
       if (!isRecord(values)) {
         throw new Error("Can't update with non-object value");
       }
       // Get current value, following aliases and references
-      const ref = resolveLinkToValue(doc, path, log, schema, rootSchema);
-      const currentValue = ref.cell.getAtPath(ref.path);
+      const tx = runtime.edit();
+      const resolvedLink = resolveLinkToValue(tx, link);
+      const currentValue = tx.readValueOrThrow(resolvedLink);
 
       // If there's no current value, initialize based on schema
       if (currentValue === undefined) {
@@ -423,8 +428,10 @@ function createRegularCell<T>(
             );
           }
         }
-        ref.cell.setAtPath(ref.path, {}, log, schema);
+        tx.writeValueOrThrow(resolvedLink, {});
       }
+      tx.commit();
+      if (log) appendTxToReactivityLog(log, tx, runtime);
 
       // Now update each property
       for (const [key, value] of Object.entries(values)) {
@@ -440,10 +447,12 @@ function createRegularCell<T>(
     ) => {
       // Follow aliases and references, since we want to get to an assumed
       // existing array.
-      const ref = resolveLinkToValue(doc, path, log, schema, rootSchema);
+      const tx = runtime.edit();
+      const resolvedLink = resolveLinkToValue(tx, link);
+      const currentValue = tx.readValueOrThrow(resolvedLink);
       const cause = getTopFrame()?.cause;
 
-      let array = ref.cell.getAtPath(ref.path);
+      let array = currentValue as unknown[];
       if (array !== undefined && !Array.isArray(array)) {
         throw new Error("Can't push into non-array value");
       }
@@ -460,33 +469,30 @@ function createRegularCell<T>(
       // separate operation, so that in the next steps [ID] is properly anchored
       // in the array.
       if (array === undefined) {
-        diffAndUpdate(ref, [], log, cause);
+        diffAndUpdate(
+          parseNormalizedFullLinktoLegacyDocCellLink(
+            resolvedLink,
+            runtime,
+          ),
+          [],
+          log,
+          cause,
+        );
         array = Array.isArray(schema?.default) ? schema.default : [];
       }
 
       // Append the new values to the array.
-      diffAndUpdate(ref, [...array, ...valuesToWrite], log, cause);
-
-      const appended = ref.cell.getAtPath(ref.path).slice(
-        -valuesToWrite.length,
+      diffAndUpdate(
+        parseNormalizedFullLinktoLegacyDocCellLink(
+          resolvedLink,
+          runtime,
+        ),
+        [...array, ...valuesToWrite],
+        log,
+        cause,
       );
-
-      // Hacky retry logic for push only. See storage.ts for details on this
-      // retry approach and what we should really be doing instead.
-      if (!ref.cell.retry) ref.cell.retry = [];
-      ref.cell.retry.push((newBaseValue) => {
-        // Unlikely, but maybe the conflict reset to undefined?
-        if (!Array.isArray(newBaseValue)) {
-          newBaseValue = Array.isArray(schema?.default) ? schema.default : [];
-        }
-
-        // Serialize cell links that were appended during the push. This works
-        // because of the .toJSON() method on Cell.
-        const newValues = JSON.parse(JSON.stringify(appended));
-
-        // Reappend the new values.
-        return [...(newBaseValue as unknown[]), ...newValues];
-      });
+      tx.commit();
+      if (log) appendTxToReactivityLog(log, tx, runtime);
     },
     equals: (other: any) => areLinksSame(self, other),
     key: <K extends T extends Cell<infer S> ? keyof S : keyof T>(
@@ -572,7 +578,7 @@ function createRegularCell<T>(
     },
     freeze: (reason: string) => doc.freeze(reason),
     isFrozen: () => doc.isFrozen(),
-    toJSON: (): JSONCellLink => // Keep old format for backward compatibility
+    toJSON: (): LegacyJSONCellLink => // Keep old format for backward compatibility
     ({ cell: doc.toJSON()!, path: path as (string | number)[] }),
     get value(): T {
       return self.get();
@@ -601,7 +607,7 @@ function createRegularCell<T>(
     [isCellMarker]: true,
     get copyTrap(): boolean {
       throw new Error(
-        "Copy trap: Don't copy renderer cells. Create references instead.",
+        "Copy trap: Don't cells. Create references instead.",
       );
     },
     schema,

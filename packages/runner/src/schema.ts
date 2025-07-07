@@ -5,7 +5,11 @@ import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
 import { createCell, isCell } from "./cell.ts";
 import { type LegacyDocCellLink, LINK_V1_TAG } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import { resolveLinks, resolveLinkToWriteRedirect } from "./link-resolution.ts";
+import {
+  readMaybeLink,
+  resolveLinks,
+  resolveLinkToWriteRedirect,
+} from "./link-resolution.ts";
 import { toURI } from "./uri-utils.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
@@ -286,26 +290,23 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedRef = resolveLinkToWriteRedirect(
-    runtime.documentMap.getDocByEntityId(link.space, link.id),
-    link.path,
-    log,
-    resolvedSchema,
-    rootSchema,
-  );
-  const doc = resolvedRef.cell;
-  const path = resolvedRef.path.map(String);
+  const resolvedLink = resolveLinkToWriteRedirect(tx, link);
 
   // Use schema from alias if provided and no explicit schema was set
-  if (!resolvedSchema && resolvedRef.schema) {
-    resolvedSchema = resolvedRef.schema;
-    rootSchema = resolvedRef.rootSchema || resolvedRef.schema;
+  if (!resolvedSchema && resolvedLink.schema) {
+    // Call resolveSchema to strip asCell/asStream here as well. It's still the
+    // initial `schema` that says whether this should be a cell, not the
+    // resolved schema.
+    resolvedSchema = resolveSchema(
+      resolvedLink.schema,
+      resolvedLink.rootSchema,
+      true,
+    );
+    rootSchema = resolvedLink.rootSchema || resolvedLink.schema;
   }
 
   link = {
-    ...link,
-    id: toURI(doc.entityId),
-    path: path,
+    ...resolvedLink,
     schema: resolvedSchema,
     rootSchema,
   };
@@ -324,7 +325,7 @@ export function validateAndTransform(
   // data. Below we handle the case where some options are meant to be cells.
   if (
     isRecord(schema) &&
-    ((schema!.asCell || schema!.asStream) ||
+    ((schema.asCell || schema.asStream) ||
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((
           option,
@@ -336,62 +337,45 @@ export function validateAndTransform(
     // But references can be paths beyond the current doc, so we create a
     // new reference based on the next doc in the chain and the remaining path.
 
-    // Start with -1 so that the first iteration is for the empty path, i.e.
-    // the top of the current doc is already a reference.
-    for (let i = -1; i < path.length; i++) {
-      const readSubPath = (extraPath: string[]) => {
-        return tx.readValueOrThrow({
-          ...link,
-          path: ["value", ...path.slice(0, i + 1), ...extraPath],
-        });
-      };
+    // Start with empty path, iterate to full path (hence <= and not <)
+    for (let i = 0; i <= link.path.length; i++) {
+      const parsedLink = readMaybeLink(tx, {
+        ...link,
+        path: link.path.slice(0, i),
+      });
 
-      // We're first checking for the deeper link paths, so that we're not
-      // reactive to other changes in the doc. If it looks like it could be a
-      // link, read the whole value, which might include siblings to the "/" and
-      // thus make the link invalid. In these cases, we do need to be ractive to
-      // all changes there.
-      if (
-        readSubPath(["/", LINK_V1_TAG]) ||
-        readSubPath(["cell", "/"]) ||
-        readSubPath(["$alias", "cell", "/"])
-      ) {
-        const value = readSubPath([]);
-
-        if (isWriteRedirectLink(value)) {
-          throw new Error(
-            "Unexpected write redirect in path, should have been handled by resolvePath",
+      if (parsedLink?.overwrite === "redirect") {
+        throw new Error(
+          "Unexpected write redirect in path, should have been handled by resolvePath",
+        );
+      }
+      if (parsedLink) {
+        const extraPath = [...link.path.slice(i)];
+        const newPath = [...parsedLink.path, ...extraPath];
+        const cfc = runtime.cfc;
+        let newSchema;
+        if (parsedLink.schema !== undefined) {
+          newSchema = cfc.getSchemaAtPath(
+            parsedLink.schema,
+            extraPath.map((key) => key.toString()),
+            rootSchema,
           );
+        } else if (i === link.path.length) {
+          // we don't have a schema provided directly for this cell link,
+          // but we can apply the one from our parent, since we are at
+          // the end of the path.
+          newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
         }
-        if (isAnyCellLink(value)) {
-          const parsedLink = parseLink(value, link);
-          const extraPath = [...path.slice(i + 1)];
-          const newPath = [...parsedLink.path, ...extraPath];
-          const cfc = runtime.cfc;
-          let newSchema;
-          if (parsedLink.schema !== undefined) {
-            newSchema = cfc.getSchemaAtPath(
-              parsedLink.schema,
-              extraPath.map((key) => key.toString()),
-              rootSchema,
-            );
-          } else if (i === path.length - 1) {
-            // we don't have a schema provided directly for this cell link,
-            // but we can apply the one from our parent, since we are at
-            // the end of the path.
-            newSchema = cfc.getSchemaAtPath(resolvedSchema, []);
-          }
-          return createCell(
-            runtime,
-            {
-              ...parsedLink,
-              path: newPath.map(String),
-              schema: newSchema,
-              rootSchema,
-            },
-            log,
-          );
-        }
+        return createCell(
+          runtime,
+          {
+            ...parsedLink,
+            path: newPath,
+            schema: newSchema,
+            rootSchema,
+          },
+          log,
+        );
       }
     }
     return createCell(runtime, link, log);
@@ -399,21 +383,16 @@ export function validateAndTransform(
 
   // If there is no schema, return as raw data via query result proxy
   if (resolvedSchema === undefined) {
-    return doc.getAsQueryResult(path, log);
+    const doc = runtime.documentMap.getDocByEntityId(link.space, link.id, true);
+    return doc.getAsQueryResult([...link.path], log);
   }
 
   // Now resolve further links until we get the actual value. Note that `doc`
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  const ref = resolveLinks({
-    cell: doc,
-    path,
-    schema: resolvedSchema,
-    rootSchema,
-  }, log);
-  let value = ref.cell.getAtPath(ref.path);
-  log?.reads.push({ ...ref });
+  const ref = resolveLinks(tx, link);
+  let value = tx.readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
@@ -597,7 +576,7 @@ export function validateAndTransform(
           result[key] = validateAndTransform(
             runtime,
             tx,
-            { ...link, path: [...path, key], schema: childSchema },
+            { ...link, path: [...link.path, key], schema: childSchema },
             log,
             seen,
           );
@@ -606,7 +585,7 @@ export function validateAndTransform(
           result[key] = processDefaultValue(
             runtime,
             tx,
-            { ...link, path: [...path, key], schema: childSchema },
+            { ...link, path: [...link.path, key], schema: childSchema },
             childSchema.default,
             log,
           );
@@ -629,7 +608,7 @@ export function validateAndTransform(
         result[key] = validateAndTransform(
           runtime,
           tx,
-          { ...link, path: [...path, key], schema: childSchema },
+          { ...link, path: [...link.path, key], schema: childSchema },
           log,
           seen,
         );
@@ -655,7 +634,7 @@ export function validateAndTransform(
         tx,
         {
           ...link,
-          path: [...path, String(i)],
+          path: [...link.path, String(i)],
           // TOOD(seefeld): Should be `false` instead of `{}`
           schema: resolvedSchema.items ?? {},
         },

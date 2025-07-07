@@ -31,9 +31,10 @@ import {
 } from "./recipe-binding.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
-  areLinksSame,
+  areNormalizedLinksSame,
   isLink,
   isWriteRedirectLink,
+  type NormalizedFullLink,
   parseLink,
   parseNormalizedFullLinktoLegacyDocCellLink,
   parseToLegacyAlias,
@@ -500,45 +501,36 @@ export class Runner implements IRunner {
     }
 
     // Check if any of the read cells is a stream alias
-    let streamRef: LegacyDocCellLink | undefined = undefined;
+    let streamLink: NormalizedFullLink | undefined = undefined;
     if (isRecord(inputs)) {
       for (const key in inputs) {
-        let doc = processCell.getDoc();
-        let path: PropertyKey[] = [key];
         let value = inputs[key];
         while (isWriteRedirectLink(value)) {
-          const ref = followWriteRedirects(value, processCell.getDoc());
-          doc = ref.cell;
-          path = ref.path;
-          value = doc.getAtPath(path);
+          // Reading this without logging, as streams remain streams.
+          const tx = this.runtime.edit();
+          const maybeStreamLink = followWriteRedirects(tx, value, processCell);
+          value = tx.readValueOrThrow(maybeStreamLink);
+          tx.commit();
         }
         if (isStreamValue(value)) {
-          streamRef = { cell: doc, path } satisfies LegacyDocCellLink;
+          streamLink = parseLink(inputs[key], processCell);
           break;
         }
       }
     }
 
-    if (streamRef) {
+    if (streamLink) {
       // Register as event handler for the stream
-      const stream = { ...streamRef };
-
       const handler = (event: any) => {
         if (event.preventDefault) event.preventDefault();
         const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
         for (const key in eventInputs) {
           if (isWriteRedirectLink(eventInputs[key])) {
-            // Use format-agnostic comparison for aliases
-            const alias = eventInputs[key];
+            // Use format-agnostic comparison for links
+            const eventLink = parseLink(eventInputs[key], processCell);
 
-            if (
-              areLinksSame(
-                alias,
-                streamRef,
-                processCell,
-              )
-            ) {
+            if (areNormalizedLinksSame(eventLink, streamLink)) {
               eventInputs[key] = event;
               cause[key] = crypto.randomUUID();
             }
@@ -591,9 +583,7 @@ export class Runner implements IRunner {
         }
       };
 
-      addCancel(
-        this.runtime.scheduler.addEventHandler(handler, parseLink(streamRef)),
-      );
+      addCancel(this.runtime.scheduler.addEventHandler(handler, streamLink));
     } else {
       if (isRecord(inputs) && "$event" in inputs) {
         throw new Error(

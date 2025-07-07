@@ -3,7 +3,7 @@ import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import { isCell } from "./cell.ts";
+import { appendTxToReactivityLog, isCell } from "./cell.ts";
 import { isAnyCellLink } from "./link-utils.ts";
 import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
@@ -12,6 +12,7 @@ import {
   areLinksSame,
   isLink,
   isWriteRedirectLink,
+  parseNormalizedFullLinktoLegacyDocCellLink,
   parseToLegacyCellLink,
 } from "./link-utils.ts";
 import {
@@ -30,7 +31,13 @@ export function setNestedValue<T>(
 ): boolean {
   const destValue = doc.getAtPath(path);
   if (isWriteRedirectLink(destValue)) {
-    const ref = followWriteRedirects(destValue, doc, log);
+    const tx = doc.runtime.edit();
+    const ref = parseNormalizedFullLinktoLegacyDocCellLink(
+      followWriteRedirects(tx, destValue, doc.asCell()),
+      doc.runtime,
+    );
+    tx.commit();
+    if (log) appendTxToReactivityLog(log, tx, doc.runtime);
     return setNestedValue(ref.cell, ref.path, value, log);
   }
 
@@ -211,7 +218,13 @@ export function normalizeAndDiff(
   if (isWriteRedirectLink(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
     log?.reads.push({ ...current });
-    const ref = followWriteRedirects(currentValue, current.cell, log);
+    const tx = current.cell.runtime.edit();
+    const ref = parseNormalizedFullLinktoLegacyDocCellLink(
+      followWriteRedirects(tx, currentValue, current.cell.asCell()),
+      current.cell.runtime,
+    );
+    tx.commit();
+    if (log) appendTxToReactivityLog(log, tx, current.cell.runtime);
     return normalizeAndDiff(ref, newValue, log, context);
   }
 

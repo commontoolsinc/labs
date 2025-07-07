@@ -8,6 +8,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { toURI } from "../src/uri-utils.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { compactifyPaths } from "../src/scheduler.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -317,9 +318,10 @@ describe("Schema Support", () => {
         schema: omitSchema,
         rootSchema: schema,
       });
-      expect(log.reads.length).toEqual(4);
+      const reads = compactifyPaths(log.reads);
+      expect(reads.length).toEqual(3);
       expect(
-        log.reads.map((r: LegacyDocCellLink) => ({
+        reads.map((r: LegacyDocCellLink) => ({
           cell: toURI(r.cell.entityId!),
           path: r.path,
         })),
@@ -327,7 +329,6 @@ describe("Schema Support", () => {
         { cell: toURI(docCell.entityId!), path: ["current"] },
         { cell: toURI(linkEntityId), path: [] },
         { cell: toURI(initialEntityId), path: ["foo"] },
-        { cell: toURI(initialEntityId), path: ["foo", "label"] },
       ]);
 
       // Then update it
