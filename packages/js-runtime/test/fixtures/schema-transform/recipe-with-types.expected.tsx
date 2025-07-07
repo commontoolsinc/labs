@@ -98,9 +98,9 @@ const addTodoSchema = {
     required: ["text"],
     title: "Add Todo",
     description: "Add a new todo item",
-    example: {
-        text: "Buy groceries"
-    }
+    examples: [{
+            text: "Buy groceries"
+        }]
 } as const satisfies JSONSchema;
 const toggleTodoSchema = {
     type: "object",
