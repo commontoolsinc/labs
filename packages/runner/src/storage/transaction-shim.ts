@@ -1,6 +1,7 @@
-import { refer } from "@commontools/memory/reference";
 import { isObject, isRecord } from "@commontools/utils/types";
 import type {
+  CommitError,
+  IExtendedStorageTransaction,
   IInvalidDataURIError,
   IMemorySpaceAddress,
   InactiveTransactionError,
@@ -23,6 +24,7 @@ import type {
   ReadError,
   Result,
   StorageTransactionFailed,
+  Unit,
   Write,
   WriteError,
   WriterError,
@@ -390,14 +392,6 @@ export class StorageTransaction implements IStorageTransaction {
 
   constructor(private runtime: IRuntime) {}
 
-  status(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
-    return { ok: this.currentStatus };
-  }
-
-  log(): IStorageTransactionLog {
-    return this.txLog;
-  }
-
   reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
     if (this.currentStatus.open === undefined) {
       const error = new Error(
@@ -430,18 +424,6 @@ export class StorageTransaction implements IStorageTransaction {
       return { ok: undefined, error: readResult.error };
     }
     return { ok: readResult.ok };
-  }
-
-  readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
-    const readResult = this.read(address);
-    if (readResult.error && readResult.error.name !== "NotFoundError") {
-      throw readResult.error;
-    }
-    return readResult.ok?.value;
-  }
-
-  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
-    return this.readOrThrow({ ...address, path: ["value", ...address.path] });
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
@@ -493,47 +475,6 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: writeResult.ok };
   }
 
-  writeOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
-    const writeResult = this.write(address, value);
-    if (writeResult.error && writeResult.error.name === "NotFoundError") {
-      // Create parent entries if needed
-      const lastValidPath = writeResult.error.path;
-      const value = (lastValidPath
-        ? this.readValueOrThrow({ ...address, path: lastValidPath })
-        : {}) as Record<string, any>;
-      if (!isObject(value)) {
-        throw new Error(
-          `Value at path ${address.path.join("/")} is not an object`,
-        );
-      }
-      const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
-      if (remainingPath.length === 0) {
-        throw new Error(
-          `Invalid error path: ${lastValidPath?.join("/")}`,
-        );
-      }
-      const lastKey = remainingPath.pop()!;
-      let nextValue = value;
-      for (const key of remainingPath) {
-        // TODO(seefeld): We should use schema meta data here or allow turning
-        // arrays into objects after the fact on write.
-        nextValue = nextValue[key] = typeof Number(key) === "number" ? [] : {};
-      }
-      nextValue[lastKey] = value;
-      const parentAddress = { ...address, path: lastValidPath ?? [] };
-      const writeResultRetry = this.write(parentAddress, value);
-      if (writeResultRetry.error) {
-        throw writeResultRetry.error;
-      }
-    } else if (writeResult.error) {
-      throw writeResult.error;
-    }
-  }
-
-  writeValueOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
-    this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
-  }
-
   abort(reason?: any): Result<any, InactiveTransactionError> {
     if (this.currentStatus.open === undefined) {
       const error = new Error(
@@ -551,7 +492,7 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: undefined };
   }
 
-  commit(): Promise<Result<any, StorageTransactionFailed>> {
+  commit(): Promise<Result<Unit, CommitError>> {
     if (this.currentStatus.open === undefined) {
       const error: any = new Error("Transaction already aborted");
       error.name = "StorageTransactionAborted";
@@ -562,6 +503,106 @@ export class StorageTransaction implements IStorageTransaction {
     // For now, just mark as done since we're only implementing basic read/write
     // In a real implementation, this would send the transaction to upstream storage
     this.currentStatus = { done: this.txLog };
-    return Promise.resolve({ ok: undefined });
+    return Promise.resolve({ ok: {} });
+  }
+}
+
+export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
+  constructor(private tx: IStorageTransaction) {}
+
+  status(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
+    // If the underlying transaction has status, use it; otherwise, return a default
+    // This assumes the underlying transaction is a StorageTransaction from this file
+    // and has currentStatus and txLog, otherwise this will need to be adapted
+    if (typeof (this.tx as any).currentStatus !== "undefined") {
+      return { ok: (this.tx as any).currentStatus };
+    }
+    // Fallback: not available
+    return { ok: { open: (this.tx as any).txLog } };
+  }
+
+  log(): IStorageTransactionLog {
+    if (typeof (this.tx as any).txLog !== "undefined") {
+      return (this.tx as any).txLog;
+    }
+    throw new Error("Underlying transaction does not expose log");
+  }
+
+  reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
+    return this.tx.reader(space);
+  }
+
+  read(address: IMemorySpaceAddress): Result<Read, ReadError> {
+    return this.tx.read(address);
+  }
+
+  readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
+    const readResult = this.tx.read(address);
+    if (readResult.error && readResult.error.name !== "NotFoundError") {
+      throw readResult.error;
+    }
+    return readResult.ok?.value;
+  }
+
+  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
+    return this.readOrThrow({ ...address, path: ["value", ...address.path] });
+  }
+
+  writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
+    return this.tx.writer(space);
+  }
+
+  write(
+    address: IMemorySpaceAddress,
+    value: any,
+  ): Result<Write, WriteError | WriterError> {
+    return this.tx.write(address, value);
+  }
+
+  writeOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
+    const writeResult = this.tx.write(address, value);
+    if (writeResult.error && writeResult.error.name === "NotFoundError") {
+      // Create parent entries if needed
+      const lastValidPath = writeResult.error.path;
+      const valueObj = (lastValidPath
+        ? this.readValueOrThrow({ ...address, path: lastValidPath })
+        : {}) as Record<string, any>;
+      if (!isObject(valueObj)) {
+        throw new Error(
+          `Value at path ${address.path.join("/")} is not an object`,
+        );
+      }
+      const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
+      if (remainingPath.length === 0) {
+        throw new Error(
+          `Invalid error path: ${lastValidPath?.join("/")}`,
+        );
+      }
+      const lastKey = remainingPath.pop()!;
+      let nextValue = valueObj;
+      for (const key of remainingPath) {
+        nextValue = nextValue[key] = typeof Number(key) === "number" ? [] : {};
+      }
+      nextValue[lastKey] = value;
+      const parentAddress = { ...address, path: lastValidPath ?? [] };
+      const writeResultRetry = this.tx.write(parentAddress, valueObj);
+      if (writeResultRetry.error) {
+        throw writeResultRetry.error;
+      }
+    } else if (writeResult.error) {
+      throw writeResult.error;
+    }
+  }
+
+  writeValueOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
+    this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
+  }
+
+  abort(reason?: any): Result<any, InactiveTransactionError> {
+    return this.tx.abort(reason);
+  }
+
+  commit(): Promise<Result<Unit, CommitError>> {
+    return this.tx.commit();
   }
 }

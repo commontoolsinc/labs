@@ -1,4 +1,3 @@
-import { isObject } from "@commontools/utils/types";
 import type {
   JSONSchema,
   Module,
@@ -16,10 +15,7 @@ import type {
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell, isCell } from "./cell.ts";
-import {
-  type LegacyDocCellLink,
-  type LegacyJSONCellLink,
-} from "./sigil-types.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
 import { DocumentMap, type EntityId, getEntityId } from "./doc-map.ts";
@@ -33,10 +29,12 @@ import {
 import type { Harness, RuntimeProgram } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
-import { StorageTransaction } from "./storage/transaction-shim.ts";
+import {
+  ExtendedStorageTransaction,
+  StorageTransaction,
+} from "./storage/transaction-shim.ts";
 import {
   type CellLink,
-  createSigilLinkFromParsedLink,
   isLegacyCellLink,
   isLink,
   isNormalizedFullLink,
@@ -423,7 +421,8 @@ export class Runtime implements IRuntime {
    * multiple spaces but writing only to one space.
    */
   edit(): IExtendedStorageTransaction {
-    return new StorageTransaction(this);
+    // TODO(seefeld): Make this a flag to use the new transaction system instead
+    return new ExtendedStorageTransaction(new StorageTransaction(this));
   }
 
   // Cell factory methods
