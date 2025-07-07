@@ -32,7 +32,7 @@ interface SetNumberEvent {
 }
 
 // Handler to increment the number
-const adder = handler<{}, InputState>((_, state) => {
+const adder = handler<unknown, InputState>((_, state) => {
   state.number.set(state.number.get() + 1);
 });
 
