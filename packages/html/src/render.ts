@@ -85,7 +85,7 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
 
   // Follow `[UI]` to actual vdom. Do this before otherwise parsing the vnode,
   // so that if there are both, the `[UI]` annotation takes precedence (avoids
-  // accidental collision with the otherwise quite generic propery names)
+  // accidental collision with the otherwise quite generic property names)
   while (node[UI]) node = node[UI];
 
   const sanitizedNode = sanitizeNode(node);

@@ -1,20 +1,23 @@
-import { describe, it } from "@std/testing/bdd";
+import { beforeEach, describe, it } from "@std/testing/bdd";
 import { h, UI } from "@commontools/api";
 import { render, renderImpl } from "../src/render.ts";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
 
+let dom: JSDOM;
+
+beforeEach(() => {
+  dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`);
+  const { document } = dom.window;
+  globalThis.document = document;
+  globalThis.Element = dom.window.Element;
+  globalThis.Node = dom.window.Node;
+  globalThis.Text = dom.window.Text;
+});
+
 describe("render", () => {
   it("renders", () => {
-    // Set up JSDOM environment for this test
-    const dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`);
-    const { document } = dom.window;
-
-    globalThis.document = document;
-    globalThis.Element = dom.window.Element;
-    globalThis.Node = dom.window.Node;
-    globalThis.Text = dom.window.Text;
-
+    // dom and globals are set up by beforeEach
     const renderable = h(
       "div",
       { id: "hello" },

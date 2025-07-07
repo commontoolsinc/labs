@@ -807,7 +807,7 @@ export type VNode = {
   name: string;
   props: Props;
   children: Array<Child> | Cell<Array<Child>>;
-  $UI?: VNode;
+  [UI]?: VNode;
 };
 
 declare global {
