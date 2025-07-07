@@ -952,6 +952,62 @@ export class CharmManager {
     return this.charms.get().find((charm) => isSameEntity(charm, charmId)) ??
       this.pinnedCharms.get().find((charm) => isSameEntity(charm, charmId));
   }
+
+  async link(
+    sourceCharmId: string,
+    sourcePath: (string | number)[],
+    targetCharmId: string,
+    targetPath: (string | number)[],
+  ): Promise<void> {
+    // Get source cell (charm or arbitrary cell)
+    const { cell: sourceCell, isCharm: sourceIsCharm } =
+      await getCellByIdOrCharm(
+        this,
+        sourceCharmId,
+        "Source",
+      );
+
+    // Get target cell (charm or arbitrary cell)
+    const { cell: targetCell, isCharm: targetIsCharm } =
+      await getCellByIdOrCharm(
+        this,
+        targetCharmId,
+        "Target",
+      );
+
+    // Navigate to the source path
+    let sourceResultCell = sourceCell;
+    // For charms, manager.get() already returns the result cell, so no need to add "result"
+
+    for (const segment of sourcePath) {
+      sourceResultCell = sourceResultCell.key(segment);
+    }
+
+    // Navigate to the target path
+    const targetKey = targetPath.pop();
+    if (!targetKey) {
+      throw new Error("Target path cannot be empty");
+    }
+
+    let targetInputCell = targetCell;
+    if (targetIsCharm) {
+      // For charms, target fields are in the source cell's argument
+      const sourceCell = targetCell.getSourceCell(processSchema);
+      if (!sourceCell) {
+        throw new Error("Target charm has no source cell");
+      }
+      targetInputCell = sourceCell.key("argument");
+    }
+
+    for (const segment of targetPath) {
+      targetInputCell = targetInputCell.key(segment);
+    }
+
+    targetInputCell.key(targetKey).set(sourceResultCell);
+
+    await this.runtime.idle();
+    await this.synced();
+  }
 }
 
 export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
@@ -959,3 +1015,36 @@ export const getRecipeIdFromCharm = (charm: Cell<Charm>): string => {
   if (!sourceCell) throw new Error("charm missing source cell");
   return sourceCell.get()?.[TYPE]!;
 };
+
+async function getCellByIdOrCharm(
+  manager: CharmManager,
+  cellId: string,
+  label: string,
+): Promise<{ cell: Cell<any>; isCharm: boolean }> {
+  try {
+    // Try to get as a charm first
+    const charm = await manager.get(cellId, true);
+    if (!charm) {
+      throw new Error(`Charm ${cellId} not found`);
+    }
+    return { cell: charm, isCharm: true };
+  } catch (error) {
+    // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
+    try {
+      const cell = await manager.getCellById({ "/": cellId });
+
+      // Check if this cell is actually a charm by looking at the charms list
+      const charms = manager.getCharms().get();
+      const isActuallyCharm = charms.some((charm) => {
+        const id = charmId(charm);
+        // If we can't get the charm ID, it's not a valid charm
+        if (!id) return false;
+        return id === cellId;
+      });
+
+      return { cell, isCharm: isActuallyCharm };
+    } catch (cellError) {
+      throw new Error(`${label} "${cellId}" not found as charm or cell`);
+    }
+  }
+}

@@ -1,28 +1,15 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import {
-  Cell,
-  NAME,
-  Recipe,
-  RecipeMeta,
-  Runtime,
-  RuntimeProgram,
-  UI,
-} from "@commontools/runner";
+import { Cell, Runtime, RuntimeProgram, UI } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
-  buildFullRecipe,
   Charm,
   charmId,
   CharmManager,
-  compileRecipe,
   extractUserCode,
-  getIframeRecipe,
-  getRecipeIdFromCharm,
-  injectUserCode,
-  processSchema,
 } from "@commontools/charm";
+import { CharmsView } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 
@@ -97,43 +84,10 @@ async function loadManager(config: SpaceConfig): Promise<CharmManager> {
   return charmManager;
 }
 
-async function getRecipeMeta(
-  manager: CharmManager,
-  charmId: string,
-): Promise<RecipeMeta> {
-  const recipe = await getRecipeFromService(manager, charmId);
-  return manager.runtime.recipeManager.getRecipeMeta(
-    recipe,
-  ) as RecipeMeta;
-}
-
-async function getIframeRecipeFromFile(
-  manager: CharmManager,
-  mainPath: string,
-  charmId: string,
-): Promise<Recipe> {
-  const charm = await manager.get(charmId);
-  if (!charm) {
-    throw new Error(`Charm "${charmId}" not found.`);
-  }
-  const iframeRecipe = getIframeRecipe(charm, manager.runtime);
-  if (!iframeRecipe.iframe) {
-    throw new Error(`Expected charm "${charmId}" to be an iframe recipe.`);
-  }
-  iframeRecipe.iframe.src = injectUserCode(await Deno.readTextFile(mainPath));
-  return await compileRecipe(
-    buildFullRecipe(iframeRecipe.iframe),
-    "recipe",
-    manager.runtime,
-    manager.getSpace(),
-    undefined,
-  );
-}
-
-async function getRecipeFromFile(
+async function getProgramFromFile(
   manager: CharmManager,
   entry: EntryConfig,
-): Promise<Recipe> {
+): Promise<RuntimeProgram> {
   // Walk entry file and collect all sources from fs.
   const program: RuntimeProgram = await manager.runtime.harness.resolve(
     new CliProgram(entry.mainPath),
@@ -141,53 +95,7 @@ async function getRecipeFromFile(
   if (entry.mainExport) {
     program.mainExport = entry.mainExport;
   }
-  return await compileRecipe(
-    program,
-    "recipe",
-    manager.runtime,
-    manager.getSpace(),
-    undefined, // parents
-  );
-}
-
-async function getRecipeFromService(
-  manager: CharmManager,
-  charmId: string,
-): Promise<Recipe> {
-  const charm = await manager.get(charmId, false);
-  if (!charm) {
-    throw new Error(`Charm "${charmId}" not found`);
-  }
-
-  const recipeId = getRecipeIdFromCharm(charm!);
-  return await manager.runtime.recipeManager.loadRecipe(
-    recipeId,
-    manager.getSpace(),
-  );
-}
-
-async function exec({
-  manager,
-  recipe,
-  charmId,
-  input,
-}: {
-  manager: CharmManager;
-  recipe: Recipe;
-  charmId?: string;
-  input?: object;
-}): Promise<Cell<Charm>> {
-  let charm;
-  // If we have a charm ID, we're updating a specific charm.
-  if (charmId) {
-    charm = await manager.runWithRecipe(recipe, charmId!, input);
-  } // If we don't, we're creating a new recipe.
-  else {
-    charm = await manager.runPersistent(recipe, input);
-  }
-  await manager.runtime.idle();
-  await manager.synced();
-  return charm;
+  return program;
 }
 
 // Returns an array of metadata about charms to display.
@@ -195,13 +103,16 @@ export async function listCharms(
   config: SpaceConfig,
 ): Promise<{ id: string; name?: string; recipeName?: string }[]> {
   const manager = await loadManager(config);
-  const charms = manager.getCharms().get();
-  return Promise.all(charms.map(async (charm) => {
-    const name = charm.get()[NAME];
-    const id = getCharmIdSafe(charm);
-    const recipeName = (await getRecipeMeta(manager, id)).recipeName;
-    return { id, name, recipeName };
-  }));
+  const charms = new CharmsView(manager);
+  return Promise.all(
+    charms.getAllCharms().map(async (charm) => {
+      return {
+        id: charm.id,
+        name: charm.name(),
+        recipeName: (await charm.getRecipeMeta()).recipeName,
+      };
+    }),
+  );
 }
 
 // Creates a new charm from source code and optional input.
@@ -210,9 +121,10 @@ export async function newCharm(
   entry: EntryConfig,
 ): Promise<string> {
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromFile(manager, entry);
-  const charm = await exec({ manager, recipe });
-  return getCharmIdSafe(charm);
+  const charms = new CharmsView(manager);
+  const program = await getProgramFromFile(manager, entry);
+  const charm = await charms.create(program);
+  return charm.id;
 }
 
 export async function setCharmRecipe(
@@ -220,20 +132,13 @@ export async function setCharmRecipe(
   entry: EntryConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
-  let recipe;
+  const charms = new CharmsView(manager);
+  const charm = await charms.get(config.charm);
   if (entry.mainPath.endsWith(".iframe.js")) {
-    recipe = await getIframeRecipeFromFile(
-      manager,
-      entry.mainPath,
-      config.charm,
-    );
+    await charm.setIframeRecipe(entry.mainPath);
   } else {
-    recipe = await getRecipeFromFile(
-      manager,
-      entry,
-    );
+    await charm.setRecipe(await getProgramFromFile(manager, entry));
   }
-  await exec({ manager, recipe, charmId: config.charm });
 }
 
 export async function saveCharmRecipe(
@@ -242,19 +147,13 @@ export async function saveCharmRecipe(
 ): Promise<void> {
   await ensureDir(outPath);
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromService(manager, config.charm);
-  const meta = manager.runtime.recipeManager.getRecipeMeta(
-    recipe,
-  ) as RecipeMeta;
+  const charms = new CharmsView(manager);
+  const charm = await charms.get(config.charm);
+  const meta = await charm.getRecipeMeta();
+  const iframeRecipe = await charm.getIframeRecipe();
 
-  const charm = await manager.get(config.charm);
-  if (!charm) {
-    throw new Error(`Charm ${config.charm} not found.`);
-  }
-
-  const iframeRecipe = getIframeRecipe(charm, manager.runtime);
-  if (iframeRecipe.iframe) {
-    const userCode = extractUserCode(iframeRecipe.iframe.src);
+  if (iframeRecipe) {
+    const userCode = extractUserCode(iframeRecipe.src);
     if (!userCode) {
       throw new Error(`No user code found in iframe recipe "${config.charm}".`);
     }
@@ -281,47 +180,12 @@ export async function saveCharmRecipe(
 
 export async function applyCharmInput(
   config: CharmConfig,
-  input: object | undefined,
+  input: object,
 ) {
   const manager = await loadManager(config);
-  const recipe = await getRecipeFromService(manager, config.charm);
-  await exec({ manager, recipe, charmId: config.charm, input });
-}
-
-async function getCellByIdOrCharm(
-  manager: CharmManager,
-  cellId: string,
-  label: string,
-): Promise<{ cell: Cell<any>; isCharm: boolean }> {
-  try {
-    // Try to get as a charm first
-    const charm = await manager.get(cellId, true);
-    if (!charm) {
-      throw new Error(`Charm ${cellId} not found`);
-    }
-    return { cell: charm, isCharm: true };
-  } catch (error) {
-    // If manager.get() fails (e.g., "recipeId is required"), try as arbitrary cell ID
-    try {
-      const cell = await manager.getCellById({ "/": cellId });
-
-      // Check if this cell is actually a charm by looking at the charms list
-      const charms = manager.getCharms().get();
-      const isActuallyCharm = charms.some((charm) => {
-        try {
-          const id = getCharmIdSafe(charm);
-          return id === cellId;
-        } catch {
-          // If we can't get the charm ID, it's not a valid charm
-          return false;
-        }
-      });
-
-      return { cell, isCharm: isActuallyCharm };
-    } catch (cellError) {
-      throw new Error(`${label} "${cellId}" not found as charm or cell`);
-    }
-  }
+  const charms = new CharmsView(manager);
+  const charm = await charms.get(config.charm);
+  await charm.setInput(input);
 }
 
 export async function linkCharms(
@@ -332,53 +196,7 @@ export async function linkCharms(
   targetPath: (string | number)[],
 ): Promise<void> {
   const manager = await loadManager(config);
-
-  // Get source cell (charm or arbitrary cell)
-  const { cell: sourceCell, isCharm: sourceIsCharm } = await getCellByIdOrCharm(
-    manager,
-    sourceCharmId,
-    "Source",
-  );
-
-  // Get target cell (charm or arbitrary cell)
-  const { cell: targetCell, isCharm: targetIsCharm } = await getCellByIdOrCharm(
-    manager,
-    targetCharmId,
-    "Target",
-  );
-
-  // Navigate to the source path
-  let sourceResultCell = sourceCell;
-  // For charms, manager.get() already returns the result cell, so no need to add "result"
-
-  for (const segment of sourcePath) {
-    sourceResultCell = sourceResultCell.key(segment);
-  }
-
-  // Navigate to the target path
-  const targetKey = targetPath.pop();
-  if (!targetKey) {
-    throw new Error("Target path cannot be empty");
-  }
-
-  let targetInputCell = targetCell;
-  if (targetIsCharm) {
-    // For charms, target fields are in the source cell's argument
-    const sourceCell = targetCell.getSourceCell(processSchema);
-    if (!sourceCell) {
-      throw new Error("Target charm has no source cell");
-    }
-    targetInputCell = sourceCell.key("argument");
-  }
-
-  for (const segment of targetPath) {
-    targetInputCell = targetInputCell.key(segment);
-  }
-
-  targetInputCell.key(targetKey).set(sourceResultCell);
-
-  await manager.runtime.idle();
-  await manager.synced();
+  await manager.link(sourceCharmId, sourcePath, targetCharmId, targetPath);
 }
 
 // Constants for charm mapping
@@ -517,12 +335,6 @@ export enum MapFormat {
   DOT = "dot",
 }
 
-export async function getCharmConnections(
-  config: SpaceConfig,
-): Promise<CharmConnectionMap> {
-  return await buildConnectionMap(config);
-}
-
 export function formatSpaceMap(
   connections: CharmConnectionMap,
   format: MapFormat,
@@ -541,7 +353,7 @@ export async function generateSpaceMap(
   config: SpaceConfig,
   format: MapFormat = MapFormat.ASCII,
 ): Promise<string> {
-  const connections = await getCharmConnections(config);
+  const connections = await buildConnectionMap(config);
   return formatSpaceMap(connections, format);
 }
 
@@ -557,36 +369,21 @@ export async function inspectCharm(
   readBy: Array<{ id: string; name?: string }>;
 }> {
   const manager = await loadManager(config);
+  const charms = new CharmsView(manager);
+  const charm = await charms.get(config.charm);
 
-  const charm = await manager.get(config.charm, false);
-  if (!charm) {
-    throw new Error(`Charm "${config.charm}" not found`);
-  }
-
-  const id = getCharmIdSafe(charm);
-  const name = charm.get()[NAME];
-
-  // Get recipe metadata
-  const recipeMeta = await getRecipeMeta(manager, config.charm);
-  const recipeName = recipeMeta.recipeName;
-
-  // Get source (arguments/inputs)
-  const argumentCell = manager.getArgument(charm);
-  const source = argumentCell.get();
-
-  // Get result (charm data)
-  const result = charm.get();
-
-  // Get charms this one reads from
-  const readingFrom = manager.getReadingFrom(charm).map((c) => ({
-    id: getCharmIdSafe(c),
-    name: c.get()[NAME],
+  const id = charm.id;
+  const name = charm.name();
+  const recipeName = (await charm.getRecipeMeta()).recipeName;
+  const source = charm.getInput();
+  const result = charm.getResult();
+  const readingFrom = charm.readingFrom().map((charm) => ({
+    id: charm.id,
+    name: charm.name(),
   }));
-
-  // Get charms that read from this one
-  const readBy = manager.getReadByCharms(charm).map((c) => ({
-    id: getCharmIdSafe(c),
-    name: c.get()[NAME],
+  const readBy = charm.readBy().map((charm) => ({
+    id: charm.id,
+    name: charm.name(),
   }));
 
   return {

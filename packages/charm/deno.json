@@ -3,5 +3,8 @@
   "tasks": {
     "test": "deno test --allow-env --allow-ffi --allow-read"
   },
-  "exports": "./src/index.ts"
+  "exports": {
+    ".": "./src/index.ts",
+    "./ops": "./src/ops/mod.ts"
+  }
 }
