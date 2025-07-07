@@ -17,7 +17,7 @@ interface CounterState {
   value: Cell<number>;
 }
 
-const increment = handler<{}, CounterState>((e, state) => {
+const increment = handler<unknown, CounterState>((e, state) => {
   state.value.set(state.value.get() + 1);
 });
 
