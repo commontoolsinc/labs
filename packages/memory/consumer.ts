@@ -223,7 +223,7 @@ class MemoryConsumerSession<
     // If we're not at the front of the queue, wait until we are
     if (queueEntry !== this.sendQueue[0]) {
       await queueEntry.promise;
-      // Check to see if we've been canceled
+      // We can be resolved, then rejected (noop) via cancel.
       if (this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]) {
         throw new Error("session cancel");
       }
