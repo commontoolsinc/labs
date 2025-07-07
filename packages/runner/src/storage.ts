@@ -95,7 +95,7 @@ export class Storage implements IStorage {
    *
    * TODO(seefeld): Should this return a `Cell` instead? Or just an empty promise?
    */
-  syncCell<T = any>(
+  async syncCell<T = any>(
     cell: DocImpl<T> | Cell<any>,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
@@ -113,63 +113,8 @@ export class Storage implements IStorage {
       };
     }
 
-    return this._syncCellHelper(cell, schemaContext);
-  }
-
-  synced(): Promise<void> {
-    return Promise.all([
-      ...this.loadingPromises.values(),
-      ...this.docToStoragePromises.values(),
-    ]).then(() => {
-      return;
-    });
-  }
-
-  async cancelAll(): Promise<void> {
-    await Promise.all(
-      Array.from(this.storageProviders.values()).map((provider) =>
-        provider.destroy()
-      ),
-    );
-    this.loadingPromises.clear();
-    this.loadingResolves.clear();
-    this.storageToDocSubs.clear();
-    this.docToStorageSubs.clear();
-    this.docToStoragePromises.clear();
-    this.cancel();
-  }
-
-  private _getStorageProviderForSpace(space: MemorySpace): IStorageProvider {
-    if (!space) throw new Error("No space set");
-
-    let provider = this.storageProviders.get(space);
-
-    if (!provider) {
-      provider = this.storageManager.open(space);
-      this.storageProviders.set(space, provider);
-    }
-    return provider;
-  }
-
-  // Given a doc and a schema context, return a string that can be used as a map key
-  private static _getSyncKey(doc: DocImpl<any>, schemaContext?: SchemaContext) {
-    // I use SchemaPathSelector here instead of just SchemaContext because
-    // it's the more general way to load a doc.
-    const selector: SchemaPathSelector = {
-      path: [],
-      schemaContext: schemaContext,
-    };
-    const selectorRef = refer(JSON.stringify(selector)).toString();
-    const docId = entityIdStr(doc.entityId);
-    return `${doc.space}/${docId}/application/json:${selectorRef}`;
-  }
-
-  // Replacement for _ensureIsSynced
-  private async _syncCellHelper<T>(
-    doc: DocImpl<T> | Cell<any>,
-    schemaContext?: SchemaContext,
-  ): Promise<DocImpl<T>> {
-    if (isCell(doc) || isStream(doc)) doc = doc.getDoc();
+    let doc = cell;
+    if (isCell(cell) || isStream(cell)) doc = cell.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
@@ -212,6 +157,53 @@ export class Storage implements IStorage {
     this.loadingResolves.delete(syncKey);
     this.loadingPromises.delete(syncKey);
     return doc;
+  }
+
+  async synced(): Promise<void> {
+    await Promise.all([
+      ...this.loadingPromises.values(),
+      ...this.docToStoragePromises.values(),
+    ]);
+    return;
+  }
+
+  async cancelAll(): Promise<void> {
+    await Promise.all(
+      Array.from(this.storageProviders.values()).map((provider) =>
+        provider.destroy()
+      ),
+    );
+    this.loadingPromises.clear();
+    this.loadingResolves.clear();
+    this.storageToDocSubs.clear();
+    this.docToStorageSubs.clear();
+    this.docToStoragePromises.clear();
+    this.cancel();
+  }
+
+  private _getStorageProviderForSpace(space: MemorySpace): IStorageProvider {
+    if (!space) throw new Error("No space set");
+
+    let provider = this.storageProviders.get(space);
+
+    if (!provider) {
+      provider = this.storageManager.open(space);
+      this.storageProviders.set(space, provider);
+    }
+    return provider;
+  }
+
+  // Given a doc and a schema context, return a string that can be used as a map key
+  private static _getSyncKey(doc: DocImpl<any>, schemaContext?: SchemaContext) {
+    // I use SchemaPathSelector here instead of just SchemaContext because
+    // it's the more general way to load a doc.
+    const selector: SchemaPathSelector = {
+      path: [],
+      schemaContext: schemaContext,
+    };
+    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const docId = entityIdStr(doc.entityId);
+    return `${doc.space}/${docId}/application/json:${selectorRef}`;
   }
 
   // After attempting to load the relevant documents from storage, we can
@@ -443,7 +435,7 @@ export class Storage implements IStorage {
       );
       // we don't need to await this, since by the time we've resolved our
       // docToStoragePromise, we'll have added the loadingPromise.
-      this._syncCellHelper(linkedDoc);
+      this.syncCell(linkedDoc);
     }
 
     const docToStoragePromise = storageProvider.send([{
