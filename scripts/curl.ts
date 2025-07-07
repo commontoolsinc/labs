@@ -48,7 +48,7 @@ async function main() {
   // the space is not an entity (not available with the 'of:` prefix).
   // did key is base58btc; entity id is base32; attribute is mime type-ish
   const urlRegex: RegExp =
-    /^(ct:\/\/)?((?<spaceDID>(did:key:[1-9A-HJ-NP-Za-km-z]+))|(?<spaceName>[^/:]+))\/(?<of>[a-z2-7]+)(\/(?<the>\w+\/[-+.\w]+))?$/;
+    /^(ct:\/\/)?((?<spaceDID>(did:key:[1-9A-HJ-NP-Za-km-z]{48}))|(?<spaceName>[^/:]+))\/(?<of>[a-z2-7]{59})(\/(?<the>\w+\/[-+.\w]+))?$/;
   const match = url.match(urlRegex);
   if (match === null || match.groups === undefined) {
     console.error("Invalid url");
