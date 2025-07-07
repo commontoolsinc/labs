@@ -4,7 +4,7 @@ import { Cell } from "@commontools/runner";
 import { CommonCharmElement } from "./common-charm.ts";
 
 declare global {
-  interface Window {
+  interface GlobalThis {
     Plaid: any;
   }
 }
@@ -75,9 +75,9 @@ export class CommonPlaidLinkElement extends LitElement {
     }
   }
 
-  private async loadPlaidScript() {
+  private loadPlaidScript() {
     // Check if already loaded
-    if (window.Plaid) {
+    if (globalThis.Plaid) {
       this.plaidScriptLoaded = true;
       return;
     }
@@ -109,7 +109,7 @@ export class CommonPlaidLinkElement extends LitElement {
   }
 
   async handleConnectClick() {
-    if (!this.plaidScriptLoaded || !window.Plaid) {
+    if (!this.plaidScriptLoaded || !globalThis.Plaid) {
       this.authStatus = "Plaid Link is still loading, please wait...";
       return;
     }
@@ -213,7 +213,7 @@ export class CommonPlaidLinkElement extends LitElement {
       },
     };
 
-    this.plaidHandler = window.Plaid.create(config);
+    this.plaidHandler = globalThis.Plaid.create(config);
 
     // Open Link immediately
     this.plaidHandler.open();
