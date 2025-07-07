@@ -21,6 +21,7 @@ import {
   SchemaObjectTraverser,
   type ValueEntry,
 } from "../traverse.ts";
+import { uriToEntityId } from "./transaction-shim.ts";
 
 export abstract class ClientObjectManager extends BaseObjectManager<
   FactAddress,
@@ -110,7 +111,7 @@ export class DocObjectManager extends ClientObjectManager {
       return this.readValues.get(key)!;
     }
     // strip off the leading "of:"
-    const entityId = { "/": doc.of.slice(3) };
+    const entityId = uriToEntityId(doc.of);
     // First, check the document map
     const docMapEntry = this.documentMap.getDocByEntityId(
       this.space,
