@@ -8,7 +8,7 @@ import {
 } from "./builder/types.ts";
 import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, isCell } from "./cell.ts";
+import { appendTxToReactivityLog, type Cell, isCell } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -17,6 +17,7 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
+  parseNormalizedFullLinktoLegacyDocCellLink,
 } from "./link-utils.ts";
 
 /**
@@ -31,30 +32,33 @@ import {
  * @param log - Optional reactivity log
  */
 export function sendValueToBinding<T>(
-  docOrCell: DocImpl<T> | Cell<T>,
+  cell: Cell<T>,
   binding: unknown,
   value: unknown,
   log?: ReactivityLog,
 ): void {
-  const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
+  const runtime = cell.getDoc().runtime;
   if (isLegacyAlias(binding)) {
-    const ref = followWriteRedirects(binding, doc, log);
-    diffAndUpdate(ref, value, log, { doc, binding });
+    const tx = runtime.edit();
+    const ref = followWriteRedirects(tx, binding, cell);
+    diffAndUpdate(
+      parseNormalizedFullLinktoLegacyDocCellLink(ref, runtime),
+      value,
+      log,
+      { doc: cell.getDoc(), binding },
+    );
+    tx.commit();
+    if (log) appendTxToReactivityLog(log, tx, runtime);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
-        sendValueToBinding(docOrCell, binding[i], value[i], log);
+        sendValueToBinding(cell, binding[i], value[i], log);
       }
     }
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
-        sendValueToBinding(
-          docOrCell,
-          binding[key],
-          value[key],
-          log,
-        );
+        sendValueToBinding(cell, binding[key], value[key], log);
       }
     }
   } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {

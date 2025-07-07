@@ -1,5 +1,5 @@
 import { refer } from "@commontools/memory/reference";
-import { isRecord } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
 import type {
   IInvalidDataURIError,
   IMemorySpaceAddress,
@@ -28,7 +28,6 @@ import type {
   WriterError,
 } from "./interface.ts";
 import type { IRuntime } from "../runtime.ts";
-import type { DocImpl } from "../doc.ts";
 import type { EntityId } from "../doc-map.ts";
 import { getValueAtPath } from "../path-utils.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
@@ -84,8 +83,8 @@ function validateParentPath(
     pathError.name = "NotFoundError";
 
     // Set pathError.path to last valid parent path component
-    pathError.path = [];
     if (isRecord(value)) {
+      pathError.path = [];
       while (parentPath.length > 0) {
         const segment = parentPath.shift()!;
         value = value[segment];
@@ -433,12 +432,16 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: readResult.ok };
   }
 
-  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
+  readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
     const readResult = this.read(address);
     if (readResult.error && readResult.error.name !== "NotFoundError") {
       throw readResult.error;
     }
     return readResult.ok?.value;
+  }
+
+  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
+    return this.readOrThrow({ ...address, path: ["value", ...address.path] });
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
@@ -488,6 +491,47 @@ export class StorageTransaction implements IStorageTransaction {
       return { ok: undefined, error: writeResult.error as WriteError };
     }
     return { ok: writeResult.ok };
+  }
+
+  writeOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
+    const writeResult = this.write(address, value);
+    if (writeResult.error && writeResult.error.name === "NotFoundError") {
+      // Create parent entries if needed
+      const lastValidPath = writeResult.error.path;
+      const value = (lastValidPath
+        ? this.readValueOrThrow({ ...address, path: lastValidPath })
+        : {}) as Record<string, any>;
+      if (!isObject(value)) {
+        throw new Error(
+          `Value at path ${address.path.join("/")} is not an object`,
+        );
+      }
+      const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
+      if (remainingPath.length === 0) {
+        throw new Error(
+          `Invalid error path: ${lastValidPath?.join("/")}`,
+        );
+      }
+      const lastKey = remainingPath.pop()!;
+      let nextValue = value;
+      for (const key of remainingPath) {
+        // TODO(seefeld): We should use schema meta data here or allow turning
+        // arrays into objects after the fact on write.
+        nextValue = nextValue[key] = typeof Number(key) === "number" ? [] : {};
+      }
+      nextValue[lastKey] = value;
+      const parentAddress = { ...address, path: lastValidPath ?? [] };
+      const writeResultRetry = this.write(parentAddress, value);
+      if (writeResultRetry.error) {
+        throw writeResultRetry.error;
+      }
+    } else if (writeResult.error) {
+      throw writeResult.error;
+    }
+  }
+
+  writeValueOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
+    this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 
   abort(reason?: any): Result<any, InactiveTransactionError> {

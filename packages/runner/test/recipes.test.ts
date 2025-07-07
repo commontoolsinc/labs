@@ -1031,17 +1031,22 @@ describe("Recipe Runner", () => {
     expect(wrapperCell.get()).toBe(5);
 
     // Follow all the links until we get to the doc holding the value
-    const ref = resolveLinks(wrapperCell.getAsLegacyCellLink());
+    const tx = runtime.edit();
+    const ref = resolveLinks(
+      tx,
+      wrapperCell.getAsNormalizedFullLink(),
+    );
     expect(ref.path).toEqual([]); // = This is stored in its own document
 
     // And let's make sure the value is correct
-    expect(ref.cell.get()).toBe(5);
+    expect(tx.readValueOrThrow(ref)).toBe(5);
 
     input.send(10);
     await runtime.idle();
 
     // That same value was updated, which shows that the id was stable
-    expect(ref.cell.get()).toBe(10);
+    expect(tx.readValueOrThrow(ref)).toBe(10);
+    tx.commit();
   });
 
   it("should handle pushing objects that reference their containing array", async () => {

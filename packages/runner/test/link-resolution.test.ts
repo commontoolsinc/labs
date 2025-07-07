@@ -4,7 +4,7 @@ import { followWriteRedirects } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { areLinksSame } from "../src/link-utils.ts";
+import { areNormalizedLinksSame } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -36,8 +36,10 @@ describe("link-resolution", () => {
       );
       testCell.set({ value: 42 });
       const binding = { $alias: { path: ["value"] } };
-      const result = followWriteRedirects(binding, testCell);
-      expect(result.cell.getAtPath(result.path)).toBe(42);
+      const tx = runtime.edit();
+      const result = followWriteRedirects(tx, binding, testCell);
+      expect(tx.readValueOrThrow(result)).toBe(42);
+      tx.commit();
     });
 
     it("should follow nested aliases", () => {
@@ -54,9 +56,18 @@ describe("link-resolution", () => {
         outer: { $alias: innerCell.key("inner").getAsLegacyCellLink() },
       });
       const binding = { $alias: { path: ["outer"] } };
-      const result = followWriteRedirects(binding, outerCell);
-      expect(areLinksSame(result, innerCell.key("inner"))).toBe(true);
-      expect(result.cell.getAtPath(result.path)).toBe(10);
+      const tx = runtime.edit();
+      const result = followWriteRedirects(tx, binding, outerCell);
+      expect(
+        areNormalizedLinksSame(
+          result,
+          innerCell.key("inner").getAsNormalizedFullLink(),
+        ),
+      ).toBe(
+        true,
+      );
+      expect(tx.readValueOrThrow(result)).toBe(10);
+      tx.commit();
     });
 
     it("should throw an error on circular aliases", () => {
@@ -77,9 +88,11 @@ describe("link-resolution", () => {
         alias: { $alias: cellA.key("alias").getAsLegacyCellLink() },
       });
       const binding = { $alias: { path: ["alias"] } };
-      expect(() => followWriteRedirects(binding, cellA)).toThrow(
+      const tx = runtime.edit();
+      expect(() => followWriteRedirects(tx, binding, cellA)).toThrow(
         "cycle detected",
       );
+      tx.commit();
     });
 
     it("should allow aliases in aliased paths", () => {
@@ -91,11 +104,16 @@ describe("link-resolution", () => {
         a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },
       });
       const binding = { $alias: { path: ["a", "a", "c"] } };
-      const result = followWriteRedirects(binding, testCell);
-      expect(areLinksSame(result, testCell.key("a").key("b").key("c"))).toBe(
-        true,
-      );
-      expect(result.cell.getAtPath(result.path)).toBe(1);
+      const tx = runtime.edit();
+      const result = followWriteRedirects(tx, binding, testCell);
+      expect(
+        areNormalizedLinksSame(
+          result,
+          testCell.key("a").key("b").key("c").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
+      expect(tx.readValueOrThrow(result)).toBe(1);
+      tx.commit();
     });
   });
 });

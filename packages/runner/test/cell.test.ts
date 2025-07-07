@@ -491,7 +491,7 @@ describe("createProxy", () => {
     const result = proxy.find((x: any) => x === 2);
     expect(result).toBe(2);
     expect(c.get()).toEqual([1, 2, 3]);
-    expect(log.reads.map((r) => r.path)).toEqual([[], [0], [1], [2]]);
+    expect(log.reads.map((r) => r.path)).toEqual([[], ["0"], ["1"], ["2"]]);
     expect(log.writes).toEqual([]);
   });
 
@@ -508,9 +508,9 @@ describe("createProxy", () => {
     expect(log.reads.map((r) => r.path)).toEqual([
       [],
       ["a"],
-      ["a", 0],
-      ["a", 1],
-      ["a", 2],
+      ["a", "0"],
+      ["a", "1"],
+      ["a", "2"],
     ]);
   });
 

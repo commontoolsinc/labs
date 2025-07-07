@@ -516,11 +516,11 @@ describe("Schema-to-TS Type Conversion", () => {
     type User = Schema<typeof schema>;
 
     // Create a cell with data matching the schema
-    const settingsCell = runtime.documentMap.getDoc(
-      { theme: "dark", notifications: true },
-      "settings-cell",
+    const settingsCell = runtime.getCell(
       space,
-    ).asCell();
+      "settings-cell",
+    );
+    settingsCell.set({ theme: "dark", notifications: true });
 
     // This is just to verify the type works at runtime
     // We're not actually testing the Schema type itself, just that it's compatible
@@ -528,7 +528,9 @@ describe("Schema-to-TS Type Conversion", () => {
       name: "John",
       age: 30,
       tags: ["developer", "typescript"],
-      settings: settingsCell,
+      settings: settingsCell.getAsLink() as unknown as Cell<
+        Schema<typeof schema.properties.settings>
+      >,
     };
 
     const userCell = runtime.getImmutableCell(

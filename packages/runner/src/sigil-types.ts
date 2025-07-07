@@ -82,7 +82,7 @@ export type LegacyAlias = {
  *
  * @deprecated Switch to sigil links instead.
  */
-export type JSONCellLink = {
+export type LegacyJSONCellLink = {
   cell: { "/": string };
   path: (string | number)[];
 };

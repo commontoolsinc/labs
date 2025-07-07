@@ -1,3 +1,4 @@
+import { isObject } from "@commontools/utils/types";
 import type {
   JSONSchema,
   Module,
@@ -14,19 +15,28 @@ import type {
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
-import { type Cell } from "./cell.ts";
-import { type JSONCellLink, type LegacyDocCellLink } from "./sigil-types.ts";
+import { type Cell, isCell } from "./cell.ts";
+import {
+  type LegacyDocCellLink,
+  type LegacyJSONCellLink,
+} from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
-import { type EntityId, getEntityId } from "./doc-map.ts";
+import { DocumentMap, type EntityId, getEntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
-import type { Action, EventHandler, ReactivityLog } from "./scheduler.ts";
+import {
+  type Action,
+  type EventHandler,
+  type ReactivityLog,
+  Scheduler,
+} from "./scheduler.ts";
 import type { Harness, RuntimeProgram } from "./harness/harness.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
 import { StorageTransaction } from "./storage/transaction-shim.ts";
 import {
   type CellLink,
+  createSigilLinkFromParsedLink,
   isLegacyCellLink,
   isLink,
   isNormalizedFullLink,
@@ -34,6 +44,11 @@ import {
   type NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { Storage } from "./storage.ts";
+import { RecipeManager, RecipeMeta } from "./recipe-manager.ts";
+import { ModuleRegistry } from "./module.ts";
+import { Runner } from "./runner.ts";
+import { registerBuiltins } from "./builtins/index.ts";
 
 export type {
   IExtendedStorageTransaction,
@@ -280,15 +295,6 @@ export interface IRunner {
   stop<T>(resultCell: DocImpl<T> | Cell<T>): void;
   stopAll(): void;
 }
-
-import { Scheduler } from "./scheduler.ts";
-import { Storage } from "./storage.ts";
-import { RecipeManager, RecipeMeta } from "./recipe-manager.ts";
-import { ModuleRegistry } from "./module.ts";
-import { DocumentMap } from "./doc-map.ts";
-import { Runner } from "./runner.ts";
-import { registerBuiltins } from "./builtins/index.ts";
-import { isCell } from "./cell.ts";
 
 /**
  * Main Runtime class that orchestrates all services in the runner package.
