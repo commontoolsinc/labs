@@ -1,6 +1,5 @@
 import { refer } from "merkle-reference";
 import { Immutable, isRecord } from "@commontools/utils/types";
-import { defer } from "@commontools/utils/defer";
 import type {
   JSONValue,
   MemorySpace,
@@ -26,6 +25,7 @@ import {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { isLink } from "./link-utils.ts";
+import { uriToEntityId } from "./storage/transaction-shim.ts";
 export type { Labels, MemorySpace };
 
 /**
@@ -188,7 +188,7 @@ export class Storage implements IStorage {
 
     // Set up a promise, so that we can notify other syncCell callers when our
     // results are ready.
-    const { resolve, reject, promise } = defer<DocImpl<T>>();
+    const { promise, resolve } = Promise.withResolvers<DocImpl<T>>();
     this.loadingPromises.set(syncKey, promise);
     this.loadingResolves.set(syncKey, resolve);
 
@@ -236,9 +236,7 @@ export class Storage implements IStorage {
     const entityIds = loaded.values().map((valueEntry) => valueEntry.source)
       .filter((docAddr) =>
         docAddr.the === "application/json" && docAddr.of.startsWith("of:")
-      ).map((docAddr) => {
-        return { "/": docAddr.of.slice(3) };
-      }).toArray();
+      ).map((docAddr) => uriToEntityId(docAddr.of)).toArray();
 
     // It's ok to be missing the primary record (this is the case when we are
     // creating it for the first time).
@@ -246,7 +244,7 @@ export class Storage implements IStorage {
       missing.length === 1 &&
       missing[0].of === `of:${entityIdStr(doc.entityId)}`
     ) {
-      entityIds.push({ "/": missing[0].of.slice(3) });
+      entityIds.push(uriToEntityId(missing[0].of));
       // } else if (missing.length > 1) {
       //   console.debug("missing", missing);
     }
@@ -427,11 +425,31 @@ export class Storage implements IStorage {
       return;
     }
     // Track these promises for our synced call.
-    const docToStoragePromise = this._getStorageProviderForSpace(doc.space)
-      .send([{
-        entityId: doc.entityId,
-        value: storageValue,
-      }]);
+    // We may have linked docs that storage doesn't know about
+    const storageProvider = this._getStorageProviderForSpace(doc.space);
+    const { missing } = this._queryLocal(
+      doc.space,
+      doc.entityId,
+      storageProvider,
+    );
+    // Any missing docs need to be linked up
+    for (const factAddress of missing) {
+      // missing docs have been created in our doc map, but storage doesn't
+      // know anything about them.
+      // TODO(@ubik2) I've lost the schema here
+      const linkedDoc = this.runtime.documentMap.getDocByEntityId(
+        doc.space,
+        uriToEntityId(factAddress.of),
+      );
+      // we don't need to await this, since by the time we've resolved our
+      // docToStoragePromise, we'll have added the loadingPromise.
+      this._syncCellHelper(linkedDoc);
+    }
+
+    const docToStoragePromise = storageProvider.send([{
+      entityId: doc.entityId,
+      value: storageValue,
+    }]);
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
       this.docToStoragePromises.delete(docToStoragePromise)

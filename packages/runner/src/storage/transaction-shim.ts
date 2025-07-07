@@ -36,7 +36,7 @@ import { getJSONFromDataURI } from "../uri-utils.ts";
 /**
  * Convert a URI string to an EntityId object
  */
-function uriToEntityId(uri: string): EntityId {
+export function uriToEntityId(uri: string): EntityId {
   if (!uri.startsWith("of:")) {
     throw new Error(`Invalid URI: ${uri}`);
   }
