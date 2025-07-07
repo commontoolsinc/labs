@@ -384,7 +384,7 @@ export function validateAndTransform(
   // If there is no schema, return as raw data via query result proxy
   if (resolvedSchema === undefined) {
     const doc = runtime.documentMap.getDocByEntityId(link.space, link.id, true);
-    return doc.getAsQueryResult(link.path, log);
+    return doc.getAsQueryResult([...link.path], log);
   }
 
   // Now resolve further links until we get the actual value. Note that `doc`

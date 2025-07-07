@@ -232,52 +232,12 @@ export interface IStorageTransaction {
   read(address: IMemorySpaceAddress): Result<IAttestation, ReadError>;
 
   /**
-   * Reads a value from a (local) memory address and throws on error, except for
-   * `NotFoundError` which is returned as undefined.
-   *
-   * @param address - Memory address to read from.
-   * @returns The read value.
-   */
-  readOrThrow(address: IMemoryAddress): JSONValue | undefined;
-
-  /**
-   * Reads a value from a (local) memory address and throws on error, except for
-   * `NotFoundError` which is returned as undefined.
-   *
-   * Also prepends `value` to path, for how source metadata currently works.
-   *
-   * @param address - Memory address to read from.
-   * @returns The read value.
-   */
-  readValueOrThrow(address: IMemoryAddress): JSONValue | undefined;
-
-  /**
    * Creates a memory space writer for this transaction. Fails if transaction is
    * no longer in progress or if writer for the different space was already open
    * on this transaction. Requesting a writer for the same memory space will
    * return same writer instance.
    */
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError>;
-
-  /**
-   * Writes a value into a storage at a given address, including creating parent
-   * entries in the document if a path is provided or throws an error.
-   *
-   * @param address - Memory address to write to.
-   * @param value - Value to write.
-   */
-  writeOrThrow(address: IMemoryAddress, value: JSONValue): void;
-
-  /**
-   * Writes a value into a storage at a given address, including creating parent
-   * entries in the document if a path is provided or throws an error.
-   *
-   * Also prepends `value` to path, for how source metadata currently works.
-   *
-   * @param address - Memory address to write to.
-   * @param value - Value to write.
-   */
-  writeValueOrThrow(address: IMemoryAddress, value: JSONValue): void;
 
   /**
    * Helper that is the same as `writer().write()` but more convenient, as it
@@ -303,16 +263,6 @@ export interface IStorageTransaction {
   reader(
     space: MemorySpace,
   ): Result<ITransactionReader, ReaderError>;
-
-  /**
-   * Creates a memory space writer for this transaction. Fails if transaction is
-   * no longer in progress or if writer for the different space was already open
-   * on this transaction. Requesting a writer for the same memory space will
-   * return same writer instance.
-   */
-  writer(
-    space: MemorySpace,
-  ): Result<ITransactionWriter, WriterError>;
 
   /**
    * Transaction can be cancelled which causes storage provider to stop keeping
@@ -366,7 +316,38 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param address - Memory address to read from.
    * @returns The read value.
    */
+  readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined;
+
+  /**
+   * Reads a value from a (local) memory address and throws on error, except for
+   * `NotFoundError` which is returned as undefined.
+   *
+   * Also prepends `value` to path, for how source metadata currently works.
+   *
+   * @param address - Memory address to read from.
+   * @returns The read value.
+   */
   readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined;
+
+  /**
+   * Writes a value into a storage at a given address, including creating parent
+   * entries in the document if a path is provided or throws an error.
+   *
+   * @param address - Memory address to write to.
+   * @param value - Value to write.
+   */
+  writeOrThrow(address: IMemorySpaceAddress, value: JSONValue): void;
+
+  /**
+   * Writes a value into a storage at a given address, including creating parent
+   * entries in the document if a path is provided or throws an error.
+   *
+   * Also prepends `value` to path, for how source metadata currently works.
+   *
+   * @param address - Memory address to write to.
+   * @param value - Value to write.
+   */
+  writeValueOrThrow(address: IMemorySpaceAddress, value: JSONValue): void;
 
   /**
    * Returns the log of the transaction.

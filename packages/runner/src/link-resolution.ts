@@ -5,12 +5,10 @@ import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
   type LegacyAlias,
-  type LegacyDocCellLink,
   LINK_V1_TAG,
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
-import { arrayEqual } from "./path-utils.ts";
 import {
   areNormalizedLinksSame,
   type CellLink,
@@ -19,10 +17,9 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import type {
-  IMemoryAddress,
-  IStorageTransaction,
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
 } from "./storage/interface.ts";
-import type { IRuntime } from "./runtime.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
 
 /**
@@ -31,11 +28,11 @@ import type { MemorySpace } from "@commontools/memory/interface";
  */
 interface Visits {
   /** Tracks visited cell links to detect cycles */
-  seen: IMemoryAddress[];
+  seen: IMemorySpaceAddress[];
   /** Cache for resolvePath results */
-  resolvePathCache: Map<string, IMemoryAddress>;
+  resolvePathCache: Map<string, IMemorySpaceAddress>;
   /** Cache for followLinks results */
-  followLinksCache: Map<string, IMemoryAddress>;
+  followLinksCache: Map<string, IMemorySpaceAddress>;
 }
 
 /**
@@ -53,7 +50,7 @@ export function createVisits(): Visits {
  * Creates a cache key for a doc and path combination.
  */
 function createPathCacheKey<T>(
-  address: IMemoryAddress,
+  address: IMemorySpaceAddress,
   aliases: boolean = false,
 ): string {
   return JSON.stringify([
@@ -72,7 +69,7 @@ function createMemoryAddress(
   uri: URI,
   path: PropertyKey[],
   space: MemorySpace,
-): IMemoryAddress {
+): IMemorySpaceAddress {
   // Add the 'value' path prefix for entity data
   const actualPath = path.length === 0 ? ["value"] : ["value", ...path];
   return {
@@ -84,8 +81,8 @@ function createMemoryAddress(
 }
 
 export function resolveLinkToValue<T>(
-  tx: IStorageTransaction,
-  address: IMemoryAddress,
+  tx: IExtendedStorageTransaction,
+  address: IMemorySpaceAddress,
 ): NormalizedFullLink {
   const visits = createVisits();
   const link = resolvePath(tx, address, visits);
@@ -93,8 +90,8 @@ export function resolveLinkToValue<T>(
 }
 
 export function resolveLinkToWriteRedirect<T>(
-  tx: IStorageTransaction,
-  address: IMemoryAddress,
+  tx: IExtendedStorageTransaction,
+  address: IMemorySpaceAddress,
 ): NormalizedFullLink {
   const visits = createVisits();
   const link = resolvePath(tx, address, visits);
@@ -102,15 +99,15 @@ export function resolveLinkToWriteRedirect<T>(
 }
 
 export function resolveLinks(
-  tx: IStorageTransaction,
-  link: IMemoryAddress,
+  tx: IExtendedStorageTransaction,
+  link: IMemorySpaceAddress,
 ): NormalizedFullLink {
   const visits = createVisits();
   return followLinks(tx, link, visits);
 }
 
 function resolvePath<T>(
-  tx: IStorageTransaction,
+  tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   visits: Visits = createVisits(),
 ): NormalizedFullLink {
@@ -203,7 +200,7 @@ function resolvePath<T>(
  * @returns The value that might be a link.
  */
 export function readMaybeLink(
-  tx: IStorageTransaction,
+  tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   onlyWriteRedirects = false,
 ): NormalizedFullLink | undefined {
@@ -231,7 +228,7 @@ export function readMaybeLink(
 // log all taken links, so not the returned one, and thus nothing if the ref
 // already pointed to a value.
 export function followLinks(
-  tx: IStorageTransaction,
+  tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   visits: Visits,
   onlyWriteRedirects = false,
@@ -294,7 +291,7 @@ export function followLinks(
 // Follows aliases and returns cell reference describing the last alias.
 // Only logs interim aliases, not the first one, and not the non-alias value.
 export function followWriteRedirects<T = any>(
-  tx: IStorageTransaction,
+  tx: IExtendedStorageTransaction,
   writeRedirect: LegacyAlias | SigilWriteRedirectLink,
   base: Cell<T>,
 ): NormalizedFullLink {
