@@ -27,6 +27,8 @@ import { FocusUtils } from "./focus-utils.ts";
  * @attr {Tree} value - Tree structure with root node
  * @attr {boolean} readonly - Whether the outliner is read-only
  * @attr {Array} mentionable - Array of mentionable items with {name, charm} structure
+ * @attr {boolean} offline - Debug mode that suppresses change events and property updates
+ * @attr {boolean} showDebugPanel - Controls visibility of the debug panel
  *
  * @fires ct-change - Fired when content changes with detail: { value }
  * @fires charm-link-click - Fired when a charm link is clicked with detail: { href, text, charm }
@@ -34,6 +36,11 @@ import { FocusUtils } from "./focus-utils.ts";
  * @example
  * const tree = { root: { body: "", children: [{ body: "Item 1", children: [], attachments: [] }] } };
  * <ct-outliner .value=${tree}></ct-outliner>
+ * 
+ * // Debug mode for development/testing:
+ * <ct-outliner .value=${tree} .offline=${true} .showDebugPanel=${true}></ct-outliner>
+ * // Or toggle debug panel with Ctrl/Cmd + Shift + D
+ * // Debug panel includes: offline toggle, save/load JSON, and reset to clean state
  */
 
 export const OutlinerEffects = {
@@ -99,6 +106,8 @@ export class CTOutliner extends BaseElement {
     showingMentions: { type: Boolean, state: true },
     mentionQuery: { type: String, state: true },
     selectedMentionIndex: { type: Number, state: true },
+    offline: { type: Boolean, state: true },
+    showDebugPanel: { type: Boolean, state: true },
   };
 
   declare value: Tree;
@@ -110,6 +119,51 @@ export class CTOutliner extends BaseElement {
   declare showingMentions: boolean;
   declare mentionQuery: string;
   declare selectedMentionIndex: number;
+  declare showDebugPanel: boolean;
+
+  private _offline: boolean = false;
+
+  /**
+   * Offline mode property with deep cloning when entering offline mode
+   */
+  get offline(): boolean {
+    return this._offline;
+  }
+
+  set offline(value: boolean) {
+    const wasOffline = this._offline;
+    this._offline = value;
+
+    // When entering offline mode, deep clone the tree to sever all external connections
+    if (!wasOffline && value) {
+      try {
+        // Get paths before cloning
+        const focusedNodePath = this.focusedNode ? this.getNodePath(this.focusedNode) : null;
+        const collapsedNodePaths = Array.from(this.collapsedNodes).map(node => ({
+          path: this.getNodePath(node),
+          body: node.body
+        })).filter(item => item.path !== null);
+
+        // Clone the tree
+        this.tree = JSON.parse(JSON.stringify(this.tree));
+        
+        // Update node references after cloning using the stored paths
+        this.focusedNode = focusedNodePath ? 
+          this.getNodeByPath(focusedNodePath) : null;
+        
+        this.collapsedNodes = new Set(
+          collapsedNodePaths.map(item => 
+            this.getNodeByPath(item.path!)
+          ).filter(Boolean) as OutlineTreeNode[]
+        );
+        
+        this.requestUpdate();
+      } catch (error) {
+        console.error('Failed to clone tree for offline mode:', error);
+        this._offline = false; // Revert if cloning fails
+      }
+    }
+  }
 
   private editingNode: OutlineTreeNode | null = null;
   private editingContent: string = "";
@@ -132,6 +186,7 @@ export class CTOutliner extends BaseElement {
         this.handleMentionKeyDown(event),
       handleNormalEditorKeyDown: (event: KeyboardEvent) =>
         this.handleNormalEditorKeyDown(event),
+      handleReset: () => this.handleReset(),
     };
   }
 
@@ -341,6 +396,109 @@ export class CTOutliner extends BaseElement {
       color: var(--muted-foreground);
       margin-top: 0.125rem;
     }
+
+    /* Debug panel styles */
+    .debug-panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: var(--background);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      padding: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      z-index: 1000;
+      font-size: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      min-width: 150px;
+    }
+
+    .debug-panel-header {
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+      color: var(--muted-foreground);
+    }
+
+    .debug-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .debug-toggle input[type="checkbox"] {
+      cursor: pointer;
+    }
+
+    .debug-buttons {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .debug-button {
+      padding: 0.25rem 0.5rem;
+      background: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: background-color 0.1s;
+    }
+
+    .debug-button:hover {
+      background: var(--muted-foreground);
+      color: var(--background);
+    }
+
+    .debug-button:active {
+      transform: translateY(1px);
+    }
+
+    .debug-controls {
+      position: absolute;
+      top: 0.25rem;
+      right: 0.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      z-index: 999;
+    }
+
+    .debug-toggle-button {
+      width: 1.5rem;
+      height: 1.5rem;
+      background: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted-foreground);
+      transition: all 0.1s;
+    }
+
+    .debug-toggle-button:hover {
+      background: var(--muted-foreground);
+      color: var(--background);
+    }
+
+    .debug-toggle-button.active {
+      background: var(--ring);
+      color: var(--background);
+    }
+
+    .offline-indicator {
+      background: #f59e0b;
+      color: white;
+      padding: 0.125rem 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
   `;
 
   constructor() {
@@ -354,6 +512,8 @@ export class CTOutliner extends BaseElement {
     this.mentionQuery = "";
     this.selectedMentionIndex = 0;
     this.value = this.tree;
+    this._offline = false;
+    this.showDebugPanel = false;
   }
 
   override connectedCallback() {
@@ -375,9 +535,9 @@ export class CTOutliner extends BaseElement {
     super.updated(changedProperties);
 
     if (changedProperties.has("value") && !this.editingNode) {
-      // Don't update tree from value if we're internally managing it
+      // Don't update tree from value if we're internally managing it or in offline mode
       // This prevents focus loss when we programmatically update the value
-      if (!this.isInternalUpdate) {
+      if (!this.isInternalUpdate && !this.offline) {
         this.tree = this.value;
         // Reset focus if the focused node no longer exists
         this.focusedNode = FocusUtils.findValidFocus(this.tree, this.focusedNode);
@@ -389,6 +549,162 @@ export class CTOutliner extends BaseElement {
     return this.nodeIndexer.getIndex(node);
   }
 
+
+  /**
+   * Get the path to a node as an array of indices from root.children
+   */
+  private getNodePath(targetNode: OutlineTreeNode): number[] | null {
+    // Check if it's a direct child of root
+    for (let i = 0; i < this.tree.root.children.length; i++) {
+      if (this.tree.root.children[i] === targetNode) {
+        return [i];
+      }
+    }
+
+    // Recursively search in children
+    const findPath = (node: OutlineTreeNode, currentPath: number[]): number[] | null => {
+      for (let i = 0; i < node.children.length; i++) {
+        const child = node.children[i];
+        const childPath = [...currentPath, i];
+        
+        if (child === targetNode) {
+          return childPath;
+        }
+        
+        const result = findPath(child, childPath);
+        if (result) {
+          return result;
+        }
+      }
+      
+      return null;
+    };
+
+    return findPath(this.tree.root, []);
+  }
+
+  /**
+   * Get a node by its path in the current tree
+   */
+  private getNodeByPath(path: number[]): OutlineTreeNode | null {
+    try {
+      let currentNode = this.tree.root;
+      
+      for (const index of path) {
+        if (index < currentNode.children.length) {
+          currentNode = currentNode.children[index];
+        } else {
+          return null;
+        }
+      }
+      
+      return currentNode;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private handleSave() {
+    try {
+      const jsonContent = JSON.stringify(this.tree, null, 2);
+      const blob = new Blob([jsonContent], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `outliner-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to save tree:', error);
+    }
+  }
+
+  private handleLoad() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        
+        // Basic validation
+        if (!data || typeof data !== 'object' || !data.root || typeof data.root !== 'object') {
+          throw new Error('Invalid tree structure');
+        }
+        
+        // Ensure root has required properties
+        if (!Array.isArray(data.root.children)) {
+          throw new Error('Invalid tree structure: root must have children array');
+        }
+        
+        this.tree = data;
+        this.focusedNode = this.tree.root.children[0] || null;
+        this.requestUpdate();
+        
+        // In offline mode, don't emit change
+        if (!this.offline) {
+          this.emitChange();
+        }
+      } catch (error) {
+        console.error('Failed to load tree:', error);
+        alert('Failed to load file: ' + (error as Error).message);
+      }
+    };
+    
+    input.click();
+  }
+
+  private handleReset() {
+    try {
+      // Reset to a clean, usable tree state
+      this.tree = {
+        root: {
+          body: "",
+          children: [
+            { body: "Welcome! Start typing here...", children: [], attachments: [] },
+            { body: "Use Ctrl/Cmd + Shift + D to toggle this debug panel", children: [], attachments: [] }
+          ],
+          attachments: []
+        }
+      };
+      
+      // Reset UI state
+      this.focusedNode = this.tree.root.children[0];
+      this.collapsedNodes = new Set();
+      this.editingNode = null;
+      this.editingContent = "";
+      this.showingMentions = false;
+      this.mentionQuery = "";
+      this.selectedMentionIndex = 0;
+      
+      // Clear any indexer state
+      this.nodeIndexer = NodeUtils.createNodeIndexer();
+      
+      this.requestUpdate();
+      
+      // In offline mode, don't emit change
+      if (!this.offline) {
+        this.emitChange();
+      }
+      
+      console.log('Tree reset to default state');
+    } catch (error) {
+      console.error('Failed to reset tree:', error);
+      // Fallback to absolute minimum state
+      this.tree = TreeOperations.createEmptyTree();
+      this.focusedNode = null;
+      this.collapsedNodes = new Set();
+      this.requestUpdate();
+    }
+  }
+
   private getAllNodes(): OutlineTreeNode[] {
     return NodeUtils.getAllNodesExcludingRoot(this.tree);
   }
@@ -398,6 +714,10 @@ export class CTOutliner extends BaseElement {
   }
 
   emitChange() {
+    if (this.offline) {
+      // In offline mode, don't emit changes
+      return;
+    }
     this.isInternalUpdate = true;
     this.value = this.tree;
     this.isInternalUpdate = false;
@@ -700,6 +1020,13 @@ export class CTOutliner extends BaseElement {
   }
 
   private handleKeyDown(event: KeyboardEvent) {
+    // Check for debug panel toggle (Ctrl/Cmd + Shift + D)
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === "D") {
+      event.preventDefault();
+      this.showDebugPanel = !this.showDebugPanel;
+      return;
+    }
+
     if (this.readonly || this.editingNode) return;
 
     const context = EventUtils.createKeyboardContext(event, this, this.focusedNode);
@@ -1165,18 +1492,54 @@ export class CTOutliner extends BaseElement {
     const hasNodes = this.tree && this.tree.root.children.length > 0;
     
     return html`
-      <div
-        class="outliner"
-        @keydown="${this.handleKeyDown}"
-        @click="${this.handleOutlinerClick}"
-        @paste="${this.handleOutlinerPaste}"
-        tabindex="0"
-      >
-        ${!hasNodes
-        ? html`
-          <div class="placeholder">Click to start typing...</div>
-        `
-        : this.renderNodes(this.tree.root.children, 0)}
+      <div style="position: relative;">
+        <!-- Debug controls in top-right corner -->
+        <div class="debug-controls">
+          ${this.offline ? html`<div class="offline-indicator">Offline</div>` : ''}
+          <button 
+            class="debug-toggle-button ${this.showDebugPanel ? 'active' : ''}"
+            @click="${() => this.showDebugPanel = !this.showDebugPanel}"
+            title="Toggle debug panel (Ctrl/Cmd + Shift + D)"
+          >
+            🔧
+          </button>
+        </div>
+        
+        ${this.showDebugPanel ? html`
+          <div class="debug-panel">
+            <div class="debug-panel-header">Debug Panel</div>
+            
+            <div class="debug-toggle">
+              <input 
+                type="checkbox" 
+                id="offline-toggle"
+                .checked="${this.offline}"
+                @change="${(e: Event) => this.offline = (e.target as HTMLInputElement).checked}"
+              />
+              <label for="offline-toggle">Offline Mode</label>
+            </div>
+            
+            <div class="debug-buttons">
+              <button class="debug-button" @click="${this.handleSave}">Save</button>
+              <button class="debug-button" @click="${this.handleLoad}">Load</button>
+              <button class="debug-button" @click="${this.handleReset}">Reset</button>
+            </div>
+          </div>
+        ` : ''}
+        
+        <div
+          class="outliner"
+          @keydown="${this.handleKeyDown}"
+          @click="${this.handleOutlinerClick}"
+          @paste="${this.handleOutlinerPaste}"
+          tabindex="0"
+        >
+          ${!hasNodes
+          ? html`
+            <div class="placeholder">Click to start typing...</div>
+          `
+          : this.renderNodes(this.tree.root.children, 0)}
+        </div>
       </div>
     `;
   }
