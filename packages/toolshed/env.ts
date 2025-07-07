@@ -102,7 +102,9 @@ const EnvSchema = z.object({
   // ===========================================================================
   PLAID_CLIENT_ID: z.string().default(""),
   PLAID_SECRET: z.string().default(""),
-  PLAID_ENV: z.enum(["sandbox", "development", "production"]).default("sandbox"),
+  PLAID_ENV: z.enum(["sandbox", "development", "production"]).default(
+    "sandbox",
+  ),
   PLAID_PRODUCTS: z.string().default("transactions"),
   PLAID_COUNTRY_CODES: z.string().default("US"),
   PLAID_REDIRECT_URI: z.string().optional(),
