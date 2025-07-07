@@ -1,9 +1,9 @@
-import type { Tree, Node } from "./types.ts";
+import type { Node, Tree } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
 
 /**
  * Pure utility functions for node operations
- * 
+ *
  * @description These functions are side-effect free and work with node references.
  * They provide functional programming utilities for common node operations
  * without mutating the tree structure.
@@ -47,7 +47,7 @@ export const NodeUtils = {
         indexMap = new WeakMap();
         counter = 0;
       },
-      size: () => counter
+      size: () => counter,
     };
   },
 
@@ -86,7 +86,7 @@ export const NodeUtils = {
   getSiblings(tree: Tree, targetNode: Node): Node[] {
     const parent = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parent) return [];
-    return parent.children.filter(child => child !== targetNode);
+    return parent.children.filter((child) => child !== targetNode);
   },
 
   /**
@@ -113,5 +113,5 @@ export const NodeUtils = {
     if (!parent) return false;
     const index = parent.children.indexOf(targetNode);
     return index === parent.children.length - 1;
-  }
+  },
 };

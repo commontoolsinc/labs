@@ -42,14 +42,14 @@ export interface Node {
 
 /**
  * Mutable type variant of Node for safe mutations in tree operations
- * 
+ *
  * @description This eliminates the need for 'any' casting while preserving type safety.
  * Used internally by tree operations that need to mutate node properties directly.
  * The type removes readonly modifiers from all properties to allow in-place mutations.
  */
 export type MutableNode = {
-  -readonly [K in keyof Node]: Node[K] extends readonly unknown[] 
-    ? Node[K][number][] 
+  -readonly [K in keyof Node]: Node[K] extends readonly unknown[]
+    ? Node[K][number][]
     : Node[K];
 };
 
@@ -85,7 +85,7 @@ export interface OutlineUIState {
 
 /**
  * Operations interface for outliner component
- * 
+ *
  * @description Provides type-safe access to component methods for keyboard commands.
  * This interface defines all the methods that keyboard command handlers need to
  * interact with the outliner component without tight coupling.
@@ -94,12 +94,20 @@ export interface OutlinerOperations {
   readonly tree: Tree;
   focusedNode: Node | null;
   collapsedNodes: Set<Node>;
-  
+
   deleteNode(node: Node): void;
   indentNode(node: Node): void;
   outdentNode(node: Node): void;
-  indentNodeWithEditState(node: Node, editingContent: string, cursorPosition: number): void;
-  outdentNodeWithEditState(node: Node, editingContent: string, cursorPosition: number): void;
+  indentNodeWithEditState(
+    node: Node,
+    editingContent: string,
+    cursorPosition: number,
+  ): void;
+  outdentNodeWithEditState(
+    node: Node,
+    editingContent: string,
+    cursorPosition: number,
+  ): void;
   startEditing(node: Node): void;
   startEditingWithInitialText(node: Node, text: string): void;
   toggleEditMode(node: Node): void;
@@ -161,7 +169,7 @@ export interface NodeCreationOptions {
 /**
  * Result type for operations that can succeed or fail
  */
-export type OperationResult<T> = 
+export type OperationResult<T> =
   | { readonly success: true; readonly data: T }
   | { readonly success: false; readonly error: string };
 

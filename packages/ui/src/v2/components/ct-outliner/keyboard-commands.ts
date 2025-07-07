@@ -1,4 +1,8 @@
-import type { KeyboardCommand, KeyboardContext, EditingKeyboardContext } from "./types.ts";
+import type {
+  EditingKeyboardContext,
+  KeyboardCommand,
+  KeyboardContext,
+} from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
 
 /**
@@ -11,7 +15,10 @@ export const KeyboardCommands = {
       if (ctx.event.altKey) {
         // Alt+Up moves node up among siblings
         if (ctx.focusedNode) {
-          const result = TreeOperations.moveNodeUp(ctx.component.tree, ctx.focusedNode);
+          const result = TreeOperations.moveNodeUp(
+            ctx.component.tree,
+            ctx.focusedNode,
+          );
           if (result.success) {
             // Tree is mutated in place, no need to reassign
             ctx.component.emitChange();
@@ -26,7 +33,7 @@ export const KeyboardCommands = {
           ctx.component.focusedNode = ctx.allNodes[ctx.allNodes.length - 1];
         }
       }
-    }
+    },
   },
 
   ArrowDown: {
@@ -35,7 +42,10 @@ export const KeyboardCommands = {
       if (ctx.event.altKey) {
         // Alt+Down moves node down among siblings
         if (ctx.focusedNode) {
-          const result = TreeOperations.moveNodeDown(ctx.component.tree, ctx.focusedNode);
+          const result = TreeOperations.moveNodeDown(
+            ctx.component.tree,
+            ctx.focusedNode,
+          );
           if (result.success) {
             // Tree is mutated in place, no need to reassign
             ctx.component.emitChange();
@@ -50,7 +60,7 @@ export const KeyboardCommands = {
           ctx.component.focusedNode = ctx.allNodes[0];
         }
       }
-    }
+    },
   },
 
   ArrowLeft: {
@@ -64,20 +74,26 @@ export const KeyboardCommands = {
         }
       } else {
         if (ctx.focusedNode) {
-          if (ctx.focusedNode.children.length > 0 && !ctx.component.collapsedNodes.has(ctx.focusedNode)) {
+          if (
+            ctx.focusedNode.children.length > 0 &&
+            !ctx.component.collapsedNodes.has(ctx.focusedNode)
+          ) {
             // Collapse node if expanded
             ctx.component.collapsedNodes.add(ctx.focusedNode);
             ctx.component.requestUpdate();
           } else {
             // Move to parent if collapsed or leaf
-            const parentNode = TreeOperations.findParentNode(ctx.component.tree.root, ctx.focusedNode);
+            const parentNode = TreeOperations.findParentNode(
+              ctx.component.tree.root,
+              ctx.focusedNode,
+            );
             if (parentNode && parentNode !== ctx.component.tree.root) {
               ctx.component.focusedNode = parentNode;
             }
           }
         }
       }
-    }
+    },
   },
 
   ArrowRight: {
@@ -103,17 +119,16 @@ export const KeyboardCommands = {
           }
         }
       }
-    }
+    },
   },
 
-
-  ' ': {  // Space key
+  " ": { // Space key
     execute(ctx: KeyboardContext): void {
       ctx.event.preventDefault();
       if (ctx.focusedNode) {
         ctx.component.startEditing(ctx.focusedNode);
       }
-    }
+    },
   },
 
   Delete: {
@@ -122,7 +137,7 @@ export const KeyboardCommands = {
       if (ctx.focusedNode) {
         ctx.component.deleteNode(ctx.focusedNode);
       }
-    }
+    },
   },
 
   Backspace: {
@@ -132,7 +147,7 @@ export const KeyboardCommands = {
         ctx.event.preventDefault();
         ctx.component.deleteNode(ctx.focusedNode);
       }
-    }
+    },
   },
 
   Tab: {
@@ -145,7 +160,7 @@ export const KeyboardCommands = {
           ctx.component.indentNode(ctx.focusedNode);
         }
       }
-    }
+    },
   },
 
   a: {
@@ -155,7 +170,7 @@ export const KeyboardCommands = {
         // Select all nodes
         // This could be implemented if needed
       }
-    }
+    },
   },
 
   c: {
@@ -165,12 +180,12 @@ export const KeyboardCommands = {
         const nodeMarkdown = TreeOperations.toMarkdown({
           root: TreeOperations.createNode({
             body: "",
-            children: [ctx.focusedNode]
-          })
+            children: [ctx.focusedNode],
+          }),
         });
         navigator.clipboard.writeText(nodeMarkdown);
       }
-    }
+    },
   },
 
   n: {
@@ -179,7 +194,7 @@ export const KeyboardCommands = {
       if (ctx.focusedNode) {
         ctx.component.createNewNodeAfter(ctx.focusedNode);
       }
-    }
+    },
   },
 
   Enter: {
@@ -202,7 +217,7 @@ export const KeyboardCommands = {
           }
         }
       }
-    }
+    },
   },
 
   "[": {
@@ -212,7 +227,7 @@ export const KeyboardCommands = {
         ctx.event.preventDefault();
         ctx.component.outdentNode(ctx.focusedNode);
       }
-    }
+    },
   },
 
   "]": {
@@ -222,17 +237,23 @@ export const KeyboardCommands = {
         ctx.event.preventDefault();
         ctx.component.indentNode(ctx.focusedNode);
       }
-    }
-  }
+    },
+  },
 };
 
 /**
  * Handle typing any regular character to enter edit mode
  * When typing, replace the entire content with the new character
  */
-export function handleTypingToEdit(key: string, context: KeyboardContext): boolean {
+export function handleTypingToEdit(
+  key: string,
+  context: KeyboardContext,
+): boolean {
   // Check if this is a regular typing key (letter, number, punctuation)
-  if (key.length === 1 && !context.event.ctrlKey && !context.event.metaKey && !context.event.altKey) {
+  if (
+    key.length === 1 && !context.event.ctrlKey && !context.event.metaKey &&
+    !context.event.altKey
+  ) {
     if (context.focusedNode) {
       // Replace entire content with the typed character
       context.component.startEditingWithInitialText(context.focusedNode, key);
@@ -240,18 +261,21 @@ export function handleTypingToEdit(key: string, context: KeyboardContext): boole
     }
   }
   return false;
-};
+}
 
 /**
  * Execute a keyboard command based on the key pressed
  */
-export function executeKeyboardCommand(key: string, context: KeyboardContext): boolean {
+export function executeKeyboardCommand(
+  key: string,
+  context: KeyboardContext,
+): boolean {
   const command = KeyboardCommands[key as keyof typeof KeyboardCommands];
   if (command) {
     command.execute(context);
     return true;
   }
-  
+
   // If no specific command, check if it's a typing key
   return handleTypingToEdit(key, context);
 }
@@ -263,9 +287,11 @@ export const EditingKeyboardCommands = {
   ArrowUp: {
     execute(ctx: EditingKeyboardContext): boolean {
       const { textarea, event } = ctx;
-      
+
       // Check if cursor is at the first line
-      const lines = textarea.value.substring(0, textarea.selectionStart).split('\n');
+      const lines = textarea.value.substring(0, textarea.selectionStart).split(
+        "\n",
+      );
       if (lines.length === 1) {
         event.preventDefault();
         ctx.component.finishEditing();
@@ -279,16 +305,16 @@ export const EditingKeyboardCommands = {
         return true;
       }
       return false;
-    }
+    },
   },
 
   ArrowDown: {
     execute(ctx: EditingKeyboardContext): boolean {
       const { textarea, event } = ctx;
-      
+
       // Check if cursor is at the last line
       const textAfterCursor = textarea.value.substring(textarea.selectionStart);
-      if (!textAfterCursor.includes('\n')) {
+      if (!textAfterCursor.includes("\n")) {
         event.preventDefault();
         ctx.component.finishEditing();
         // Move focus to next node
@@ -301,13 +327,13 @@ export const EditingKeyboardCommands = {
         return true;
       }
       return false;
-    }
+    },
   },
 
   ArrowLeft: {
     execute(ctx: EditingKeyboardContext): boolean {
       const { textarea, event } = ctx;
-      
+
       // Check if cursor is at the beginning
       if (textarea.selectionStart === 0 && textarea.selectionEnd === 0) {
         event.preventDefault();
@@ -316,73 +342,87 @@ export const EditingKeyboardCommands = {
         return true;
       }
       return false;
-    }
+    },
   },
 
   ArrowRight: {
     execute(ctx: EditingKeyboardContext): boolean {
       const { textarea, event } = ctx;
-      
+
       // Check if cursor is at the end
-      if (textarea.selectionStart === textarea.value.length && 
-          textarea.selectionEnd === textarea.value.length) {
+      if (
+        textarea.selectionStart === textarea.value.length &&
+        textarea.selectionEnd === textarea.value.length
+      ) {
         event.preventDefault();
         ctx.component.finishEditing();
         ctx.component.requestUpdate();
         return true;
       }
       return false;
-    }
+    },
   },
 
   "[": {
     execute(ctx: EditingKeyboardContext): boolean {
       const { event, textarea } = ctx;
-      
+
       // cmd/ctrl+[ outdents node even in edit mode
       if (event.metaKey || event.ctrlKey) {
         event.preventDefault();
-        
+
         // Save current editing content and cursor position from textarea
         const currentContent = textarea.value;
         const cursorPosition = textarea.selectionStart;
-        
+
         // Perform the outdent operation while preserving edit state
-        ctx.component.outdentNodeWithEditState(ctx.editingNode, currentContent, cursorPosition);
-        
+        ctx.component.outdentNodeWithEditState(
+          ctx.editingNode,
+          currentContent,
+          cursorPosition,
+        );
+
         return true;
       }
       return false;
-    }
+    },
   },
 
   "]": {
     execute(ctx: EditingKeyboardContext): boolean {
       const { event, textarea } = ctx;
-      
+
       // cmd/ctrl+] indents node even in edit mode
       if (event.metaKey || event.ctrlKey) {
         event.preventDefault();
-        
+
         // Save current editing content and cursor position from textarea
         const currentContent = textarea.value;
         const cursorPosition = textarea.selectionStart;
-        
+
         // Perform the indent operation while preserving edit state
-        ctx.component.indentNodeWithEditState(ctx.editingNode, currentContent, cursorPosition);
-        
+        ctx.component.indentNodeWithEditState(
+          ctx.editingNode,
+          currentContent,
+          cursorPosition,
+        );
+
         return true;
       }
       return false;
-    }
-  }
+    },
+  },
 };
 
 /**
  * Execute editing keyboard command
  */
-export function executeEditingKeyboardCommand(key: string, context: EditingKeyboardContext): boolean {
-  const command = EditingKeyboardCommands[key as keyof typeof EditingKeyboardCommands];
+export function executeEditingKeyboardCommand(
+  key: string,
+  context: EditingKeyboardContext,
+): boolean {
+  const command =
+    EditingKeyboardCommands[key as keyof typeof EditingKeyboardCommands];
   if (command) {
     return command.execute(context);
   }

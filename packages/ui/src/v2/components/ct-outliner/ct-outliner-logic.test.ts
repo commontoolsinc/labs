@@ -2,14 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { TreeOperations } from "./tree-operations.ts";
 import { KeyboardCommands } from "./keyboard-commands.ts";
-import { createTestTree, createNestedTestTree } from "./test-utils.ts";
-import type { Tree, Node } from "./types.ts";
+import { createNestedTestTree, createTestTree } from "./test-utils.ts";
+import type { Node, Tree } from "./types.ts";
 
 // Test the core logic without DOM dependencies
 describe("CTOutliner Logic Tests", () => {
   // Test Tree structure and TreeOperations
   describe("Tree Operations", () => {
-
     it("should create empty tree", () => {
       const tree = TreeOperations.createEmptyTree();
       expect(tree.root.children).toHaveLength(0);
@@ -27,7 +26,11 @@ describe("CTOutliner Logic Tests", () => {
     it("should update node content", () => {
       const tree = createTestTree();
       const node = tree.root.children[0];
-      const updatedTree = TreeOperations.updateNodeBody(tree, node, "Updated content");
+      const updatedTree = TreeOperations.updateNodeBody(
+        tree,
+        node,
+        "Updated content",
+      );
       const updatedNode = updatedTree.root.children[0];
       expect(updatedNode.body).toBe("Updated content");
     });
@@ -36,7 +39,7 @@ describe("CTOutliner Logic Tests", () => {
       const tree = createTestTree();
       const secondChild = tree.root.children[1];
       const result = TreeOperations.moveNodeUp(tree, secondChild);
-      
+
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.tree.root.children[0].body).toBe("Second item");
@@ -48,7 +51,7 @@ describe("CTOutliner Logic Tests", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
       const result = TreeOperations.moveNodeDown(tree, firstChild);
-      
+
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.tree.root.children[0].body).toBe("Second item");
@@ -60,7 +63,7 @@ describe("CTOutliner Logic Tests", () => {
       const tree = createTestTree();
       const child1 = tree.root.children[0];
       const result = TreeOperations.deleteNode(tree, child1);
-      
+
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.tree.root.children).toHaveLength(1);
@@ -71,13 +74,13 @@ describe("CTOutliner Logic Tests", () => {
     it("should handle transformTree utility", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
-      
+
       const result = TreeOperations.transformTree(
         tree,
         (node) => node === firstChild,
-        (node) => ({ ...node, body: "Transformed" })
+        (node) => ({ ...node, body: "Transformed" }),
       );
-      
+
       expect(result.root.children[0].body).toBe("Transformed");
       expect(result.root.children[1].body).toBe("Second item");
     });
@@ -86,12 +89,14 @@ describe("CTOutliner Logic Tests", () => {
       const tree = createTestTree();
       const secondChild = tree.root.children[1];
       const result = TreeOperations.indentNode(tree, secondChild);
-      
+
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.tree.root.children).toHaveLength(1);
         expect(result.data.tree.root.children[0].children).toHaveLength(1);
-        expect(result.data.tree.root.children[0].children[0].body).toBe("Second item");
+        expect(result.data.tree.root.children[0].children[0].body).toBe(
+          "Second item",
+        );
       }
     });
 
@@ -104,17 +109,17 @@ describe("CTOutliner Logic Tests", () => {
             children: [{
               body: "Child",
               children: [],
-              attachments: []
+              attachments: [],
             }],
-            attachments: []
+            attachments: [],
           }],
-          attachments: []
-        }
+          attachments: [],
+        },
       };
-      
+
       const childNode = tree.root.children[0].children[0];
       const result = TreeOperations.outdentNode(tree, childNode);
-      
+
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.tree.root.children).toHaveLength(2);
@@ -131,18 +136,18 @@ describe("CTOutliner Logic Tests", () => {
             children: [{
               body: "Sub-item 1.1",
               children: [],
-              attachments: []
+              attachments: [],
             }],
-            attachments: []
+            attachments: [],
           }, {
             body: "Item 2",
             children: [],
-            attachments: []
+            attachments: [],
           }],
-          attachments: []
-        }
+          attachments: [],
+        },
       };
-      
+
       const markdown = TreeOperations.toMarkdown(tree);
       expect(markdown).toBe("- Item 1\n  - Sub-item 1.1\n- Item 2");
     });
@@ -150,7 +155,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should parse markdown to tree", () => {
       const markdown = "- Item 1\n  - Sub-item 1.1\n- Item 2";
       const tree = TreeOperations.parseMarkdownToTree(markdown);
-      
+
       expect(tree.root.children).toHaveLength(2);
       expect(tree.root.children[0].body).toBe("Item 1");
       expect(tree.root.children[0].children).toHaveLength(1);
@@ -161,7 +166,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should get all nodes", () => {
       const tree = createTestTree();
       const allNodes = TreeOperations.getAllNodes(tree.root);
-      
+
       expect(allNodes).toHaveLength(3); // root + 2 children
       expect(allNodes[0]).toBe(tree.root);
       expect(allNodes[1]).toBe(tree.root.children[0]);
@@ -177,22 +182,25 @@ describe("CTOutliner Logic Tests", () => {
             children: [{
               body: "Child",
               children: [],
-              attachments: []
+              attachments: [],
             }],
-            attachments: []
+            attachments: [],
           }, {
             body: "Item 2",
             children: [],
-            attachments: []
+            attachments: [],
           }],
-          attachments: []
-        }
+          attachments: [],
+        },
       };
-      
+
       const parentNode = tree.root.children[0];
       const collapsedNodes = new Set([parentNode]);
-      const visibleNodes = TreeOperations.getAllVisibleNodes(tree.root, collapsedNodes);
-      
+      const visibleNodes = TreeOperations.getAllVisibleNodes(
+        tree.root,
+        collapsedNodes,
+      );
+
       expect(visibleNodes).toHaveLength(2); // Parent and Item 2 (Child is hidden)
       expect(visibleNodes[0]).toBe(parentNode);
       expect(visibleNodes[1]).toBe(tree.root.children[1]);
@@ -207,25 +215,30 @@ describe("CTOutliner Logic Tests", () => {
             children: [{
               body: "Child",
               children: [],
-              attachments: []
+              attachments: [],
             }],
-            attachments: []
+            attachments: [],
           }],
-          attachments: []
-        }
+          attachments: [],
+        },
       };
-      
+
       const childNode = tree.root.children[0].children[0];
       const parent = TreeOperations.findParentNode(tree.root, childNode);
-      
+
       expect(parent).toBe(tree.root.children[0]);
     });
 
     it("should insert node at specific index", () => {
       const tree = createTestTree();
       const newNode = TreeOperations.createNode({ body: "New item" });
-      const updatedTree = TreeOperations.insertNode(tree, tree.root, newNode, 1);
-      
+      const updatedTree = TreeOperations.insertNode(
+        tree,
+        tree.root,
+        newNode,
+        1,
+      );
+
       expect(updatedTree.root.children).toHaveLength(3);
       expect(updatedTree.root.children[0].body).toBe("First item");
       expect(updatedTree.root.children[1].body).toBe("New item");
@@ -243,19 +256,19 @@ describe("CTOutliner Logic Tests", () => {
               children: [{
                 body: "Grandchild",
                 children: [],
-                attachments: []
+                attachments: [],
               }],
-              attachments: []
+              attachments: [],
             }],
-            attachments: []
+            attachments: [],
           }],
-          attachments: []
-        }
+          attachments: [],
+        },
       };
-      
+
       const grandchild = tree.root.children[0].children[0].children[0];
       const path = TreeOperations.findNodePath(tree.root, grandchild);
-      
+
       expect(path).toHaveLength(4);
       expect(path![0]).toBe(tree.root);
       expect(path![1]).toBe(tree.root.children[0]);
@@ -275,7 +288,7 @@ describe("CTOutliner Logic Tests", () => {
 
     it("should have editing commands", () => {
       expect(KeyboardCommands.Enter).toBeDefined();
-      expect(KeyboardCommands[' ']).toBeDefined();
+      expect(KeyboardCommands[" "]).toBeDefined();
       expect(KeyboardCommands.Delete).toBeDefined();
     });
 
@@ -303,21 +316,21 @@ describe("CTOutliner Logic Tests", () => {
             children: [{
               body: "Child 1",
               children: [],
-              attachments: []
+              attachments: [],
             }, {
               body: "Child 2",
               children: [],
-              attachments: []
+              attachments: [],
             }],
-            attachments: []
+            attachments: [],
           }],
-          attachments: []
-        }
+          attachments: [],
+        },
       };
-      
+
       const parentNode = tree.root.children[0];
       const result = TreeOperations.deleteNode(tree, parentNode);
-      
+
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.tree.root.children).toHaveLength(2);
@@ -329,7 +342,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should not allow deleting root node", () => {
       const tree = createTestTree();
       const result = TreeOperations.deleteNode(tree, tree.root);
-      
+
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(result.error).toBe("Cannot delete root node");
@@ -340,7 +353,7 @@ describe("CTOutliner Logic Tests", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
       const result = TreeOperations.indentNode(tree, firstChild);
-      
+
       expect(result.success).toBe(false);
     });
 
@@ -348,7 +361,7 @@ describe("CTOutliner Logic Tests", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
       const result = TreeOperations.outdentNode(tree, firstChild);
-      
+
       expect(result.success).toBe(false);
     });
   });

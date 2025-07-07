@@ -29,7 +29,7 @@ export const createMockShadowRoot = () => ({
     if (selector.includes("editor-")) return createMockElement("textarea");
     if (selector === ".outliner") return createMockElement("div");
     return null;
-  }
+  },
 });
 
 /**
@@ -40,10 +40,10 @@ export const createTestTree = () => ({
     body: "",
     children: [
       { body: "First item", children: [], attachments: [] },
-      { body: "Second item", children: [], attachments: [] }
+      { body: "Second item", children: [], attachments: [] },
     ],
-    attachments: []
-  }
+    attachments: [],
+  },
 });
 
 /**
@@ -57,12 +57,12 @@ export const createNestedTestTree = () => ({
       children: [{
         body: "Child",
         children: [],
-        attachments: []
+        attachments: [],
       }],
-      attachments: []
+      attachments: [],
     }],
-    attachments: []
-  }
+    attachments: [],
+  },
 });
 
 /**
@@ -70,18 +70,18 @@ export const createNestedTestTree = () => ({
  */
 export const setupMockOutliner = () => {
   const outliner = new CTOutliner();
-  
+
   // Mock the shadowRoot
-  Object.defineProperty(outliner, 'shadowRoot', {
+  Object.defineProperty(outliner, "shadowRoot", {
     value: createMockShadowRoot(),
-    writable: false
+    writable: false,
   });
-  
+
   // Setup basic tree
   const tree = createTestTree();
   outliner.tree = tree;
   outliner.focusedNode = tree.root.children[0];
-  
+
   return { outliner, tree };
 };
 
@@ -89,13 +89,13 @@ export const setupMockOutliner = () => {
  * Create mock keyboard event
  */
 export const createMockKeyboardEvent = (
-  key: string, 
-  modifiers: { 
-    ctrlKey?: boolean; 
-    metaKey?: boolean; 
-    shiftKey?: boolean; 
-    altKey?: boolean; 
-  } = {}
+  key: string,
+  modifiers: {
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    shiftKey?: boolean;
+    altKey?: boolean;
+  } = {},
 ): KeyboardEvent => ({
   key,
   ctrlKey: modifiers.ctrlKey || false,
@@ -103,19 +103,24 @@ export const createMockKeyboardEvent = (
   shiftKey: modifiers.shiftKey || false,
   altKey: modifiers.altKey || false,
   preventDefault: () => {},
-  stopPropagation: () => {}
+  stopPropagation: () => {},
 } as KeyboardEvent);
 
 /**
  * Create keyboard context for testing
  */
 export const createKeyboardContext = (
-  event: KeyboardEvent, 
-  outliner: CTOutliner
+  event: KeyboardEvent,
+  outliner: CTOutliner,
 ): KeyboardContext => {
-  const allNodes = TreeOperations.getAllVisibleNodes(outliner.tree.root, new Set());
-  const currentIndex = outliner.focusedNode ? allNodes.indexOf(outliner.focusedNode) : -1;
-  
+  const allNodes = TreeOperations.getAllVisibleNodes(
+    outliner.tree.root,
+    new Set(),
+  );
+  const currentIndex = outliner.focusedNode
+    ? allNodes.indexOf(outliner.focusedNode)
+    : -1;
+
   return {
     event,
     component: outliner,
@@ -128,8 +133,11 @@ export const createKeyboardContext = (
 /**
  * Create mock textarea for editing tests
  */
-export const createMockTextarea = (content: string, cursorPosition: number = 0) => ({
+export const createMockTextarea = (
+  content: string,
+  cursorPosition: number = 0,
+) => ({
   selectionStart: cursorPosition,
   selectionEnd: cursorPosition,
-  value: content
+  value: content,
 } as HTMLTextAreaElement);
