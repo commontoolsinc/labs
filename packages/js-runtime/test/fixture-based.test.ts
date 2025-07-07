@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { compareFixtureTransformation } from "./test-utils.ts";
 import { cache } from "@commontools/static";
 import { walk } from "@std/fs/walk";
-import { basename, dirname, relative } from "@std/path";
+import { basename, dirname, relative, resolve } from "@std/path";
 
 // Helper to create a unified diff-like output
 function createUnifiedDiff(
@@ -259,8 +259,8 @@ for (const config of configsWithFixtures) {
               let diffMessage =
                 `\n\nTransformation output does not match expected for: ${testName}\n`;
               diffMessage += `\nFiles:\n`;
-              diffMessage += `  Input:    test/fixtures/${inputPath}.input${ext}\n`;
-              diffMessage += `  Expected: test/fixtures/${inputPath}.expected${ext}\n`;
+              diffMessage += `  Input:    ${resolve(`test/fixtures/${inputPath}.input${ext}`)}\n`;
+              diffMessage += `  Expected: ${resolve(`test/fixtures/${inputPath}.expected${ext}`)}\n`;
               diffMessage += `\n${"=".repeat(80)}\n`;
               diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
               diffMessage += `${"=".repeat(80)}\n`;
@@ -299,8 +299,8 @@ for (const config of configsWithFixtures) {
           let diffMessage =
             `\n\nTransformation output does not match expected for: ${testName}\n`;
           diffMessage += `\nFiles:\n`;
-          diffMessage += `  Input:    test/fixtures/${inputPath}.input${ext}\n`;
-          diffMessage += `  Expected: test/fixtures/${inputPath}.expected${ext}\n`;
+          diffMessage += `  Input:    ${resolve(`test/fixtures/${inputPath}.input${ext}`)}\n`;
+          diffMessage += `  Expected: ${resolve(`test/fixtures/${inputPath}.expected${ext}`)}\n`;
           diffMessage += `\n${"=".repeat(80)}\n`;
           diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
           diffMessage += `${"=".repeat(80)}\n`;
