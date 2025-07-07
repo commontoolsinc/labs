@@ -4,6 +4,7 @@ import { cache } from "@commontools/static";
 // to a string of standalone .d.ts content.
 // Includes the following types:
 // * "es2023"
+// * "jsx"
 // * "dom"
 export const getTypeScriptEnvironmentTypes = (() => {
   let cached: Record<string, string> | undefined;
@@ -17,10 +18,8 @@ export const getTypeScriptEnvironmentTypes = (() => {
 
     cached = {
       es2023,
-      // Combine jsx types in our "DOM" types -- having jsx types
-      // in commontools module definition was a problem as it's imported
-      // multiple times when shimming older modules with the "commontools" types.
-      dom: `${dom}\n${jsx}`,
+      dom,
+      jsx,
     };
     return cached;
   };

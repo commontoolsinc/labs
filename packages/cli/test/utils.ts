@@ -8,7 +8,12 @@ export function bytesToLines(stream: Uint8Array): string[] {
 }
 
 export function checkStderr(stderr: string[]) {
-  expect(stderr.length).toBe(2);
+  try {
+    expect(stderr.length).toBe(2);
+  } catch (e) {
+    console.error(stderr);
+    throw e;
+  }
   expect(stderr[0]).toMatch(/deno run /);
   expect(stderr[1]).toMatch(/experimentalDecorators compiler option/);
 }

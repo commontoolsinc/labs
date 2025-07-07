@@ -396,11 +396,4 @@ export type VNode = {
     props: Props;
     children: Array<Child> | Cell<Array<Child>>;
 };
-declare global {
-    namespace JSX {
-        interface IntrinsicElements {
-            [elemName: string]: any;
-        }
-    }
-}
 export {};
