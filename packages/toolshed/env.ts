@@ -96,6 +96,21 @@ const EnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
 
+  // ===========================================================================
+  // Plaid Integration
+  //   * /routes/integrations/plaid-oauth
+  // ===========================================================================
+  PLAID_CLIENT_ID: z.string().default(""),
+  PLAID_SECRET: z.string().default(""),
+  PLAID_ENV: z.enum(["sandbox", "development", "production"]).default(
+    "sandbox",
+  ),
+  PLAID_PRODUCTS: z.string().default("transactions"),
+  PLAID_COUNTRY_CODES: z.string().default("US"),
+  PLAID_REDIRECT_URI: z.string().optional(),
+  PLAID_SYNC_ALL_TRANSACTIONS: z.coerce.boolean().default(false),
+  // ===========================================================================
+
   // URL of the toolshed API, for self-referring requests
   TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
 
