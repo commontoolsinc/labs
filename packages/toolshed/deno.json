@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno run --unstable-otel -A --watch --env-file=.env index.ts",
+    "dev": "TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno run --unstable-otel -A --watch --env-file=.env index.ts",
     "production": "deno run --unstable-otel -A --env-file=.env index.ts",
     "test": "deno test -A --env-file=.env.test"
   },
