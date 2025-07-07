@@ -600,6 +600,11 @@ export class Replica {
       }
     }
 
+    // Add notFound entries to the heap and also persist them in the cache.
+    // Don't notify subscribers as if this were a server update.
+    this.heap.merge(notFound, Replica.put, (val) => false);
+    const result = await this.cache.merge(revisions.values(), Replica.put);
+
     for (const [revision, schema] of fetchedEntries) {
       const factAddress = { the: revision.the, of: revision.of };
       revisions.set(factAddress, revision);
@@ -608,11 +613,6 @@ export class Replica {
         schemaContext: schema,
       });
     }
-
-    // Add notFound entries to the heap and also persist them in the cache.
-    // Don't notify subscribers as if this were a server update.
-    this.heap.merge(notFound, Replica.put, (val) => false);
-    const result = await this.cache.merge(revisions.values(), Replica.put);
 
     if (result.error) {
       return result;
