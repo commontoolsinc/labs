@@ -28,14 +28,16 @@ describe("Keyboard Commands", () => {
   describe("Basic Commands", () => {
     it("should handle Enter key to create new node", () => {
       setupOutliner();
-      const initialChildCount = outliner.value.root.children.length;
+      const initialChildCount = outliner.value.get().root.children.length;
 
       const event = createMockKeyboardEvent("Enter");
       const context = createKeyboardContext(event, outliner);
 
       KeyboardCommands.Enter.execute(context);
 
-      expect(outliner.value.root.children.length).toBe(initialChildCount + 1);
+      expect(outliner.value.get().root.children.length).toBe(
+        initialChildCount + 1,
+      );
     });
 
     it("should handle Shift+Enter to create child node", () => {
@@ -70,7 +72,7 @@ describe("Keyboard Commands", () => {
     it("should exit edit mode with cmd/ctrl+Enter when already editing", () => {
       setupOutliner();
       const node = outliner.focusedNode!;
-      const initialNodeCount = outliner.value.root.children.length;
+      const initialNodeCount = outliner.value.get().root.children.length;
 
       // Start editing first
       outliner.startEditing(node);
@@ -93,7 +95,7 @@ describe("Keyboard Commands", () => {
       // Should exit edit mode
       expect(outliner.testAPI.editingNode).toBe(null);
       // Should NOT create a new node
-      expect(outliner.value.root.children.length).toBe(initialNodeCount);
+      expect(outliner.value.get().root.children.length).toBe(initialNodeCount);
     });
 
     it("should handle Space key to start editing", () => {
@@ -111,35 +113,35 @@ describe("Keyboard Commands", () => {
 
     it("should handle Delete key to delete node", () => {
       setupOutliner();
-      const nodeToDelete = outliner.value.root.children[0];
-      const secondNode = outliner.value.root.children[1];
+      const nodeToDelete = outliner.value.get().root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
 
       const event = createMockKeyboardEvent("Delete");
       const context = createKeyboardContext(event, outliner);
 
       KeyboardCommands.Delete.execute(context);
 
-      expect(outliner.value.root.children.length).toBe(1);
-      expect(outliner.value.root.children[0]).toBe(secondNode);
+      expect(outliner.value.get().root.children.length).toBe(1);
+      expect(outliner.value.get().root.children[0]).toBe(secondNode);
     });
 
     it("should handle cmd/ctrl+Backspace to delete node", () => {
       setupOutliner();
-      const nodeToDelete = outliner.value.root.children[0];
-      const secondNode = outliner.value.root.children[1];
+      const nodeToDelete = outliner.value.get().root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
 
       const event = createMockKeyboardEvent("Backspace", { metaKey: true });
       const context = createKeyboardContext(event, outliner);
 
       KeyboardCommands.Backspace.execute(context);
 
-      expect(outliner.value.root.children.length).toBe(1);
-      expect(outliner.value.root.children[0]).toBe(secondNode);
+      expect(outliner.value.get().root.children.length).toBe(1);
+      expect(outliner.value.get().root.children[0]).toBe(secondNode);
     });
 
     it("should not delete on regular Backspace without modifiers", () => {
       setupOutliner();
-      const initialChildCount = outliner.value.root.children.length;
+      const initialChildCount = outliner.value.get().root.children.length;
 
       const event = createMockKeyboardEvent("Backspace");
       const context = createKeyboardContext(event, outliner);
@@ -147,15 +149,15 @@ describe("Keyboard Commands", () => {
       KeyboardCommands.Backspace.execute(context);
 
       // Should not delete
-      expect(outliner.value.root.children.length).toBe(initialChildCount);
+      expect(outliner.value.get().root.children.length).toBe(initialChildCount);
     });
   });
 
   describe("Navigation Commands", () => {
     it("should handle Tab key for indentation", () => {
       setupOutliner();
-      const secondNode = outliner.value.root.children[1];
-      const firstNode = outliner.value.root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
+      const firstNode = outliner.value.get().root.children[0];
       outliner.focusedNode = secondNode;
 
       const event = createMockKeyboardEvent("Tab");
@@ -163,7 +165,7 @@ describe("Keyboard Commands", () => {
 
       KeyboardCommands.Tab.execute(context);
 
-      expect(outliner.value.root.children.length).toBe(1);
+      expect(outliner.value.get().root.children.length).toBe(1);
       expect(firstNode.children.length).toBe(1);
       expect(firstNode.children[0]).toBe(secondNode);
     });
@@ -186,7 +188,7 @@ describe("Keyboard Commands", () => {
           attachments: [],
         },
       };
-      outliner.value = tree;
+      outliner.value.set(tree);
       const childNode = tree.root.children[0].children[0];
       outliner.focusedNode = childNode;
 
@@ -195,14 +197,14 @@ describe("Keyboard Commands", () => {
 
       KeyboardCommands.Tab.execute(context);
 
-      expect(outliner.value.root.children.length).toBe(2);
-      expect(outliner.value.root.children[1]).toBe(childNode);
+      expect(outliner.value.get().root.children.length).toBe(2);
+      expect(outliner.value.get().root.children[1]).toBe(childNode);
     });
 
     it("should handle arrow key navigation", () => {
       setupOutliner();
-      const firstNode = outliner.value.root.children[0];
-      const secondNode = outliner.value.root.children[1];
+      const firstNode = outliner.value.get().root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
       outliner.focusedNode = firstNode;
 
       const event = createMockKeyboardEvent("ArrowDown");
@@ -215,8 +217,8 @@ describe("Keyboard Commands", () => {
 
     it("should handle cmd/ctrl+] for indentation", () => {
       setupOutliner();
-      const secondNode = outliner.value.root.children[1];
-      const firstNode = outliner.value.root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
+      const firstNode = outliner.value.get().root.children[0];
       outliner.focusedNode = secondNode;
 
       const event = createMockKeyboardEvent("]", { metaKey: true });
@@ -224,7 +226,7 @@ describe("Keyboard Commands", () => {
 
       KeyboardCommands["]"].execute(context);
 
-      expect(outliner.value.root.children.length).toBe(1);
+      expect(outliner.value.get().root.children.length).toBe(1);
       expect(firstNode.children.length).toBe(1);
       expect(firstNode.children[0]).toBe(secondNode);
     });
@@ -247,7 +249,7 @@ describe("Keyboard Commands", () => {
           attachments: [],
         },
       };
-      outliner.value = tree;
+      outliner.value.set(tree);
       const childNode = tree.root.children[0].children[0];
       outliner.focusedNode = childNode;
 
@@ -256,13 +258,13 @@ describe("Keyboard Commands", () => {
 
       KeyboardCommands["["].execute(context);
 
-      expect(outliner.value.root.children.length).toBe(2);
-      expect(outliner.value.root.children[1]).toBe(childNode);
+      expect(outliner.value.get().root.children.length).toBe(2);
+      expect(outliner.value.get().root.children[1]).toBe(childNode);
     });
 
     it("should not indent/outdent without modifiers", () => {
       setupOutliner();
-      const secondNode = outliner.value.root.children[1];
+      const secondNode = outliner.value.get().root.children[1];
       const initialStructure = JSON.stringify(outliner.value);
 
       // Test ] without modifiers
@@ -337,7 +339,7 @@ describe("Keyboard Commands", () => {
   describe("Command Integration", () => {
     it("should execute keyboard commands via executeKeyboardCommand", () => {
       setupOutliner();
-      const initialChildCount = outliner.value.root.children.length;
+      const initialChildCount = outliner.value.get().root.children.length;
 
       const event = createMockKeyboardEvent("Enter");
       const context = createKeyboardContext(event, outliner);
@@ -345,7 +347,9 @@ describe("Keyboard Commands", () => {
       const handled = executeKeyboardCommand("Enter", context);
 
       expect(handled).toBe(true);
-      expect(outliner.value.root.children.length).toBe(initialChildCount + 1);
+      expect(outliner.value.get().root.children.length).toBe(
+        initialChildCount + 1,
+      );
     });
 
     it("should fall back to typing handler for unknown keys", () => {
@@ -375,8 +379,8 @@ describe("Keyboard Commands", () => {
 
     it("should handle cmd/ctrl+[ and ] in edit mode", () => {
       setupOutliner();
-      const secondNode = outliner.value.root.children[1];
-      const firstNode = outliner.value.root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
+      const firstNode = outliner.value.get().root.children[0];
 
       // Start editing
       outliner.startEditing(secondNode);
@@ -399,7 +403,7 @@ describe("Keyboard Commands", () => {
       const indentHandled = EditingKeyboardCommands["]"].execute(indentContext);
 
       expect(indentHandled).toBe(true);
-      expect(outliner.value.root.children.length).toBe(1);
+      expect(outliner.value.get().root.children.length).toBe(1);
       expect(firstNode.children.length).toBe(1);
       expect(firstNode.children[0]).toBe(secondNode);
 
@@ -420,12 +424,12 @@ describe("Keyboard Commands", () => {
       );
 
       expect(outdentHandled).toBe(true);
-      expect(outliner.value.root.children.length).toBe(2);
+      expect(outliner.value.get().root.children.length).toBe(2);
     });
 
     it("should preserve edit mode after indent/outdent operations", () => {
       setupOutliner();
-      const secondNode = outliner.value.root.children[1];
+      const secondNode = outliner.value.get().root.children[1];
       const editingContent = "editing this node";
 
       // Start editing with some content
@@ -474,8 +478,8 @@ describe("Keyboard Commands", () => {
 
     it("should preserve cursor position and content during edit mode indentation", () => {
       setupOutliner();
-      const secondNode = outliner.value.root.children[1];
-      const firstNode = outliner.value.root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
+      const firstNode = outliner.value.get().root.children[0];
       const editingContent = "I am editing this text";
       const cursorPosition = 15; // Position in "editing this text"
 
@@ -500,7 +504,7 @@ describe("Keyboard Commands", () => {
       EditingKeyboardCommands["]"].execute(indentContext);
 
       // Verify tree structure changed (node was indented)
-      expect(outliner.value.root.children.length).toBe(1);
+      expect(outliner.value.get().root.children.length).toBe(1);
       expect(firstNode.children.length).toBe(1);
       expect(firstNode.children[0]).toBe(secondNode);
 
@@ -536,7 +540,7 @@ describe("Keyboard Commands", () => {
       const context = createKeyboardContext(event, outliner);
 
       KeyboardCommands.Backspace.execute(context);
-      expect(outliner.value.root.children.length).toBe(1);
+      expect(outliner.value.get().root.children.length).toBe(1);
     });
   });
 });

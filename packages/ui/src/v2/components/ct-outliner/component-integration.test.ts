@@ -15,11 +15,11 @@ describe("CTOutliner Component Integration Tests", () => {
   describe("Node Creation", () => {
     it("should create new sibling node with Enter", () => {
       setupOutliner();
-      const initialCount = outliner.value.root.children.length;
+      const initialCount = outliner.value.get().root.children.length;
 
       outliner.createNewNodeAfter(outliner.focusedNode!);
 
-      expect(outliner.value.root.children.length).toBe(initialCount + 1);
+      expect(outliner.value.get().root.children.length).toBe(initialCount + 1);
       expect(outliner.focusedNode!.body).toBe("");
     });
 
@@ -39,38 +39,38 @@ describe("CTOutliner Component Integration Tests", () => {
   describe("Node Deletion", () => {
     it("should delete node and update focus", () => {
       setupOutliner();
-      const nodeToDelete = outliner.value.root.children[0];
-      const secondNode = outliner.value.root.children[1];
+      const nodeToDelete = outliner.value.get().root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
 
       outliner.deleteNode(nodeToDelete);
 
-      expect(outliner.value.root.children.length).toBe(1);
-      expect(outliner.value.root.children[0]).toBe(secondNode);
+      expect(outliner.value.get().root.children.length).toBe(1);
+      expect(outliner.value.get().root.children[0]).toBe(secondNode);
     });
   });
 
   describe("Node Indentation", () => {
     it("should indent node correctly", () => {
       setupOutliner();
-      const secondNode = outliner.value.root.children[1];
-      const firstNode = outliner.value.root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
+      const firstNode = outliner.value.get().root.children[0];
 
       outliner.indentNode(secondNode);
 
-      expect(outliner.value.root.children.length).toBe(1);
+      expect(outliner.value.get().root.children.length).toBe(1);
       expect(firstNode.children.length).toBe(1);
       expect(firstNode.children[0]).toBe(secondNode);
     });
 
     it("should outdent node correctly", () => {
       const tree = createNestedTestTree();
-      outliner.value = tree;
+      outliner.value.set(tree);
       const childNode = tree.root.children[0].children[0];
 
       outliner.outdentNode(childNode);
 
-      expect(outliner.value.root.children.length).toBe(2);
-      expect(outliner.value.root.children[1]).toBe(childNode);
+      expect(outliner.value.get().root.children.length).toBe(2);
+      expect(outliner.value.get().root.children[1]).toBe(childNode);
     });
   });
 
@@ -100,20 +100,20 @@ describe("CTOutliner Component Integration Tests", () => {
   describe("Tree Structure Integrity", () => {
     it("should preserve node references after operations", () => {
       setupOutliner();
-      const originalFirstNode = outliner.value.root.children[0];
-      const originalSecondNode = outliner.value.root.children[1];
+      const originalFirstNode = outliner.value.get().root.children[0];
+      const originalSecondNode = outliner.value.get().root.children[1];
 
       // Create a new node
       outliner.createNewNodeAfter(originalFirstNode);
 
       // Original nodes should still be present and identifiable
-      expect(outliner.value.root.children[0]).toBe(originalFirstNode);
-      expect(outliner.value.root.children[2]).toBe(originalSecondNode);
+      expect(outliner.value.get().root.children[0]).toBe(originalFirstNode);
+      expect(outliner.value.get().root.children[2]).toBe(originalSecondNode);
     });
 
     it("should maintain focus correctly after tree modifications", () => {
       setupOutliner();
-      const firstNode = outliner.value.root.children[0];
+      const firstNode = outliner.value.get().root.children[0];
 
       // Create new node and verify focus is on new node
       outliner.createNewNodeAfter(firstNode);
@@ -154,8 +154,8 @@ describe("CTOutliner Component Integration Tests", () => {
 
     it("should handle switching edit mode between different nodes", () => {
       setupOutliner();
-      const firstNode = outliner.value.root.children[0];
-      const secondNode = outliner.value.root.children[1];
+      const firstNode = outliner.value.get().root.children[0];
+      const secondNode = outliner.value.get().root.children[1];
 
       // Start editing first node
       outliner.toggleEditMode(firstNode);
