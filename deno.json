@@ -1,11 +1,12 @@
 {
   "workspace": [
+    "./packages/api",
     "./packages/background-charm-service",
-    "./packages/builder",
     "./packages/charm",
     "./packages/cli",
     "./packages/deno-vite-plugin",
     "./packages/deno-web-test",
+    "./packages/felt",
     "./packages/html",
     "./packages/identity",
     "./packages/iframe-sandbox",
@@ -16,6 +17,7 @@
     "./packages/memory",
     "./packages/runner",
     "./packages/seeder",
+    "./packages/shell",
     "./packages/static",
     "./packages/toolshed",
     "./packages/ui",
@@ -23,9 +25,11 @@
   ],
   "tasks": {
     "check": "./tasks/check.sh",
+    "ct": "ROOT=$(pwd) && cd $INIT_CWD && deno run --allow-net --allow-ffi --allow-read --allow-write --allow-env \"$ROOT/packages/cli/mod.ts\"",
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
-    "build-binaries": "./tasks/build-binaries.ts"
+    "build-binaries": "./tasks/build-binaries.ts",
+    "initialize-db": "./tasks/initialize-db.sh"
   },
   "compilerOptions": {
     "jsx": "react-jsxdev",
@@ -38,7 +42,8 @@
     ],
     "types": [
       "./packages/jumble/src/global.d.ts"
-    ]
+    ],
+    "experimentalDecorators": true
   },
   "exclude": [
     "packages/jumble/.vite/deps/",
@@ -77,10 +82,12 @@
     "proseWrap": "always",
     "exclude": [
       "packages/jumble/integration/cache/llm-api-cache/",
-      "packages/seeder/templates/"
+      "packages/seeder/templates/",
+      "packages/static/assets/"
     ]
   },
   "imports": {
+    "commontools": "./packages/api/index.ts",
     "@astral/astral": "jsr:@astral/astral",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
@@ -107,7 +114,7 @@
     "esbuild": "npm:esbuild",
     "jsdom": "npm:jsdom",
     "lit": "npm:lit@^3.2.1",
-    "merkle-reference": "npm:merkle-reference@^2.0.1",
+    "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
     "react": "npm:react@^18.3.1",
     "react-dom": "npm:react-dom@^18.3.1",

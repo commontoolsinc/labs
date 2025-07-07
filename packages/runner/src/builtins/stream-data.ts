@@ -1,5 +1,6 @@
-import { type DocImpl, getDoc } from "../doc.ts";
-import { type Action, idle } from "../scheduler.ts";
+import { type Cell } from "../cell.ts";
+import { type Action } from "../scheduler.ts";
+import type { IRuntime } from "../runtime.ts";
 import { type ReactivityLog } from "../scheduler.ts";
 
 /**
@@ -14,43 +15,44 @@ import { type ReactivityLog } from "../scheduler.ts";
  * @returns { pending: boolean, result: any, error: any } - As individual docs, representing `pending` state, streamed `result`, and any `error`.
  */
 export function streamData(
-  inputsCell: DocImpl<{
+  inputsCell: Cell<{
     url: string;
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: DocImpl<any>[],
-  parentDoc: DocImpl<any>,
+  cause: Cell<any>[],
+  parentCell: Cell<any>,
+  runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = getDoc(
-    false,
+  const pending = runtime.getCell(
+    parentCell.space,
     { streamData: { pending: cause } },
-    parentDoc.space,
   );
-  const result = getDoc<any | undefined>(
-    undefined,
+  pending.send(false);
+
+  const result = runtime.getCell<any | undefined>(
+    parentCell.space,
     {
       streamData: { result: cause },
     },
-    parentDoc.space,
   );
-  const error = getDoc<any | undefined>(
-    undefined,
+
+  const error = runtime.getCell<any | undefined>(
+    parentCell.space,
     {
       streamData: { error: cause },
     },
-    parentDoc.space,
   );
 
-  pending.ephemeral = true;
-  result.ephemeral = true;
-  error.ephemeral = true;
+  pending.getDoc().ephemeral = true;
+  result.getDoc().ephemeral = true;
+  error.getDoc().ephemeral = true;
 
-  pending.sourceCell = parentDoc;
-  result.sourceCell = parentDoc;
-  error.sourceCell = parentDoc;
+  pending.setSourceCell(parentCell);
+  result.setSourceCell(parentCell);
+  error.setSourceCell(parentCell);
 
   // Since we'll only write into the docs above, we only have to call this once
   // here, instead of in the action.
@@ -63,6 +65,10 @@ export function streamData(
 
   let previousCall = "";
   return (log: ReactivityLog) => {
+    const pendingWithLog = pending.withLog(log);
+    const resultWithLog = result.withLog(log);
+    const errorWithLog = error.withLog(log);
+
     const { url, options } = inputsCell.getAsQueryResult([], log) || {};
 
     // Re-entrancy guard: Don't restart the stream if it's the same request.
@@ -76,16 +82,16 @@ export function streamData(
     }
 
     if (url === undefined) {
-      pending.setAtPath([], false, log);
-      result.setAtPath([], undefined, log);
-      error.setAtPath([], undefined, log);
+      pendingWithLog.set(false);
+      resultWithLog.set(undefined);
+      errorWithLog.set(undefined);
       ++status.run;
       return;
     }
 
-    pending.setAtPath([], true, log);
-    result.setAtPath([], undefined, log);
-    error.setAtPath([], undefined, log);
+    pendingWithLog.set(true);
+    resultWithLog.set(undefined);
+    errorWithLog.set(undefined);
 
     const controller = new AbortController();
     const signal = controller.signal;
@@ -135,9 +141,9 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            await idle();
+            await runtime.idle();
 
-            result.setAtPath([], parsedData, log);
+            resultWithLog.set(parsedData);
             id = undefined;
             event = undefined;
             data = undefined;
@@ -157,10 +163,10 @@ export function streamData(
         // FIXME(ja): also pending should probably be more like "live"?
         console.error(e);
 
-        await idle();
-        pending.setAtPath([], false, log);
-        result.setAtPath([], undefined, log);
-        error.setAtPath([], e, log);
+        await runtime.idle();
+        pendingWithLog.set(false);
+        resultWithLog.set(undefined);
+        errorWithLog.set(e);
 
         // Allow retrying the same request.
         previousCall = "";

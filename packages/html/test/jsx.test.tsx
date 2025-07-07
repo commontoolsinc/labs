@@ -1,6 +1,7 @@
-import { beforeEach, describe, it } from "@std/testing/bdd";
+import { describe, it } from "@std/testing/bdd";
+import { h, UI } from "@commontools/api";
 import * as assert from "./assert.ts";
-import { h } from "../src/jsx.ts";
+import { isVNode } from "../src/jsx.ts";
 
 describe("jsx dom fragments support", () => {
   it("dom fragments should work", () => {
@@ -60,5 +61,28 @@ describe("jsx dom fragments support", () => {
         </common-fragment>
       </div>,
     );
+  });
+});
+
+describe("isVNode utility", () => {
+  it("returns true for a direct VNode", () => {
+    const vnode = { type: "vnode", name: "div", props: {}, children: [] };
+    assert.equal(isVNode(vnode), true);
+  });
+
+  it("returns true for a VNode wrapped in [UI]", () => {
+    const vnode = { type: "vnode", name: "div", props: {}, children: [] };
+    const wrapped = { [UI]: vnode };
+    assert.equal(isVNode(wrapped), true);
+  });
+
+  it("returns false for non-VNode objects", () => {
+    assert.equal(isVNode({}), false);
+    assert.equal(isVNode({ foo: "bar" }), false);
+    assert.equal(isVNode([]), false);
+    assert.equal(isVNode(null), false);
+    assert.equal(isVNode(undefined), false);
+    assert.equal(isVNode("string"), false);
+    assert.equal(isVNode(123), false);
   });
 });

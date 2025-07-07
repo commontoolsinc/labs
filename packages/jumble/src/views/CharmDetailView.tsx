@@ -1,12 +1,15 @@
 import {
   Charm,
   charmId,
+  compileAndRunRecipe,
+  compileRecipe,
   extractVersionTag,
   getIframeRecipe,
+  getRecipeIdFromCharm,
   modifyCharm,
 } from "@commontools/charm";
 import { useCharmReferences } from "@/hooks/use-charm-references.ts";
-import { isCell, isStream } from "@commontools/runner";
+import { isCell, isStream, Runtime, RuntimeProgram } from "@commontools/runner";
 import { isObject } from "@commontools/utils/types";
 import {
   CheckboxToggle,
@@ -27,6 +30,7 @@ import { type CharmRouteParams } from "@/routes.ts";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { LoadingSpinner } from "@/components/Loader.tsx";
 import { useCharm } from "@/hooks/use-charm.ts";
+import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 import CharmCodeEditor from "@/components/CharmCodeEditor.tsx";
 import { CharmRenderer } from "@/components/CharmRunner.tsx";
 import { DitheredCube } from "@/components/DitherCube.tsx";
@@ -130,7 +134,7 @@ function useTabNavigation() {
 }
 
 // Hook for managing suggestions
-function useSuggestions(charm: Cell<Charm> | undefined) {
+function useSuggestions(charm: Cell<Charm> | undefined, runtime: Runtime) {
   const [suggestions, setSuggestions] = useState<CharmSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const suggestionsLoadedRef = useRef(false);
@@ -141,7 +145,7 @@ function useSuggestions(charm: Cell<Charm> | undefined) {
     const loadSuggestions = async () => {
       setLoadingSuggestions(true);
       try {
-        const iframeRecipe = getIframeRecipe(charm);
+        const iframeRecipe = getIframeRecipe(charm, runtime);
         if (!iframeRecipe) {
           throw new Error("No iframe recipe found in charm");
         }
@@ -490,8 +494,9 @@ const Variants = () => {
 // Suggestions Component
 const Suggestions = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
+  const runtime = useRuntime();
   const { currentFocus: charm } = useCharm(paramCharmId);
-  const { suggestions, loadingSuggestions } = useSuggestions(charm);
+  const { suggestions, loadingSuggestions } = useSuggestions(charm, runtime);
   const {
     setInput,
     userPreferredModel,
@@ -505,8 +510,6 @@ const Suggestions = () => {
 
   const navigate = useNavigate();
   const { replicaName } = useParams<CharmRouteParams>();
-
-  const { charmManager } = useCharmManager();
 
   // Store selected suggestion in state to use in effects
   const [selectedSuggestion, setSelectedSuggestion] = useState<
@@ -712,8 +715,67 @@ const OperationTab = () => {
 const CodeTab = () => {
   const { charmId: paramCharmId } = useParams<CharmRouteParams>();
   const { currentFocus: charm, iframeRecipe } = useCharm(paramCharmId);
+  const { charmManager } = useCharmManager();
+  const runtime = useRuntime();
   const [showFullCode, setShowFullCode] = useState(false);
-  const { loading } = useCharmOperationContext();
+  const { loading, setLoading } = useCharmOperationContext();
+  const [regularRecipeSource, setRegularRecipeSource] = useState<string>("");
+  const [workingRegularRecipeSource, setWorkingRegularRecipeSource] = useState<
+    string
+  >("");
+  const [isRegularRecipe, setIsRegularRecipe] = useState(false);
+  const [isMultiFileRecipe, setIsMultiFileRecipe] = useState(false);
+  const [recipeFiles, setRecipeFiles] = useState<
+    Array<{ name: string; contents: string }>
+  >([]);
+  const [workingRecipeFiles, setWorkingRecipeFiles] = useState<
+    Array<{ name: string; contents: string }>
+  >([]);
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+  const [mainFile, setMainFile] = useState<string>("/main.tsx");
+  const [mainExport, setMainExport] = useState<string | undefined>();
+  const navigate = useNavigate();
+  const { replicaName } = useParams<CharmRouteParams>();
+
+  // Load regular recipe source if not an iframe recipe
+  useEffect(() => {
+    function loadRegularRecipeSource() {
+      if (!charm || iframeRecipe) {
+        setIsRegularRecipe(false);
+        setIsMultiFileRecipe(false);
+        return;
+      }
+
+      // This is a regular recipe
+      setIsRegularRecipe(true);
+
+      try {
+        const recipeId = getRecipeIdFromCharm(charm);
+        if (recipeId) {
+          const recipeMeta = runtime.recipeManager.getRecipeMeta({ recipeId });
+
+          // Check if it's a multi-file recipe
+          if (recipeMeta?.program) {
+            setIsMultiFileRecipe(true);
+            setRecipeFiles(recipeMeta.program.files);
+            setWorkingRecipeFiles([...recipeMeta.program.files]);
+            setMainFile(recipeMeta.program.main);
+            setMainExport(recipeMeta.program.mainExport);
+            setSelectedFileIndex(0);
+          } else if (recipeMeta?.src) {
+            // Single file recipe
+            setIsMultiFileRecipe(false);
+            setRegularRecipeSource(recipeMeta.src);
+            setWorkingRegularRecipeSource(recipeMeta.src);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading regular recipe source:", error);
+      }
+    }
+
+    loadRegularRecipeSource();
+  }, [charm, iframeRecipe, runtime]);
 
   const {
     fullSrc,
@@ -786,6 +848,164 @@ const CodeTab = () => {
     return activeSchema === "argument" ? "argumentSchema" : "resultSchema";
   };
 
+  // For regular recipes, show either single or multi-file editor
+  if (isRegularRecipe) {
+    // Check if changes have been made
+    const hasChanges = isMultiFileRecipe
+      ? JSON.stringify(workingRecipeFiles) !== JSON.stringify(recipeFiles)
+      : workingRegularRecipeSource !== regularRecipeSource;
+
+    return (
+      <div className="h-full flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between p-4 pb-2">
+          <div className="text-sm font-semibold">
+            {isMultiFileRecipe ? "Recipe Files" : "Recipe Code"}
+          </div>
+          {/* Save button for regular recipes */}
+          {hasChanges && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (!charm) return;
+                setLoading(true);
+                try {
+                  // Get the recipe spec and argument from the current charm
+                  const recipeId = getRecipeIdFromCharm(charm);
+                  const recipeMeta = runtime.recipeManager.getRecipeMeta({
+                    recipeId,
+                  });
+                  const spec = recipeMeta?.spec || "";
+                  const argument = charmManager.getArgument(charm);
+
+                  let newCharm;
+                  if (isMultiFileRecipe) {
+                    // For multi-file recipes, we need to use compileRecipe directly
+                    const program: RuntimeProgram = {
+                      main: mainFile,
+                      files: workingRecipeFiles,
+                      ...(mainExport && { mainExport }),
+                    };
+
+                    // Use compileRecipe which accepts RuntimeProgram
+                    const recipe = await compileRecipe(
+                      program,
+                      spec,
+                      runtime,
+                      charmManager.getSpace(),
+                      recipeId ? [recipeId] : undefined,
+                    );
+
+                    // Run the recipe
+                    newCharm = await charmManager.runPersistent(
+                      recipe,
+                      argument,
+                    );
+                  } else {
+                    // Single file recipe - use the existing compileAndRunRecipe
+                    newCharm = await compileAndRunRecipe(
+                      charmManager,
+                      workingRegularRecipeSource,
+                      spec,
+                      argument,
+                      recipeId ? [recipeId] : undefined,
+                    );
+                  }
+
+                  if (newCharm && replicaName) {
+                    navigate(
+                      createPath("charmShow", {
+                        charmId: charmId(newCharm)!,
+                        replicaName,
+                      }),
+                    );
+                  }
+                } catch (error) {
+                  console.error("Error saving regular recipe:", error);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+              className="px-3 py-1 text-sm bg-black text-white border border-black disabled:opacity-50 flex items-center gap-1"
+            >
+              {loading
+                ? (
+                  <>
+                    <span className="inline-block w-3 h-3">
+                      <DitheredCube
+                        width={12}
+                        height={12}
+                        animate
+                        cameraZoom={6}
+                      />
+                    </span>
+                    <span>Processing...</span>
+                  </>
+                )
+                : (
+                  "Save Changes"
+                )}
+            </button>
+          )}
+        </div>
+
+        {/* File tabs for multi-file recipes */}
+        {isMultiFileRecipe && (
+          <div className="px-4 pb-2">
+            <div className="flex gap-2 overflow-x-auto">
+              {workingRecipeFiles.map((file, index) => (
+                <button
+                  key={file.name}
+                  type="button"
+                  onClick={() => setSelectedFileIndex(index)}
+                  className={`px-3 py-1 text-sm border ${
+                    selectedFileIndex === index
+                      ? "bg-black text-white border-black"
+                      : "bg-white text-black border-gray-300 hover:border-black"
+                  }`}
+                >
+                  {file.name.substring(1)} {/* Remove leading slash */}
+                  {file.name === mainFile && " (main)"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="px-4 flex-grow flex flex-col overflow-hidden">
+          <CharmCodeEditor
+            docs={[
+              {
+                key: "code",
+                label: isMultiFileRecipe
+                  ? workingRecipeFiles[selectedFileIndex]?.name.substring(1)
+                  : "Recipe Code",
+                value: isMultiFileRecipe
+                  ? workingRecipeFiles[selectedFileIndex]?.contents || ""
+                  : workingRegularRecipeSource,
+                onChange: isMultiFileRecipe
+                  ? (newContent: string) => {
+                    const updatedFiles = [...workingRecipeFiles];
+                    updatedFiles[selectedFileIndex] = {
+                      ...updatedFiles[selectedFileIndex],
+                      contents: newContent,
+                    };
+                    setWorkingRecipeFiles(updatedFiles);
+                  }
+                  : setWorkingRegularRecipeSource,
+                language: "javascript" as const,
+                readOnly: false,
+              },
+            ]}
+            activeKey="code"
+            loading={false}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // Original iframe recipe editor
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex items-center justify-between p-4 pb-2">
@@ -924,7 +1144,7 @@ const DataTab = () => {
 
   const lineage = charmManager.getLineage(charm);
 
-  const Lineage = (item: typeof lineage[number]) => (
+  const Lineage = (item: typeof lineage[number]): JSX.Element => (
     <div
       key={`lineage-${charmId(item.charm) || ""}`}
     >
@@ -1091,7 +1311,6 @@ const DataTab = () => {
                         <div className="flex flex-wrap gap-1">
                           {readingFrom.map((
                             charm: Cell<Charm>,
-                            index: number,
                           ) => (
                             <div
                               key={`read-from-${charmId(charm)}`}
@@ -1122,7 +1341,7 @@ const DataTab = () => {
                     {readBy.length > 0
                       ? (
                         <div className="flex flex-wrap gap-1">
-                          {readBy.map((charm: Cell<Charm>, index: number) => (
+                          {readBy.map((charm: Cell<Charm>) => (
                             <div
                               key={`read-by-${charmId(charm)}`}
                               className="bg-green-100 border border-green-300 px-2 py-1"

@@ -1,15 +1,13 @@
 import {
-  CompilerError,
-  isJsModule,
-  isSourceMap,
-  JsArtifact,
-  JsModule,
-  TsArtifact,
+  Compiler,
+  isProgram,
+  JsScript,
+  Program,
+  ProgramResolver,
 } from "../interface.ts";
 import type {
   CompilerHost,
   CompilerOptions,
-  Diagnostic,
   FileReference,
   ModuleResolutionHost,
   ResolvedModuleWithFailedLookupLocations,
@@ -19,17 +17,16 @@ import type {
   SourceFile,
   StringLiteralLike,
 } from "typescript";
-import * as ts from "typescript";
+import ts from "typescript";
 import * as path from "@std/path";
-
-const TARGET_TYPE_LIB = "es2023";
-const IS_MAP = /\.js\.map$/;
-const IS_TYPE = /\.d\.ts$/;
-const IS_JS = /\.js$/;
+import { getCompilerOptions, TARGET } from "./options.ts";
+import { bundleAMDOutput } from "./bundler/mod.ts";
+import { parseSourceMap } from "../source-map.ts";
+import { resolveProgram } from "./resolver.ts";
+import { Checker } from "./diagnostics/mod.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
-const VFS_DEPS_DIR = "$ext/";
 
 // Mapping from virtual type path (e.g. `$types/es2023.d.ts`)
 type TypeLibs = Record<string, string>;
@@ -40,7 +37,7 @@ class VirtualFs implements ModuleResolutionHost {
   private readonly fsWrite: Record<string, string> = Object.create(null);
   private readonly debug: boolean;
   constructor(
-    input: TsArtifact,
+    input: Program,
     typeLib: TypeLibs,
     debug?: boolean,
   ) {
@@ -87,73 +84,8 @@ class VirtualFs implements ModuleResolutionHost {
     return true;
   }
 
-  getCompiledModules(): Record<string, JsModule> {
-    const modules = Object.create(null) as Record<
-      string,
-      Partial<JsModule>
-    >;
-    for (const key of Object.keys(this.fsWrite)) {
-      if (IS_MAP.test(key)) {
-        const root = key.slice(0, -4);
-        modules[root] = modules[root] ?? {};
-        try {
-          const sourceMap = JSON.parse(this.fsWrite[key]);
-          if (sourceMap && "version" in sourceMap) {
-            // TypeScript correctly generates `version` as an integer,
-            // but the `source-map-js` library's `RawSourceMap` we use
-            // elsewhere expects `version` to be a string.
-            sourceMap.version = `${sourceMap.version}`;
-          }
-          if (isSourceMap(sourceMap)) {
-            modules[root].sourceMap = sourceMap;
-          } else {
-            throw new Error(
-              "DEV: Source map type check failure: " +
-                JSON.stringify(sourceMap, null, 2),
-            );
-          }
-        } catch (e) {
-          console.warn(`There was an error parsing "${key}" source map: ${e}`);
-        }
-      } else if (IS_TYPE.test(key)) {
-        const root = `${key.slice(0, -5)}.js`;
-        modules[root] = modules[root] ?? {};
-        modules[root].typesSrc = this.fsWrite[key];
-      } else if (IS_JS.test(key)) {
-        const root = key;
-        modules[root] = modules[root] ?? {};
-        modules[root].contents = this.fsWrite[key];
-        // Attempt to map to source filename here -- this could be tsx,
-        // ts, or js.
-        let ext;
-        const keyNoExt = key.slice(0, -3);
-        if (this.fsRead[`${keyNoExt}.tsx`]) {
-          ext = ".tsx";
-        } else if (this.fsRead[`${keyNoExt}.ts`]) {
-          ext = ".ts";
-        } else if (this.fsRead[`${keyNoExt}.js`]) {
-          ext = ".js";
-        } else {
-          throw new Error("Could not find original source extension.");
-        }
-        modules[root].originalFilename = `${keyNoExt}${ext}`;
-      } else {
-        throw new Error(`Unknown generated file: ${key}`);
-      }
-    }
-
-    for (const key of Object.keys(modules)) {
-      if (typeof key !== "string") {
-        throw new Error("Invalid module key.");
-      }
-      const module = modules[key];
-      if (!isJsModule(module)) {
-        throw new Error(
-          `Incomplete compiled module "${key}": ${JSON.stringify(module)}`,
-        );
-      }
-    }
-    return modules as Record<string, JsModule>;
+  getWrites(): Record<string, string> {
+    return this.fsWrite;
   }
 
   private innerRead(fileName: string): string | undefined {
@@ -181,14 +113,17 @@ class VirtualFs implements ModuleResolutionHost {
 }
 
 class TypeScriptHost extends VirtualFs implements CompilerHost {
+  private allowedRuntimeModules: string[];
   constructor(
-    source: TsArtifact,
+    source: Program,
     typeLibs: TypeLibs,
+    allowedRuntimeModules: string[],
   ) {
     super(source, typeLibs, DEBUG_VIRTUAL_FS);
+    this.allowedRuntimeModules = allowedRuntimeModules;
   }
 
-  getDefaultLibFileName(options: CompilerOptions): string {
+  getDefaultLibFileName(_options: CompilerOptions): string {
     return "lib.d.ts";
   }
 
@@ -196,13 +131,17 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
     return VFS_TYPES_DIR;
   }
 
+  getEnvironmentVariable(name: string): string | undefined {
+    return undefined;
+  }
+
   resolveTypeReferenceDirectiveReferences?<T extends FileReference | string>(
-    typeDirectiveReferences: readonly T[],
-    containingFile: string,
-    redirectedReference: ResolvedProjectReference | undefined,
-    options: CompilerOptions,
-    containingSourceFile: SourceFile | undefined,
-    reusedNames: readonly T[] | undefined,
+    _typeDirectiveReferences: readonly T[],
+    _containingFile: string,
+    _redirectedReference: ResolvedProjectReference | undefined,
+    _options: CompilerOptions,
+    _containingSourceFile: SourceFile | undefined,
+    _reusedNames: readonly T[] | undefined,
   ): readonly ResolvedTypeReferenceDirectiveWithFailedLookupLocations[] {
     throw new Error("ResolveTypeReferenceDirectiveReferences");
   }
@@ -218,7 +157,7 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
   getSourceFile(
     fileName: string,
     languageVersion: ScriptTarget,
-    onError?: (message: string) => void,
+    _onError?: (message: string) => void,
   ): SourceFile | undefined {
     const sourceText = this.readFile(fileName);
     return sourceText !== undefined
@@ -237,30 +176,60 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
         return {
           resolvedModule: {
             resolvedFileName: resolved,
-            extension: ".ts",
+            extension: ts.Extension.Ts,
           },
         };
       }
       // This module could not be found in the input
-      // e.g. `@commontools/foo`. Attempt to resolve at runtime
-      // for now.
-      return {
-        resolvedModule: {
-          resolvedFileName: `${literal.text}.d.ts`,
-          extension: ts.Extension.Dts,
-          isExternalLibraryImport: true,
-          packageId: undefined,
-        },
-      };
+      // e.g. `@commontools/foo`. If a type definition was provided
+      // with the same identifier with a `.d.ts` extension, that will be used
+      // for types, leaving the module implementation resolution to runtime.
+      if (this.allowedRuntimeModules.includes(name)) {
+        return {
+          resolvedModule: {
+            resolvedFileName: `${name}.d.ts`,
+            extension: ts.Extension.Dts,
+            isExternalLibraryImport: true,
+            packageId: undefined,
+          },
+        };
+      }
+      return { resolvedModule: undefined };
     });
   }
 }
 
 export interface TypeScriptCompilerOptions {
+  // Filename for the output JS, used internally
+  // with source maps.
+  filename?: string;
+  // Skip type checking.
   noCheck?: boolean;
+  // Extra scripts to inject into the output bundle.
+  injectedScript?: string;
+  // Optional mapping of runtime module name e.g. `"@commontools/framework"`,
+  // and its corresponding type definitions.
+  runtimeModules?: string[];
+  // Whether the bundling process results in the bundle, upon invocation,
+  // evaluating to the main entry's exports (false|undefined),
+  // or an object containing the main/default export and a map of all files'
+  // exports (true).
+  // Changes the bundle's evaluation signature from
+  // ```ts
+  //   ({ runtimeDeps: Record<string, any> }) =>
+  //     Record<string, any>;
+  // ```
+  //
+  // to
+  //
+  // ```ts
+  //   ({ runtimeDeps: Record<string, any> }) =>
+  //     { main: Record<string, any>, exportMap: Record<string, Record<string, any>> }`
+  // ```
+  bundleExportAll?: true;
 }
 
-export class TypeScriptCompiler {
+export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
   private typeLibs: TypeLibs;
   constructor(typeLibs: TypeLibs) {
     this.typeLibs = Object.keys(typeLibs).reduce((libs, libName) => {
@@ -269,122 +238,117 @@ export class TypeScriptCompiler {
     }, {} as TypeLibs);
   }
 
+  resolveProgram(
+    resolver: ProgramResolver,
+    options: Pick<TypeScriptCompilerOptions, "runtimeModules"> = {},
+  ): Promise<Program> {
+    return resolveProgram(resolver, {
+      unresolvedModules: {
+        type: "allow",
+        identifiers: options.runtimeModules ?? [],
+      },
+      resolveUnresolvedModuleTypes: true,
+      target: TARGET,
+    });
+  }
+
+  async resolveAndCompile(
+    resolver: ProgramResolver,
+    options: TypeScriptCompilerOptions = {},
+  ): Promise<JsScript> {
+    const program = await this.resolveProgram(resolver, options);
+    return await this.compile(program, options);
+  }
+
   // Compiles `source` into `JsArtifact`.
   // Artifact files must be TypeScriptModuleSource
   compile(
-    input: TsArtifact,
-    options: TypeScriptCompilerOptions = {},
-  ): JsArtifact {
-    validateSource(input);
-    const sourceNames = input.files.map(({ name }) => name);
-    const tsOptions = this.getCompilerOptions();
+    program: Program,
+    inputOptions: TypeScriptCompilerOptions = {},
+  ): JsScript {
+    const filename = inputOptions.filename ?? "out.js";
+    const noCheck = inputOptions.noCheck ?? false;
+    const injectedScript = inputOptions.injectedScript;
+    const runtimeModules = inputOptions.runtimeModules ?? [];
+
+    validateSource(program);
+    const sourceNames = program.files.map(({ name }) => name);
+    const tsOptions = getCompilerOptions();
+    tsOptions.outFile = filename;
+
     const host = new TypeScriptHost(
-      input,
+      program,
       this.typeLibs,
+      runtimeModules,
     );
-    const program = ts.createProgram(
+    const tsProgram = ts.createProgram(
       sourceNames,
       tsOptions,
       host,
     );
 
-    // Filter out the default type lib of generated sources
-    const sourceFiles = program.getSourceFiles().filter((source) =>
-      !source.fileName.startsWith(VFS_TYPES_DIR)
-    );
+    const checker = new Checker(tsProgram);
+    if (!noCheck) {
+      checker.typeCheck();
+    }
+    checker.declarationCheck();
 
-    assert(
-      sourceFiles.length === sourceNames.length,
-      `Some inputs were not converted to source files.`,
+    const mainSource = tsProgram.getSourceFiles().find((source) =>
+      source.fileName === program.main
     );
-
-    for (const sourceFile of sourceFiles) {
-      if (!options.noCheck) {
-        // check types
-        const diagnostics = program.getSemanticDiagnostics(sourceFile);
-        checkDiagnostics(diagnostics);
-      }
-      // check compilation
-      const diagnostics = program.getDeclarationDiagnostics(sourceFile);
-      checkDiagnostics(diagnostics);
+    if (!mainSource) {
+      throw new Error("Missing main source.");
     }
 
-    const { diagnostics } = program.emit();
-    checkDiagnostics(diagnostics);
+    const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
+      mainSource,
+    );
+    checker.check(diagnostics);
 
-    return {
-      entry: input.entry,
-      modules: host.getCompiledModules(),
-    };
-  }
+    if (emitSkipped) {
+      throw new Error("Emit skipped. Check diagnostics.");
+    }
 
-  private getCompilerOptions(): CompilerOptions {
+    // Get written files, should be a JS and source map.
+    const writes = host.getWrites();
+
+    const source = writes[filename];
+    const sourceMap = parseSourceMap(writes[`${filename}.map`]);
+    const exportModuleExports = inputOptions.bundleExportAll
+      ? sourceNames.filter((name) => !name.endsWith(".d.ts"))
+      : undefined;
+    const bundled = bundleAMDOutput({
+      mainModule: program.main,
+      source,
+      sourceMap,
+      filename,
+      injectedScript,
+      exportModuleExports,
+    });
     return {
-      declarations: true,
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2023,
-      // `lib` should autoapply, but we need to manage default libraries since
-      // we are running outside of node. Ensure this lib matches `target`.
-      lib: [TARGET_TYPE_LIB],
-      strict: true,
-      isolatedModules: true,
-      jsx: ts.JsxEmit.React,
-      jsxFactory: "h",
-      jsxFragmentFactory: "h.fragment",
-      esModuleInterop: true,
-      sourceMap: true, // Enable source map generation
-      inlineSources: true, // We want the source map to include the original TypeScript files
-      inlineSourceMap: false, // Generate separate source map instead of inline
-      allowImportingTsExtensions: true,
+      js: bundled,
+      filename,
+      sourceMap,
     };
   }
 }
 
-function validateSource(artifact: TsArtifact) {
+function validateSource(artifact: Program) {
   let entryFound = false;
   for (const { name } of artifact.files) {
-    if (name === artifact.entry) {
+    if (name === artifact.main) {
       entryFound = true;
     }
     // Sources must be root paths, unless they are type files,
     // which could be included for runtime dependencies,
     // e.g. `@commontools/builder.d.ts`
     if (name[0] !== "/" && !name.endsWith(".d.ts")) {
-      throw new Error(`File "${name}" must have a "/" root.`);
+      //throw new Error(`File "${name}" must have a "/" root.`);
     }
   }
   if (!entryFound) {
-    throw new Error(`No entry module "${artifact.entry}" in source.`);
+    throw new Error(`No main module "${artifact.main}" in source.`);
   }
-}
-
-// Generates and throws an error if any diagnostics found in the input.
-function checkDiagnostics(
-  diagnostics: readonly Diagnostic[] | undefined,
-) {
-  if (!diagnostics || diagnostics.length === 0) {
-    return;
-  }
-  const message = diagnostics
-    .map((diagnostic) => {
-      const message = ts.flattenDiagnosticMessageText(
-        diagnostic.messageText,
-        "\n",
-      );
-      let locationInfo = "";
-
-      if (diagnostic.file && diagnostic.start !== undefined) {
-        const { line, character } = diagnostic.file
-          .getLineAndCharacterOfPosition(
-            diagnostic.start,
-          );
-        locationInfo = `[${line + 1}:${character + 1}] `; // +1 because TypeScript uses 0-based positions
-      }
-
-      return `Compilation Error: ${locationInfo}${message}`;
-    })
-    .join("\n");
-  throw new CompilerError(message);
 }
 
 function assert(expr: boolean, message: string) {

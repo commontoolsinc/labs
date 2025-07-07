@@ -1,31 +1,26 @@
+import { isRecord } from "@commontools/utils/types";
+import { opaqueRef } from "./builder/opaque-ref.ts";
+import { getTopFrame } from "./builder/recipe.ts";
+import { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";
 import {
-  cell as opaqueRef,
-  deepEqual,
   type Frame,
-  getTopFrame,
-  getValueAtPath,
   type JSONSchema,
   type OpaqueRef,
   type Schema,
-  setValueAtPath,
   toOpaqueRef,
-} from "@commontools/builder";
+} from "./builder/types.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
   createQueryResultProxy,
   type QueryResult,
 } from "./query-result-proxy.ts";
-import {
-  createRef,
-  type EntityId,
-  getDocByEntityId,
-  setDocByEntityId,
-} from "./doc-map.ts";
+import { type EntityId } from "./doc-map.ts";
+import type { IRuntime } from "./runtime.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
-import { arrayEqual } from "./utils.ts";
-import { ContextualFlowControl } from "./index.ts";
-import { Labels } from "./storage.ts";
+import { Labels, MemorySpace } from "./storage.ts";
+import { arrayEqual } from "./path-utils.ts";
+import { toURI } from "./uri-utils.ts";
 
 /**
  * Lowest level cell implementation.
@@ -50,7 +45,9 @@ export type DocImpl<T> = {
    * @param path - Path to follow.
    * @returns Value.
    */
-  getAtPath<Path extends PropertyKey[]>(path: Path): DeepKeyLookup<T, Path>;
+  getAtPath<Path extends readonly PropertyKey[]>(
+    path: Path,
+  ): DeepKeyLookup<T, Path>;
 
   /**
    * Get as value proxy, following query (i.e. aliases) and cell references.
@@ -80,7 +77,7 @@ export type DocImpl<T> = {
    * @param log - Reactivity log.
    * @returns Simple cell.
    */
-  asCell<Q = T, Path extends PropertyKey[] = []>(
+  asCell<Q = T, Path extends readonly PropertyKey[] = []>(
     path?: Path,
     log?: ReactivityLog,
     schema?: JSONSchema,
@@ -122,7 +119,7 @@ export type DocImpl<T> = {
    * @returns Whether the value changed.
    */
   setAtPath(
-    path: PropertyKey[],
+    path: readonly PropertyKey[],
     newValue: any,
     log?: ReactivityLog,
     schema?: JSONSchema,
@@ -135,7 +132,7 @@ export type DocImpl<T> = {
    * @returns Cancel function.
    */
   updates(
-    callback: (value: T, path: PropertyKey[], labels?: Labels) => void,
+    callback: (value: T, path: readonly PropertyKey[], labels?: Labels) => void,
   ): Cancel;
 
   /**
@@ -144,7 +141,7 @@ export type DocImpl<T> = {
    * Useful for cells that just represent a query, like a cell composed to
    * represent inputs to a module (which is just aliases).
    */
-  freeze(): void;
+  freeze(reason: string): void;
 
   /**
    * Check if cell is frozen.
@@ -175,7 +172,7 @@ export type DocImpl<T> = {
    * The space this doc belongs to.
    * Required when entityId is set.
    */
-  space: string;
+  space: MemorySpace;
 
   /**
    * Get current entity ID.
@@ -183,6 +180,7 @@ export type DocImpl<T> = {
    * @returns Entity ID.
    */
   entityId: EntityId;
+  "/": string;
 
   /**
    * Get and set the source cell, that is the cell that populates this cell.
@@ -202,6 +200,12 @@ export type DocImpl<T> = {
    * @returns Whether the cell is ephemeral.
    */
   ephemeral: boolean;
+
+  /**
+   * The runtime instance that owns this document.
+   * Used for accessing scheduler and other runtime services.
+   */
+  runtime: IRuntime;
 
   /**
    * Retry callbacks for the current value on cell. Will be cleared after a
@@ -231,7 +235,8 @@ export type DocImpl<T> = {
   copyTrap: boolean;
 };
 
-export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
+export type DeepKeyLookup<T, Path extends readonly PropertyKey[]> = Path extends
+  [] ? T
   : Path extends [infer First, ...infer Rest]
     ? First extends keyof T
       ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
@@ -240,38 +245,23 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
   : any;
 
 /**
- * Gets or creates a document for the given value, cause, and space.
- * @param value - The value to wrap in a document
- * @param cause - The cause for creating the document
- * @param space - The space identifier
- * @returns A document implementation wrapping the value
- */
-export function getDoc<T>(value: T, cause: any, space: string): DocImpl<T> {
-  // If cause is provided, generate ID and return pre-existing cell if any.
-  const entityId = generateEntityId(value, cause);
-  const existing = getDocByEntityId(space, entityId, false);
-  if (existing) return existing;
-
-  return createDoc(value, entityId, space);
-}
-
-/**
  * Creates a new document with the specified value, entity ID, and space.
  * @param value - The value to wrap in a document
  * @param entityId - The entity identifier
  * @param space - The space identifier
+ * @param runtime - The runtime instance that owns this document
  * @returns A new document implementation
  */
 export function createDoc<T>(
   value: T,
   entityId: EntityId,
-  space: string,
+  space: MemorySpace,
+  runtime: IRuntime,
 ): DocImpl<T> {
   const callbacks = new Set<
     (value: T, path: PropertyKey[], labels?: Labels) => void
   >();
-  const cfc = new ContextualFlowControl();
-  let readOnly = false;
+  let readOnly: string | undefined = undefined;
   let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
 
@@ -289,7 +279,15 @@ export function createDoc<T>(
       log?: ReactivityLog,
       schema?: JSONSchema,
       rootSchema?: JSONSchema,
-    ) => createCell<Q>(self, path || [], log, schema, rootSchema),
+    ) =>
+      createCell(runtime, {
+        space,
+        id: toURI(entityId),
+        path: path?.map(String) ?? [],
+        type: "application/json",
+        schema,
+        rootSchema,
+      }, log),
     send: (newValue: T, log?: ReactivityLog) =>
       self.setAtPath([], newValue, log),
     updates: (
@@ -298,17 +296,20 @@ export function createDoc<T>(
       callbacks.add(callback);
       return () => callbacks.delete(callback);
     },
-    getAtPath: (path: PropertyKey[]) => getValueAtPath(value, path),
+    getAtPath: (path: readonly PropertyKey[]) => getValueAtPath(value, path),
     setAtPath: (
       path: PropertyKey[],
       newValue: any,
       log?: ReactivityLog,
       schema?: JSONSchema,
     ) => {
-      if (readOnly) throw new Error("Cell is read-only");
+      if (readOnly) throw new Error(`Cell is read-only: ${readOnly}`);
 
       let changed = false;
       if (path.length > 0) {
+        if (value === undefined) {
+          value = (typeof path[0] === "number" ? [] : {}) as T;
+        }
         changed = setValueAtPath(value, path, newValue);
       } else if (!deepEqual(value, newValue)) {
         changed = true;
@@ -317,7 +318,7 @@ export function createDoc<T>(
       if (changed) {
         log?.writes.push({ cell: self, path, schema: schema });
         const lubSchema = (schema !== undefined)
-          ? cfc.lubSchema(schema)
+          ? runtime.cfc.lubSchema(schema)
           : undefined;
         const labels = (lubSchema !== undefined)
           ? { classification: [lubSchema] }
@@ -330,13 +331,13 @@ export function createDoc<T>(
       }
       return changed;
     },
-    freeze: () => {
-      readOnly = true;
+    freeze: (reason: string) => {
+      readOnly = reason;
       /* NOTE: Can't freeze actual object, since otherwise JS throws type errors
       for the cases where the proxy returns different values than what is
       proxied, e.g. for aliases. TODO: Consider changing proxy here. */
     },
-    isFrozen: () => readOnly,
+    isFrozen: () => readOnly !== undefined,
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
     // and we want to serialize that as am IPLD link to this cell.
@@ -347,23 +348,28 @@ export function createDoc<T>(
     get value(): T {
       return value as T;
     },
+    get "/"(): string {
+      return typeof entityId.toJSON === "function"
+        ? entityId.toJSON()["/"]
+        : (entityId["/"] as string);
+    },
     get entityId(): EntityId {
       return entityId;
     },
     set entityId(id: EntityId) {
       throw new Error("Can't set entity ID directly, use getDocByEntityId");
     },
-    get space(): string {
+    get space(): MemorySpace {
       return space;
     },
-    set space(newSpace: string) {
+    set space(newSpace: MemorySpace) {
       throw new Error("Can't set space directly, use getDocByEntityId");
     },
     get sourceCell(): DocImpl<any> | undefined {
       return sourceCell;
     },
     set sourceCell(cell: DocImpl<any> | undefined) {
-      if (sourceCell && sourceCell !== cell) {
+      if (sourceCell && JSON.stringify(sourceCell) !== JSON.stringify(cell)) {
         throw new Error(
           `Source cell already set: ${JSON.stringify(sourceCell)} -> ${
             JSON.stringify(cell)
@@ -381,6 +387,9 @@ export function createDoc<T>(
     set ephemeral(value: boolean) {
       ephemeral = value;
     },
+    get runtime(): IRuntime {
+      return runtime;
+    },
     [toOpaqueRef]: () => makeOpaqueRef(self, []),
     [isDocMarker]: true,
     get copyTrap(): boolean {
@@ -388,25 +397,17 @@ export function createDoc<T>(
     },
   };
 
-  setDocByEntityId(space, entityId, self);
+  runtime.documentMap.registerDoc(entityId, self, space);
 
   return self;
 }
 
-function generateEntityId(value: any, cause?: any): EntityId {
-  return createRef(
-    typeof value === "object" && value !== null
-      ? (value as object)
-      : value !== undefined
-      ? { value }
-      : {},
-    cause,
-  );
-}
-
 const docLinkToOpaqueRef = new WeakMap<
   Frame,
-  WeakMap<DocImpl<any>, { path: PropertyKey[]; opaqueRef: OpaqueRef<any> }[]>
+  WeakMap<
+    DocImpl<any>,
+    { path: readonly PropertyKey[]; opaqueRef: OpaqueRef<any> }[]
+  >
 >();
 
 // Creates aliases to value, used in recipes to refer to this specific cell. We
@@ -414,7 +415,7 @@ const docLinkToOpaqueRef = new WeakMap<
 // creaeting the recipe.
 export function makeOpaqueRef(
   doc: DocImpl<any>,
-  path: PropertyKey[],
+  path: readonly PropertyKey[],
 ): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
@@ -442,8 +443,7 @@ export function makeOpaqueRef(
  * @returns {boolean}
  */
 export function isDoc(value: any): value is DocImpl<any> {
-  return typeof value === "object" && value !== null &&
-    value[isDocMarker] === true;
+  return isRecord(value) && value[isDocMarker] === true;
 }
 
 const isDocMarker = Symbol("isDoc");

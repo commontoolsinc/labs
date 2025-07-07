@@ -1,16 +1,29 @@
-import { isOpaqueRef } from "@commontools/builder";
+import { refer } from "merkle-reference/json";
+import { isRecord } from "@commontools/utils/types";
+import { isOpaqueRef } from "./builder/types.ts";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
-import { refer } from "merkle-reference";
+import { isCell } from "./cell.ts";
+import { parseLink } from "./link-utils.ts";
+import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
+import { fromURI } from "./uri-utils.ts";
 
 export type EntityId = {
   "/": string | Uint8Array;
   toJSON?: () => { "/": string };
 };
+
+export function entityIdStr(entityId: EntityId) {
+  const slashVal = entityId["/"];
+  if (typeof slashVal === "string") {
+    return slashVal;
+  } else {
+    return entityId.toJSON!()["/"];
+  }
+}
 
 /**
  * Generates an entity ID.
@@ -18,10 +31,10 @@ export type EntityId = {
  * @param source - The source object.
  * @param cause - Optional causal source. Otherwise a random n is used.
  */
-export const createRef = (
+export function createRef(
   source: Record<string | number | symbol, any> = {},
   cause: any = crypto.randomUUID(),
-): EntityId => {
+): EntityId {
   const seen = new Set<any>();
 
   // Unwrap query result proxies, replace docs with their ids and remove
@@ -33,11 +46,14 @@ export const createRef = (
     seen.add(obj);
 
     // Don't traverse into ids.
-    if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
+    if (isRecord(obj) && "/" in obj && !isDoc(obj)) return obj;
 
     // If there is a .toJSON method, replace obj with it, then descend.
+    // TODO(seefeld): We have to accept functions for now as the recipe factory
+    // is a function and has a .toJSON method. But we plan to move away from
+    // that kind of serialization anyway, so once we did, remove this.
     if (
-      typeof obj === "object" && obj !== null &&
+      (isRecord(obj) || typeof obj === "function") &&
       typeof obj.toJSON === "function"
     ) {
       obj = obj.toJSON() ?? obj;
@@ -53,7 +69,7 @@ export const createRef = (
     // If referencing other docs, return their ids (or random as fallback).
     if (isDoc(obj) || isCell(obj)) return obj.entityId ?? crypto.randomUUID();
     else if (Array.isArray(obj)) return obj.map(traverse);
-    else if (typeof obj === "object" && obj !== null) {
+    else if (isRecord(obj)) {
       return Object.fromEntries(
         Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
       );
@@ -63,60 +79,36 @@ export const createRef = (
   }
 
   return refer(traverse({ ...source, causal: cause }));
-};
+}
 
 /**
- * Extracts an entity ID from a cell or cell representation. Creates a stable
- * derivative entity ID for path references.
+ * Extracts an entity ID from a cell or cell representation.
  *
  * @param value - The value to extract the entity ID from.
  * @returns The entity ID, or undefined if the value is not a cell or doc.
  */
-export const getEntityId = (value: any): { "/": string } | undefined => {
+export function getEntityId(value: any): { "/": string } | undefined {
   if (typeof value === "string") {
+    // Handle URI format with "of:" prefix
+    if (value.startsWith("of:")) value = fromURI(value);
     return value.startsWith("{") ? JSON.parse(value) : { "/": value };
   }
-  if (typeof value === "object" && value !== null && "/" in value) {
+  if (isRecord(value) && "/" in value) {
     return JSON.parse(JSON.stringify(value));
   }
 
-  let ref: CellLink | undefined = undefined;
+  const link = parseLink(value);
 
-  if (isQueryResultForDereferencing(value)) ref = getCellLinkOrThrow(value);
-  else if (isCellLink(value)) ref = value;
-  else if (isCell(value)) ref = value.getAsCellLink();
-  else if (isDoc(value)) ref = { cell: value, path: [] };
+  if (!link || !link.id) return undefined;
 
-  if (!ref?.cell.entityId) return undefined;
+  const entityId = { "/": fromURI(link.id) };
 
-  if (ref.path.length > 0) {
+  if (link.path && link.path.length > 0) {
     return JSON.parse(
-      JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)),
+      JSON.stringify(createRef({ path: link.path }, entityId)),
     );
-  } else return JSON.parse(JSON.stringify(ref.cell.entityId));
-};
-
-/**
- * A map that holds weak references to its values per space.
- */
-class SpaceAwareCleanableMap<T extends object> {
-  private maps = new Map<string, CleanableMap<T>>();
-
-  set(space: string, key: string, value: T) {
-    let map = this.maps.get(space);
-    if (!map) {
-      map = new CleanableMap<T>();
-      this.maps.set(space, map);
-    }
-    map.set(key, value);
-  }
-
-  get(space: string, key: string): T | undefined {
-    return this.maps.get(space)?.get(key);
-  }
+  } else return entityId;
 }
-
-const entityIdToDocMap = new SpaceAwareCleanableMap<DocImpl<any>>();
 
 /**
  * A map that holds weak references to its values. Triggers a cleanup of the map
@@ -162,32 +154,127 @@ class CleanableMap<T extends object> {
   }
 }
 
-export function getDocByEntityId<T = any>(
-  space: string,
-  entityId: EntityId | string,
-  createIfNotFound = true,
-  sourceIfCreated?: DocImpl<any>,
-): DocImpl<T> | undefined {
-  const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
-  let doc = entityIdToDocMap.get(space, id);
-  if (doc) return doc;
-  if (!createIfNotFound) return undefined;
+/**
+ * A map that holds weak references to its values per space.
+ */
+class SpaceAwareCleanableMap<T extends object> {
+  private maps = new Map<string, CleanableMap<T>>();
 
-  if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
-  doc = createDoc<T>(undefined as T, entityId, space);
-  doc.sourceCell = sourceIfCreated;
-  return doc;
-}
-
-export const setDocByEntityId = (
-  space: string,
-  entityId: EntityId,
-  doc: DocImpl<any>,
-) => {
-  // throw if doc already exists
-  if (entityIdToDocMap.get(space, JSON.stringify(entityId))) {
-    throw new Error("Doc already exists");
+  set(space: string, key: string, value: T) {
+    let map = this.maps.get(space);
+    if (!map) {
+      map = new CleanableMap<T>();
+      this.maps.set(space, map);
+    }
+    map.set(key, value);
   }
 
-  entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
-};
+  get(space: string, key: string): T | undefined {
+    return this.maps.get(space)?.get(key);
+  }
+
+  cleanup() {
+    this.maps.clear();
+  }
+}
+
+export class DocumentMap implements IDocumentMap {
+  private entityIdToDocMap = new SpaceAwareCleanableMap<DocImpl<any>>();
+
+  constructor(readonly runtime: IRuntime) {}
+
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
+    createIfNotFound?: true,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T>;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
+    createIfNotFound: false,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T> | undefined;
+  getDocByEntityId<T = any>(
+    space: MemorySpace,
+    entityId: EntityId | string,
+    createIfNotFound = true,
+    sourceIfCreated?: DocImpl<any>,
+  ): DocImpl<T> | undefined {
+    const normalizedId = normalizeEntityId(entityId);
+
+    let doc = this.entityIdToDocMap.get(space, JSON.stringify(normalizedId));
+    if (doc) return doc;
+    if (!createIfNotFound) return undefined;
+
+    doc = this.createDoc<T>(undefined as T, normalizedId, space);
+    doc.sourceCell = sourceIfCreated;
+    return doc;
+  }
+
+  setDocByEntityId(
+    space: string,
+    entityId: EntityId,
+    doc: DocImpl<any>,
+  ): void {
+    // throw if doc already exists
+    if (this.entityIdToDocMap.get(space, JSON.stringify(entityId))) {
+      throw new Error("Doc already exists");
+    }
+
+    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+  }
+
+  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
+    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+  }
+
+  cleanup(): void {
+    this.entityIdToDocMap.cleanup();
+  }
+
+  /**
+   * Get or create a document with the specified value, cause, and space
+   */
+  getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T> {
+    // Generate entity ID from value and cause
+    const entityId = this.generateEntityId(value, cause);
+    const existing = this.getDocByEntityId<T>(space, entityId, false);
+    if (existing) return existing;
+
+    return this.createDoc(value, entityId, space);
+  }
+
+  private generateEntityId(value: any, cause?: any): EntityId {
+    return createRef(
+      isRecord(value)
+        ? (value as object)
+        : value !== undefined
+        ? { value }
+        : {},
+      cause,
+    );
+  }
+
+  private createDoc<T>(
+    value: T,
+    entityId: EntityId,
+    space: MemorySpace,
+  ): DocImpl<T> {
+    // Use the full createDoc implementation with runtime parameter
+    return createDoc(value, entityId, space, this.runtime);
+  }
+}
+
+function normalizeEntityId(entityId: EntityId | string): EntityId {
+  if (typeof entityId === "string") {
+    if (entityId.startsWith("of:")) {
+      return { "/": fromURI(entityId) };
+    }
+    return JSON.parse(entityId) as EntityId;
+  } else if (isRecord(entityId) && "/" in entityId) {
+    return entityId;
+  } else {
+    throw new Error("Invalid entity ID: " + JSON.stringify(entityId));
+  }
+}

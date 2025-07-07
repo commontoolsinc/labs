@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   cell,
   derive,
   handler,
@@ -9,7 +9,7 @@ import {
   schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 const updaterSchema = {
   type: "object",

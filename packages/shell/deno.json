@@ -1,0 +1,14 @@
+{
+  "name": "@commontools/shell",
+  "tasks": {
+    "build": "deno run -A ../felt/cli.ts build .",
+    "production": "PRODUCTION=1 deno run -A ../felt/cli.ts build .",
+    "serve": "deno run -A ../felt/cli.ts serve .",
+    "dev": "deno run -A ../felt/cli.ts dev .",
+    "test": "deno run build"
+  },
+  "exports": "./src/index.ts",
+  "imports": {
+    "@lit/context": "npm:@lit/context@^1.1.5"
+  }
+}

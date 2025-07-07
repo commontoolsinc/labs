@@ -33,6 +33,8 @@ The instructions in this document apply to the entire repository.
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
+- Import either from `@commontools/builder` (internal API) or
+  `@commontools/builder/interface` (external API), but not both.
 
 ### Error Handling
 

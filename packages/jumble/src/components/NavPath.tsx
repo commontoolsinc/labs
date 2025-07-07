@@ -1,5 +1,5 @@
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { CharmLink } from "@/components/CharmLink.tsx";
@@ -21,6 +21,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
     async function getCharm() {
       if (charmId) {
         const charm = await charmManager.get(charmId);
+        cancel?.();
         cancel = charm?.key(NAME).sink((value) => {
           if (mounted) setCharmName(value ?? null);
         });

@@ -1,3 +1,4 @@
+import type { Authorization, JSONValue, SchemaContext } from "./interface.ts";
 import {
   Abilities,
   AuthorizationError,
@@ -31,8 +32,6 @@ import {
   Reference,
   Result,
   Revision,
-  SchemaContext,
-  SchemaNone,
   SchemaPathSelector,
   SchemaQuery,
   SchemaQueryArgs,
@@ -48,7 +47,6 @@ import {
   UCAN,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import type { JSONValue } from "@commontools/builder";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import {
@@ -65,6 +63,7 @@ import { fromStringStream } from "./receipt.ts";
 import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
+import { SchemaNone } from "./schema.ts";
 
 export const connect = ({
   address,
@@ -122,7 +121,7 @@ class MemoryConsumerSession<
 > extends TransformStream<
   ProviderCommand<Protocol>,
   UCAN<ConsumerCommandInvocation<Protocol>>
-> implements MemorySession<Space> {
+> implements MemoryConsumer<Space> {
   controller:
     | TransformStreamDefaultController<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
@@ -132,6 +131,9 @@ class MemoryConsumerSession<
     InvocationURL<Reference<Invocation>>,
     Job<Abilities<MemoryProtocol>, MemoryProtocol>
   > = new Map();
+
+  // Promises that are resolved when the message is at the front of the queue
+  private sendQueue: PromiseWithResolvers<void>[] = [];
 
   constructor(
     public as: Signer,
@@ -209,9 +211,42 @@ class MemoryConsumerSession<
   async execute<Ability extends string>(
     invocation: ConsumerInvocation<Ability, MemoryProtocol>,
   ) {
-    const { error, ok: authorization } = await Access.authorize([
+    const queueEntry = Promise.withResolvers<void>();
+    // put it in the queue immediately -- messages are sent in the order
+    // they are executed, regardless of authorization timing
+    this.sendQueue.push(queueEntry);
+
+    const authorizationResult = await Access.authorize([
       invocation.refer(),
     ], this.as);
+
+    // If we're not at the front of the queue, wait until we are
+    if (queueEntry !== this.sendQueue[0]) {
+      await queueEntry.promise;
+      // We can be resolved, then rejected (noop) via cancel.
+      if (this.sendQueue.length === 0 || queueEntry !== this.sendQueue[0]) {
+        throw new Error("session cancel");
+      }
+    }
+    try {
+      this.executeAuthorized(authorizationResult, invocation);
+    } finally {
+      // if that throws, we still want to unblock the queue
+      this.sendQueue.shift();
+      if (this.sendQueue.length > 0) {
+        this.sendQueue[0].resolve();
+      }
+    }
+  }
+
+  private executeAuthorized<
+    Ability extends string,
+    Access extends Reference[],
+  >(
+    authorizationResult: Result<Authorization<Access[number]>, Error>,
+    invocation: ConsumerInvocation<Ability, MemoryProtocol>,
+  ) {
+    const { error, ok: authorization } = authorizationResult;
     if (error) {
       invocation.return({ error });
     } else {
@@ -237,10 +272,17 @@ class MemoryConsumerSession<
       }
     }
   }
+
   close() {
+    this.cancel();
     this.controller?.terminate();
   }
-  cancel() {}
+  cancel() {
+    for (const queueEntry of [...this.sendQueue]) {
+      queueEntry.reject(new Error("session cancel"));
+    }
+    this.sendQueue = [];
+  }
   abort(invocation: InvocationHandle) {
     this.invocations.delete(invocation.toURL());
   }
@@ -256,6 +298,15 @@ class MemoryConsumerSession<
 
 export interface MemorySession<Space extends MemorySpace> {
   mount<Subject extends Space>(space: Subject): MemorySpaceSession<Subject>;
+}
+
+export interface MemoryConsumer<Space extends MemorySpace>
+  extends
+    MemorySession<Space>,
+    TransformStream<
+      ProviderCommand<Protocol>,
+      UCAN<ConsumerCommandInvocation<Protocol>>
+    > {
 }
 
 export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {

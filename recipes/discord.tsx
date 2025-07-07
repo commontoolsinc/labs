@@ -1,17 +1,14 @@
-import { h } from "@commontools/html";
 import {
+  h,
   cell,
   derive,
   handler,
-  ID,
-  JSONSchema,
+  type JSONSchema,
   NAME,
   recipe,
-  Schema,
-  str,
+  type Schema,
   UI,
-} from "@commontools/builder";
-import { Cell } from "@commontools/runner";
+} from "commontools";
 
 // README:
 // sudo tailscale serve --https=443 localhost:8080

@@ -1,13 +1,13 @@
-import { h } from "@commontools/html";
 import {
   derive,
+  h,
   handler,
   JSONSchema,
   NAME,
   recipe,
   Schema,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 const TodoItemSchema = {
   type: "object",
@@ -46,7 +46,7 @@ const ResultSchema = {
       properties: {
         title: { type: "string" },
       },
-      example: { title: "New item" },
+      examples: [{ title: "New item" }],
       required: ["title"],
     },
     "/action/drop/schema": { type: "object" },

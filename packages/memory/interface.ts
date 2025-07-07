@@ -1,7 +1,8 @@
 import type { Reference } from "merkle-reference";
-import { JSONSchema, JSONValue } from "@commontools/builder";
+import { JSONValue, SchemaContext } from "@commontools/runner";
+import { SchemaPathSelector } from "@commontools/runner/traverse";
 
-export type { Reference };
+export type { JSONValue, Reference, SchemaContext, SchemaPathSelector };
 
 export interface Clock {
   now(): UTCUnixTimestampInSeconds;
@@ -519,6 +520,11 @@ export type InvocationURL<T> = `job:${string}` & {
   toString(): InvocationURL<T>;
 };
 
+export interface FactAddress {
+  the: The;
+  of: Entity;
+}
+
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
@@ -782,21 +788,6 @@ export type SchemaSelector = Select<
   Select<The, Select<Cause, SchemaPathSelector>>
 >;
 
-// Note: This could be altered to only pass the rootSchema (as schema), and rely on path
-// to narrow the schema to the appropriate section.
-export type SchemaPathSelector = {
-  path: string[];
-  schemaContext?: SchemaContext;
-  is?: Unit;
-};
-
-// This is a schema, together with its rootSchema for resolving $ref entries
-// In the future, we should include the boolean option in the JSONSchema type itself
-export type SchemaContext = {
-  schema: JSONSchema | boolean;
-  rootSchema: JSONSchema | boolean;
-};
-
 export type Operation =
   | Transaction
   | Query
@@ -904,7 +895,7 @@ export type Conflict = {
   /**
    * Actual memory state in the replica repository.
    */
-  actual: Fact | null;
+  actual: Revision<Fact> | null;
 };
 
 export type ToJSON<T> = T & {
@@ -989,11 +980,3 @@ export type Variant<U extends Record<string, unknown>> = {
       [K in Key]: U[Key];
     };
 }[keyof U];
-
-// This will match every doc reachable by the specified set of documents
-export const SchemaAll: SchemaContext = { schema: true, rootSchema: true };
-
-// This is equivalent to a standard query, and will only match the specified documents
-export const SchemaNone: SchemaContext = { schema: false, rootSchema: false };
-
-export const SelectAllString = "_";

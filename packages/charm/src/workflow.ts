@@ -10,9 +10,9 @@
  * 6. Spell search and casting
  */
 
-import { Cell, recipeManager } from "@commontools/runner";
+import { Cell, Runtime } from "@commontools/runner";
 import { Charm, charmId, CharmManager } from "./manager.ts";
-import { JSONSchema } from "@commontools/builder";
+import { JSONSchema } from "@commontools/runner";
 import { classifyWorkflow, generateWorkflowPlan } from "@commontools/llm";
 import { iterate } from "./iterate.ts";
 import { getIframeRecipe } from "./iframe/recipe.ts";
@@ -22,6 +22,7 @@ import { castNewRecipe } from "./iterate.ts";
 import { VNode } from "@commontools/html";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
 import { CharmSearchResult, searchCharms } from "./search.ts";
+import { console } from "./conditional-console.ts";
 
 export interface RecipeRecord {
   argumentSchema: JSONSchema; // Schema type from jsonschema
@@ -166,7 +167,10 @@ export async function classifyIntent(
   let existingCode: string | undefined;
 
   if (form.input.existingCharm) {
-    const { spec, schema, code } = extractContext(form.input.existingCharm);
+    const { spec, schema, code } = extractContext(
+      form.input.existingCharm,
+      form.meta.charmManager.runtime,
+    );
     existingSpec = spec;
     existingSchema = schema;
     existingCode = code;
@@ -208,13 +212,13 @@ export async function classifyIntent(
   };
 }
 
-function extractContext(charm: Cell<Charm>) {
+function extractContext(charm: Cell<Charm>, runtime: Runtime) {
   let spec: string | undefined;
   let schema: JSONSchema | undefined;
   let code: string | undefined;
 
   try {
-    const iframeRecipe = getIframeRecipe(charm);
+    const iframeRecipe = getIframeRecipe(charm, runtime);
     if (
       iframeRecipe && iframeRecipe.iframe
     ) {
@@ -252,7 +256,10 @@ export async function generatePlan(
   let existingCode: string | undefined;
 
   if (form.input.existingCharm) {
-    const { spec, schema, code } = extractContext(form.input.existingCharm);
+    const { spec, schema, code } = extractContext(
+      form.input.existingCharm,
+      form.meta.charmManager.runtime,
+    );
     existingSpec = spec;
     existingSchema = schema;
     existingCode = code;

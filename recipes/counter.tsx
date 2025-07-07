@@ -1,14 +1,5 @@
 // deno-lint-ignore-file jsx-no-useless-fragment
-import { h } from "@commontools/html";
-import {
-  derive,
-  handler,
-  NAME,
-  recipe,
-  schema,
-  str,
-  UI,
-} from "@commontools/builder";
+import { derive, h, handler, NAME, recipe, schema, str, UI } from "commontools";
 
 // Different way to define the same schema, using 'schema' helper function,
 // let's as leave off `as const satisfies JSONSchema`.
@@ -33,12 +24,12 @@ export default recipe(model, model, (cell) => {
     [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
     [UI]: (
       <div>
-        <button type="button" onClick={increment(cell)}>+</button>
+        <ct-button onClick={decrement(cell)}>-</ct-button>
         {/* use html fragment to test that it works  */}
         <>
           <b>{cell.value}</b>
         </>
-        <button type="button" onClick={decrement(cell)}>-</button>
+        <ct-button onClick={increment(cell)}>+</ct-button>
       </div>
     ),
     value: cell.value,

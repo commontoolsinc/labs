@@ -1,6 +1,5 @@
 import { Command } from "cmdk";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import "./commands.css";
 import { useCharmManager } from "@/contexts/CharmManagerContext.tsx";
 import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
@@ -22,7 +21,7 @@ import { WorkflowForm } from "@commontools/charm";
 import { TranscribeInput } from "./TranscribeCommand.tsx";
 import { Composer, ComposerSubmitBar } from "@/components/Composer.tsx";
 import { getMentionableCharms } from "@/utils/charms.ts";
-import { NAME } from "@commontools/builder";
+import { NAME } from "@commontools/runner";
 import { Cell } from "@commontools/runner";
 import { Charm, charmId } from "@commontools/charm";
 import { useLiveSpecPreview } from "@/hooks/use-live-spec-preview.ts";
@@ -33,6 +32,7 @@ import {
   ModelSelector,
   useUserPreferredModel,
 } from "@/components/common/ModelSelector.tsx";
+import { createPath } from "@/routes.ts";
 
 function CommandProcessor({
   mode,
@@ -414,15 +414,14 @@ export function CommandCenter() {
         setMode({
           type: "input",
           command: newCharmCommand,
-          placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
+          placeholder: (newCharmCommand as InputCommandItem).placeholder ||
+            "What would you like to create?",
         });
       }
     };
 
     const handleNewCharmEvent = () => {
-      const newCharmCommand = allCommands.find((cmd) =>
-        cmd.id === "new-charm"
-      );
+      const newCharmCommand = allCommands.find((cmd) => cmd.id === "new-charm");
       if (!newCharmCommand) {
         console.warn("New charm command not found");
         return;
@@ -431,12 +430,50 @@ export function CommandCenter() {
       setMode({
         type: "input",
         command: newCharmCommand,
-        placeholder: (newCharmCommand as InputCommandItem).placeholder || "What would you like to create?",
+        placeholder: (newCharmCommand as InputCommandItem).placeholder ||
+          "What would you like to create?",
       });
+    };
+
+    const handleNavigateToCharm = (event: CustomEvent) => {
+      const { charmId, charm, replicaName } = event.detail || {};
+
+      // If we have a charm object, ensure it's added to the charm manager
+      if (charm && charmManager) {
+        charmManager.add([charm]).catch((err) => {
+          console.error("Failed to add charm to manager:", err);
+        });
+      }
+
+      if (charmId && replicaName) {
+        navigate(
+          createPath("charmShow", {
+            charmId,
+            replicaName,
+          }),
+        );
+      } else if (charmId && focusedReplicaId) {
+        // Use current replica if not specified
+        navigate(
+          createPath("charmShow", {
+            charmId,
+            replicaName: focusedReplicaId,
+          }),
+        );
+      } else {
+        console.warn("Navigate to charm event missing required parameters:", {
+          charmId,
+          replicaName,
+        });
+      }
     };
 
     document.addEventListener("keydown", handleNewCharm);
     globalThis.addEventListener("new-charm-command", handleNewCharmEvent);
+    globalThis.addEventListener(
+      "navigate-to-charm",
+      handleNavigateToCharm as EventListener,
+    );
 
     return () => {
       document.removeEventListener("keydown", handleNewCharm);
@@ -444,8 +481,12 @@ export function CommandCenter() {
         "new-charm-command",
         handleNewCharmEvent,
       );
+      globalThis.removeEventListener(
+        "navigate-to-charm",
+        handleNavigateToCharm as EventListener,
+      );
     };
-  }, [focusedCharmId, allCommands]);
+  }, [focusedCharmId, allCommands, navigate, focusedReplicaId, charmManager]);
 
   const handleBack = () => {
     if (commandPathIds.length === 1) {

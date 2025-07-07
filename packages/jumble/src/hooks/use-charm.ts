@@ -19,7 +19,7 @@ const loadCharmData = async (
 
   if (charm) {
     try {
-      const ir = getIframeRecipe(charm);
+      const ir = getIframeRecipe(charm, charmManager.runtime);
       iframeRecipe = ir?.iframe ?? null;
     } catch (e) {
       console.info(e);

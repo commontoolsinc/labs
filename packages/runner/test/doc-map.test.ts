@@ -1,13 +1,13 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  createRef,
-  type EntityId,
-  getDocByEntityId,
-  getEntityId,
-} from "../src/doc-map.ts";
-import { getDoc } from "../src/doc.ts";
+import { createRef, type EntityId, getEntityId } from "../src/doc-map.ts";
 import { refer } from "merkle-reference";
+import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("refer", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
@@ -18,6 +18,24 @@ describe("refer", () => {
 });
 
 describe("cell-map", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    // Create memory service for testing
+    storageManager = StorageManager.emulate({ as: signer });
+
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
   describe("createRef", () => {
     it("should create a reference with custom source and cause", () => {
       const source = { foo: "bar" };
@@ -36,53 +54,75 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const c = getDoc({}, undefined, "test");
-      const id = getEntityId(c);
+      const cell = runtime.getCell(space, "test-cell");
+      cell.set({});
+      const id = getEntityId(cell);
 
-      expect(getEntityId(c)).toEqual(id);
-      expect(getEntityId(c.getAsQueryResult())).toEqual(id);
-      expect(getEntityId(c.asCell())).toEqual(id);
-      expect(getEntityId({ cell: c, path: [] })).toEqual(id);
+      expect(getEntityId(cell)).toEqual(id);
+      expect(getEntityId(cell.getAsQueryResult())).toEqual(id);
+      expect(getEntityId(cell.getAsLegacyCellLink())).toEqual(id);
     });
 
     it("should return a different entity ID for reference with paths", () => {
-      const c = getDoc({ foo: { bar: 42 } }, undefined, "test");
+      const c = runtime.getCell<{ foo: { bar: number } }>(
+        space,
+        "test-with-paths",
+      );
+      c.set({ foo: { bar: 42 } });
       const id = getEntityId(c);
 
       expect(getEntityId(c.getAsQueryResult())).toEqual(id);
       expect(getEntityId(c.getAsQueryResult(["foo"]))).not.toEqual(id);
-      expect(getEntityId(c.asCell(["foo"]))).not.toEqual(id);
-      expect(getEntityId({ cell: c, path: ["foo"] })).not.toEqual(id);
+      expect(getEntityId(c.key("foo"))).not.toEqual(id);
+      expect(getEntityId(c.key("foo").getAsLegacyCellLink())).not.toEqual(id);
 
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
-        getEntityId(c.asCell(["foo"])),
+        getEntityId(c.key("foo")),
       );
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
-        getEntityId({ cell: c, path: ["foo"] }),
+        getEntityId(c.key("foo").getAsLegacyCellLink()),
       );
     });
   });
 
   describe("getCellByEntityId and setCellByEntityId", () => {
     it("should set and get a cell by entity ID", () => {
-      const c = getDoc({ value: 42 }, undefined, "test");
+      const c = runtime.getCell<{ value: number }>(space, "test-by-entity-id");
+      c.set({ value: 42 });
 
-      const retrievedCell = getDocByEntityId(c.space, c.entityId!);
+      // Use Cell API to retrieve by entity ID
+      const retrievedCell = runtime.getCellFromEntityId<{ value: number }>(
+        space,
+        c.entityId!,
+      );
 
-      expect(retrievedCell).toBe(c);
+      // Verify we got the same cell
+      expect(retrievedCell.entityId).toEqual(c.entityId);
+      expect(retrievedCell.get()).toEqual({ value: 42 });
+
+      // Also verify the cells are equal
+      expect(retrievedCell.equals(c)).toBe(true);
     });
 
     it("should return undefined for non-existent entity ID", () => {
       const nonExistentId = createRef() as EntityId;
-      expect(getDocByEntityId("test", nonExistentId, false))
+      // Note: We must use getDocByEntityId directly here because getCellFromEntityId
+      // always creates a new doc if not found (createIfNotFound: true)
+      expect(runtime.documentMap.getDocByEntityId(space, nonExistentId, false))
         .toBeUndefined();
     });
   });
 
   describe("cells as JSON", () => {
     it("should serialize the entity ID", () => {
-      const c = getDoc({ value: 42 }, "cause", "test");
-      expect(JSON.stringify(c)).toEqual(JSON.stringify(c.entityId));
+      const c = runtime.getCell<{ value: number }>(space, "test-json");
+      c.set({ value: 42 });
+
+      const expected = JSON.stringify({
+        cell: c.entityId,
+        path: [],
+      });
+      expect(JSON.stringify(c)).toEqual(expected);
     });
   });
 });

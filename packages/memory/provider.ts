@@ -1,4 +1,5 @@
-import * as Memory from "./memory.ts";
+import { MapSet } from "@commontools/runner/traverse";
+import * as Access from "./access.ts";
 import type {
   AsyncResult,
   Await,
@@ -8,13 +9,15 @@ import type {
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
+  DID,
   Fact,
+  FactAddress,
   Invocation,
   InvocationURL,
   MemorySession,
   MemorySpace,
   Proto,
-  Protocol as Protocol,
+  Protocol,
   ProviderCommand,
   ProviderCommandFor,
   ProviderSession,
@@ -23,6 +26,7 @@ import type {
   Reference,
   Result,
   Revision,
+  SchemaPathSelector,
   SchemaQuery,
   Selection,
   Subscribe,
@@ -30,24 +34,26 @@ import type {
   Transaction,
   UCAN,
 } from "./interface.ts";
-import * as Subscription from "./subscription.ts";
-export * from "./interface.ts";
-export * from "./util.ts";
-export * as Error from "./error.ts";
-export * as Space from "./space.ts";
-export * as Memory from "./memory.ts";
-export * as Subscription from "./subscription.ts";
+import * as SelectionBuilder from "./selection.ts";
+import * as Memory from "./memory.ts";
 import { refer } from "./reference.ts";
-import * as Access from "./access.ts";
-import { Fact as FactModule, SelectionBuilder } from "./lib.ts";
-import { FactAddress } from "../runner/src/storage/cache.ts";
 import { redactCommit } from "./space.ts";
+import * as Subscription from "./subscription.ts";
+import * as FactModule from "./fact.ts";
+
+export * as Error from "./error.ts";
+export * from "./interface.ts";
+export * as Memory from "./memory.ts";
+export * as Space from "./space.ts";
+export * as Subscription from "./subscription.ts";
+export * from "./util.ts";
 
 // Convenient shorthand so I don't need this long type for this string
 type JobId = InvocationURL<Reference<ConsumerCommandInvocation<Protocol>>>;
+export type Options = Memory.Options;
 
 export const open = async (
-  options: Memory.Options,
+  options: Options,
 ): AsyncResult<Provider<Protocol>, ConnectionError> => {
   const result = await Memory.open(options);
   if (result.error) {
@@ -56,6 +62,16 @@ export const open = async (
 
   return { ok: new MemoryProvider(result.ok) };
 };
+
+/**
+ * Creates an ephemeral memory provider. It does not persist anything
+ * and it's primary use is in testing.
+ */
+export const emulate = (options: Memory.ServiceOptions): Provider<Protocol> =>
+  new MemoryProvider(Memory.emulate(options));
+
+export const create = (memory: MemorySession): Provider<Protocol> =>
+  new MemoryProvider(memory);
 
 export interface Provider<Protocol extends Proto> {
   fetch(request: Request): Promise<Response>;
@@ -138,6 +154,7 @@ class MemoryProviderSession<
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
+  watchedObjects: MapSet<string, SchemaPathSelector> = new MapSet();
 
   constructor(
     public memory: MemorySession,
@@ -226,6 +243,7 @@ class MemoryProviderSession<
       }
       case "/memory/graph/query": {
         const result = await this.memory.querySchema(invocation);
+        // We maintain subscriptions at this level, but really need more data from the query response
         if (invocation.args.subscribe && result.ok !== undefined) {
           this.addSchemaSubscription(of, invocation, result.ok);
           this.memory.subscribe(this);
@@ -325,9 +343,13 @@ class MemoryProviderSession<
 
   private formatAddress<Space extends MemorySpace>(
     space: Space,
-    fv: FactAddress,
+    fv: Readonly<FactAddress>,
   ) {
     return Subscription.formatAddress({ at: space, the: fv.the, of: fv.of });
+  }
+
+  private toKey(fv: Readonly<FactAddress>) {
+    return `${fv.of}/${fv.the}`;
   }
 
   private addSchemaSubscription<Space extends MemorySpace>(
@@ -351,6 +373,13 @@ class MemoryProviderSession<
       since,
     );
     this.schemaChannels.set(of, subscription);
+
+    // We don't know which schema path selector caused this fact to be included (it may have been included by multiple)
+    for (const fact of factVersions) {
+      const factKey = this.toKey(fact);
+      // FIXME(@ubik2)
+      this.watchedObjects.add(factKey, { path: [] });
+    }
   }
 
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(

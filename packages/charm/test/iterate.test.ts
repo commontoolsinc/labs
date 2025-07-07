@@ -1,10 +1,32 @@
 import { assertEquals } from "@std/assert";
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { scrub } from "../src/iterate.ts";
-import { getImmutableCell } from "@commontools/runner";
-import { JSONSchema } from "@commontools/builder";
+import { type JSONSchema, Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { Identity } from "@commontools/identity";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("scrub function", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
   it("should return primitive values unchanged", () => {
     assertEquals(scrub(123), 123);
     assertEquals(scrub("test"), "test");
@@ -15,7 +37,7 @@ describe("scrub function", () => {
 
   it("should scrub arrays recursively", () => {
     const cellValue = { test: 123, $UI: "hidden" };
-    const testCell = getImmutableCell("test", cellValue);
+    const testCell = runtime.getImmutableCell(space, cellValue);
 
     const input = [1, "test", testCell, { a: 1 }];
     const result = scrub(input);
@@ -38,7 +60,7 @@ describe("scrub function", () => {
     };
 
     const cellValue = { name: "test", age: 30, $UI: {}, streamProp: {} };
-    const cellWithSchema = getImmutableCell("test", cellValue, schema);
+    const cellWithSchema = runtime.getImmutableCell(space, cellValue, schema);
 
     const result = scrub(cellWithSchema);
 
@@ -61,7 +83,7 @@ describe("scrub function", () => {
       type: "object",
     };
 
-    const cellWithEmptySchema = getImmutableCell("test", {
+    const cellWithEmptySchema = runtime.getImmutableCell(space, {
       name: "test",
       $UI: {},
     }, schema);
@@ -77,7 +99,11 @@ describe("scrub function", () => {
       type: "string",
     };
 
-    const cellWithStringSchema = getImmutableCell("test", "test value", schema);
+    const cellWithStringSchema = runtime.getImmutableCell(
+      space,
+      "test value",
+      schema,
+    );
 
     const result = scrub(cellWithStringSchema);
 

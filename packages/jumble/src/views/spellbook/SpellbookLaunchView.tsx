@@ -4,7 +4,6 @@ import {
   CharmsManagerProvider,
   useCharmManager,
 } from "@/contexts/CharmManagerContext.tsx";
-import { recipeManager } from "@commontools/runner";
 import { createPath } from "@/routes.ts";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { AuthenticationView } from "@/views/AuthenticationView.tsx";
@@ -54,10 +53,10 @@ function Launcher() {
         await charmManager.syncRecipeById(spellId);
         console.log("Recipe sync completed");
 
-        const recipe = await recipeManager.loadRecipe({
-          recipeId: spellId,
-          space: charmManager.getSpace(),
-        });
+        const recipe = await charmManager.runtime.recipeManager.loadRecipe(
+          spellId,
+          charmManager.getSpace(),
+        );
         console.log("Retrieved recipe:", recipe);
 
         if (!recipe) {

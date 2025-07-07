@@ -51,10 +51,10 @@ import {
   setEmptyObj,
   setRevision,
 } from "./selection.ts";
-import { SelectAllString } from "./interface.ts";
+import { SelectAllString } from "./schema.ts";
 import * as Error from "./error.ts";
 import { selectSchema } from "./space-schema.ts";
-import { JSONValue } from "@commontools/builder";
+import { JSONValue } from "@commontools/runner";
 import { isObject } from "../utils/src/types.ts";
 export type * from "./interface.ts";
 
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS fact (
   this    TEXT NOT NULL PRIMARY KEY,  -- Merkle reference for { the, of, is, cause }
   the     TEXT NOT NULL,              -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,              -- Entity identifier fact is about
-  'is'    TEXT NOT NULL,              -- Merkle reference of asserted value or "undefined" if retraction 
+  'is'    TEXT NOT NULL,              -- Merkle reference of asserted value or "undefined" if retraction
   cause   TEXT,                       -- Causal reference to prior fact (It is NULL for a first assertion)
   since   INTEGER NOT NULL,           -- Lamport clock since when this fact was in effect
   FOREIGN KEY('is') REFERENCES datum(this)
@@ -386,24 +386,25 @@ type StateRow = {
 const recall = <Space extends MemorySpace>(
   { store }: Session<Space>,
   { the, of }: { the: The; of: Entity },
-): { fact: Fact | null; since?: number; id?: string } => {
+): Revision<Fact> | null => {
   const row = store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
   if (row) {
-    const fact: Fact = {
+    const revision: Revision<Fact> = {
       the,
       of,
       cause: row.cause
         ? (fromString(row.cause) as Reference<Assertion>)
         : refer(unclaimed(row)),
+      since: row.since,
     };
 
     if (row.is) {
-      fact.is = JSON.parse(row.is);
+      revision.is = JSON.parse(row.is);
     }
 
-    return { fact, id: row.fact, since: row.since };
+    return revision;
   } else {
-    return { fact: null };
+    return null;
   }
 };
 
@@ -413,7 +414,7 @@ const select = <Space extends MemorySpace>(
 ): Selection<Space>[Space] => {
   const factSelection: FactSelection = {}; // we'll store our facts here
   // First, collect all the potentially relevant facts (without dereferencing pointers)
-  for (const entry of iterateSelector(select)) {
+  for (const entry of iterateSelector(select, {})) {
     const factSelector = {
       of: entry.of,
       the: entry.the,
@@ -475,6 +476,30 @@ export const selectFacts = function* <Space extends MemorySpace>(
       since: row.since,
     };
   }
+};
+
+export const selectFact = function <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { the, of, since }: { the: The; of: Entity; since?: number },
+): SelectedFact | undefined {
+  const rows = store.prepare(EXPORT).all({
+    the: the,
+    of: of,
+    cause: null,
+    is: null,
+    since: since ?? null,
+  }) as StateRow[];
+  if (rows.length > 0) {
+    const row = rows[0];
+    return {
+      the: row.the,
+      of: row.of,
+      cause: row.cause ?? refer(unclaimed(row)).toString() as Cause,
+      is: row.is ? JSON.parse(row.is) as JSONValue : undefined,
+      since: row.since,
+    };
+  }
+  return undefined;
 };
 
 /**
@@ -592,10 +617,11 @@ const swap = <Space extends MemorySpace>(
   // matching `cause`. It may be because `cause` referenced implicit fact
   // in which case which case `IMPORT_MEMORY` provisioned desired record and
   // update would not have applied. Or it could be that `cause` in the database
-  // is different from the one being asserted. We will asses this by pulling
+  // is different from the one being asserted. We will assess this by pulling
   // the record and comparing it to desired state.
   if (updated === 0) {
-    const { fact: actual } = recall(session, { the, of });
+    const revision = recall(session, { the, of });
+    const { since, ...actual } = revision ? revision : { actual: null };
 
     // If actual state matches desired state it either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
@@ -606,7 +632,7 @@ const swap = <Space extends MemorySpace>(
         the,
         of,
         expected,
-        actual,
+        actual: revision as Revision<Fact>,
       });
     }
   }
@@ -800,6 +826,10 @@ export function getLabels<
 ): OfTheCause<FactSelectionValue> {
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
+    // We don't restrict acccess to labels
+    if (fact.the === LABEL_THE) {
+      continue;
+    }
     const labelFact = getLabel(session, fact.of);
     if (labelFact !== undefined) {
       set<FactSelectionValue, OfTheCause<FactSelectionValue>>(
@@ -822,12 +852,7 @@ export function getLabel<Space extends MemorySpace>(
   session: Session<Space>,
   of: Entity,
 ) {
-  const labelSelector = { of, the: LABEL_THE, cause: SelectAllString };
-  // Apply the last label that was active for the selected fact
-  for (const metadata of selectFacts(session, labelSelector)) {
-    return metadata;
-  }
-  return undefined;
+  return selectFact(session, { of, the: LABEL_THE });
 }
 
 // Get the various classification tags required based on the collection of labels.
@@ -881,12 +906,19 @@ export function redactCommitData(
     if (fact.value === true) {
       continue;
     }
-    const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
-    if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
-      setEmptyObj(newChanges, fact.of, fact.the);
-    } else {
+    // We treat all labels as unclassified
+    if (fact.the === LABEL_THE) {
       set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+      continue;
     }
+    // FIXME(@ubik2): Re-enable this once we've tracked down other issues
+    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
+    // if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
+    //   setEmptyObj(newChanges, fact.of, fact.the);
+    // } else {
+    //   set(newChanges, fact.of, fact.the, fact.cause, fact.value);
+    // }
+    set(newChanges, fact.of, fact.the, fact.cause, fact.value);
   }
   const newCommitData = {
     since: commitData.since,
@@ -898,7 +930,7 @@ export function redactCommitData(
   return newCommitData;
 }
 
-export function loadFacts<Space extends MemorySpace>(
+function loadFacts<Space extends MemorySpace>(
   selection: FactSelection,
   session: Session<Space>,
   factSelector: FactSelector,

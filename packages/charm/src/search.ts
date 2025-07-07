@@ -4,9 +4,9 @@ import {
   CharmManager,
   DEFAULT_MODEL,
 } from "@commontools/charm";
-import { NAME, Recipe, recipe } from "@commontools/builder";
+import { NAME, Recipe } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm";
-import { Cell, recipeManager } from "@commontools/runner";
+import { Cell } from "@commontools/runner";
 
 export type CharmSearchResult = {
   charm: Cell<Charm>;
@@ -33,9 +33,9 @@ export async function searchCharms(
           const recipe = await charmManager.syncRecipe(charm);
 
           return {
-            title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
+            title: title + ` (#${charmId(charm)!.slice(-4)})`,
             description: (recipe as Recipe).argumentSchema.description,
-            id: charmId(charm.entityId!)!,
+            id: charmId(charm)!,
             value: charm.entityId!,
           };
         } catch (error) {
@@ -44,7 +44,7 @@ export async function searchCharms(
           return {
             title: "Error loading charm",
             description: "Failed to load charm details",
-            id: charm.entityId ? charmId(charm.entityId)! : "unknown",
+            id: charm.entityId ? charmId(charm)! : "unknown",
             value: charm.entityId || "unknown",
           };
         }

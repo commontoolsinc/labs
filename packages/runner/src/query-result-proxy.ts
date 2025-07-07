@@ -1,8 +1,24 @@
-import { getTopFrame, toOpaqueRef } from "@commontools/builder";
-import { type DocImpl, getDoc, makeOpaqueRef } from "./doc.ts";
-import { type CellLink } from "./cell.ts";
-import { queueEvent, type ReactivityLog } from "./scheduler.ts";
-import { diffAndUpdate, resolveLinkToValue, setNestedValue } from "./utils.ts";
+import { isRecord } from "@commontools/utils/types";
+import { getTopFrame } from "./builder/recipe.ts";
+import { toOpaqueRef } from "./builder/types.ts";
+import { type DocImpl, makeOpaqueRef } from "./doc.ts";
+import { type LegacyDocCellLink } from "./sigil-types.ts";
+import { type ReactivityLog } from "./scheduler.ts";
+import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
+import { resolveLinkToValue } from "./link-resolution.ts";
+import {
+  parseLink,
+  parseNormalizedFullLinktoLegacyDocCellLink,
+} from "./link-utils.ts";
+import { appendTxToReactivityLog } from "./cell.ts";
+
+// Maximum recursion depth to prevent infinite loops
+const MAX_RECURSION_DEPTH = 100;
+
+// Cache of target objects to their proxies, scoped by ReactivityLog
+const proxyCacheByLog = new WeakMap<ReactivityLog, WeakMap<object, any>>();
+// Use this to index cache if there is no log provided.
+const fallbackLog: ReactivityLog = { reads: [], writes: [] };
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -49,24 +65,53 @@ export function createQueryResultProxy<T>(
   valueCell: DocImpl<T>,
   valuePath: PropertyKey[],
   log?: ReactivityLog,
+  depth: number = 0,
 ): T {
+  // Check recursion depth
+  if (depth > MAX_RECURSION_DEPTH) {
+    throw new Error(
+      `Maximum recursion depth of ${MAX_RECURSION_DEPTH} exceeded`,
+    );
+  }
+
   // Resolve path and follow links to actual value.
-  ({ cell: valueCell, path: valuePath } = resolveLinkToValue(
-    valueCell,
-    valuePath,
-    log,
-  ));
+  const tx = valueCell.runtime.edit();
+  ({ cell: valueCell, path: valuePath } =
+    parseNormalizedFullLinktoLegacyDocCellLink(
+      resolveLinkToValue(
+        tx,
+        parseLink({ cell: valueCell, path: valuePath } as LegacyDocCellLink),
+      ),
+      valueCell.runtime,
+    ));
+  tx.commit();
+  if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
 
   log?.reads.push({ cell: valueCell, path: valuePath });
   const target = valueCell.getAtPath(valuePath) as any;
 
-  if (typeof target !== "object" || target === null) return target;
+  if (!isRecord(target)) return target;
 
-  return new Proxy(target as object, {
+  // Get the appropriate cache index by log
+  const cacheIndex = log ?? fallbackLog;
+  let logCache = proxyCacheByLog.get(cacheIndex);
+  if (!logCache) {
+    logCache = new WeakMap<object, any>();
+    proxyCacheByLog.set(cacheIndex, logCache);
+  }
+
+  // Check if we already have a proxy for this target in the cache
+  const existingProxy = logCache?.get(target);
+  if (existingProxy) return existingProxy;
+
+  const proxy = new Proxy(target as object, {
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
         if (prop === getCellLink) {
-          return { cell: valueCell, path: valuePath } satisfies CellLink;
+          return {
+            cell: valueCell,
+            path: valuePath,
+          } satisfies LegacyDocCellLink;
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(valueCell, valuePath);
         }
@@ -86,7 +131,12 @@ export function createQueryResultProxy<T>(
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
             const copy = target.map((_, index) =>
-              createQueryResultProxy(valueCell, [...valuePath, index], log)
+              createQueryResultProxy(
+                valueCell,
+                [...valuePath, index],
+                log,
+                depth + 1,
+              )
             );
 
             return method.apply(copy, args);
@@ -153,28 +203,36 @@ export function createQueryResultProxy<T>(
                 context: getTopFrame()?.cause ?? "unknown",
               };
 
-              const resultCell = getDoc<any[]>(
+              if (!valueCell.runtime) {
+                throw new Error("No runtime available in document for getDoc");
+              }
+              const resultDoc = valueCell.runtime.documentMap.getDoc<any[]>(
                 undefined as unknown as any[],
                 cause,
                 valueCell.space,
               );
-              resultCell.send(result);
+              resultDoc.send(result);
 
               diffAndUpdate(
-                { cell: resultCell, path: [] },
+                { cell: resultDoc, path: [] },
                 result,
                 log,
                 cause,
               );
 
-              result = resultCell.getAsQueryResult([], log);
+              result = resultDoc.getAsQueryResult([], log);
             }
 
             return result;
           };
       }
 
-      return createQueryResultProxy(valueCell, [...valuePath, prop], log);
+      return createQueryResultProxy(
+        valueCell,
+        [...valuePath, prop],
+        log,
+        depth + 1,
+      );
     },
     set: (target, prop, value) => {
       if (isQueryResult(value)) value = value[getCellLink];
@@ -195,7 +253,6 @@ export function createQueryResultProxy<T>(
             i++
           ) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
-            queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
           }
         }
         return true;
@@ -211,6 +268,10 @@ export function createQueryResultProxy<T>(
       return true;
     },
   }) as T;
+
+  // Cache the proxy in the appropriate cache before returning
+  logCache.set(target, proxy);
+  return proxy;
 }
 
 // Wraps a value on an array so that it can be read as literal or object,
@@ -242,28 +303,17 @@ const createProxyForArrayValue = (
 };
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
-  return typeof value === "object" && value !== null && originalIndex in value;
-}
-
-/**
- * Get cell link or return values as is if not a cell value proxy.
- *
- * @param {any} value - The value to get the cell link or value from.
- * @returns {CellLink | any}
- */
-export function getCellLinkOrValue(value: any): CellLink {
-  if (isQueryResult(value)) return value[getCellLink];
-  else return value;
+  return isRecord(value) && originalIndex in value;
 }
 
 /**
  * Get cell link or throw if not a cell value proxy.
  *
  * @param {any} value - The value to get the cell link from.
- * @returns {CellLink}
+ * @returns {LegacyDocCellLink}
  * @throws {Error} If the value is not a cell value proxy.
  */
-export function getCellLinkOrThrow(value: any): CellLink {
+export function getCellLinkOrThrow(value: any): LegacyDocCellLink {
   if (isQueryResult(value)) return value[getCellLink];
   else throw new Error("Value is not a cell proxy");
 }
@@ -275,8 +325,7 @@ export function getCellLinkOrThrow(value: any): CellLink {
  * @returns {boolean}
  */
 export function isQueryResult(value: any): value is QueryResult<any> {
-  return typeof value === "object" && value !== null &&
-    value[getCellLink] !== undefined;
+  return isRecord(value) && value[getCellLink] !== undefined;
 }
 
 const getCellLink = Symbol("isQueryResultProxy");
@@ -295,7 +344,7 @@ export function isQueryResultForDereferencing(
 }
 
 export type QueryResultInternals = {
-  [getCellLink]: CellLink;
+  [getCellLink]: LegacyDocCellLink;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;

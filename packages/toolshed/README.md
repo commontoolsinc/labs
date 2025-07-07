@@ -9,7 +9,7 @@ to run our system.
 
 For a detailed list of endpoints, their documentation, and an interactive API
 playground, take a look at the Toolshed API reference playground:
-https://toolshed.commontools.dev/reference
+<https://toolshed.commontools.dev/reference>
 
 ### Philosophy and Structure
 
@@ -26,7 +26,7 @@ Toolshed is built as a single monolithic [Deno2](https://deno.com/blog/v2.0)
 
 The project follows a structured layout:
 
-```
+```sh
 toolshed/
 ├── lib/          # Shared utilities and configuration
 ├── middlewares/  # Global hono middleware
@@ -50,7 +50,7 @@ dependencies, and set up your environment variables.
 
 To clone the repository, you can run the following command:
 
-```
+```sh
 git clone git@github.com:commontoolsinc/labs.git
 cd labs/toolshed
 ```
@@ -60,8 +60,8 @@ cd labs/toolshed
 #### Deno
 
 Toolshed is build using Deno, so you'll need to install Deno if you want to run
-the code locally. Deno has a detailed installation guide
-[here](https://deno.land/manual/getting_started/installation).
+the code locally. Deno has a
+[detailed installation guide](https://deno.land/manual/getting_started/installation).
 
 The fastest path to install on MacOS and Linux is to run the following command:
 

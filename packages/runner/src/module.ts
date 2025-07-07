@@ -1,22 +1,35 @@
+import { createNodeFactory } from "./builder/module.ts";
 import {
-  createNodeFactory,
-  type Module,
+  Module,
   type ModuleFactory,
-} from "@commontools/builder";
+} from "./builder/types.ts";
+import type { Cell } from "./cell.ts";
 import type { Action } from "./scheduler.ts";
-import type { DocImpl } from "./doc.ts";
 import type { AddCancel } from "./cancel.ts";
-const moduleMap = new Map<string, Module>();
+import type { IModuleRegistry, IRuntime } from "./runtime.ts";
 
-export function addModuleByRef(ref: string, module: Module) {
-  moduleMap.set(ref, module);
-}
+export class ModuleRegistry implements IModuleRegistry {
+  private moduleMap = new Map<string, Module>();
+  readonly runtime: IRuntime;
 
-export function getModuleByRef(ref: string): Module {
-  if (typeof ref !== "string") throw new Error(`Unknown module ref: ${ref}`);
-  const module = moduleMap.get(ref);
-  if (!module) throw new Error(`Unknown module ref: ${ref}`);
-  return module;
+  constructor(runtime: IRuntime) {
+    this.runtime = runtime;
+  }
+
+  addModuleByRef(ref: string, module: Module): void {
+    this.moduleMap.set(ref, module);
+  }
+
+  getModule(ref: string): Module {
+    if (typeof ref !== "string") throw new Error(`Unknown module ref: ${ref}`);
+    const module = this.moduleMap.get(ref);
+    if (!module) throw new Error(`Unknown module ref: ${ref}`);
+    return module;
+  }
+
+  clear(): void {
+    this.moduleMap.clear();
+  }
 }
 
 // This corresponds to the node factory factories in common-builder:module.ts.
@@ -24,11 +37,12 @@ export function getModuleByRef(ref: string): Module {
 // runner, and won't work with any other runners.
 export function raw<T, R>(
   implementation: (
-    inputsCell: DocImpl<T>,
+    inputsCell: Cell<T>,
     sendResult: (result: R) => void,
     addCancel: AddCancel,
     cause: any,
-    parentCell: DocImpl<any>,
+    parentCell: Cell<any>,
+    runtime: IRuntime,
   ) => Action,
 ): ModuleFactory<T, R> {
   return createNodeFactory({

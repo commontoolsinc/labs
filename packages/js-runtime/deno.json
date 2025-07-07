@@ -1,12 +1,14 @@
 {
   "name": "@commontools/js-runtime",
   "tasks": {
-    "test": "deno test --allow-env --allow-read"
+    "test": "deno test --allow-read --allow-write --allow-run --allow-env=TOOLSHED_API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
   "imports": {
     "source-map-js": "npm:source-map-js"
   },
   "exports": {
-    ".": "./mod.ts"
+    ".": "./mod.ts",
+    "./typescript": "./typescript/mod.ts",
+    "./cli": "./cli/mod.ts"
   }
 }

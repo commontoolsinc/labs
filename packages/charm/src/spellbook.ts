@@ -1,5 +1,5 @@
-import { recipeManager } from "@commontools/runner";
-import { UI } from "@commontools/builder";
+import { UI } from "@commontools/runner";
+import type { Runtime } from "@commontools/runner";
 
 export interface Spell {
   id: string;
@@ -98,10 +98,12 @@ export async function saveSpell(
   title: string,
   description: string,
   tags: string[],
+  runtime: Runtime,
 ): Promise<boolean> {
   try {
     // Get all the required data from commontools first
-    const { src, spec, parents } = recipeManager.getRecipeMeta(spell);
+    const recipeMetaResult = runtime.recipeManager.getRecipeMeta(spell);
+    const { src, spec, parents } = recipeMetaResult || {};
     const ui = spell.resultRef?.[UI];
 
     if (spellId === undefined) {

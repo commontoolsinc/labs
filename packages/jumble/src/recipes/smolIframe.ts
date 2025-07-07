@@ -1,5 +1,4 @@
-import { h } from "@commontools/html";
-import { JSONSchema, NAME, recipe, UI } from "@commontools/builder";
+import { h, JSONSchema, NAME, recipe, UI } from "commontools";
 
 import src from "./smolIFrame.html?raw";
 

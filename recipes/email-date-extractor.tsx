@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   derive,
   handler,
   ifElse,
@@ -10,7 +10,7 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 // Reuse email schema from email-summarizer.tsx
 const EmailProperties = {
@@ -397,7 +397,7 @@ export default recipe(
       const extractionResult = llm({
         system: systemPrompt,
         messages: [userPrompt],
-        model: "google:gemini-2.0-flash",
+        model: "google:gemini-2.5-flash",
         mode: "json",
       });
 

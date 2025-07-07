@@ -1,19 +1,46 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getDoc } from "../src/doc.ts";
-import { type Cell, isCell } from "../src/cell.ts";
-import { run } from "../src/runner.ts";
-import { type JSONSchema, recipe, UI } from "@commontools/builder";
+import { type Cell, type JSONSchema } from "../src/builder/types.ts";
+import { createBuilder } from "../src/builder/factory.ts";
+import { isCell } from "../src/cell.ts";
+import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
-describe.skip("Schema Lineage", () => {
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
+
+describe("Schema Lineage", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    const { commontools } = createBuilder(runtime);
+    ({ recipe, UI } = commontools);
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
   describe("Schema Propagation through Aliases", () => {
     it("should propagate schema from aliases to cells", () => {
-      // Create a doc with an alias that has schema information
-      const targetDoc = getDoc(
-        { count: 42, label: "test" },
+      // Create a cell with data that will be referenced by an alias
+      const targetCell = runtime.getCell<{ count: number; label: string }>(
+        space,
         "schema-lineage-target",
-        "test",
       );
+      targetCell.set({ count: 42, label: "test" });
 
       // Create a schema for our alias
       const schema = {
@@ -24,23 +51,23 @@ describe.skip("Schema Lineage", () => {
         },
       } as const satisfies JSONSchema;
 
-      // Create a doc with an alias that includes schema information
-      const sourceDoc = getDoc(
-        {
-          $alias: {
-            cell: targetDoc,
-            path: [],
-            schema,
-            rootSchema: schema,
-          },
-        },
+      // Create a cell with an alias that includes schema information
+      const sourceCell = runtime.getCell<any>(
+        space,
         "schema-lineage-source",
-        "test",
       );
+      sourceCell.setRaw({
+        $alias: {
+          ...targetCell.getAsLegacyCellLink(),
+          schema,
+          rootSchema: schema,
+        },
+      });
 
-      // Access the doc without providing a schema
+      // Access the cell without providing a schema
       // (Type script type is just to avoid compiler errors)
-      const cell: Cell<{ count: number; label: string }> = sourceDoc.asCell();
+      const cell: Cell<{ count: number; label: string }> = sourceCell
+        .asSchema();
 
       // The cell should have picked up the schema from the alias
       expect(cell.schema).toBeDefined();
@@ -53,12 +80,12 @@ describe.skip("Schema Lineage", () => {
     });
 
     it("should respect explicitly provided schema over alias schema", () => {
-      // Create a doc with an alias that has schema information
-      const targetDoc = getDoc(
-        { count: 42, label: "test" },
+      // Create a cell with data that will be referenced by an alias
+      const targetCell = runtime.getCell<{ count: number; label: string }>(
+        space,
         "schema-lineage-target-explicit",
-        "test",
       );
+      targetCell.set({ count: 42, label: "test" });
 
       // Create schemas with different types
       const aliasSchema = {
@@ -77,22 +104,21 @@ describe.skip("Schema Lineage", () => {
         },
       } as const satisfies JSONSchema;
 
-      // Create a doc with an alias that includes schema information
-      const sourceDoc = getDoc(
-        {
-          $alias: {
-            cell: targetDoc,
-            path: [],
-            schema: aliasSchema,
-            rootSchema: aliasSchema,
-          },
-        },
+      // Create a cell with an alias that includes schema information
+      const sourceCell = runtime.getCell<any>(
+        space,
         "schema-lineage-source-explicit",
-        "test",
       );
+      sourceCell.setRaw({
+        $alias: {
+          ...targetCell.getAsLegacyCellLink(),
+          schema: aliasSchema,
+          rootSchema: aliasSchema,
+        },
+      });
 
-      // Access the doc with explicit schema
-      const cell = sourceDoc.asCell([], undefined, explicitSchema);
+      // Access the cell with explicit schema
+      const cell = sourceCell.asSchema(explicitSchema);
 
       // The cell should have the explicit schema, not the alias schema
       expect(cell.schema).toBeDefined();
@@ -108,43 +134,39 @@ describe.skip("Schema Lineage", () => {
   describe("Schema Propagation from Aliases (without Recipes)", () => {
     it("should track schema through deep aliases", () => {
       // Create a series of nested aliases with schemas
-      const valueDoc = getDoc(
-        { count: 5, name: "test" },
+      const valueCell = runtime.getCell<{ count: number; name: string }>(
+        space,
         "deep-alias-value",
-        "test",
       );
+      valueCell.set({ count: 5, name: "test" });
 
       // Create a schema for our first level alias
       const numberSchema = { type: "number" };
 
-      // Create a doc with an alias specifically for the count field
-      const countDoc = getDoc(
-        {
-          $alias: {
-            cell: valueDoc,
-            path: ["count"],
-            schema: numberSchema,
-            rootSchema: numberSchema,
-          },
-        },
+      // Create a cell with an alias specifically for the count field
+      const countCell = runtime.getCell<any>(
+        space,
         "count-alias",
-        "test",
       );
+      countCell.setRaw({
+        $alias: {
+          ...valueCell.key("count").getAsLegacyCellLink(),
+          schema: numberSchema,
+          rootSchema: numberSchema,
+        },
+      });
 
       // Create a third level of aliasing
-      const finalDoc = getDoc(
-        {
-          $alias: {
-            cell: countDoc,
-            path: [],
-          },
-        },
+      const finalCell = runtime.getCell<any>(
+        space,
         "final-alias",
-        "test",
       );
+      finalCell.setRaw({
+        $alias: countCell.getAsLegacyCellLink(),
+      });
 
-      // Access the doc without providing a schema
-      const cell = finalDoc.asCell();
+      // Access the cell without providing a schema
+      const cell = finalCell.asSchema();
 
       // The cell should have picked up the schema from the alias chain
       expect(cell.schema).toBeDefined();
@@ -153,17 +175,19 @@ describe.skip("Schema Lineage", () => {
     });
 
     it("should correctly handle aliases with asCell:true in schema", () => {
-      // Create a document with nested objects that will be accessed with asCell
-      const nestedDoc = getDoc(
-        {
-          items: [
-            { id: 1, name: "Item 1" },
-            { id: 2, name: "Item 2" },
-          ],
-        },
+      // Create a cell with nested objects that will be accessed with asCell
+      const nestedCell = runtime.getCell<{
+        items: Array<{ id: number; name: string }>;
+      }>(
+        space,
         "nested-doc-with-alias",
-        "test",
       );
+      nestedCell.set({
+        items: [
+          { id: 1, name: "Item 1" },
+          { id: 2, name: "Item 2" },
+        ],
+      });
 
       // Define schemas for the nested objects
       const arraySchema = {
@@ -178,28 +202,25 @@ describe.skip("Schema Lineage", () => {
       } as const satisfies JSONSchema;
 
       // Create an alias to the items array with schema information
-      const itemsDoc = getDoc(
-        {
-          $alias: {
-            cell: nestedDoc,
-            path: ["items"],
-            schema: arraySchema,
-          },
-        },
+      const itemsCell = runtime.getCell<any>(
+        space,
         "items-alias",
-        "test",
       );
+      itemsCell.setRaw({
+        $alias: {
+          ...nestedCell.key("items").getAsLegacyCellLink(),
+          schema: arraySchema,
+        },
+      });
 
       // Access the items with a schema that specifies array items should be cells
-      const itemsCell = itemsDoc.asCell(
-        [],
-        undefined,
+      const itemsCellWithSchema = itemsCell.asSchema(
         {
           asCell: true,
         } as const satisfies JSONSchema,
       );
 
-      const value = itemsCell.get();
+      const value = itemsCellWithSchema.get() as any;
       expect(isCell(value)).toBe(true);
       expect(value.schema).toEqual(arraySchema);
 
@@ -213,6 +234,28 @@ describe.skip("Schema Lineage", () => {
 });
 
 describe("Schema propagation end-to-end example", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
+  let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    const { commontools } = createBuilder(runtime);
+    ({ recipe, UI } = commontools);
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
   it("should propagate schema through a recipe", () => {
     // Create a recipe with schema
     const testRecipe = recipe({
@@ -239,16 +282,17 @@ describe("Schema propagation end-to-end example", () => {
       },
     }));
 
-    const result = getDoc(
-      undefined,
+    const result = runtime.getCell<any>(
+      space,
       "should propagate schema through a recipe",
-      "test",
     );
-    run(testRecipe, { details: { name: "hello", age: 14 } }, result);
+    runtime.run(
+      testRecipe,
+      { details: { name: "hello", age: 14 } },
+      result,
+    );
 
-    const c = result.asCell(
-      [UI],
-      undefined,
+    const c = result.key(UI).asSchema(
       {
         type: "object",
         properties: {
@@ -262,12 +306,13 @@ describe("Schema propagation end-to-end example", () => {
       } as const satisfies JSONSchema,
     );
 
-    expect(isCell(c.get().props.value)).toBe(true);
-    expect(c.get().props.value.schema).toEqual({
+    const cValue = c.get() as any;
+    expect(isCell(cValue.props.value)).toBe(true);
+    expect(cValue.props.value.schema).toEqual({
       type: "object",
       properties: { name: { type: "string" } },
       additionalProperties: false,
     });
-    expect(c.get().props.value.get()).toEqual({ name: "hello" });
+    expect(cValue.props.value.get()).toEqual({ name: "hello" });
   });
 });

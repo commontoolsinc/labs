@@ -2,15 +2,17 @@ import {
   Cell,
   isCell,
   isStream,
-  recipeManager,
-  runtime,
+  type MemorySpace,
+  RecipeMeta,
+  type Runtime,
 } from "@commontools/runner";
-import { isObject } from "@commontools/utils/types";
+import { isObject, Mutable } from "@commontools/utils/types";
 import {
   createJsonSchema,
   JSONSchema,
   JSONSchemaMutable,
-} from "@commontools/builder";
+  RuntimeProgram,
+} from "@commontools/runner";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.ts";
 import { buildPrompt, RESPONSE_PREFILL } from "./iframe/prompt.ts";
@@ -24,6 +26,7 @@ import {
 } from "@commontools/llm";
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
+import { console } from "./conditional-console.ts";
 
 const llm = new LLMClient();
 
@@ -102,7 +105,7 @@ export async function iterate(
 ): Promise<{ cell: Cell<Charm>; llmRequestId?: string }> {
   const optionsWithDefaults = applyDefaults(options);
   const { model, cache, space, generationId } = optionsWithDefaults;
-  const { iframe } = getIframeRecipe(charm);
+  const { iframe } = getIframeRecipe(charm, charmManager.runtime);
 
   const prevSpec = iframe?.spec;
   if (plan?.description === undefined) {
@@ -148,14 +151,14 @@ export const generateNewRecipeVersion = async (
   generationId?: string,
   llmRequestId?: string,
 ) => {
-  const parentInfo = getIframeRecipe(parent);
+  const parentInfo = getIframeRecipe(parent, charmManager.runtime);
   if (!parentInfo.recipeId) {
     throw new Error("No recipeId found for charm");
   }
-  const parentRecipe = await recipeManager.loadRecipe({
-    space: charmManager.getSpace(),
-    recipeId: parentInfo.recipeId,
-  });
+  const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
+    parentInfo.recipeId,
+    charmManager.getSpace(),
+  );
 
   const name = extractTitle(newRecipe.src, "<unknown>");
   const argumentSchema =
@@ -261,19 +264,21 @@ export function scrub(data: any): any {
 }
 
 /**
- * Turn cells references into aliases, this forces writes to go back
- * to the original cell.
+ * Turn cells references into writes redirects, this forces writes to go back to
+ * the original cell.
+ * @param data The data to process
+ * @param baseSpace Optional base space DID to make links relative to
  */
-function turnCellsIntoAliases(data: any): any {
+function turnCellsIntoWriteRedirects(data: any, baseSpace?: MemorySpace): any {
   if (isCell(data)) {
-    return { $alias: data.getAsCellLink() };
+    return data.getAsWriteRedirectLink(baseSpace ? { baseSpace } : undefined);
   } else if (Array.isArray(data)) {
-    return data.map((value) => turnCellsIntoAliases(value));
+    return data.map((value) => turnCellsIntoWriteRedirects(value, baseSpace));
   } else if (isObject(data)) {
     return Object.fromEntries(
       Object.entries(data).map((
         [key, value],
-      ) => [key, turnCellsIntoAliases(value)]),
+      ) => [key, turnCellsIntoWriteRedirects(value, baseSpace)]),
     );
   } else return data;
 }
@@ -475,7 +480,11 @@ export async function castNewRecipe(
   const scrubbed = scrub(form.input.references);
 
   // First, extract any existing schema if we have data
-  const existingSchema = createJsonSchema(scrubbed);
+  const existingSchema = createJsonSchema(
+    scrubbed,
+    false,
+    charmManager.runtime,
+  );
 
   // Prototype workflow: combine steps
   const { newSpec, newRecipeSrc, llmRequestId } =
@@ -483,7 +492,7 @@ export async function castNewRecipe(
       ? await singlePhaseCodeGeneration(form, existingSchema)
       : await twoPhaseCodeGeneration(form, existingSchema);
 
-  const input = turnCellsIntoAliases(scrubbed);
+  const input = turnCellsIntoWriteRedirects(scrubbed, charmManager.getSpace());
 
   globalThis.dispatchEvent(
     new CustomEvent("job-update", {
@@ -509,27 +518,41 @@ export async function castNewRecipe(
 }
 
 export async function compileRecipe(
-  recipeSrc: string,
+  recipeSrc: string | RuntimeProgram,
   spec: string,
-  charmManager: CharmManager,
+  runtime: Runtime,
+  space: MemorySpace,
   parents?: string[],
 ) {
-  const recipe = await runtime.runSingle(recipeSrc);
+  const recipe = await runtime.recipeManager.compileRecipe(recipeSrc);
+
   if (!recipe) {
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  recipeManager.registerRecipe({
-    recipeId: recipeManager.generateRecipeId(recipe),
-    space: charmManager.getSpace(),
+  const recipeId = runtime.recipeManager.registerRecipe(
     recipe,
-    recipeMeta: {
-      id: recipeManager.generateRecipeId(recipe),
-      src: recipeSrc,
-      spec,
-      parents: parentsIds,
-    },
+    recipeSrc,
+  );
+
+  const recipeMeta: Partial<Mutable<RecipeMeta>> = {
+    id: recipeId,
+    spec,
+    parents: parentsIds,
+  };
+
+  if (typeof recipeSrc === "string") {
+    recipeMeta.src = recipeSrc;
+  } else {
+    recipeMeta.program = recipeSrc;
+  }
+  await runtime.recipeManager.saveAndSyncRecipe({
+    recipeId,
+    space,
+    recipe,
+    recipeMeta: recipeMeta as RecipeMeta,
   });
+
   return recipe;
 }
 
@@ -541,7 +564,13 @@ export async function compileAndRunRecipe(
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {
-  const recipe = await compileRecipe(recipeSrc, spec, charmManager, parents);
+  const recipe = await compileRecipe(
+    recipeSrc,
+    spec,
+    charmManager.runtime,
+    charmManager.getSpace(),
+    parents,
+  );
   if (!recipe) {
     throw new Error("Failed to compile recipe");
   }

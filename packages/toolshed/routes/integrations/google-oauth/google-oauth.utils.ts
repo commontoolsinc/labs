@@ -1,8 +1,8 @@
 import { OAuth2Client, Tokens } from "@cmd-johnson/oauth2-client";
 import env from "@/env.ts";
-import { type CellLink, getCellFromLink, storage } from "@commontools/runner";
+import { runtime } from "@/index.ts";
 import { Context } from "@hono/hono";
-import { AuthSchema, Mutable, Schema } from "@commontools/builder";
+import { AuthSchema, Mutable, Schema } from "@commontools/runner";
 // Types
 
 export interface OAuth2Tokens {
@@ -36,18 +36,24 @@ export interface CallbackResult extends Record<string, unknown> {
 type AuthData = Mutable<Schema<typeof AuthSchema>>;
 
 // Create OAuth client with credentials from environment variables
-export const createOAuthClient = (redirectUri: string) => {
-  return new OAuth2Client({
+export const createOAuthClient = (redirectUri: string, scopes?: string[]) => {
+  // Don't use default scopes if custom scopes are provided
+  const scopeString = scopes && scopes.length > 0
+    ? scopes.join(" ")
+    : "email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly";
+
+  const client = new OAuth2Client({
     clientId: env.GOOGLE_CLIENT_ID,
     clientSecret: env.GOOGLE_CLIENT_SECRET,
     tokenUri: "https://oauth2.googleapis.com/token",
     authorizationEndpointUri: "https://accounts.google.com/o/oauth2/v2/auth",
     redirectUri,
     defaults: {
-      scope:
-        "email profile https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly",
+      scope: scopeString,
     },
   });
+
+  return client;
 };
 
 // Helper function to get the base URL
@@ -136,27 +142,23 @@ export async function fetchUserInfo(accessToken: string): Promise<UserInfo> {
   }
 }
 
-// Helper function to get auth cell and storage
-export async function getAuthCellAndStorage(docLink: CellLink | string) {
+// Helper function to get auth cell
+export async function getAuthCell(docLink: string) {
   try {
     // Parse string to docLink if needed
-    const parsedDocLink = typeof docLink === "string"
-      ? JSON.parse(docLink)
-      : docLink;
+    const parsedDocLink = JSON.parse(docLink);
 
-    if (!storage.hasSigner() || !storage.hasRemoteStorage()) {
-      throw new Error("Unable to talk to storage: not configured.");
-    }
+    let authCell = runtime.getCellFromLink(parsedDocLink);
 
     // We already should have the schema on the parsedDocLink (from our state),
     // but if it's missing, we can add it  here.
-    parsedDocLink.schema = parsedDocLink.schema ?? AuthSchema;
-    const authCell = getCellFromLink(parsedDocLink);
-    // make sure the cell is live!
-    await storage.syncCell(authCell, true);
-    await storage.synced();
+    if (!authCell.schema) authCell = authCell.asSchema(AuthSchema);
 
-    return { authCell, storage };
+    // make sure the cell is live!
+    await runtime.storage.syncCell(authCell, true);
+    await runtime.storage.synced();
+
+    return authCell;
   } catch (error) {
     throw new Error(`Failed to get auth cell: ${error}`);
   }
@@ -166,10 +168,10 @@ export async function getAuthCellAndStorage(docLink: CellLink | string) {
 export async function persistTokens(
   oauthToken: OAuth2Tokens,
   userInfo: UserInfo,
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string,
 ) {
   try {
-    const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
+    const authCell = await getAuthCell(authCellDocLink);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
@@ -187,7 +189,7 @@ export async function persistTokens(
     authCell.set(tokenData);
 
     // Ensure the cell is synced
-    await storage.synced();
+    await runtime.storage.synced();
 
     return tokenData;
   } catch (error) {
@@ -197,10 +199,10 @@ export async function persistTokens(
 
 // Get tokens from the auth cell
 export async function getTokensFromAuthCell(
-  authCellDocLink: string | CellLink,
+  authCellDocLink: string,
 ) {
   try {
-    const { authCell } = await getAuthCellAndStorage(authCellDocLink);
+    const authCell = await getAuthCell(authCellDocLink);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
@@ -274,9 +276,9 @@ export function createRefreshErrorResponse(
 }
 
 // Clears authentication data from the auth cell
-export async function clearAuthData(authCellDocLink: string | CellLink) {
+export async function clearAuthData(authCellDocLink: string) {
   try {
-    const { authCell, storage } = await getAuthCellAndStorage(authCellDocLink);
+    const authCell = await getAuthCell(authCellDocLink);
 
     if (!authCell) {
       throw new Error("Auth cell not found");
@@ -301,7 +303,7 @@ export async function clearAuthData(authCellDocLink: string | CellLink) {
     authCell.set(emptyAuthData);
 
     // Ensure the cell is synced
-    await storage.synced();
+    await runtime.storage.synced();
 
     return emptyAuthData;
   } catch (error) {

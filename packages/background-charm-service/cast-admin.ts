@@ -1,11 +1,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { CharmManager, compileRecipe } from "@commontools/charm";
-import {
-  getCell,
-  getEntityId,
-  setBlobbyServerUrl,
-  storage,
-} from "@commontools/runner";
+import { getEntityId, Runtime } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type DID } from "@commontools/identity";
 import { createAdminSession } from "@commontools/identity";
 import {
@@ -42,15 +38,12 @@ const identity = await getIdentity(
   Deno.env.get("OPERATOR_PASS"),
 );
 
-storage.setRemoteStorage(new URL(toolshedUrl));
-setBlobbyServerUrl(toolshedUrl);
+// Storage and blobby server URL are now configured in Runtime constructor
 
 async function castRecipe() {
   const spaceId = BG_SYSTEM_SPACE_ID;
   const cause = BG_CELL_CAUSE;
   console.log(`Casting recipe from ${recipePath} in space ${spaceId}`);
-
-  storage.setSigner(identity);
 
   console.log("params:", {
     spaceId,
@@ -58,6 +51,15 @@ async function castRecipe() {
     cause,
     toolshedUrl,
     quit,
+  });
+
+  // Create runtime with proper configuration
+  const runtime = new Runtime({
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL("/api/storage/memory", toolshedUrl),
+    }),
+    blobbyServerUrl: toolshedUrl,
   });
 
   try {
@@ -69,15 +71,15 @@ async function castRecipe() {
       throw new Error("Cell ID is required");
     }
 
-    const targetCell = getCell(
+    const targetCell = runtime.getCell(
       spaceId as DID,
       cause,
       BGCharmEntriesSchema,
     );
 
     // Ensure the cell is synced
-    await storage.syncCell(targetCell, true);
-    await storage.synced();
+    await runtime.storage.syncCell(targetCell, true);
+    await runtime.storage.synced();
 
     console.log("Getting cell...");
 
@@ -92,8 +94,9 @@ async function castRecipe() {
     });
 
     // Create charm manager for the specified space
-    const charmManager = new CharmManager(session);
-    const recipe = await compileRecipe(recipeSrc, "recipe", charmManager);
+    const charmManager = new CharmManager(session, runtime);
+    await charmManager.ready;
+    const recipe = await compileRecipe(recipeSrc, "recipe", runtime, spaceId);
     console.log("Recipe compiled successfully");
 
     const charm = await charmManager.runPersistent(
@@ -104,13 +107,13 @@ async function castRecipe() {
     console.log("Recipe cast successfully!");
     console.log("Result charm ID:", getEntityId(charm));
 
-    await storage.synced();
+    await runtime.storage.synced();
     console.log("Storage synced, exiting");
     Deno.exit(0);
   } catch (error) {
     console.error("Error casting recipe:", error);
     if (quit) {
-      await storage.synced();
+      await runtime.storage.synced();
       Deno.exit(1);
     }
   }

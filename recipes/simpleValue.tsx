@@ -1,15 +1,14 @@
-import { h } from "@commontools/html";
 import {
-  cell,
   derive,
+  h,
   handler,
-  JSONSchema,
+  type JSONSchema,
   NAME,
   recipe,
   schema,
   str,
   UI,
-} from "@commontools/builder";
+} from "commontools";
 
 const updaterSchema = {
   type: "object",
@@ -18,7 +17,7 @@ const updaterSchema = {
   },
   title: "Update Values",
   description: "Append `newValues` to the list.",
-  example: { newValues: ["foo", "bar"] },
+  examples: [{ newValues: ["foo", "bar"] }],
   default: { newValues: [] },
 } as const satisfies JSONSchema;
 

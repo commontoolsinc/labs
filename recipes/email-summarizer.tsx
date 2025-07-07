@@ -1,6 +1,6 @@
-import { h } from "@commontools/html";
 import {
   derive,
+  h,
   handler,
   JSONSchema,
   lift,
@@ -10,72 +10,81 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder";
-
-// Email schema based on Gmail recipe
-const EmailProperties = {
-  id: {
-    type: "string",
-    title: "Email ID",
-    description: "Unique identifier for the email",
-  },
-  threadId: {
-    type: "string",
-    title: "Thread ID",
-    description: "Identifier for the email thread",
-  },
-  labelIds: {
-    type: "array",
-    items: { type: "string" },
-    title: "Labels",
-    description: "Gmail labels assigned to the email",
-  },
-  snippet: {
-    type: "string",
-    title: "Snippet",
-    description: "Brief preview of the email content",
-  },
-  subject: {
-    type: "string",
-    title: "Subject",
-    description: "Email subject line",
-  },
-  from: {
-    type: "string",
-    title: "From",
-    description: "Sender's email address",
-  },
-  date: {
-    type: "string",
-    title: "Date",
-    description: "Date and time when the email was sent",
-  },
-  to: {
-    type: "string",
-    title: "To",
-    description: "Recipient's email address",
-  },
-  plainText: {
-    type: "string",
-    title: "Plain Text Content",
-    description: "Email content in plain text format (often empty)",
-  },
-  htmlContent: {
-    type: "string",
-    title: "HTML Content",
-    description: "Email content in HTML format",
-  },
-  markdownContent: {
-    type: "string",
-    title: "Markdown Content",
-    description: "Email content converted to Markdown format",
-  },
-} as const satisfies JSONSchema;
+} from "commontools";
 
 const EmailSchema = {
   type: "object",
-  properties: EmailProperties,
-  required: Object.keys(EmailProperties),
+  properties: {
+    id: {
+      type: "string",
+      title: "Email ID",
+      description: "Unique identifier for the email",
+    },
+    threadId: {
+      type: "string",
+      title: "Thread ID",
+      description: "Identifier for the email thread",
+    },
+    labelIds: {
+      type: "array",
+      items: { type: "string" },
+      title: "Labels",
+      description: "Gmail labels assigned to the email",
+    },
+    snippet: {
+      type: "string",
+      title: "Snippet",
+      description: "Brief preview of the email content",
+    },
+    subject: {
+      type: "string",
+      title: "Subject",
+      description: "Email subject line",
+    },
+    from: {
+      type: "string",
+      title: "From",
+      description: "Sender's email address",
+    },
+    date: {
+      type: "string",
+      title: "Date",
+      description: "Date and time when the email was sent",
+    },
+    to: {
+      type: "string",
+      title: "To",
+      description: "Recipient's email address",
+    },
+    plainText: {
+      type: "string",
+      title: "Plain Text Content",
+      description: "Email content in plain text format (often empty)",
+    },
+    htmlContent: {
+      type: "string",
+      title: "HTML Content",
+      description: "Email content in HTML format",
+    },
+    markdownContent: {
+      type: "string",
+      title: "Markdown Content",
+      description: "Email content converted to Markdown format",
+    },
+  },
+  required: [
+    "id",
+    "threadId",
+    "labelIds",
+    "snippet",
+    "subject",
+    "from",
+    "date",
+    "to",
+    "plainText",
+    "htmlContent",
+    "markdownContent",
+  ],
 } as const satisfies JSONSchema;
 
 type Email = Schema<typeof EmailSchema>;
@@ -91,10 +100,7 @@ const EmailSummarizerInputSchema = {
   properties: {
     emails: {
       type: "array",
-      items: {
-        type: "object",
-        properties: EmailProperties,
-      },
+      items: EmailSchema,
     },
     settings: {
       type: "object",
@@ -210,11 +216,7 @@ const getEmailContent = lift(
   {
     type: "object",
     properties: {
-      email: {
-        type: "object",
-        properties: EmailProperties,
-        required: Object.keys(EmailProperties),
-      },
+      email: EmailSchema,
     },
     required: ["email"],
   },
@@ -222,11 +224,7 @@ const getEmailContent = lift(
   {
     type: "object",
     properties: {
-      email: {
-        type: "object",
-        properties: EmailProperties,
-        required: Object.keys(EmailProperties),
-      },
+      email: EmailSchema,
       content: { type: "string" },
       hasContent: { type: "boolean" },
     },
@@ -294,7 +292,7 @@ export default recipe(
       // Call LLM to generate summary
       const summaryResult = llm({
         system: systemPrompt,
-        prompt: userPrompt,
+        messages: [userPrompt],
       });
 
       // Return a simple object that references the original email

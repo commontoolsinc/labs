@@ -53,10 +53,10 @@ jobs:
           # or download them from a known location if stored separately
           tar -xzf downloaded-artifacts/labs-${{ github.event.inputs.commit_sha }}.tar.gz -C jumble-artifacts || true
 
-      - name: 🦕 Setup Deno 2.2.2
-        uses: denoland/setup-deno@v2
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
         with:
-          deno-version: "2.2.2"
+          cache: false
 
       - name: 🔽 Pre-download Sentry CLI
         run: |

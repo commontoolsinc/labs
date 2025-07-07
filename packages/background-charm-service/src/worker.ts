@@ -1,16 +1,15 @@
 import { type Charm, CharmManager } from "@commontools/charm";
 import {
   Cell,
+  type ConsoleHandler,
   ConsoleMethod,
-  idle,
-  isErrorWithContext,
+  type ErrorHandler,
+  type ErrorWithContext,
   isStream,
-  onConsole,
-  onError,
-  setBlobbyServerUrl,
-  setRecipeEnvironment,
-  storage,
+  Runtime,
 } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+
 import { createAdminSession, type DID, Identity } from "@commontools/identity";
 import {
   InitializationData,
@@ -24,12 +23,13 @@ let spaceId: DID;
 let latestError: Error | null = null;
 let currentSession: any = null;
 let manager: CharmManager | null = null;
+let runtime: Runtime | null = null;
 const loadedCharms = new Map<string, Cell<Charm>>();
 
-// Capture errors in the charm
-onError((e: Error) => {
+// Error handler that will be passed to Runtime
+const errorHandler: ErrorHandler = (e: ErrorWithContext) => {
   latestError = e;
-});
+};
 
 const trueConsole = globalThis.console;
 // Console for "worker" messages
@@ -44,36 +44,34 @@ const console = {
     return `Worker(${spaceId ?? "NO_SPACE"})`;
   },
 };
-// Annotate messages from charm contexts
-onConsole(
-  (
-    metadata:
-      | { charmId?: string; recipeId?: string; space?: string }
-      | undefined,
-    _method: ConsoleMethod,
-    args: any[],
-  ) => {
-    if (!spaceId) {
-      // Shouldn't happen.
-      throw new Error(
-        "FatalError: Charm executing but worker has no space ID.",
-      );
-    }
-    let ctx;
-    if (metadata) {
-      if (metadata.space) {
-        if (metadata.space !== spaceId) {
-          throw new Error("FatalError: Mismatched space ids in worker.");
-        }
-      }
-      if (metadata.charmId) {
-        ctx = `Charm(${metadata.charmId})`;
+// Console handler that will be passed to Runtime
+const consoleHandler: ConsoleHandler = (
+  metadata:
+    | { charmId?: string; recipeId?: string; space?: string }
+    | undefined,
+  _method: ConsoleMethod,
+  args: any[],
+) => {
+  if (!spaceId) {
+    // Shouldn't happen.
+    throw new Error(
+      "FatalError: Charm executing but worker has no space ID.",
+    );
+  }
+  let ctx;
+  if (metadata) {
+    if (metadata.space) {
+      if (metadata.space !== spaceId) {
+        throw new Error("FatalError: Mismatched space ids in worker.");
       }
     }
-    ctx = ctx ?? "Charm(NO_CHARM)";
-    return [ctx, ...args.map((arg) => safeFormat(arg))];
-  },
-);
+    if (metadata.charmId) {
+      ctx = `Charm(${metadata.charmId})`;
+    }
+  }
+  ctx = ctx ?? "Charm(NO_CHARM)";
+  return [ctx, ...args.map((arg) => safeFormat(arg))];
+};
 
 async function initialize(
   data: InitializationData,
@@ -86,13 +84,6 @@ async function initialize(
   const { did, toolshedUrl, rawIdentity } = data;
   const identity = await Identity.deserialize(rawIdentity);
   const apiUrl = new URL(toolshedUrl);
-  // Initialize storage and remote connection
-  storage.setRemoteStorage(apiUrl);
-  setBlobbyServerUrl(toolshedUrl);
-  storage.setSigner(identity);
-  setRecipeEnvironment({
-    apiUrl,
-  });
 
   // Initialize session
   spaceId = did as DID;
@@ -102,8 +93,18 @@ async function initialize(
     space: spaceId,
   });
 
-  // Initialize charm manager
-  manager = new CharmManager(currentSession);
+  // Initialize runtime and charm manager
+  runtime = new Runtime({
+    storageManager: StorageManager.open({
+      as: identity,
+      address: new URL("/api/storage/memory", toolshedUrl),
+    }),
+    blobbyServerUrl: toolshedUrl,
+    recipeEnvironment: { apiUrl },
+    consoleHandler: consoleHandler,
+    errorHandlers: [errorHandler],
+  });
+  manager = new CharmManager(currentSession, runtime);
   await manager.ready;
 
   console.log(`Initialized`);
@@ -123,7 +124,11 @@ async function cleanup(): Promise<void> {
   manager = null;
 
   // Ensure storage is synced before cleanup
-  await storage.synced();
+  if (runtime) {
+    await runtime.storage.synced();
+    await runtime.dispose();
+    runtime = null;
+  }
 
   initialized = false;
 }
@@ -175,7 +180,9 @@ async function runCharm(data: RunData): Promise<void> {
     updater.send({});
 
     // Wait for any pending operations to complete
-    await idle();
+    if (runtime) {
+      await runtime.idle();
+    }
 
     if (latestError) {
       throw latestError;
@@ -184,9 +191,14 @@ async function runCharm(data: RunData): Promise<void> {
     console.log(`Successfully executed charm ${spaceId}/${charmId}`);
     return;
   } catch (error) {
-    const errorMessage = isErrorWithContext(error)
-      ? `${error.message} @ ${error.space}:${error.charmId} running ${error.recipeId}`
-      : String(error);
+    // Check if error has context properties
+    const errorMessage =
+      (error instanceof Error && "space" in error && "charmId" in error &&
+          "recipeId" in error)
+        ? `${error.message} @ ${(error as any).space}:${
+          (error as any).charmId
+        } running ${(error as any).recipeId}`
+        : String(error);
     console.error(
       `Error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
     );
@@ -256,3 +268,10 @@ self.addEventListener("message", async (event: MessageEvent) => {
     });
   }
 });
+
+// Signal to the controller that the worker is ready to receive messages.
+// This handshake prevents race conditions where the controller might send
+// the initialization message before the worker has set up its message listener.
+if (typeof self !== "undefined" && self.postMessage) {
+  self.postMessage({ type: "ready", msgId: -1 });
+}

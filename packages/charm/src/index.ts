@@ -4,6 +4,7 @@ export {
   charmListSchema,
   CharmManager,
   charmSchema,
+  getRecipeIdFromCharm,
   processSchema,
 } from "./manager.ts";
 export { searchCharms } from "./search.ts";
@@ -28,7 +29,11 @@ export {
   modifyCharm,
   renameCharm,
 } from "./commands.ts";
-export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.ts";
+export {
+  buildFullRecipe,
+  getIframeRecipe,
+  type IFrameRecipe,
+} from "./iframe/recipe.ts";
 export { type ParsedMention, type ProcessedPrompt } from "./imagine.ts";
 export { formatPromptWithMentions, parseComposerDocument } from "./format.ts";
 

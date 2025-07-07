@@ -1,16 +1,17 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
-import * as Space from "../space.ts";
-import * as Changes from "../changes.ts";
-import * as Selection from "../selection.ts";
-import * as Commit from "../commit.ts";
-import * as Transaction from "../transaction.ts";
-import * as Fact from "../fact.ts";
-import { createTemporaryDirectory } from "../util.ts";
 import { refer } from "merkle-reference";
-
-import { alice, space } from "./principal.ts";
+import { JSONSchema, SchemaContext } from "@commontools/runner";
+import * as Changes from "../changes.ts";
+import * as Commit from "../commit.ts";
+import * as Fact from "../fact.ts";
+import * as Selection from "../selection.ts";
+import * as Space from "../space.ts";
+import * as Transaction from "../transaction.ts";
+import { createTemporaryDirectory } from "../util.ts";
+import { AssertFact } from "../interface.ts";
 import { SchemaSelector } from "../space.ts";
-import { AssertFact, SchemaContext } from "../interface.ts";
+import { alice, space } from "./principal.ts";
+
 const the = "application/json";
 const doc = `of:${refer({ hello: "world" })}` as const;
 const doc1 = doc; // convenient name
@@ -373,7 +374,7 @@ test("create memory fails if already exists", DB, async (session) => {
     the,
     of: doc,
     expected: null,
-    actual: v1,
+    actual: { ...v1, since: 0 },
   });
 });
 
@@ -464,7 +465,7 @@ test("concurrent update fails", DB, async (session) => {
     the,
     of: doc,
     expected: refer(v1),
-    actual: v2,
+    actual: { ...v2, since: 1 },
   });
 });
 
@@ -736,7 +737,7 @@ test(
       the,
       of: doc,
       expected: refer(v2),
-      actual: v3,
+      actual: { ...v3, since: 2 },
     });
 
     assertMatch(
@@ -807,7 +808,7 @@ test(
       the,
       of: doc,
       expected: null,
-      actual: v2,
+      actual: { ...v2, since: 1 },
     });
   },
 );
@@ -978,7 +979,7 @@ test("batch updates", DB, async (session) => {
     the,
     of: hi,
     expected: refer(hi1),
-    actual: hi2,
+    actual: { ...hi2, since: 1 },
   });
 
   assertEquals(
@@ -1886,6 +1887,231 @@ test(
         },
       },
       "finds no facts",
+    );
+  },
+);
+
+test(
+  "list fact with cycle using schema query returns",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc1,
+      is: {
+        "value": {
+          "first": "Bob",
+        },
+      },
+    });
+
+    const v2 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "value": {
+          "home": {
+            "name": {
+              "$alias": {
+                "cell": {
+                  "/": doc1.slice(3), // strip off 'of:'
+                },
+                "path": [],
+              },
+            },
+            "street": "2466 Southridge Drive",
+            "city": "Palm Springs",
+          },
+          "work": {
+            "name": "Mr. Bob Hope",
+            "street": "2627 N Hollywood Way",
+            "city": "Burbank",
+          },
+        },
+      },
+    });
+
+    const v3 = Fact.assert({
+      the,
+      of: doc1,
+      is: {
+        "value": {
+          "first": "Bob",
+          "address": {
+            "$alias": {
+              "cell": {
+                "/": doc2.slice(3), // strip off 'of:'
+              },
+              "path": ["home"],
+            },
+          },
+        },
+      },
+      cause: v1,
+    });
+
+    const tr1 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    const write1 = await session.transact(tr1);
+    assert(write1.ok);
+    const c1 = Commit.toRevision(write1.ok);
+    const tr2 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    });
+    const write2 = await session.transact(tr2);
+    assert(write2.ok);
+    const c2 = Commit.toRevision(write2.ok);
+    const tr3 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v3]),
+    });
+    const write3 = await session.transact(tr3);
+    assert(write3.ok);
+    const c3 = Commit.toRevision(write3.ok);
+
+    const schemaSelector: SchemaSelector = {
+      [doc1]: {
+        [the]: {
+          _: {
+            path: [],
+            schemaContext: {
+              schema: {
+                "type": "object",
+              },
+              rootSchema: {
+                "type": "object",
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const result = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: schemaSelector,
+      },
+      prf: [],
+    });
+
+    assertExists(
+      getResultForDoc(result, space.did(), doc1),
+      "doc1 should be in the result",
+    );
+    assertExists(
+      getResultForDoc(result, space.did(), doc2),
+      "doc2 should be in the result",
+    );
+  },
+);
+
+test(
+  "returns all entries from charm list",
+  DB,
+  async (session) => {
+    const charmSchema = {
+      type: "object",
+      properties: {
+        ["$NAME"]: { type: "string" },
+        ["$UI"]: { type: "object" },
+      },
+      required: ["$UI", "$NAME"],
+    } as const satisfies JSONSchema;
+
+    const charmListSchema = {
+      type: "array",
+      items: { ...charmSchema, asCell: true },
+    } as const satisfies JSONSchema;
+
+    const c1 = Fact.assert({
+      the,
+      of: doc1,
+      is: {
+        "value": { "$NAME": "test 1", "$UI": { "type": "vnode" } },
+      },
+    });
+
+    const c2 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "value": { "$NAME": "test 2", "$UI": { "type": "vnode" } },
+      },
+    });
+
+    const c_list = Fact.assert({
+      the,
+      of: doc3,
+      is: {
+        "value": [
+          {
+            "space": space.did(),
+            "cell": { "/": doc1.slice(3) },
+            "path": [],
+            "schema": charmSchema,
+          },
+          {
+            "space": space.did(),
+            "cell": { "/": doc2.slice(3) },
+            "path": [],
+            "schema": charmSchema,
+          },
+        ],
+      },
+    });
+
+    const tr1 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([c1, c2, c_list]),
+    });
+    const write1 = await session.transact(tr1);
+    assert(write1.ok);
+
+    const schemaSelector: SchemaSelector = {
+      [doc3]: {
+        [the]: {
+          _: {
+            path: [],
+            schemaContext: {
+              schema: charmListSchema,
+              rootSchema: charmListSchema,
+            },
+          },
+        },
+      },
+    };
+
+    const result = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: schemaSelector,
+      },
+      prf: [],
+    });
+
+    assertExists(
+      getResultForDoc(result, space.did(), doc1),
+      "doc1 should be in the result",
+    );
+    assertExists(
+      getResultForDoc(result, space.did(), doc2),
+      "doc2 should be in the result",
+    );
+    assertExists(
+      getResultForDoc(result, space.did(), doc3),
+      "doc3 should be in the result",
     );
   },
 );

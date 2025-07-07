@@ -1,18 +1,23 @@
 export type {
-  CompilerError,
-  ExecutableJs,
+  Compiler,
   JsIsolate,
   JsRuntime,
-  TsArtifact,
+  JsScript,
+  Program,
+  ProgramResolver,
+  Source,
 } from "./interface.ts";
 export {
+  CompilationError,
+  type CompilationErrorType,
+  CompilerError,
   TypeScriptCompiler,
   type TypeScriptCompilerOptions,
 } from "./typescript/mod.ts";
-export { bundle } from "./bundler/bundler.ts";
 export {
   UnsafeEvalIsolate,
   UnsafeEvalJsValue,
   UnsafeEvalRuntime,
-} from "./eval-runtime.ts";
-export { getTypeLibs } from "./utils.ts";
+} from "./runtime/mod.ts";
+export { InMemoryProgram } from "./program.ts";
+export { getTypeScriptEnvironmentTypes } from "./utils.ts";

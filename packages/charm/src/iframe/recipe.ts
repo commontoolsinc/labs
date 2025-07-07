@@ -1,6 +1,10 @@
-import { JSONSchema } from "@commontools/builder";
+import {
+  Cell,
+  getEntityId,
+  type JSONSchema,
+  type Runtime,
+} from "@commontools/runner";
 import { Charm, getRecipeIdFromCharm } from "../manager.ts";
-import { Cell, getEntityId, recipeManager } from "@commontools/runner";
 
 export type IFrameRecipe = {
   src: string;
@@ -17,9 +21,7 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
     `    ${key}: data.${key},\n`
   ).join("\n");
 
-  return `import { h } from "@commontools/html";
-  import { recipe, UI, NAME } from "@commontools/builder";
-  import type { JSONSchema } from "@commontools/builder";
+  return `import { h, recipe, type JSONSchema, UI, NAME } from "commontools";
 
   type IFrameRecipe = {
     src: string,
@@ -61,8 +63,13 @@ function parseIframeRecipe(source: string): IFrameRecipe {
   return JSON.parse(match[1]) as IFrameRecipe;
 }
 
-export const getIframeRecipe = (charm: Cell<Charm>): {
+export const getIframeRecipe = (
+  charm: Cell<Charm>,
+  runtime: Runtime,
+): {
   recipeId: string;
+  // `src` is either a single file string source, or the entry
+  // file source code in a recipe.
   src?: string;
   iframe?: IFrameRecipe;
 } => {
@@ -71,15 +78,18 @@ export const getIframeRecipe = (charm: Cell<Charm>): {
     console.warn("No recipeId found for charm", getEntityId(charm));
     return { recipeId, src: "", iframe: undefined };
   }
-  const src = recipeManager.getRecipeMeta({ recipeId })?.src;
+  const meta = runtime.recipeManager.getRecipeMeta({ recipeId });
+  const src = meta
+    ? (meta.src ??
+      meta.program?.files.find((file) => file.name === meta.program?.main)
+        ?.contents)
+    : undefined;
   if (!src) {
-    console.warn("No src found for charm", getEntityId(charm));
     return { recipeId };
   }
   try {
     return { recipeId, src, iframe: parseIframeRecipe(src) };
   } catch (error) {
-    console.warn("Error parsing iframe recipe:", error);
     return { recipeId, src };
   }
 };

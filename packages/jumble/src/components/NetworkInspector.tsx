@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useResizableDrawer } from "@/hooks/use-resizeable-drawer.ts";
 import JsonViewImport from "@uiw/react-json-view";
 import { githubDarkTheme } from "@uiw/react-json-view/githubDark";
-import { storage } from "@commontools/runner";
+import { useRuntime } from "@/contexts/RuntimeContext.tsx";
 // Type assertion to help TypeScript understand this is a valid React component
 const JsonView: React.FC<{
   value: any;
@@ -39,8 +39,9 @@ export function useStatusMonitor() {
 
 // Example usage with dummy data
 export const DummyModelInspector: React.FC = () => {
+  const runtime = useRuntime();
   const { status, updateStatus } = useStatusMonitor();
-  useStorageBroadcast(storage.id, updateStatus);
+  useStorageBroadcast(runtime.id, updateStatus);
   if (!status.current) return null;
 
   return <ModelInspector model={status.current} />;
@@ -53,8 +54,9 @@ export const ToggleableNetworkInspector: React.FC<
 > = (
   { visible, fullscreen = false },
 ) => {
+  const runtime = useRuntime();
   const { status, updateStatus } = useStatusMonitor();
-  const scope = fullscreen ? "" : storage.id;
+  const scope = fullscreen ? "" : runtime.id;
   useStorageBroadcast(scope, updateStatus);
 
   if (!visible || !status.current) return null;

@@ -1,48 +1,80 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getDoc } from "../src/doc.ts";
-import {
-  type Cell,
-  CellLink,
-  getImmutableCell,
-  isCell,
-  isStream,
-} from "../src/cell.ts";
-import type { JSONSchema } from "@commontools/builder";
-import { idle, running } from "../src/scheduler.ts";
+import { type Cell, isCell, isStream } from "../src/cell.ts";
+import { LegacyDocCellLink } from "../src/sigil-types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import { Runtime } from "../src/runtime.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { toURI } from "../src/uri-utils.ts";
+import { parseLink } from "../src/link-utils.ts";
+import { compactifyPaths } from "../src/scheduler.ts";
+
+const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Schema Support", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    // Create runtime with the shared storage provider
+    // We need to bypass the URL-based configuration for this test
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
   describe("Examples", () => {
     it("allows mapping of fields via interim cells", () => {
-      const c = getDoc(
-        {
-          id: 1,
-          metadata: {
-            createdAt: "2025-01-06",
-            type: "user",
-          },
-          tags: ["a", "b"],
-        },
+      const c = runtime.getCell<{
+        id: number;
+        metadata: {
+          createdAt: string;
+          type: string;
+        };
+        tags: string[];
+      }>(
+        space,
         "allows mapping of fields via interim cells 1",
-        "test",
       );
+      c.set({
+        id: 1,
+        metadata: {
+          createdAt: "2025-01-06",
+          type: "user",
+        },
+        tags: ["a", "b"],
+      });
 
       // This is what the system (or someone manually) would create to remap
       // data to match the desired schema
-      const mappingCell = getDoc(
-        {
-          // as-is
-          id: { cell: c, path: ["id"] },
-          // turn single value to set
-          changes: [{ cell: c, path: ["metadata", "createdAt"] }],
-          // rename field and uplift from nested element
-          kind: { cell: c, path: ["metadata", "type"] },
-          // turn set into a single value
-          tag: { cell: c, path: ["tags", 0] },
-        },
+      const mappingCell = runtime.getCell<{
+        id: LegacyDocCellLink;
+        changes: LegacyDocCellLink[];
+        kind: LegacyDocCellLink;
+        tag: LegacyDocCellLink;
+      }>(
+        space,
         "allows mapping of fields via interim cells 2",
-        "test",
       );
+      mappingCell.setRaw({
+        // as-is
+        id: c.key("id").getAsLegacyCellLink(),
+        // turn single value to set
+        changes: [c.key("metadata").key("createdAt").getAsLegacyCellLink()],
+        // rename field and uplift from nested element
+        kind: c.key("metadata").key("type").getAsLegacyCellLink(),
+        // turn set into a single value
+        tag: c.key("tags").key(0).getAsLegacyCellLink(),
+      });
 
       // This schema is how the recipient specifies what they want
       const schema = {
@@ -56,7 +88,7 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Let type inference work through the schema
-      const result = mappingCell.asCell([], undefined, schema).get();
+      const result = mappingCell.asSchema(schema).get();
 
       expect(result).toEqual({
         id: 1,
@@ -67,32 +99,33 @@ describe("Schema Support", () => {
     });
 
     it("should support nested sinks via asCell", async () => {
-      const schema = {
-        type: "object",
-        properties: {
-          value: { type: "string" },
-          current: {
-            type: "object",
-            properties: { label: { type: "string" } },
-            required: ["label"],
-            asCell: true,
-          },
-        },
-        required: ["value", "current"],
-      } as const satisfies JSONSchema;
+      const innerCell = runtime.getCell<{ label: string }>(
+        space,
+        "should support nested sinks 1",
+      );
+      innerCell.set({ label: "first" });
 
-      const c = getDoc(
-        {
-          value: "root",
-          current: getDoc(
-            { label: "first" },
-            "should support nested sinks 1",
-            "test",
-          ).asCell().getAsCellLink(),
-        },
+      const cell = runtime.getCell(
+        space,
         "should support nested sinks 2",
-        "test",
-      ).asCell([], undefined, schema);
+        {
+          type: "object",
+          properties: {
+            value: { type: "string" },
+            current: {
+              type: "object",
+              properties: { label: { type: "string" } },
+              required: ["label"],
+              asCell: true,
+            },
+          },
+          required: ["value", "current"],
+        } as const satisfies JSONSchema,
+      );
+      cell.setRaw({
+        value: "root",
+        current: innerCell.getAsLegacyCellLink(),
+      });
 
       const rootValues: string[] = [];
       const currentValues: string[] = [];
@@ -100,7 +133,7 @@ describe("Schema Support", () => {
       const currentByGetValues: string[] = [];
 
       // Nested traversal of data
-      c.sink((value) => {
+      cell.sink((value) => {
         rootValues.push(value.value);
         const cancel = value.current.sink((value) => {
           currentValues.push(value.label);
@@ -112,46 +145,51 @@ describe("Schema Support", () => {
       });
 
       // Querying for a value tied to the currently selected sub-document
-      c.key("current")
+      cell.key("current")
         .key("label")
         .sink((value) => {
           currentByKeyValues.push(value);
         });
 
       // .get() the currently selected cell
-      c.key("current")
+      cell.key("current")
         .get()
         .sink((value) => {
           currentByGetValues.push(value.label);
         });
 
-      await idle();
+      await runtime.idle();
 
       // Find the currently selected cell and update it
-      const first = c.key("current").get();
+      const first = cell.key("current").get();
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       first.set({ label: "first - update" });
 
-      await idle();
+      await runtime.idle();
 
       // Now change the currently selected cell
-      const second = getDoc(
-        { label: "second" },
+      const second = runtime.getCell(
+        space,
         "should support nested sinks 3",
-        "test",
-      ).asCell();
-      c.key("current").set(second);
+        {
+          type: "object",
+          properties: { label: { type: "string" } },
+          required: ["label"],
+        } as const satisfies JSONSchema,
+      );
+      second.set({ label: "second" });
+      cell.key("current").set(second);
 
-      await idle();
+      await runtime.idle();
 
       // Now change the first one again, should only change currentByGetValues
       first.set({ label: "first - updated again" });
-      await idle();
+      await runtime.idle();
 
       // Now change the second one, should change all but currentByGetValues
       second.set({ label: "second - update" });
-      await idle();
+      await runtime.idle();
 
       expect(currentByGetValues).toEqual([
         "first",
@@ -194,26 +232,32 @@ describe("Schema Support", () => {
       } as const satisfies JSONSchema;
 
       // Construct an alias that also has a path to the actual data
-      const initialDoc = getDoc(
-        { foo: { label: "first" } },
+      const initial = runtime.getCell<{ foo: { label: string } }>(
+        space,
         "should support nested sinks via asCell with aliases 1",
-        "test",
       );
-      const initial = initialDoc.asCell();
-      const linkDoc = getDoc(
-        initial.getAsCellLink(),
+      initial.set({ foo: { label: "first" } });
+      const initialEntityId = initial.entityId!;
+
+      const linkCell = runtime.getCell<any>(
+        space,
         "should support nested sinks via asCell with aliases 2",
-        "test",
       );
-      const doc = getDoc(
-        {
-          value: "root",
-          current: { $alias: { cell: linkDoc, path: ["foo"] } },
-        },
+      linkCell.setRaw(initial.getAsLegacyCellLink());
+      const linkEntityId = linkCell.entityId!;
+
+      const docCell = runtime.getCell<{
+        value: string;
+        current: any;
+      }>(
+        space,
         "should support nested sinks via asCell with aliases 3",
-        "test",
       );
-      const root = doc.asCell([], undefined, schema);
+      docCell.setRaw({
+        value: "root",
+        current: { $alias: linkCell.key("foo").getAsLegacyCellLink() },
+      });
+      const root = docCell.asSchema(schema);
 
       const rootValues: any[] = [];
       const currentValues: any[] = [];
@@ -240,12 +284,13 @@ describe("Schema Support", () => {
 
       // Make sure the schema is correct and it is still anchored at the root
       expect(current.schema).toEqual({ type: "string" });
-      expect(JSON.parse(JSON.stringify(current.getAsCellLink()))).toEqual({
-        cell: doc.toJSON(),
+      expect(parseLink(current.getAsLink({ includeSchema: true }))).toEqual({
+        id: toURI(docCell.entityId!),
         path: ["current", "label"],
-        space: "test",
+        space,
         schema: current.schema,
         rootSchema: current.rootSchema,
+        type: "application/json",
       });
 
       // .get() the currently selected cell. This should not change when
@@ -257,7 +302,7 @@ describe("Schema Support", () => {
           currentByGetValues.push(value.label);
         });
 
-      await idle();
+      await runtime.idle();
 
       // Find the currently selected cell and read it
       const log = { reads: [], writes: [] };
@@ -265,48 +310,49 @@ describe("Schema Support", () => {
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
-      expect(JSON.parse(JSON.stringify(first.getAsCellLink()))).toEqual({
-        cell: initialDoc.toJSON(),
+      expect(parseLink(first.getAsLink({ includeSchema: true }))).toEqual({
+        id: toURI(initialEntityId),
         path: ["foo"],
-        space: "test",
+        space,
+        type: "application/json",
         schema: omitSchema,
         rootSchema: schema,
       });
-      expect(log.reads.length).toEqual(4);
+      const reads = compactifyPaths(log.reads);
+      expect(reads.length).toEqual(3);
       expect(
-        log.reads.map((r: CellLink) => ({
-          cell: r.cell.toJSON(),
+        reads.map((r: LegacyDocCellLink) => ({
+          cell: toURI(r.cell.entityId!),
           path: r.path,
         })),
       ).toEqual([
-        { cell: doc.toJSON(), path: ["current"] },
-        { cell: linkDoc.toJSON(), path: [] },
-        { cell: initialDoc.toJSON(), path: ["foo"] },
-        { cell: initialDoc.toJSON(), path: ["foo", "label"] },
+        { cell: toURI(docCell.entityId!), path: ["current"] },
+        { cell: toURI(linkEntityId), path: [] },
+        { cell: toURI(initialEntityId), path: ["foo"] },
       ]);
 
       // Then update it
       initial.set({ foo: { label: "first - update" } });
-      await idle();
+      await runtime.idle();
       expect(first.get()).toEqual({ label: "first - update" });
 
       // Now change the currently selected cell behind the alias. This should
       // trigger a change on the root cell, since this is the first doc after
       // the aliases.
-      const second = getDoc(
-        { foo: { label: "second" } },
+      const second = runtime.getCell<{ foo: { label: string } }>(
+        space,
         "should support nested sinks via asCell with aliases 4",
-        "test",
-      ).asCell();
-      linkDoc.send(second.getAsCellLink());
+      );
+      second.set({ foo: { label: "second" } });
+      linkCell.setRaw(second.getAsLegacyCellLink());
 
-      await idle();
+      await runtime.idle();
 
       expect(rootValues).toEqual(["root", "cancelled", "root"]);
 
       // Change unrelated value should update root, but not the other cells
       root.key("value").set("root - updated");
-      await idle();
+      await runtime.idle();
       expect(rootValues).toEqual([
         "root",
         "cancelled",
@@ -317,11 +363,11 @@ describe("Schema Support", () => {
 
       // Now change the first one again, should only change currentByGetValues
       initial.set({ foo: { label: "first - updated again" } });
-      await idle();
+      await runtime.idle();
 
       // Now change the second one, should change all but currentByGetValues
       second.set({ foo: { label: "second - update" } });
-      await idle();
+      await runtime.idle();
 
       expect(rootValues).toEqual([
         "root",
@@ -334,22 +380,22 @@ describe("Schema Support", () => {
       // Now change the alias. This should also be seen by the root cell. It
       // will not be seen by the .get()s earlier, since they anchored on the
       // link, not the alias ahead of it. That's intentional.
-      const third = getDoc(
-        { label: "third" },
+      const third = runtime.getCell<{ label: string }>(
+        space,
         "should support nested sinks via asCell with aliases 5",
-        "test",
-      ).asCell();
-      doc.setAtPath(["current"], {
-        $alias: { cell: third.getDoc(), path: [] },
+      );
+      third.set({ label: "third" });
+      docCell.key("current").setRaw({
+        $alias: third.getAsLegacyCellLink(),
       });
 
-      await idle();
+      await runtime.idle();
 
       // Now change the first one again, should only change currentByGetValues
       initial.set({ foo: { label: "first - updated yet again" } });
       second.set({ foo: { label: "second - updated again" } });
       third.set({ label: "third - updated" });
-      await idle();
+      await runtime.idle();
 
       expect(currentByGetValues).toEqual([
         "first",
@@ -388,15 +434,19 @@ describe("Schema Support", () => {
 
   describe("Basic Types", () => {
     it("should handle primitive types", () => {
-      const c = getDoc(
-        {
-          str: "hello",
-          num: 42,
-          bool: true,
-        },
+      const c = runtime.getCell<{
+        str: string;
+        num: number;
+        bool: boolean;
+      }>(
+        space,
         "should handle primitive types 1",
-        "test",
       );
+      c.set({
+        str: "hello",
+        num: 42,
+        bool: true,
+      });
 
       const schema = {
         type: "object",
@@ -407,7 +457,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.str).toBe("hello");
@@ -416,18 +466,25 @@ describe("Schema Support", () => {
     });
 
     it("should handle nested objects", () => {
-      const c = getDoc(
-        {
-          user: {
-            name: "John",
-            settings: {
-              theme: "dark",
-            },
+      const c = runtime.getCell<{
+        user: {
+          name: string;
+          settings: {
+            theme: string;
+          };
+        };
+      }>(
+        space,
+        "should handle nested objects 1",
+      );
+      c.set({
+        user: {
+          name: "John",
+          settings: {
+            theme: "dark",
           },
         },
-        "should handle nested objects 1",
-        "test",
-      );
+      });
 
       const schema = {
         type: "object",
@@ -447,7 +504,7 @@ describe("Schema Support", () => {
         required: ["user"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.user.name).toBe("John");
@@ -455,13 +512,15 @@ describe("Schema Support", () => {
     });
 
     it("should handle arrays", () => {
-      const c = getDoc(
-        {
-          items: [1, 2, 3],
-        },
+      const c = runtime.getCell<{
+        items: number[];
+      }>(
+        space,
         "should handle arrays 1",
-        "test",
       );
+      c.set({
+        items: [1, 2, 3],
+      });
 
       const schema = {
         type: "object",
@@ -473,7 +532,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.items).toEqual([1, 2, 3]);
@@ -482,17 +541,23 @@ describe("Schema Support", () => {
 
   describe("References", () => {
     it("should return a Cell for reference properties", () => {
-      const c = getDoc(
-        {
-          id: 1,
-          metadata: {
-            createdAt: "2025-01-06",
-            type: "user",
-          },
-        },
+      const c = runtime.getCell<{
+        id: number;
+        metadata: {
+          createdAt: string;
+          type: string;
+        };
+      }>(
+        space,
         "should return a Cell for reference properties 1",
-        "test",
       );
+      c.set({
+        id: 1,
+        metadata: {
+          createdAt: "2025-01-06",
+          type: "user",
+        },
+      });
 
       const schema = {
         type: "object",
@@ -505,7 +570,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.id).toBe(1);
@@ -518,14 +583,17 @@ describe("Schema Support", () => {
     });
 
     it("Should support a reference at the root", () => {
-      const c = getDoc(
-        {
-          id: 1,
-          nested: { id: 2 },
-        },
+      const c = runtime.getCell<{
+        id: number;
+        nested: { id: number };
+      }>(
+        space,
         "Should support a reference at the root 1",
-        "test",
       );
+      c.set({
+        id: 1,
+        nested: { id: 2 },
+      });
 
       const schema = {
         type: "object",
@@ -537,7 +605,7 @@ describe("Schema Support", () => {
         required: ["id", "nested"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(isCell(value)).toBe(true);
@@ -549,17 +617,20 @@ describe("Schema Support", () => {
 
   describe("Schema References", () => {
     it("should handle self-references with $ref: '#'", () => {
-      const c = getDoc(
-        {
-          name: "root",
-          children: [
-            { name: "child1", children: [] },
-            { name: "child2", children: [] },
-          ],
-        },
+      const c = runtime.getCell<{
+        name: string;
+        children: Array<{ name: string; children: any[] }>;
+      }>(
+        space,
         "should handle self-references with $ref 1",
-        "test",
       );
+      c.set({
+        name: "root",
+        children: [
+          { name: "child1", children: [] },
+          { name: "child2", children: [] },
+        ],
+      });
 
       const schema = {
         type: "object",
@@ -573,29 +644,228 @@ describe("Schema Support", () => {
         required: ["name", "children"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.name).toBe("root");
       expect(value.children[0].name).toBe("child1");
       expect(value.children[1].name).toBe("child2");
     });
+
+    it("should handle circular references in objects", () => {
+      const c = runtime.getCell<{
+        name: string;
+        parent: any;
+        children: Array<{ name: string; parent: any; children: any[] }>;
+      }>(
+        space,
+        "should handle circular references in objects 1",
+      );
+      c.set({
+        name: "root",
+        parent: null,
+        children: [
+          { name: "child1", parent: null, children: [] },
+          { name: "child2", parent: null, children: [] },
+        ],
+      });
+
+      // Set up circular references using cell links
+      c.key("parent").setRaw(c.getAsLegacyCellLink());
+      c.key("children").key(0).key("parent").setRaw(c.getAsLegacyCellLink());
+      c.key("children").key(1).key("parent").setRaw(c.getAsLegacyCellLink());
+
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          parent: { $ref: "#" },
+          children: {
+            type: "array",
+            items: { $ref: "#" },
+          },
+        },
+        required: ["name", "parent", "children"],
+      } as const satisfies JSONSchema;
+
+      const cell = c.asSchema(schema);
+      const value = cell.get() as {
+        name: string;
+        parent: any;
+        children: Array<{ name: string; parent: any; children: any[] }>;
+      };
+
+      // Verify the structure is maintained
+      expect(value.name).toBe("root");
+      expect(value.parent.name).toBe("root");
+      expect(value.children[0].name).toBe("child1");
+      expect(value.children[0].parent.name).toBe("root");
+      expect(value.children[1].name).toBe("child2");
+      expect(value.children[1].parent.name).toBe("root");
+    });
+
+    it("should handle nested circular references", () => {
+      const c = runtime.getCell<{
+        name: string;
+        nested: {
+          name: string;
+          items: Array<{ name: string; value: any }>;
+        };
+      }>(
+        space,
+        "should handle nested circular references 1",
+      );
+      c.set({
+        name: "root",
+        nested: {
+          name: "nested",
+          items: [
+            { name: "item1", value: null },
+            { name: "item2", value: null },
+          ],
+        },
+      });
+
+      // Set up circular references using cell links
+      c.key("nested").key("items").key(0).key("value").setRaw(
+        c.getAsLegacyCellLink(),
+      );
+      c.key("nested").key("items").key(1).key("value").setRaw(
+        c.key("nested").getAsLegacyCellLink(),
+      );
+
+      const schema = {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          nested: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    value: { $ref: "#" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const cell = c.asSchema(schema);
+      const value = cell.get() as {
+        name: string;
+        nested: {
+          name: string;
+          items: Array<{ name: string; value: any }>;
+        };
+      };
+
+      // Verify the structure is maintained
+      expect(value.name).toBe("root");
+      expect(value.nested.name).toBe("nested");
+      expect(value.nested.items[0].name).toBe("item1");
+      expect(value.nested.items[0].value.name).toBe("root");
+      expect(value.nested.items[1].name).toBe("item2");
+      expect(value.nested.items[1].value.name).toBe("nested");
+    });
+
+    it("should handle circular references with anyOf", () => {
+      const c = runtime.getCell<{
+        type: string;
+        name: string;
+        children: Array<{
+          type: string;
+          name: string;
+          children?: any[];
+          value?: any;
+        }>;
+      }>(
+        space,
+        "should handle circular references with anyOf 1",
+      );
+      c.set({
+        type: "node",
+        name: "root",
+        children: [
+          { type: "node", name: "child1", children: [] },
+          { type: "leaf", name: "child2", value: null },
+        ],
+      });
+
+      // Set up circular references using cell links
+      c.key("children").key(1).key("value").setRaw(c.getAsLegacyCellLink());
+
+      const schema = {
+        type: "object",
+        properties: {
+          type: { type: "string" },
+          name: { type: "string" },
+          children: {
+            type: "array",
+            items: {
+              anyOf: [
+                { $ref: "#" },
+                {
+                  type: "object",
+                  properties: {
+                    type: { type: "string" },
+                    name: { type: "string" },
+                    value: { $ref: "#" },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const cell = c.asSchema(schema);
+      const value = cell.get() as {
+        type: string;
+        name: string;
+        children: Array<{
+          type: string;
+          name: string;
+          children?: any[];
+          value?: any;
+        }>;
+      };
+
+      // Verify the structure is maintained
+      expect(value.name).toBe("root");
+      expect(value.children[0].name).toBe("child1");
+      expect(value.children[1].name).toBe("child2");
+      expect(value.children[1].value.name).toBe("root");
+    });
   });
 
   describe("Key Navigation", () => {
     it("should preserve schema when using key()", () => {
-      const c = getDoc(
-        {
-          user: {
-            profile: {
-              name: "John",
-              metadata: { id: 123 },
-            },
+      const c = runtime.getCell<{
+        user: {
+          profile: {
+            name: string;
+            metadata: { id: number };
+          };
+        };
+      }>(
+        space,
+        "should preserve schema when using key 1",
+      );
+      c.set({
+        user: {
+          profile: {
+            name: "John",
+            metadata: { id: 123 },
           },
         },
-        "should preserve schema when using key 1",
-        "test",
-      );
+      });
 
       const schema = {
         type: "object",
@@ -621,7 +891,7 @@ describe("Schema Support", () => {
         required: ["user"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const userCell = cell.key("user");
       const profileCell = userCell.key("profile");
       const value = profileCell.get();
@@ -633,11 +903,11 @@ describe("Schema Support", () => {
 
   describe("AnyOf Support", () => {
     it("should select the correct candidate for primitive types (number)", () => {
-      const c = getDoc(
-        { value: 42 },
+      const c = runtime.getCell<{ value: number }>(
+        space,
         "should select the correct candidate for primitive types (number) 1",
-        "test",
       );
+      c.set({ value: 42 });
       const schema = {
         type: "object",
         properties: {
@@ -647,17 +917,17 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const result = cell.get();
       expect(result.value).toBe(42);
     });
 
     it("should select the correct candidate for primitive types (string)", () => {
-      const c = getDoc(
-        { value: "hello" },
+      const c = runtime.getCell<{ value: string }>(
+        space,
         "should select the correct candidate for primitive types (string) 1",
-        "test",
       );
+      c.set({ value: "hello" });
       const schema = {
         type: "object",
         properties: {
@@ -667,17 +937,17 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const result = cell.get();
       expect(result.value).toBe("hello");
     });
 
     it("should merge object candidates in anyOf", () => {
-      const c = getDoc(
-        { item: { a: 100, b: "merged" } },
+      const c = runtime.getCell<{ item: { a: number; b: string } }>(
+        space,
         "should merge object candidates in anyOf 1",
-        "test",
       );
+      c.set({ item: { a: 100, b: "merged" } });
       const schema = {
         type: "object",
         properties: {
@@ -699,18 +969,18 @@ describe("Schema Support", () => {
         required: ["item"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const result = cell.get();
       expect((result.item as { a: number }).a).toBe(100);
       expect((result.item as { b: string }).b).toBe("merged");
     });
 
     it("should return undefined if no anyOf candidate matches for primitive types", () => {
-      const c = getDoc(
-        { value: true },
+      const c = runtime.getCell<{ value: boolean }>(
+        space,
         "should return undefined if no anyOf candidate matches 1",
-        "test",
       );
+      c.set({ value: true });
       const schema = {
         type: "object",
         properties: {
@@ -720,17 +990,17 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const result = cell.get();
       expect(result.value).toBeUndefined();
     });
 
     it("should return undefined when value is an object but no anyOf candidate is an object", () => {
-      const c = getDoc(
-        { value: { a: 1 } },
+      const c = runtime.getCell<{ value: { a: number } }>(
+        space,
         "should return undefined when value is an object 1",
-        "test",
       );
+      c.set({ value: { a: 1 } });
       const schema = {
         type: "object",
         properties: {
@@ -740,17 +1010,17 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const result = cell.get();
       expect(result.value).toBeUndefined();
     });
 
     it("should handle anyOf in array items", () => {
-      const c = getDoc(
-        { arr: [42, "test", true] },
+      const c = runtime.getCell<{ arr: any[] }>(
+        space,
         "should handle anyOf in array items 1",
-        "test",
       );
+      c.set({ arr: [42, space, true] });
       const schema = {
         type: "object",
         properties: {
@@ -764,20 +1034,20 @@ describe("Schema Support", () => {
         required: ["arr"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const result = cell.get();
       expect(result.arr[0]).toBe(42);
-      expect(result.arr[1]).toBe("test");
+      expect(result.arr[1]).toBe(space);
       expect(result.arr[2]).toBeUndefined();
     });
 
     it("should select the correct candidate when mixing object and array candidates", () => {
       // Case 1: When the value is an object, the object candidate should be used.
-      const cObject = getDoc(
-        { mixed: { foo: "bar" } },
+      const cObject = runtime.getCell<{ mixed: { foo: string } }>(
+        space,
         "should select the correct candidate when mixing 1",
-        "test",
       );
+      cObject.set({ mixed: { foo: "bar" } });
       const schemaObject = {
         type: "object",
         properties: {
@@ -796,18 +1066,18 @@ describe("Schema Support", () => {
         required: ["mixed"],
       } as const satisfies JSONSchema;
 
-      const cellObject = cObject.asCell([], undefined, schemaObject);
+      const cellObject = cObject.asSchema(schemaObject);
       const resultObject = cellObject.get();
       // Since the input is an object, the object candidate is selected.
       // TS doesn't infer `foo as string` when mixing objects and arrays, so have to cast.
       expect((resultObject.mixed as { foo: string }).foo).toBe("bar");
 
       // Case 2: When the value is an array, the array candidate should be used.
-      const cArray = getDoc(
-        { mixed: ["bar", "baz"] },
+      const cArray = runtime.getCell<{ mixed: string[] }>(
+        space,
         "should select the correct candidate when mixing 2",
-        "test",
       );
+      cArray.set({ mixed: ["bar", "baz"] });
       const schemaArray = {
         type: "object",
         properties: {
@@ -821,7 +1091,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cellArray = cArray.asCell([], undefined, schemaArray);
+      const cellArray = cArray.asSchema(schemaArray);
       const resultArray = cellArray.get();
       // Verify that the array candidate is chosen and returns the intended array.
       expect(resultArray).toEqual({ mixed: ["bar", "baz"] });
@@ -831,11 +1101,11 @@ describe("Schema Support", () => {
 
     describe("Array anyOf Support", () => {
       it("should handle multiple array type options in anyOf", () => {
-        const c = getDoc(
-          { data: [1, 2, 3] },
+        const c = runtime.getCell<{ data: number[] }>(
+          space,
           "should handle multiple array type options 1",
-          "test",
         );
+        c.set({ data: [1, 2, 3] });
         const schema = {
           type: "object",
           properties: {
@@ -848,17 +1118,17 @@ describe("Schema Support", () => {
           },
         } as const satisfies JSONSchema;
 
-        const cell = c.asCell([], undefined, schema);
+        const cell = c.asSchema(schema);
         const result = cell.get();
         expect(result.data).toEqual([1, 2, 3]);
       });
 
       it("should merge item schemas when multiple array options exist", () => {
-        const c = getDoc(
-          { data: ["hello", 42, true] },
+        const c = runtime.getCell<{ data: any[] }>(
+          space,
           "should merge item schemas when multiple array options 1",
-          "test",
         );
+        c.set({ data: ["hello", 42, true] });
         const schema = {
           type: "object",
           properties: {
@@ -871,23 +1141,25 @@ describe("Schema Support", () => {
           },
         } as const satisfies JSONSchema;
 
-        const cell = c.asCell([], undefined, schema);
+        const cell = c.asSchema(schema);
         const result = cell.get();
         // Should keep string and number values, drop boolean
         expect(result.data).toEqual(["hello", 42, undefined]);
       });
 
       it("should handle nested anyOf in array items", () => {
-        const c = getDoc(
-          {
-            data: [
-              { type: "text", value: "hello" },
-              { type: "number", value: 42 },
-            ],
-          },
+        const c = runtime.getCell<{
+          data: Array<{ type: string; value: string | number }>;
+        }>(
+          space,
           "should handle nested anyOf in array items 1",
-          "test",
         );
+        c.set({
+          data: [
+            { type: "text", value: "hello" },
+            { type: "number", value: 42 },
+          ],
+        });
         const schema = {
           type: "object",
           properties: {
@@ -915,7 +1187,7 @@ describe("Schema Support", () => {
           },
         } as const satisfies JSONSchema;
 
-        const cell = c.asCell([], undefined, schema);
+        const cell = c.asSchema(schema);
         const result = cell.get();
         expect(result.data).toEqual([
           { type: "text", value: "hello" },
@@ -924,11 +1196,11 @@ describe("Schema Support", () => {
       });
 
       it("should return empty array when no array options match", () => {
-        const c = getDoc(
-          { data: { key: "value" } },
+        const c = runtime.getCell<{ data: { key: string } }>(
+          space,
           "should return empty array when no array options match 1",
-          "test",
         );
+        c.set({ data: { key: "value" } });
         const schema = {
           type: "object",
           properties: {
@@ -941,70 +1213,82 @@ describe("Schema Support", () => {
           },
         } as const satisfies JSONSchema;
 
-        const cell = c.asCell([], undefined, schema);
+        const cell = c.asSchema(schema);
         const result = cell.get();
         expect(result.data).toBeUndefined();
       });
 
       it("should work for the vdom schema with $ref", () => {
-        const plain = getDoc(
-          {
-            type: "vnode",
-            name: "div",
-            props: { style: { color: "red" } },
-            children: [
-              { type: "text", value: "single" },
-              [
-                { type: "text", value: "hello" },
-                { type: "text", value: "world" },
-              ],
-              "or just text",
-            ],
-          },
+        const plain = runtime.getCell<{
+          type: string;
+          name: string;
+          props: { style: { color: string } };
+          children: any[];
+        }>(
+          space,
           "should work for the vdom schema with $ref 1",
-          "test",
         );
-
-        const withLinks = getDoc(
-          {
-            type: "vnode",
-            name: "div",
-            props: {
-              style: {
-                cell: getDoc(
-                  { color: "red" },
-                  "should work for the vdom schema with $ref 2",
-                  "test",
-                ),
-                path: [],
-              },
-            },
-            children: [
-              { type: "text", value: "single" },
-              {
-                cell: getDoc(
-                  [
-                    { type: "text", value: "hello" },
-                    {
-                      cell: getDoc(
-                        { type: "text", value: "world" },
-                        "should work for the vdom schema with $ref 4",
-                        "test",
-                      ),
-                      path: [],
-                    },
-                  ],
-                  "should work for the vdom schema with $ref 5",
-                  "test",
-                ),
-                path: [],
-              },
-              "or just text",
+        plain.set({
+          type: "vnode",
+          name: "div",
+          props: { style: { color: "red" } },
+          children: [
+            { type: "text", value: "single" },
+            [
+              { type: "text", value: "hello" },
+              { type: "text", value: "world" },
             ],
-          },
-          "should work for the vdom schema with $ref 3",
-          "test",
+            "or just text",
+          ],
+        });
+
+        const styleCell = runtime.getCell<{ color: string }>(
+          space,
+          "should work for the vdom schema with $ref 2",
         );
+        styleCell.set({ color: "red" });
+
+        const innerTextCell = runtime.getCell<{ type: string; value: string }>(
+          space,
+          "should work for the vdom schema with $ref 4",
+        );
+        innerTextCell.set({ type: "text", value: "world" });
+
+        const childrenArrayCell = runtime.getCell<any[]>(
+          space,
+          "should work for the vdom schema with $ref 5",
+        );
+        childrenArrayCell.set([
+          { type: "text", value: "hello" },
+          innerTextCell.getAsLegacyCellLink(),
+        ]);
+
+        const withLinks = runtime.getCell<{
+          type: string;
+          name: string;
+          props: {
+            style: {
+              cell: any;
+              path: any[];
+            };
+          };
+          children: any[];
+        }>(
+          space,
+          "should work for the vdom schema with $ref 3",
+        );
+        withLinks.set({
+          type: "vnode",
+          name: "div",
+          props: {
+            style: styleCell.getAsLegacyCellLink(),
+          },
+          children: [
+            { type: "text", value: "single" },
+            childrenArrayCell.getAsLegacyCellLink(),
+            "or just text",
+          ],
+        });
 
         const vdomSchema = {
           type: "object",
@@ -1034,7 +1318,7 @@ describe("Schema Support", () => {
         } as const satisfies JSONSchema;
 
         for (const doc of [plain, withLinks]) {
-          const cell = doc.asCell([], undefined, vdomSchema);
+          const cell = doc.asSchema(vdomSchema);
           const result = cell.get();
           expect(result.type).toBe("vnode");
           expect(result.name).toBe("div");
@@ -1064,14 +1348,17 @@ describe("Schema Support", () => {
 
   describe("Default Values", () => {
     it("should use the default value when property is undefined", () => {
-      const c = getDoc(
-        {
-          name: "John",
-          // age is not defined
-        },
+      const c = runtime.getCell<{
+        name: string;
+        // age is not defined
+      }>(
+        space,
         "should use the default value when property is undefined 1",
-        "test",
       );
+      c.set({
+        name: "John",
+        // age is not defined
+      });
 
       const schema = {
         type: "object",
@@ -1081,7 +1368,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.name).toBe("John");
@@ -1089,14 +1376,17 @@ describe("Schema Support", () => {
     });
 
     it("should use the default value with asCell for objects", () => {
-      const c = getDoc(
-        {
-          name: "John",
-          // profile is not defined
-        },
+      const c = runtime.getCell<{
+        name: string;
+        // profile is not defined
+      }>(
+        space,
         "should use the default value with asCell for objects 1",
-        "test",
       );
+      c.set({
+        name: "John",
+        // profile is not defined
+      });
 
       const schema = {
         type: "object",
@@ -1115,7 +1405,7 @@ describe("Schema Support", () => {
         required: ["name", "profile"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.name).toBe("John");
@@ -1134,14 +1424,17 @@ describe("Schema Support", () => {
     });
 
     it("should use the default value with asCell for arrays", () => {
-      const c = getDoc(
-        {
-          name: "John",
-          // tags is not defined
-        },
+      const c = runtime.getCell<{
+        name: string;
+        // tags is not defined
+      }>(
+        space,
         "should use the default value with asCell for arrays 1",
-        "test",
       );
+      c.set({
+        name: "John",
+        // tags is not defined
+      });
 
       const schema = {
         type: "object",
@@ -1157,7 +1450,7 @@ describe("Schema Support", () => {
         required: ["name", "tags"],
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.name).toBe("John");
@@ -1204,18 +1497,23 @@ describe("Schema Support", () => {
         required: ["user"],
       } as const satisfies JSONSchema;
 
-      const c = getDoc(
-        {
-          user: {
-            name: "John",
-            // settings is not defined
-          },
-        },
+      const c = runtime.getCell<{
+        user: {
+          name: string;
+          // settings is not defined
+        };
+      }>(
+        space,
         "should use the default value with nested schema 1",
-        "test",
       );
+      c.set({
+        user: {
+          name: "John",
+          // settings is not defined
+        },
+      });
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.user.name).toBe("John");
@@ -1227,19 +1525,25 @@ describe("Schema Support", () => {
       expect(isCell(settings.theme.get())).toBe(false);
       expect(settings.theme.get()).toEqual({ mode: "light", color: "red" });
 
-      const c2 = getDoc(
-        {
-          user: {
-            name: "John",
-            // settings is set, but theme is not
-            settings: { notifications: false },
-          },
-        },
+      const c2 = runtime.getCell<{
+        user: {
+          name: string;
+          // settings is set, but theme is not
+          settings: { notifications: boolean };
+        };
+      }>(
+        space,
         "should use the default value with nested schema 2",
-        "test",
       );
+      c2.set({
+        user: {
+          name: "John",
+          // settings is set, but theme is not
+          settings: { notifications: false },
+        },
+      });
 
-      const cell2 = c2.asCell([], undefined, schema);
+      const cell2 = c2.asSchema(schema);
       const value2 = cell2.get();
 
       expect(value2.user.name).toBe("John");
@@ -1287,18 +1591,20 @@ describe("Schema Support", () => {
         default: {},
       } as const satisfies JSONSchema;
 
-      const c = getDoc(
-        {
-          items: [
-            { id: 1, title: "First Item" },
-            // Second item has missing properties
-            { id: 2 },
-          ],
-        },
+      const c = runtime.getCell<{
+        items: Array<{ id: number; title?: string }>;
+      }>(
+        space,
         "should use the default value for array items 1",
-        "test",
       );
-      const cell = c.asCell([], undefined, schema);
+      c.set({
+        items: [
+          { id: 1, title: "First Item" },
+          // Second item has missing properties
+          { id: 2 },
+        ],
+      });
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.items?.[0].title).toBe("First Item");
@@ -1307,12 +1613,12 @@ describe("Schema Support", () => {
       expect(isCell(value.items?.[0].metadata)).toBe(true);
       expect(isCell(value.items?.[1].metadata)).toBe(true);
 
-      const c2 = getDoc(
-        undefined,
+      const c2 = runtime.getCell<any>(
+        space,
         "should use the default value for array items 2",
-        "test",
       );
-      const cell2 = c2.asCell([], undefined, schema);
+      c2.set(undefined);
+      const cell2 = c2.asSchema(schema);
       const value2 = cell2.get();
 
       expect(value2.items?.length).toBe(2);
@@ -1358,12 +1664,12 @@ describe("Schema Support", () => {
         required: ["config"],
       } as const satisfies JSONSchema;
 
-      const c = getDoc(
-        undefined,
+      const c = runtime.getCell<any>(
+        space,
         "should handle default values with additionalProperties 1",
-        "test",
       );
-      const cell = c.asCell([], undefined, schema);
+      c.set(undefined);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.config.knownProp).toBe("default");
@@ -1401,12 +1707,12 @@ describe("Schema Support", () => {
         asCell: true,
       } as const satisfies JSONSchema;
 
-      const c = getDoc(
-        undefined,
+      const c = runtime.getCell<any>(
+        space,
         "should use the default value at the root level 1",
-        "test",
       );
-      const cell = c.asCell([], undefined, schema);
+      c.set(undefined);
+      const cell = c.asSchema(schema);
 
       // The whole document should be a cell containing the default
       expect(isCell(cell)).toBe(true);
@@ -1420,7 +1726,7 @@ describe("Schema Support", () => {
 
       // Verify it can be updated
       cell.set(
-        getImmutableCell("test", {
+        runtime.getImmutableCell(space, {
           name: "Updated User",
           settings: { theme: "dark" },
         }),
@@ -1440,18 +1746,18 @@ describe("Schema Support", () => {
         default: {},
       } as const satisfies JSONSchema;
 
-      const c = getDoc(
-        undefined,
+      const c = runtime.getCell<any>(
+        space,
         "should make immutable cells if they provide the default value 1",
-        "test",
       );
-      const cell = c.asCell([], undefined, schema);
+      c.set(undefined);
+      const cell = c.asSchema(schema);
       const value = cell.get();
       expect(isCell(value.name)).toBe(true);
       expect(value?.name?.get()).toBe("Default Name");
 
       cell.set(
-        getImmutableCell("test", { name: "Updated Name" }),
+        runtime.getImmutableCell(space, { name: "Updated Name" }),
       );
 
       // Expect the cell to be immutable
@@ -1467,17 +1773,17 @@ describe("Schema Support", () => {
         default: { name: "First default name" },
       } as const satisfies JSONSchema;
 
-      const c = getDoc(
-        undefined,
+      const c = runtime.getCell<any>(
+        space,
         "should make mutable cells if parent provides the default value 1",
-        "test",
       );
-      const cell = c.asCell([], undefined, schema);
+      c.set(undefined);
+      const cell = c.asSchema(schema);
       const value = cell.get();
       expect(isCell(value.name)).toBe(true);
       expect(value.name.get()).toBe("First default name");
 
-      cell.set({ name: getImmutableCell("test", "Updated Name") });
+      cell.set({ name: runtime.getImmutableCell(space, "Updated Name") });
 
       // Expect the cell to be immutable
       expect(value.name.get()).toBe("Updated Name");
@@ -1486,14 +1792,17 @@ describe("Schema Support", () => {
 
   describe("Stream Support", () => {
     it("should create a stream for properties marked with asStream", () => {
-      const c = getDoc(
-        {
-          name: "Test Doc",
-          events: { $stream: true },
-        },
+      const c = runtime.getCell<{
+        name: string;
+        events: { $stream: boolean };
+      }>(
+        space,
         "should create a stream for properties marked with asStream 1",
-        "test",
       );
+      c.set({
+        name: "Test Doc",
+        events: { $stream: true },
+      });
 
       const schema = {
         type: "object",
@@ -1506,7 +1815,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.name).toBe("Test Doc");
@@ -1517,18 +1826,25 @@ describe("Schema Support", () => {
     });
 
     it("should handle nested streams in objects", () => {
-      const c = getDoc(
-        {
-          user: {
-            profile: {
-              name: "John",
-              notifications: { $stream: true },
-            },
+      const c = runtime.getCell<{
+        user: {
+          profile: {
+            name: string;
+            notifications: { $stream: boolean };
+          };
+        };
+      }>(
+        space,
+        "should handle nested streams in objects 1",
+      );
+      c.set({
+        user: {
+          profile: {
+            name: "John",
+            notifications: { $stream: true },
           },
         },
-        "should handle nested streams in objects 1",
-        "test",
-      );
+      });
 
       const schema = {
         type: "object",
@@ -1551,7 +1867,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value?.user?.profile?.name).toBe("John");
@@ -1559,14 +1875,17 @@ describe("Schema Support", () => {
     });
 
     it("should not create a stream when property is missing", () => {
-      const c = getDoc(
-        {
-          name: "Test Doc",
-          // Missing events property
-        },
+      const c = runtime.getCell<{
+        name: string;
+        // Missing events property
+      }>(
+        space,
         "should not create a stream when property is missing 1",
-        "test",
       );
+      c.set({
+        name: "Test Doc",
+        // Missing events property
+      });
 
       const schema = {
         type: "object",
@@ -1579,7 +1898,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(value.name).toBe("Test Doc");
@@ -1587,14 +1906,17 @@ describe("Schema Support", () => {
     });
 
     it("should behave correctly when both asCell and asStream are in the schema", () => {
-      const c = getDoc(
-        {
-          cellData: { value: 42 },
-          streamData: { $stream: true },
-        },
+      const c = runtime.getCell<{
+        cellData: { value: number };
+        streamData: { $stream: boolean };
+      }>(
+        space,
         "should behave correctly when both asCell and asStream are in the schema 1",
-        "test",
       );
+      c.set({
+        cellData: { value: 42 },
+        streamData: { $stream: true },
+      });
 
       const schema = {
         type: "object",
@@ -1610,7 +1932,7 @@ describe("Schema Support", () => {
         },
       } as const satisfies JSONSchema;
 
-      const cell = c.asCell([], undefined, schema);
+      const cell = c.asSchema(schema);
       const value = cell.get();
 
       expect(isCell(value.cellData)).toBe(true);
@@ -1622,52 +1944,52 @@ describe("Schema Support", () => {
 
   describe("Running Promise", () => {
     it("should allow setting a promise when none is running", async () => {
-      await idle();
+      await runtime.idle();
 
       const { promise, resolve } = Promise.withResolvers();
-      running.promise = promise;
-      expect(running.promise).toBeDefined();
-      resolve("test");
+      runtime.scheduler.runningPromise = promise;
+      expect(runtime.scheduler.runningPromise).toBeDefined();
+      resolve(space);
       await promise;
-      expect(running.promise).toBeUndefined();
+      expect(runtime.scheduler.runningPromise).toBeUndefined();
     });
 
     it("should throw when trying to set a promise while one is running", async () => {
-      await idle();
+      await runtime.idle();
 
       const { promise: promise1, resolve: resolve1 } = Promise.withResolvers();
-      running.promise = promise1;
-      expect(running.promise).toBeDefined();
+      runtime.scheduler.runningPromise = promise1;
+      expect(runtime.scheduler.runningPromise).toBeDefined();
 
       const { promise: promise2, resolve: resolve2 } = Promise.withResolvers();
       expect(() => {
-        running.promise = promise2;
+        runtime.scheduler.runningPromise = promise2;
       }).toThrow("Cannot set running while another promise is in progress");
 
-      resolve1("test");
+      resolve1(space);
       await promise1;
-      expect(running.promise).toBeUndefined();
+      expect(runtime.scheduler.runningPromise).toBeUndefined();
     });
 
     it("should clear the promise after it rejects", async () => {
-      await idle();
+      await runtime.idle();
 
       const { promise, reject } = Promise.withResolvers();
-      running.promise = promise.catch(() => {});
+      runtime.scheduler.runningPromise = promise.catch(() => {});
 
       // Now reject after the handler is in place
       reject(new Error("test error"));
 
       // Wait for both the rejection to be handled and the promise to be cleared
-      await running.promise;
-      expect(running.promise).toBeUndefined();
+      await runtime.scheduler.runningPromise;
+      expect(runtime.scheduler.runningPromise).toBeUndefined();
     });
 
     it("should allow setting undefined when no promise is running", async () => {
-      await idle();
+      await runtime.idle();
 
-      running.promise = undefined;
-      expect(running.promise).toBeUndefined();
+      runtime.scheduler.runningPromise = undefined;
+      expect(runtime.scheduler.runningPromise).toBeUndefined();
     });
   });
 });

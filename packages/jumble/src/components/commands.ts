@@ -1,4 +1,3 @@
-import "./commands.css";
 import {
   addGithubRecipe,
   castSpellAsCharm,
@@ -13,8 +12,7 @@ import {
 } from "@commontools/charm";
 import { charmId } from "@commontools/charm";
 import type { NavigateFunction } from "react-router-dom";
-import { NAME } from "@commontools/builder";
-import { isStream } from "@commontools/runner";
+import { type Cell, isStream, NAME } from "@commontools/runner";
 import { createPath, createPathWithHash, ROUTES } from "@/routes.ts";
 import { LanguageModelId } from "@/components/common/ModelSelector.tsx";
 
@@ -184,7 +182,7 @@ async function handleExecuteCharmAction(ctx: CommandContext) {
 
     // Create options for the select menu with key as the action name
     const actionOptions = actions.map(([key, stream]) => {
-      const example = JSON.stringify(charm.key(key).schema?.example);
+      const [example] = JSON.stringify(charm.key(key).schema?.examples) ?? [];
       return {
         id: key,
         title: key,
@@ -239,7 +237,7 @@ async function handleExecuteCharmAction(ctx: CommandContext) {
   }
 }
 
-function navigateToCharm(ctx: CommandContext, charm: Charm | string) {
+function navigateToCharm(ctx: CommandContext, charm: Cell<Charm> | string) {
   // Navigate to the new charm
   const id = typeof charm === "string" ? charm : charmId(charm);
   if (!id || !ctx.focusedReplicaId) {
@@ -528,6 +526,44 @@ async function handleUseSpellOnOtherData(ctx: CommandContext) {
   }
 }
 
+async function handleAddRemoteEmailRecipe(
+  ctx: CommandContext,
+  filename: string,
+  name: string,
+) {
+  if (!ctx.focusedCharmId) {
+    ctx.setOpen(false);
+    return;
+  }
+
+  const emailCharm = await ctx.charmManager.get(ctx.focusedCharmId);
+  if (!emailCharm) {
+    console.error("Failed to load charm", ctx.focusedCharmId);
+    return;
+  }
+
+  const emails = emailCharm.getAsQueryResult().emails;
+
+  ctx.setLoading(true);
+  try {
+    const newCharm = await addGithubRecipe(
+      ctx.charmManager,
+      filename,
+      name,
+      {
+        emails,
+      },
+    );
+
+    navigateToCharm(ctx, newCharm);
+  } catch (error) {
+    console.error(`Error loading ${filename}:`, error);
+  } finally {
+    ctx.setLoading(false);
+    ctx.setOpen(false);
+  }
+}
+
 async function handleAddRemoteRecipe(
   ctx: CommandContext,
   filename: string,
@@ -631,8 +667,8 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
             const data = charm.get();
             const title = data?.[NAME] ?? "Untitled";
             return {
-              title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
-              id: charmId(charm.entityId!)!,
+              title: title + ` (#${charmId(charm)!.slice(-4)})`,
+              id: charmId(charm)!,
               value: charm.entityId!,
             };
           });
@@ -866,6 +902,30 @@ export function getCommands(ctx: CommandContext): CommandItem[] {
           title: "Add Gmail Importer",
           handler: () =>
             handleAddRemoteRecipe(ctx, "gmail.tsx", "GMail Importer"),
+        },
+        {
+          id: "add-email-summarizer",
+          type: "action",
+          title: "Add Email Summarizer",
+          predicate: !!ctx.focusedCharmId,
+          handler: () =>
+            handleAddRemoteEmailRecipe(
+              ctx,
+              "email-summarizer.tsx",
+              "Email Summarizer",
+            ),
+        },
+        {
+          id: "add-email-date-extractor",
+          type: "action",
+          title: "Add Email Date Extractor",
+          predicate: !!ctx.focusedCharmId,
+          handler: () =>
+            handleAddRemoteEmailRecipe(
+              ctx,
+              "email-date-extractor.tsx",
+              "Email Date Extractor",
+            ),
         },
         {
           id: "add-gcal-importer",

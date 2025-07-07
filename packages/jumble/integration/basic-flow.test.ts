@@ -17,10 +17,13 @@ const TAKE_SNAPSHOTS = false;
 const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
   "http://localhost:8000/";
 const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
-const HEADLESS = true;
+const HEADLESS = !Deno.env.get("RUN_IN_BROWSER");
 const ASTRAL_TIMEOUT = 60_000;
 const RECIPE_PATH = "../../recipes/simpleValue.tsx";
-const COMMON_CLI_PATH = path.join(import.meta.dirname!, "../../cli");
+const COMMON_CLI_PATH = path.join(
+  import.meta.dirname!,
+  "../../../scripts/main.ts",
+);
 const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
 
 console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
@@ -260,7 +263,7 @@ Deno.test({
         },
       });
     } finally {
-      await browser!.close();
+      await browser?.close();
     }
   },
 });
@@ -282,10 +285,11 @@ async function addCharm(toolshedUrl: string, recipePath: string) {
   const name = `ci-${Date.now()}-${
     Math.random().toString(36).substring(2, 15)
   }`;
-  const { success, stderr } = await (new Deno.Command(Deno.execPath(), {
+  const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
-      "task",
-      "start",
+      "run",
+      "-A",
+      COMMON_CLI_PATH,
       "--spaceName",
       name,
       "--recipeFile",
@@ -299,15 +303,17 @@ async function addCharm(toolshedUrl: string, recipePath: string) {
       "TOOLSHED_API_URL": toolshedUrl,
       "OPERATOR_PASS": "common user",
     },
-    cwd: COMMON_CLI_PATH,
   })).output();
 
   if (!success) {
     throw new Error(`Failed to add charm: ${decode(stderr)}`);
   }
 
+  const output = decode(stdout);
+  const charmId = output.split("created charm: ")[1].trim();
+
   return {
-    charmId: "baedreic5a2muxtlgvn6u36lmcp3tdoq5sih3nbachysw4srquvga5fjtem",
+    charmId,
     name,
   };
 }
@@ -319,7 +325,9 @@ async function inspectCharm(
 ) {
   const { success, stdout, stderr } = await (new Deno.Command(Deno.execPath(), {
     args: [
-      "task",
+      "run",
+      "-A",
+      COMMON_CLI_PATH,
       "start",
       "--spaceName",
       name,
@@ -332,7 +340,6 @@ async function inspectCharm(
       "TOOLSHED_API_URL": toolshedUrl,
       "OPERATOR_PASS": "common user",
     },
-    cwd: COMMON_CLI_PATH,
   })).output();
 
   if (!success) {

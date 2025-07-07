@@ -1,705 +1,925 @@
+import { refer } from "merkle-reference";
+import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
-  type Alias,
-  isAlias,
   isModule,
+  isOpaqueRef,
   isRecipe,
-  isStreamAlias,
+  isStreamValue,
+  type JSONSchema,
   type JSONValue,
   type Module,
   type NodeFactory,
-  popFrame,
-  pushFrameFromCause,
   type Recipe,
-  recipeFromFrame,
   TYPE,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   type UnsafeBinding,
-} from "@commontools/builder";
-import { type DocImpl, getDoc, isDoc } from "./doc.ts";
-import { type Cell, getCellFromLink } from "./cell.ts";
-import { recipeManager } from "./recipe-manager.ts";
+} from "./builder/types.ts";
 import {
-  Action,
-  addEventHandler,
-  type ReactivityLog,
-  schedule,
-} from "./scheduler.ts";
+  popFrame,
+  pushFrameFromCause,
+  recipeFromFrame,
+} from "./builder/recipe.ts";
+import { type DocImpl, isDoc } from "./doc.ts";
+import { type Cell } from "./cell.ts";
+import { type Action, type ReactivityLog } from "./scheduler.ts";
+import { diffAndUpdate } from "./data-updating.ts";
 import {
-  containsOpaqueRef,
-  deepCopy,
-  diffAndUpdate,
-  extractDefaultValues,
-  findAllAliasedCells,
-  followAliases,
-  maybeGetCellLink,
-  mergeObjects,
-  sendValueToBinding,
+  findAllWriteRedirectCells,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
-} from "./utils.ts";
-import { getModuleByRef } from "./module.ts";
+} from "./recipe-binding.ts";
+import { followWriteRedirects } from "./link-resolution.ts";
+import {
+  areNormalizedLinksSame,
+  isLink,
+  isWriteRedirectLink,
+  type NormalizedFullLink,
+  parseLink,
+  parseNormalizedFullLinktoLegacyDocCellLink,
+  parseToLegacyAlias,
+} from "./link-utils.ts";
+import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { type CellLink, isCell, isCellLink } from "./cell.ts";
-import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
-import { getCellLinkOrThrow } from "./query-result-proxy.ts";
-import { storage } from "./storage.ts";
-import { runtime } from "./runtime/index.ts";
+import { isCell } from "./cell.ts";
+import {
+  type LegacyDocCellLink,
+  LINK_V1_TAG,
+  SigilLink,
+} from "./sigil-types.ts";
+import type { IRunner, IRuntime } from "./runtime.ts";
 
-export const cancels = new WeakMap<DocImpl<any>, Cancel>();
+export class Runner implements IRunner {
+  readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
+  private allCancels = new Set<Cancel>();
 
-/**
- * Run a recipe.
- *
- * resultCell is required and should have an id. processCell is created if not
- * already set.
- *
- * If no recipe is provided, the previous one is used, and the recipe is started
- * if it isn't already started.
- *
- * If no argument is provided, the previous one is used, and the recipe is
- * started if it isn't already running.
- *
- * If a new recipe or any argument value is provided, a currently running recipe
- * is stopped, the recipe and argument replaced and the recipe restarted.
- *
- * @param recipeFactory - Function that takes the argument and returns a recipe.
- * @param argument - The argument to pass to the recipe. Can be static data
- * and/or cell references, including cell value proxies, docs and regular cells.
- * @param resultDoc - Doc to run the recipe off.
- * @returns The result cell.
- */
-export function run<T, R>(
-  recipeFactory: NodeFactory<T, R>,
-  argument: T,
-  resultCell: DocImpl<R>,
-): DocImpl<R>;
-export function run<T, R = any>(
-  recipe: Recipe | Module | undefined,
-  argument: T,
-  resultCell: DocImpl<R>,
-): DocImpl<R>;
-export function run<T, R = any>(
-  recipeOrModule: Recipe | Module | undefined,
-  argument: T,
-  resultCell: DocImpl<R>,
-): DocImpl<R> {
-  let processCell: DocImpl<{
-    [TYPE]: string;
-    argument?: T;
-    internal?: { [key: string]: any };
-    resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
-  }>;
+  constructor(readonly runtime: IRuntime) {}
 
-  if (resultCell.sourceCell !== undefined) {
-    processCell = resultCell.sourceCell;
-  } else {
-    processCell = getDoc(
-      undefined,
-      { cell: resultCell, path: [] },
-      resultCell.space,
-    ) as any;
-    resultCell.sourceCell = processCell;
-  }
+  /**
+   * Run a recipe.
+   *
+   * resultDoc is required and should have an id. processCell is created if not
+   * already set.
+   *
+   * If no recipe is provided, the previous one is used, and the recipe is started
+   * if it isn't already started.
+   *
+   * If no argument is provided, the previous one is used, and the recipe is
+   * started if it isn't already running.
+   *
+   * If a new recipe or any argument value is provided, a currently running recipe
+   * is stopped, the recipe and argument replaced and the recipe restarted.
+   *
+   * @param recipeFactory - Function that takes the argument and returns a recipe.
+   * @param argument - The argument to pass to the recipe. Can be static data
+   * and/or cell references, including cell value proxies, docs and regular cells.
+   * @param resultDoc - Doc to run the recipe off.
+   * @returns The result cell.
+   */
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: DocImpl<R>,
+  ): DocImpl<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: DocImpl<R>,
+  ): DocImpl<R>;
+  run<T, R>(
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  run<T, R = any>(
+    recipeOrModule: Recipe | Module | undefined,
+    argument: T,
+    resultCell: DocImpl<R> | Cell<R>,
+  ): DocImpl<R> | Cell<R> {
+    // Convert to Cell if needed and work with Cell internally
+    const resultDoc = isCell(resultCell)
+      ? resultCell
+      : (resultCell as DocImpl<R>).asCell();
 
-  let recipeId: string | undefined;
+    type ProcessCellData = {
+      [TYPE]: string;
+      spell?: SigilLink;
+      argument?: T;
+      internal?: JSONValue;
+      resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
+    };
 
-  if (!recipeOrModule && processCell.get()?.[TYPE]) {
-    recipeId = processCell.get()[TYPE];
-    recipeOrModule = recipeManager.recipeById(recipeId);
-    if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
-  } else if (!recipeOrModule) {
-    console.warn(
-      "No recipe provided and no recipe found in process doc. Not running.",
-    );
-    return resultCell;
-  }
+    let processCell: Cell<ProcessCellData>;
 
-  let recipe: Recipe;
+    const sourceCell = resultDoc.getSourceCell();
+    if (sourceCell !== undefined) {
+      processCell = sourceCell as Cell<ProcessCellData>;
+    } else {
+      processCell = this.runtime.getCell<ProcessCellData>(
+        resultDoc.space,
+        resultDoc.getAsLegacyCellLink(),
+      );
+      resultDoc.getDoc().sourceCell = processCell.getDoc();
+    }
 
-  // If this is a module, not a recipe, wrap it in a recipe that just runs,
-  // passing arguments in unmodified and passing all results through as is
-  if (isModule(recipeOrModule)) {
-    const module = recipeOrModule as Module;
-    recipeId ??= recipeManager.generateRecipeId(module);
+    let recipeId: string | undefined;
 
-    recipe = {
-      argumentSchema: module.argumentSchema ?? {},
-      resultSchema: module.resultSchema ?? {},
-      result: { $alias: { path: ["internal"] } },
-      nodes: [
-        {
-          module,
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal"] } },
-        },
-      ],
-    } satisfies Recipe;
-  } else {
-    recipe = recipeOrModule as Recipe;
-  }
-
-  recipeId ??= recipeManager.generateRecipeId(recipe);
-
-  if (cancels.has(resultCell)) {
-    // If it's already running and no new recipe or argument are given,
-    // we are just returning the result doc
-    if (argument === undefined && recipeId === processCell.get()?.[TYPE]) {
+    if (!recipeOrModule && processCell.getRaw()?.[TYPE]) {
+      recipeId = processCell.getRaw()[TYPE];
+      recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
+      if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
+    } else if (!recipeOrModule) {
+      console.warn(
+        "No recipe provided and no recipe found in process doc. Not running.",
+      );
       return resultCell;
     }
 
-    // TODO(seefeld): If recipe is the same, but argument is different, just update the argument without stopping
+    let recipe: Recipe;
 
-    // Otherwise stop execution of the old recipe. TODO: Await, but this will
-    // make all this async.
-    stop(resultCell);
-  }
+    // If this is a module, not a recipe, wrap it in a recipe that just runs,
+    // passing arguments in unmodified and passing all results through as is
+    if (isModule(recipeOrModule)) {
+      const module = recipeOrModule as Module;
+      recipeId ??= this.runtime.recipeManager.registerRecipe(module);
 
-  // Keep track of subscriptions to cancel them later
-  const [cancel, addCancel] = useCancelGroup();
-  cancels.set(resultCell, cancel);
+      recipe = {
+        argumentSchema: module.argumentSchema ?? {},
+        resultSchema: module.resultSchema ?? {},
+        result: { $alias: { path: ["internal"] } },
+        nodes: [
+          {
+            module,
+            inputs: { $alias: { path: ["argument"] } },
+            outputs: { $alias: { path: ["internal"] } },
+          },
+        ],
+      } satisfies Recipe;
+    } else {
+      recipe = recipeOrModule as Recipe;
+    }
 
-  // If the bindings are a cell, doc or doc link, convert them to an alias
-  if (
-    isDoc(argument) ||
-    isCellLink(argument) ||
-    isCell(argument) ||
-    isQueryResultForDereferencing(argument)
-  ) {
-    const ref = isCellLink(argument)
-      ? argument
-      : isCell(argument)
-      ? argument.getAsCellLink()
-      : isQueryResultForDereferencing(argument)
-      ? getCellLinkOrThrow(argument)
-      : ({ cell: argument, path: [] } satisfies CellLink);
-
-    argument = { $alias: ref } as T;
-  }
-
-  // Walk the recipe's schema and extract all default values
-  const defaults = extractDefaultValues(recipe.argumentSchema);
-
-  const internal = {
-    ...(deepCopy(defaults) as { internal: any })?.internal,
-    ...(recipe.initial as { internal: any } | void)?.internal,
-    ...processCell.get()?.internal,
-  };
-
-  // Still necessary until we consistently use schema for defaults.
-  // Only do it on first load.
-  if (!processCell.get()?.argument) {
-    argument = mergeObjects(argument, defaults);
-  }
-
-  const recipeChanged = recipeId !== processCell.get()?.[TYPE];
-
-  processCell.send({
-    ...processCell.get(),
-    [TYPE]: recipeId,
-    resultRef: { cell: resultCell, path: [] },
-    internal,
-  });
-  if (argument) {
-    diffAndUpdate(
-      { cell: processCell, path: ["argument"] },
-      argument,
-      undefined,
-      processCell,
-    );
-  }
-
-  // Send "query" to results to the result doc only on initial run or if recipe
-  // changed. This preserves user modifications like renamed charms.
-  if (recipeChanged) {
-    // TODO(seefeld): Be smarter about merging in case result changed. But since
-    // we don't yet update recipes, this isn't urgent yet.
-    resultCell.send(
-      unwrapOneLevelAndBindtoDoc<R>(recipe.result as R, processCell),
-    );
-  }
-
-  // [unsafe closures:] For recipes from closures, add a materialize factory
-  if (recipe[unsafe_originalRecipe]) {
-    recipe[unsafe_materializeFactory] = (log: any) => (path: PropertyKey[]) =>
-      processCell.getAsQueryResult(path, log);
-  }
-
-  for (const node of recipe.nodes) {
-    instantiateNode(
-      node.module,
-      node.inputs,
-      node.outputs,
-      processCell,
-      addCancel,
+    recipeId ??= this.runtime.recipeManager.registerRecipe(recipe);
+    this.runtime.recipeManager.saveRecipe({
+      recipeId,
+      space: resultDoc.space,
       recipe,
+    });
+
+    if (this.cancels.has(resultDoc.getDoc())) {
+      // If it's already running and no new recipe or argument are given,
+      // we are just returning the result doc
+      if (argument === undefined && recipeId === processCell.getRaw()?.[TYPE]) {
+        return resultDoc;
+      }
+
+      // TODO(seefeld): If recipe is the same, but argument is different, just update the argument without stopping
+
+      // Otherwise stop execution of the old recipe. TODO: Await, but this will
+      // make all this async.
+      this.stop(resultDoc);
+    }
+
+    // Keep track of subscriptions to cancel them later
+    const [cancel, addCancel] = useCancelGroup();
+    this.cancels.set(resultDoc.getDoc(), cancel);
+    this.allCancels.add(cancel);
+
+    // If the bindings are a cell, doc or doc link, convert them to an alias
+    if (isLink(argument)) {
+      argument = parseToLegacyAlias(argument) as T;
+    }
+
+    // Walk the recipe's schema and extract all default values
+    const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
+
+    // Important to use DeepCopy here, as the resulting object will be modified!
+    const previousInternal = processCell.getRaw()?.internal;
+    const internal: JSONValue = Object.assign(
+      {},
+      cellAwareDeepCopy(
+        (defaults as unknown as { internal: JSONValue })?.internal,
+      ),
+      cellAwareDeepCopy(
+        isRecord(recipe.initial) && isRecord(recipe.initial.internal)
+          ? recipe.initial.internal
+          : {},
+      ),
+      isRecord(previousInternal) ? previousInternal : {},
+    );
+
+    // Still necessary until we consistently use schema for defaults.
+    // Only do it on first load.
+    if (!processCell.getRaw()?.argument) {
+      argument = mergeObjects<T>(argument as any, defaults);
+    }
+
+    const recipeChanged = recipeId !== processCell.getRaw()?.[TYPE];
+
+    processCell.setRaw({
+      ...processCell.getRaw(),
+      [TYPE]: recipeId || "unknown",
+      resultRef: resultDoc.getAsLegacyCellLink(),
+      internal,
+      ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
+    });
+    if (argument) {
+      diffAndUpdate(
+        processCell.key("argument").getAsLegacyCellLink(),
+        argument,
+        undefined,
+        processCell.getDoc(),
+      );
+    }
+
+    // Send "query" to results to the result doc only on initial run or if recipe
+    // changed. This preserves user modifications like renamed charms.
+    if (recipeChanged) {
+      // TODO(seefeld): Be smarter about merging in case result changed. But since
+      // we don't yet update recipes, this isn't urgent yet.
+      resultDoc.setRaw(
+        unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
+      );
+    }
+
+    // [unsafe closures:] For recipes from closures, add a materialize factory
+    if (recipe[unsafe_originalRecipe]) {
+      recipe[unsafe_materializeFactory] =
+        (log: any) => (path: readonly PropertyKey[]) =>
+          processCell.getAsQueryResult(path, log);
+    }
+
+    for (const node of recipe.nodes) {
+      this.instantiateNode(
+        node.module,
+        node.inputs,
+        node.outputs,
+        processCell,
+        addCancel,
+        recipe,
+      );
+    }
+
+    // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
+    // Return the correct type based on what was passed in
+    if (isCell(resultCell)) {
+      return resultDoc;
+    } else {
+      return resultDoc.getDoc();
+    }
+  }
+
+  async runSynced(
+    resultCell: Cell<any>,
+    recipe: Recipe | Module,
+    inputs?: any,
+  ) {
+    await this.runtime.storage.syncCell(resultCell);
+
+    const synced = await this.syncCellsForRunningRecipe(
+      resultCell,
+      recipe,
+      inputs,
+    );
+
+    this.run(recipe, inputs, resultCell);
+
+    // If a new recipe was specified, make sure to sync any new cells
+    // TODO(seefeld): Possible race condition here with lifted functions running
+    // and using old data to update a value that arrives just between starting and
+    // finishing the computation. Should be fixed by changing conflict resolution
+    // for derived values to be based on what they are derived from.
+    if (recipe || !synced) {
+      await this.syncCellsForRunningRecipe(resultCell, recipe);
+    }
+
+    return recipe?.resultSchema
+      ? resultCell.asSchema(recipe.resultSchema)
+      : resultCell;
+  }
+
+  private async syncCellsForRunningRecipe(
+    resultCell: Cell<any>,
+    recipe: Module | Recipe,
+    inputs?: any,
+  ): Promise<boolean> {
+    const seen = new Set<Cell<any>>();
+    const promises = new Set<Promise<any>>();
+
+    const syncAllMentionedCells = (value: any) => {
+      if (seen.has(value)) return;
+      seen.add(value);
+
+      const link = parseLink(value, resultCell);
+
+      if (link) {
+        const maybePromise = this.runtime.storage.syncCell(
+          this.runtime.getCellFromLink(link),
+        );
+        if (maybePromise instanceof Promise) promises.add(maybePromise);
+      } else if (isRecord(value)) {
+        for (const key in value) syncAllMentionedCells(value[key]);
+      }
+    };
+
+    syncAllMentionedCells(inputs);
+    await Promise.all(promises);
+
+    const sourceCell = resultCell.getSourceCell({
+      type: "object",
+      properties: {
+        [TYPE]: { type: "string" },
+        argument: recipe.argumentSchema ?? {},
+      },
+      required: [TYPE],
+    });
+    if (!sourceCell) return false;
+
+    await this.runtime.storage.syncCell(sourceCell);
+
+    // We could support this by replicating what happens in runner, but since
+    // we're calling this again when returning false, this is good enough for now.
+    if (isModule(recipe)) return false;
+
+    const cells: Cell<any>[] = [];
+
+    for (const node of recipe.nodes) {
+      const inputs = findAllWriteRedirectCells(node.inputs, sourceCell);
+      const outputs = findAllWriteRedirectCells(node.outputs, sourceCell);
+
+      // TODO(seefeld): This ignores schemas provided by modules, so it might
+      // still fetch a lot.
+      [...inputs, ...outputs].forEach((c) => {
+        const cell = this.runtime.getCellFromLink(c);
+        cells.push(cell);
+      });
+    }
+
+    if (recipe.resultSchema) {
+      cells.push(resultCell.asSchema(recipe.resultSchema));
+    }
+
+    await Promise.all(cells.map((c) => this.runtime.storage.syncCell(c)));
+
+    return true;
+  }
+
+  /**
+   * Stop a recipe. This will cancel the recipe and all its children.
+   *
+   * TODO: This isn't a good strategy, as other instances might depend on behavior
+   * provided here, even if the user might no longer care about e.g. the UI here.
+   * A better strategy would be to schedule based on effects and unregister the
+   * effects driving execution, e.g. the UI.
+   *
+   * @param resultCell - The result doc or cell to stop.
+   */
+  stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
+    const doc = isDoc(resultCell)
+      ? resultCell
+      : (resultCell as Cell<T>).getDoc();
+    this.cancels.get(doc)?.();
+    this.cancels.delete(doc);
+  }
+
+  stopAll(): void {
+    // Cancel all tracked operations
+    for (const cancel of this.allCancels) {
+      try {
+        cancel();
+      } catch (error) {
+        console.warn("Error canceling operation:", error);
+      }
+    }
+    this.allCancels.clear();
+  }
+
+  private instantiateNode(
+    module: Module,
+    inputBindings: JSONValue,
+    outputBindings: JSONValue,
+    processCell: Cell<any>,
+    addCancel: AddCancel,
+    recipe: Recipe,
+  ) {
+    if (isModule(module)) {
+      switch (module.type) {
+        case "ref":
+          this.instantiateNode(
+            this.runtime.moduleRegistry.getModule(
+              module.implementation as string,
+            ),
+            inputBindings,
+            outputBindings,
+            processCell,
+            addCancel,
+            recipe,
+          );
+          break;
+        case "javascript":
+          this.instantiateJavaScriptNode(
+            module,
+            inputBindings,
+            outputBindings,
+            processCell,
+            addCancel,
+            recipe,
+          );
+          break;
+        case "raw":
+          this.instantiateRawNode(
+            module,
+            inputBindings,
+            outputBindings,
+            processCell,
+            addCancel,
+            recipe,
+          );
+          break;
+        case "passthrough":
+          this.instantiatePassthroughNode(
+            module,
+            inputBindings,
+            outputBindings,
+            processCell,
+            addCancel,
+            recipe,
+          );
+          break;
+        case "recipe":
+          this.instantiateRecipeNode(
+            module,
+            inputBindings,
+            outputBindings,
+            processCell,
+            addCancel,
+            recipe,
+          );
+          break;
+        default:
+          throw new Error(`Unknown module type: ${module.type}`);
+      }
+    } else if (isWriteRedirectLink(module)) {
+      // TODO(seefeld): Implement, a dynamic node
+    } else {
+      throw new Error(`Unknown module: ${JSON.stringify(module)}`);
+    }
+  }
+
+  private instantiateJavaScriptNode(
+    module: Module,
+    inputBindings: JSONValue,
+    outputBindings: JSONValue,
+    processCell: Cell<any>,
+    addCancel: AddCancel,
+    recipe: Recipe,
+  ) {
+    const inputs = unwrapOneLevelAndBindtoDoc(
+      inputBindings,
+      processCell,
+    );
+
+    const reads = findAllWriteRedirectCells(inputs, processCell);
+
+    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
+    const writes = findAllWriteRedirectCells(outputs, processCell);
+
+    let fn = (
+      typeof module.implementation === "string"
+        ? this.runtime.harness.getInvocation(module.implementation)
+        : module.implementation
+    ) as (inputs: any) => any;
+
+    if (module.wrapper && module.wrapper in moduleWrappers) {
+      fn = moduleWrappers[module.wrapper](fn);
+    }
+
+    // Check if any of the read cells is a stream alias
+    let streamLink: NormalizedFullLink | undefined = undefined;
+    if (isRecord(inputs)) {
+      for (const key in inputs) {
+        let value = inputs[key];
+        while (isWriteRedirectLink(value)) {
+          // Reading this without logging, as streams remain streams.
+          const tx = this.runtime.edit();
+          const maybeStreamLink = followWriteRedirects(tx, value, processCell);
+          value = tx.readValueOrThrow(maybeStreamLink);
+          tx.commit();
+        }
+        if (isStreamValue(value)) {
+          streamLink = parseLink(inputs[key], processCell);
+          break;
+        }
+      }
+    }
+
+    if (streamLink) {
+      // Register as event handler for the stream
+      const handler = (event: any) => {
+        if (event.preventDefault) event.preventDefault();
+        const eventInputs = { ...(inputs as Record<string, any>) };
+        const cause = { ...(inputs as Record<string, any>) };
+        for (const key in eventInputs) {
+          if (isWriteRedirectLink(eventInputs[key])) {
+            // Use format-agnostic comparison for links
+            const eventLink = parseLink(eventInputs[key], processCell);
+
+            if (areNormalizedLinksSame(eventLink, streamLink)) {
+              eventInputs[key] = event;
+              cause[key] = crypto.randomUUID();
+            }
+          }
+        }
+
+        const inputsCell = this.runtime.getImmutableCell(
+          processCell.space,
+          eventInputs,
+        );
+
+        const frame = pushFrameFromCause(cause, {
+          recipe,
+          materialize: (path: readonly PropertyKey[]) =>
+            processCell.getAsQueryResult(path),
+        });
+
+        const argument = module.argumentSchema
+          ? inputsCell.asSchema(module.argumentSchema).get()
+          : inputsCell.getAsQueryResult([], undefined);
+        const result = fn(argument);
+
+        const postRun = (result: any) => {
+          if (containsOpaqueRef(result)) {
+            const resultRecipe = recipeFromFrame(
+              "event handler result",
+              undefined,
+              () => result,
+            );
+
+            const resultCell = this.run(
+              resultRecipe,
+              undefined,
+              this.runtime.getCell(
+                processCell.space,
+                { resultFor: cause },
+              ),
+            );
+            addCancel(() => this.stop(resultCell));
+          }
+
+          popFrame(frame);
+          return result;
+        };
+
+        if (result instanceof Promise) {
+          return result.then(postRun);
+        } else {
+          return postRun(result);
+        }
+      };
+
+      addCancel(this.runtime.scheduler.addEventHandler(handler, streamLink));
+    } else {
+      if (isRecord(inputs) && "$event" in inputs) {
+        throw new Error(
+          "Handler used as lift, because $stream: true was overwritten",
+        );
+      }
+
+      // Schedule the action to run when the inputs change
+      const inputsCell = this.runtime.getImmutableCell(
+        processCell.space,
+        inputs,
+      );
+
+      let previousResultDoc: Cell<any> | undefined;
+      let previousResultRecipeAsString: string | undefined;
+
+      const action: Action = (log: ReactivityLog) => {
+        const argument = module.argumentSchema
+          ? inputsCell.asSchema(module.argumentSchema).withLog(log).get()
+          : inputsCell.getAsQueryResult([], log);
+
+        const frame = pushFrameFromCause(
+          { inputs, outputs, fn: fn.toString() },
+          {
+            recipe,
+            materialize: (path: readonly PropertyKey[]) =>
+              processCell.getAsQueryResult(path, log),
+          } satisfies UnsafeBinding,
+        );
+        const result = fn(argument);
+
+        const postRun = (result: any) => {
+          if (containsOpaqueRef(result)) {
+            const resultRecipe = recipeFromFrame(
+              "action result",
+              undefined,
+              () => result,
+            );
+
+            // If nothing changed, don't rerun the recipe
+            const resultRecipeAsString = JSON.stringify(resultRecipe);
+            if (previousResultRecipeAsString === resultRecipeAsString) return;
+            previousResultRecipeAsString = resultRecipeAsString;
+
+            const resultDoc = this.run(
+              resultRecipe,
+              undefined,
+              previousResultDoc ??
+                this.runtime.getCell(
+                  processCell.space,
+                  { resultFor: { inputs, outputs, fn: fn.toString() } },
+                ),
+            );
+            addCancel(() => this.stop(resultDoc));
+
+            if (!previousResultDoc) {
+              previousResultDoc = resultDoc;
+              sendValueToBinding(
+                processCell,
+                outputs,
+                resultDoc.getAsLegacyCellLink(),
+                log,
+              );
+            }
+          } else {
+            sendValueToBinding(processCell, outputs, result, log);
+          }
+
+          popFrame(frame);
+          return result;
+        };
+
+        if (result instanceof Promise) {
+          return result.then(postRun);
+        } else {
+          return postRun(result);
+        }
+      };
+
+      addCancel(
+        this.runtime.scheduler.schedule(
+          action,
+          {
+            reads: reads.map((r) =>
+              parseNormalizedFullLinktoLegacyDocCellLink(r, this.runtime)
+            ),
+            writes: writes.map((w) =>
+              parseNormalizedFullLinktoLegacyDocCellLink(w, this.runtime)
+            ),
+          } satisfies ReactivityLog,
+        ),
+      );
+    }
+  }
+
+  private instantiateRawNode(
+    module: Module,
+    inputBindings: JSONValue,
+    outputBindings: JSONValue,
+    processCell: Cell<any>,
+    addCancel: AddCancel,
+    recipe: Recipe,
+  ) {
+    if (typeof module.implementation !== "function") {
+      throw new Error(
+        `Raw module is not a function, got: ${module.implementation}`,
+      );
+    }
+
+    const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
+      inputBindings,
+      processCell,
+    );
+    const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
+      outputBindings,
+      processCell,
+    );
+
+    // For `map` and future other node types that take closures, we need to
+    // note the parent recipe on the closure recipes.
+    unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
+
+    const inputCells = findAllWriteRedirectCells(
+      mappedInputBindings,
+      processCell,
+    );
+    const outputCells = findAllWriteRedirectCells(
+      mappedOutputBindings,
+      processCell,
+    );
+
+    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
+    const inputsCell = this.runtime.getCell(
+      processCell.space,
+      { immutable: mappedInputBindings },
+    );
+    inputsCell.setRaw(mappedInputBindings);
+    const inputsDoc = inputsCell.getDoc();
+
+    const action = module.implementation(
+      inputsDoc.asCell(),
+      (result: any) =>
+        sendValueToBinding(processCell, mappedOutputBindings, result),
+      addCancel,
+      { inputs: inputsCell, parents: processCell.getDoc() },
+      processCell,
+      this.runtime,
+    );
+
+    addCancel(
+      this.runtime.scheduler.schedule(action, {
+        reads: inputCells.map((c) =>
+          parseNormalizedFullLinktoLegacyDocCellLink(c, this.runtime)
+        ),
+        writes: outputCells.map((c) =>
+          parseNormalizedFullLinktoLegacyDocCellLink(c, this.runtime)
+        ),
+      }),
     );
   }
 
-  // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
-  return resultCell;
+  private instantiatePassthroughNode(
+    module: Module,
+    inputBindings: JSONValue,
+    outputBindings: JSONValue,
+    processCell: Cell<any>,
+    addCancel: AddCancel,
+    recipe: Recipe,
+  ) {
+    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
+    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
+    const inputsCell = this.runtime.getCell(
+      processCell.space,
+      { immutable: inputs },
+    );
+    inputsCell.setRaw(inputs);
+    const reads = findAllWriteRedirectCells(inputs, processCell);
+
+    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
+    const writes = findAllWriteRedirectCells(outputs, processCell);
+
+    const action: Action = (log: ReactivityLog) => {
+      const inputsProxy = inputsCell.getAsQueryResult([], log);
+      sendValueToBinding(processCell, outputBindings, inputsProxy, log);
+    };
+
+    addCancel(
+      this.runtime.scheduler.schedule(
+        action,
+        {
+          reads: reads.map((r) =>
+            parseNormalizedFullLinktoLegacyDocCellLink(r, this.runtime)
+          ),
+          writes: writes.map((w) =>
+            parseNormalizedFullLinktoLegacyDocCellLink(w, this.runtime)
+          ),
+        } satisfies ReactivityLog,
+      ),
+    );
+  }
+
+  private instantiateRecipeNode(
+    module: Module,
+    inputBindings: JSONValue,
+    outputBindings: JSONValue,
+    processCell: Cell<any>,
+    addCancel: AddCancel,
+    recipe: Recipe,
+  ) {
+    if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
+    const recipeImpl = unwrapOneLevelAndBindtoDoc(
+      module.implementation,
+      processCell,
+    );
+    const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
+    const resultCell = this.runtime.getCell(
+      processCell.space,
+      {
+        recipe: module.implementation,
+        parent: processCell.getDoc(),
+        inputBindings,
+        outputBindings,
+      },
+    );
+    this.run(recipeImpl, inputs, resultCell);
+    sendValueToBinding(
+      processCell,
+      outputBindings,
+      resultCell.getAsLegacyCellLink(),
+    );
+    // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
+    // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
+    // this as TODO.
+    addCancel(this.cancels.get(resultCell.getSourceCell()!.getDoc()));
+  }
+}
+
+// This takes a recipe id and returns a sigil link with the corresponding entity.
+function getSpellLink(recipeId: string): SigilLink {
+  const id = refer({ causal: { recipeId, type: "recipe" } }).toJSON()["/"];
+  return { "/": { [LINK_V1_TAG]: { id: `of:${id}` } } };
+}
+
+function containsOpaqueRef(value: unknown): boolean {
+  if (isOpaqueRef(value)) return true;
+  if (isLink(value)) return false;
+  if (isRecord(value)) {
+    return Object.values(value).some(containsOpaqueRef);
+  }
+  return false;
+}
+
+export function cellAwareDeepCopy<T = unknown>(value: T): Mutable<T> {
+  if (isLink(value)) return value as Mutable<T>;
+  if (isRecord(value)) {
+    return Array.isArray(value)
+      ? value.map(cellAwareDeepCopy) as unknown as Mutable<T>
+      : Object.fromEntries(
+        Object.entries(value).map((
+          [key, value],
+        ) => [key, cellAwareDeepCopy(value)]),
+      ) as unknown as Mutable<T>;
+    // Literal value:
+  } else return value as Mutable<T>;
 }
 
 /**
- * Stop a recipe. This will cancel the recipe and all its children.
- *
- * TODO: This isn't a good strategy, as other instances might depend on behavior
- * provided here, even if the user might no longer care about e.g. the UI here.
- * A better strategy would be to schedule based on effects and unregister the
- * effects driving execution, e.g. the UI.
- *
- * @param resultCell - The result doc to stop.
+ * Extracts default values from a JSON schema object.
+ * @param schema - The JSON schema to extract defaults from
+ * @returns An object containing the default values, or undefined if none found
  */
-export function stop(resultCell: DocImpl<any>) {
-  cancels.get(resultCell)?.();
-  cancels.delete(resultCell);
-}
+export function extractDefaultValues(
+  schema: JSONSchema,
+): JSONValue | undefined {
+  if (typeof schema !== "object" || schema === null) return undefined;
 
-function instantiateNode(
-  module: Module | Alias,
-  inputBindings: JSONValue,
-  outputBindings: JSONValue,
-  processCell: DocImpl<any>,
-  addCancel: AddCancel,
-  recipe: Recipe,
-) {
-  if (isModule(module)) {
-    switch (module.type) {
-      case "ref":
-        instantiateNode(
-          getModuleByRef(module.implementation as string),
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-          recipe,
-        );
-        break;
-      case "javascript":
-        instantiateJavaScriptNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-          recipe,
-        );
-        break;
-      case "raw":
-        instantiateRawNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-          recipe,
-        );
-        break;
-      case "passthrough":
-        instantiatePassthroughNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-        );
-        break;
-      case "recipe":
-        instantiateRecipeNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-        );
-        break;
-      default:
-        throw new Error(`Unknown module type: ${module.type}`);
-    }
-  } else if (isAlias(module)) {
-    // TODO(seefeld): Implement, a dynamic node
-  } else {
-    throw new Error(`Unknown module type: ${module}`);
-  }
-}
-
-function instantiateJavaScriptNode(
-  module: Module,
-  inputBindings: JSONValue,
-  outputBindings: JSONValue,
-  processCell: DocImpl<any>,
-  addCancel: AddCancel,
-  recipe: Recipe,
-) {
-  const inputs = unwrapOneLevelAndBindtoDoc(
-    inputBindings as { [key: string]: any },
-    processCell,
-  );
-
-  // TODO(seefeld): This isn't correct, as module can write into passed docs. We
-  // should look at the schema to find out what docs are read and
-  // written.
-  const reads = findAllAliasedCells(inputs, processCell);
-
-  const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-  const writes = findAllAliasedCells(outputs, processCell);
-
-  let fn = (
-    typeof module.implementation === "string"
-      ? runtime.getInvocation(module.implementation)
-      : module.implementation
-  ) as (inputs: any) => any;
-
-  if (module.wrapper && module.wrapper in moduleWrappers) {
-    fn = moduleWrappers[module.wrapper](fn);
-  }
-
-  // Check if any of the read cells is a stream alias
-  let streamRef: CellLink | undefined = undefined;
-  for (const key in inputs) {
-    let doc = processCell;
-    let path: PropertyKey[] = [key];
-    let value = inputs[key];
-    while (isAlias(value)) {
-      const ref = followAliases(value, processCell);
-      doc = ref.cell;
-      path = ref.path;
-      value = doc.getAtPath(path);
-    }
-    if (isStreamAlias(value)) {
-      streamRef = { cell: doc, path };
-      break;
-    }
-  }
-
-  if (streamRef) {
-    // Register as event handler for the stream. Replace alias to
-    // stream with the event.
-
-    const stream = { ...streamRef };
-
-    const handler = (event: any) => {
-      if (event.preventDefault) event.preventDefault();
-      const eventInputs = { ...inputs };
-      const cause = { ...inputs };
-      for (const key in eventInputs) {
-        if (
-          isAlias(eventInputs[key]) &&
-          eventInputs[key].$alias.cell === stream.cell &&
-          eventInputs[key].$alias.path.length === stream.path.length &&
-          eventInputs[key].$alias.path.every(
-            (value: PropertyKey, index: number) => value === stream.path[index],
-          )
-        ) {
-          eventInputs[key] = event;
-          cause[key] = crypto.randomUUID(); // TODO(seefeld): Track this ID for integrity
-        }
-      }
-
-      const inputsCell = getDoc(eventInputs, cause, processCell.space);
-      inputsCell.freeze(); // Freezes the bindings, not aliased cells.
-
-      const frame = pushFrameFromCause(cause, {
-        recipe,
-        materialize: (path: PropertyKey[]) =>
-          processCell.getAsQueryResult(path),
-      });
-
-      const argument = module.argumentSchema
-        ? inputsCell.asCell([], undefined, module.argumentSchema).get()
-        : inputsCell.getAsQueryResult([], undefined);
-      const result = fn(argument);
-
-      function postRun(result: any) {
-        // If handler returns a graph created by builder, run it
-        if (containsOpaqueRef(result)) {
-          const resultRecipe = recipeFromFrame(
-            "event handler result",
-            undefined,
-            () => result,
-          );
-
-          const resultCell = run(
-            resultRecipe,
-            undefined,
-            getDoc(undefined, { resultFor: cause }, processCell.space),
-          );
-          addCancel(cancels.get(resultCell));
-        }
-
-        popFrame(frame);
-
-        return result;
-      }
-
-      if (result instanceof Promise) {
-        return result.then(postRun);
-      } else {
-        return postRun(result);
-      }
-    };
-
-    addCancel(addEventHandler(handler, stream));
-  } else {
-    // Schedule the action to run when the inputs change
-
-    const inputsCell = getDoc(inputs, { immutable: inputs }, processCell.space);
-    inputsCell.freeze(); // Freezes the bindings, not aliased cells.
-
-    let resultCell: DocImpl<any> | undefined;
-
-    const action: Action = (log: ReactivityLog) => {
-      const argument = module.argumentSchema
-        ? inputsCell.asCell([], log, module.argumentSchema).get()
-        : inputsCell.getAsQueryResult([], log);
-
-      const frame = pushFrameFromCause(
-        { inputs, outputs, fn: fn.toString() },
-        {
-          recipe,
-          materialize: (path: PropertyKey[]) =>
-            processCell.getAsQueryResult(path, log),
-        } satisfies UnsafeBinding,
-      );
-      const result = fn(argument);
-
-      function postRun(result: any) {
-        if (containsOpaqueRef(result)) {
-          const resultRecipe = recipeFromFrame(
-            "action result",
-            undefined,
-            () => result,
-          );
-
-          resultCell = run(
-            resultRecipe,
-            undefined,
-            resultCell ??
-              getDoc(
-                undefined,
-                { resultFor: { inputs, outputs, fn: fn.toString() } },
-                processCell.space,
-              ),
-          );
-          addCancel(cancels.get(resultCell));
-
-          sendValueToBinding(
-            processCell,
-            outputs,
-            { cell: resultCell, path: [] },
-            log,
-          );
-        } else {
-          sendValueToBinding(processCell, outputs, result, log);
-        }
-
-        popFrame(frame);
-
-        return result;
-      }
-
-      if (result instanceof Promise) {
-        return result.then(postRun);
-      } else {
-        return postRun(result);
-      }
-    };
-
-    addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
-  }
-}
-
-function instantiateRawNode(
-  module: Module,
-  inputBindings: JSONValue,
-  outputBindings: JSONValue,
-  processCell: DocImpl<any>,
-  addCancel: AddCancel,
-  recipe: Recipe,
-) {
-  if (typeof module.implementation !== "function") {
-    throw new Error(
-      `Raw module is not a function, got: ${module.implementation}`,
+  if (
+    schema.type === "object" && schema.properties && isObject(schema.properties)
+  ) {
+    // Ignore the schema.default if it's not an object, since it's not a valid
+    // default value for an object.
+    const obj = cellAwareDeepCopy(
+      isRecord(schema.default) ? schema.default : {},
     );
-  }
-
-  // Built-ins can define their own scheduling logic, so they'll
-  // implement parts of the above themselves.
-
-  const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
-    inputBindings,
-    processCell,
-  );
-  const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
-    outputBindings,
-    processCell,
-  );
-
-  // For `map` and future other node types that take closures, we need to
-  // note the parent recipe on the closure recipes.
-  unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
-
-  const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
-  const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
-
-  const action = module.implementation(
-    getDoc(
-      mappedInputBindings,
-      { immutable: mappedInputBindings },
-      processCell.space,
-    ),
-    (result: any) =>
-      sendValueToBinding(processCell, mappedOutputBindings, result),
-    addCancel,
-    inputCells, // cause
-    processCell,
-  );
-
-  addCancel(schedule(action, { reads: inputCells, writes: outputCells }));
-}
-
-function instantiatePassthroughNode(
-  _: Module,
-  inputBindings: JSONValue,
-  outputBindings: JSONValue,
-  processCell: DocImpl<any>,
-  addCancel: AddCancel,
-) {
-  const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-  const inputsCell = getDoc(inputs, { immutable: inputs }, processCell.space);
-  const reads = findAllAliasedCells(inputs, processCell);
-
-  const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-  const writes = findAllAliasedCells(outputs, processCell);
-
-  const action: Action = (log: ReactivityLog) => {
-    const inputsProxy = inputsCell.getAsQueryResult([], log);
-    sendValueToBinding(processCell, outputBindings, inputsProxy, log);
-  };
-
-  addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
-}
-
-function instantiateRecipeNode(
-  module: Module,
-  inputBindings: JSONValue,
-  outputBindings: JSONValue,
-  processCell: DocImpl<any>,
-  addCancel: AddCancel,
-) {
-  if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
-  const recipe = unwrapOneLevelAndBindtoDoc(
-    module.implementation,
-    processCell,
-  );
-  const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-  const resultCell = getDoc(
-    undefined,
-    {
-      recipe: module.implementation,
-      parent: processCell,
-      inputBindings,
-      outputBindings,
-    },
-    processCell.space,
-  );
-  run(recipe, inputs, resultCell);
-  sendValueToBinding(processCell, outputBindings, {
-    cell: resultCell,
-    path: [],
-  });
-  // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a charm, e.g.
-  // via navigateTo. Nothing is cancelling right now, so leaving this as TODO.
-  addCancel(cancels.get(resultCell.sourceCell!));
-}
-
-export async function runSynced(
-  resultCell: Cell<any>,
-  recipe: Recipe | Module,
-  inputs?: any,
-) {
-  await storage.syncCell(resultCell);
-
-  const synced = await syncCellsForRunningRecipe(resultCell, recipe, inputs);
-
-  run(recipe, inputs, resultCell.getDoc());
-
-  // If a new recipe was specified, make sure to sync any new cells
-  // TODO(seefeld): Possible race condition here with lifted functions running
-  // and using old data to update a value that arrives just between starting and
-  // finishing the computation. Should be fixed by changing conflict resolution
-  // for derived values to be based on what they are derived from.
-  if (recipe || !synced) {
-    await syncCellsForRunningRecipe(resultCell, recipe);
-  }
-
-  return recipe?.resultSchema
-    ? resultCell.asSchema(recipe.resultSchema)
-    : resultCell;
-}
-
-async function syncCellsForRunningRecipe(
-  resultCell: Cell<any>,
-  recipe: Module | Recipe,
-  inputs?: any,
-): Promise<boolean> {
-  const seen = new Set<Cell<any>>();
-  const promises = new Set<Promise<any>>();
-
-  const syncAllMentionedCells = (value: any) => {
-    if (seen.has(value)) return;
-    seen.add(value);
-
-    const link = maybeGetCellLink(value);
-
-    if (link && link.cell) {
-      const maybePromise = storage.syncCell(link.cell);
-      if (maybePromise instanceof Promise) promises.add(maybePromise);
-    } else if (typeof value === "object" && value !== null) {
-      for (const key in value) syncAllMentionedCells(value[key]);
+    for (const [propKey, propSchema] of Object.entries(schema.properties)) {
+      const value = extractDefaultValues(propSchema);
+      if (value !== undefined) {
+        (obj as Record<string, unknown>)[propKey] = value;
+      }
     }
-  };
 
-  syncAllMentionedCells(inputs);
-  await Promise.all(promises);
-
-  const sourceCell = resultCell.getSourceCell({
-    type: "object",
-    properties: {
-      [TYPE]: { type: "string" },
-      argument: recipe.argumentSchema ?? {},
-    },
-    required: [TYPE],
-  });
-  if (!sourceCell) return false;
-
-  await storage.syncCell(sourceCell);
-
-  // We could support this by replicating what happens in runner, but since
-  // we're calling this again when returning false, this is good enough for now.
-  if (isModule(recipe)) return false;
-
-  const cells: Cell<any>[] = [];
-
-  for (const node of recipe.nodes) {
-    const sourceDoc = sourceCell.getDoc();
-    const inputs = findAllAliasedCells(node.inputs, sourceDoc);
-    const outputs = findAllAliasedCells(node.outputs, sourceDoc);
-
-    // TODO(seefeld): This ignores schemas provided by modules, so it might
-    // still fetch a lot.
-    [...inputs, ...outputs].forEach((c) => {
-      const cell = getCellFromLink(c);
-      cells.push(cell);
-    });
+    return Object.entries(obj).length > 0 ? obj : undefined;
   }
 
-  if (recipe.resultSchema) cells.push(resultCell.asSchema(recipe.resultSchema));
+  return schema.default;
+}
 
-  await Promise.all(cells.map((c) => storage.syncCell(c)));
+/**
+ * Merges objects into a single object, preferring values from later objects.
+ * Recursively calls itself for nested objects, passing on any objects that
+ * matching properties.
+ * @param objects - Objects to merge
+ * @returns A merged object, or undefined if no objects provided
+ */
+export function mergeObjects<T>(
+  ...objects: (Partial<T> | undefined)[]
+): T {
+  objects = objects.filter((obj) => obj !== undefined);
+  if (objects.length === 0) return {} as T;
+  if (objects.length === 1) return objects[0] as T;
 
-  return true;
+  const seen = new Set<PropertyKey>();
+  const result: Record<string, unknown> = {};
+
+  for (const obj of objects) {
+    // If we have a literal value, return it. Same for arrays, since we wouldn't
+    // know how to merge them. Note that earlier objects take precedence, so if
+    // an earlier was e.g. an object, we'll return that instead of the literal.
+    if (!isObject(obj) || isLink(obj)) {
+      return obj as T;
+    }
+
+    // Then merge objects, only passing those on that have any values.
+    for (const key of Object.keys(obj)) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const merged = mergeObjects<T[keyof T]>(
+        ...objects.map((obj) =>
+          (obj as Record<string, unknown>)?.[key] as T[keyof T]
+        ),
+      );
+      if (merged !== undefined) result[key] = merged;
+    }
+  }
+
+  return result as T;
 }
 
 const moduleWrappers = {

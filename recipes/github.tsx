@@ -1,5 +1,5 @@
-import { h } from "@commontools/html";
 import {
+  h,
   cell,
   derive,
   handler,
@@ -8,8 +8,10 @@ import {
   recipe,
   str,
   UI,
-} from "@commontools/builder";
-import { sleep } from "@commontools/utils/sleep";
+} from "commontools";
+
+const sleep = (timeout: number) =>
+  new Promise((resolve) => setTimeout(resolve, timeout));
 
 interface GitHubCommit {
   sha: string;
@@ -148,6 +150,7 @@ const refreshCommits = handler({}, {
     repo: { type: "string" },
     owner: { type: "string" },
   },
+  required: ["commits", "repo", "owner"],
 }, async (_, state) => {
   console.log("refreshing commits", JSON.stringify(state, null, 2));
   const commits = await getRecentCommits(state.owner, state.repo);

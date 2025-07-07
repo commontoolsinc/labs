@@ -1,11 +1,12 @@
-import { h } from "@commontools/html";
 import {
-  AuthSchema,
+  Cell,
   cell,
   derive,
   getRecipeEnvironment,
+  h,
   handler,
   ID,
+  ifElse,
   JSONSchema,
   Mutable,
   NAME,
@@ -13,8 +14,7 @@ import {
   Schema,
   str,
   UI,
-} from "@commontools/builder";
-import { Cell } from "@commontools/runner";
+} from "commontools";
 
 const Classification = {
   Unclassified: "unclassified",
@@ -22,6 +22,37 @@ const Classification = {
   Secret: "secret",
   TopSecret: "topsecret",
 } as const;
+
+const ClassificationSecret = "secret";
+
+// This is used by the various Google tokens created with tokenToAuthData
+export const AuthSchema = {
+  type: "object",
+  properties: {
+    token: {
+      type: "string",
+      default: "",
+      ifc: { classification: [ClassificationSecret] },
+    },
+    tokenType: { type: "string", default: "" },
+    scope: { type: "array", items: { type: "string" }, default: [] },
+    expiresIn: { type: "number", default: 0 },
+    expiresAt: { type: "number", default: 0 },
+    refreshToken: {
+      type: "string",
+      default: "",
+      ifc: { classification: [ClassificationSecret] },
+    },
+    user: {
+      type: "object",
+      properties: {
+        email: { type: "string", default: "" },
+        name: { type: "string", default: "" },
+        picture: { type: "string", default: "" },
+      },
+    },
+  },
+} as const satisfies JSONSchema;
 
 const env = getRecipeEnvironment();
 
@@ -81,8 +112,13 @@ const GcalImporterInputs = {
           description: "number of events to import",
           default: 250,
         },
+        syncToken: {
+          type: "string",
+          description: "Google Calendar sync token for incremental sync",
+          default: "",
+        },
       },
-      required: ["calendarId", "limit"],
+      required: ["calendarId", "limit", "syncToken"],
     },
     auth: AuthSchema,
   },
@@ -172,11 +208,11 @@ const calendarUpdater = handler(
         asCell: true,
       },
       auth: { ...AuthSchema, asCell: true },
-      settings: GcalImporterInputs.properties.settings,
+      settings: { ...GcalImporterInputs.properties.settings, asCell: true },
     },
     required: ["events", "auth", "settings"],
   } as const satisfies JSONSchema,
-  (_event, state) => {
+  async (_event, state) => {
     console.log("calendarUpdater!");
 
     if (!state.auth.get().token) {
@@ -184,12 +220,47 @@ const calendarUpdater = handler(
       return;
     }
 
-    return fetchCalendar(
+    const settings = state.settings.get();
+    const result = await fetchCalendar(
       state.auth,
-      state.settings.limit,
-      state.settings.calendarId,
+      settings.limit,
+      settings.calendarId,
+      settings.syncToken,
       state,
     );
+
+    if (!result) return;
+
+    // Handle deleted events
+    if (result.deletedEventIds && result.deletedEventIds.length > 0) {
+      console.log(`Removing ${result.deletedEventIds.length} deleted events`);
+      const deleteSet = new Set(result.deletedEventIds);
+      const currentEvents = state.events.get();
+      const remainingEvents = currentEvents.filter((event) =>
+        !deleteSet.has(event.id)
+      );
+      state.events.set(remainingEvents);
+    }
+
+    // Add new events
+    if (result.newEvents && result.newEvents.length > 0) {
+      console.log(`Adding ${result.newEvents.length} new events`);
+      state.events.push(...result.newEvents);
+    }
+
+    // Update syncToken
+    if (result.newSyncToken) {
+      const currentSettings = state.settings.get();
+      console.log("=== UPDATING SYNC TOKEN ===");
+      console.log("Previous syncToken:", currentSettings.syncToken || "none");
+      console.log("New syncToken:", result.newSyncToken);
+      state.settings.set({
+        ...currentSettings,
+        syncToken: result.newSyncToken,
+      });
+      console.log("SyncToken updated successfully");
+      console.log("==========================");
+    }
   },
 );
 
@@ -266,66 +337,175 @@ export async function fetchCalendar(
   auth: Cell<Auth>,
   maxResults: number = 250,
   calendarId: string = "primary",
+  currentSyncToken: string = "",
   state: {
     events: Cell<CalendarEvent[]>;
   },
-) {
+): Promise<
+  | {
+    newSyncToken?: string;
+    newEvents?: CalendarEvent[];
+    deletedEventIds?: string[];
+  }
+  | void
+> {
+  if (!auth.get()) {
+    console.warn("no token");
+    return;
+  }
+
   // Get existing event IDs for lookup
   const existingEventIds = new Set(
     state.events.get().map((event) => event.id),
   );
-  console.log("existing event ids", existingEventIds);
 
-  // Get current date in ISO format for timeMin parameter
-  const now = new Date().toISOString();
+  let newSyncToken: string | undefined;
+  const eventsToAdd: CalendarEvent[] = [];
+  const eventsToDelete: string[] = [];
 
-  const google_cal_url = new URL(
-    `https://www.googleapis.com/calendar/v3/calendars/${
-      encodeURIComponent(
-        calendarId.trim(),
-      )
-    }/events?maxResults=${maxResults}&timeMin=${
-      encodeURIComponent(now)
-    }&singleEvents=true&orderBy=startTime`);
-  const listResponse = await googleRequest(
-    auth,
-    google_cal_url,
-  );
+  // If we have a sync token, use incremental sync
+  if (currentSyncToken) {
+    console.log("=== INCREMENTAL SYNC MODE ===");
+    console.log("Using syncToken:", currentSyncToken);
 
-  const listData = await listResponse.json();
+    try {
+      const syncUrl = new URL(
+        `https://www.googleapis.com/calendar/v3/calendars/${
+          encodeURIComponent(calendarId.trim())
+        }/events?syncToken=${
+          encodeURIComponent(currentSyncToken)
+        }&singleEvents=true`,
+      );
 
-  if (!listData.items || !Array.isArray(listData.items)) {
-    console.log("No events found in response");
-    return { items: [] };
+      const syncResponse = await googleRequest(auth, syncUrl);
+      const syncData = await syncResponse.json();
+
+      if (syncData.items && Array.isArray(syncData.items)) {
+        for (const event of syncData.items) {
+          if (event.status === "cancelled") {
+            console.log(`Event deleted: ${event.id}`);
+            eventsToDelete.push(event.id);
+          } else if (!existingEventIds.has(event.id)) {
+            console.log(`New/Updated event: ${event.id} - ${event.summary}`);
+            eventsToAdd.push({
+              id: event.id,
+              summary: event.summary || "",
+              description: event.description || "",
+              start: event.start
+                ? event.start.dateTime || event.start.date || ""
+                : "",
+              end: event.end ? event.end.dateTime || event.end.date || "" : "",
+              location: event.location || "",
+              eventType: event.eventType || "",
+              hangoutLink: event.hangoutLink || "",
+              attendees: event.attendees || [],
+            });
+          }
+        }
+      }
+
+      newSyncToken = syncData.nextSyncToken;
+      console.log("Incremental sync complete. New syncToken:", newSyncToken);
+    } catch (error: any) {
+      if (error.message && error.message.includes("410")) {
+        console.log("Sync token expired, falling back to full sync");
+        currentSyncToken = ""; // Force full sync below
+      } else {
+        throw error;
+      }
+    }
   }
 
-  // Filter out events we already have
-  const newEvents = listData.items
-    .filter((event: { id: string }) => !existingEventIds.has(event.id))
-    .map((event: any) => ({
-      id: event.id,
-      summary: event.summary || "",
-      description: event.description || "",
-      start: event.start ? event.start.dateTime || event.start.date || "" : "",
-      end: event.end ? event.end.dateTime || event.end.date || "" : "",
-      location: event.location || "",
-      eventType: event.eventType || "",
-      hangoutLink: event.hangoutLink || "",
-      attendees: event.attendees || [],
-    }));
+  // If no sync token or it expired, do a full sync
+  if (!currentSyncToken) {
+    console.log("=== FULL SYNC MODE ===");
 
-  if (newEvents.length > 0) {
-    console.log(`Adding ${newEvents.length} new events`);
+    // First, fetch events with timeMin to get the events we want to display
+    const now = new Date().toISOString();
+    const eventsUrl = new URL(
+      `https://www.googleapis.com/calendar/v3/calendars/${
+        encodeURIComponent(calendarId.trim())
+      }/events?maxResults=${maxResults}&timeMin=${
+        encodeURIComponent(now)
+      }&singleEvents=true&orderBy=startTime`,
+    );
 
-    // Use event ID to generate our ID
-    newEvents.forEach((event: any) => {
-      event[ID] = event.id;
-    });
+    const eventsResponse = await googleRequest(auth, eventsUrl);
+    const eventsData = await eventsResponse.json();
 
-    state.events.push(...newEvents);
-  } else {
-    console.log("No new events found");
+    if (eventsData.items && Array.isArray(eventsData.items)) {
+      for (const event of eventsData.items) {
+        if (!existingEventIds.has(event.id)) {
+          eventsToAdd.push({
+            id: event.id,
+            summary: event.summary || "",
+            description: event.description || "",
+            start: event.start
+              ? event.start.dateTime || event.start.date || ""
+              : "",
+            end: event.end ? event.end.dateTime || event.end.date || "" : "",
+            location: event.location || "",
+            eventType: event.eventType || "",
+            hangoutLink: event.hangoutLink || "",
+            attendees: event.attendees || [],
+          });
+        }
+      }
+    }
+
+    console.log(`Fetched ${eventsToAdd.length} new future events`);
+
+    // Now we need to get the sync token by iterating through ALL pages
+    console.log("Getting sync token by iterating through all pages...");
+    let pageToken: string | undefined;
+    let pageCount = 0;
+    const maxPages = 1000; // Safety limit
+
+    const tokenUrl = new URL(
+      `https://www.googleapis.com/calendar/v3/calendars/${
+        encodeURIComponent(calendarId.trim())
+      }/events?maxResults=250&singleEvents=true&fields=nextPageToken,nextSyncToken`,
+    );
+
+    do {
+      pageCount++;
+      if (pageToken) {
+        tokenUrl.searchParams.set("pageToken", pageToken);
+      }
+
+      console.log(`Fetching page ${pageCount} for sync token...`);
+      const tokenResponse = await googleRequest(auth, tokenUrl);
+      const tokenData = await tokenResponse.json();
+
+      pageToken = tokenData.nextPageToken;
+      if (!pageToken) {
+        newSyncToken = tokenData.nextSyncToken;
+        console.log(`Got sync token after ${pageCount} pages:`, newSyncToken);
+      }
+
+      if (pageCount >= maxPages) {
+        console.warn("Reached max page limit, calendar might be too large");
+        break;
+      }
+    } while (pageToken);
   }
+
+  // Add IDs to new events
+  eventsToAdd.forEach((event: any) => {
+    event[ID] = event.id;
+  });
+
+  console.log("=== SYNC SUMMARY ===");
+  console.log(`Events to add: ${eventsToAdd.length}`);
+  console.log(`Events to delete: ${eventsToDelete.length}`);
+  console.log(`New sync token: ${newSyncToken}`);
+  console.log("===================");
+
+  return {
+    newSyncToken,
+    newEvents: eventsToAdd.length > 0 ? eventsToAdd : undefined,
+    deletedEventIds: eventsToDelete.length > 0 ? eventsToDelete : undefined,
+  };
 }
 
 const CalendarSchema = {
@@ -360,7 +540,7 @@ const getCalendars = handler(
     }
 
     googleRequest(
-      auth,
+      state.auth,
       new URL(`https://www.googleapis.com/calendar/v3/users/me/calendarList`),
     )
       .then((res) => res.json())
@@ -419,6 +599,11 @@ export default recipe(
           </h2>
           <h2 style="font-size: 20px; font-weight: bold;">
             Imported event count: {derive(events, (events) => events.length)}
+          </h2>
+
+          <h2>
+            syncToken:{" "}
+            {ifElse(settings.syncToken, settings.syncToken, "Not yet obtained")}
           </h2>
 
           <common-hstack gap="sm">
@@ -491,7 +676,14 @@ export default recipe(
               </common-button>
             </common-vstack>
           </common-hstack>
-          <common-google-oauth $auth={auth} />
+          <common-google-oauth
+            $auth={auth}
+            scopes={[
+              "email",
+              "profile",
+              "https://www.googleapis.com/auth/calendar.readonly",
+            ]}
+          />
           <div>
             <table>
               <thead>

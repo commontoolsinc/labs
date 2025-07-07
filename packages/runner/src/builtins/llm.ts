@@ -1,9 +1,20 @@
-import { type DocImpl, getDoc } from "../doc.ts";
-import { DEFAULT_MODEL_NAME, LLMClient, LLMRequest } from "@commontools/llm";
-import { type Action, idle } from "../scheduler.ts";
+import {
+  DEFAULT_GENERATE_OBJECT_MODELS,
+  DEFAULT_MODEL_NAME,
+  LLMClient,
+  LLMGenerateObjectRequest,
+  LLMRequest,
+} from "@commontools/llm";
+import {
+  BuiltInGenerateObjectParams,
+  BuiltInLLMParams,
+  BuiltInLLMState,
+} from "@commontools/api";
 import { refer } from "merkle-reference";
+import { type Cell } from "../cell.ts";
+import { type Action } from "../scheduler.ts";
+import type { IRuntime } from "../runtime.ts";
 import { type ReactivityLog } from "../scheduler.ts";
-import { BuiltInLLMParams, BuiltInLLMState } from "@commontools/builder";
 
 const client = new LLMClient();
 
@@ -30,33 +41,38 @@ const client = new LLMClient();
  *   updating `partial` result.
  */
 export function llm(
-  inputsCell: DocImpl<BuiltInLLMParams>,
+  inputsCell: Cell<BuiltInLLMParams>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
-  parentDoc: DocImpl<any>,
+  parentCell: Cell<any>,
+  runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = getDoc(false, { llm: { pending: cause } }, parentDoc.space);
-  const result = getDoc<string | undefined>(
-    undefined,
+  const pending = runtime.getCell(
+    parentCell.space,
+    { llm: { pending: cause } },
+  );
+  pending.send(false);
+
+  const result = runtime.getCell<string | undefined>(
+    parentCell.space,
     {
       llm: { result: cause },
     },
-    parentDoc.space,
   );
-  const partial = getDoc<string | undefined>(
-    undefined,
+
+  const partial = runtime.getCell<string | undefined>(
+    parentCell.space,
     {
       llm: { partial: cause },
     },
-    parentDoc.space,
   );
-  const requestHash = getDoc<string | undefined>(
-    undefined,
+
+  const requestHash = runtime.getCell<string | undefined>(
+    parentCell.space,
     {
       llm: { requestHash: cause },
     },
-    parentDoc.space,
   );
 
   sendResult({ pending, result, partial, requestHash });
@@ -66,6 +82,10 @@ export function llm(
 
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
+    const pendingWithLog = pending.withLog(log);
+    const resultWithLog = result.withLog(log);
+    const partialWithLog = partial.withLog(log);
+    const requestHashWithLog = requestHash.withLog(log);
 
     const { system, messages, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], log) ?? {};
@@ -93,21 +113,21 @@ export function llm(
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
     // contents of the requestHash doc).
-    if (hash === previousCallHash || hash === requestHash.get()) return;
+    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
     previousCallHash = hash;
 
-    result.setAtPath([], undefined, log);
-    partial.setAtPath([], undefined, log);
+    resultWithLog.set(undefined);
+    partialWithLog.set(undefined);
 
     if (!Array.isArray(messages) || messages.length === 0) {
-      pending.setAtPath([], false, log);
+      pendingWithLog.set(false);
       return;
     }
-    pending.setAtPath([], true, log);
+    pendingWithLog.set(true);
 
     const updatePartial = (text: string) => {
       if (thisRun != currentRun) return;
-      partial.setAtPath([], text, log);
+      partialWithLog.set(text);
     };
 
     const resultPromise = client.sendRequest(llmParams, updatePartial);
@@ -118,23 +138,165 @@ export function llm(
         if (thisRun !== currentRun) return;
 
         //normalizeToCells(text, undefined, log);
-        await idle();
+        await runtime.idle();
 
-        pending.setAtPath([], false, log);
-        result.setAtPath([], text, log);
-        partial.setAtPath([], text, log);
-        requestHash.setAtPath([], hash, log);
+        pendingWithLog.set(false);
+        resultWithLog.set(text);
+        partialWithLog.set(text);
+        requestHashWithLog.set(hash);
       })
       .catch(async (error) => {
         if (thisRun !== currentRun) return;
 
         console.error("Error generating data", error);
 
-        await idle();
+        await runtime.idle();
 
-        pending.setAtPath([], false, log);
-        result.setAtPath([], undefined, log);
-        partial.setAtPath([], undefined, log);
+        pendingWithLog.set(false);
+        resultWithLog.set(undefined);
+        partialWithLog.set(undefined);
+
+        // TODO(seefeld): Not writing now, so we retry the request after failure.
+        // Replace this with more fine-grained retry logic.
+        // requestHash.setAtPath([], hash, log);
+      });
+  };
+}
+
+/**
+ * Generate structured data via an LLM using JSON mode.
+ *
+ * Returns the complete result as `result` and the incremental result as
+ * `partial`. `pending` is true while a request is pending.
+ *
+ * @param prompt - The prompt to send to the LLM.
+ * @param schema - JSON Schema to validate the response against.
+ * @param system - Optional system message.
+ * @param maxTokens - Maximum number of tokens to generate.
+ * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODELS).
+ * @param cache - Whether to cache the response (defaults to true).
+ * @param metadata - Additional metadata to pass to the LLM.
+ *
+ * @returns { pending: boolean, result?: object, partial?: string } - As individual
+ *   docs, representing `pending` state, final `result` and incrementally
+ *   updating `partial` result.
+ */
+export function generateObject<T extends Record<string, unknown>>(
+  inputsCell: Cell<BuiltInGenerateObjectParams>,
+  sendResult: (docs: {
+    pending: Cell<boolean>;
+    result: Cell<T | undefined>;
+    partial: Cell<string | undefined>;
+    requestHash: Cell<string | undefined>;
+  }) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause: any,
+  parentCell: Cell<any>,
+  runtime: IRuntime,
+): Action {
+  const pending = runtime.getCell<boolean>(
+    parentCell.space,
+    { generateObject: { pending: cause } },
+  );
+  pending.send(false);
+
+  const result = runtime.getCell<T | undefined>(
+    parentCell.space,
+    {
+      generateObject: { result: cause },
+    },
+  );
+
+  const partial = runtime.getCell<string | undefined>(
+    parentCell.space,
+    {
+      generateObject: { partial: cause },
+    },
+  );
+
+  const requestHash = runtime.getCell<string | undefined>(
+    parentCell.space,
+    {
+      generateObject: { requestHash: cause },
+    },
+  );
+
+  sendResult({ pending, result, partial, requestHash });
+
+  let currentRun = 0;
+  let previousCallHash: string | undefined = undefined;
+
+  return (log: ReactivityLog) => {
+    const thisRun = ++currentRun;
+    const pendingWithLog = pending.withLog(log);
+    const resultWithLog = result.withLog(log);
+    const partialWithLog = partial.withLog(log);
+    const requestHashWithLog = requestHash.withLog(log);
+
+    const { prompt, maxTokens, model, schema, system, cache, metadata } =
+      inputsCell.getAsQueryResult([], log) ?? {};
+
+    if (!prompt || !schema) {
+      pendingWithLog.set(false);
+      return;
+    }
+
+    const readyMetadata = metadata ? JSON.parse(JSON.stringify(metadata)) : {};
+
+    const generateObjectParams: LLMGenerateObjectRequest = {
+      prompt,
+      maxTokens: maxTokens ?? 8192,
+      schema: JSON.parse(JSON.stringify(schema)),
+      model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+      metadata: {
+        ...readyMetadata,
+        context: "charm",
+      },
+      cache: cache ?? true,
+    };
+
+    if (system) {
+      generateObjectParams.system = system;
+    }
+
+    const hash = refer(generateObjectParams).toString();
+
+    // Return if the same request is being made again, either concurrently (same
+    // as previousCallHash) or when rehydrated from storage (same as the
+    // contents of the requestHash doc).
+    if (hash === previousCallHash || hash === requestHashWithLog.get()) return;
+    previousCallHash = hash;
+
+    resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
+    partialWithLog.set(undefined);
+    pendingWithLog.set(true);
+
+    const resultPromise = client.generateObject(
+      generateObjectParams,
+    ) as Promise<{
+      object: T;
+    }>;
+
+    resultPromise
+      .then(async (response) => {
+        if (thisRun !== currentRun) return;
+
+        await runtime.idle();
+
+        pendingWithLog.set(false);
+        resultWithLog.set(response.object);
+        requestHashWithLog.set(hash);
+      })
+      .catch(async (error) => {
+        if (thisRun !== currentRun) return;
+
+        console.error("Error generating object", error);
+
+        await runtime.idle();
+
+        pendingWithLog.set(false);
+        resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
+        partialWithLog.set(undefined);
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.

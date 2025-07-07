@@ -1,16 +1,16 @@
-import {
+import type {
   Cause,
   Changes,
   Entity,
   Fact,
   FactSelection,
+  JSONValue,
   OfTheCause,
   Select,
   SelectAll,
-  SelectAllString,
   The,
 } from "./interface.ts";
-import { JSONValue } from "../builder/src/index.ts";
+import { SelectAllString } from "./schema.ts";
 
 export const from = (
   source: Iterable<[fact: Fact, since: number]>,
@@ -110,12 +110,13 @@ type EmptyObj = Record<string | number | symbol, never>;
 // If we're missing a "the" or "cause", we treat these as wildcards
 export const iterateSelector = function* <T>(
   selector: Select<Entity, Select<The, Select<Cause, T>>>,
+  defaultValue: T,
 ): Iterable<
   {
     of: Entity | SelectAll;
     the: The | SelectAll;
     cause: Cause | SelectAll;
-    value: T | EmptyObj;
+    value: T;
   }
 > {
   for (const [of, attributes] of Object.entries(selector)) {
@@ -126,16 +127,16 @@ export const iterateSelector = function* <T>(
     for (const [the, causes] of attrEntries) {
       let causeEntries: [string, T | EmptyObj][] = Object.entries(causes);
       if (causeEntries.length == 0) {
-        causeEntries = [[SelectAllString, {}]];
+        causeEntries = [[SelectAllString, defaultValue]];
       }
-      for (const [cause, state] of causeEntries) {
-        yield {
-          of: of as Entity | SelectAll,
-          the: the as The | SelectAll,
-          cause,
-          value: state,
-        };
-      }
+      // we will extract at most one cause from the selector
+      const [[cause, state]] = causeEntries;
+      yield {
+        of: of as Entity | SelectAll,
+        the: the as The | SelectAll,
+        cause,
+        value: state,
+      };
     }
   }
 };

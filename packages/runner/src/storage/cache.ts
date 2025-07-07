@@ -1,44 +1,71 @@
 import type {
+  Assertion,
   AuthorizationError,
+  Changes as MemoryChanges,
   Commit,
   ConflictError,
   ConnectionError,
+  ConsumerCommandInvocation,
   Entity,
   Fact,
+  FactAddress,
+  Invariant,
+  JSONValue,
   MemorySpace,
+  Protocol,
+  ProviderCommand,
+  ProviderSession,
   QueryError,
+  Reference,
   Result,
   Revision,
   SchemaContext,
+  SchemaPathSelector,
+  SchemaQueryArgs,
+  Signer,
   State,
+  Statement,
   The,
   TransactionError,
   UCAN,
   Unit,
+  Variant,
 } from "@commontools/memory/interface";
-import {
-  type Cancel,
-  ContextualFlowControl,
-  type EntityId,
-} from "@commontools/runner";
-import {
-  BaseStorageProvider,
-  type StorageProvider,
-  type StorageValue,
-} from "./base.ts";
-import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
-import { fromString, refer } from "merkle-reference";
-import { the, toChanges, toRevision } from "@commontools/memory/commit";
-import * as IDB from "./idb.ts";
-import * as Memory from "@commontools/memory/consumer";
-export * from "@commontools/memory/interface";
-import * as Codec from "@commontools/memory/codec";
-import { Channel, RawCommand } from "./inspector.ts";
-import { isBrowser } from "@commontools/utils/env";
-import { deepEqual, JSONSchema, JSONValue } from "@commontools/builder";
 import { set, setSelector } from "@commontools/memory/selection";
+import type { MemorySpaceSession } from "@commontools/memory/consumer";
+import { assert, claim, retract, unclaimed } from "@commontools/memory/fact";
+import { the, toChanges, toRevision } from "@commontools/memory/commit";
+import * as Consumer from "@commontools/memory/consumer";
+import * as Codec from "@commontools/memory/codec";
+import { type Cancel, type EntityId } from "@commontools/runner";
+import type { JSONSchema } from "../builder/types.ts";
+import { ContextualFlowControl } from "../cfc.ts";
+import { deepEqual } from "../path-utils.ts";
+import { MapSet } from "../traverse.ts";
+import { fromString, refer } from "merkle-reference";
+import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
+import type {
+  Assert,
+  Claim,
+  IRemoteStorageProviderSettings,
+  IStorageManager,
+  IStorageManagerV2,
+  IStorageProvider,
+  IStorageProviderWithReplica,
+  IStorageTransaction,
+  IStoreError,
+  ITransaction,
+  PushError,
+  Retract,
+  StorageValue,
+} from "./interface.ts";
+import { BaseStorageProvider } from "./base.ts";
+import * as IDB from "./idb.ts";
+export * from "@commontools/memory/interface";
+import { Channel, RawCommand } from "./inspector.ts";
+import { SchemaNone } from "@commontools/memory/schema";
+import * as Transaction from "./transaction.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -62,7 +89,7 @@ export interface AsyncPull<Model, Address> {
   pull(
     selector: Selector<Address>,
   ): Promise<
-    Result<Selection<Address, Model>, StoreError>
+    Result<Selection<Address, Model>, IStoreError>
   >;
 }
 
@@ -70,7 +97,7 @@ export interface AsyncPush<Model> {
   merge(
     entries: Iterable<Model>,
     merge: Merge<Model>,
-  ): Promise<Result<Unit, StoreError>>;
+  ): Promise<Result<Unit, IStoreError>>;
 }
 
 export interface AsyncStore<Model, Address>
@@ -81,7 +108,7 @@ export interface SyncPull<Model, Address> {
   pull(
     selector: Selector<Address>,
   ): Promise<
-    Result<Selection<Address, Model>, StoreError>
+    Result<Selection<Address, Model>, IStoreError>
   >;
 }
 
@@ -89,7 +116,7 @@ export interface SyncPush<Model> {
   merge(
     entries: Iterable<Model>,
     merge: Merge<Model>,
-  ): Result<Unit, StoreError>;
+  ): Result<Unit, IStoreError>;
 }
 
 export interface SyncStore<Model, Address>
@@ -101,29 +128,16 @@ interface NotFoundError extends Error {
   address: FactAddress;
 }
 
-interface StoreError extends Error {
-  name: "StoreError";
-  cause: Error;
-}
-
-export interface Assert {
-  the: The;
-  of: Entity;
-  is: JSONValue;
-}
-
-export interface Retract {
-  the: The;
-  of: Entity;
-  is?: void;
-}
-
-export interface FactAddress {
-  the: The;
-  of: Entity;
-}
-
 const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
+const fromKey = (key: string): FactAddress => {
+  const separatorIndex = key.indexOf("/");
+  if (separatorIndex === -1) {
+    throw new Error(`Invalid key format: ${key}`);
+  }
+  const of = key.substring(0, separatorIndex);
+  const the = key.substring(separatorIndex + 1);
+  return { of: of as Entity, the };
+};
 
 export class NoCache<Model extends object, Address>
   implements AsyncStore<Model, Address> {
@@ -132,7 +146,7 @@ export class NoCache<Model extends object, Address>
    */
   async pull(
     selector: Selector<Address>,
-  ): Promise<Result<Selection<Address, Model>, StoreError>> {
+  ): Promise<Result<Selection<Address, Model>, IStoreError>> {
     return await { ok: new Map() };
   }
 
@@ -150,6 +164,24 @@ class Nursery implements SyncPush<State> {
   }
   static delete() {
     return undefined;
+  }
+
+  /**
+   * If state `before` and `after` are the same that implies that remote has
+   * caught up with `nursery` so we evict record from nursery allowing reads
+   * to fall through to `heap`. If `after` is `undefined` that is very unusual,
+   * yet we keep value from `before` as nursery is more likely ahead. If
+   * `before` is `undefined` keep it as is because reads would fall through
+   * to `heap` anyway.
+   */
+  static evict(before?: State, after?: State) {
+    return before == undefined
+      ? undefined
+      : after === undefined
+      ? before
+      : JSON.stringify(before) === JSON.stringify(after)
+      ? undefined
+      : before;
   }
 
   constructor(public store: Map<string, State> = new Map()) {
@@ -185,7 +217,11 @@ class Heap implements SyncPush<Revision<State>> {
     return this.store.get(toKey(entry));
   }
 
-  merge(entries: Iterable<Revision<State>>, merge: Merge<Revision<State>>) {
+  merge(
+    entries: Iterable<Revision<State>>,
+    merge: Merge<Revision<State>>,
+    notifyFilter?: (state: Revision<State> | undefined) => boolean,
+  ) {
     const updated = new Set<string>();
     for (const entry of entries) {
       const key = toKey(entry);
@@ -202,8 +238,10 @@ class Heap implements SyncPush<Revision<State>> {
 
     // Notify all the subscribers
     for (const key of updated) {
-      for (const subscriber of this.subscribers.get(key) ?? []) {
-        subscriber(this.store.get(key));
+      if (notifyFilter === undefined || notifyFilter(this.store.get(key))) {
+        for (const subscriber of this.subscribers.get(key) ?? []) {
+          subscriber(this.store.get(key));
+        }
       }
     }
 
@@ -291,6 +329,64 @@ class PullQueue {
   }
 }
 
+// This class helps us maintain a client model of our server side subscriptions
+class SelectorTracker {
+  private refTracker = new MapSet<string, string>();
+  private selectors = new Map<string, SchemaPathSelector>();
+
+  add(doc: FactAddress, selector: SchemaPathSelector | undefined) {
+    if (selector === undefined) {
+      return;
+    }
+    const selectorRef = refer(JSON.stringify(selector)).toString();
+    this.refTracker.add(toKey(doc), selectorRef);
+    this.selectors.set(selectorRef, selector);
+  }
+
+  has(doc: FactAddress): boolean {
+    return this.refTracker.has(toKey(doc));
+  }
+
+  hasSelector(doc: FactAddress, selector: SchemaPathSelector): boolean {
+    const selectorRefs = this.refTracker.get(toKey(doc));
+    if (selectorRefs !== undefined) {
+      const selectorRef = refer(JSON.stringify(selector)).toString();
+      return selectorRefs.has(selectorRef);
+    }
+    return false;
+  }
+
+  get(doc: FactAddress): IteratorObject<SchemaPathSelector> {
+    const selectorRefs = this.refTracker.get(toKey(doc)) ?? [];
+    return selectorRefs.values().map((selectorRef) =>
+      this.selectors.get(selectorRef)!
+    );
+  }
+
+  /**
+   * Return all tracked subscriptions as an array of {factAddress, selector} pairs
+   */
+  getAllSubscriptions(): {
+    factAddress: FactAddress;
+    selector: SchemaPathSelector;
+  }[] {
+    const subscriptions: {
+      factAddress: FactAddress;
+      selector: SchemaPathSelector;
+    }[] = [];
+    for (const [factKey, selectorRefs] of this.refTracker) {
+      const factAddress = fromKey(factKey);
+      for (const selectorRef of selectorRefs) {
+        const selector = this.selectors.get(selectorRef);
+        if (selector) {
+          subscriptions.push({ factAddress, selector });
+        }
+      }
+    }
+    return subscriptions;
+  }
+}
+
 export class Replica {
   static put(
     local: Revision<State> | undefined,
@@ -323,6 +419,10 @@ export class Replica {
   /** */
   static open() {
   }
+
+  // Track the causes of pending nursery changes
+  private pendingNurseryChanges = new MapSet<string, string>();
+  private seenNurseryChanges = new MapSet<string, string>();
 
   constructor(
     /**
@@ -358,10 +458,16 @@ export class Replica {
     public nursery: Nursery = new Nursery(),
     public queue: PullQueue = new PullQueue(),
     public pullRetryLimit: number = 100,
-    public schemaTracker = new Map<string, Set<string>>(),
     public useSchemaQueries: boolean = false,
+    // Track the selectors used for top level docs
+    private selectorTracker: SelectorTracker = new SelectorTracker(),
+    private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);
+  }
+
+  did(): MemorySpace {
+    return this.space;
   }
 
   async poll() {
@@ -392,14 +498,14 @@ export class Replica {
       if (next.done) {
         break;
       }
-      this.merge(next.value[this.space] as unknown as Commit);
+      this.integrate(next.value[this.space] as unknown as Commit);
     }
   }
 
   /**
    * Pulls requested entries from the remote source and updates both in memory
    * cache and local store so they will be available for future reads. If
-   * entries are not provided it will pull entries that have being loaded from
+   * entries are not provided it will pull entries that have been loaded from
    * local store in this session.
    */
   async pull(
@@ -407,7 +513,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | AuthorizationError | ConnectionError
+      IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // If requested entry list is empty there is nothing to fetch so we return
@@ -422,28 +528,29 @@ export class Replica {
     const querySelector = {};
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
-    const cfc = new ContextualFlowControl();
     const classifications = new Set<string>();
     for (const [{ the, of }, context] of entries) {
       if (this.useSchemaQueries) {
         // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-        const schemaContext = context ?? Memory.SchemaNone;
+        const schemaContext = context ?? SchemaNone;
         setSelector(schemaSelector, of, the, "_", {
           path: [],
           schemaContext: schemaContext,
         });
         // Since we're accessing the entire document, we should base our classification on the rootSchema
-        cfc.joinSchema(classifications, schemaContext.rootSchema);
+        this.cfc.joinSchema(classifications, schemaContext.rootSchema);
       } else {
         // We're using the "cached" mode, and we don't use schema queries
         setSelector(querySelector, of, the, "_", {});
       }
     }
 
+    // We provided schema for the top level fact that we selected, but we
+    // will have undefined schema for the entries included as links.
     let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
     // Run all our schema queries first
     if (Object.entries(schemaSelector).length > 0) {
-      const queryArgs: Memory.SchemaQueryArgs = {
+      const queryArgs: SchemaQueryArgs = {
         selectSchema: schemaSelector,
         subscribe: true,
       };
@@ -454,13 +561,14 @@ export class Replica {
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {
-        console.error("query failure", error);
+        console.error("query failure", queryArgs, error);
         return { error };
       }
       fetchedEntries = query.schemaFacts;
-      // FIXME(@ubik2) verify that we're dealing with this subscription
-      // I know we're sending updates over from the provider, but make sure
-      // we're incorporating those in the cache.
+      // FIXME(@ubik2) we're not actually handling the data from this
+      // subscription properly. We get the data through the commit changes,
+      // because the server knows we're watching, but we should be able
+      // to use the data from the subscription instead.
     }
     // Now run our regular queries (this will include our commit+json)
     if (Object.entries(querySelector).length > 0) {
@@ -480,7 +588,7 @@ export class Replica {
     // `unclaimed` revisions for those that we store. By doing this we can avoid
     // network round trips if such are pulled again in the future.
     const notFound = [];
-    const revisions = new Map();
+    const revisions = new Map<FactAddress, Revision<State>>();
     if (fetched.length < entries.length) {
       for (const [entry, _schema] of entries) {
         if (!this.get(entry)) {
@@ -495,19 +603,20 @@ export class Replica {
     for (const [revision, schema] of fetchedEntries) {
       const factAddress = { the: revision.the, of: revision.of };
       revisions.set(factAddress, revision);
-      if (schema !== undefined) {
-        const schemaRef = refer(schema).toString();
-        const factKey = toKey(factAddress);
-        if (!this.schemaTracker.has(factKey)) {
-          this.schemaTracker.set(factKey, new Set<string>());
-        }
-        this.schemaTracker.get(factKey)?.add(schemaRef);
-      }
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
-    this.heap.merge(notFound, Replica.put);
+    // Don't notify subscribers as if this were a server update.
+    this.heap.merge(notFound, Replica.put, (val) => false);
     const result = await this.cache.merge(revisions.values(), Replica.put);
+
+    for (const [revision, schema] of fetchedEntries) {
+      const factAddress = { the: revision.the, of: revision.of };
+      this.selectorTracker.add(factAddress, {
+        path: [],
+        schemaContext: schema,
+      });
+    }
 
     if (result.error) {
       return result;
@@ -526,7 +635,7 @@ export class Replica {
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
-      StoreError | QueryError | AuthorizationError | ConnectionError
+      IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
     // First we identify entries that we need to load from the store.
@@ -535,12 +644,15 @@ export class Replica {
       if (!this.get(address)) {
         need.push([address, schema]);
       } else if (schema !== undefined) {
+        const selector = { path: [], schemaContext: schema };
         // Even though we have our root doc in local store, we may need
         // to re-issue our query, since our cached copy may have been run with a
         // different schema, and thus have different linked documents.
-        const schemaRef = refer(schema).toString();
-        const key = toKey(address);
-        if (!this.schemaTracker.get(key)?.has(schemaRef)) {
+        if (!this.selectorTracker.hasSelector(address, selector)) {
+          // If we already have a subscription for the query running on the
+          // server for this selector, we don't need to send a new one
+          // (revisit this when we allow unsubscribe)
+          // Otherwise, add it to the set of things we need
           need.push([address, schema]);
         }
       }
@@ -591,7 +703,7 @@ export class Replica {
   }
 
   syncTimer: number = -1;
-  syncTimeout = 1000;
+  syncTimeout = 60 * 1000;
 
   sync() {
     clearTimeout(this.syncTimer);
@@ -609,16 +721,11 @@ export class Replica {
    * would assume state that is rejected.
    */
   async push(
-    changes: (Assert | Retract)[],
+    changes: (Assert | Retract | Claim)[],
   ): Promise<
     Result<
       Commit,
-      | StoreError
-      | QueryError
-      | ConnectionError
-      | ConflictError
-      | TransactionError
-      | AuthorizationError
+      PushError
     >
   > {
     // First we pull all the affected entries into heap so we can build a
@@ -632,10 +739,18 @@ export class Replica {
       // Collect facts so that we can derive desired state and a corresponding
       // transaction
       const facts: Fact[] = [];
-      for (const { the, of, is } of changes) {
-        const fact = limitFactState(this.get({ the, of }));
-        // If `is` is `undefined` we want to retract the fact.
-        if (is === undefined) {
+      const claims: Invariant[] = [];
+      for (const { the, of, is, claim } of changes) {
+        const fact = this.get({ the, of });
+
+        if (claim) {
+          claims.push({
+            the,
+            of,
+            fact: refer(fact),
+          });
+        } else if (is === undefined) {
+          // If `is` is `undefined` we want to retract the fact.
           // If local `is` in the local state is also `undefined` desired state
           // matches current state in which case we omit this change from the
           // transaction, otherwise we retract fact.
@@ -653,37 +768,104 @@ export class Replica {
         }
       }
 
-      // Store facts in a nursery so that subsequent changes will be build
-      // optimistically assuming that push will succeed.
-      this.nursery.merge(facts, Nursery.put);
-
       // These push transaction that will commit desired state to a remote.
-      const result = await this.remote.transact({
-        changes: getChanges(facts),
-      });
-
-      // If transaction fails we delete facts from the nursery so that new
-      // changes will not build upon rejected state. If there are other inflight
-      // transactions that already were built upon our facts they will also fail.
-      if (result.error) {
-        this.nursery.merge(facts, Nursery.delete);
-      } //
-      // If transaction succeeded we promote facts from nursery into a heap.
-      else {
-        const commit = toRevision(result.ok);
-        const { since } = commit.is;
-        const revisions = [
-          ...facts.map((fact) => ({ ...fact, since })),
-          // We strip transaction info so we don't duplicate same data
-          { ...commit, is: { since: commit.is.since } },
-        ];
-        // Turn facts into revisions corresponding with the commit.
-        this.heap.merge(revisions, Replica.put);
-        this.nursery.merge(facts, Nursery.delete);
-      }
-
-      return result;
+      return this.commit({ facts, claims });
     }
+  }
+
+  async commit({ facts, claims }: ITransaction) {
+    // Store facts in a nursery so that subsequent changes will be build
+    // optimistically assuming that push will succeed.
+    this.nursery.merge(facts, Nursery.put);
+    // Track all our pending changes
+    facts.map((fact) =>
+      this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
+    );
+
+    // These push transaction that will commit desired state to a remote.
+    const result = await this.remote.transact({
+      changes: getChanges([...claims, ...facts] as Statement[]),
+    });
+
+    // If transaction fails we delete facts from the nursery so that new
+    // changes will not build upon rejected state. If there are other inflight
+    // transactions that already were built upon our facts they will also fail.
+    if (result.error) {
+      for (const fact of facts) {
+        this.pendingNurseryChanges.deleteValue(
+          toKey(fact),
+          fact.cause.toString(),
+        );
+        this.seenNurseryChanges.delete(toKey(fact));
+      }
+      this.nursery.merge(facts, Nursery.delete);
+      const fact = result.error.name === "ConflictError" &&
+        result.error.conflict.actual;
+      // We also update heap so it holds latest record
+      if (fact) {
+        this.heap.merge([fact], Replica.update);
+      }
+    } //
+    // If transaction succeeded we promote facts from nursery into a heap.
+    else {
+      const commit = toRevision(result.ok);
+      const { since } = commit.is;
+      // Turn facts into revisions corresponding with the commit.
+      const revisions = [
+        ...facts.map((fact) => ({ ...fact, since })),
+        // We strip transaction info so we don't duplicate same data
+        { ...commit, is: { since: commit.is.since } },
+      ];
+      // Avoid sending out updates to subscribers if it's a fact we already
+      // know about in the nursery.
+      const localFacts = this.getLocalFacts(revisions);
+      this.heap.merge(
+        revisions,
+        Replica.put,
+        (revision) => !localFacts.has(revision),
+      );
+      // We only delete from the nursery when we've seen all of our pending
+      // facts (or gotten a conflict).
+      // Server facts may have newer nursery changes that we want to keep.
+      const freshFacts = revisions.filter((revision) =>
+        this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0 === 0
+      );
+      this.nursery.merge(freshFacts, Nursery.delete);
+      for (const fact of freshFacts) {
+        this.pendingNurseryChanges.delete(toKey(fact));
+        this.seenNurseryChanges.delete(toKey(fact));
+      }
+    }
+    // If transaction fails we delete facts from the nursery so that new
+    // changes will not build upon rejected state. If there are other inflight
+    // transactions that already were built upon our facts they will also fail.
+    if (result.error) {
+      this.nursery.merge(facts, Nursery.delete);
+      const fact = result.error.name === "ConflictError" &&
+        result.error.conflict.actual;
+      // We also update heap so it holds latest record
+      if (fact) {
+        this.heap.merge([fact], Replica.update);
+      }
+    } //
+    // If transaction succeeded we promote facts from nursery into a heap.
+    else {
+      const commit = toRevision(result.ok);
+      const { since } = commit.is;
+      const revisions = [
+        ...facts.map((fact) => ({ ...fact, since })),
+        // We strip transaction info so we don't duplicate same data
+        { ...commit, is: { since: commit.is.since } },
+      ];
+      // Turn facts into revisions corresponding with the commit.
+      this.heap.merge(revisions, Replica.put);
+      // Evict redundant facts which we just merged into `heap` so that reads
+      // will occur from `heap`. This way future changes upstream we not get
+      // shadowed by prior local changes.
+      this.nursery.merge(facts, Nursery.evict);
+    }
+
+    return result;
   }
 
   subscribe(entry: FactAddress, subscriber: (value?: Revision<State>) => void) {
@@ -696,15 +878,23 @@ export class Replica {
     this.heap.unsubscribe(entry, subscriber);
   }
 
-  merge(commit: Commit) {
+  integrate(commit: Commit) {
     const { the, of, cause, is, since } = toRevision(commit);
     const revisions = [
       { the, of, cause, is: { since: is.since }, since },
       ...toChanges(commit),
     ];
 
-    // Store newer revisions into the heap,
-    this.heap.merge(revisions, Replica.update);
+    // Store newer revisions into the heap.
+    // It's possible to get the same fact (including cause) twice, and we'll
+    // have a new since field on the second, so we can't clear them from
+    // tracking when we see them.
+    const resolvedFacts = this.getLocalFacts(revisions);
+    this.heap.merge(
+      revisions,
+      Replica.update,
+      (state) => !resolvedFacts.has(state),
+    );
     return this.cache.merge(revisions, Replica.update);
   }
 
@@ -712,8 +902,58 @@ export class Replica {
    * Returns state corresponding to the requested entry. If there is a pending
    * state returns it otherwise returns recent state.
    */
-  get(entry: FactAddress) {
+  get(entry: FactAddress): State | undefined {
     return this.nursery.get(entry) ?? this.heap.get(entry);
+  }
+
+  /**
+   * Gets facts that have an entry in the pending or seen MapSet
+   * This will also update the pending and seen sets
+   *
+   * @param revisions the facts we received from the server
+   * @returns the set of these facts that are in the pending or seen lists
+   */
+  private getLocalFacts(
+    revisions: (Revision<State> | undefined)[],
+  ) {
+    const matches = new Set();
+    for (const revision of revisions) {
+      if (revision === undefined || revision.cause === undefined) {
+        continue;
+      }
+      const factKey = toKey(revision);
+      const factCause = revision.cause.toString();
+      if (this.pendingNurseryChanges.hasValue(factKey, factCause)) {
+        this.seenNurseryChanges.add(factKey, factCause);
+        this.pendingNurseryChanges.deleteValue(factKey, factCause);
+      }
+      if (this.seenNurseryChanges.hasValue(factKey, factCause)) {
+        matches.add(revision);
+      }
+    }
+    return matches;
+  }
+
+  /**
+   * Resets the Replica's internal state for reconnection scenarios.
+   * Clears nursery tracking, heap facts, and selector tracking while
+   * preserving heap subscribers.
+   */
+  reset() {
+    // Clear nursery tracking
+    this.pendingNurseryChanges = new MapSet<string, string>();
+    this.seenNurseryChanges = new MapSet<string, string>();
+    // Clear the nursery itself
+    this.nursery = new Nursery();
+    // Save subscribers before clearing heap
+    const savedSubscribers = new Map(this.heap.subscribers);
+    // Clear heap and restore subscribers
+    this.heap = new Heap();
+    this.heap.subscribers = savedSubscribers;
+    // Clear selector tracker to ensure fresh schema queries
+    this.selectorTracker = new SelectorTracker();
+    // Clear the pull queue
+    this.queue = new PullQueue();
   }
 }
 
@@ -737,214 +977,126 @@ export interface RemoteStorageProviderSettings {
 }
 
 export interface RemoteStorageProviderOptions {
+  session: Consumer.MemoryConsumer<MemorySpace>;
+  space: MemorySpace;
+  the?: string;
+  settings?: IRemoteStorageProviderSettings;
+}
+
+export const defaultSettings: IRemoteStorageProviderSettings = {
+  maxSubscriptionsPerSpace: 50_000,
+  connectionTimeout: 30_000,
+  useSchemaQueries: true,
+};
+
+export interface ConnectionOptions {
   /**
    * Unique identifier of the storage. Used as name of the `BroadcastChannel`
    * in order to allow inspection of the storage.
    */
   id: string;
-
   address: URL;
-  as: Memory.Signer;
-  space: MemorySpace;
-  the?: string;
-  settings?: RemoteStorageProviderSettings;
-
   inspector?: Channel;
 }
 
-const defaultSettings: RemoteStorageProviderSettings = {
-  maxSubscriptionsPerSpace: 50_000,
-  connectionTimeout: 30_000,
-  useSchemaQueries: false,
-};
+export interface ProviderConnectionOptions extends ConnectionOptions {
+  provider: Provider;
+}
 
-export class Provider implements StorageProvider {
-  connection: WebSocket | null = null;
+class ProviderConnection implements IStorageProvider {
   address: URL;
-  workspace: Replica;
-  the: string;
-  session: Memory.MemorySession<MemorySpace>;
-  spaces: Map<string, Replica>;
-  settings: RemoteStorageProviderSettings;
-
-  subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
-    new Map();
-
+  connection: WebSocket | null = null;
+  connectionCount = 0;
+  timeoutID = 0;
   inspector?: Channel;
+  provider: Provider;
+  reader: ReadableStreamDefaultReader<
+    UCAN<ConsumerCommandInvocation<Protocol>>
+  >;
+  writer: WritableStreamDefaultWriter<ProviderCommand<Protocol>>;
 
   /**
    * queue that holds commands that we read from the session, but could not
    * send because connection was down.
    */
-  queue: Set<UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>> =
-    new Set();
-  writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
-  reader: ReadableStreamDefaultReader<
-    UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>
-  >;
+  queue: Set<UCAN<ConsumerCommandInvocation<Protocol>>> = new Set();
 
-  connectionCount = 0;
-  timeoutID = 0;
-
-  constructor({
-    id,
-    address,
-    as,
-    space,
-    the = "application/json",
-    settings = defaultSettings,
-    inspector,
-  }: RemoteStorageProviderOptions) {
+  constructor(
+    { id, address, provider, inspector }: ProviderConnectionOptions,
+  ) {
     this.address = address;
-    this.the = the;
-    this.settings = settings;
+    this.provider = provider;
+    this.handleEvent = this.handleEvent.bind(this);
     // Do not use a default inspector when in Deno:
     // Requires `--unstable-broadcast-channel` flags and it is not used
     // in that environment.
     this.inspector = isBrowser() ? (inspector ?? new Channel(id)) : undefined;
-    this.handleEvent = this.handleEvent.bind(this);
 
-    const session = Memory.create({ as });
-
+    const session = provider.session;
     this.reader = session.readable.getReader();
     this.writer = session.writable.getWriter();
-    this.session = session;
-    this.spaces = new Map();
-    this.workspace = this.mount(space);
 
     this.connect();
   }
-
-  mount(space: MemorySpace): Replica {
-    const replica = this.spaces.get(space);
-    if (replica) {
-      return replica;
-    } else {
-      const session = this.session.mount(space);
-      const replica = new Replica(space, session);
-      replica.useSchemaQueries = this.settings.useSchemaQueries;
-      replica.poll();
-      this.spaces.set(space, replica);
-      return replica;
+  get settings() {
+    return this.provider.settings;
+  }
+  get replica() {
+    return this.provider.replica;
+  }
+  connect() {
+    const { connection } = this;
+    // If we already have a connection we remove all the listeners from it.
+    if (connection) {
+      clearTimeout(this.timeoutID);
+      connection.removeEventListener("message", this);
+      connection.removeEventListener("open", this);
+      connection.removeEventListener("close", this);
+      connection.removeEventListener("error", this);
     }
+
+    const webSocketUrl = new URL(this.address.href);
+    webSocketUrl.searchParams.set("space", this.provider.workspace.space);
+    const socket = new WebSocket(webSocketUrl.href);
+    this.connection = socket;
+    // Start a timer so if connection is pending longer then `connectionTimeout`
+    // we should abort and retry.
+    this.setTimeout();
+    socket.addEventListener("message", this);
+    socket.addEventListener("open", this);
+    socket.addEventListener("close", this);
+    socket.addEventListener("error", this);
+
+    this.connectionCount += 1;
   }
-
-  sink<T = any>(
-    entityId: EntityId,
-    callback: (value: StorageValue<T>) => void,
-  ): Cancel {
-    const { the } = this;
-    const of = BaseStorageProvider.toEntity(entityId);
-    const { workspace } = this;
-    const address = { the, of };
-    const subscriber = (revision?: Revision<State>) => {
-      if (revision) {
-        // ⚠️ We may not have a value because fact was retracted or
-        // (less likely) deleted altogether. We still need to notify sink
-        // but we do is empty object per
-        // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
-        // TODO(@seefeldb): Make compatible `sink` API change
-        callback((revision?.is ?? {}) as unknown as StorageValue<T>);
-      }
-    };
-
-    workspace.subscribe(address, subscriber);
-    this.workspace.load([[address, undefined]]);
-
-    return () => workspace.unsubscribe(address, subscriber);
-  }
-
-  sync(
-    entityId: EntityId,
-    expectedInStorage?: boolean,
-    schemaContext?: SchemaContext,
+  post(
+    invocation: UCAN<ConsumerCommandInvocation<Protocol>>,
   ) {
-    const { the } = this;
-    const of = BaseStorageProvider.toEntity(entityId);
-    return this.workspace.load([[{ the, of }, schemaContext]]);
-  }
-
-  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
-    const entity = this.workspace.get({
-      the: this.the,
-      of: BaseStorageProvider.toEntity(entityId),
+    this.inspect({
+      send: invocation,
     });
-
-    return entity?.is as StorageValue<T> | undefined;
+    this.connection!.send(Codec.UCAN.toString(invocation));
   }
-  async send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<
-    Result<
-      Unit,
-      | ConflictError
-      | TransactionError
-      | ConnectionError
-      | AuthorizationError
-      | QueryError
-      | StoreError
-    >
-  > {
-    const { the, workspace } = this;
-    const TheLabel = "application/label+json" as const;
-
-    const changes = [];
-    for (const { entityId, value } of batch) {
-      const of = BaseStorageProvider.toEntity(entityId);
-      const content = value.value !== undefined
-        ? JSON.stringify({ value: value.value, source: value.source })
-        : undefined;
-
-      const current = workspace.get({ the, of });
-      if (JSON.stringify(current?.is) !== content) {
-        if (content !== undefined) {
-          // ⚠️ We do JSON roundtrips to strip off the undefined values that
-          // cause problems with serialization.
-          changes.push({ the, of, is: JSON.parse(content) as JSONValue });
-        } else {
-          changes.push({ the, of });
-        }
-      }
-      if (value.labels !== undefined) {
-        const currentLabel = workspace.get({ the: TheLabel, of });
-        if (!deepEqual(currentLabel?.is, value.labels)) {
-          if (value.labels !== undefined) {
-            changes.push({ the: TheLabel, of, is: value.labels as JSONValue });
-          } else {
-            changes.push({ the: TheLabel, of });
-          }
-        }
-      }
-    }
-
-    if (changes.length > 0) {
-      const result = await this.workspace.push(changes);
-      return result.error ? result : { ok: {} };
-    } else {
-      return { ok: {} };
-    }
-  }
-
-  parse(source: string): Memory.ProviderCommand<Memory.Protocol> {
-    return Codec.Receipt.fromString(source);
-  }
-
-  onReceive(data: string) {
-    return this.writer.write(
-      this.inspect({ receive: this.parse(data) }).receive,
+  setTimeout() {
+    this.timeoutID = setTimeout(
+      this.handleEvent,
+      this.settings.connectionTimeout,
+      { type: "timeout", target: this.connection },
     );
   }
-
-  inspect(
-    message: RawCommand,
-  ): RawCommand {
-    this.inspector?.postMessage({
-      ...message,
-      time: Date.now(),
+  onTimeout(socket: WebSocket) {
+    this.inspect({
+      disconnect: {
+        reason: "timeout",
+        message:
+          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
+      },
     });
-    return message;
-  }
 
+    if (this.connection === socket) {
+      socket.close();
+    }
+  }
   handleEvent(event: MessageEvent) {
     // clear if we had timeout pending
     clearTimeout(this.timeoutID);
@@ -962,52 +1114,14 @@ export class Provider implements StorageProvider {
         return this.onTimeout(event.target as WebSocket);
     }
   }
-  connect() {
-    const { connection } = this;
-    // If we already have a connection we remove all the listeners from it.
-    if (connection) {
-      clearTimeout(this.timeoutID);
-      connection.removeEventListener("message", this);
-      connection.removeEventListener("open", this);
-      connection.removeEventListener("close", this);
-      connection.removeEventListener("error", this);
-    }
 
-    const webSocketUrl = new URL(this.address.href);
-    webSocketUrl.searchParams.set("space", this.workspace.space);
-    const socket = new WebSocket(webSocketUrl.href);
-    this.connection = socket;
-    // Start a timer so if connection is pending longer then `connectionTimeout`
-    // we should abort and retry.
-    this.setTimeout();
-    socket.addEventListener("message", this);
-    socket.addEventListener("open", this);
-    socket.addEventListener("close", this);
-    socket.addEventListener("error", this);
-
-    this.connectionCount += 1;
+  parse(source: string): ProviderCommand<Protocol> {
+    return Codec.Receipt.fromString(source);
   }
-
-  setTimeout() {
-    this.timeoutID = setTimeout(
-      this.handleEvent,
-      this.settings.connectionTimeout,
-      { type: "timeout", target: this.connection },
+  onReceive(data: string) {
+    return this.writer.write(
+      this.inspect({ receive: this.parse(data) }).receive,
     );
-  }
-
-  onTimeout(socket: WebSocket) {
-    this.inspect({
-      disconnect: {
-        reason: "timeout",
-        message:
-          `Aborting connection after failure to connect in ${this.settings.connectionTimeout}ms`,
-      },
-    });
-
-    if (this.connection === socket) {
-      socket.close();
-    }
   }
 
   async onOpen(socket: WebSocket) {
@@ -1018,11 +1132,15 @@ export class Provider implements StorageProvider {
       connect: { attempt: this.connectionCount },
     });
 
-    // If we did have connection
+    // If we did have connection, schedule reestablishment without blocking
     if (this.connectionCount > 1) {
-      for (const space of this.spaces.values()) {
-        space.poll();
-      }
+      // Use queueMicrotask to ensure message pump starts first
+      queueMicrotask(() => {
+        this.provider.poll();
+        this.provider.reestablishSubscriptions().catch((error) => {
+          console.error("Failed to reestablish subscriptions:", error);
+        });
+      });
     }
 
     while (this.connection === socket) {
@@ -1032,35 +1150,17 @@ export class Provider implements StorageProvider {
         queue.delete(command);
       }
 
-      // Next read next command from the session.
+      // Then read next command
       const next = await reader.read();
-      // If session is closed we're done.
-      if (next.done) {
-        this.close();
-      }
-
-      const command = next.value!;
-
-      // Now we make sure that our socket is still a current connection as we
-      // may have lost connection while waiting to read a command.
-      if (this.connection === socket) {
-        this.post(command);
-      } // If it is no longer our connection we simply add the command into a
-      // queue so it will be send once connection is reopen.
-      else {
-        this.queue.add(command);
+      // if our connection changed while we were waiting on read we bail out
+      // and let the reconnection logic pick up.
+      if (this.connection !== socket || next.done) {
         break;
       }
+      // otherwise we pass the command via web-socket.
+      const command = next.value;
+      this.post(command);
     }
-  }
-
-  post(
-    invocation: Memory.UCAN<Memory.ConsumerCommandInvocation<Memory.Protocol>>,
-  ) {
-    this.inspect({
-      send: invocation,
-    });
-    this.connection!.send(Codec.UCAN.toString(invocation));
   }
 
   onDisconnect(event: Event) {
@@ -1082,7 +1182,7 @@ export class Provider implements StorageProvider {
           break;
         }
         default:
-          throw new Error(`Unknown event type: ${event.type}`);
+          throw new RangeError(`Unknown event type: ${event.type}`);
       }
 
       this.connect();
@@ -1094,7 +1194,7 @@ export class Provider implements StorageProvider {
     this.connection = null;
     if (connection && connection.readyState !== WebSocket.CLOSED) {
       connection.close();
-      return await Provider.closed(connection);
+      return await ProviderConnection.closed(connection);
     } else {
       return {};
     }
@@ -1102,6 +1202,16 @@ export class Provider implements StorageProvider {
 
   async destroy(): Promise<void> {
     await this.close();
+  }
+
+  inspect(
+    message: RawCommand,
+  ): RawCommand {
+    this.inspector?.postMessage({
+      ...message,
+      time: Date.now(),
+    });
+    return message;
   }
 
   /**
@@ -1150,19 +1260,363 @@ export class Provider implements StorageProvider {
     }
   }
 
-  getReplica(): string {
-    return this.workspace.space;
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: StorageValue<T>) => void,
+  ) {
+    return this.provider.sink(entityId, callback);
+  }
+
+  sync(
+    entityId: EntityId,
+    expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
+  ) {
+    return this.provider.sync(entityId, expectedInStorage, schemaContext);
+  }
+
+  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
+    return this.provider.get(entityId);
+  }
+  send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
+  ) {
+    return this.provider.send(batch);
+  }
+
+  getReplica() {
+    return this.provider.getReplica();
   }
 }
 
-export const getChanges = <
-  T extends The,
-  Of extends Entity,
-  Is extends JSONValue,
->(
-  statements: Iterable<Memory.Statement>,
+export class Provider implements IStorageProvider {
+  workspace: Replica;
+  the: string;
+  session: Consumer.MemoryConsumer<MemorySpace>;
+  spaces: Map<string, Replica>;
+  settings: IRemoteStorageProviderSettings;
+
+  subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
+    new Map();
+  // Tracks server-side subscriptions so we can re-establish them after reconnection
+  private serverSubscriptions = new SelectorTracker();
+
+  static open(options: RemoteStorageProviderOptions) {
+    return new this(options);
+  }
+
+  static connect(options: ConnectionOptions & RemoteStorageProviderOptions) {
+    const provider = this.open(options);
+    return provider.connect(options);
+  }
+
+  constructor({
+    session,
+    space,
+    the = "application/json",
+    settings = defaultSettings,
+  }: RemoteStorageProviderOptions) {
+    this.the = the;
+    this.settings = settings;
+    this.session = session;
+    this.spaces = new Map();
+    this.workspace = this.mount(space);
+  }
+
+  connect(options: ConnectionOptions) {
+    return new ProviderConnection({
+      id: options.id,
+      provider: this,
+      address: options.address,
+    });
+  }
+  get replica() {
+    return this.workspace;
+  }
+
+  mount(space: MemorySpace): Replica {
+    const replica = this.spaces.get(space);
+    if (replica) {
+      return replica;
+    } else {
+      const session = this.session.mount(space);
+      // FIXME(@ubik2): Disabling the cache while I ensure things work correctly
+      const replica = new Replica(space, session, new NoCache());
+      replica.useSchemaQueries = this.settings.useSchemaQueries;
+      replica.poll();
+      this.spaces.set(space, replica);
+      return replica;
+    }
+  }
+
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: StorageValue<T>) => void,
+  ): Cancel {
+    const { the } = this;
+    const of = BaseStorageProvider.toEntity(entityId);
+    // Capture workspace locally, so that if it changes later, our cancel
+    // will unsubscribe with the same object.
+    const { workspace } = this;
+    const address = { the, of };
+    const subscriber = (revision?: Revision<State>) => {
+      // If since is -1, this is not a real revision, so don't notify subscribers
+      if (revision && revision.since !== -1) {
+        // ⚠️ We may not have a value because fact was retracted or
+        // (less likely) deleted altogether. We still need to notify sink
+        // but we do this with the empty object per
+        // @see https://github.com/commontoolsinc/labs/pull/989#discussion_r2033651935
+        // TODO(@seefeldb): Make compatible `sink` API change
+        callback((revision?.is ?? {}) as unknown as StorageValue<T>);
+      }
+    };
+
+    workspace.subscribe(address, subscriber);
+    workspace.load([[address, undefined]]);
+
+    return () => workspace.unsubscribe(address, subscriber);
+  }
+
+  sync(
+    entityId: EntityId,
+    expectedInStorage?: boolean,
+    schemaContext?: SchemaContext,
+  ) {
+    const { the } = this;
+    const of = BaseStorageProvider.toEntity(entityId);
+    const factAddress = { the, of };
+
+    // Track this server subscription, and don't re-issue it
+    if (schemaContext) {
+      const selector = { path: [], schemaContext: schemaContext };
+      if (this.serverSubscriptions.hasSelector(factAddress, selector)) {
+        return Promise.resolve({ ok: {} });
+      }
+      this.serverSubscriptions.add(factAddress, selector);
+    }
+    return this.workspace.load([[factAddress, schemaContext]]);
+  }
+
+  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
+    const entity = this.workspace.get({
+      the: this.the,
+      of: BaseStorageProvider.toEntity(entityId),
+    });
+
+    return entity?.is as StorageValue<T> | undefined;
+  }
+
+  async send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
+  ): Promise<
+    Result<
+      Unit,
+      | ConflictError
+      | TransactionError
+      | ConnectionError
+      | AuthorizationError
+      | QueryError
+      | IStoreError
+    >
+  > {
+    const { the, workspace } = this;
+    const TheLabel = "application/label+json" as const;
+
+    const changes = [];
+    for (const { entityId, value } of batch) {
+      const of = BaseStorageProvider.toEntity(entityId);
+      const content = value.value !== undefined
+        ? JSON.stringify({ value: value.value, source: value.source })
+        : undefined;
+
+      const current = workspace.get({ the, of });
+      if (JSON.stringify(current?.is) !== content) {
+        if (content !== undefined) {
+          // ⚠️ We do JSON roundtrips to strip off the undefined values that
+          // cause problems with serialization.
+          changes.push({ the, of, is: JSON.parse(content) as JSONValue });
+        } else {
+          changes.push({ the, of });
+        }
+      }
+      if (value.labels !== undefined) {
+        const currentLabel = workspace.get({ the: TheLabel, of });
+        if (!deepEqual(currentLabel?.is, value.labels)) {
+          if (value.labels !== undefined) {
+            changes.push({ the: TheLabel, of, is: value.labels as JSONValue });
+          } else {
+            changes.push({ the: TheLabel, of });
+          }
+        }
+      }
+    }
+
+    if (changes.length > 0) {
+      const result = await this.workspace.push(changes);
+      return result.error ? result : { ok: {} };
+    } else {
+      return { ok: {} };
+    }
+  }
+
+  /**
+   * Polls all spaces for changes.
+   */
+  poll() {
+    for (const space of this.spaces.values()) {
+      space.poll();
+    }
+  }
+
+  /**
+   * Re-establishes all tracked schema query subscriptions.
+   * Called after WebSocket reconnection
+   * See `ProviderConnection.onOpen()`
+   */
+  async reestablishSubscriptions(): Promise<void> {
+    const subscriptions = this.serverSubscriptions.getAllSubscriptions();
+
+    // Try to clear pending invocations from the consumer session
+    try {
+      const consumerSession = (this.workspace.remote as any).session;
+      if (consumerSession?.invocations) {
+        consumerSession.invocations.clear();
+      }
+    } catch (error) {
+      // Ignore error
+    }
+
+    // Reset the existing Replica to clear its state
+    this.workspace.reset();
+
+    // Re-establish subscriptions
+    const need: [FactAddress, SchemaContext?][] = [];
+
+    // Always include the space commit object to ensure proper query context
+    const spaceCommitAddress: FactAddress = {
+      the: "application/commit+json",
+      of: this.workspace.space,
+    };
+    need.push([spaceCommitAddress, undefined]);
+
+    // Add all tracked subscriptions
+    for (const { factAddress, selector } of subscriptions) {
+      need.push([factAddress, selector.schemaContext]);
+    }
+
+    try {
+      await this.workspace.pull(need);
+    } catch (error) {
+      console.error("Failed to re-establish subscriptions:", error);
+    }
+  }
+
+  getReplica(): string {
+    return this.workspace.space;
+  }
+
+  async destroy(): Promise<void> {
+  }
+}
+
+export interface Options {
+  /**
+   * Singning authority.
+   */
+  as: Signer;
+
+  /**
+   * Address of the storage provider.
+   */
+  address: URL;
+
+  /**
+   * Unique identifier used for inspection.
+   */
+  id?: string;
+
+  /**
+   * Various settings to configure storage provider.
+   */
+  settings?: IRemoteStorageProviderSettings;
+}
+
+export class StorageManager implements IStorageManager, IStorageManagerV2 {
+  address: URL;
+  as: Signer;
+  id: string;
+  settings: IRemoteStorageProviderSettings;
+  #providers: Map<string, IStorageProviderWithReplica> = new Map();
+
+  static open(options: Options) {
+    if (options.address.protocol === "memory:") {
+      throw new RangeError(
+        "memory: protocol is not supported in browser runtime",
+      );
+    } else {
+      return new this(options);
+    }
+  }
+
+  protected constructor(
+    { address, as, id = crypto.randomUUID(), settings = defaultSettings }:
+      Options,
+  ) {
+    this.address = address;
+    this.settings = settings;
+    this.as = as;
+    this.id = id;
+  }
+
+  /**
+   * Opens a new storage provider session for the given space. Currently this
+   * creates a new web socket connection to `${this.address}?space=${space}`
+   * in order to cluster connections for the space in the same group.
+   */
+  open(space: MemorySpace) {
+    const provider = this.#providers.get(space);
+    if (!provider) {
+      const provider = this.connect(space);
+      this.#providers.set(space, provider);
+      return provider;
+    }
+    return provider;
+  }
+
+  protected connect(space: MemorySpace): IStorageProviderWithReplica {
+    const { id, address, as, settings } = this;
+    return Provider.connect({
+      id,
+      space,
+      address,
+      settings,
+      session: Consumer.create({ as }),
+    });
+  }
+
+  async close() {
+    const promises = [];
+    for (const provider of this.#providers.values()) {
+      promises.push(provider.destroy());
+    }
+
+    await Promise.all(promises);
+  }
+
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IStorageTransaction {
+    return Transaction.create(this);
+  }
+}
+
+export const getChanges = (
+  statements: Iterable<Statement>,
 ) => {
-  const changes = {} as Memory.Changes<T, Of, Is>;
+  const changes = {} as MemoryChanges;
   for (const statement of statements) {
     if (statement.cause) {
       const cause = statement.cause.toString();
@@ -1177,23 +1631,12 @@ export const getChanges = <
 };
 
 // Given an Assert statement with labels, return a SchemaContext with the ifc tags
-const getSchema = (change: Assert | Retract): SchemaContext | undefined => {
+const getSchema = (
+  change: Assert | Retract | Claim,
+): SchemaContext | undefined => {
   if (isObject(change?.is) && "labels" in change.is) {
     const schema = { ifc: change.is.labels } as JSONSchema;
     return { schema: schema, rootSchema: schema };
   }
   return undefined;
-};
-
-// Remove any non-state fields from fact
-const limitFactState = (fact: State | undefined): State | undefined => {
-  if (fact === undefined) {
-    return undefined;
-  } else if (fact?.is !== undefined && fact?.cause !== undefined) {
-    return { of: fact.of, the: fact.the, is: fact.is, cause: fact.cause };
-  } else if (fact?.cause !== undefined) {
-    return { of: fact.of, the: fact.the, cause: fact.cause };
-  } else {
-    return { of: fact.of, the: fact.the };
-  }
 };
