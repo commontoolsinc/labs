@@ -1,7 +1,7 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { App } from "../models/app.ts";
+import { AppState } from "../models/app.ts";
 import { appContext } from "../contexts/app.ts";
 
 export class XHeaderView extends LitElement {
@@ -14,9 +14,9 @@ export class XHeaderView extends LitElement {
     }
   `;
 
-  @consume({ context: appContext })
+  @consume({ context: appContext, subscribe: true })
   @property({ attribute: false })
-  app = new App();
+  private app?: AppState;
 
   override render() {
     return html`
