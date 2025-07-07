@@ -6,18 +6,16 @@
  */
 
 /**
- * Cell interface - reactive container for values with subscription capabilities
- *
- * Imported from @commontools/api for type compatibility during migration.
- * Provides reactive state management with get(), set(), update(), key(), and sink() methods.
+ * Import Cell interface from @commontools/runner for reactive state management
+ * 
+ * The Cell interface provides reactive container capabilities with methods like:
+ * - get(): T - Gets current value
+ * - set(value: T): void - Sets entire value  
+ * - update(values: Partial<T>): void - Updates partial values
+ * - key(valueKey: K): Cell<T[K]> - Gets cell for specific property
+ * - sink(callback: (value: T) => void): Cancel - Subscribes to changes
  */
-export interface Cell<T = any> {
-  get(): T;
-  set(value: T): void;
-  update(values: Partial<T>): void;
-  key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  sink(callback: (value: T) => void): () => void;
-}
+import type { Cell } from "./simple-cell.ts";
 
 /**
  * Represents a reference to a charm object with optional identifying properties
@@ -157,8 +155,8 @@ export interface OutlineUIState {
  * and Cell<Tree> reactive operations to maintain backward compatibility.
  */
 export interface OutlinerOperations {
-  // Legacy direct access (maintained for backward compatibility)
-  readonly value: Tree;
+  // Cell-based tree access (current implementation)
+  readonly value: Cell<Tree>;
   focusedNode: Node | null;
   collapsedNodes: Set<Node>;
 
@@ -269,6 +267,18 @@ export interface OutlinerOperations {
 }
 
 /**
+ * Extended operations interface for components using Cell<Tree>
+ * 
+ * This interface represents the current state of the CTOutliner component
+ * which uses Cell<Tree> for the value property but still accesses it directly.
+ * This will be used during the migration to track the actual component interface.
+ */
+export interface CellBasedOutlinerOperations extends Omit<OutlinerOperations, 'value'> {
+  // Cell-based tree access (current component implementation)
+  readonly value: Cell<Tree>;
+}
+
+/**
  * Context object passed to keyboard commands
  *
  * Enhanced during migration to provide both direct access and Cell-based reactive access
@@ -310,6 +320,16 @@ export interface KeyboardContext {
    * - allNodesCell.sink(callback): Cancel - Subscribes to node list changes
    */
   readonly allNodesCell?: Cell<Node[]>;
+}
+
+/**
+ * Cell-based keyboard context for components using Cell<Tree>
+ * 
+ * This interface represents the context for components that use Cell<Tree>
+ * but still access it directly during the migration period.
+ */
+export interface CellBasedKeyboardContext extends Omit<KeyboardContext, 'component'> {
+  readonly component: CellBasedOutlinerOperations;
 }
 
 /**
@@ -356,6 +376,16 @@ export interface EditingKeyboardContext {
    * - treeCell.sink(callback): Cancel - Subscribes to tree changes
    */
   readonly treeCell?: TreeCell;
+}
+
+/**
+ * Cell-based editing keyboard context for components using Cell<Tree>
+ * 
+ * This interface represents the editing context for components that use Cell<Tree>
+ * but still access it directly during the migration period.
+ */
+export interface CellBasedEditingKeyboardContext extends Omit<EditingKeyboardContext, 'component'> {
+  readonly component: CellBasedOutlinerOperations;
 }
 
 /**

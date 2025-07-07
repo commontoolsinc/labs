@@ -4,6 +4,8 @@
 import { CTOutliner } from "./ct-outliner.ts";
 import type { KeyboardContext } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
+import type { Cell } from "./simple-cell.ts";
+import { createSimpleCell } from "./simple-cell.ts";
 
 /**
  * Mock DOM element for testing
@@ -79,7 +81,7 @@ export const setupMockOutliner = () => {
 
   // Setup basic tree
   const tree = createTestTree();
-  outliner.value = tree;
+  outliner.value = createSimpleCell(tree);
   outliner.focusedNode = tree.root.children[0];
 
   return { outliner, tree };
@@ -114,7 +116,7 @@ export const createKeyboardContext = (
   outliner: CTOutliner,
 ): KeyboardContext => {
   const allNodes = TreeOperations.getAllVisibleNodes(
-    outliner.value.root,
+    outliner.value.get().root,
     new Set(),
   );
   const currentIndex = outliner.focusedNode
