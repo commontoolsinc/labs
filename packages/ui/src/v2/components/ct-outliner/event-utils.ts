@@ -1,4 +1,9 @@
-import type { KeyboardContext, EditingKeyboardContext, OutlinerOperations, Node } from "./types.ts";
+import type {
+  EditingKeyboardContext,
+  KeyboardContext,
+  Node,
+  OutlinerOperations,
+} from "./types.ts";
 import { NodeUtils } from "./node-utils.ts";
 
 /**
@@ -12,17 +17,17 @@ export const EventUtils = {
   createKeyboardContext(
     event: KeyboardEvent,
     component: OutlinerOperations,
-    focusedNode: Node | null
+    focusedNode: Node | null,
   ): KeyboardContext {
     const allNodes = component.getAllVisibleNodes();
     const currentIndex = focusedNode ? allNodes.indexOf(focusedNode) : -1;
-    
+
     return {
       event,
       component,
       allNodes,
       currentIndex,
-      focusedNode
+      focusedNode,
     };
   },
 
@@ -34,14 +39,14 @@ export const EventUtils = {
     component: OutlinerOperations,
     editingNode: Node,
     editingContent: string,
-    textarea: HTMLTextAreaElement
+    textarea: HTMLTextAreaElement,
   ): EditingKeyboardContext {
     return {
       event,
       component,
       editingNode,
       editingContent,
-      textarea
+      textarea,
     };
   },
 
@@ -49,10 +54,10 @@ export const EventUtils = {
    * Check if key is a typing character (letter, number, punctuation)
    */
   isTypingKey(key: string, event: KeyboardEvent): boolean {
-    return key.length === 1 && 
-           !event.ctrlKey && 
-           !event.metaKey && 
-           !event.altKey;
+    return key.length === 1 &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey;
   },
 
   /**
@@ -73,7 +78,16 @@ export const EventUtils = {
    * Check if key is a navigation key
    */
   isNavigationKey(key: string): boolean {
-    return ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(key);
+    return [
+      "ArrowUp",
+      "ArrowDown",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+      "PageUp",
+      "PageDown",
+    ].includes(key);
   },
 
   /**
@@ -88,17 +102,15 @@ export const EventUtils = {
    */
   getKeyDisplayName(key: string, event: KeyboardEvent): string {
     const modifiers = [];
-    
+
     if (event.ctrlKey) modifiers.push("Ctrl");
     if (event.metaKey) modifiers.push("Cmd");
     if (event.altKey) modifiers.push("Alt");
     if (event.shiftKey) modifiers.push("Shift");
-    
+
     const keyName = key === " " ? "Space" : key;
-    
-    return modifiers.length > 0 
-      ? `${modifiers.join("+")}+${keyName}`
-      : keyName;
+
+    return modifiers.length > 0 ? `${modifiers.join("+")}+${keyName}` : keyName;
   },
 
   /**
@@ -113,12 +125,12 @@ export const EventUtils = {
     const { value, selectionStart, selectionEnd } = textarea;
     const textBeforeCursor = value.substring(0, selectionStart);
     const textAfterCursor = value.substring(selectionEnd);
-    
+
     return {
       atStart: selectionStart === 0,
       atEnd: selectionEnd === value.length,
-      atFirstLine: !textBeforeCursor.includes('\n'),
-      atLastLine: !textAfterCursor.includes('\n')
+      atFirstLine: !textBeforeCursor.includes("\n"),
+      atLastLine: !textAfterCursor.includes("\n"),
     };
   },
 
@@ -134,14 +146,14 @@ export const EventUtils = {
   } {
     const { value, selectionStart, selectionEnd } = textarea;
     const textBeforeCursor = value.substring(0, selectionStart);
-    const lines = textBeforeCursor.split('\n');
-    
+    const lines = textBeforeCursor.split("\n");
+
     return {
       position: selectionStart,
       line: lines.length - 1,
       column: lines[lines.length - 1].length,
       selectedText: value.substring(selectionStart, selectionEnd),
-      hasSelection: selectionStart !== selectionEnd
+      hasSelection: selectionStart !== selectionEnd,
     };
-  }
+  },
 };

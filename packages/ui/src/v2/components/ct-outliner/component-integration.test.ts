@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CTOutliner } from "./ct-outliner.ts";
-import { setupMockOutliner, createNestedTestTree } from "./test-utils.ts";
+import { createNestedTestTree, setupMockOutliner } from "./test-utils.ts";
 
 describe("CTOutliner Component Integration Tests", () => {
   let outliner: CTOutliner;
@@ -16,9 +16,9 @@ describe("CTOutliner Component Integration Tests", () => {
     it("should create new sibling node with Enter", () => {
       setupOutliner();
       const initialCount = outliner.tree.root.children.length;
-      
+
       outliner.createNewNodeAfter(outliner.focusedNode!);
-      
+
       expect(outliner.tree.root.children.length).toBe(initialCount + 1);
       expect(outliner.focusedNode!.body).toBe("");
     });
@@ -27,9 +27,9 @@ describe("CTOutliner Component Integration Tests", () => {
       setupOutliner();
       const parentNode = outliner.focusedNode!;
       const initialChildCount = parentNode.children.length;
-      
+
       outliner.createChildNode(parentNode);
-      
+
       // Since tree is mutable, parentNode should have the new child
       expect(parentNode.children.length).toBe(initialChildCount + 1);
       expect(outliner.focusedNode!.body).toBe("");
@@ -41,9 +41,9 @@ describe("CTOutliner Component Integration Tests", () => {
       setupOutliner();
       const nodeToDelete = outliner.tree.root.children[0];
       const secondNode = outliner.tree.root.children[1];
-      
+
       outliner.deleteNode(nodeToDelete);
-      
+
       expect(outliner.tree.root.children.length).toBe(1);
       expect(outliner.tree.root.children[0]).toBe(secondNode);
     });
@@ -54,9 +54,9 @@ describe("CTOutliner Component Integration Tests", () => {
       setupOutliner();
       const secondNode = outliner.tree.root.children[1];
       const firstNode = outliner.tree.root.children[0];
-      
+
       outliner.indentNode(secondNode);
-      
+
       expect(outliner.tree.root.children.length).toBe(1);
       expect(firstNode.children.length).toBe(1);
       expect(firstNode.children[0]).toBe(secondNode);
@@ -66,9 +66,9 @@ describe("CTOutliner Component Integration Tests", () => {
       const tree = createNestedTestTree();
       outliner.tree = tree;
       const childNode = tree.root.children[0].children[0];
-      
+
       outliner.outdentNode(childNode);
-      
+
       expect(outliner.tree.root.children.length).toBe(2);
       expect(outliner.tree.root.children[1]).toBe(childNode);
     });
@@ -78,9 +78,9 @@ describe("CTOutliner Component Integration Tests", () => {
     it("should enter edit mode and preserve content", () => {
       setupOutliner();
       const node = outliner.focusedNode!;
-      
+
       outliner.startEditing(node);
-      
+
       expect(outliner.testAPI.editingNode).toBe(node);
       expect(outliner.testAPI.editingContent).toBe(node.body);
     });
@@ -89,9 +89,9 @@ describe("CTOutliner Component Integration Tests", () => {
       setupOutliner();
       const node = outliner.focusedNode!;
       const initialText = "Hello";
-      
+
       outliner.startEditingWithInitialText(node, initialText);
-      
+
       expect(outliner.testAPI.editingNode).toBe(node);
       expect(outliner.testAPI.editingContent).toBe(initialText);
     });
@@ -102,10 +102,10 @@ describe("CTOutliner Component Integration Tests", () => {
       setupOutliner();
       const originalFirstNode = outliner.tree.root.children[0];
       const originalSecondNode = outliner.tree.root.children[1];
-      
+
       // Create a new node
       outliner.createNewNodeAfter(originalFirstNode);
-      
+
       // Original nodes should still be present and identifiable
       expect(outliner.tree.root.children[0]).toBe(originalFirstNode);
       expect(outliner.tree.root.children[2]).toBe(originalSecondNode);
@@ -114,7 +114,7 @@ describe("CTOutliner Component Integration Tests", () => {
     it("should maintain focus correctly after tree modifications", () => {
       setupOutliner();
       const firstNode = outliner.tree.root.children[0];
-      
+
       // Create new node and verify focus is on new node
       outliner.createNewNodeAfter(firstNode);
       expect(outliner.focusedNode!.body).toBe("");
@@ -125,7 +125,7 @@ describe("CTOutliner Component Integration Tests", () => {
   describe("Public API Methods", () => {
     it("should have all required public methods accessible", () => {
       setupOutliner();
-      
+
       expect(typeof outliner.createNewNodeAfter).toBe("function");
       expect(typeof outliner.createChildNode).toBe("function");
       expect(typeof outliner.deleteNode).toBe("function");
@@ -142,11 +142,11 @@ describe("CTOutliner Component Integration Tests", () => {
     it("should toggle edit mode correctly", () => {
       setupOutliner();
       const node = outliner.focusedNode!;
-      
+
       // Should start editing
       outliner.toggleEditMode(node);
       expect(outliner.testAPI.editingNode).toBe(node);
-      
+
       // Should stop editing
       outliner.toggleEditMode(node);
       expect(outliner.testAPI.editingNode).toBe(null);
@@ -156,11 +156,11 @@ describe("CTOutliner Component Integration Tests", () => {
       setupOutliner();
       const firstNode = outliner.tree.root.children[0];
       const secondNode = outliner.tree.root.children[1];
-      
+
       // Start editing first node
       outliner.toggleEditMode(firstNode);
       expect(outliner.testAPI.editingNode).toBe(firstNode);
-      
+
       // Switch to editing second node (should stop editing first)
       outliner.toggleEditMode(secondNode);
       expect(outliner.testAPI.editingNode).toBe(secondNode);
