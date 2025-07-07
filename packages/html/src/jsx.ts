@@ -1,4 +1,5 @@
-import { type VNode } from "@commontools/runner";
+import { isObject } from "@commontools/utils/types";
+import { UI, type VNode } from "@commontools/runner";
 export type { Child, Props } from "@commontools/runner";
 export { type VNode };
 
@@ -8,5 +9,6 @@ export { type VNode };
  * @returns True if the value is a VNode
  */
 export const isVNode = (value: unknown): value is VNode => {
+  while (isObject(value) && UI in value) value = value[UI];
   return (value as VNode)?.type === "vnode";
 };

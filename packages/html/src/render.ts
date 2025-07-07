@@ -1,14 +1,15 @@
-import { type Child, isVNode, type Props, type VNode } from "./jsx.ts";
+import { isObject } from "@commontools/utils/types";
 import {
   type Cancel,
   type Cell,
   effect,
   isCell,
   isStream,
+  type JSONSchema,
+  UI,
   useCancelGroup,
 } from "@commontools/runner";
-import { JSONSchema } from "@commontools/runner";
-import { isObject } from "@commontools/utils/types";
+import { type Child, isVNode, type Props, type VNode } from "./jsx.ts";
 import * as logger from "./logger.ts";
 
 const vdomSchema: JSONSchema = {
@@ -33,6 +34,7 @@ const vdomSchema: JSONSchema = {
       },
       asCell: true,
     },
+    [UI]: { $ref: "#" },
   },
 } as const;
 
@@ -58,6 +60,11 @@ export const render = (
  * @returns A cancel function to remove the rendered content
  */
 export const renderImpl = (parent: HTMLElement, view: VNode): Cancel => {
+  // If there is no valid vnode, don't render anything
+  if (!isVNode(view)) {
+    logger.debug("No valid vnode to render", view);
+    return () => {};
+  }
   const [root, cancel] = renderNode(view);
   if (!root) {
     logger.warn("Could not render view", view);
@@ -75,6 +82,11 @@ export default render;
 
 const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
   const [cancel, addCancel] = useCancelGroup();
+
+  // Follow `[UI]` to actual vdom. Do this before otherwise parsing the vnode,
+  // so that if there are both, the `[UI]` annotation takes precedence (avoids
+  // accidental collision with the otherwise quite generic propery names)
+  while (node[UI]) node = node[UI];
 
   const sanitizedNode = sanitizeNode(node);
 
