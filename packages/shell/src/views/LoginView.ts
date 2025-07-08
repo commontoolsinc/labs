@@ -1,10 +1,8 @@
-import { css, html, LitElement } from "lit";
-import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
-import { App } from "../models/app.ts";
-import { appContext } from "../contexts/app.ts";
+import { css, html } from "lit";
+import { ANYONE, Identity } from "@commontools/identity";
+import { BaseView } from "./BaseView.ts";
 
-export class XLoginView extends LitElement {
+export class XLoginView extends BaseView {
   static override styles = css`
     :host {
       display: block;
@@ -14,13 +12,15 @@ export class XLoginView extends LitElement {
     }
   `;
 
-  @consume({ context: appContext })
-  @property({ attribute: false })
-  app = new App();
+  async onLogin(e: Event) {
+    e.preventDefault();
+    const identity = await Identity.fromPassphrase(ANYONE);
+    this.command({ type: "set-identity", identity });
+  }
 
   override render() {
     return html`
-      <span>TODO LOGIN!</span>
+      <button @click="${this.onLogin}">Anonymous Login</button>
     `;
   }
 }

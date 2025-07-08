@@ -1,10 +1,11 @@
-import { css, html, LitElement } from "lit";
+import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { consume } from "@lit/context";
-import { App } from "../models/app.ts";
+import { AppState } from "../models/app.ts";
 import { appContext } from "../contexts/app.ts";
+import { BaseView } from "./BaseView.ts";
 
-export class XBodyView extends LitElement {
+export class XBodyView extends BaseView {
   static override styles = css`
     :host {
       display: block;
@@ -14,9 +15,9 @@ export class XBodyView extends LitElement {
     }
   `;
 
-  @consume({ context: appContext })
+  @consume({ context: appContext, subscribe: true })
   @property({ attribute: false })
-  app = new App();
+  private app?: AppState;
 
   override render() {
     return html`
