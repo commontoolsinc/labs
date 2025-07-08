@@ -21,7 +21,7 @@ class MockCharmManager {
     };
   }
 
-  async get(charmId: string): Promise<any | null> {
+  get(charmId: string): any | null {
     return this.charms.get(charmId) || null;
   }
 
