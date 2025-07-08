@@ -271,11 +271,7 @@ export const load = (
         const reason = error as Error;
         return {
           error: new InvalidDataURIError(
-            `Failed to parse JSON from data URI: ${reason.message}
-              parseError instanceof Error
-                ?
-                : String(parseError)
-            }`,
+            `Failed to parse JSON from data URI: ${reason.message}`,
             reason,
           ),
         };
