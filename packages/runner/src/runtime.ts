@@ -109,76 +109,81 @@ export interface IRuntime {
 
   // Cell factory methods
   getCell<T>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromEntityId<T>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId,
     path?: PropertyKey[],
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId,
     path: PropertyKey[],
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink<T>(
+    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getImmutableCell<T>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: T,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: any,
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
 
   // Convenience methods that delegate to the runner
   run<T, R>(
+    tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
   run<T, R = any>(
+    tx: IExtendedStorageTransaction,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
   run<T, R>(
+    tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
+    tx: IExtendedStorageTransaction,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   runSynced(
+    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Recipe | Module,
     inputs?: any,
@@ -214,10 +219,15 @@ export interface IRecipeManager {
   readonly runtime: IRuntime;
   recipeById(id: string): any;
   registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
-  loadRecipe(id: string, space?: MemorySpace): Promise<Recipe>;
+  loadRecipe(
+    tx: IExtendedStorageTransaction,
+    id: string,
+    space?: MemorySpace,
+  ): Promise<Recipe>;
   compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
   saveRecipe(
+    tx: IExtendedStorageTransaction,
     params: {
       recipeId: string;
       space: MemorySpace;
@@ -226,6 +236,7 @@ export interface IRecipeManager {
     },
   ): boolean;
   saveAndSyncRecipe(
+    tx: IExtendedStorageTransaction,
     params: {
       recipeId: string;
       space: MemorySpace;
@@ -265,27 +276,32 @@ export interface IRunner {
   readonly runtime: IRuntime;
 
   run<T, R>(
+    tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
   run<T, R = any>(
+    tx: IExtendedStorageTransaction,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
   run<T, R>(
+    tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
+    tx: IExtendedStorageTransaction,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
 
   runSynced(
+    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Recipe | Module,
     inputs?: any,
@@ -427,67 +443,67 @@ export class Runtime implements IRuntime {
 
   // Cell factory methods
   getCell<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCell<T>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getCell(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<any> {
     const doc = this.documentMap.getDoc<any>(undefined as any, cause, space);
     // Use doc.asCell method to avoid circular dependency
-    return doc.asCell([], log, schema);
+    return doc.asCell(tx, [], schema);
   }
 
   getCellFromEntityId<T>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId | string,
     path?: PropertyKey[],
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[],
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromEntityId(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[] = [],
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<any> {
     const doc = this.documentMap.getDocByEntityId(space, entityId, true)!;
-    return doc.asCell(path, log, schema);
+    return doc.asCell(tx, path, schema);
   }
 
   getCellFromLink<T>(
+    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getCellFromLink(
+    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<any> {
     let doc;
 
@@ -510,8 +526,8 @@ export class Runtime implements IRuntime {
 
       // If we aren't passed a schema, use the one in the cellLink
       return doc.asCell(
+        tx,
         link.path,
-        log,
         schema ?? link.schema,
         schema ? undefined : link.rootSchema,
       );
@@ -528,8 +544,8 @@ export class Runtime implements IRuntime {
         true,
       )!;
       return doc.asCell(
+        tx,
         link.path,
-        log,
         schema ?? link.schema,
         schema ? undefined : link.rootSchema,
       );
@@ -537,58 +553,64 @@ export class Runtime implements IRuntime {
   }
 
   getImmutableCell<T>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: T,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: any,
     schema: S,
-    log?: ReactivityLog,
   ): Cell<Schema<S>>;
   getImmutableCell(
+    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: any,
     schema?: JSONSchema,
-    log?: ReactivityLog,
   ): Cell<any> {
     const doc = this.documentMap.getDoc<any>(data, { immutable: data }, space);
     doc.freeze("immutable cell");
-    return doc.asCell([], log, schema);
+    return doc.asCell(tx, [], schema);
   }
 
   // Convenience methods that delegate to the runner
   run<T, R>(
+    tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
   run<T, R = any>(
+    tx: IExtendedStorageTransaction,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: DocImpl<R>,
   ): DocImpl<R>;
   run<T, R>(
+    tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
+    tx: IExtendedStorageTransaction,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
+    tx: IExtendedStorageTransaction,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: DocImpl<R> | Cell<R>,
   ): DocImpl<R> | Cell<R> {
     if (isCell(resultCell)) {
-      return this.runner.run<T, R>(recipeOrModule, argument, resultCell);
+      return this.runner.run<T, R>(tx, recipeOrModule, argument, resultCell);
     } else {
       return this.runner.run<T, R>(
+        tx,
         recipeOrModule,
         argument,
         resultCell as DocImpl<R>,
@@ -597,10 +619,11 @@ export class Runtime implements IRuntime {
   }
 
   runSynced(
+    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Recipe | Module,
     inputs?: any,
   ) {
-    return this.runner.runSynced(resultCell, recipe, inputs);
+    return this.runner.runSynced(tx, resultCell, recipe, inputs);
   }
 }

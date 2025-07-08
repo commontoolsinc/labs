@@ -2,15 +2,12 @@ import { isRecord } from "@commontools/utils/types";
 import {
   type JSONValue,
   type Recipe,
-  unsafe_materializeFactory,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
-  type UnsafeBinding,
 } from "./builder/types.ts";
 import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { appendTxToReactivityLog, type Cell, isCell } from "./cell.ts";
-import { type ReactivityLog } from "./scheduler.ts";
+import { type Cell, isCell } from "./cell.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -18,8 +15,8 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
-  parseNormalizedFullLinktoLegacyDocCellLink,
 } from "./link-utils.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 /**
  * Sends a value to a binding. If the binding is an array or object, it'll
@@ -27,20 +24,18 @@ import {
  * an alias, it will follow all aliases and send the value to the last aliased
  * doc. If the binding is a literal, we verify that it matches the value and
  * throw an error otherwise.
+ * @param tx - The transaction to use for updates
  * @param docOrCell - The document or cell context
  * @param binding - The binding to send to
  * @param value - The value to send
- * @param log - Optional reactivity log
  */
 export function sendValueToBinding<T>(
+  tx: IExtendedStorageTransaction,
   cell: Cell<T>,
   binding: unknown,
   value: unknown,
-  log?: ReactivityLog,
 ): void {
-  const runtime = cell.getDoc().runtime;
   if (isLegacyAlias(binding)) {
-    const tx = runtime.edit();
     const ref = followWriteRedirects(tx, binding, cell);
     diffAndUpdate(
       cell.getDoc().runtime,
@@ -49,18 +44,16 @@ export function sendValueToBinding<T>(
       value as JSONValue,
       { cell: cell.getAsNormalizedFullLink(), binding },
     );
-    tx.commit();
-    if (log) appendTxToReactivityLog(log, tx, runtime);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {
       for (let i = 0; i < Math.min(binding.length, value.length); i++) {
-        sendValueToBinding(cell, binding[i], value[i], log);
+        sendValueToBinding(tx, cell, binding[i], value[i]);
       }
     }
   } else if (isRecord(binding) && isRecord(value)) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
-        sendValueToBinding(cell, binding[key], value[key], log);
+        sendValueToBinding(tx, cell, binding[key], value[key]);
       }
     }
   } else if (!isRecord(binding) || Object.keys(binding).length !== 0) {
@@ -141,20 +134,6 @@ export function unsafe_noteParentOnRecipes(
   }
 }
 
-export function unsafe_createParentBindings(
-  recipe: Recipe,
-  log: ReactivityLog,
-): UnsafeBinding | undefined {
-  if (!recipe || !recipe[unsafe_originalRecipe]) return undefined;
-  else {
-    return {
-      recipe: recipe[unsafe_originalRecipe]!,
-      materialize: recipe[unsafe_materializeFactory]!(log),
-      parent: unsafe_createParentBindings(recipe[unsafe_parentRecipe]!, log),
-    };
-  }
-}
-
 /**
  * Traverses binding and returns all cells reachable through write redirects.
  *
@@ -177,7 +156,10 @@ export function findAllWriteRedirectCells<T>(
       const link = parseLink(binding, baseCell);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
-      const linkCell = baseCell.getDoc().runtime.getCellFromLink(link);
+      const linkCell = baseCell.getDoc().runtime.getCellFromLink(
+        baseCell.tx,
+        link,
+      );
       if (!linkCell) throw new Error("Link cell not found");
       find(linkCell.getRaw(), baseCell);
     } else if (isLink(binding)) {

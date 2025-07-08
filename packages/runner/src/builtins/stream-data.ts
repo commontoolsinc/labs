@@ -1,7 +1,7 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
-import { type ReactivityLog } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -26,50 +26,60 @@ export function streamData(
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = runtime.getCell(
-    parentCell.space,
-    { streamData: { pending: cause } },
-  );
-  pending.send(false);
-
-  const result = runtime.getCell<any | undefined>(
-    parentCell.space,
-    {
-      streamData: { result: cause },
-    },
-  );
-
-  const error = runtime.getCell<any | undefined>(
-    parentCell.space,
-    {
-      streamData: { error: cause },
-    },
-  );
-
-  pending.getDoc().ephemeral = true;
-  result.getDoc().ephemeral = true;
-  error.getDoc().ephemeral = true;
-
-  pending.setSourceCell(parentCell);
-  result.setSourceCell(parentCell);
-  error.setSourceCell(parentCell);
-
-  // Since we'll only write into the docs above, we only have to call this once
-  // here, instead of in the action.
-  sendResult({ pending, result, error });
-
   const status = { run: 0, controller: undefined } as {
     run: number;
     controller: AbortController | undefined;
   };
 
   let previousCall = "";
-  return (log: ReactivityLog) => {
-    const pendingWithLog = pending.withLog(log);
-    const resultWithLog = result.withLog(log);
-    const errorWithLog = error.withLog(log);
+  let cellsInitialized = false;
+  let pending: Cell<boolean>;
+  let result: Cell<any | undefined>;
+  let error: Cell<any | undefined>;
+  
+  return (tx: IExtendedStorageTransaction) => {
+    if (!cellsInitialized) {
+      pending = runtime.getCell(
+        tx,
+        parentCell.space,
+        { streamData: { pending: cause } },
+      );
+      pending.send(false);
 
-    const { url, options } = inputsCell.getAsQueryResult([], log) || {};
+      result = runtime.getCell<any | undefined>(
+        tx,
+        parentCell.space,
+        {
+          streamData: { result: cause },
+        },
+      );
+
+      error = runtime.getCell<any | undefined>(
+        tx,
+        parentCell.space,
+        {
+          streamData: { error: cause },
+        },
+      );
+
+      pending.getDoc().ephemeral = true;
+      result.getDoc().ephemeral = true;
+      error.getDoc().ephemeral = true;
+
+      pending.setSourceCell(parentCell);
+      result.setSourceCell(parentCell);
+      error.setSourceCell(parentCell);
+
+      // Since we'll only write into the docs above, we only have to call this once
+      // here, instead of in the action.
+      sendResult({ pending, result, error });
+      cellsInitialized = true;
+    }
+    const pendingWithLog = pending.withTx(tx);
+    const resultWithLog = result.withTx(tx);
+    const errorWithLog = error.withTx(tx);
+
+    const { url, options } = inputsCell.getAsQueryResult([], tx) || {};
 
     // Re-entrancy guard: Don't restart the stream if it's the same request.
     const currentCall = `${url}${JSON.stringify(options)}`;

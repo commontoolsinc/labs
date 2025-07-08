@@ -1,8 +1,8 @@
 import { refer } from "merkle-reference";
 import { type Cell } from "../cell.ts";
-import { type ReactivityLog } from "../scheduler.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
  * Fetch data from a URL.
@@ -27,55 +27,66 @@ export function fetchData(
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = runtime.getCell(
-    parentCell.space,
-    { fetchData: { pending: cause } },
-  );
-  pending.send(false);
-
-  const result = runtime.getCell<any | undefined>(
-    parentCell.space,
-    {
-      fetchData: { result: cause },
-    },
-  );
-
-  const error = runtime.getCell<any | undefined>(
-    parentCell.space,
-    {
-      fetchData: { error: cause },
-    },
-  );
-
-  const requestHash = runtime.getCell<string | undefined>(
-    parentCell.space,
-    {
-      fetchData: { requestHash: cause },
-    },
-  );
-
-  pending.setSourceCell(parentCell);
-  result.setSourceCell(parentCell);
-  error.setSourceCell(parentCell);
-  requestHash.setSourceCell(parentCell);
-
-  sendResult({
-    pending,
-    result,
-    error,
-    requestHash,
-  });
-
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  let cellsInitialized = false;
+  let pending: Cell<boolean>;
+  let result: Cell<any | undefined>;
+  let error: Cell<any | undefined>;
+  let requestHash: Cell<string | undefined>;
 
-  return (log: ReactivityLog) => {
-    const pendingWithLog = pending.withLog(log);
-    const resultWithLog = result.withLog(log);
-    const errorWithLog = error.withLog(log);
-    const requestHashWithLog = requestHash.withLog(log);
+  return (tx: IExtendedStorageTransaction) => {
+    if (!cellsInitialized) {
+      pending = runtime.getCell(
+        tx,
+        parentCell.space,
+        { fetchData: { pending: cause } },
+      );
+      pending.send(false);
 
-    const { url, mode, options } = inputsCell.getAsQueryResult([], log);
+      result = runtime.getCell<any | undefined>(
+        tx,
+        parentCell.space,
+        {
+          fetchData: { result: cause },
+        },
+      );
+
+      error = runtime.getCell<any | undefined>(
+        tx,
+        parentCell.space,
+        {
+          fetchData: { error: cause },
+        },
+      );
+
+      requestHash = runtime.getCell<string | undefined>(
+        tx,
+        parentCell.space,
+        {
+          fetchData: { requestHash: cause },
+        },
+      );
+
+      pending.setSourceCell(parentCell);
+      result.setSourceCell(parentCell);
+      error.setSourceCell(parentCell);
+      requestHash.setSourceCell(parentCell);
+
+      sendResult({
+        pending,
+        result,
+        error,
+        requestHash,
+      });
+      cellsInitialized = true;
+    }
+    const pendingWithLog = pending.withTx(tx);
+    const resultWithLog = result.withTx(tx);
+    const errorWithLog = error.withTx(tx);
+    const requestHashWithLog = requestHash.withTx(tx);
+
+    const { url, mode, options } = inputsCell.getAsQueryResult([], tx);
 
     const hash = refer({
       url: url ?? "",

@@ -1,24 +1,24 @@
+import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
-import { toOpaqueRef } from "./builder/types.ts";
-import { type DocImpl, makeOpaqueRef } from "./doc.ts";
+import { type Frame, type OpaqueRef, toOpaqueRef } from "./builder/types.ts";
+import { opaqueRef } from "./builder/opaque-ref.ts";
 import { type LegacyDocCellLink } from "./sigil-types.ts";
-import { type ReactivityLog } from "./scheduler.ts";
-import { diffAndUpdate, setNestedValue } from "./data-updating.ts";
+import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLinkToValue } from "./link-resolution.ts";
-import {
-  parseLink,
-  parseNormalizedFullLinktoLegacyDocCellLink,
-} from "./link-utils.ts";
-import { appendTxToReactivityLog } from "./cell.ts";
+import { type NormalizedFullLink } from "./link-utils.ts";
+import { type IRuntime } from "./runtime.ts";
+import { type IExtendedStorageTransaction } from "./storage/interface.ts";
+import { fromURI, toURI } from "./uri-utils.ts";
 
 // Maximum recursion depth to prevent infinite loops
 const MAX_RECURSION_DEPTH = 100;
 
 // Cache of target objects to their proxies, scoped by ReactivityLog
-const proxyCacheByLog = new WeakMap<ReactivityLog, WeakMap<object, any>>();
-// Use this to index cache if there is no log provided.
-const fallbackLog: ReactivityLog = { reads: [], writes: [] };
+const proxyCacheByTx = new WeakMap<
+  IExtendedStorageTransaction,
+  WeakMap<object, any>
+>();
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -62,9 +62,9 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 };
 
 export function createQueryResultProxy<T>(
-  valueCell: DocImpl<T>,
-  valuePath: PropertyKey[],
-  log?: ReactivityLog,
+  runtime: IRuntime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
   depth: number = 0,
 ): T {
   // Check recursion depth
@@ -75,33 +75,22 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  const tx = valueCell.runtime.edit();
-  ({ cell: valueCell, path: valuePath } =
-    parseNormalizedFullLinktoLegacyDocCellLink(
-      resolveLinkToValue(
-        tx,
-        parseLink({ cell: valueCell, path: valuePath } as LegacyDocCellLink),
-      ),
-      valueCell.runtime,
-    ));
-  tx.commit();
-  if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
+  link = resolveLinkToValue(tx, link);
 
-  log?.reads.push({ cell: valueCell, path: valuePath });
-  const target = valueCell.getAtPath(valuePath) as any;
+  const target = tx.readValueOrThrow(link) as any;
 
   if (!isRecord(target)) return target;
 
   // Get the appropriate cache index by log
-  const cacheIndex = log ?? fallbackLog;
-  let logCache = proxyCacheByLog.get(cacheIndex);
-  if (!logCache) {
-    logCache = new WeakMap<object, any>();
-    proxyCacheByLog.set(cacheIndex, logCache);
+  const cacheIndex = tx;
+  let txCache = proxyCacheByTx.get(cacheIndex);
+  if (!txCache) {
+    txCache = new WeakMap<object, any>();
+    proxyCacheByTx.set(cacheIndex, txCache);
   }
 
   // Check if we already have a proxy for this target in the cache
-  const existingProxy = logCache?.get(target);
+  const existingProxy = txCache?.get(target);
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(target as object, {
@@ -109,11 +98,15 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         if (prop === getCellLink) {
           return {
-            cell: valueCell,
-            path: valuePath,
+            cell: runtime.documentMap.getDocByEntityId(
+              link.space,
+              link.id,
+              true,
+            ),
+            path: link.path as PropertyKey[],
           } satisfies LegacyDocCellLink;
         } else if (prop === toOpaqueRef) {
-          return () => makeOpaqueRef(valueCell, valuePath);
+          return () => makeOpaqueRef(link);
         }
 
         const value = Reflect.get(target, prop, receiver);
@@ -132,9 +125,9 @@ export function createQueryResultProxy<T>(
             // exceptions like at().
             const copy = target.map((_, index) =>
               createQueryResultProxy(
-                valueCell,
-                [...valuePath, index],
-                log,
+                runtime,
+                tx,
+                { ...link, path: [...link.path, index] },
                 depth + 1,
               )
             );
@@ -150,10 +143,12 @@ export function createQueryResultProxy<T>(
             if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...target];
             else {
               copy = target.map((_, index) =>
-                createProxyForArrayValue(index, valueCell, [
-                  ...valuePath,
+                createProxyForArrayValue(
+                  runtime,
+                  tx,
                   index,
-                ], log)
+                  { ...link, path: [...link.path, index] },
+                )
               );
             }
 
@@ -178,59 +173,31 @@ export function createQueryResultProxy<T>(
 
             // Turn any newly added elements into cells. And if there was a
             // change at all, update the cell.
-            const tx = valueCell.runtime.edit();
-            diffAndUpdate(
-              valueCell.runtime,
-              tx,
-              parseLink(
-                { cell: valueCell, path: valuePath } as LegacyDocCellLink,
-              ),
-              copy,
-              {
-                parent: valueCell.entityId,
-                method: prop,
-                call: new Error().stack,
-                context: getTopFrame()?.cause ?? "unknown",
-              },
-            );
-            tx.commit();
-            if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
+            diffAndUpdate(runtime, tx, link, copy, {
+              parent: { id: link.id, space: link.space },
+              method: prop,
+              call: new Error().stack,
+              context: getTopFrame()?.cause ?? "unknown",
+            });
 
             if (Array.isArray(result)) {
-              if (!valueCell.entityId) {
-                throw new Error("No entity id for cell holding array");
-              }
-
               const cause = {
-                parent: valueCell.entityId,
-                path: valuePath,
+                parent: { id: link.id, path: link.path },
                 resultOf: prop,
                 call: new Error().stack,
                 context: getTopFrame()?.cause ?? "unknown",
               };
 
-              if (!valueCell.runtime) {
-                throw new Error("No runtime available in document for getDoc");
-              }
-              const resultDoc = valueCell.runtime.documentMap.getDoc<any[]>(
-                undefined as unknown as any[],
-                cause,
-                valueCell.space,
-              );
-              resultDoc.send(result);
+              const resultLink: NormalizedFullLink = {
+                id: toURI(refer(cause)),
+                space: link.space,
+                path: [],
+                type: "application/json",
+              };
 
-              const tx = valueCell.runtime.edit();
-              diffAndUpdate(
-                valueCell.runtime,
-                tx,
-                parseLink({ cell: resultDoc, path: [] } as LegacyDocCellLink),
-                result,
-                cause,
-              );
-              tx.commit();
-              if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
+              diffAndUpdate(runtime, tx, resultLink, result, cause);
 
-              result = resultDoc.getAsQueryResult([], log);
+              result = createQueryResultProxy(runtime, tx, resultLink);
             }
 
             return result;
@@ -238,55 +205,30 @@ export function createQueryResultProxy<T>(
       }
 
       return createQueryResultProxy(
-        valueCell,
-        [...valuePath, prop],
-        log,
+        runtime,
+        tx,
+        { ...link, path: [...link.path, prop] },
         depth + 1,
       );
     },
     set: (target, prop, value) => {
+      if (typeof prop === "symbol") return false;
+
       if (isQueryResult(value)) value = value[getCellLink];
 
-      if (Array.isArray(target) && prop === "length") {
-        const oldLength = target.length;
-        const changed = setNestedValue(
-          valueCell,
-          [...valuePath, prop],
-          value,
-          log,
-        );
-        const newLength = value;
-        if (changed) {
-          for (
-            let i = Math.min(oldLength, newLength);
-            i < Math.max(oldLength, newLength);
-            i++
-          ) {
-            log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
-          }
-        }
-        return true;
-      }
-
-      const tx = valueCell.runtime.edit();
       diffAndUpdate(
-        valueCell.runtime,
+        runtime,
         tx,
-        parseLink(
-          { cell: valueCell, path: [...valuePath, prop] } as LegacyDocCellLink,
-        ),
+        { ...link, path: [...link.path, String(prop)] },
         value,
-        getTopFrame()?.cause ?? "unknown",
       );
-      tx.commit();
-      if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
 
       return true;
     },
   }) as T;
 
   // Cache the proxy in the appropriate cache before returning
-  logCache.set(target, proxy);
+  txCache.set(target, proxy);
   return proxy;
 }
 
@@ -300,17 +242,17 @@ type ProxyForArrayValue = {
 const originalIndex = Symbol("original index");
 
 const createProxyForArrayValue = (
+  runtime: IRuntime,
+  tx: IExtendedStorageTransaction,
   source: number,
-  valueCell: DocImpl<any>,
-  valuePath: PropertyKey[],
-  log?: ReactivityLog,
+  link: NormalizedFullLink,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createQueryResultProxy(valueCell, valuePath, log);
+      return createQueryResultProxy(runtime, tx, link);
     },
     toString: function () {
-      return String(createQueryResultProxy(valueCell, valuePath, log));
+      return String(createQueryResultProxy(runtime, tx, link));
     },
     [originalIndex]: source,
   };
@@ -320,6 +262,33 @@ const createProxyForArrayValue = (
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
   return isRecord(value) && originalIndex in value;
+}
+
+const linkToOpaqueRef = new WeakMap<
+  Frame,
+  Map<string, OpaqueRef<any>>
+>();
+
+// Creates aliases to value, used in recipes to refer to this specific cell. We
+// have to memoize these, as conversion happens at multiple places when
+// creaeting the recipe.
+export function makeOpaqueRef(
+  link: NormalizedFullLink,
+): OpaqueRef<any> {
+  const frame = getTopFrame();
+  if (!frame) throw new Error("No frame");
+  if (!linkToOpaqueRef.has(frame)) linkToOpaqueRef.set(frame, new Map());
+  const map = linkToOpaqueRef.get(frame)!;
+
+  const id = `${link.space}:${link.id}:${link.path.join(":")}`;
+  if (map.has(id)) return map.get(id)!;
+
+  const ref = opaqueRef();
+  ref.setPreExisting({
+    $alias: { cell: { "/": fromURI(link.id) }, path: link.path },
+  });
+  map.set(id, ref);
+  return ref;
 }
 
 /**

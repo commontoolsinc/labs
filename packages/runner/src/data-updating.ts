@@ -2,8 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import { appendTxToReactivityLog, isCell } from "./cell.ts";
-import { type ReactivityLog } from "./scheduler.ts";
+import { isCell } from "./cell.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -14,7 +13,6 @@ import {
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
-  parseNormalizedFullLinktoLegacyDocCellLink,
 } from "./link-utils.ts";
 import {
   getCellLinkOrThrow,
@@ -26,72 +24,6 @@ import {
 } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { toURI } from "./uri-utils.ts";
-
-// Sets a value at a path, following aliases and recursing into objects. Returns
-// success, meaning no frozen docs were in the way. That is, also returns true
-// if there was no change.
-export function setNestedValue<T>(
-  doc: DocImpl<T>,
-  path: readonly PropertyKey[],
-  value: unknown,
-  log?: ReactivityLog,
-): boolean {
-  const destValue = doc.getAtPath(path);
-  if (isWriteRedirectLink(destValue)) {
-    const tx = doc.runtime.edit();
-    const ref = parseNormalizedFullLinktoLegacyDocCellLink(
-      followWriteRedirects(tx, destValue, doc.asCell()),
-      doc.runtime,
-    );
-    tx.commit();
-    if (log) appendTxToReactivityLog(log, tx, doc.runtime);
-    return setNestedValue(ref.cell, ref.path, value, log);
-  }
-
-  // Compare destValue and value, if they are the same, recurse, otherwise write
-  // value with setAtPath
-  if (
-    isRecord(destValue) &&
-    isRecord(value) &&
-    Array.isArray(value) === Array.isArray(destValue) &&
-    !isLink(value)
-  ) {
-    let success = true;
-    for (const key in value) {
-      if (key in destValue) {
-        success &&= setNestedValue(
-          doc,
-          [...path, key],
-          value[key],
-          log,
-        );
-      } else {
-        if (doc.isFrozen()) success = false;
-        else doc.setAtPath([...path, key], value[key], log);
-      }
-    }
-    for (const key in destValue) {
-      if (!(key in value)) {
-        if (doc.isFrozen()) success = false;
-        else doc.setAtPath([...path, key], undefined, log);
-      }
-    }
-
-    return success;
-  } else if (isLink(value) && isLink(destValue)) {
-    if (!areLinksSame(value, destValue, doc.asCell())) {
-      doc.setAtPath(path, value, log);
-    }
-    return true;
-  } else if (!Object.is(destValue, value)) {
-    // Use Object.is for comparison to handle NaN and -0 correctly
-    if (doc.isFrozen()) return false;
-    doc.setAtPath(path, value, log);
-    return true;
-  }
-
-  return true;
-}
 
 /**
  * Traverses newValue and updates `current` and any relevant linked documents.
@@ -177,7 +109,7 @@ export function normalizeAndDiff(
         path: link.path.slice(0, -1),
       });
       if (Array.isArray(parent)) {
-        const base = runtime.getCellFromLink(link);
+        const base = runtime.getCellFromLink(tx, link);
         for (const v of parent) {
           if (isLink(v)) {
             const sibling = parseLink(v, base);
@@ -389,6 +321,34 @@ export function normalizeAndDiff(
     }
 
     return changes;
+  }
+
+  // When setting array length, also update the removed/added elements.
+  if (
+    link.path.length > 0 && link.path[link.path.length - 1] === "length"
+  ) {
+    const maybeCurrentArray = tx.readValueOrThrow({
+      ...link,
+      path: link.path.slice(0, -1),
+    });
+    if (Array.isArray(maybeCurrentArray)) {
+      const currentLength = maybeCurrentArray.length;
+      const newLength = newValue as number;
+      if (currentLength !== newLength) {
+        changes.push({ location: link, value: newLength });
+        for (
+          let i = Math.min(currentLength, newLength);
+          i < Math.max(currentLength, newLength);
+          i++
+        ) {
+          changes.push({
+            location: { ...link, path: [...link.path, i.toString()] },
+            value: undefined,
+          });
+        }
+        return changes;
+      }
+    } // else, i.e. parent is not an array: fall through to the primitive case
   }
 
   // Handle primitive values and other cases (Object.is handles NaN and -0)

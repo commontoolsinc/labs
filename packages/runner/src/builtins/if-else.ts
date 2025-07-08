@@ -1,7 +1,7 @@
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import { type ReactivityLog } from "../scheduler.ts";
 import { type IRuntime } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 export function ifElse(
   inputsCell: Cell<[any, any, any]>,
@@ -11,15 +11,15 @@ export function ifElse(
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const result = runtime.getCell<any>(
-    parentCell.space,
-    { ifElse: cause },
-  );
-  sendResult(result);
-
-  return (log: ReactivityLog) => {
-    const resultWithLog = result.withLog(log);
-    const inputsWithLog = inputsCell.withLog(log);
+  return (tx: IExtendedStorageTransaction) => {
+    const result = runtime.getCell<any>(
+      tx,
+      parentCell.space,
+      { ifElse: cause },
+    );
+    sendResult(result);
+    const resultWithLog = result.withTx(tx);
+    const inputsWithLog = inputsCell.withTx(tx);
 
     const condition = inputsWithLog.key(0).get();
 

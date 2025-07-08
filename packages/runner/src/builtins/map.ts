@@ -1,9 +1,9 @@
 import { type JSONSchema, type Recipe } from "../builder/types.ts";
 import { type Cell } from "../cell.ts";
-import { type ReactivityLog } from "../scheduler.ts";
 import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { IRuntime } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
@@ -37,28 +37,30 @@ export function map(
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const result = runtime.getCell<any[]>(
-    parentCell.space,
-    {
-      map: parentCell.entityId,
-      op: inputsCell.getAsQueryResult([])?.op,
-      cause,
-    },
-  );
-  result.send([]);
-  result.setSourceCell(parentCell);
-
-  sendResult(result);
-
   // Tracks up to where in the source array we've handled entries. Right now we
   // start at zero, even though in principle the result doc above could have
   // been pre-initalized from storage, so that we `run` each recipe. Once that
   // is automated on rehyrdation, we can change this to measure the difference
   // between the source list and the result list.
   let initializedUpTo = 0;
+  let result: Cell<any[]> | undefined;
 
-  return (log: ReactivityLog) => {
-    const resultWithLog = result.withLog(log);
+  return (tx: IExtendedStorageTransaction) => {
+    if (!result) {
+      result = runtime.getCell<any[]>(
+        tx,
+        parentCell.space,
+        {
+          map: parentCell.entityId,
+          op: inputsCell.getAsQueryResult([], tx)?.op,
+          cause,
+        },
+      );
+      result.send([]);
+      result.setSourceCell(parentCell);
+      sendResult(result);
+    }
+    const resultWithLog = result.withTx(tx);
     const { list, op } = inputsCell.asSchema(
       {
         type: "object",
@@ -69,7 +71,7 @@ export function map(
         required: ["list", "op"],
         additionalProperties: false,
       } as const satisfies JSONSchema,
-    ).withLog(log).get();
+    ).withTx(tx).get();
 
     // .getRaw() because we want the recipe itself and avoid following the
     // aliases in the recipe
@@ -97,10 +99,12 @@ export function map(
     // Add values that have been appended
     while (initializedUpTo < list.length) {
       const resultCell = runtime.getCell(
+        tx,
         parentCell.space,
         { result, index: initializedUpTo },
       );
       runtime.runner.run(
+        tx,
         opRecipe,
         {
           element: inputsCell.key("list").key(initializedUpTo),

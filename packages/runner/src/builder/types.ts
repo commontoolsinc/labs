@@ -65,6 +65,10 @@ export type {
   toJSON,
   VNode,
 } from "@commontools/api";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "../storage/interface.ts";
 
 export type JSONSchemaMutable = Mutable<JSONSchema>;
 
@@ -182,7 +186,7 @@ declare module "@commontools/api" {
     [unsafe_originalRecipe]?: Recipe;
     [unsafe_parentRecipe]?: Recipe;
     [unsafe_materializeFactory]?: (
-      log: any,
+      tx: IExtendedStorageTransaction,
     ) => (path: readonly PropertyKey[]) => any;
   }
 }
@@ -230,7 +234,12 @@ export function isShadowRef(value: unknown): value is ShadowRef {
 
 export type UnsafeBinding = {
   recipe: Recipe;
-  materialize: (path: readonly PropertyKey[]) => any;
+  materialize: (
+    path: readonly PropertyKey[],
+    tx: IExtendedStorageTransaction,
+  ) => any;
+  space: MemorySpace;
+  tx: IExtendedStorageTransaction;
   parent?: UnsafeBinding;
 };
 

@@ -1,9 +1,7 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
 import { createCell, isCell } from "./cell.ts";
-import { type LegacyDocCellLink, LINK_V1_TAG } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import {
   readMaybeLink,
@@ -14,6 +12,7 @@ import { toURI } from "./uri-utils.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
+import { type IMemorySpaceAddress } from "./storage/interface.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -91,7 +90,6 @@ function processDefaultValue(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   defaultValue: any,
-  log?: ReactivityLog,
 ): any {
   const schema = link.schema;
   const rootSchema = link.rootSchema ?? schema;
@@ -120,7 +118,7 @@ function processDefaultValue(
           schema: resolvedSchema,
           rootSchema,
         },
-        log,
+        tx,
       );
     } else {
       return createCell(
@@ -130,7 +128,7 @@ function processDefaultValue(
           schema: mergeDefaults(resolvedSchema, defaultValue),
           rootSchema,
         },
-        log,
+        tx,
       );
     }
   }
@@ -142,10 +140,10 @@ function processDefaultValue(
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
     return runtime.getImmutableCell(
+      tx,
       link.space,
       { $stream: true },
       resolvedSchema,
-      log,
     );
   }
 
@@ -167,7 +165,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             defaultValue[key as keyof typeof defaultValue],
-            log,
           );
           processedKeys.add(key);
         } else if (propSchema.asCell) {
@@ -177,7 +174,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             undefined,
-            log,
           );
         } else if (propSchema.default !== undefined) {
           result[key] = processDefaultValue(
@@ -185,7 +181,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             propSchema.default,
-            log,
           );
         } else if (
           resolvedSchema?.required?.includes(key) &&
@@ -196,7 +191,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             propSchema.type === "object" ? {} : [],
-            log,
           );
         }
       }
@@ -221,7 +215,6 @@ function processDefaultValue(
               path: [...link.path, key],
             },
             defaultValue[key as keyof typeof defaultValue],
-            log,
           );
         }
       }
@@ -245,7 +238,6 @@ function processDefaultValue(
           path: [...link.path, String(i)],
         },
         item,
-        log,
       )
     );
   }
@@ -374,17 +366,17 @@ export function validateAndTransform(
             schema: newSchema,
             rootSchema,
           },
-          log,
+          tx,
         );
       }
     }
-    return createCell(runtime, link, log);
+    return createCell(runtime, link, tx);
   }
 
   // If there is no schema, return as raw data via query result proxy
   if (resolvedSchema === undefined) {
     const doc = runtime.documentMap.getDocByEntityId(link.space, link.id, true);
-    return doc.getAsQueryResult([...link.path], log);
+    return doc.getAsQueryResult([...link.path], tx);
   }
 
   // Now resolve further links until we get the actual value. Note that `doc`
@@ -401,7 +393,6 @@ export function validateAndTransform(
       tx,
       { ...link, schema: resolvedSchema },
       resolvedSchema.default,
-      log,
     );
     seen.push([seenKey, result]);
     return result;
@@ -496,7 +487,7 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: LegacyDocCellLink[] = [];
+      const extraReads: IMemorySpaceAddress[] = [];
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
           merged = result;
@@ -586,7 +577,6 @@ export function validateAndTransform(
             tx,
             { ...link, path: [...link.path, key], schema: childSchema },
             childSchema.default,
-            log,
           );
         }
       }
@@ -651,7 +641,6 @@ export function validateAndTransform(
       tx,
       { ...link, schema: resolvedSchema },
       resolvedSchema.default,
-      log,
     );
     seen.push([seenKey, result]);
     return result;

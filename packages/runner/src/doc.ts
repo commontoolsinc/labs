@@ -16,11 +16,11 @@ import {
 } from "./query-result-proxy.ts";
 import { type EntityId } from "./doc-map.ts";
 import type { IRuntime } from "./runtime.ts";
-import { type ReactivityLog } from "./scheduler.ts";
 import { type Cancel } from "./cancel.ts";
 import { Labels, MemorySpace } from "./storage.ts";
 import { arrayEqual } from "./path-utils.ts";
 import { toURI } from "./uri-utils.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 /**
  * Lowest level cell implementation.
@@ -45,9 +45,7 @@ export type DocImpl<T> = {
    * @param path - Path to follow.
    * @returns Value.
    */
-  getAtPath<Path extends readonly PropertyKey[]>(
-    path: Path,
-  ): DeepKeyLookup<T, Path>;
+  getAtPath<Path extends PropertyKey[]>(path: Path): DeepKeyLookup<T, Path>;
 
   /**
    * Get as value proxy, following query (i.e. aliases) and cell references.
@@ -64,7 +62,7 @@ export type DocImpl<T> = {
    */
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
-    log?: ReactivityLog,
+    tx?: IExtendedStorageTransaction,
   ): QueryResult<DeepKeyLookup<T, Path>>;
 
   /**
@@ -77,9 +75,9 @@ export type DocImpl<T> = {
    * @param log - Reactivity log.
    * @returns Simple cell.
    */
-  asCell<Q = T, Path extends readonly PropertyKey[] = []>(
-    path?: Path,
-    log?: ReactivityLog,
+  asCell<Q = T, Path extends PropertyKey[] = []>(
+    tx: IExtendedStorageTransaction,
+    path?: Readonly<Path>,
     schema?: JSONSchema,
     rootSchema?: JSONSchema,
   ): Cell<DeepKeyLookup<Q, Path>>;
@@ -94,8 +92,8 @@ export type DocImpl<T> = {
    * @returns Simple cell with inferred type.
    */
   asCell<S extends JSONSchema, Path extends PropertyKey[] = []>(
+    tx: IExtendedStorageTransaction,
     path: Path | undefined,
-    log: ReactivityLog | undefined,
     schema: S,
     rootSchema?: JSONSchema,
   ): Cell<Schema<S>>;
@@ -107,7 +105,7 @@ export type DocImpl<T> = {
    * @param log - Reactivity log.
    * @returns Whether the value changed.
    */
-  send(value: T, log?: ReactivityLog): boolean;
+  send(value: T): boolean;
 
   /**
    * Set value at path, log writes.
@@ -119,9 +117,8 @@ export type DocImpl<T> = {
    * @returns Whether the value changed.
    */
   setAtPath(
-    path: readonly PropertyKey[],
+    path: PropertyKey[],
     newValue: any,
-    log?: ReactivityLog,
     schema?: JSONSchema,
   ): boolean;
 
@@ -132,7 +129,7 @@ export type DocImpl<T> = {
    * @returns Cancel function.
    */
   updates(
-    callback: (value: T, path: readonly PropertyKey[], labels?: Labels) => void,
+    callback: (value: T, path: PropertyKey[], labels?: Labels) => void,
   ): Cancel;
 
   /**
@@ -235,8 +232,7 @@ export type DocImpl<T> = {
   copyTrap: boolean;
 };
 
-export type DeepKeyLookup<T, Path extends readonly PropertyKey[]> = Path extends
-  [] ? T
+export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends [] ? T
   : Path extends [infer First, ...infer Rest]
     ? First extends keyof T
       ? Rest extends PropertyKey[] ? DeepKeyLookup<T[First], Rest>
@@ -269,14 +265,17 @@ export function createDoc<T>(
     get: () => value as T,
     getAsQueryResult: <Path extends PropertyKey[]>(
       path?: Path,
-      log?: ReactivityLog,
+      tx?: IExtendedStorageTransaction,
     ) =>
-      createQueryResultProxy(self, path ?? [], log) as QueryResult<
-        DeepKeyLookup<T, Path>
-      >,
+      createQueryResultProxy(runtime, tx ?? runtime.edit(), {
+        space,
+        id: toURI(entityId),
+        path: path?.map(String) ?? [],
+        type: "application/json",
+      }) as QueryResult<DeepKeyLookup<T, Path>>,
     asCell: <Q = T, Path extends PropertyKey[] = []>(
+      tx: IExtendedStorageTransaction,
       path?: Path,
-      log?: ReactivityLog,
       schema?: JSONSchema,
       rootSchema?: JSONSchema,
     ) =>
@@ -287,20 +286,18 @@ export function createDoc<T>(
         type: "application/json",
         schema,
         rootSchema,
-      }, log),
-    send: (newValue: T, log?: ReactivityLog) =>
-      self.setAtPath([], newValue, log),
+      }, tx),
+    send: (newValue: T) => self.setAtPath([], newValue),
     updates: (
       callback: (value: T, path: PropertyKey[], labels?: Labels) => void,
     ) => {
       callbacks.add(callback);
       return () => callbacks.delete(callback);
     },
-    getAtPath: (path: readonly PropertyKey[]) => getValueAtPath(value, path),
+    getAtPath: (path: PropertyKey[]) => getValueAtPath(value, path),
     setAtPath: (
       path: PropertyKey[],
       newValue: any,
-      log?: ReactivityLog,
       schema?: JSONSchema,
     ) => {
       if (readOnly) throw new Error(`Cell is read-only: ${readOnly}`);
@@ -316,7 +313,6 @@ export function createDoc<T>(
         value = newValue;
       }
       if (changed) {
-        log?.writes.push({ cell: self, path, schema: schema });
         const lubSchema = (schema !== undefined)
           ? runtime.cfc.lubSchema(schema)
           : undefined;
@@ -404,10 +400,7 @@ export function createDoc<T>(
 
 const docLinkToOpaqueRef = new WeakMap<
   Frame,
-  WeakMap<
-    DocImpl<any>,
-    { path: readonly PropertyKey[]; opaqueRef: OpaqueRef<any> }[]
-  >
+  WeakMap<DocImpl<any>, { path: PropertyKey[]; opaqueRef: OpaqueRef<any> }[]>
 >();
 
 // Creates aliases to value, used in recipes to refer to this specific cell. We
@@ -415,7 +408,7 @@ const docLinkToOpaqueRef = new WeakMap<
 // creaeting the recipe.
 export function makeOpaqueRef(
   doc: DocImpl<any>,
-  path: readonly PropertyKey[],
+  path: PropertyKey[],
 ): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
