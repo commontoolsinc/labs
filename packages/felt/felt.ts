@@ -10,7 +10,8 @@ export class Felt {
   ) {}
 
   async process() {
-    const { port, hostname, watchDir, publicDir, outDir } = this.config;
+    const { port, redirectToIndex, hostname, watchDir, publicDir, outDir } =
+      this.config;
     const isBuild = this.command === "build";
     const isServe = this.command === "serve";
     const isDev = this.command === "dev";
@@ -35,6 +36,7 @@ export class Felt {
     const server = new DevServer({
       useReloadSocket: isDev,
       hostname,
+      redirectToIndex,
       port,
       outDir,
     });

@@ -22,6 +22,10 @@ export interface Config {
   // to cause a JS rebuild during `dev`.
   // Defaults to "src".
   watchDir?: string;
+  // While running a dev server, a regex to match
+  // against a path, and if successful, will return
+  // the root index.html.
+  redirectToIndex?: RegExp;
   esbuild?: ESBuildConfig;
 }
 
@@ -44,6 +48,7 @@ export class ResolvedConfig {
   port: number;
   publicDir: string;
   watchDir: string;
+  redirectToIndex?: RegExp;
   esbuild: {
     sourcemap: boolean;
     external: string[];
@@ -61,6 +66,7 @@ export class ResolvedConfig {
     this.watchDir = join(cwd, partial?.watchDir ?? "src");
     this.hostname = partial?.hostname ?? "127.0.0.1";
     this.port = partial?.port ?? 5173;
+    this.redirectToIndex = partial?.redirectToIndex;
     this.esbuild = {
       sourcemap: !!(partial?.esbuild?.sourcemap),
       minify: !!(partial?.esbuild?.minify),
