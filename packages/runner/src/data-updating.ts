@@ -204,7 +204,6 @@ export function normalizeAndDiff(
 
   // Unwrap proxies and handle special types
   if (isQueryResultForDereferencing(newValue)) {
-    // TODO(seefeld): Convert getCellLinkOrThrow to generate normalized or sigil
     newValue = createSigilLinkFromParsedLink(
       parseLink(getCellLinkOrThrow(newValue), link),
     );
