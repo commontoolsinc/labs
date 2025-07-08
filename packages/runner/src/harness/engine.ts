@@ -5,7 +5,7 @@ import {
   HarnessedFunction,
   RuntimeProgram,
   TypeScriptHarnessProcessOptions,
-} from "./harness.ts";
+} from "./types.ts";
 import {
   getTypeScriptEnvironmentTypes,
   InMemoryProgram,
@@ -132,19 +132,21 @@ export class Engine extends EventTarget implements Harness {
   // Compile and run a `Program` with options, returning the compiled
   // result and evaluated exports.
   async process(
-    program: Program,
+    program: RuntimeProgram,
     options: TypeScriptHarnessProcessOptions = {},
   ): Promise<
     { main?: Exports; exportMap?: Record<string, Exports>; output: JsScript }
   > {
-    const resolver = new EngineProgramResolver(program);
+    const id = options.identifier ?? computeId(program);
+    const filename = options.filename ?? `${id}.js`;
+    const mappedProgram = mapPrefixProgramFiles(program, id);
+    const resolver = new EngineProgramResolver(mappedProgram);
 
     const { compiler, isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
     const resolvedProgram = await this.resolve(resolver);
-
     const output = await compiler.compile(resolvedProgram, {
-      filename: options.filename ?? computeFilename(resolvedProgram),
+      filename,
       noCheck: options.noCheck,
       injectedScript: INJECTED_SCRIPT,
       runtimeModules: Engine.runtimeModuleNames(),
@@ -223,10 +225,39 @@ export class Engine extends EventTarget implements Harness {
   }
 }
 
-function computeFilename(program: Program): string {
+function computeId(program: Program): string {
   const source = [
     program.main,
     ...program.files.filter(({ name }) => !name.endsWith(".d.ts")),
   ];
-  return merkleReference.refer(source).toString() + ".tsx";
+  return merkleReference.refer(source).toString();
+}
+
+// Adds `id` as a prefix to all files in the program.
+// Injects a new entry at root `/index.ts` to re-export
+// the entry contents because otherwise `typescript`
+// flattens the output, eliding the common prefix.
+function mapPrefixProgramFiles(program: RuntimeProgram, id: string): Program {
+  const main = program.main;
+  const exportNameds = `export * from "${prefix(main, id)}";`;
+  const exportDefault = `export { default } from "${prefix(main, id)}";`;
+  const hasDefault = !program.mainExport || program.mainExport === "default";
+  const files = [
+    ...program.files.map((source) => ({
+      name: prefix(source.name, id),
+      contents: source.contents,
+    })),
+    {
+      name: `/index.ts`,
+      contents: `${exportNameds}${hasDefault ? `\n${exportDefault}` : ""}`,
+    },
+  ];
+  return {
+    main: `/index.ts`,
+    files,
+  };
+}
+
+function prefix(filename: string, id: string): string {
+  return `/${id}${filename}`;
 }

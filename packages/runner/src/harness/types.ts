@@ -14,6 +14,9 @@ export interface TypeScriptHarnessProcessOptions {
   noCheck?: boolean;
   // Does not evaluate the recipe.
   noRun?: boolean;
+  // An identifer to use to uniquely identify the compiled
+  // code when applying source maps.
+  identifier?: string;
   // Filename to use in the compiled JS code, for engines
   // that apply source maps.
   filename?: string;

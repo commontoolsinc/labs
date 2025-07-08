@@ -4,5 +4,5 @@ export type {
   HarnessedFunction,
   RuntimeProgram,
   TypeScriptHarnessProcessOptions,
-} from "./harness.ts";
+} from "./types.ts";
 export { Console, ConsoleEvent, ConsoleMethod } from "./console.ts";

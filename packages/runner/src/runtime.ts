@@ -26,7 +26,7 @@ import {
   type ReactivityLog,
   Scheduler,
 } from "./scheduler.ts";
-import type { Harness, RuntimeProgram } from "./harness/harness.ts";
+import type { RuntimeProgram } from "./harness/types.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
 import {
@@ -95,7 +95,7 @@ export interface IRuntime {
   readonly recipeManager: IRecipeManager;
   readonly moduleRegistry: IModuleRegistry;
   readonly documentMap: IDocumentMap;
-  readonly harness: Harness;
+  readonly harness: Engine;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
   readonly navigateCallback?: NavigateCallback;
@@ -321,7 +321,7 @@ export class Runtime implements IRuntime {
   readonly recipeManager: IRecipeManager;
   readonly moduleRegistry: IModuleRegistry;
   readonly documentMap: IDocumentMap;
-  readonly harness: Harness;
+  readonly harness: Engine;
   readonly runner: IRunner;
   readonly blobbyServerUrl: string;
   readonly navigateCallback?: NavigateCallback;

@@ -33,7 +33,7 @@ import {
   streamData,
 } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
-import type { RuntimeProgram } from "../harness/harness.ts";
+import type { RuntimeProgram } from "../harness/types.ts";
 
 /**
  * Creates a set of builder functions with the given runtime
