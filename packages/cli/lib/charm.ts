@@ -9,7 +9,7 @@ import {
   CharmManager,
   extractUserCode,
 } from "@commontools/charm";
-import { CharmsView, CellOperations } from "@commontools/charm/ops";
+import { CellOperations, CharmsView } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 

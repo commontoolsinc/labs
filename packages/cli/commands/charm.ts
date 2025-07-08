@@ -326,12 +326,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .arguments("<path:string>")
   .action(async (options, pathString) => {
     const charmConfig = parseCharmOptions(options);
-    // Parse path directly (not using parseLink which expects charmId/path format)
-    const pathSegments = pathString ? pathString.split("/").map((segment) => {
-      const num = Number(segment);
-      return Number.isInteger(num) ? num : segment;
-    }) : [];
-    
+    const pathSegments = parseCellPath(pathString);
     const value = await getCellValue(charmConfig, pathSegments);
     render(value, { json: true });
   })
@@ -350,12 +345,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .arguments("<path:string>")
   .action(async (options, pathString) => {
     const charmConfig = parseCharmOptions(options);
-    // Parse path directly (not using parseLink which expects charmId/path format)
-    const pathSegments = pathString ? pathString.split("/").map((segment) => {
-      const num = Number(segment);
-      return Number.isInteger(num) ? num : segment;
-    }) : [];
-    
+    const pathSegments = parseCellPath(pathString);
     const value = await drainStdin();
     await setCellValue(charmConfig, pathSegments, value);
     render(`Set value at path: ${pathString}`);
@@ -517,6 +507,22 @@ function parseUrl(
     );
   }
   return { apiUrl, space, charm };
+}
+
+/**
+ * Parses a path string into an array of path segments.
+ * Converts numeric strings to numbers for array indices.
+ * @param pathString - The path string to parse (e.g., "data/users/0/email")
+ * @returns Array of path segments with numbers for array indices
+ */
+export function parseCellPath(pathString: string): (string | number)[] {
+  if (!pathString) {
+    return [];
+  }
+  return pathString.split("/").map((segment) => {
+    const num = Number(segment);
+    return Number.isInteger(num) ? num : segment;
+  });
 }
 
 // We use stdin for charm input which must be an `Object`
