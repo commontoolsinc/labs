@@ -93,6 +93,44 @@ This document contains shared setup instructions for the CT binary that are used
 - `./dist/ct dev <recipe-path> --no-run --output <file>` - Compile recipe to JavaScript file
 - `./dist/ct dev <recipe-path> --filename <name>` - Set filename for source maps
 
+### Cell Data Management Commands:
+- `./dist/ct charm get --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Get cell value at path
+- `./dist/ct charm set --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Set cell value at path (JSON via stdin)
+
+#### Cell Data Management Examples:
+
+**Get cell values:**
+```bash
+# Get a simple field
+./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 name
+
+# Get nested data
+./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config/apiKey
+
+# Get array element
+./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 users/0/email
+```
+
+**Set cell values:**
+```bash
+# Set a simple string value
+echo '"New Name"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 name
+
+# Set a complex object
+echo '{"apiKey": "abc123", "enabled": true}' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config
+
+# Set an array element
+echo '"new@email.com"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 users/0/email
+
+# Set a number
+echo '42' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 count
+```
+
+**Path Format:**
+- Use forward slashes to separate path components: `config/database/host`
+- Array indices are numeric: `users/0/profile` (first user's profile)
+- Support nested objects and arrays: `data/items/2/metadata/tags`
+
 ## Understanding Linking
 
 **Basic Syntax:** `ct charm link [source] [target]/[field]`

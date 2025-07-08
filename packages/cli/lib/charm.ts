@@ -9,7 +9,7 @@ import {
   CharmManager,
   extractUserCode,
 } from "@commontools/charm";
-import { CharmsView } from "@commontools/charm/ops";
+import { CharmsView, CellOperations } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 
@@ -431,4 +431,23 @@ export function formatViewTree(view: unknown): string {
   };
 
   return format(view, "", true);
+}
+
+export async function getCellValue(
+  config: CharmConfig,
+  path: (string | number)[],
+): Promise<any> {
+  const manager = await loadManager(config);
+  const cellOps = new CellOperations(manager);
+  return await cellOps.getCellValue(config.charm, path);
+}
+
+export async function setCellValue(
+  config: CharmConfig,
+  path: (string | number)[],
+  value: any,
+): Promise<void> {
+  const manager = await loadManager(config);
+  const cellOps = new CellOperations(manager);
+  await cellOps.setCellValue(config.charm, path, value);
 }

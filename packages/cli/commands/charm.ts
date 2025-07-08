@@ -5,6 +5,7 @@ import {
   CharmConfig,
   formatViewTree,
   generateSpaceMap,
+  getCellValue,
   getCharmView,
   inspectCharm,
   linkCharms,
@@ -12,6 +13,7 @@ import {
   MapFormat,
   newCharm,
   saveCharmRecipe,
+  setCellValue,
   setCharmRecipe,
   SpaceConfig,
 } from "../lib/charm.ts";
@@ -308,6 +310,55 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     );
 
     render(`Linked ${sourceRef} to ${targetRef}`);
+  })
+  /* charm get */
+  .command("get", "Get a value from a charm at a specific path")
+  .usage(charmUsage)
+  .example(
+    `ct charm get ${EX_ID} ${EX_COMP_CHARM} name`,
+    `Get the "name" field from charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `ct charm get ${EX_ID} ${EX_COMP_CHARM} data/users/0/email`,
+    `Get a nested field value from charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .arguments("<path:string>")
+  .action(async (options, pathString) => {
+    const charmConfig = parseCharmOptions(options);
+    // Parse path directly (not using parseLink which expects charmId/path format)
+    const pathSegments = pathString ? pathString.split("/").map((segment) => {
+      const num = Number(segment);
+      return Number.isInteger(num) ? num : segment;
+    }) : [];
+    
+    const value = await getCellValue(charmConfig, pathSegments);
+    render(value, { json: true });
+  })
+  /* charm set */
+  .command("set", "Set a value in a charm at a specific path")
+  .usage(charmUsage)
+  .example(
+    `echo '"New Name"' | ct charm set ${EX_ID} ${EX_COMP_CHARM} name`,
+    `Set the "name" field in charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `echo '{"foo": "bar"}' | ct charm set ${EX_ID} ${EX_COMP_CHARM} config`,
+    `Set a nested object value in charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .arguments("<path:string>")
+  .action(async (options, pathString) => {
+    const charmConfig = parseCharmOptions(options);
+    // Parse path directly (not using parseLink which expects charmId/path format)
+    const pathSegments = pathString ? pathString.split("/").map((segment) => {
+      const num = Number(segment);
+      return Number.isInteger(num) ? num : segment;
+    }) : [];
+    
+    const value = await drainStdin();
+    await setCellValue(charmConfig, pathSegments, value);
+    render(`Set value at path: ${pathString}`);
   })
   /* charm map */
   .command("map", "Display a visual map of all charms and their connections")
