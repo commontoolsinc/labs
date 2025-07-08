@@ -2,7 +2,7 @@ import { JSONSchema, Module, Recipe, Schema } from "./builder/types.ts";
 import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
-import { RuntimeProgram } from "./harness/harness.ts";
+import { RuntimeProgram } from "./harness/types.ts";
 
 export const recipeMetaSchema = {
   type: "object",

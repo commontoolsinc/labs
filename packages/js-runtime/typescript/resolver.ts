@@ -110,6 +110,13 @@ function getImports(
         imports.push(moduleSpecifier.text);
       }
     }
+    // `export * from "specifier";`
+    if (ts.isExportDeclaration(node)) {
+      const moduleSpecifier = node.moduleSpecifier;
+      if (moduleSpecifier && ts.isStringLiteral(moduleSpecifier)) {
+        imports.push(moduleSpecifier.text);
+      }
+    }
     ts.forEachChild(node, visit);
   }
 
