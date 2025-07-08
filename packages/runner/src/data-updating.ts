@@ -204,9 +204,7 @@ export function normalizeAndDiff(
 
   // Unwrap proxies and handle special types
   if (isQueryResultForDereferencing(newValue)) {
-    newValue = createSigilLinkFromParsedLink(
-      parseLink(getCellLinkOrThrow(newValue), link),
-    );
+    newValue = createSigilLinkFromParsedLink(parseLink(newValue));
   }
 
   if (isDoc(newValue)) {
@@ -308,6 +306,7 @@ export function normalizeAndDiff(
         link.schema,
         [i.toString()],
         link.rootSchema,
+        link.rootSchema,
       );
       const nestedChanges = normalizeAndDiff(
         runtime,
@@ -361,6 +360,7 @@ export function normalizeAndDiff(
         link.schema,
         [key],
         link.rootSchema,
+        link.rootSchema,
       );
       const nestedChanges = normalizeAndDiff(
         runtime,
@@ -378,6 +378,7 @@ export function normalizeAndDiff(
         const childSchema = runtime.cfc.getSchemaAtPath(
           link.schema,
           [key],
+          link.rootSchema,
           link.rootSchema,
         );
         changes.push({
