@@ -1,11 +1,13 @@
-import { ANYONE, Identity, Session } from "@commontools/identity";
+import { Identity } from "@commontools/identity";
 import { Command } from "./commands.ts";
+import { CharmManager } from "@commontools/charm";
+import { createCharmManager } from "./runtime.ts";
 
 export interface AppState {
   identity?: Identity;
   spaceName?: string;
+  charmManager?: CharmManager;
   activeCharmId?: string;
-  session?: Session;
   apiUrl: URL;
 }
 
@@ -19,40 +21,30 @@ export async function applyCommand(
 ): Promise<AppState> {
   const next = clone(state);
   switch (command.type) {
+    case "set-active-charm-id": {
+      next.activeCharmId = command.charmId;
+      break;
+    }
     case "set-identity": {
       next.identity = command.identity;
-      next.session = undefined;
+      next.charmManager = undefined;
       break;
     }
     case "set-space": {
       next.spaceName = command.spaceName;
-      next.session = undefined;
+      next.charmManager = undefined;
       break;
     }
   }
-  // If space or identity was set, and session reset,
-  // compute a Session.
-  if (next.spaceName && next.identity && !next.session) {
-    next.session = await createSession(
-      next.identity,
-      next.spaceName,
-    );
+  // CharmManager is derived from `identity` and `spaceName`.
+  // Ensure that the manager exists if both identity and spaceName
+  // are provided.
+  if (next.spaceName && next.identity && !next.charmManager) {
+    next.charmManager = await createCharmManager({
+      identity: next.identity,
+      spaceName: next.spaceName,
+      apiUrl: next.apiUrl,
+    });
   }
   return next;
-}
-
-async function createSession(
-  root: Identity,
-  spaceName: string,
-): Promise<Session> {
-  const account = spaceName.startsWith("~")
-    ? root
-    : await Identity.fromPassphrase(ANYONE);
-  const user = await account.derive(spaceName);
-  return {
-    private: account.did() === root.did(),
-    name: spaceName,
-    space: user.did(),
-    as: user,
-  };
 }

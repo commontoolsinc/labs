@@ -7,6 +7,8 @@ import { SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/commands.ts";
 import { API_URL } from "../lib/env.ts";
 import { AppUpdateEvent } from "../lib/app-update.ts";
+import { WorkQueue } from "../lib/queue.ts";
+import { Identity } from "@commontools/identity";
 
 // @ts-ignore Use Runtime to test bundling
 globalThis.runtime = Runtime;
@@ -38,6 +40,13 @@ export class XRootView extends LitElement {
     initialValue: { apiUrl: API_URL },
   });
 
+  #commandQueue: WorkQueue<Command>;
+
+  constructor() {
+    super();
+    this.#commandQueue = new WorkQueue(this.onCommandProcess);
+  }
+
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener(SHELL_COMMAND, this.onCommand);
@@ -60,7 +69,19 @@ export class XRootView extends LitElement {
     await this.apply({ type: "set-space", spaceName });
   }
 
-  async apply(command: Command) {
+  async setActiveCharmId(charmId: string) {
+    await this.apply({ type: "set-active-charm-id", charmId });
+  }
+
+  async setIdentity(identity: Identity) {
+    await this.apply({ type: "set-identity", identity });
+  }
+
+  apply(command: Command): Promise<void> {
+    return this.#commandQueue.submit(command);
+  }
+
+  private onCommandProcess = async (command: Command) => {
     try {
       const state = await applyCommand(this._provider.value, command);
       this._provider.setValue(state);
@@ -72,7 +93,7 @@ export class XRootView extends LitElement {
       );
       throw new Error(error.message, { cause: error });
     }
-  }
+  };
 
   override render() {
     return html`
