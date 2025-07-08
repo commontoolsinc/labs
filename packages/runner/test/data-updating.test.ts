@@ -335,19 +335,9 @@ describe("data-updating", () => {
         $alias: { path: ["value2"] },
       });
 
-      console.log(
-        JSON.stringify(current, null, 2),
-        JSON.stringify(changes2, null, 2),
-      );
       applyChangeSet(tx, changes2);
 
       expect(changes2.length).toBe(1);
-      console.log(
-        JSON.stringify(testCell.getRaw(), null, 2),
-        parseLink(current),
-        parseLink(changes2[0].location),
-        parseLink(testCell.key("alias")),
-      );
       expect(
         areNormalizedLinksSame(
           changes2[0].location,
@@ -438,10 +428,6 @@ describe("data-updating", () => {
 
       // Should create an entity and return changes to that entity
       expect(changes.length).toBe(3);
-      console.log(
-        JSON.stringify(changes, null, 2),
-        testCell.key("items").key(0).getAsNormalizedFullLink(),
-      );
       expect(changes[0].location.id).toEqual(
         testCell.getAsNormalizedFullLink().id,
       );
