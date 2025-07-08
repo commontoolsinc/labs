@@ -66,18 +66,6 @@ function createTsConfig() {
   };
 }
 
-// Standalone typescript needs this -- code executed
-// in runtime uses the global JSX.IntrinsicElements declaration
-// used in `commontools` types.
-const jsxRuntime = `declare module "react/jsx-runtime" {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
-`;
-
 // Creates the necessary type definitions
 // in CWD so that recipes can be successfully parsed
 // and typed against a typical typescript environment in e.g. VSCode.
@@ -88,14 +76,21 @@ const jsxRuntime = `declare module "react/jsx-runtime" {
 // environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
 async function initWorkspace(cwd: string) {
   const runtimeModuleTypes = await Engine.getRuntimeModuleTypes();
-  const envTypes = await Engine.getEnvironmentTypes();
+  const { dom, es2023, jsx } = await Engine.getEnvironmentTypes();
 
   // Concatenate all environment types into a single "lib",
   // which will be referred to as "ct-env" in the typescript config
-  const ctEnv = Object.values(envTypes).reduce((env, types) => {
+  const ctEnv = Object.values({ dom, es2023 }).reduce((env, types) => {
     env += `${env}\n${types}`;
     return env;
   }, "");
+
+  // The JSX types needs a different type of declaration'
+  // to be used within a vanilla typescript environment
+  const jsxRuntime = jsx.replace(
+    `declare global`,
+    `declare module "react/jsx-runtime"`,
+  );
 
   const types = {
     "commontools": runtimeModuleTypes.commontools,

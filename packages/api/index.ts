@@ -809,11 +809,3 @@ export type VNode = {
   children: Array<Child> | Cell<Array<Child>>;
   [UI]?: VNode;
 };
-
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      [elemName: string]: any;
-    }
-  }
-}
