@@ -481,13 +481,15 @@ export type ReadError =
 export type WriteError =
   | INotFoundError
   | IUnsupportedMediaTypeError
-  | InactiveTransactionError;
+  | InactiveTransactionError
+  | IReadOnlyAddressError;
 
 export type ReaderError = InactiveTransactionError;
 
 export type WriterError =
   | InactiveTransactionError
-  | IStorageTransactionWriteIsolationError;
+  | IStorageTransactionWriteIsolationError
+  | IReadOnlyAddressError;
 
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
@@ -656,6 +658,20 @@ export interface IStorageTransactionWriteIsolationError extends Error {
    * Memory space writer could not be opened for.
    */
   requested: MemorySpace;
+}
+
+/**
+ * Error returned when attempting to write to a read-only address (data: URI).
+ */
+export interface IReadOnlyAddressError extends Error {
+  name: "ReadOnlyAddressError";
+
+  /**
+   * The read-only address that was attempted to be written to.
+   */
+  address: IMemoryAddress;
+
+  from(space: MemorySpace): IReadOnlyAddressError;
 }
 
 /**
