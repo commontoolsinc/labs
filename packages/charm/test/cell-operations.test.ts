@@ -1,15 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { 
-  CellOperations,
   getCellValue,
   setCellValue,
-  navigatePath,
-  validateNavigable,
-  CellOperationException,
-  type CellPath,
-  type GetCellResult,
-  type SetCellResult
+  type CellPath
 } from "../src/ops/cell-operations.ts";
 import { CharmManager } from "../src/manager.ts";
 import { Cell, Runtime } from "@commontools/runner";
@@ -69,14 +63,13 @@ class MockCell {
   }
 }
 
-describe("CellOperations", () => {
+describe("Cell Operations", () => {
   describe("getCellValue", () => {
     it("should retrieve values at simple paths", async () => {
       const mockManager = new MockCharmManager() as any;
       mockManager.setCharmData("charm-1", { name: "Test Charm" });
       
-      const cellOps = new CellOperations(mockManager);
-      const value = await cellOps.getCellValue("charm-1", ["name"]);
+      const value = await getCellValue(mockManager, "charm-1", ["name"]);
       
       assertEquals(value, "Test Charm");
     });
@@ -91,8 +84,7 @@ describe("CellOperations", () => {
         },
       });
       
-      const cellOps = new CellOperations(mockManager);
-      const value = await cellOps.getCellValue("charm-1", ["config", "settings", "theme"]);
+      const value = await getCellValue(mockManager, "charm-1", ["config", "settings", "theme"]);
       
       assertEquals(value, "dark");
     });
@@ -106,19 +98,17 @@ describe("CellOperations", () => {
         ],
       });
       
-      const cellOps = new CellOperations(mockManager);
-      const value = await cellOps.getCellValue("charm-1", ["users", 1, "email"]);
+      const value = await getCellValue(mockManager, "charm-1", ["users", 1, "email"]);
       
       assertEquals(value, "bob@example.com");
     });
 
     it("should throw for non-existent charms", async () => {
       const mockManager = new MockCharmManager() as any;
-      const cellOps = new CellOperations(mockManager);
       
       await assertRejects(
-        async () => await cellOps.getCellValue("non-existent", ["path"]),
-        CellOperationException,
+        async () => await getCellValue(mockManager, "non-existent", ["path"]),
+        Error,
         `Charm with ID "non-existent" not found`,
       );
     });
@@ -129,11 +119,9 @@ describe("CellOperations", () => {
         config: null,
       });
       
-      const cellOps = new CellOperations(mockManager);
-      
       await assertRejects(
-        async () => await cellOps.getCellValue("charm-1", ["config", "settings"]),
-        CellOperationException,
+        async () => await getCellValue(mockManager, "charm-1", ["config", "settings"]),
+        Error,
       );
     });
 
@@ -143,11 +131,9 @@ describe("CellOperations", () => {
         count: 42,
       });
       
-      const cellOps = new CellOperations(mockManager);
-      
       await assertRejects(
-        async () => await cellOps.getCellValue("charm-1", ["count", "invalid"]),
-        CellOperationException,
+        async () => await getCellValue(mockManager, "charm-1", ["count", "invalid"]),
+        Error,
       );
     });
 
@@ -156,8 +142,7 @@ describe("CellOperations", () => {
       const testData = { name: "Test", value: 123 };
       mockManager.setCharmData("charm-1", testData);
       
-      const cellOps = new CellOperations(mockManager);
-      const value = await cellOps.getCellValue("charm-1", []);
+      const value = await getCellValue(mockManager, "charm-1", []);
       
       assertEquals(value, testData);
     });
@@ -173,8 +158,7 @@ describe("CellOperations", () => {
         },
       });
       
-      const cellOps = new CellOperations(mockManager);
-      const value = await cellOps.getCellValue("charm-1", ["data", "items", 1, "tags", 2]);
+      const value = await getCellValue(mockManager, "charm-1", ["data", "items", 1, "tags", 2]);
       
       assertEquals(value, "c");
     });
@@ -185,8 +169,7 @@ describe("CellOperations", () => {
       const mockManager = new MockCharmManager() as any;
       mockManager.setCharmData("charm-1", {});
       
-      const cellOps = new CellOperations(mockManager);
-      await cellOps.setCellValue("charm-1", ["name"], "Updated Name");
+      await setCellValue(mockManager, "charm-1", ["name"], "Updated Name");
       
       // In a real test, we'd verify the value was set on the input cell
       // For now, we just verify no errors were thrown
@@ -196,219 +179,20 @@ describe("CellOperations", () => {
       const mockManager = new MockCharmManager() as any;
       mockManager.setCharmData("charm-1", {});
       
-      const cellOps = new CellOperations(mockManager);
-      await cellOps.setCellValue("charm-1", ["config", "theme"], "light");
+      await setCellValue(mockManager, "charm-1", ["config", "theme"], "light");
       
       // Verify no errors were thrown
     });
 
     it("should throw for non-existent charms", async () => {
       const mockManager = new MockCharmManager() as any;
-      const cellOps = new CellOperations(mockManager);
       
       await assertRejects(
-        async () => await cellOps.setCellValue("non-existent", ["path"], "value"),
-        CellOperationException,
+        async () => await setCellValue(mockManager, "non-existent", ["path"], "value"),
+        Error,
         `Charm with ID "non-existent" not found`,
       );
     });
   });
 
-  describe("Pure Functions", () => {
-    describe("validateNavigable", () => {
-      it("should return null for valid objects", () => {
-        const error = validateNavigable({ key: "value" }, "key");
-        assertEquals(error, null);
-      });
-
-      it("should return null for valid arrays", () => {
-        const error = validateNavigable([1, 2, 3], 0);
-        assertEquals(error, null);
-      });
-
-      it("should return error for null values", () => {
-        const error = validateNavigable(null, "key");
-        assertEquals(error?.type, "NULL_VALUE");
-        assertEquals(error?.segment, "key");
-      });
-
-      it("should return error for undefined values", () => {
-        const error = validateNavigable(undefined, "key");
-        assertEquals(error?.type, "NULL_VALUE");
-        assertEquals(error?.segment, "key");
-      });
-
-      it("should return error for non-object values", () => {
-        const error = validateNavigable(42, "key");
-        assertEquals(error?.type, "NON_OBJECT");
-        assertEquals(error?.segment, "key");
-      });
-    });
-
-    describe("navigatePath", () => {
-      it("should navigate simple paths", () => {
-        const data = { name: "test", value: 42 };
-        const result = navigatePath(data, ["name"]);
-        
-        assertEquals(result.success, true);
-        if (result.success) {
-          assertEquals(result.value, "test");
-          assertEquals(result.path, ["name"]);
-        }
-      });
-
-      it("should navigate nested paths", () => {
-        const data = { 
-          config: { 
-            settings: { 
-              theme: "dark" 
-            } 
-          } 
-        };
-        const result = navigatePath(data, ["config", "settings", "theme"]);
-        
-        assertEquals(result.success, true);
-        if (result.success) {
-          assertEquals(result.value, "dark");
-        }
-      });
-
-      it("should handle array navigation", () => {
-        const data = { 
-          items: [
-            { id: 1 },
-            { id: 2, name: "second" }
-          ] 
-        };
-        const result = navigatePath(data, ["items", 1, "name"]);
-        
-        assertEquals(result.success, true);
-        if (result.success) {
-          assertEquals(result.value, "second");
-        }
-      });
-
-      it("should return error for null in path", () => {
-        const data = { config: null };
-        const result = navigatePath(data, ["config", "settings"]);
-        
-        assertEquals(result.success, false);
-        if (!result.success) {
-          assertEquals(result.error.type, "NULL_VALUE");
-          assertEquals(result.error.path, ["config", "settings"]);
-        }
-      });
-
-      it("should return error for non-object in path", () => {
-        const data = { count: 42 };
-        const result = navigatePath(data, ["count", "invalid"]);
-        
-        assertEquals(result.success, false);
-        if (!result.success) {
-          assertEquals(result.error.type, "NON_OBJECT");
-          assertEquals(result.error.path, ["count", "invalid"]);
-        }
-      });
-
-      it("should handle empty path", () => {
-        const data = { test: "value" };
-        const result = navigatePath(data, []);
-        
-        assertEquals(result.success, true);
-        if (result.success) {
-          assertEquals(result.value, data);
-        }
-      });
-    });
-
-    describe("Functional getCellValue", () => {
-      it("should return success result for valid paths", async () => {
-        const mockManager = new MockCharmManager() as any;
-        mockManager.setCharmData("charm-1", { name: "Test" });
-        
-        const result = await getCellValue(mockManager, "charm-1", ["name"]);
-        
-        assertEquals(result.success, true);
-        if (result.success) {
-          assertEquals(result.value, "Test");
-        }
-      });
-
-      it("should return error result for non-existent charm", async () => {
-        const mockManager = new MockCharmManager() as any;
-        
-        const result = await getCellValue(mockManager, "non-existent", ["path"]);
-        
-        assertEquals(result.success, false);
-        if (!result.success) {
-          assertEquals(result.error.type, "CHARM_NOT_FOUND");
-          assertEquals(result.error.charmId, "non-existent");
-        }
-      });
-
-      it("should return error result for invalid path", async () => {
-        const mockManager = new MockCharmManager() as any;
-        mockManager.setCharmData("charm-1", { count: 42 });
-        
-        const result = await getCellValue(mockManager, "charm-1", ["count", "invalid"]);
-        
-        assertEquals(result.success, false);
-        if (!result.success) {
-          assertEquals(result.error.type, "NON_OBJECT");
-        }
-      });
-    });
-
-    describe("Functional setCellValue", () => {
-      it("should return success result for valid operations", async () => {
-        const mockManager = new MockCharmManager() as any;
-        mockManager.setCharmData("charm-1", {});
-        
-        const result = await setCellValue(mockManager, "charm-1", ["name"], "Test");
-        
-        assertEquals(result.success, true);
-      });
-
-      it("should return error result for non-existent charm", async () => {
-        const mockManager = new MockCharmManager() as any;
-        
-        const result = await setCellValue(mockManager, "non-existent", ["path"], "value");
-        
-        assertEquals(result.success, false);
-        if (!result.success) {
-          assertEquals(result.error.type, "CHARM_NOT_FOUND");
-          assertEquals(result.error.charmId, "non-existent");
-        }
-      });
-    });
-  });
-
-  describe("CellOperationException", () => {
-    it("should properly format error messages", () => {
-      const error = new CellOperationException({
-        type: "CHARM_NOT_FOUND",
-        message: "Test error message",
-        charmId: "test-charm"
-      });
-      
-      assertEquals(error.message, "Test error message");
-      assertEquals(error.name, "CellOperationException");
-      assertEquals(error.error.type, "CHARM_NOT_FOUND");
-      assertEquals(error.error.charmId, "test-charm");
-    });
-
-    it("should be thrown by class methods for errors", async () => {
-      const mockManager = new MockCharmManager() as any;
-      const cellOps = new CellOperations(mockManager);
-      
-      try {
-        await cellOps.getCellValue("non-existent", ["path"]);
-      } catch (e) {
-        assertEquals(e instanceof CellOperationException, true);
-        if (e instanceof CellOperationException) {
-          assertEquals(e.error.type, "CHARM_NOT_FOUND");
-        }
-      }
-    });
-  });
 });
