@@ -1,9 +1,11 @@
 import type {
   IAttestation,
+  IInvalidDataURIError,
   IMemoryAddress,
   ISpaceReplica,
   IStorageTransactionInconsistent,
   ITransaction,
+  IUnsupportedMediaTypeError,
   JSONValue,
   MemorySpace,
   Result,
@@ -13,8 +15,11 @@ import * as Address from "./address.ts";
 import {
   attest,
   claim,
+  InvalidDataURIError,
+  load,
   read,
   StateInconsistency,
+  UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
 import { unclaimed } from "@commontools/memory/fact";
@@ -22,6 +27,8 @@ import { refer } from "merkle-reference";
 import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
+
+export { InvalidDataURIError, UnsupportedMediaTypeError };
 
 export class Chronicle {
   #replica: ISpaceReplica;
@@ -87,7 +94,22 @@ export class Chronicle {
 
   read(
     address: IMemoryAddress,
-  ): Result<IAttestation, IStorageTransactionInconsistent> {
+  ): Result<
+    IAttestation,
+    | IStorageTransactionInconsistent
+    | IInvalidDataURIError
+    | IUnsupportedMediaTypeError
+  > {
+    // Handle data URIs
+    if (Address.isInline(address)) {
+      const { ok: attestation, error } = load(address);
+      if (error) {
+        return { error };
+      } else {
+        return read(attestation, address);
+      }
+    }
+
     // If we previously wrote into overlapping memory address we simply
     // read from it.
     const written = this.#novelty.get(address);

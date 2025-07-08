@@ -1,15 +1,49 @@
 import type {
   IAttestation,
+  IInvalidDataURIError,
   IMemoryAddress,
   INotFoundError,
   ISpaceReplica,
   IStorageTransactionInconsistent,
+  IUnsupportedMediaTypeError,
   JSONValue,
   MemorySpace,
   Result,
   State,
 } from "../interface.ts";
 import { unclaimed } from "@commontools/memory/fact";
+
+export class InvalidDataURIError extends Error implements IInvalidDataURIError {
+  override readonly name = "InvalidDataURIError";
+  declare readonly cause: Error;
+
+  constructor(
+    message: string,
+    cause?: Error,
+  ) {
+    super(message);
+    if (cause) {
+      this.cause = cause;
+    }
+  }
+
+  from(space: MemorySpace) {
+    return this;
+  }
+}
+
+export class UnsupportedMediaTypeError extends Error
+  implements IUnsupportedMediaTypeError {
+  override readonly name = "UnsupportedMediaTypeError";
+
+  constructor(message: string) {
+    super(message);
+  }
+
+  from(space: MemorySpace) {
+    return this;
+  }
+}
 
 /**
  * Takes `source` attestation, `address` and `value` and produces derived
@@ -178,6 +212,98 @@ export const resolve = (
   }
 
   return { ok: { value, address } };
+};
+
+/**
+ * Loads an attestation from a data URI address. Parses the data URI content
+ * and returns an attestation with the parsed value.
+ */
+export const load = (
+  address: Omit<IMemoryAddress, "path">,
+): Result<IAttestation, IInvalidDataURIError | IUnsupportedMediaTypeError> => {
+  try {
+    // Parse data URI using URL constructor
+    const url = new URL(address.id);
+
+    if (url.protocol !== "data:") {
+      return {
+        error: new InvalidDataURIError(
+          "Invalid data URI: protocol must be 'data:'",
+        ),
+      };
+    }
+
+    const [mediaTypeAndParams, data] = url.pathname.split(",");
+
+    if (data === undefined) {
+      return {
+        error: new InvalidDataURIError(
+          "Invalid data URI format: missing comma separator",
+          undefined,
+        ),
+      };
+    }
+
+    // Parse media type and parameters
+    const params = mediaTypeAndParams.split(";");
+    const mediaType = params[0] || "text/plain";
+    const isBase64 = params.includes("base64");
+
+    // Decode data
+    const content = isBase64 ? atob(data) : decodeURIComponent(data);
+
+    // Check if media type matches address.type
+    if (mediaType !== address.type) {
+      // Media type mismatch - return error
+      return {
+        error: new UnsupportedMediaTypeError(
+          `Media type mismatch: expected "${address.type}" but data URI contains "${mediaType}"`,
+        ),
+      };
+    }
+
+    // Handle JSON media type
+    if (mediaType === "application/json") {
+      let value: JSONValue;
+      try {
+        value = JSON.parse(content);
+      } catch (error) {
+        const reason = error as Error;
+        return {
+          error: new InvalidDataURIError(
+            `Failed to parse JSON from data URI: ${reason.message}
+              parseError instanceof Error
+                ?
+                : String(parseError)
+            }`,
+            reason,
+          ),
+        };
+      }
+
+      return { ok: { address: { ...address, path: [] }, value } };
+    }
+
+    if (mediaType.startsWith("text/")) {
+      // Handle other media types - store as string for now since we do not
+      // support blobs yet.
+      return { ok: { address: { ...address, path: [] }, value: content } };
+    }
+
+    return {
+      error: new UnsupportedMediaTypeError(
+        `Unsupported media type ${mediaType}`,
+      ),
+    };
+  } catch (error) {
+    const reason = error as Error;
+    return {
+      error: new InvalidDataURIError(
+        `Invalid data URI: ${reason.message}`,
+        reason,
+      ),
+    };
+  }
 };
 
 export class NotFound extends RangeError implements INotFoundError {

@@ -458,6 +458,8 @@ export interface INotFoundError extends Error {
  */
 export interface IUnsupportedMediaTypeError extends Error {
   name: "UnsupportedMediaTypeError";
+
+  from(space: MemorySpace): IUnsupportedMediaTypeError;
 }
 
 /**
@@ -466,6 +468,8 @@ export interface IUnsupportedMediaTypeError extends Error {
 export interface IInvalidDataURIError extends Error {
   name: "InvalidDataURIError";
   cause: Error;
+
+  from(space: MemorySpace): IInvalidDataURIError;
 }
 
 export type ReadError =
