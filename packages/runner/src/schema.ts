@@ -561,10 +561,9 @@ export function validateAndTransform(
     seen.push([seenKey, result]);
 
     // Handle explicitly defined properties
-    const cfc = new ContextualFlowControl();
     if (resolvedSchema.properties) {
       for (const key of Object.keys(resolvedSchema.properties)) {
-        const childSchema = cfc.getSchemaAtPath(
+        const childSchema = runtime.cfc.getSchemaAtPath(
           resolvedSchema,
           [key],
           rootSchema,
@@ -597,7 +596,7 @@ export function validateAndTransform(
     const keys = Object.keys(value);
     for (const key of keys) {
       if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
-        const childSchema = cfc.getSchemaAtPath(
+        const childSchema = runtime.cfc.getSchemaAtPath(
           resolvedSchema,
           [key],
           rootSchema,
