@@ -110,6 +110,34 @@ This script guides Claude through setting up a complete space with the `ct` util
 - Check network connectivity
 - Verify identity file permissions
 
+### Data Management During Setup
+
+**Viewing charm data:**
+Use the new cell get commands to inspect charm data during setup:
+```bash
+# View charm input parameters
+./dist/ct charm get --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] title
+
+# View nested data
+./dist/ct charm get --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] config/apiKey
+
+# View array elements
+./dist/ct charm get --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] items/0/name
+```
+
+**Modifying charm data:**
+Use cell set commands to configure charms during setup:
+```bash
+# Set simple values
+echo '"Updated Title"' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] title
+
+# Set configuration objects
+echo '{"apiKey": "your-key", "enabled": true}' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] config
+
+# Set array data
+echo '[{"name": "Item 1"}, {"name": "Item 2"}]' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] items
+```
+
 ### Notes for Claude
 
 - Always run commands and show real output to user
@@ -118,6 +146,7 @@ This script guides Claude through setting up a complete space with the `ct` util
 - Be helpful if user needs to troubleshoot
 - Ask questions when paths or parameters are unclear
 - Keep track of what's been created to avoid duplicates
+- Use cell get/set commands to inspect and configure charm data as needed
 
 ### Important: External Recipe Repository Handling
 
