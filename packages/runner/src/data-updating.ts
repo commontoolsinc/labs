@@ -297,7 +297,6 @@ export function normalizeAndDiff(
     ];
   }
 
-  const cfc = current.cell.runtime.cfc;
   // Handle arrays
   if (Array.isArray(newValue)) {
     // If the current value is not an array, set it to an empty array
@@ -306,7 +305,7 @@ export function normalizeAndDiff(
     }
 
     for (let i = 0; i < newValue.length; i++) {
-      const childSchema = cfc.getSchemaAtPath(
+      const childSchema = runtime.cfc.getSchemaAtPath(
         link.schema,
         [i.toString()],
         link.rootSchema,
@@ -330,7 +329,7 @@ export function normalizeAndDiff(
     if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
       const lub = (link.schema !== undefined)
-        ? cfc.lubSchema(link.schema)
+        ? runtime.cfc.lubSchema(link.schema)
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)
@@ -359,7 +358,7 @@ export function normalizeAndDiff(
     }
 
     for (const key in newValue) {
-      const childSchema = cfc.getSchemaAtPath(
+      const childSchema = runtime.cfc.getSchemaAtPath(
         link.schema,
         [key],
         link.rootSchema,
@@ -377,7 +376,7 @@ export function normalizeAndDiff(
     // Handle removed keys
     for (const key in currentValue) {
       if (!(key in newValue)) {
-        const childSchema = cfc.getSchemaAtPath(
+        const childSchema = runtime.cfc.getSchemaAtPath(
           link.schema,
           [key],
           link.rootSchema,
