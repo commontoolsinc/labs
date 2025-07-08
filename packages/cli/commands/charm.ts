@@ -20,7 +20,7 @@ import {
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
-import { parseSlashNotationPath } from "../lib/path-helpers.ts";
+import { parsePath } from "../lib/path-helpers.ts";
 
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
@@ -479,7 +479,7 @@ export function parseLink(
     return { charmId };
   }
 
-  const path = parseSlashNotationPath(parts.slice(1).join("/"));
+  const path = parsePath(parts.slice(1).join("/"));
   return { charmId, path };
 }
 
@@ -513,7 +513,7 @@ function parseUrl(
  * @returns Array of path segments with numbers for array indices
  */
 export function parseCellPath(pathString: string): (string | number)[] {
-  return parseSlashNotationPath(pathString);
+  return parsePath(pathString);
 }
 
 // We use stdin for charm input which must be an `Object`
