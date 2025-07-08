@@ -112,6 +112,7 @@ jobs:
         run: deno task build-binaries
         env:
           VITE_COMMIT_SHA: ${{ github.sha }}
+          COMMIT_SHA: ${{ github.sha }}
           VITE_BUILD_SOURCEMAPS: "true"
           VITE_STORAGE_TYPE: "schema"
 

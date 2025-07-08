@@ -1,3 +1,4 @@
+shell-frontend
 jumble-frontend
 llm-api-cache
 cache
@@ -9,3 +10,4 @@ cache
 
 vendor/
 vendor/**
+
