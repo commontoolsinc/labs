@@ -178,10 +178,14 @@ export function createQueryResultProxy<T>(
 
             // Turn any newly added elements into cells. And if there was a
             // change at all, update the cell.
+            const tx = valueCell.runtime.edit();
             diffAndUpdate(
-              { cell: valueCell, path: valuePath },
+              valueCell.runtime,
+              tx,
+              parseLink(
+                { cell: valueCell, path: valuePath } as LegacyDocCellLink,
+              ),
               copy,
-              log,
               {
                 parent: valueCell.entityId,
                 method: prop,
@@ -189,6 +193,8 @@ export function createQueryResultProxy<T>(
                 context: getTopFrame()?.cause ?? "unknown",
               },
             );
+            tx.commit();
+            if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
 
             if (Array.isArray(result)) {
               if (!valueCell.entityId) {
@@ -213,12 +219,16 @@ export function createQueryResultProxy<T>(
               );
               resultDoc.send(result);
 
+              const tx = valueCell.runtime.edit();
               diffAndUpdate(
-                { cell: resultDoc, path: [] },
+                valueCell.runtime,
+                tx,
+                parseLink({ cell: resultDoc, path: [] } as LegacyDocCellLink),
                 result,
-                log,
                 cause,
               );
+              tx.commit();
+              if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
 
               result = resultDoc.getAsQueryResult([], log);
             }
@@ -258,12 +268,18 @@ export function createQueryResultProxy<T>(
         return true;
       }
 
+      const tx = valueCell.runtime.edit();
       diffAndUpdate(
-        { cell: valueCell, path: [...valuePath, prop] },
+        valueCell.runtime,
+        tx,
+        parseLink(
+          { cell: valueCell, path: [...valuePath, prop] } as LegacyDocCellLink,
+        ),
         value,
-        log,
         getTopFrame()?.cause ?? "unknown",
       );
+      tx.commit();
+      if (log) appendTxToReactivityLog(log, tx, valueCell.runtime);
 
       return true;
     },

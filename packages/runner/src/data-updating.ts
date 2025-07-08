@@ -3,21 +3,29 @@ import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { appendTxToReactivityLog, isCell } from "./cell.ts";
-import { isAnyCellLink } from "./link-utils.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
+  areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
+  isAnyCellLink,
   isLink,
   isWriteRedirectLink,
+  type NormalizedFullLink,
+  parseLink,
   parseNormalizedFullLinktoLegacyDocCellLink,
-  parseToLegacyCellLink,
 } from "./link-utils.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
+import {
+  type IExtendedStorageTransaction,
+  type JSONValue,
+} from "./storage/interface.ts";
+import { type IRuntime } from "./runtime.ts";
+import { toURI } from "./uri-utils.ts";
 
 // Sets a value at a path, following aliases and recursing into objects. Returns
 // success, meaning no frozen docs were in the way. That is, also returns true
@@ -46,9 +54,7 @@ export function setNestedValue<T>(
     isRecord(destValue) &&
     isRecord(value) &&
     Array.isArray(value) === Array.isArray(destValue) &&
-    !isDoc(value) &&
-    !isAnyCellLink(value) &&
-    !isCell(value)
+    !isLink(value)
   ) {
     let success = true;
     for (const key in value) {
@@ -103,17 +109,21 @@ export function setNestedValue<T>(
  * @returns Whether any changes were made.
  */
 export function diffAndUpdate(
-  current: LegacyDocCellLink,
+  runtime: IRuntime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
   newValue: unknown,
-  log?: ReactivityLog,
   context?: unknown,
 ): boolean {
-  const changes = normalizeAndDiff(current, newValue, log, context);
-  applyChangeSet(changes, log);
+  const changes = normalizeAndDiff(runtime, tx, link, newValue, context);
+  applyChangeSet(tx, changes);
   return changes.length > 0;
 }
 
-type ChangeSet = { location: LegacyDocCellLink; value: unknown }[];
+type ChangeSet = {
+  location: NormalizedFullLink;
+  value: JSONValue | undefined;
+}[];
 
 /**
  * Traverses objects and returns an array of changes that should be written. An
@@ -137,9 +147,10 @@ type ChangeSet = { location: LegacyDocCellLink; value: unknown }[];
  * @returns An array of changes that should be written.
  */
 export function normalizeAndDiff(
-  current: LegacyDocCellLink,
+  runtime: IRuntime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
   newValue: unknown,
-  log?: ReactivityLog,
   context?: unknown,
 ): ChangeSet {
   const changes: ChangeSet = [];
@@ -156,27 +167,31 @@ export function normalizeAndDiff(
     isRecord(newValue) &&
     newValue[ID_FIELD] !== undefined
   ) {
-    const { [ID_FIELD]: fieldName, ...rest } = newValue;
+    const { [ID_FIELD]: fieldName, ...rest } = newValue as
+      & { [ID_FIELD]: string }
+      & Record<string, JSONValue>;
     const id = newValue[fieldName as PropertyKey];
-    if (current.path.length > 1) {
-      const parent = current.cell.getAtPath(current.path.slice(0, -1));
+    if (link.path.length > 1) {
+      const parent = tx.readValueOrThrow({
+        ...link,
+        path: link.path.slice(0, -1),
+      });
       if (Array.isArray(parent)) {
-        const base = current.cell.asCell(current.path);
+        const base = runtime.getCellFromLink(link);
         for (const v of parent) {
           if (isLink(v)) {
-            const sibling = parseToLegacyCellLink(v, base);
-            if (
-              sibling.cell.getAtPath([
-                ...sibling.path,
-                fieldName as PropertyKey,
-              ]) === id
-            ) {
+            const sibling = parseLink(v, base);
+            const siblingId = tx.readValueOrThrow({
+              ...sibling,
+              path: [...sibling.path, fieldName as string],
+            });
+            if (siblingId === id) {
               // We found a sibling with the same id, so ...
               return [
                 // ... reuse the existing document
-                ...normalizeAndDiff(current, v, log, context),
+                ...normalizeAndDiff(runtime, tx, link, v, context),
                 // ... and update it to the new value
-                ...normalizeAndDiff(sibling, rest, log, context),
+                ...normalizeAndDiff(runtime, tx, sibling, rest, context),
               ];
             }
           }
@@ -189,26 +204,29 @@ export function normalizeAndDiff(
 
   // Unwrap proxies and handle special types
   if (isQueryResultForDereferencing(newValue)) {
-    newValue = getCellLinkOrThrow(newValue);
+    // TODO(seefeld): Convert getCellLinkOrThrow to generate normalized or sigil
+    newValue = createSigilLinkFromParsedLink(
+      parseLink(getCellLinkOrThrow(newValue), link),
+    );
   }
 
   if (isDoc(newValue)) {
-    newValue = { cell: newValue, path: [] } satisfies LegacyDocCellLink;
+    throw new Error("Docs are not supported anymore");
   }
-  if (isCell(newValue)) newValue = newValue.getAsLegacyCellLink();
+  if (isCell(newValue)) newValue = newValue.getAsLink();
 
   // Get current value to compare against
-  const currentValue = current.cell.getAtPath(current.path);
+  let currentValue = tx.readValueOrThrow(link);
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
     if (
       isWriteRedirectLink(currentValue) &&
-      areLinksSame(currentValue, newValue, current.cell.asCell())
+      areNormalizedLinksSame(parseLink(currentValue, link), link)
     ) {
       return [];
     } else {
-      changes.push({ location: current, value: newValue });
+      changes.push({ location: link, value: newValue as JSONValue });
       return changes;
     }
   }
@@ -216,67 +234,66 @@ export function normalizeAndDiff(
   // Handle alias in current value (at this point: if newValue is not an alias)
   if (isWriteRedirectLink(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
-    log?.reads.push({ ...current });
-    const tx = current.cell.runtime.edit();
-    const ref = parseNormalizedFullLinktoLegacyDocCellLink(
-      followWriteRedirects(tx, currentValue, current.cell.asCell()),
-      current.cell.runtime,
-    );
-    tx.commit();
-    if (log) appendTxToReactivityLog(log, tx, current.cell.runtime);
-    return normalizeAndDiff(ref, newValue, log, context);
+    const redirectLink = followWriteRedirects(tx, currentValue, link);
+    return normalizeAndDiff(runtime, tx, redirectLink, newValue, context);
   }
 
   if (isAnyCellLink(newValue)) {
     if (
       isAnyCellLink(currentValue) &&
-      areLinksSame(newValue, currentValue, current.cell.asCell())
+      areLinksSame(newValue, currentValue, link)
     ) {
       return [];
     } else {
       return [
-        { location: current, value: newValue },
+        // TODO(seefeld): Normalize the link to a sigil link?
+        { location: link, value: newValue as JSONValue },
       ];
     }
   }
 
   // Handle ID-based object (convert to entity)
   if (isRecord(newValue) && newValue[ID] !== undefined) {
-    const { [ID]: id, ...rest } = newValue;
-    let path = current.path;
+    const { [ID]: id, ...rest } = newValue as
+      & { [ID]: string }
+      & Record<string, JSONValue>;
+    let path = link.path;
 
     // If we're setting an array element, make the array the context for the
     // derived id, not the array index. If it's a nested array, take the parent
     // array as context, recursively.
     while (
       path.length > 0 &&
-      Array.isArray(current.cell.getAtPath(path.slice(0, -1)))
+      Array.isArray(tx.readValueOrThrow({ ...link, path: path.slice(0, -1) }))
     ) {
       path = path.slice(0, -1);
     }
 
     const entityId = createRef({ id }, {
-      parent: current.cell.entityId,
+      parent: { id: link.id, space: link.space },
       path,
       context,
     });
-    const doc = current.cell.runtime.documentMap.getDocByEntityId(
-      current.cell.space,
-      entityId,
-      true,
-      current.cell,
-    )!;
-    const ref = {
-      cell: doc,
+
+    const newEntryLink: NormalizedFullLink = {
+      id: toURI(entityId),
+      space: link.space,
       path: [],
-      schema: current.schema,
-      rootSchema: current.rootSchema,
+      type: link.type,
+      schema: link.schema,
+      rootSchema: link.rootSchema,
     };
     return [
       // If it wasn't already, set the current value to be a doc link to this doc
-      ...normalizeAndDiff(current, ref, log, context),
+      ...normalizeAndDiff(
+        runtime,
+        tx,
+        link,
+        createSigilLinkFromParsedLink(newEntryLink),
+        context,
+      ),
       // And see whether the value of the document itself changed
-      ...normalizeAndDiff(ref, rest, log, context),
+      ...normalizeAndDiff(runtime, tx, newEntryLink, rest, context),
     ];
   }
 
@@ -285,24 +302,25 @@ export function normalizeAndDiff(
   if (Array.isArray(newValue)) {
     // If the current value is not an array, set it to an empty array
     if (!Array.isArray(currentValue)) {
-      changes.push({ location: current, value: [] });
+      changes.push({ location: link, value: [] });
     }
 
     for (let i = 0; i < newValue.length; i++) {
       const childSchema = cfc.getSchemaAtPath(
-        current.schema,
+        link.schema,
         [i.toString()],
-        current.rootSchema,
+        link.rootSchema,
       );
       const nestedChanges = normalizeAndDiff(
+        runtime,
+        tx,
         {
-          cell: current.cell,
-          path: [...current.path, i.toString()],
+          ...link,
+          path: [...link.path, i.toString()],
           schema: childSchema,
-          rootSchema: current.rootSchema,
+          rootSchema: link.rootSchema,
         },
         newValue[i],
-        log,
         context,
       );
       changes.push(...nestedChanges);
@@ -311,8 +329,8 @@ export function normalizeAndDiff(
     // Handle array length changes
     if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
-      const lub = (current.schema !== undefined)
-        ? cfc.lubSchema(current.schema)
+      const lub = (link.schema !== undefined)
+        ? cfc.lubSchema(link.schema)
         : undefined;
       // We have to cast these, since the type could be changed to another value
       const childSchema = (lub !== undefined)
@@ -320,10 +338,9 @@ export function normalizeAndDiff(
         : { type: "number" } as JSONSchema;
       changes.push({
         location: {
-          cell: current.cell,
-          path: [...current.path, "length"],
+          ...link,
+          path: [...link.path, "length"],
           schema: childSchema,
-          rootSchema: current.rootSchema,
         },
         value: newValue.length,
       });
@@ -337,24 +354,21 @@ export function normalizeAndDiff(
     // If the current value is not a (regular) object, set it to an empty object
     // Note that the alias case is handled above
     if (!isRecord(currentValue) || isAnyCellLink(currentValue)) {
-      changes.push({ location: current, value: {} });
+      changes.push({ location: link, value: {} });
+      currentValue = {};
     }
 
     for (const key in newValue) {
       const childSchema = cfc.getSchemaAtPath(
-        current.schema,
+        link.schema,
         [key],
-        current.rootSchema,
+        link.rootSchema,
       );
       const nestedChanges = normalizeAndDiff(
-        {
-          cell: current.cell,
-          path: [...current.path, key],
-          schema: childSchema,
-          rootSchema: current.rootSchema,
-        },
+        runtime,
+        tx,
+        { ...link, path: [...link.path, key], schema: childSchema },
         newValue[key],
-        log,
         context,
       );
       changes.push(...nestedChanges);
@@ -364,17 +378,12 @@ export function normalizeAndDiff(
     for (const key in currentValue) {
       if (!(key in newValue)) {
         const childSchema = cfc.getSchemaAtPath(
-          current.schema,
+          link.schema,
           [key],
-          current.rootSchema,
+          link.rootSchema,
         );
         changes.push({
-          location: {
-            cell: current.cell,
-            path: [...current.path, key],
-            schema: childSchema,
-            rootSchema: current.rootSchema,
-          },
+          location: { ...link, path: [...link.path, key], schema: childSchema },
           value: undefined,
         });
       }
@@ -385,7 +394,7 @@ export function normalizeAndDiff(
 
   // Handle primitive values and other cases (Object.is handles NaN and -0)
   if (!Object.is(currentValue, newValue)) {
-    changes.push({ location: current, value: newValue });
+    changes.push({ location: link, value: newValue as JSONValue });
   }
 
   return changes;
@@ -398,17 +407,11 @@ export function normalizeAndDiff(
  * @param log - The log to write to.
  */
 export function applyChangeSet(
+  tx: IExtendedStorageTransaction,
   changes: ChangeSet,
-  log?: ReactivityLog,
 ) {
   for (const change of changes) {
-    change.location.cell.setAtPath(
-      change.location.path,
-      change.value,
-      undefined,
-      change.location.schema,
-    );
-    log?.writes.push(change.location);
+    tx.writeValueOrThrow(change.location, change.value);
   }
 }
 

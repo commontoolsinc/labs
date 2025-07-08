@@ -11,6 +11,7 @@ import {
 import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
+  areNormalizedLinksSame,
   isAnyCellLink,
   isLegacyCellLink,
   isLegacyDocCellLink,
@@ -21,6 +22,7 @@ import { arrayEqual } from "../src/path-utils.ts";
 import { type ReactivityLog } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -28,6 +30,7 @@ const space = signer.did();
 describe("data-updating", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -37,9 +40,11 @@ describe("data-updating", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -160,8 +165,8 @@ describe("data-updating", () => {
         "normalizeAndDiff simple value changes",
       );
       testCell.set({ value: 42 });
-      const current = testCell.key("value").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, 100);
+      const current = testCell.key("value").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, 100);
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
@@ -174,12 +179,18 @@ describe("data-updating", () => {
         "normalizeAndDiff object property changes",
       );
       testCell.set({ user: { name: "John", age: 30 } });
-      const current = testCell.key("user").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, { name: "Jane", age: 30 });
+      const current = testCell.key("user").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, {
+        name: "Jane",
+        age: 30,
+      });
 
       expect(changes.length).toBe(1);
       expect(
-        areLinksSame(changes[0].location, testCell.key("user").key("name")),
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("user").key("name").getAsNormalizedFullLink(),
+        ),
       ).toBe(true);
       expect(changes[0].value).toBe("Jane");
     });
@@ -192,12 +203,19 @@ describe("data-updating", () => {
         "normalizeAndDiff added object properties",
       );
       testCell.set({ user: { name: "John" } });
-      const current = testCell.key("user").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, { name: "John", age: 30 });
+      const current = testCell.key("user").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, {
+        name: "John",
+        age: 30,
+      });
 
       expect(changes.length).toBe(1);
-      expect(areLinksSame(changes[0].location, testCell.key("user").key("age")))
-        .toBe(true);
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("user").key("age").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
       expect(changes[0].value).toBe(30);
     });
 
@@ -207,12 +225,16 @@ describe("data-updating", () => {
         "normalizeAndDiff removed object properties",
       );
       testCell.set({ user: { name: "John", age: 30 } });
-      const current = testCell.key("user").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, { name: "John" });
+      const current = testCell.key("user").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, { name: "John" });
 
       expect(changes.length).toBe(1);
-      expect(areLinksSame(changes[0].location, testCell.key("user").key("age")))
-        .toBe(true);
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("user").key("age").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
       expect(changes[0].value).toBe(undefined);
     });
 
@@ -222,12 +244,15 @@ describe("data-updating", () => {
         "normalizeAndDiff array length changes",
       );
       testCell.set({ items: [1, 2, 3] });
-      const current = testCell.key("items").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, [1, 2]);
+      const current = testCell.key("items").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, [1, 2]);
 
       expect(changes.length).toBe(1);
       expect(
-        areLinksSame(changes[0].location, testCell.key("items").key("length")),
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("items").key("length").getAsNormalizedFullLink(),
+        ),
       ).toBe(true);
       expect(changes[0].value).toBe(2);
     });
@@ -238,12 +263,16 @@ describe("data-updating", () => {
         "normalizeAndDiff array element changes",
       );
       testCell.set({ items: [1, 2, 3] });
-      const current = testCell.key("items").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, [1, 5, 3]);
+      const current = testCell.key("items").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, [1, 5, 3]);
 
       expect(changes.length).toBe(1);
-      expect(areLinksSame(changes[0].location, testCell.key("items").key(1)))
-        .toBe(true);
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("items").key(1).getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
       expect(changes[0].value).toBe(5);
     });
 
@@ -259,14 +288,17 @@ describe("data-updating", () => {
         value: 42,
         alias: { $alias: { path: ["value"] } },
       });
-      const current = testCell.key("alias").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, 100);
+      const current = testCell.key("alias").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, 100);
 
       // Should follow alias to value and change it there
       expect(changes.length).toBe(1);
-      expect(areLinksSame(changes[0].location, testCell.key("value"))).toBe(
-        true,
-      );
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("value").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
       expect(changes[0].value).toBe(100);
     });
 
@@ -284,19 +316,22 @@ describe("data-updating", () => {
         value2: 200,
         alias: { $alias: { path: ["value"] } },
       });
-      const current = testCell.key("alias").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, 100);
+      const current = testCell.key("alias").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, 100);
 
       // Should follow alias to value and change it there
       expect(changes.length).toBe(1);
-      expect(areLinksSame(changes[0].location, testCell.key("value"))).toBe(
-        true,
-      );
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("value").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
       expect(changes[0].value).toBe(100);
 
-      applyChangeSet(changes);
+      applyChangeSet(tx, changes);
 
-      const changes2 = normalizeAndDiff(current, {
+      const changes2 = normalizeAndDiff(runtime, tx, current, {
         $alias: { path: ["value2"] },
       });
 
@@ -304,7 +339,7 @@ describe("data-updating", () => {
         JSON.stringify(current, null, 2),
         JSON.stringify(changes2, null, 2),
       );
-      applyChangeSet(changes2);
+      applyChangeSet(tx, changes2);
 
       expect(changes2.length).toBe(1);
       console.log(
@@ -313,17 +348,23 @@ describe("data-updating", () => {
         parseLink(changes2[0].location),
         parseLink(testCell.key("alias")),
       );
-      expect(areLinksSame(changes2[0].location, testCell.key("alias"))).toBe(
-        true,
-      );
+      expect(
+        areNormalizedLinksSame(
+          changes2[0].location,
+          testCell.key("alias").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
       expect(changes2[0].value).toEqual({ $alias: { path: ["value2"] } });
 
-      const changes3 = normalizeAndDiff(current, 300);
+      const changes3 = normalizeAndDiff(runtime, tx, current, 300);
 
       expect(changes3.length).toBe(1);
-      expect(areLinksSame(changes3[0].location, testCell.key("value2"))).toBe(
-        true,
-      );
+      expect(
+        areNormalizedLinksSame(
+          changes3[0].location,
+          testCell.key("value2").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
       expect(changes3[0].value).toBe(300);
     });
 
@@ -355,8 +396,9 @@ describe("data-updating", () => {
           },
         },
       });
-      const current = testCell.key("user").key("profile").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, {
+      const current = testCell.key("user").key("profile")
+        .getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, {
         details: {
           address: {
             city: "Boston",
@@ -367,11 +409,11 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(
-        areLinksSame(
+        areNormalizedLinksSame(
           changes[0].location,
           testCell.key("user").key("profile").key("details").key("address").key(
             "city",
-          ),
+          ).getAsNormalizedFullLink(),
         ),
       ).toBe(true);
       expect(changes[0].value).toBe("Boston");
@@ -383,23 +425,30 @@ describe("data-updating", () => {
         "should handle ID-based entity objects",
       );
       testCell.set({ items: [] });
-      const current = testCell.key("items").key(0).getAsLegacyCellLink();
+      const current = testCell.key("items").key(0).getAsNormalizedFullLink();
 
       const newValue = { [ID]: "item1", name: "First Item" };
       const changes = normalizeAndDiff(
+        runtime,
+        tx,
         current,
         newValue,
-        undefined,
         "should handle ID-based entity objects",
       );
 
       // Should create an entity and return changes to that entity
       expect(changes.length).toBe(3);
-      expect(changes[0].location.cell.asCell().equals(testCell)).toBe(true);
+      console.log(
+        JSON.stringify(changes, null, 2),
+        testCell.key("items").key(0).getAsNormalizedFullLink(),
+      );
+      expect(changes[0].location.id).toEqual(
+        testCell.getAsNormalizedFullLink().id,
+      );
       expect(changes[0].location.path).toEqual(["items", "0"]);
-      expect(changes[1].location.cell).not.toBe(changes[0].location.cell);
+      expect(changes[1].location.id).not.toEqual(changes[0].location.id);
       expect(changes[1].location.path).toEqual([]);
-      expect(changes[2].location.cell).toBe(changes[1].location.cell);
+      expect(changes[2].location.id).toEqual(changes[1].location.id);
       expect(changes[2].location.path).toEqual(["name"]);
     });
 
@@ -409,17 +458,18 @@ describe("data-updating", () => {
         "should update the same document with ID-based entity objects",
       );
       testCell.set({ items: [] });
-      const current = testCell.key("items").key(0).getAsLegacyCellLink();
+      const current = testCell.key("items").key(0).getAsNormalizedFullLink();
 
       const newValue = { [ID]: "item1", name: "First Item" };
       diffAndUpdate(
+        runtime,
+        tx,
         current,
         newValue,
-        undefined,
         "should update the same document with ID-based entity objects",
       );
 
-      const newDoc = testCell.getRaw().items[0]?.cell;
+      const newLink = testCell.getRaw().items[0];
 
       const newValue2 = {
         items: [
@@ -428,22 +478,31 @@ describe("data-updating", () => {
         ],
       };
       diffAndUpdate(
-        testCell.getAsLegacyCellLink(),
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
         newValue2,
-        undefined,
         "should update the same document with ID-based entity objects",
       );
 
       expect(isAnyCellLink(testCell.getRaw().items[0])).toBe(true);
       expect(isAnyCellLink(testCell.getRaw().items[1])).toBe(true);
-      expect(testCell.getRaw().items[0].cell).not.toBe(newDoc);
-      expect(testCell.getRaw().items[0].cell.get().name).toEqual(
-        "Inserted before",
-      );
-      expect(testCell.getRaw().items[1].cell).toBe(newDoc);
-      expect(testCell.getRaw().items[1].cell.get().name).toEqual(
-        "Second Value",
-      );
+      expect(areLinksSame(testCell.getRaw().items[0], newLink)).toBe(false);
+      expect(
+        (tx.readValueOrThrow(
+          parseLink(testCell.getRaw().items[0], testCell)!,
+        ) as any)
+          .name,
+      )
+        .toEqual("Inserted before");
+      expect(areLinksSame(testCell.getRaw().items[1], newLink)).toBe(true);
+      expect(
+        (tx.readValueOrThrow(
+          parseLink(testCell.getRaw().items[1], testCell)!,
+        ) as any)
+          .name,
+      )
+        .toEqual("Second Value");
     });
 
     it("should update the same document with numeric ID-based entity objects", () => {
@@ -452,17 +511,18 @@ describe("data-updating", () => {
         "should update the same document with ID-based entity objects",
       );
       testCell.set({ items: [] });
-      const current = testCell.key("items").key(0).getAsLegacyCellLink();
+      const current = testCell.key("items").key(0).getAsNormalizedFullLink();
 
       const newValue = { [ID]: 1, name: "First Item" };
       diffAndUpdate(
+        runtime,
+        tx,
         current,
         newValue,
-        undefined,
         "should update the same document with ID-based entity objects",
       );
 
-      const newDoc = testCell.getRaw().items[0].cell;
+      const newLink = testCell.getRaw().items[0];
 
       const newValue2 = {
         items: [
@@ -471,20 +531,29 @@ describe("data-updating", () => {
         ],
       };
       diffAndUpdate(
-        testCell.getAsLegacyCellLink(),
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
         newValue2,
-        undefined,
         "should update the same document with ID-based entity objects",
       );
 
-      expect(testCell.getRaw().items[0].cell).not.toBe(newDoc);
-      expect(testCell.getRaw().items[0].cell.get().name).toEqual(
-        "Inserted before",
-      );
-      expect(testCell.getRaw().items[1].cell).toBe(newDoc);
-      expect(testCell.getRaw().items[1].cell.get().name).toEqual(
-        "Second Value",
-      );
+      expect(areLinksSame(testCell.getRaw().items[0], newLink)).toBe(false);
+      expect(
+        (tx.readValueOrThrow(
+          parseLink(testCell.getRaw().items[0], testCell)!,
+        ) as any)
+          .name,
+      )
+        .toEqual("Inserted before");
+      expect(areLinksSame(testCell.getRaw().items[1], newLink)).toBe(true);
+      expect(
+        (tx.readValueOrThrow(
+          parseLink(testCell.getRaw().items[1], testCell)!,
+        ) as any)
+          .name,
+      )
+        .toEqual("Second Value");
     });
 
     it("should handle ID_FIELD redirects and reuse existing documents", () => {
@@ -498,13 +567,14 @@ describe("data-updating", () => {
       const data = { id: "item1", name: "First Item" };
       addCommonIDfromObjectID(data);
       diffAndUpdate(
-        testCell.key("items").key(0).getAsLegacyCellLink(),
+        runtime,
+        tx,
+        testCell.key("items").key(0).getAsNormalizedFullLink(),
         data,
-        undefined,
         "test ID_FIELD redirects",
       );
 
-      const initialDoc = testCell.getRaw().items[0].cell;
+      const initialLink = testCell.getRaw().items[0];
 
       // Update with another item using ID_FIELD to point to the 'id' field
       const newValue = {
@@ -516,20 +586,33 @@ describe("data-updating", () => {
       addCommonIDfromObjectID(newValue);
 
       diffAndUpdate(
-        testCell.getAsLegacyCellLink(),
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
         newValue,
-        undefined,
         "test ID_FIELD redirects",
       );
 
       // Verify that the second item reused the existing document
-      expect(isLegacyCellLink(testCell.getRaw().items[0])).toBe(true);
-      expect(isLegacyCellLink(testCell.getRaw().items[1])).toBe(true);
-      expect(testCell.getRaw().items[1].cell).toBe(initialDoc);
-      expect(testCell.getRaw().items[1].cell.get().name).toEqual(
-        "Updated Item",
-      );
-      expect(testCell.getRaw().items[0].cell.get().name).toEqual("New Item");
+      expect(isAnyCellLink(testCell.getRaw().items[0])).toBe(true);
+      expect(isAnyCellLink(testCell.getRaw().items[1])).toBe(true);
+      expect(areLinksSame(testCell.getRaw().items[1], initialLink)).toBe(true);
+      expect(
+        (tx.readValueOrThrow(
+          parseLink(testCell.getRaw().items[1], testCell)!,
+        ) as any)
+          .name,
+      )
+        .toEqual(
+          "Updated Item",
+        );
+      expect(
+        (tx.readValueOrThrow(
+          parseLink(testCell.getRaw().items[0], testCell)!,
+        ) as any)
+          .name,
+      )
+        .toEqual("New Item");
     });
 
     it("should treat different properties as different ID namespaces", () => {
@@ -538,24 +621,35 @@ describe("data-updating", () => {
         "it should treat different properties as different ID namespaces",
       );
       testCell.set(undefined);
-      const current = testCell.getAsLegacyCellLink();
+      const current = testCell.getAsNormalizedFullLink();
 
       const newValue = {
         a: { [ID]: "item1", name: "First Item" },
         b: { [ID]: "item1", name: "Second Item" }, // Same ID, different namespace
       };
       diffAndUpdate(
+        runtime,
+        tx,
         current,
         newValue,
-        undefined,
         "it should treat different properties as different ID namespaces",
       );
 
-      expect(isLegacyCellLink(testCell.getRaw().a)).toBe(true);
-      expect(isLegacyCellLink(testCell.getRaw().b)).toBe(true);
-      expect(testCell.getRaw().a.cell).not.toBe(testCell.getRaw().b.cell);
-      expect(testCell.getRaw().a.cell.get().name).toEqual("First Item");
-      expect(testCell.getRaw().b.cell.get().name).toEqual("Second Item");
+      expect(isAnyCellLink(testCell.getRaw().a)).toBe(true);
+      expect(isAnyCellLink(testCell.getRaw().b)).toBe(true);
+      expect(areLinksSame(testCell.getRaw().a, testCell.getRaw().b)).toBe(
+        false,
+      );
+      expect(
+        (tx.readValueOrThrow(parseLink(testCell.getRaw().a, testCell)!) as any)
+          .name,
+      )
+        .toEqual("First Item");
+      expect(
+        (tx.readValueOrThrow(parseLink(testCell.getRaw().b, testCell)!) as any)
+          .name,
+      )
+        .toEqual("Second Item");
     });
 
     it("should return empty array when no changes", () => {
@@ -564,8 +658,8 @@ describe("data-updating", () => {
         "normalizeAndDiff no changes",
       );
       testCell.set({ value: 42 });
-      const current = testCell.key("value").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, 42);
+      const current = testCell.key("value").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, 42);
 
       expect(changes.length).toBe(0);
     });
@@ -582,8 +676,8 @@ describe("data-updating", () => {
       );
       cellB.set({ value: { name: "Original" } });
 
-      const current = cellB.key("value").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, cellA.getDoc());
+      const current = cellB.key("value").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, cellA);
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
@@ -602,16 +696,16 @@ describe("data-updating", () => {
       );
       cellB.set({ value: { name: "Original" } });
 
-      const current = cellB.key("value").getAsLegacyCellLink();
-      const changes = normalizeAndDiff(current, cellA.getDoc());
+      const current = cellB.key("value").getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, current, cellA);
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
       expect(areLinksSame(changes[0].value, cellA)).toBe(true);
 
-      applyChangeSet(changes);
+      applyChangeSet(tx, changes);
 
-      const changes2 = normalizeAndDiff(current, cellA.getDoc());
+      const changes2 = normalizeAndDiff(runtime, tx, current, cellA);
 
       expect(changes2.length).toBe(0);
     });
@@ -625,15 +719,6 @@ describe("data-updating", () => {
     });
 
     it("should reuse items", () => {
-      function isEqualCellLink(
-        a: LegacyDocCellLink,
-        b: LegacyDocCellLink,
-      ): boolean {
-        return isLegacyDocCellLink(a) && isLegacyDocCellLink(b) &&
-          a.cell === b.cell &&
-          arrayEqual(a.path, b.path);
-      }
-
       const itemCell = runtime.getCell<{ id: string; name: string }>(
         space,
         "addCommonIDfromObjectID reuse items",
@@ -644,25 +729,30 @@ describe("data-updating", () => {
         space,
         "addCommonIDfromObjectID arrays",
       );
-      testCell.setRaw({ items: [itemCell.getAsLegacyCellLink()] });
+      testCell.setRaw({ items: [itemCell.getAsLink()] });
 
       const data = {
         items: [{ id: "item1", name: "New Item" }, itemCell],
       };
       addCommonIDfromObjectID(data);
       diffAndUpdate(
-        testCell.getAsLegacyCellLink(),
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
         data,
-        undefined,
         "addCommonIDfromObjectID reuse items",
       );
 
       const result = testCell.getRaw();
       expect(isAnyCellLink(result.items[0])).toBe(true);
       expect(isAnyCellLink(result.items[1])).toBe(true);
-      expect(isEqualCellLink(result.items[0] as any, result.items[1] as any))
+      expect(areLinksSame(result.items[0], result.items[1]))
         .toBe(true);
-      expect(result.items[1].cell.get().name).toBe("New Item");
+      expect(
+        (tx.readValueOrThrow(parseLink(result.items[1], testCell)!) as any)
+          .name,
+      )
+        .toBe("New Item");
     });
   });
 });

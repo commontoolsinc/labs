@@ -291,7 +291,7 @@ export function followLinks(
 export function followWriteRedirects<T = any>(
   tx: IExtendedStorageTransaction,
   writeRedirect: LegacyAlias | SigilWriteRedirectLink,
-  base: Cell<T>,
+  base: Cell<T> | NormalizedFullLink,
 ): NormalizedFullLink {
   if (isWriteRedirectLink(writeRedirect)) {
     const link = parseLink(writeRedirect, base);

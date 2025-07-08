@@ -336,7 +336,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param address - Memory address to write to.
    * @param value - Value to write.
    */
-  writeOrThrow(address: IMemorySpaceAddress, value: JSONValue): void;
+  writeOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
@@ -347,7 +350,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param address - Memory address to write to.
    * @param value - Value to write.
    */
-  writeValueOrThrow(address: IMemorySpaceAddress, value: JSONValue): void;
+  writeValueOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void;
 
   /**
    * Returns the log of the transaction.
