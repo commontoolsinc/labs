@@ -7,19 +7,22 @@ export class DevServer {
   private _server: Deno.HttpServer;
   private outDir: string;
   private sockets: WebSocket[] = [];
-  private reloadableHtml: string;
+  private html: string;
   private socketScript: string;
   private useReloadSocket: boolean;
+  private redirectToIndex?: RegExp;
 
-  constructor({ useReloadSocket, outDir, port, hostname }: {
+  constructor({ useReloadSocket, outDir, port, hostname, redirectToIndex }: {
     useReloadSocket: boolean;
     port: number;
     hostname: string;
     outDir: string;
+    redirectToIndex?: RegExp;
   }) {
     this.useReloadSocket = useReloadSocket;
     this.outDir = outDir;
-    this.reloadableHtml = this.getReloadableHtml({ outDir });
+    this.redirectToIndex = redirectToIndex;
+    this.html = this.getHtml({ useReloadSocket, outDir });
     this.socketScript = this.getSocketScript({ hostname, port });
     this._server = Deno.serve(
       { port, hostname, onListen() {} },
@@ -37,29 +40,23 @@ export class DevServer {
     const url = new URL(req.url);
 
     if (req.headers.get("upgrade") === "websocket") {
-      const { socket, response } = Deno.upgradeWebSocket(req);
-      socket.addEventListener("open", () => {
-        this.sockets.push(socket);
-      });
-      socket.addEventListener("close", () => {
-        const index = this.sockets.findIndex((s) => s === socket);
-        if (index > 0) {
-          this.sockets.splice(index, 1);
-        }
-      });
-      return response;
+      return this.upgradeWebSocket(req);
     }
 
-    if (this.useReloadSocket && url.pathname === "/") {
-      return new Response(this.reloadableHtml, {
-        status: 200,
-        headers: { "Content-Type": "text/html" },
-      });
-    }
     if (this.useReloadSocket && url.pathname === `/${DEV_SOCKET}`) {
       return new Response(this.socketScript, {
         status: 200,
         headers: { "Content-Type": "text/javascript" },
+      });
+    }
+
+    if (
+      url.pathname === "/" || url.pathname === "/index.html" ||
+      (this.redirectToIndex && this.redirectToIndex?.test(url.pathname))
+    ) {
+      return new Response(this.html, {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
       });
     }
 
@@ -69,12 +66,30 @@ export class DevServer {
     });
   }
 
-  private getReloadableHtml({ outDir }: { outDir: string }): string {
+  private upgradeWebSocket(req: Request): Response {
+    const { socket, response } = Deno.upgradeWebSocket(req);
+    socket.addEventListener("open", () => {
+      this.sockets.push(socket);
+    });
+    socket.addEventListener("close", () => {
+      const index = this.sockets.findIndex((s) => s === socket);
+      if (index > 0) {
+        this.sockets.splice(index, 1);
+      }
+    });
+    return response;
+  }
+
+  private getHtml(
+    { useReloadSocket, outDir }: { useReloadSocket?: boolean; outDir: string },
+  ): string {
     const html = Deno.readTextFileSync(join(outDir, "index.html"));
-    return html.replace(
-      "</body>",
-      `<script src="/${DEV_SOCKET}" type="module"></script>\n</body>`,
-    );
+    return useReloadSocket
+      ? html.replace(
+        "</body>",
+        `<script src="/${DEV_SOCKET}" type="module"></script>\n</body>`,
+      )
+      : html;
   }
 
   private getSocketScript(

@@ -9,7 +9,14 @@ export class Builder extends EventTarget {
   }
 
   async watch(watchRoot: string, debounceTimeout: number = 200) {
-    const fn = debounce(this.build.bind(this), debounceTimeout);
+    const fn = debounce(async () => {
+      try {
+        await this.build();
+      } catch (e: any) {
+        const message = e && "message" in e ? e.message : e;
+        console.error(message);
+      }
+    }, debounceTimeout);
     const watcher = Deno.watchFs(watchRoot);
     for await (const _ of watcher) {
       await fn();
