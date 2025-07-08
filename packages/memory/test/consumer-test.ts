@@ -11,6 +11,7 @@ import * as Selection from "../selection.ts";
 import { LABEL_THE } from "../space.ts";
 import * as Transaction from "../transaction.ts";
 import { alice, bob, space as subject } from "./principal.ts";
+import { Identity } from "../../identity/src/identity.ts";
 
 // Some generated service key.
 const serviceDid = "did:key:z6MkfJPMCrTyDmurrAHPUsEjCgvcjvLtAuzyZ7nSqwZwb8KQ";
@@ -1252,5 +1253,72 @@ test(
     });
 
     assert(q3_claimed.ok);
+  },
+);
+
+test(
+  "messages sent in order when signed out of order",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    // Create a sign method that will sign the second payload before the first
+    const slowSigner = await Identity.fromString(
+      "MU+bzp2GaFQHso587iSFWPSeCzbSfn/CbNHEz7ilKRZ0=",
+    );
+
+    const originalSign = slowSigner.sign.bind(slowSigner);
+    const deferred = Promise.withResolvers<void>();
+    let counter = 0;
+    slowSigner.sign = async <T>(payload: Consumer.AsBytes<T>) => {
+      counter++;
+      let result;
+      if (counter === 1) {
+        await deferred.promise;
+        result = await originalSign(payload);
+      } else if (counter === 2) {
+        result = await originalSign(payload);
+        setTimeout(() => deferred.resolve(), 100);
+      } else {
+        result = await originalSign(payload);
+      }
+      return result;
+    };
+    const memory = Consumer.open({ as: slowSigner, session, clock })
+      .mount(slowSigner.did());
+
+    const selector = {
+      path: [],
+      schemaContext: { schema: VersionSchema, rootSchema: VersionSchema },
+    };
+
+    const v1 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    });
+
+    const c1 = Changes.from([v1]);
+    const p1 = memory.transact({ changes: c1 });
+
+    const v2 = Fact.assert({
+      the: "application/json",
+      of: doc,
+      is: { v: 2 },
+      cause: v1,
+    });
+
+    const c2 = Changes.from([v2]);
+    const p2 = memory.transact({ changes: c2 });
+
+    const r2 = await p2;
+    const r1 = await p1;
+    assert(r1.ok);
+    assert(r2.ok);
+
+    const q1 = await memory.query({
+      selectSchema: { [doc]: { "application/json": { _: selector } } },
+    });
+
+    assert(q1.ok);
   },
 );
