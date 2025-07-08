@@ -1,6 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
-import { ContextualFlowControl } from "./cfc.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { appendTxToReactivityLog, isCell } from "./cell.ts";
@@ -281,7 +280,7 @@ export function normalizeAndDiff(
     ];
   }
 
-  const cfc = new ContextualFlowControl();
+  const cfc = current.cell.runtime.cfc;
   // Handle arrays
   if (Array.isArray(newValue)) {
     // If the current value is not an array, set it to an empty array
