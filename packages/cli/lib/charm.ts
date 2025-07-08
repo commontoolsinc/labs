@@ -9,7 +9,7 @@ import {
   CharmManager,
   extractUserCode,
 } from "@commontools/charm";
-import { CharmsView, getCellValue, setCellValue } from "@commontools/charm/ops";
+import { CharmsView, getCellValue as getCellValueCore, setCellValue as setCellValueCore } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 
@@ -438,7 +438,7 @@ export async function getCellValue(
   path: (string | number)[],
 ): Promise<any> {
   const manager = await loadManager(config);
-  return await getCellValue(manager, config.charm, path);
+  return await getCellValueCore(manager, config.charm, path);
 }
 
 export async function setCellValue(
@@ -447,5 +447,5 @@ export async function setCellValue(
   value: any,
 ): Promise<void> {
   const manager = await loadManager(config);
-  await setCellValue(manager, config.charm, path, value);
+  await setCellValueCore(manager, config.charm, path, value);
 }

@@ -1,31 +1,57 @@
 /**
- * Path parsing utilities for cell manipulation commands.
- * Provides pure utility functions for converting dot-notation paths to PropertyKey arrays.
+ * Path parsing utilities for CLI commands.
+ * Provides unified path parsing for both dot-notation and slash-notation paths.
  */
 
 /**
- * Converts a dot-notation path string to an array of PropertyKey elements.
+ * Standardized path segment parsing - converts string segments to string/number values.
+ * Handles numeric conversion consistently across all path parsing functions.
+ * 
+ * @param segments - Array of string segments to convert
+ * @returns Array of string/number elements where numeric strings become numbers
+ */
+function parsePathSegments(segments: string[]): (string | number)[] {
+  return segments.map((segment) => {
+    if (!segment) return segment; // Preserve empty strings
+    const num = Number(segment);
+    return Number.isInteger(num) ? num : segment;
+  });
+}
+
+/**
+ * Converts a dot-notation path string to an array of string/number elements.
  * 
  * @param path - Dot-notation path string (e.g., "user.profile.name", "items.0.title")
- * @returns Array of PropertyKey elements where numeric strings are converted to numbers
+ * @returns Array of string/number elements where numeric strings are converted to numbers
  * 
  * @example
  * parseDotNotationPath("user.profile.name") // ["user", "profile", "name"]
  * parseDotNotationPath("items.0.title") // ["items", 0, "title"]
  * parseDotNotationPath("data.users.1.email") // ["data", "users", 1, "email"]
  */
-export function parseDotNotationPath(path: string): PropertyKey[] {
+export function parseDotNotationPath(path: string): (string | number)[] {
   if (!path || path.trim() === "") {
     return [];
   }
+  return parsePathSegments(path.split("."));
+}
 
-  return path.split(".").map((segment) => {
-    // Check if segment is a valid number (array index)
-    const numericValue = parseInt(segment, 10);
-    return !isNaN(numericValue) && numericValue.toString() === segment
-      ? numericValue
-      : segment;
-  });
+/**
+ * Converts a slash-notation path string to an array of string/number elements.
+ * 
+ * @param path - Slash-notation path string (e.g., "user/profile/name", "items/0/title")
+ * @returns Array of string/number elements where numeric strings are converted to numbers
+ * 
+ * @example
+ * parseSlashNotationPath("user/profile/name") // ["user", "profile", "name"]
+ * parseSlashNotationPath("items/0/title") // ["items", 0, "title"]
+ * parseSlashNotationPath("data/users/1/email") // ["data", "users", 1, "email"]
+ */
+export function parseSlashNotationPath(path: string): (string | number)[] {
+  if (!path || path.trim() === "") {
+    return [];
+  }
+  return parsePathSegments(path.split("/"));
 }
 
 /**
