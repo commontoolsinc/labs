@@ -123,6 +123,19 @@ test_json_value() {
   fi
 }
 
+test_get_only() {
+  local test_name="$1"
+  local path="$2"
+  local expected="$3"
+  local flags="$4"
+  
+  local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
+  
+  if [ "$result" != "$expected" ]; then
+    error "$test_name failed. Expected: $expected, Got: $result"
+  fi
+}
+
 echo "Testing different data types and nested paths..."
 
 # Test different data types
@@ -133,9 +146,9 @@ test_json_value "Array value" "arrayField" '[1,2,3]'
 test_json_value "Nested object" "userData" '{"user":{"name":"John","age":30}}'
 
 # Test nested path access
-test_value "Nested path access" "userData/user/name" "" '"John"'
+test_get_only "Nested path access" "userData/user/name" '"John"'
 test_json_value "Array indexing" "listField" '["first","second","third"]'
-test_value "Array index access" "listField/1" "" '"second"'
+test_get_only "Array index access" "listField/1" '"second"'
 
 # Test setting nested value
 test_value "Nested path set" "userData/user/name" '"Jane"' '"Jane"'
