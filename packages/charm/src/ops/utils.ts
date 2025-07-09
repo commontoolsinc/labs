@@ -6,11 +6,15 @@ export async function compileProgram(
   manager: CharmManager,
   program: RuntimeProgram | string,
 ) {
-  return await compileRecipe(
+  const tx = manager.runtime.edit();
+  const recipe = await compileRecipe(
+    tx,
     program,
     "recipe",
     manager.runtime,
     manager.getSpace(),
     undefined, // parents
   );
+  await tx.commit(); // TODO(seefeld): Retry?
+  return recipe;
 }

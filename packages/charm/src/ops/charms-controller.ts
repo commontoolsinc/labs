@@ -18,8 +18,10 @@ export class CharmsController {
     program: RuntimeProgram,
     input?: object,
   ): Promise<CharmController> {
+    const tx = this.#manager.runtime.edit();
     const recipe = await compileProgram(this.#manager, program);
-    const charm = await this.#manager.runPersistent(recipe, input);
+    const charm = await this.#manager.runPersistent(tx, recipe, input);
+    await tx.commit();
     await this.#manager.runtime.idle();
     await this.#manager.synced();
     return new CharmController(this.#manager, charm);
