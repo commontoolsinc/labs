@@ -388,9 +388,10 @@ export class CharmManager {
       if (!recipe) {
         throw new Error(`Recipe not found for charm ${getEntityId(charm)}`);
       }
-      return (await this.runtime.runSynced(charm, recipe)).asSchema(
-        asSchema ?? resultSchema,
-      );
+      const tx = this.runtime.edit();
+      const newCharm = await this.runtime.runSynced(tx, charm, recipe);
+      tx.commit(); // TODO(seefeld): Retry on failure
+      return newCharm.asSchema(asSchema ?? resultSchema);
     } else {
       return charm.asSchema<T>(asSchema ?? resultSchema);
     }
