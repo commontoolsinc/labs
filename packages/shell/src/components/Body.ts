@@ -1,7 +1,7 @@
 import { css, html, PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "../views/BaseView.ts";
-import { CharmController } from "@commontools/charm/ops";
+import { CharmsController } from "@commontools/charm/ops";
 
 export class XBodyElement extends BaseView {
   static override styles = css`
@@ -15,13 +15,22 @@ export class XBodyElement extends BaseView {
   `;
 
   @property({ attribute: false })
-  cc?: CharmController;
+  cc?: CharmsController;
 
   @property({ attribute: false })
   activeCharmId?: string;
 
   override render() {
     const cc = this.cc ? "Connected" : "Not Connected";
+
+    if (this.cc) {
+      const charms = this.cc.getAllCharms();
+      console.log("------------------");
+      console.log(this.cc.manager().getCharms().get());
+      console.log(charms);
+      console.log("------------------");
+    }
+
     console.log("BODY RENDER", this.cc);
     return html`
       <div>

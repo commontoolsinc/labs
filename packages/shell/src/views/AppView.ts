@@ -55,7 +55,7 @@ export class XAppView extends BaseView {
     const cc = this._cc.value;
     console.log("app view", cc);
     const app = (this.app ?? {}) as AppState;
-    const activeCharmId = Math.random() + ""; //app.activeCharmId;
+    const activeCharmId = app.activeCharmId;
     console.log("ACI", activeCharmId);
     const unauthenticated = html`
       <div class="shell-container">
