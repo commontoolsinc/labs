@@ -20,7 +20,7 @@ import {
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
-import { parsePath } from "../lib/path-helpers.ts";
+import { parsePath } from "@commontools/charm/ops";
 
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
@@ -317,18 +317,19 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .usage(charmUsage)
   .example(
     `ct charm get ${EX_ID} ${EX_COMP_CHARM} name`,
-    `Get the "name" field from charm "${RAW_EX_COMP.charm!}".`,
+    `Get the "name" field from charm result "${RAW_EX_COMP.charm!}".`,
   )
   .example(
-    `ct charm get ${EX_ID} ${EX_COMP_CHARM} data/users/0/email`,
-    `Get a nested field value from charm "${RAW_EX_COMP.charm!}".`,
+    `ct charm get ${EX_ID} ${EX_COMP_CHARM} data/users/0/email --input`,
+    `Get a nested field value from charm input "${RAW_EX_COMP.charm!}".`,
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--input", "Read from the charm's input cell instead of result cell")
   .arguments("<path:string>")
   .action(async (options, pathString) => {
     const charmConfig = parseCharmOptions(options);
-    const pathSegments = parseCellPath(pathString);
-    const value = await getCellValue(charmConfig, pathSegments);
+    const pathSegments = parsePath(pathString);
+    const value = await getCellValue(charmConfig, pathSegments, { input: options.input });
     render(value, { json: true });
   })
   /* charm set */
@@ -336,19 +337,20 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .usage(charmUsage)
   .example(
     `echo '"New Name"' | ct charm set ${EX_ID} ${EX_COMP_CHARM} name`,
-    `Set the "name" field in charm "${RAW_EX_COMP.charm!}".`,
+    `Set the "name" field in charm result "${RAW_EX_COMP.charm!}".`,
   )
   .example(
-    `echo '{"foo": "bar"}' | ct charm set ${EX_ID} ${EX_COMP_CHARM} config`,
-    `Set a nested object value in charm "${RAW_EX_COMP.charm!}".`,
+    `echo '{"foo": "bar"}' | ct charm set ${EX_ID} ${EX_COMP_CHARM} config --input`,
+    `Set a nested object value in charm input "${RAW_EX_COMP.charm!}".`,
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--input", "Write to the charm's input cell instead of result cell")
   .arguments("<path:string>")
   .action(async (options, pathString) => {
     const charmConfig = parseCharmOptions(options);
-    const pathSegments = parseCellPath(pathString);
+    const pathSegments = parsePath(pathString);
     const value = await drainStdin();
-    await setCellValue(charmConfig, pathSegments, value);
+    await setCellValue(charmConfig, pathSegments, value, { input: options.input });
     render(`Set value at path: ${pathString}`);
   })
   /* charm map */
@@ -506,15 +508,6 @@ function parseUrl(
   return { apiUrl, space, charm };
 }
 
-/**
- * Parses a path string into an array of path segments.
- * Converts numeric strings to numbers for array indices.
- * @param pathString - The path string to parse (e.g., "data/users/0/email")
- * @returns Array of path segments with numbers for array indices
- */
-export function parseCellPath(pathString: string): (string | number)[] {
-  return parsePath(pathString);
-}
 
 // We use stdin for charm input which must be an `Object`
 async function drainStdin(): Promise<object> {

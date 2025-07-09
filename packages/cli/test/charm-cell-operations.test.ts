@@ -1,15 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { parseCellPath } from "../commands/charm.ts";
+import { parsePath } from "@commontools/charm/ops";
 
-describe("parseCellPath", () => {
+describe("parsePath", () => {
   it("should parse simple string paths", () => {
-    expect(parseCellPath("name")).toEqual(["name"]);
-    expect(parseCellPath("config")).toEqual(["config"]);
+    expect(parsePath("name")).toEqual(["name"]);
+    expect(parsePath("config")).toEqual(["config"]);
   });
 
   it("should parse nested paths", () => {
-    expect(parseCellPath("config/settings/theme")).toEqual([
+    expect(parsePath("config/settings/theme")).toEqual([
       "config",
       "settings",
       "theme",
@@ -17,12 +17,12 @@ describe("parseCellPath", () => {
   });
 
   it("should convert numeric segments to numbers", () => {
-    expect(parseCellPath("users/0/name")).toEqual(["users", 0, "name"]);
-    expect(parseCellPath("items/10/value")).toEqual(["items", 10, "value"]);
+    expect(parsePath("users/0/name")).toEqual(["users", 0, "name"]);
+    expect(parsePath("items/10/value")).toEqual(["items", 10, "value"]);
   });
 
   it("should handle mixed string and number paths", () => {
-    expect(parseCellPath("data/items/1/tags/2")).toEqual([
+    expect(parsePath("data/items/1/tags/2")).toEqual([
       "data",
       "items",
       1,
@@ -32,17 +32,17 @@ describe("parseCellPath", () => {
   });
 
   it("should return empty array for empty string", () => {
-    expect(parseCellPath("")).toEqual([]);
+    expect(parsePath("")).toEqual([]);
   });
 
   it("should handle paths with only numbers", () => {
-    expect(parseCellPath("0/1/2")).toEqual([0, 1, 2]);
+    expect(parsePath("0/1/2")).toEqual([0, 1, 2]);
   });
 
   it("should not convert non-integer numbers", () => {
-    expect(parseCellPath("value/3.14/pi")).toEqual(["value", "3.14", "pi"]);
+    expect(parsePath("value/3.14/pi")).toEqual(["value", "3.14", "pi"]);
     // Note: 1e5 is considered an integer (100000) by JavaScript
-    expect(parseCellPath("data/1e5/scientific")).toEqual([
+    expect(parsePath("data/1e5/scientific")).toEqual([
       "data",
       100000,
       "scientific",
@@ -51,13 +51,13 @@ describe("parseCellPath", () => {
 
   it("should handle negative numbers", () => {
     // Negative integers are converted to numbers
-    expect(parseCellPath("values/-1/negative")).toEqual([
+    expect(parsePath("values/-1/negative")).toEqual([
       "values",
       -1,
       "negative",
     ]);
     // Non-integer negative numbers remain as strings
-    expect(parseCellPath("values/-3.14/float")).toEqual([
+    expect(parsePath("values/-3.14/float")).toEqual([
       "values",
       "-3.14",
       "float",
@@ -65,18 +65,18 @@ describe("parseCellPath", () => {
   });
 
   it("should handle paths with special characters", () => {
-    expect(parseCellPath("user@email/domain")).toEqual([
+    expect(parsePath("user@email/domain")).toEqual([
       "user@email",
       "domain",
     ]);
-    expect(parseCellPath("key-with-dash/value")).toEqual([
+    expect(parsePath("key-with-dash/value")).toEqual([
       "key-with-dash",
       "value",
     ]);
   });
 
   it("should handle single-segment paths", () => {
-    expect(parseCellPath("singleKey")).toEqual(["singleKey"]);
-    expect(parseCellPath("0")).toEqual([0]);
+    expect(parsePath("singleKey")).toEqual(["singleKey"]);
+    expect(parsePath("0")).toEqual([0]);
   });
 });

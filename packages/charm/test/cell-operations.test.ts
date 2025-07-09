@@ -1,8 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { 
-  getCellValue,
-  setCellValue,
+  getCharmResult,
+  setCharmInput,
   type CellPath
 } from "../src/ops/cell-operations.ts";
 import { CharmManager } from "../src/manager.ts";
@@ -63,13 +63,13 @@ class MockCell {
   }
 }
 
-describe("Cell Operations", () => {
-  describe("getCellValue", () => {
+describe("Charm Cell Operations", () => {
+  describe("getCharmResult", () => {
     it("should retrieve values at simple paths", async () => {
       const mockManager = new MockCharmManager() as any;
       mockManager.setCharmData("charm-1", { name: "Test Charm" });
       
-      const value = await getCellValue(mockManager, "charm-1", ["name"]);
+      const value = await getCharmResult(mockManager, "charm-1", ["name"]);
       
       assertEquals(value, "Test Charm");
     });
@@ -84,7 +84,7 @@ describe("Cell Operations", () => {
         },
       });
       
-      const value = await getCellValue(mockManager, "charm-1", ["config", "settings", "theme"]);
+      const value = await getCharmResult(mockManager, "charm-1", ["config", "settings", "theme"]);
       
       assertEquals(value, "dark");
     });
@@ -98,7 +98,7 @@ describe("Cell Operations", () => {
         ],
       });
       
-      const value = await getCellValue(mockManager, "charm-1", ["users", 1, "email"]);
+      const value = await getCharmResult(mockManager, "charm-1", ["users", 1, "email"]);
       
       assertEquals(value, "bob@example.com");
     });
@@ -107,7 +107,7 @@ describe("Cell Operations", () => {
       const mockManager = new MockCharmManager() as any;
       
       await assertRejects(
-        async () => await getCellValue(mockManager, "non-existent", ["path"]),
+        async () => await getCharmResult(mockManager, "non-existent", ["path"]),
         Error,
         `Charm with ID "non-existent" not found`,
       );
@@ -120,7 +120,7 @@ describe("Cell Operations", () => {
       });
       
       await assertRejects(
-        async () => await getCellValue(mockManager, "charm-1", ["config", "settings"]),
+        async () => await getCharmResult(mockManager, "charm-1", ["config", "settings"]),
         Error,
       );
     });
@@ -132,7 +132,7 @@ describe("Cell Operations", () => {
       });
       
       await assertRejects(
-        async () => await getCellValue(mockManager, "charm-1", ["count", "invalid"]),
+        async () => await getCharmResult(mockManager, "charm-1", ["count", "invalid"]),
         Error,
       );
     });
@@ -142,7 +142,7 @@ describe("Cell Operations", () => {
       const testData = { name: "Test", value: 123 };
       mockManager.setCharmData("charm-1", testData);
       
-      const value = await getCellValue(mockManager, "charm-1", []);
+      const value = await getCharmResult(mockManager, "charm-1", []);
       
       assertEquals(value, testData);
     });
@@ -158,18 +158,18 @@ describe("Cell Operations", () => {
         },
       });
       
-      const value = await getCellValue(mockManager, "charm-1", ["data", "items", 1, "tags", 2]);
+      const value = await getCharmResult(mockManager, "charm-1", ["data", "items", 1, "tags", 2]);
       
       assertEquals(value, "c");
     });
   });
 
-  describe("setCellValue", () => {
+  describe("setCharmInput", () => {
     it("should set values at simple paths", async () => {
       const mockManager = new MockCharmManager() as any;
       mockManager.setCharmData("charm-1", {});
       
-      await setCellValue(mockManager, "charm-1", ["name"], "Updated Name");
+      await setCharmInput(mockManager, "charm-1", ["name"], "Updated Name");
       
       // In a real test, we'd verify the value was set on the input cell
       // For now, we just verify no errors were thrown
@@ -179,7 +179,7 @@ describe("Cell Operations", () => {
       const mockManager = new MockCharmManager() as any;
       mockManager.setCharmData("charm-1", {});
       
-      await setCellValue(mockManager, "charm-1", ["config", "theme"], "light");
+      await setCharmInput(mockManager, "charm-1", ["config", "theme"], "light");
       
       // Verify no errors were thrown
     });
@@ -188,7 +188,7 @@ describe("Cell Operations", () => {
       const mockManager = new MockCharmManager() as any;
       
       await assertRejects(
-        async () => await setCellValue(mockManager, "non-existent", ["path"], "value"),
+        async () => await setCharmInput(mockManager, "non-existent", ["path"], "value"),
         Error,
         `Charm with ID "non-existent" not found`,
       );
