@@ -545,7 +545,7 @@ describe("Schema-to-TS Type Conversion", () => {
       schema,
     );
     const user = userCell.get();
-    console.log("user id", userCell.getAsNormalizedFullLink().id);
+
     expect(user.name).toBe("John");
     expect(user.age).toBe(30);
     expect(user.tags).toEqual(["developer", "typescript"]);
