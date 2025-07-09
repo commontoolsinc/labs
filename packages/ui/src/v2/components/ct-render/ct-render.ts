@@ -1,8 +1,8 @@
 import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
-import { render } from "../../../../../html/src/index.ts";
-import { UI } from "../../../../../runner/src/index.ts";
-import type { Cell } from "../../../../../runner/src/index.ts";
+import { render } from "@commontools/html";
+import { UI } from "@commontools/runner";
+import type { Cell } from "@commontools/runner";
 
 /**
  * CTRender - Renders a cell or object with a [UI] property as VDOM
