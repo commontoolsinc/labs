@@ -256,6 +256,8 @@ describe("Schema Support", () => {
       const linkCell = runtime.getCell<any>(
         space,
         "should support nested sinks via asCell with aliases 2",
+        undefined,
+        tx,
       );
       linkCell.setRaw(initial.getAsLegacyCellLink());
       const linkEntityId = linkCell.entityId!;
@@ -266,6 +268,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should support nested sinks via asCell with aliases 3",
+        undefined,
+        tx,
       );
       docCell.setRaw({
         value: "root",
@@ -332,7 +336,6 @@ describe("Schema Support", () => {
         schema: omitSchema,
         rootSchema: schema,
       });
-      await tx2.commit();
       const log = txToReactivityLog(tx2);
       const reads = compactifyPaths(log.reads);
       expect(reads.length).toEqual(3);
@@ -356,6 +359,8 @@ describe("Schema Support", () => {
       const second = runtime.getCell<{ foo: { label: string } }>(
         space,
         "should support nested sinks via asCell with aliases 4",
+        undefined,
+        tx,
       );
       second.set({ foo: { label: "second" } });
       linkCell.setRaw(second.getAsLegacyCellLink());
@@ -397,6 +402,8 @@ describe("Schema Support", () => {
       const third = runtime.getCell<{ label: string }>(
         space,
         "should support nested sinks via asCell with aliases 5",
+        undefined,
+        tx,
       );
       third.set({ label: "third" });
       docCell.key("current").setRaw({
@@ -410,6 +417,8 @@ describe("Schema Support", () => {
       second.set({ foo: { label: "second - updated again" } });
       third.set({ label: "third - updated" });
       await runtime.idle();
+
+      await tx2.commit();
 
       expect(currentByGetValues).toEqual([
         "first",

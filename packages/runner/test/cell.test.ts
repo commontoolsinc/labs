@@ -1846,12 +1846,13 @@ describe("getAsLink method", () => {
   });
 
   it("should return new sigil format", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsLink-test",
+    const cell = runtime.getCell<{ value: number }>(
       space,
+      "getAsLink-test",
+      undefined,
+      tx,
     );
-    const cell = c.asCell();
+    cell.set({ value: 42 });
 
     // Get the new sigil format
     const link = cell.getAsLink();
@@ -1873,12 +1874,14 @@ describe("getAsLink method", () => {
   });
 
   it("should return correct path for nested cells", () => {
-    const c = runtime.documentMap.getDoc(
-      { nested: { value: 42 } },
-      "getAsLink-nested-test",
+    const c = runtime.getCell<{ nested: { value: number } }>(
       space,
+      "getAsLink-nested-test",
+      undefined,
+      tx,
     );
-    const nestedCell = c.asCell(["nested", "value"]);
+    c.set({ nested: { value: 42 } });
+    const nestedCell = c.key("nested").key("value");
 
     const link = nestedCell.getAsLink();
 
@@ -1886,12 +1889,13 @@ describe("getAsLink method", () => {
   });
 
   it("should return different formats for getAsLink vs toJSON", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsLink-json-test",
+    const cell = runtime.getCell<{ value: number }>(
       space,
+      "getAsLink-json-test",
+      undefined,
+      tx,
     );
-    const cell = c.asCell();
+    cell.set({ value: 42 });
 
     const link = cell.getAsLink();
     const json = cell.toJSON();
@@ -1907,16 +1911,17 @@ describe("getAsLink method", () => {
   });
 
   it("should create relative links with base parameter - same document", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42, other: "test" },
-      "getAsLink-base-test",
+    const c = runtime.getCell<{ value: number; other: string }>(
       space,
+      "getAsLink-base-test",
+      undefined,
+      tx,
     );
-    const cell = c.asCell(["value"]);
-    const baseCell = c.asCell();
+    c.set({ value: 42, other: "test" });
+    const cell = c.key("value");
 
     // Link relative to base cell (same document)
-    const link = cell.getAsLink({ base: baseCell });
+    const link = cell.getAsLink({ base: c });
 
     // Should omit id and space since they're the same
     expect(link["/"][LINK_V1_TAG].id).toBeUndefined();
@@ -1925,21 +1930,24 @@ describe("getAsLink method", () => {
   });
 
   it("should create relative links with base parameter - different document", () => {
-    const c1 = runtime.documentMap.getDoc(
-      { value: 42 },
+    const c1 = runtime.getCell<{ value: number }>(
+      space,
       "getAsLink-base-test-1",
-      space,
+      undefined,
+      tx,
     );
-    const c2 = runtime.documentMap.getDoc(
-      { other: "test" },
+    c1.set({ value: 42 });
+    const c2 = runtime.getCell<{ other: string }>(
+      space,
       "getAsLink-base-test-2",
-      space,
+      undefined,
+      tx,
     );
-    const cell = c1.asCell(["value"]);
-    const baseCell = c2.asCell();
+    c2.set({ other: "test" });
+    const cell = c1.key("value");
 
     // Link relative to base cell (different document, same space)
-    const link = cell.getAsLink({ base: baseCell });
+    const link = cell.getAsLink({ base: c2 });
 
     // Should include id but not space since space is the same
     expect(link["/"][LINK_V1_TAG].id).toBeDefined();
@@ -1949,21 +1957,26 @@ describe("getAsLink method", () => {
   });
 
   it("should create relative links with base parameter - different space", () => {
-    const c1 = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsLink-base-test-1",
+    const c1 = runtime.getCell<{ value: number }>(
       space,
+      "getAsLink-base-test-1",
+      undefined,
+      tx,
     );
-    const c2 = runtime.documentMap.getDoc(
-      { other: "test" },
-      "getAsLink-base-test-2",
+    c1.set({ value: 42 });
+    const tx2 = runtime.edit(); // We're writing into a different space!
+    const c2 = runtime.getCell<{ other: string }>(
       space2,
+      "getAsLink-base-test-2",
+      undefined,
+      tx2,
     );
-    const cell = c1.asCell(["value"]);
-    const baseCell = c2.asCell();
+    c2.set({ other: "test" });
+    tx2.commit();
+    const cell = c1.key("value");
 
     // Link relative to base cell (different space)
-    const link = cell.getAsLink({ base: baseCell });
+    const link = cell.getAsLink({ base: c2 });
 
     // Should include both id and space since they're different
     expect(link["/"][LINK_V1_TAG].id).toBeDefined();
@@ -1973,13 +1986,15 @@ describe("getAsLink method", () => {
   });
 
   it("should include schema when includeSchema is true", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsLink-schema-test",
+    const c = runtime.getCell<{ value: number }>(
       space,
+      "getAsLink-schema-test",
+      undefined,
+      tx,
     );
+    c.set({ value: 42 });
     const schema = { type: "number", minimum: 0 } as const;
-    const cell = c.asCell(["value"], undefined, schema);
+    const cell = c.key("value").asSchema(schema);
 
     // Link with schema included
     const link = cell.getAsLink({ includeSchema: true });
@@ -1990,13 +2005,15 @@ describe("getAsLink method", () => {
   });
 
   it("should not include schema when includeSchema is false", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsLink-no-schema-test",
+    const c = runtime.getCell<{ value: number }>(
       space,
+      "getAsLink-no-schema-test",
+      undefined,
+      tx,
     );
+    c.set({ value: 42 });
     const schema = { type: "number", minimum: 0 } as const;
-    const cell = c.asCell(["value"], undefined, schema);
+    const cell = c.key("value").asSchema(schema);
 
     // Link without schema
     const link = cell.getAsLink({ includeSchema: false });
@@ -2005,13 +2022,14 @@ describe("getAsLink method", () => {
   });
 
   it("should not include schema when includeSchema is undefined", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsLink-default-schema-test",
+    const c = runtime.getCell<{ value: number }>(
       space,
+      "getAsLink-default-schema-test",
+      undefined,
+      tx,
     );
-    const schema = { type: "number", minimum: 0 } as const;
-    const cell = c.asCell(["value"], undefined, schema);
+    c.set({ value: 42 });
+    const cell = c.key("value");
 
     // Link with default options (no schema)
     const link = cell.getAsLink();
@@ -2020,22 +2038,24 @@ describe("getAsLink method", () => {
   });
 
   it("should handle both base and includeSchema options together", () => {
-    const c1 = runtime.documentMap.getDoc(
-      { value: 42 },
+    const schema = { type: "number", minimum: 0 } as const satisfies JSONSchema;
+    const c1 = runtime.getCell<{ value: number }>(
+      space,
       "getAsLink-combined-test-1",
-      space,
+      schema,
+      tx,
     );
-    const c2 = runtime.documentMap.getDoc(
-      { other: "test" },
+    c1.set({ value: 42 });
+    const c2 = runtime.getCell<{ other: string }>(
+      space,
       "getAsLink-combined-test-2",
-      space,
+      undefined,
+      tx,
     );
-    const schema = { type: "number", minimum: 0 } as const;
-    const cell = c1.asCell(["value"], undefined, schema);
-    const baseCell = c2.asCell();
+    const cell = c1.key("value").asSchema(schema);
 
     // Link with both base and schema options
-    const link = cell.getAsLink({ base: baseCell, includeSchema: true });
+    const link = cell.getAsLink({ base: c2, includeSchema: true });
 
     // Should include id (different docs) but not space (same space)
     expect(link["/"][LINK_V1_TAG].id).toBeDefined();
@@ -2045,12 +2065,14 @@ describe("getAsLink method", () => {
   });
 
   it("should handle cell without schema when includeSchema is true", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsLink-no-cell-schema-test",
+    const c = runtime.getCell<{ value: number }>(
       space,
+      "getAsLink-no-cell-schema-test",
+      undefined,
+      tx,
     );
-    const cell = c.asCell(["value"]); // No schema provided
+    c.set({ value: 42 });
+    const cell = c.key("value"); // No schema provided
 
     // Link with includeSchema but cell has no schema
     const link = cell.getAsLink({ includeSchema: true });
@@ -2081,12 +2103,14 @@ describe("getAsWriteRedirectLink method", () => {
   });
 
   it("should return new sigil alias format", () => {
-    const c = runtime.documentMap.getDoc(
-      { value: 42 },
-      "getAsWriteRedirectLink-test",
+    const c = runtime.getCell<{ value: number }>(
       space,
+      "getAsWriteRedirectLink-test",
+      undefined,
+      tx,
     );
-    const cell = c.asCell();
+    c.set({ value: 42 });
+    const cell = c;
 
     // Get the new sigil alias format
     const alias = cell.getAsWriteRedirectLink();
@@ -2109,12 +2133,14 @@ describe("getAsWriteRedirectLink method", () => {
   });
 
   it("should return correct path for nested cells", () => {
-    const c = runtime.documentMap.getDoc(
-      { nested: { value: 42 } },
-      "getAsWriteRedirectLink-nested-test",
+    const c = runtime.getCell<{ nested: { value: number } }>(
       space,
+      "getAsWriteRedirectLink-nested-test",
+      undefined,
+      tx,
     );
-    const nestedCell = c.asCell(["nested", "value"]);
+    c.set({ nested: { value: 42 } });
+    const nestedCell = c.key("nested").key("value");
 
     const alias = nestedCell.getAsWriteRedirectLink();
 

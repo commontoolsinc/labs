@@ -56,7 +56,12 @@ describe("data-updating", () => {
         tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      diffAndUpdate(runtime, tx, testCell.key("b").key("c").getAsNormalizedFullLink(), 3);
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("b").key("c").getAsNormalizedFullLink(),
+        3,
+      );
       expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
     });
 
@@ -70,7 +75,9 @@ describe("data-updating", () => {
         tx,
       );
       testCell.set({ a: 1, b: { c: 2, d: 3 } });
-      diffAndUpdate(runtime, tx, testCell.key("b").getAsNormalizedFullLink(), { c: 4 });
+      diffAndUpdate(runtime, tx, testCell.key("b").getAsNormalizedFullLink(), {
+        c: 4,
+      });
       expect(testCell.get()).toEqual({ a: 1, b: { c: 4 } });
     });
 
@@ -82,10 +89,15 @@ describe("data-updating", () => {
         tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const changes = normalizeAndDiff(runtime, tx, testCell.getAsNormalizedFullLink(), {
-        a: 1,
-        b: { c: 2 },
-      });
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        {
+          a: 1,
+          b: { c: 2 },
+        },
+      );
       expect(changes.length).toEqual(0);
     });
 
@@ -97,10 +109,15 @@ describe("data-updating", () => {
         tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const changes = normalizeAndDiff(runtime, tx, testCell.getAsNormalizedFullLink(), {
-        a: 1,
-        b: { c: 3 },
-      });
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        {
+          a: 1,
+          b: { c: 3 },
+        },
+      );
       expect(changes.length).toEqual(1);
       expect(changes[0].location.path).toEqual(["b", "c"]);
     });
@@ -114,11 +131,12 @@ describe("data-updating", () => {
       );
       testCell.set({ a: 1, b: { c: 2 } });
       testCell.freeze("test");
-      const success = diffAndUpdate(runtime, tx, testCell.getAsNormalizedFullLink(), {
-        a: 1,
-        b: { c: 3 },
-      });
-      expect(success).toBe(false);
+      expect(() =>
+        diffAndUpdate(runtime, tx, testCell.getAsNormalizedFullLink(), {
+          a: 1,
+          b: { c: 3 },
+        })
+      ).toThrow();
     });
 
     it("should correctly update with shorter arrays", () => {
@@ -129,7 +147,12 @@ describe("data-updating", () => {
         tx,
       );
       testCell.set({ a: [1, 2, 3] });
-      const success = diffAndUpdate(runtime, tx, testCell.key("a").getAsNormalizedFullLink(), [1, 2]);
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        [1, 2],
+      );
       expect(success).toBe(true);
       expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2] });
     });
@@ -142,7 +165,12 @@ describe("data-updating", () => {
         tx,
       );
       testCell.set({ a: [1, 2, 3] });
-      const success = diffAndUpdate(runtime, tx, testCell.key("a").getAsNormalizedFullLink(), [1, 2, 3, 4]);
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        [1, 2, 3, 4],
+      );
       expect(success).toBe(true);
       expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2, 3, 4] });
     });
@@ -155,7 +183,12 @@ describe("data-updating", () => {
         tx,
       );
       testCell.set({ a: { b: 1 } });
-      const success = diffAndUpdate(runtime, tx, testCell.key("a").getAsNormalizedFullLink(), [1, 2, 3]);
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        [1, 2, 3],
+      );
       expect(success).toBeTruthy();
       expect(testCell.get()).toHaveProperty("a");
       expect(testCell.get().a).toHaveLength(3);
