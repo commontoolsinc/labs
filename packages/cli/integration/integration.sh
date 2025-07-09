@@ -92,6 +92,61 @@ if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
   error "Get operation did not return expected value. Expected: {\"value\":10}, Got: $RESULT"
 fi
 
+# Helper functions for testing
+test_value() {
+  local test_name="$1"
+  local path="$2"
+  local value="$3"
+  local expected="$4"
+  local flags="$5"
+  
+  echo "$value" | ct charm set $SPACE_ARGS --charm $CHARM_ID "$path" $flags
+  local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
+  
+  if [ "$result" != "$expected" ]; then
+    error "$test_name failed. Expected: $expected, Got: $result"
+  fi
+}
+
+test_json_value() {
+  local test_name="$1"
+  local path="$2"
+  local value="$3"
+  local flags="$4"
+  
+  echo "$value" | ct charm set $SPACE_ARGS --charm $CHARM_ID "$path" $flags
+  local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
+  
+  echo "$value" | jq . > /tmp/expected.json
+  echo "$result" | jq . > /tmp/actual.json
+  if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
+    error "$test_name failed. Expected: $value, Got: $result"
+  fi
+}
+
+echo "Testing different data types and nested paths..."
+
+# Test different data types
+test_value "String value" "stringField" '"hello world"' '"hello world"'
+test_value "Number value" "numberField" '42' '42'
+test_value "Boolean value" "booleanField" 'true' 'true'
+test_json_value "Array value" "arrayField" '[1,2,3]'
+test_json_value "Nested object" "userData" '{"user":{"name":"John","age":30}}'
+
+# Test nested path access
+test_value "Nested path access" "userData/user/name" "" '"John"'
+test_json_value "Array indexing" "listField" '["first","second","third"]'
+test_value "Array index access" "listField/1" "" '"second"'
+
+# Test setting nested value
+test_value "Nested path set" "userData/user/name" '"Jane"' '"Jane"'
+
+echo "Testing --input flag operations..."
+
+# Test input flag operations
+test_json_value "Input flag set" "config" '{"inputConfig":"test"}' "--input"
+test_value "Nested input path" "config/inputConfig" '"inputValue"' '"inputValue"' "--input"
+
 # Check space has new charm with correct inputs and title
 TITLE="Simple counter 2: 5"
 ct charm ls $SPACE_ARGS | grep -q "$CHARM_ID $TITLE <unnamed>"
