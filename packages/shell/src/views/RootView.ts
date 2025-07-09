@@ -1,17 +1,14 @@
 import { css, html, LitElement } from "lit";
 import { ContextProvider } from "@lit/context";
-import { applyCommand, AppState } from "../lib/app.ts";
+import { applyCommand, AppState } from "../lib/app/mod.ts";
 import { appContext } from "../contexts/app.ts";
 import { Runtime } from "@commontools/runner";
 import { SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/commands.ts";
 import { API_URL } from "../lib/env.ts";
-import { AppUpdateEvent } from "../lib/app-update.ts";
+import { AppUpdateEvent } from "../lib/app/events.ts";
 import { WorkQueue } from "../lib/queue.ts";
-import { Identity } from "@commontools/identity";
-
-// @ts-ignore Use Runtime to test bundling
-globalThis.runtime = Runtime;
+import { clone } from "../lib/app/state.ts";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
@@ -65,20 +62,12 @@ export class XRootView extends LitElement {
     await this.apply(command);
   };
 
-  async setSpace(spaceName: string) {
-    await this.apply({ type: "set-space", spaceName });
-  }
-
-  async setActiveCharmId(charmId: string) {
-    await this.apply({ type: "set-active-charm-id", charmId });
-  }
-
-  async setIdentity(identity: Identity) {
-    await this.apply({ type: "set-identity", identity });
-  }
-
   apply(command: Command): Promise<void> {
     return this.#commandQueue.submit(command);
+  }
+
+  state(): AppState {
+    return clone(this._provider.value);
   }
 
   private onCommandProcess = async (command: Command) => {
