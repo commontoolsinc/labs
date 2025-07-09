@@ -165,18 +165,6 @@ export interface IRuntime {
     tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
-  run<T, R = any>(
-    tx: IExtendedStorageTransaction,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
-  run<T, R>(
-    tx: IExtendedStorageTransaction,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
@@ -278,18 +266,6 @@ export interface IDocumentMap {
 export interface IRunner {
   readonly runtime: IRuntime;
 
-  run<T, R>(
-    tx: IExtendedStorageTransaction,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
-  run<T, R = any>(
-    tx: IExtendedStorageTransaction,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
   run<T, R>(
     tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
@@ -583,18 +559,6 @@ export class Runtime implements IRuntime {
     tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
-  run<T, R = any>(
-    tx: IExtendedStorageTransaction,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
-  run<T, R>(
-    tx: IExtendedStorageTransaction,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
@@ -607,18 +571,9 @@ export class Runtime implements IRuntime {
     tx: IExtendedStorageTransaction,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
-    resultCell: DocImpl<R> | Cell<R>,
+    resultCell: Cell<R>,
   ): DocImpl<R> | Cell<R> {
-    if (isCell(resultCell)) {
-      return this.runner.run<T, R>(tx, recipeOrModule, argument, resultCell);
-    } else {
-      return this.runner.run<T, R>(
-        tx,
-        recipeOrModule,
-        argument,
-        resultCell as DocImpl<R>,
-      );
-    }
+    return this.runner.run<T, R>(tx, recipeOrModule, argument, resultCell);
   }
 
   runSynced(

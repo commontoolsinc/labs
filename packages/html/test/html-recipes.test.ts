@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { render, VNode } from "../src/index.ts";
 import {
+  type Cell,
   createBuilder,
   type IExtendedStorageTransaction,
   Runtime,
@@ -68,11 +69,11 @@ describe("recipes with HTML", () => {
       tx,
       simpleRecipe,
       { value: 5 },
-      runtime.documentMap.getDoc(undefined, "simple-ui-result", space),
+      runtime.getCell(space, "simple-ui-result", undefined, tx),
     );
 
     await runtime.idle();
-    const resultValue = result.get();
+    const resultValue = result.get() as any;
 
     if (resultValue && (resultValue[UI] as any)?.children?.[0]?.$alias) {
       (resultValue[UI] as any).children[0].$alias = Object;
@@ -119,14 +120,14 @@ describe("recipes with HTML", () => {
           { title: "item 2", done: true },
         ],
       },
-      runtime.documentMap.getDoc(undefined, "todo-list-result", space),
-    );
+      runtime.getCell(space, "todo-list-result", undefined, tx),
+    ) as Cell<{ [UI]: VNode }>;
 
     await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
-    const cell = result.asCell<{ [UI]: VNode }>().key(UI);
+    const cell = result.key(UI);
     render(parent, cell.get());
 
     assert.equal(
@@ -162,14 +163,14 @@ describe("recipes with HTML", () => {
           { title: "item 2", done: true },
         ],
       },
-      runtime.documentMap.getDoc(undefined, "nested-todo-result", space),
-    );
+      runtime.getCell(space, "nested-todo-result", undefined, tx),
+    ) as Cell<{ [UI]: VNode }>;
 
     await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
-    const cell = result.asCell<{ [UI]: VNode }>().key(UI);
+    const cell = result.key(UI);
     render(parent, cell);
 
     assert.equal(parent.innerHTML, "<div><div>test</div></div>");
@@ -184,14 +185,14 @@ describe("recipes with HTML", () => {
       tx,
       strRecipe,
       { name: "world" },
-      runtime.documentMap.getDoc(undefined, "str-recipe-result", space),
-    );
+      runtime.getCell(space, "str-recipe-result", undefined, tx),
+    ) as Cell<{ [UI]: VNode }>;
 
     await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
-    const cell = result.asCell<{ [UI]: VNode }>().key(UI);
+    const cell = result.key(UI);
     render(parent, cell.get());
 
     assert.equal(parent.textContent, "Hello, world!");
@@ -226,14 +227,14 @@ describe("recipes with HTML", () => {
       tx,
       nestedMapRecipe,
       data,
-      runtime.documentMap.getDoc(undefined, "nested-map-result", space),
-    );
+      runtime.getCell(space, "nested-map-result", undefined, tx),
+    ) as Cell<{ [UI]: VNode }>;
 
     await runtime.idle();
 
     const parent = document.createElement("div");
     document.body.appendChild(parent);
-    const cell = result.asCell([UI]);
+    const cell = result.key(UI);
     render(parent, cell.get());
 
     assert.equal(

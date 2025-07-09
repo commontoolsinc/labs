@@ -77,18 +77,6 @@ export class Runner implements IRunner {
     tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
-  run<T, R = any>(
-    tx: IExtendedStorageTransaction,
-    recipe: Recipe | Module | undefined,
-    argument: T,
-    resultCell: DocImpl<R>,
-  ): DocImpl<R>;
-  run<T, R>(
-    tx: IExtendedStorageTransaction,
-    recipeFactory: NodeFactory<T, R>,
-    argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
@@ -101,13 +89,8 @@ export class Runner implements IRunner {
     tx: IExtendedStorageTransaction,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
-    resultCell: DocImpl<R> | Cell<R>,
-  ): DocImpl<R> | Cell<R> {
-    // Convert to Cell if needed and work with Cell internally
-    const resultDoc = isCell(resultCell)
-      ? resultCell
-      : (resultCell as DocImpl<R>).asCell([], undefined, undefined, tx);
-
+    resultCell: Cell<R>,
+  ): Cell<R> {
     type ProcessCellData = {
       [TYPE]: string;
       spell?: SigilLink;
@@ -118,17 +101,17 @@ export class Runner implements IRunner {
 
     let processCell: Cell<ProcessCellData>;
 
-    const sourceCell = resultDoc.getSourceCell();
+    const sourceCell = resultCell.getSourceCell();
     if (sourceCell !== undefined) {
       processCell = sourceCell as Cell<ProcessCellData>;
     } else {
       processCell = this.runtime.getCell<ProcessCellData>(
-        resultDoc.space,
-        resultDoc, // Cause
+        resultCell.space,
+        resultCell, // Cause
         undefined,
         tx,
       );
-      resultDoc.getDoc().sourceCell = processCell.getDoc();
+      resultCell.getDoc().sourceCell = processCell.getDoc();
     }
 
     let recipeId: string | undefined;
@@ -171,27 +154,27 @@ export class Runner implements IRunner {
     recipeId ??= this.runtime.recipeManager.registerRecipe(recipe);
     this.runtime.recipeManager.saveRecipe(tx, {
       recipeId,
-      space: resultDoc.space,
+      space: resultCell.space,
       recipe,
     });
 
-    if (this.cancels.has(resultDoc.getDoc())) {
+    if (this.cancels.has(resultCell.getDoc())) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
       if (argument === undefined && recipeId === processCell.getRaw()?.[TYPE]) {
-        return resultDoc;
+        return resultCell;
       }
 
       // TODO(seefeld): If recipe is the same, but argument is different, just update the argument without stopping
 
       // Otherwise stop execution of the old recipe. TODO: Await, but this will
       // make all this async.
-      this.stop(resultDoc);
+      this.stop(resultCell);
     }
 
     // Keep track of subscriptions to cancel them later
     const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(resultDoc.getDoc(), cancel);
+    this.cancels.set(resultCell.getDoc(), cancel);
     this.allCancels.add(cancel);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
@@ -228,7 +211,7 @@ export class Runner implements IRunner {
     processCell.setRaw({
       ...processCell.getRaw(),
       [TYPE]: recipeId || "unknown",
-      resultRef: resultDoc.getAsLegacyCellLink(),
+      resultRef: resultCell.getAsLegacyCellLink(),
       internal,
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
@@ -247,7 +230,7 @@ export class Runner implements IRunner {
     if (recipeChanged) {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
-      resultDoc.setRaw(
+      resultCell.setRaw(
         unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }
@@ -273,11 +256,7 @@ export class Runner implements IRunner {
 
     // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
     // Return the correct type based on what was passed in
-    if (isCell(resultCell)) {
-      return resultDoc;
-    } else {
-      return resultDoc.getDoc();
-    }
+    return resultCell;
   }
 
   async runSynced(
