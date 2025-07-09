@@ -29,21 +29,33 @@ export async function getCharmResult(
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
-  
+
   let currentValue: any = charmCell.get();
   for (const segment of path) {
     if (currentValue == null) {
-      throw new Error(`Cannot access path "${path.join("/")}" - encountered null/undefined at "${segment}"`);
+      throw new Error(
+        `Cannot access path "${
+          path.join("/")
+        }" - encountered null/undefined at "${segment}"`,
+      );
     }
     if (typeof currentValue !== "object") {
-      throw new Error(`Cannot access path "${path.join("/")}" - encountered non-object at "${segment}"`);
+      throw new Error(
+        `Cannot access path "${
+          path.join("/")
+        }" - encountered non-object at "${segment}"`,
+      );
     }
     if (!(segment in currentValue)) {
-      throw new Error(`Cannot access path "${path.join("/")}" - property "${segment}" not found`);
+      throw new Error(
+        `Cannot access path "${
+          path.join("/")
+        }" - property "${segment}" not found`,
+      );
     }
     currentValue = currentValue[segment];
   }
-  
+
   return currentValue;
 }
 
@@ -56,22 +68,34 @@ export async function getCharmInput(
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
-  
+
   const inputCell = manager.getArgument(charmCell);
   let currentValue: any = inputCell.get();
   for (const segment of path) {
     if (currentValue == null) {
-      throw new Error(`Cannot access path "${path.join("/")}" - encountered null/undefined at "${segment}"`);
+      throw new Error(
+        `Cannot access path "${
+          path.join("/")
+        }" - encountered null/undefined at "${segment}"`,
+      );
     }
     if (typeof currentValue !== "object") {
-      throw new Error(`Cannot access path "${path.join("/")}" - encountered non-object at "${segment}"`);
+      throw new Error(
+        `Cannot access path "${
+          path.join("/")
+        }" - encountered non-object at "${segment}"`,
+      );
     }
     if (!(segment in currentValue)) {
-      throw new Error(`Cannot access path "${path.join("/")}" - property "${segment}" not found`);
+      throw new Error(
+        `Cannot access path "${
+          path.join("/")
+        }" - property "${segment}" not found`,
+      );
     }
     currentValue = currentValue[segment];
   }
-  
+
   return currentValue;
 }
 
@@ -85,15 +109,15 @@ export async function setCharmInput(
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
-  
+
   const inputCell = manager.getArgument(charmCell);
   let targetCell = inputCell;
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
-  
+
   targetCell.set(value as any);
-  
+
   await manager.runtime.idle();
   await manager.synced();
 }
@@ -108,14 +132,14 @@ export async function setCharmResult(
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
-  
+
   let targetCell = charmCell;
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
-  
+
   targetCell.set(value as any);
-  
+
   await manager.runtime.idle();
   await manager.synced();
 }

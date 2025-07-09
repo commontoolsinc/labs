@@ -1,12 +1,12 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
-import { 
-  getCharmResult,
+import {
+  type CellPath,
   getCharmInput,
+  getCharmResult,
+  parsePath,
   setCharmInput,
   setCharmResult,
-  parsePath,
-  type CellPath
 } from "../src/ops/cell-operations.ts";
 import { Cell } from "@commontools/runner";
 
@@ -76,7 +76,11 @@ describe("Extended Cell Operations", () => {
     });
 
     it("should parse nested paths", () => {
-      assertEquals(parsePath("config/settings/theme"), ["config", "settings", "theme"]);
+      assertEquals(parsePath("config/settings/theme"), [
+        "config",
+        "settings",
+        "theme",
+      ]);
     });
 
     it("should convert numeric segments", () => {
@@ -95,7 +99,7 @@ describe("Extended Cell Operations", () => {
       it("should get input value from charm", async () => {
         const manager = new MockCharmManager() as any;
         manager.setCharmData("charm-1", { result: "data" }, { input: "value" });
-        
+
         const value = await getCharmInput(manager, "charm-1", ["input"]);
         assertEquals(value, "value");
       });
@@ -103,8 +107,11 @@ describe("Extended Cell Operations", () => {
       it("should handle nested input paths", async () => {
         const manager = new MockCharmManager() as any;
         manager.setCharmData("charm-1", {}, { config: { api: "key123" } });
-        
-        const value = await getCharmInput(manager, "charm-1", ["config", "api"]);
+
+        const value = await getCharmInput(manager, "charm-1", [
+          "config",
+          "api",
+        ]);
         assertEquals(value, "key123");
       });
     });
@@ -113,9 +120,9 @@ describe("Extended Cell Operations", () => {
       it("should set result value in charm", async () => {
         const manager = new MockCharmManager() as any;
         manager.setCharmData("charm-1", {}, {});
-        
+
         await setCharmResult(manager, "charm-1", ["status"], "completed");
-        
+
         // Get the charm cell to verify
         const charmCell = manager.get("charm-1") as MockCell;
         const statusCell = charmCell.key("status") as MockCell;
@@ -125,9 +132,12 @@ describe("Extended Cell Operations", () => {
       it("should handle nested result paths", async () => {
         const manager = new MockCharmManager() as any;
         manager.setCharmData("charm-1", {}, {});
-        
-        await setCharmResult(manager, "charm-1", ["data", "items", 0], { id: 1, name: "Item" });
-        
+
+        await setCharmResult(manager, "charm-1", ["data", "items", 0], {
+          id: 1,
+          name: "Item",
+        });
+
         // Get the charm cell to verify
         const charmCell = manager.get("charm-1") as MockCell;
         const dataCell = charmCell.key("data") as MockCell;
@@ -140,20 +150,18 @@ describe("Extended Cell Operations", () => {
     describe("Input vs Result distinction", () => {
       it("should differentiate between input and result cells", async () => {
         const manager = new MockCharmManager() as any;
-        manager.setCharmData("charm-1", 
-          { name: "Result Name" }, 
-          { name: "Input Name" }
-        );
-        
+        manager.setCharmData("charm-1", { name: "Result Name" }, {
+          name: "Input Name",
+        });
+
         // Get from result
         const resultName = await getCharmResult(manager, "charm-1", ["name"]);
         assertEquals(resultName, "Result Name");
-        
+
         // Get from input
         const inputName = await getCharmInput(manager, "charm-1", ["name"]);
         assertEquals(inputName, "Input Name");
       });
-
     });
   });
 });

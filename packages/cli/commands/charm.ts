@@ -329,7 +329,9 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .action(async (options, pathString) => {
     const charmConfig = parseCharmOptions(options);
     const pathSegments = parsePath(pathString);
-    const value = await getCellValue(charmConfig, pathSegments, { input: options.input });
+    const value = await getCellValue(charmConfig, pathSegments, {
+      input: options.input,
+    });
     render(value, { json: true });
   })
   /* charm set */
@@ -350,7 +352,9 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     const charmConfig = parseCharmOptions(options);
     const pathSegments = parsePath(pathString);
     const value = await drainStdin();
-    await setCellValue(charmConfig, pathSegments, value, { input: options.input });
+    await setCellValue(charmConfig, pathSegments, value, {
+      input: options.input,
+    });
     render(`Set value at path: ${pathString}`);
   })
   /* charm map */
@@ -460,7 +464,6 @@ export function parseSpaceOptions(
   return output as CharmConfig;
 }
 
-
 export function parseLink(
   ref: string,
   options?: { allowWellKnown?: boolean },
@@ -507,7 +510,6 @@ function parseUrl(
   }
   return { apiUrl, space, charm };
 }
-
 
 // We use stdin for charm input which must be an `Object`
 async function drainStdin(): Promise<object> {
