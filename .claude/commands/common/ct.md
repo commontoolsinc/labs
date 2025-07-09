@@ -94,36 +94,42 @@ This document contains shared setup instructions for the CT binary that are used
 - `./dist/ct dev <recipe-path> --filename <name>` - Set filename for source maps
 
 ### Cell Data Management Commands:
-- `./dist/ct charm get --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Get cell value at path
-- `./dist/ct charm set --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Set cell value at path (JSON via stdin)
+
+**Understanding Input vs Result Cells:**
+- **Result Cell**: Contains the computed output/result of a charm (default for get/set)
+- **Input Cell**: Contains the input parameters/arguments passed to a charm
+- Use `--input` flag to access input cell instead of result cell
+
+**Get Commands:**
+- `./dist/ct charm get --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Get cell value at path (from result cell)
+- `./dist/ct charm get --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path> --input` - Get cell value at path (from input cell)
+
+**Set Commands:**
+- `./dist/ct charm set --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Set cell value at path (to result cell)
+- `./dist/ct charm set --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path> --input` - Set cell value at path (to input cell)
 
 #### Cell Data Management Examples:
 
 **Get cell values:**
 ```bash
-# Get a simple field
+# Get from result cell (default) - computed output
 ./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 name
+./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 data/users/0/email
 
-# Get nested data
-./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config/apiKey
-
-# Get array element
-./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 users/0/email
+# Get from input cell - parameters passed to charm
+./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config/apiKey --input
+./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 settings/theme --input
 ```
 
 **Set cell values:**
 ```bash
-# Set a simple string value
+# Set to result cell (default) - modify computed output
 echo '"New Name"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 name
+echo '{"status": "complete"}' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 metadata
 
-# Set a complex object
-echo '{"apiKey": "abc123", "enabled": true}' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config
-
-# Set an array element
-echo '"new@email.com"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 users/0/email
-
-# Set a number
-echo '42' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 count
+# Set to input cell - modify parameters passed to charm
+echo '{"apiKey": "abc123", "enabled": true}' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config --input
+echo '"dark"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 settings/theme --input
 ```
 
 **Path Format:**
