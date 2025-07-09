@@ -10,7 +10,7 @@ replace () {
     sed -i ' ' "$1" "$2"
   else
     sed -i "$1" "$2"
-  fi 
+  fi
 }
 
 if [ -n "$CT_CLI_INTEGRATION_USE_LOCAL" ]; then
@@ -40,7 +40,7 @@ ct id new > $IDENTITY
 
 # Check space is empty
 if [ "$(ct charm ls $SPACE_ARGS)" != "" ]; then
-  error "Space not empty." 
+  error "Space not empty."
 fi
 
 # Create a new charm using custom default export as input
@@ -75,10 +75,22 @@ if [ $? -ne 0 ]; then
   error "Retrieved source code was not modified"
 fi
 
-echo "Updating charm input."
+echo "Applying charm input."
 
 # Apply new input to charm
 echo '{"value":5}' | ct charm apply $SPACE_ARGS --charm $CHARM_ID
+
+# get, set and then re-get a value from the charm
+ct charm get $SPACE_ARGS --charm $CHARM_ID testField
+echo '{"value":10}' | ct charm set $SPACE_ARGS --charm $CHARM_ID testField
+
+# Verify the get returned what we expect
+RESULT=$(ct charm get $SPACE_ARGS --charm $CHARM_ID testField)
+echo '{"value":10}' | jq . > /tmp/expected.json
+echo "$RESULT" | jq . > /tmp/actual.json
+if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
+  error "Get operation did not return expected value. Expected: {\"value\":10}, Got: $RESULT"
+fi
 
 # Check space has new charm with correct inputs and title
 TITLE="Simple counter 2: 5"
