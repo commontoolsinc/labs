@@ -175,7 +175,7 @@ declare module "@commontools/api" {
     asSchema<T>(
       schema?: JSONSchema,
     ): Cell<T>;
-    withTx(tx: IExtendedStorageTransaction): Cell<T>;
+    withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: T) => Cancel | undefined | void): Cancel;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
