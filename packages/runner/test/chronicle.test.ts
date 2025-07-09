@@ -1229,6 +1229,182 @@ describe("Chronicle", () => {
         expect(result.ok!.value).toEqual({ hello: "world" });
       });
 
+      it("should fail to write to data URI at root level", () => {
+        const address = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, { hello: "updated" });
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+        expect(result.error!.message).toContain(
+          "Cannot write to read-only address",
+        );
+        expect(result.error!.message).toContain(address.id);
+        expect(result.error!.address).toEqual(address);
+      });
+
+      it("should fail to write to nested path in data URI", () => {
+        const address = {
+          id: 'data:application/json,{"user":{"name":"Alice"}}' as const,
+          type: "application/json" as const,
+          path: ["user", "name"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "Bob");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+        expect(result.error!.address).toEqual(address);
+      });
+
+      it("should fail to write undefined (delete) to data URI", () => {
+        const address = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: ["hello"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, undefined);
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should fail to write to base64 encoded data URI", () => {
+        const address = {
+          id: "data:application/json;base64,eyJoZWxsbyI6IndvcmxkIn0=" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, { hello: "updated" });
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should fail to write to text/plain data URI", () => {
+        const address = {
+          id: "data:text/plain,hello%20world" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "goodbye world");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should allow writes to regular addresses after failing to write to data URI", () => {
+        const dataUriAddress = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const regularAddress = {
+          id: "test:regular",
+          type: "application/json",
+          path: [],
+        } as const;
+
+        const chronicle = Chronicle.open(replica);
+
+        // First, fail to write to data URI
+        const dataUriResult = chronicle.write(dataUriAddress, {
+          hello: "updated",
+        });
+        expect(dataUriResult.error).toBeDefined();
+        expect(dataUriResult.error!.name).toBe("ReadOnlyAddressError");
+
+        // Then, successfully write to regular address
+        const regularResult = chronicle.write(regularAddress, {
+          status: "active",
+        });
+        expect(regularResult.ok).toBeDefined();
+        expect(regularResult.ok!.value).toEqual({ status: "active" });
+      });
+
+      it("should check for data URI before any other validation", () => {
+        // This tests that we check for data URI early, before loading or rebasing
+        const address = {
+          id: 'data:application/json,{"complex":{"nested":"value"}}' as const,
+          type: "application/json" as const,
+          path: ["complex", "nested"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "new value");
+
+        // Should fail immediately with ReadOnlyAddressError, not with any other error
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should handle data URI with special characters in write attempt", () => {
+        const address = {
+          id:
+            "data:application/json,%7B%22key%22%3A%22value%20with%20spaces%22%7D" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, { key: "new value" });
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should fail to write to array element in data URI", () => {
+        const address = {
+          id: 'data:application/json,["a","b","c"]' as const,
+          type: "application/json" as const,
+          path: ["1"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "B");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should provide helpful error message with the data URI", () => {
+        const longDataUri = `data:application/json,${
+          encodeURIComponent(JSON.stringify({
+            users: Array(10).fill(null).map((_, i) => ({
+              id: i,
+              name: `User ${i}`,
+              email: `user${i}@example.com`,
+            })),
+          }))
+        }`;
+
+        const address = {
+          id: longDataUri as `data:${string}`,
+          type: "application/json" as const,
+          path: ["users", "0", "name"] as const,
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "Updated Name");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+        expect(result.error!.message).toContain(longDataUri);
+      });
+
       it("should read base64 encoded JSON data URI", () => {
         const address = {
           id: "data:application/json;base64,eyJoZWxsbyI6IndvcmxkIn0=" as const,

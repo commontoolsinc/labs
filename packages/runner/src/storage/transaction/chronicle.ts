@@ -2,6 +2,7 @@ import type {
   IAttestation,
   IInvalidDataURIError,
   IMemoryAddress,
+  IReadOnlyAddressError,
   ISpaceReplica,
   IStorageTransactionInconsistent,
   ITransaction,
@@ -29,6 +30,23 @@ import * as Edit from "./edit.ts";
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
 
 export { InvalidDataURIError, UnsupportedMediaTypeError };
+
+export class ReadOnlyAddressError extends Error
+  implements IReadOnlyAddressError {
+  override readonly name = "ReadOnlyAddressError";
+  declare readonly address: IMemoryAddress;
+
+  constructor(address: IMemoryAddress) {
+    super(
+      `Cannot write to read-only address: ${address.id}`,
+    );
+    this.address = address;
+  }
+
+  from(space: MemorySpace) {
+    return this;
+  }
+}
 
 export class Chronicle {
   #replica: ISpaceReplica;
@@ -76,7 +94,15 @@ export class Chronicle {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<IAttestation, IStorageTransactionInconsistent> {
+  ): Result<
+    IAttestation,
+    IStorageTransactionInconsistent | ReadOnlyAddressError
+  > {
+    // Check if address is inline (data: URI) - these are read-only
+    if (Address.isInline(address)) {
+      return { error: new ReadOnlyAddressError(address) };
+    }
+
     // Validate against current state (replica + any overlapping novelty)
     const loaded = attest(this.load(address));
     const rebase = this.rebase(loaded);
