@@ -470,16 +470,13 @@ function parseToLegacyCellLinkWithMaybeACell(
  *
  * @param link - The normalized full link to parse
  * @param runtime - The runtime to use for getting the cell
- * @param tx - The transaction to use for getting the cell
  * @returns The parsed legacy doc cell link
  */
 export function parseNormalizedFullLinktoLegacyDocCellLink(
   link: NormalizedFullLink,
   runtime: IRuntime,
 ): LegacyDocCellLink {
-  const sideTx = runtime.edit();
-  const cell = runtime.getCellFromLink(link, undefined, sideTx);
-  sideTx.commit();
+  const cell = runtime.getCellFromLink(link, undefined);
   return {
     cell: cell.getDoc(),
     path: link.path as string[],
