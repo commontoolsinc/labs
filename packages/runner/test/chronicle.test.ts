@@ -1212,6 +1212,422 @@ describe("Chronicle", () => {
       expect(state.of).toBe("test:nonexistent");
       expect(state.is).toBeUndefined();
     });
+
+    describe("Data URI Handling", () => {
+      it("should read valid JSON data URI", () => {
+        const address = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toEqual({ hello: "world" });
+      });
+
+      it("should fail to write to data URI at root level", () => {
+        const address = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, { hello: "updated" });
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+        expect(result.error!.message).toContain(
+          "Cannot write to read-only address",
+        );
+        expect(result.error!.message).toContain(address.id);
+        expect(result.error!.address).toEqual(address);
+      });
+
+      it("should fail to write to nested path in data URI", () => {
+        const address = {
+          id: 'data:application/json,{"user":{"name":"Alice"}}' as const,
+          type: "application/json" as const,
+          path: ["user", "name"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "Bob");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+        expect(result.error!.address).toEqual(address);
+      });
+
+      it("should fail to write undefined (delete) to data URI", () => {
+        const address = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: ["hello"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, undefined);
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should fail to write to base64 encoded data URI", () => {
+        const address = {
+          id: "data:application/json;base64,eyJoZWxsbyI6IndvcmxkIn0=" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, { hello: "updated" });
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should fail to write to text/plain data URI", () => {
+        const address = {
+          id: "data:text/plain,hello%20world" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "goodbye world");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should allow writes to regular addresses after failing to write to data URI", () => {
+        const dataUriAddress = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const regularAddress = {
+          id: "test:regular",
+          type: "application/json",
+          path: [],
+        } as const;
+
+        const chronicle = Chronicle.open(replica);
+
+        // First, fail to write to data URI
+        const dataUriResult = chronicle.write(dataUriAddress, {
+          hello: "updated",
+        });
+        expect(dataUriResult.error).toBeDefined();
+        expect(dataUriResult.error!.name).toBe("ReadOnlyAddressError");
+
+        // Then, successfully write to regular address
+        const regularResult = chronicle.write(regularAddress, {
+          status: "active",
+        });
+        expect(regularResult.ok).toBeDefined();
+        expect(regularResult.ok!.value).toEqual({ status: "active" });
+      });
+
+      it("should check for data URI before any other validation", () => {
+        // This tests that we check for data URI early, before loading or rebasing
+        const address = {
+          id: 'data:application/json,{"complex":{"nested":"value"}}' as const,
+          type: "application/json" as const,
+          path: ["complex", "nested"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "new value");
+
+        // Should fail immediately with ReadOnlyAddressError, not with any other error
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should handle data URI with special characters in write attempt", () => {
+        const address = {
+          id:
+            "data:application/json,%7B%22key%22%3A%22value%20with%20spaces%22%7D" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, { key: "new value" });
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should fail to write to array element in data URI", () => {
+        const address = {
+          id: 'data:application/json,["a","b","c"]' as const,
+          type: "application/json" as const,
+          path: ["1"],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "B");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+      });
+
+      it("should provide helpful error message with the data URI", () => {
+        const longDataUri = `data:application/json,${
+          encodeURIComponent(JSON.stringify({
+            users: Array(10).fill(null).map((_, i) => ({
+              id: i,
+              name: `User ${i}`,
+              email: `user${i}@example.com`,
+            })),
+          }))
+        }`;
+
+        const address = {
+          id: longDataUri as `data:${string}`,
+          type: "application/json" as const,
+          path: ["users", "0", "name"] as const,
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.write(address, "Updated Name");
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("ReadOnlyAddressError");
+        expect(result.error!.message).toContain(longDataUri);
+      });
+
+      it("should read base64 encoded JSON data URI", () => {
+        const address = {
+          id: "data:application/json;base64,eyJoZWxsbyI6IndvcmxkIn0=" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toEqual({ hello: "world" });
+      });
+
+      it("should read text/plain data URI", () => {
+        const address = {
+          id: "data:text/plain,hello%20world" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toBe("hello world");
+      });
+
+      it("should read nested path from JSON data URI", () => {
+        const jsonData = { user: { name: "Alice", age: 30 } };
+        const address = {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify(jsonData))
+          }` as const,
+          type: "application/json" as const,
+          path: ["user", "name"] as const,
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toBe("Alice");
+      });
+
+      it("should read undefined for non-existent nested path from data URI", () => {
+        const address = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: ["nonexistent"] as const,
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toBeUndefined();
+      });
+
+      it("should return UnsupportedMediaTypeError for media type mismatch", () => {
+        const address = {
+          id: "data:text/plain,hello%20world" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("UnsupportedMediaTypeError");
+        expect(result.error!.message).toContain("Media type mismatch");
+      });
+
+      it("should return InvalidDataURIError for invalid JSON", () => {
+        const address = {
+          id: "data:application/json,{invalid-json" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("InvalidDataURIError");
+        expect(result.error!.message).toContain("Failed to parse JSON");
+      });
+
+      it("should return InvalidDataURIError for malformed data URI", () => {
+        const address = {
+          id: "data:application/json;no-comma-separator" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("InvalidDataURIError");
+        expect(result.error!.message).toContain("missing comma separator");
+      });
+
+      it("should handle complex JSON objects in data URIs", () => {
+        const complexData = {
+          users: [
+            { id: 1, name: "Alice", active: true },
+            { id: 2, name: "Bob", active: false },
+          ],
+          metadata: {
+            total: 2,
+            lastUpdated: "2023-01-01T00:00:00Z",
+          },
+        };
+
+        const address = {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify(complexData))
+          }` as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.value).toEqual(complexData);
+      });
+
+      it("should read array elements from data URI", () => {
+        const arrayData = ["first", "second", "third"];
+        const address = {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify(arrayData))
+          }` as const,
+          type: "application/json" as const,
+          path: ["1"] as const,
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.value).toBe("second");
+      });
+
+      it("should handle URL-encoded special characters in text data URI", () => {
+        const address = {
+          id: "data:text/plain,Hello%20World%21%20%40%23%24%25" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.value).toBe("Hello World! @#$%");
+      });
+
+      it("should handle data URI with additional parameters", () => {
+        const address = {
+          id:
+            "data:application/json;charset=utf-8;base64,eyJoZWxsbyI6IndvcmxkIn0=" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.value).toEqual({ hello: "world" });
+      });
+
+      it("should fail reading nested path through primitive in data URI", () => {
+        const address = {
+          id: 'data:application/json,"string-value"' as const,
+          type: "application/json" as const,
+          path: ["property"] as const,
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const result = chronicle.read(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("StorageTransactionInconsistent");
+        expect(result.error!.message).toContain("cannot read");
+        expect(result.error!.message).toContain("expected an object");
+      });
+
+      it("should not interfere with regular replica reads", () => {
+        // First write some data to replica
+        const regularAddress = {
+          id: "user:1" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const chronicle = Chronicle.open(replica);
+        const writeResult = chronicle.write(regularAddress, { name: "Alice" });
+        expect(writeResult.ok).toBeDefined();
+
+        // Then read a data URI
+        const dataUriAddress = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: [],
+        };
+        const dataUriResult = chronicle.read(dataUriAddress);
+        expect(dataUriResult.ok!.value).toEqual({ hello: "world" });
+
+        // Regular read should still work
+        const regularResult = chronicle.read(regularAddress);
+        expect(regularResult.ok!.value).toEqual({ name: "Alice" });
+      });
+    });
   });
 
   describe("Edge Cases", () => {

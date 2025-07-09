@@ -356,7 +356,9 @@ describe("Journal", () => {
 
       const newReaderResult = journal.reader(space);
       expect(newReaderResult.error).toBeDefined();
-      expect(newReaderResult.error?.name).toBe("StorageTransactionCompleteError");
+      expect(newReaderResult.error?.name).toBe(
+        "StorageTransactionCompleteError",
+      );
 
       const readResult = reader!.read({
         id: "test:closed",
@@ -394,7 +396,9 @@ describe("Journal", () => {
 
       const newWriterResult = journal.writer(space);
       expect(newWriterResult.error).toBeDefined();
-      expect(newWriterResult.error?.name).toBe("StorageTransactionCompleteError");
+      expect(newWriterResult.error?.name).toBe(
+        "StorageTransactionCompleteError",
+      );
 
       const readResult = writer!.read({
         id: "test:closed-write",
