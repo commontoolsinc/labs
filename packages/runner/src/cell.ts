@@ -479,7 +479,7 @@ function createRegularCell<T>(
         { ...link, schema: newSchema, rootSchema: newSchema },
         tx,
       ),
-    withTx: (newTx: IExtendedStorageTransaction) =>
+    withTx: (newTx?: IExtendedStorageTransaction) =>
       createCell(runtime, link, newTx),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, runtime, link),
