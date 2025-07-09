@@ -1010,10 +1010,11 @@ describe("Recipe Runner", () => {
     expect(charm.get()).toMatchObject({ result: 10 });
   });
 
-  it("idle should not wait for deliberately async handlers", async () => {
+  it("idle should not wait for deliberately async handlers and writes should fail", async () => {
     let handlerCalled = false;
     let timeoutCalled = false;
     let timeoutPromise: Promise<void> | undefined;
+    let caughtErrorTryingToSetResult: Error | undefined;
 
     const slowHandler = handler<{ value: number }, { result: number }>(
       ({ value }, state) => {
@@ -1022,7 +1023,11 @@ describe("Recipe Runner", () => {
         timeoutPromise = new Promise<void>((resolve) =>
           setTimeout(() => {
             timeoutCalled = true;
-            state.result = value * 2;
+            try {
+              state.result = value * 2;
+            } catch (error) {
+              caughtErrorTryingToSetResult = error as Error;
+            }
             resolve();
           }, 10)
         );
@@ -1056,7 +1061,8 @@ describe("Recipe Runner", () => {
     // Now idle should wait for the handler's promise to resolve
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
-    expect(charm.get()).toMatchObject({ result: 10 });
+    expect(caughtErrorTryingToSetResult).toBeDefined();
+    expect(charm.get()?.result).toBe(0); // No change
   });
 
   it("should create and use a named cell inside a lift", async () => {
