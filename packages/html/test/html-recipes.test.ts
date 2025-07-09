@@ -73,17 +73,14 @@ describe("recipes with HTML", () => {
     );
 
     await runtime.idle();
-    const resultValue = result.get() as any;
+    const resultValue = result.get();
 
-    if (resultValue && (resultValue[UI] as any)?.children?.[0]?.$alias) {
-      (resultValue[UI] as any).children[0].$alias = Object;
-    }
     assert.matchObject(resultValue, {
       [UI]: {
         type: "vnode",
         name: "div",
         props: {},
-        children: [{ $alias: Object }],
+        children: [10],
       },
     });
   });
