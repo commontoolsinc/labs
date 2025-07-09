@@ -233,7 +233,7 @@ export class CharmManager {
     trashedCharms.set(newTrashedCharms);
 
     // Add back to charms
-    await this.add(tx, [trashedCharm]);
+    await this.add([trashedCharm], tx);
 
     await tx.commit();
 
@@ -258,11 +258,12 @@ export class CharmManager {
     return this.charms;
   }
 
-  async add(tx: IExtendedStorageTransaction, newCharms: Cell<Charm>[]) {
+  async add(newCharms: Cell<Charm>[], tx?: IExtendedStorageTransaction) {
     await this.syncCharms(this.charms);
     await this.runtime.idle();
 
-    const charms = this.charms.withTx(tx);
+    const transaction = tx ?? this.runtime.edit();
+    const charms = this.charms.withTx(transaction);
 
     newCharms.forEach((charm) => {
       if (!charms.get().some((otherCharm) => otherCharm.equals(charm))) {
@@ -270,7 +271,7 @@ export class CharmManager {
       }
     });
 
-    await tx.commit();
+    if (!tx) await transaction.commit();
     await this.runtime.idle();
   }
 
@@ -344,7 +345,7 @@ export class CharmManager {
       });
     }
 
-    await this.add(tx, [duplicatedCharm]);
+    await this.add([duplicatedCharm], tx);
 
     await tx.commit();
 
@@ -927,7 +928,7 @@ export class CharmManager {
     const charm = this.runtime.getCell(this.space, cause, charmSchema, tx);
     await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
-    await this.add(tx, [charm]);
+    await this.add([charm], tx);
 
     if (llmRequestId) {
       charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
@@ -964,7 +965,7 @@ export class CharmManager {
     await this.runtime.storage.syncCell(charm);
     await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
-    await this.add(tx, [charm]);
+    await this.add([charm], tx);
 
     await tx.commit();
 
