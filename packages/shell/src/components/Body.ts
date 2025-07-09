@@ -13,16 +13,12 @@ export class XBodyElement extends BaseView {
     }
   `;
 
-  @property()
+  @property({ attribute: false })
   cc?: CharmController;
 
-  @property()
+  @property({ attribute: false })
   activeCharmId?: string;
 
-  override shouldUpdate(changedProperties: PropertyValues<this>) {
-    console.log("should update?", changedProperties);
-    return super.shouldUpdate(changedProperties);
-  }
   override render() {
     const cc = this.cc ? "Connected" : "Not Connected";
     console.log("BODY RENDER", this.cc);

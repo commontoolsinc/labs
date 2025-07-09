@@ -37,6 +37,5 @@ export async function createCharmsController(
     blobbyServerUrl: url,
   });
   const charmManager = new CharmManager(session, runtime);
-  await charmManager.synced();
   return new CharmsController(charmManager);
 }

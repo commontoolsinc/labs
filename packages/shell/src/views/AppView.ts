@@ -50,12 +50,20 @@ export class XAppView extends BaseView {
     const unauthenticated = html`
       <x-login-view></x-login-view>
     `;
-    const authenticated = html`
-      <div class="${activeCharmId}">
-        <x-header .identity="${app.identity}"></x-header>
-        <x-body .cc="${cc}" .activeCharmId="${activeCharmId}"></x-body>
-      </div>
-    `;
+    const authenticated = this._cc.render({
+      pending: () => html`
+        <div>
+          <x-header .identity="${app.identity}"></x-header>
+          <x-body .cc="${undefined}" .activeCharmId="${activeCharmId}"></x-body>
+        </div>
+      `,
+      complete: (cc) => html`
+        <div>
+          <x-header .identity="${app.identity}"></x-header>
+          <x-body .cc="${cc}" .activeCharmId="${activeCharmId}"></x-body>
+        </div>
+      `
+    });
     return this.app?.identity ? authenticated : unauthenticated;
   }
 }
