@@ -76,10 +76,10 @@ export type DocImpl<T> = {
    * @returns Simple cell.
    */
   asCell<Q = T, Path extends PropertyKey[] = []>(
-    tx: IExtendedStorageTransaction,
     path?: Readonly<Path>,
     schema?: JSONSchema,
     rootSchema?: JSONSchema,
+    tx: IExtendedStorageTransaction,
   ): Cell<DeepKeyLookup<Q, Path>>;
 
   /**
@@ -92,10 +92,10 @@ export type DocImpl<T> = {
    * @returns Simple cell with inferred type.
    */
   asCell<S extends JSONSchema, Path extends PropertyKey[] = []>(
-    tx: IExtendedStorageTransaction,
     path: Path | undefined,
     schema: S,
     rootSchema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
 
   /**
@@ -274,10 +274,10 @@ export function createDoc<T>(
         type: "application/json",
       }) as QueryResult<DeepKeyLookup<T, Path>>,
     asCell: <Q = T, Path extends PropertyKey[] = []>(
-      tx: IExtendedStorageTransaction,
       path?: Path,
       schema?: JSONSchema,
       rootSchema?: JSONSchema,
+      tx?: IExtendedStorageTransaction,
     ) =>
       createCell(runtime, {
         space,

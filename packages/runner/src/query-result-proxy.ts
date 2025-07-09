@@ -74,6 +74,8 @@ export function createQueryResultProxy<T>(
     );
   }
 
+  if (!tx) throw new Error("Transaction required for createQueryResultProxy");
+
   // Resolve path and follow links to actual value.
   link = resolveLinkToValue(tx, link);
 

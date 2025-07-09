@@ -280,7 +280,7 @@ export interface Stream<T> {
 export function createCell<T>(
   runtime: IRuntime,
   link: NormalizedFullLink,
-  tx: IExtendedStorageTransaction,
+  tx?: IExtendedStorageTransaction,
   noResolve = false,
 ): Cell<T> {
   let { schema, rootSchema } = link;
@@ -310,7 +310,7 @@ export function createCell<T>(
 function createStreamCell<T>(
   runtime: IRuntime,
   link: NormalizedFullLink,
-  _tx: IExtendedStorageTransaction,
+  _tx?: IExtendedStorageTransaction,
 ): Stream<T> {
   const listeners = new Set<(event: T) => Cancel | undefined>();
 
@@ -346,27 +346,32 @@ function createStreamCell<T>(
 function createRegularCell<T>(
   runtime: IRuntime,
   link: NormalizedFullLink,
-  tx: IExtendedStorageTransaction,
+  tx?: IExtendedStorageTransaction,
 ): Cell<T> {
   const doc = runtime.documentMap.getDocByEntityId(link.space, link.id);
   const { path, schema, rootSchema } = link;
 
   const self = {
     get: () => {
-      const value = validateAndTransform(runtime, tx, link);
+      const transaction = tx ?? runtime.edit();
+      const value = validateAndTransform(runtime, transaction, link);
+      if (!tx) transaction.commit();
       return value;
     },
-    set: (newValue: Cellify<T>) =>
+    set: (newValue: Cellify<T>) => {
+      if (!tx) throw new Error("Transaction required for set");
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
-      diffAndUpdate(
+      return diffAndUpdate(
         runtime,
         tx,
         resolveLinkToWriteRedirect(tx, link),
         newValue,
         getTopFrame()?.cause,
-      ),
+      );
+    },
     send: (newValue: Cellify<T>) => self.set(newValue),
     update: (values: Cellify<Partial<T>>) => {
+      if (!tx) throw new Error("Transaction required for update");
       if (!isRecord(values)) {
         throw new Error("Can't update with non-object value");
       }
@@ -406,6 +411,8 @@ function createRegularCell<T>(
         | Cell
       >
     ) => {
+      if (!tx) throw new Error("Transaction required for push");
+
       // Follow aliases and references, since we want to get to an assumed
       // existing array.
       const resolvedLink = resolveLinkToValue(tx, link);

@@ -513,10 +513,7 @@ function getCharmMetadataFromFrame(): {
   // abstractions for context here as well.
   const frame = getTopFrame();
 
-  const sourceAsProxy = frame?.unsafe_binding?.materialize(
-    [],
-    frame.unsafe_binding.tx,
-  );
+  const sourceAsProxy = frame?.unsafe_binding?.materialize([]);
 
   if (!isQueryResultForDereferencing(sourceAsProxy)) {
     return;

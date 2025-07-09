@@ -443,67 +443,67 @@ export class Runtime implements IRuntime {
 
   // Cell factory methods
   getCell<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCell<T>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCell(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<any> {
     const doc = this.documentMap.getDoc<any>(undefined as any, cause, space);
     // Use doc.asCell method to avoid circular dependency
-    return doc.asCell(tx, [], schema);
+    return doc.asCell([], schema, undefined, tx);
   }
 
   getCellFromEntityId<T>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId | string,
     path?: PropertyKey[],
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[],
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromEntityId(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId | string,
     path: PropertyKey[] = [],
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<any> {
     const doc = this.documentMap.getDocByEntityId(space, entityId, true)!;
-    return doc.asCell(tx, path, schema);
+    return doc.asCell(path, schema, undefined, tx);
   }
 
   getCellFromLink<T>(
-    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getCellFromLink(
-    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<any> {
     let doc;
 
@@ -526,10 +526,10 @@ export class Runtime implements IRuntime {
 
       // If we aren't passed a schema, use the one in the cellLink
       return doc.asCell(
-        tx,
         link.path,
         schema ?? link.schema,
         schema ? undefined : link.rootSchema,
+        tx,
       );
     } else {
       const link = isLink(cellLink)
@@ -544,35 +544,35 @@ export class Runtime implements IRuntime {
         true,
       )!;
       return doc.asCell(
-        tx,
         link.path,
         schema ?? link.schema,
         schema ? undefined : link.rootSchema,
+        tx,
       );
     }
   }
 
   getImmutableCell<T>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: T,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getImmutableCell<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: any,
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
   getImmutableCell(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: any,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<any> {
     const doc = this.documentMap.getDoc<any>(data, { immutable: data }, space);
     doc.freeze("immutable cell");
-    return doc.asCell(tx, [], schema);
+    return doc.asCell([], schema, undefined, tx);
   }
 
   // Convenience methods that delegate to the runner
