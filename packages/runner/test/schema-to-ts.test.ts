@@ -543,7 +543,6 @@ describe("Schema-to-TS Type Conversion", () => {
       space,
       userData,
       schema,
-      // tx,
     );
     const user = userCell.get();
     console.log("user id", userCell.getAsNormalizedFullLink().id);
