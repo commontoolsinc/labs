@@ -92,13 +92,13 @@ function Launcher() {
 
         // Run the spell with the suggested values
         console.log("Creating run with suggested values");
-        const spell = await charmManager.runPersistent(
+        let spell = await charmManager.runPersistent(
           tx,
           recipe,
           suggestionData.values || {},
         );
-
-        await tx.commit(); // TODO(seefeld): Retry?
+        spell = spell.withTx();
+        tx.commit(); // TODO(seefeld): Retry?
 
         console.log("Spell run created:", spell);
 

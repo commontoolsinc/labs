@@ -903,7 +903,8 @@ const CodeTab = () => {
                       recipe,
                       argument,
                     );
-                    await tx.commit();
+                    newCharm = newCharm.withTx();
+                    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
                   } else {
                     // Single file recipe - use the existing compileAndRunRecipe
                     newCharm = await compileAndRunRecipe(

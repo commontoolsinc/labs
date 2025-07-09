@@ -120,7 +120,7 @@ async function main() {
       console.log("charm:", JSON.stringify(charm.get(), null, 2));
       console.log(
         "sourceCell:",
-        JSON.stringify(charm.getSourceCell().get(), null, 2),
+        JSON.stringify(charm.getSourceCell()?.get(), null, 2),
       );
       Deno.exit(0);
     }
@@ -199,8 +199,22 @@ async function main() {
   if (recipeFile) {
     try {
       const recipeSrc = await Deno.readTextFile(recipeFile);
-      const recipe = await compileRecipe(recipeSrc, "recipe", runtime, space);
-      const charm = await charmManager.runPersistent(recipe, inputValue, cause);
+      const tx = runtime.edit();
+      const recipe = await compileRecipe(
+        tx,
+        recipeSrc,
+        "recipe",
+        runtime,
+        space,
+      );
+      let charm = await charmManager.runPersistent(
+        tx,
+        recipe,
+        inputValue,
+        cause,
+      );
+      charm = charm.withTx();
+      tx.commit(); // TODO(seefeld): Retry?
       const charmWithSchema = (await charmManager.get(charm))!;
       charmWithSchema.sink((value) => {
         console.log("running charm:", getEntityId(charm), value);

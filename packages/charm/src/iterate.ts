@@ -582,14 +582,18 @@ export async function compileAndRunRecipe(
       throw new Error("Failed to compile recipe");
     }
 
-    return charmManager.runPersistent(
+    const charm = await charmManager.runPersistent(
       tx,
       recipe,
       runOptions,
       undefined,
       llmRequestId,
     );
+    return charm.withTx();
+  } catch (e) {
+    tx.abort();
+    throw e;
   } finally {
-    tx.commit();
+    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
   }
 }

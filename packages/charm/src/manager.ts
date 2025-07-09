@@ -326,12 +326,13 @@ export class CharmManager {
     const duplicateInputs = JSON.parse(JSON.stringify(originalInputs));
 
     // Create a new charm with the cloned inputs
-    const duplicatedCharm = await this.runPersistent(
+    let duplicatedCharm = await this.runPersistent(
       tx,
       recipe,
       duplicateInputs,
       { relation: "duplicate", origin: id },
     );
+    duplicatedCharm = duplicatedCharm.withTx();
 
     // Add a lineage record to track the relationship to the original
     const lineage = duplicatedCharm.getSourceCell(charmSourceCellSchema)?.key(
@@ -347,7 +348,7 @@ export class CharmManager {
 
     await this.add([duplicatedCharm], tx);
 
-    await tx.commit();
+    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
 
     return duplicatedCharm;
   }
@@ -425,11 +426,11 @@ export class CharmManager {
         throw new Error(`Recipe not found for charm ${getEntityId(charm)}`);
       }
       const newCharm = await this.runtime.runSynced(charm, recipe);
-      await tx.commit(); // TODO(seefeld): Retry on failure
-      return newCharm.asSchema(asSchema ?? resultSchema);
+      tx.commit(); // TODO(seefeld): Retry on failure? Await confirmation?
+      return newCharm.withTx().asSchema(asSchema ?? resultSchema);
     } else {
-      await tx.commit();
-      return charm.asSchema<T>(asSchema ?? resultSchema);
+      tx.commit(); // TODO(seefeld): Retry on failure? Await confirmation?
+      return charm.withTx().asSchema<T>(asSchema ?? resultSchema);
     }
   }
 
@@ -937,9 +938,9 @@ export class CharmManager {
         );
     }
 
-    await tx.commit();
+    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
 
-    return charm;
+    return charm.withTx();
   }
 
   // Consistently return the `Cell<Charm>` of charm with
@@ -967,9 +968,9 @@ export class CharmManager {
     await this.syncRecipe(charm);
     await this.add([charm], tx);
 
-    await tx.commit();
+    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
 
-    return charm;
+    return charm.withTx();
   }
 
   // FIXME(JA): this really really really needs to be revisited

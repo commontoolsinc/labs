@@ -20,8 +20,9 @@ export class CharmsController {
   ): Promise<CharmController> {
     const tx = this.#manager.runtime.edit();
     const recipe = await compileProgram(this.#manager, program);
-    const charm = await this.#manager.runPersistent(tx, recipe, input);
-    await tx.commit();
+    let charm = await this.#manager.runPersistent(tx, recipe, input);
+    charm = charm.withTx();
+    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
     await this.#manager.runtime.idle();
     await this.#manager.synced();
     return new CharmController(this.#manager, charm);

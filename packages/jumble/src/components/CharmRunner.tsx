@@ -52,10 +52,12 @@ function useCharmLoader({
 
       if (currentMountKey !== mountingKey.current) return;
 
-      const charm = await charmManager.runPersistent(factory, argument);
+      const tx = charmManager.runtime.edit();
+      const charm = await charmManager.runPersistent(tx, factory, argument);
+      tx.commit(); // TODO(seefeld): Retry?
       if (currentMountKey !== mountingKey.current) return;
 
-      onCharmReadyCallback(charm);
+      onCharmReadyCallback(charm.withTx());
     } catch (err) {
       if (currentMountKey === mountingKey.current) {
         setError(err as Error);

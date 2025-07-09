@@ -27,8 +27,8 @@ export const castSpellAsCharm = async (
       recipe,
       argument,
     );
-    await tx.commit();
-    return charm;
+    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
+    return charm.withTx();
   }
   console.log("Failed to cast");
   return null;
