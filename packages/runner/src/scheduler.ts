@@ -157,7 +157,7 @@ export class Scheduler implements IScheduler {
           // Set up reactive subscriptions after the action runs
           // This matches the original scheduler behavior
           tx.commit();
-          const log = txToReactivityLog(tx, this.runtime);
+          const log = txToReactivityLog(tx);
           this.subscribe(action, log);
           resolve(result);
         }
@@ -441,7 +441,6 @@ function topologicalSort(
 
 export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
-  _runtime: IRuntime,
 ): ReactivityLog {
   const log: ReactivityLog = { reads: [], writes: [] };
   for (const change of tx.log()) {

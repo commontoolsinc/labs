@@ -174,7 +174,6 @@ export interface IRuntime {
     resultCell: Cell<R>,
   ): Cell<R>;
   runSynced(
-    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Recipe | Module,
     inputs?: any,
@@ -280,7 +279,6 @@ export interface IRunner {
   ): Cell<R>;
 
   runSynced(
-    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Recipe | Module,
     inputs?: any,
@@ -577,11 +575,10 @@ export class Runtime implements IRuntime {
   }
 
   runSynced(
-    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Recipe | Module,
     inputs?: any,
   ) {
-    return this.runner.runSynced(tx, resultCell, recipe, inputs);
+    return this.runner.runSynced(resultCell, recipe, inputs);
   }
 }

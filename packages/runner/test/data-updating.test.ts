@@ -6,7 +6,6 @@ import {
   applyChangeSet,
   diffAndUpdate,
   normalizeAndDiff,
-  setNestedValue,
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -19,10 +18,9 @@ import {
 } from "../src/link-utils.ts";
 import type { LegacyDocCellLink } from "../src/sigil-types.ts";
 import { arrayEqual } from "../src/path-utils.ts";
-import { type ReactivityLog } from "../src/scheduler.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -56,8 +54,7 @@ describe("data-updating", () => {
         "should set a value at a path 1",
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const success = setNestedValue(testCell.getDoc(), ["b", "c"], 3);
-      expect(success).toBe(true);
+      diffAndUpdate(runtime, tx, testCell.key("b").key("c").getAsNormalizedFullLink(), 3);
       expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
     });
 
@@ -69,8 +66,7 @@ describe("data-updating", () => {
         "should delete no longer used fields 1",
       );
       testCell.set({ a: 1, b: { c: 2, d: 3 } });
-      const success = setNestedValue(testCell.getDoc(), ["b"], { c: 4 });
-      expect(success).toBe(true);
+      diffAndUpdate(runtime, tx, testCell.key("b").getAsNormalizedFullLink(), { c: 4 });
       expect(testCell.get()).toEqual({ a: 1, b: { c: 4 } });
     });
 
@@ -80,14 +76,11 @@ describe("data-updating", () => {
         "should log no changes 1",
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], {
+      const changes = normalizeAndDiff(runtime, tx, testCell.getAsNormalizedFullLink(), {
         a: 1,
         b: { c: 2 },
-      }, log);
-      expect(success).toBe(true); // No changes is still a success
-      expect(testCell.get()).toEqual({ a: 1, b: { c: 2 } });
-      expect(log.writes).toEqual([]);
+      });
+      expect(changes.length).toEqual(0);
     });
 
     it("should log minimal changes when setting a nested value", () => {
@@ -96,15 +89,12 @@ describe("data-updating", () => {
         "should log minimal changes 1",
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], {
+      const changes = normalizeAndDiff(runtime, tx, testCell.getAsNormalizedFullLink(), {
         a: 1,
         b: { c: 3 },
-      }, log);
-      expect(success).toBe(true);
-      expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
-      expect(log.writes.length).toEqual(1);
-      expect(log.writes[0].path).toEqual(["b", "c"]);
+      });
+      expect(changes.length).toEqual(1);
+      expect(changes[0].location.path).toEqual(["b", "c"]);
     });
 
     it("should fail when setting a nested value on a frozen cell", () => {
@@ -114,11 +104,10 @@ describe("data-updating", () => {
       );
       testCell.set({ a: 1, b: { c: 2 } });
       testCell.freeze("test");
-      const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], {
+      const success = diffAndUpdate(runtime, tx, testCell.getAsNormalizedFullLink(), {
         a: 1,
         b: { c: 3 },
-      }, log);
+      });
       expect(success).toBe(false);
     });
 
@@ -128,7 +117,7 @@ describe("data-updating", () => {
         "should correctly update with shorter arrays 1",
       );
       testCell.set({ a: [1, 2, 3] });
-      const success = setNestedValue(testCell.getDoc(), ["a"], [1, 2]);
+      const success = diffAndUpdate(runtime, tx, testCell.key("a").getAsNormalizedFullLink(), [1, 2]);
       expect(success).toBe(true);
       expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2] });
     });
@@ -139,7 +128,7 @@ describe("data-updating", () => {
         "should correctly update with a longer arrays 1",
       );
       testCell.set({ a: [1, 2, 3] });
-      const success = setNestedValue(testCell.getDoc(), ["a"], [1, 2, 3, 4]);
+      const success = diffAndUpdate(runtime, tx, testCell.key("a").getAsNormalizedFullLink(), [1, 2, 3, 4]);
       expect(success).toBe(true);
       expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2, 3, 4] });
     });
@@ -150,7 +139,7 @@ describe("data-updating", () => {
         "should overwrite an object with an array 1",
       );
       testCell.set({ a: { b: 1 } });
-      const success = setNestedValue(testCell.getDoc(), ["a"], [1, 2, 3]);
+      const success = diffAndUpdate(runtime, tx, testCell.key("a").getAsNormalizedFullLink(), [1, 2, 3]);
       expect(success).toBeTruthy();
       expect(testCell.get()).toHaveProperty("a");
       expect(testCell.get().a).toHaveLength(3);

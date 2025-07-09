@@ -5,6 +5,7 @@ import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -12,6 +13,7 @@ const space = signer.did();
 describe("runRecipe", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -21,9 +23,11 @@ describe("runRecipe", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.storage.synced();
     await runtime?.dispose();
     await storageManager?.close();
@@ -52,7 +56,12 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const resultCell = runtime.getCell(space, "should work with passthrough");
+    const resultCell = runtime.getCell(
+      space,
+      "should work with passthrough",
+      undefined,
+      tx,
+    );
     const result = await runtime.runSynced(resultCell, recipe, { input: 1 });
     await runtime.idle();
 
@@ -120,6 +129,8 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should work with nested recipes",
+      undefined,
+      tx,
     );
     const result = await runtime.runSynced(resultCell, outerRecipe, {
       value: 5,
@@ -146,7 +157,12 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.getCell(space, "should run a simple module");
+    const resultCell = runtime.getCell(
+      space,
+      "should run a simple module",
+      undefined,
+      tx,
+    );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
     });
@@ -178,6 +194,8 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should run a simple module with no outputs",
+      undefined,
+      tx,
     );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
@@ -211,6 +229,8 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should handle incorrect inputs gracefully",
+      undefined,
+      tx,
     );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
@@ -250,7 +270,12 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.getCell(space, "should handle nested recipes");
+    const resultCell = runtime.getCell(
+      space,
+      "should handle nested recipes",
+      undefined,
+      tx,
+    );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
     });
@@ -278,11 +303,15 @@ describe("runRecipe", () => {
     const inputCell = runtime.getCell<{ input: number; output: number }>(
       space,
       "should allow passing a cell as a binding: input cell",
+      undefined,
+      tx,
     );
     inputCell.set({ input: 10, output: 0 });
     const resultCell = runtime.getCell(
       space,
       "should allow passing a cell as a binding",
+      undefined,
+      tx,
     );
     const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
@@ -319,9 +348,16 @@ describe("runRecipe", () => {
     const inputCell = runtime.getCell<{ input: number; output: number }>(
       space,
       "should allow stopping a recipe: input cell",
+      undefined,
+      tx,
     );
     inputCell.set({ input: 10, output: 0 });
-    const resultCell = runtime.getCell(space, "should allow stopping a recipe");
+    const resultCell = runtime.getCell(
+      space,
+      "should allow stopping a recipe",
+      undefined,
+      tx,
+    );
     const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
     await runtime.idle();
@@ -374,6 +410,8 @@ describe("runRecipe", () => {
     const resultWithPartialCell = runtime.getCell(
       space,
       "default values test - partial",
+      undefined,
+      tx,
     );
     const resultWithPartial = await runtime.runSynced(
       resultWithPartialCell,
@@ -387,6 +425,8 @@ describe("runRecipe", () => {
     const resultWithDefaultsCell = runtime.getCell(
       space,
       "default values test - all defaults",
+      undefined,
+      tx,
     );
     const resultWithDefaults = await runtime.runSynced(
       resultWithDefaultsCell,
@@ -446,7 +486,12 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.getCell(space, "complex schema test");
+    const resultCell = runtime.getCell(
+      space,
+      "complex schema test",
+      undefined,
+      tx,
+    );
     const result = await runtime.runSynced(resultCell, recipe, {
       config: { values: [10, 20, 30, 40], operation: "avg" },
     });
@@ -497,7 +542,12 @@ describe("runRecipe", () => {
     };
 
     // Provide partial options - should merge with defaults
-    const resultCell = runtime.getCell(space, "merge defaults test");
+    const resultCell = runtime.getCell(
+      space,
+      "merge defaults test",
+      undefined,
+      tx,
+    );
     const result = await runtime.runSynced(resultCell, recipe, {
       options: { value: 10 },
       input: 5,
@@ -538,6 +588,8 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell<any>(
       space,
       "state preservation test",
+      undefined,
+      tx,
     );
 
     // First run
@@ -595,16 +647,24 @@ describe("runRecipe", () => {
     const result1Cell = runtime.getCell(
       space,
       "should create separate copies of initial values 1",
+      undefined,
+      tx,
     );
-    const result1 = await runtime.runSynced(result1Cell, recipe, { input: 5 });
+    const result1 = await runtime.runSynced(result1Cell, recipe, {
+      input: 5,
+    });
     await runtime.idle();
 
     // Create second instance
     const result2Cell = runtime.getCell(
       space,
       "should create separate copies of initial values 2",
+      undefined,
+      tx,
     );
-    const result2 = await runtime.runSynced(result2Cell, recipe, { input: 10 });
+    const result2 = await runtime.runSynced(result2Cell, recipe, {
+      input: 10,
+    });
     await runtime.idle();
 
     // Get the internal state objects
@@ -627,6 +687,7 @@ describe("runRecipe", () => {
 describe("runner utils", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -636,9 +697,11 @@ describe("runner utils", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -709,6 +772,8 @@ describe("runner utils", () => {
       const testCell = runtime.getCell<{ a: any }>(
         space,
         "should treat cell aliases and references as values 1",
+        undefined,
+        tx,
       );
       const obj1 = { a: { $alias: { path: [] } } };
       const obj2 = { a: 2, b: { c: testCell.getAsLegacyCellLink() } };

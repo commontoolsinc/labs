@@ -3,6 +3,7 @@ import {
   Classification,
   EntityId,
   getEntityId,
+  type IExtendedStorageTransaction,
   isCell,
   isLink,
   JSONSchema,
@@ -213,22 +214,28 @@ export class CharmManager {
     await this.syncCharms(this.trashedCharms);
     await this.syncCharms(this.charms);
 
+    const tx = this.runtime.edit();
+
+    const trashedCharms = this.trashedCharms.withTx(tx);
+
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
     // Find the charm in trash
-    const trashedCharm = this.trashedCharms.get().find((charm) =>
+    const trashedCharm = trashedCharms.get().find((charm) =>
       isSameEntity(charm, id)
     );
 
     if (!trashedCharm) return false;
 
     // Remove from trash
-    const newTrashedCharms = filterOutEntity(this.trashedCharms, id);
-    this.trashedCharms.set(newTrashedCharms);
+    const newTrashedCharms = filterOutEntity(trashedCharms, id);
+    trashedCharms.set(newTrashedCharms);
 
     // Add back to charms
-    await this.add([trashedCharm]);
+    await this.add(tx, [trashedCharm]);
+
+    await tx.commit();
 
     await this.runtime.idle();
     return true;
@@ -251,16 +258,19 @@ export class CharmManager {
     return this.charms;
   }
 
-  async add(newCharms: Cell<Charm>[]) {
+  async add(tx: IExtendedStorageTransaction, newCharms: Cell<Charm>[]) {
     await this.syncCharms(this.charms);
     await this.runtime.idle();
 
+    const charms = this.charms.withTx(tx);
+
     newCharms.forEach((charm) => {
-      if (!this.charms.get().some((otherCharm) => otherCharm.equals(charm))) {
-        this.charms.push(charm);
+      if (!charms.get().some((otherCharm) => otherCharm.equals(charm))) {
+        charms.push(charm);
       }
     });
 
+    await tx.commit();
     await this.runtime.idle();
   }
 
@@ -287,17 +297,26 @@ export class CharmManager {
     const id = getEntityId(charm);
     if (!id) throw new Error("Cannot duplicate charm: missing ID");
 
+    const tx = this.runtime.edit();
+
     // Get the recipe ID from the source cell
-    const sourceCell = charm.getSourceCell(processSchema);
+    const sourceCell = charm.withTx(tx).getSourceCell(processSchema);
     const recipeId = sourceCell?.get()?.[TYPE];
-    if (!recipeId) throw new Error("Cannot duplicate charm: missing recipe ID");
+    if (!recipeId) {
+      tx.abort();
+      throw new Error("Cannot duplicate charm: missing recipe ID");
+    }
 
     // Get the recipe
     const recipe = await this.runtime.recipeManager.loadRecipe(
+      tx,
       recipeId,
       this.space,
     );
-    if (!recipe) throw new Error("Cannot duplicate charm: recipe not found");
+    if (!recipe) {
+      tx.abort();
+      throw new Error("Cannot duplicate charm: recipe not found");
+    }
 
     // Get the original inputs
     const originalInputs = sourceCell?.key("argument").get();
@@ -307,6 +326,7 @@ export class CharmManager {
 
     // Create a new charm with the cloned inputs
     const duplicatedCharm = await this.runPersistent(
+      tx,
       recipe,
       duplicateInputs,
       { relation: "duplicate", origin: id },
@@ -324,7 +344,9 @@ export class CharmManager {
       });
     }
 
-    await this.add([duplicatedCharm]);
+    await this.add(tx, [duplicatedCharm]);
+
+    await tx.commit();
 
     return duplicatedCharm;
   }
@@ -336,25 +358,38 @@ export class CharmManager {
     runIt: boolean = true,
     asSchema?: JSONSchema,
   ): Promise<Cell<T> | undefined> {
+    const tx = this.runtime.edit();
+
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
 
-    if (isCell(id)) charm = id;
-    else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
+    if (isCell(id)) charm = id.withTx(tx);
+    else {charm = this.runtime.getCellFromEntityId(
+        this.space,
+        { "/": id },
+        [],
+        charmSchema,
+        tx,
+      );}
 
-    await this.runtime.storage.syncCell(charm.asSchema(charmSchema));
+    await this.runtime.storage.syncCell(charm);
 
     const recipeId = getRecipeIdFromCharm(charm);
-    if (!recipeId) throw new Error("recipeId is required");
+    if (!recipeId) {
+      tx.abort();
+      throw new Error("recipeId is required");
+    }
 
     // Make sure we have the recipe so we can run it!
     let recipe: Recipe | Module | undefined;
     try {
       recipe = await this.runtime.recipeManager.loadRecipe(
+        tx,
         recipeId,
         this.space,
       );
     } catch (e) {
+      tx.abort();
       console.warn("loadRecipe: error", e);
       console.warn("recipeId", recipeId);
       console.warn("recipe", recipe);
@@ -388,11 +423,11 @@ export class CharmManager {
       if (!recipe) {
         throw new Error(`Recipe not found for charm ${getEntityId(charm)}`);
       }
-      const tx = this.runtime.edit();
-      const newCharm = await this.runtime.runSynced(tx, charm, recipe);
-      tx.commit(); // TODO(seefeld): Retry on failure
+      const newCharm = await this.runtime.runSynced(charm, recipe);
+      await tx.commit(); // TODO(seefeld): Retry on failure
       return newCharm.asSchema(asSchema ?? resultSchema);
     } else {
+      await tx.commit();
       return charm.asSchema<T>(asSchema ?? resultSchema);
     }
   }
@@ -881,6 +916,7 @@ export class CharmManager {
   }
 
   async runPersistent(
+    tx: IExtendedStorageTransaction,
     recipe: Recipe | Module,
     inputs?: any,
     cause?: any,
@@ -888,16 +924,19 @@ export class CharmManager {
   ): Promise<Cell<Charm>> {
     await this.runtime.idle();
 
-    const charm = this.runtime.getCell(this.space, cause, charmSchema);
+    const charm = this.runtime.getCell(this.space, cause, charmSchema, tx);
     await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
-    await this.add([charm]);
+    await this.add(tx, [charm]);
 
     if (llmRequestId) {
-      charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId").set(
-        llmRequestId,
-      );
+      charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
+        .set(
+          llmRequestId,
+        );
     }
+
+    await tx.commit();
 
     return charm;
   }
@@ -911,13 +950,23 @@ export class CharmManager {
     charmId: string,
     inputs?: object,
   ): Promise<Cell<Charm>> {
-    const charm = this.runtime.getCellFromEntityId<Charm>(this.space, {
-      "/": charmId,
-    });
+    const tx = this.runtime.edit();
+
+    const charm = this.runtime.getCellFromEntityId<Charm>(
+      this.space,
+      {
+        "/": charmId,
+      },
+      [],
+      charmSchema,
+      tx,
+    );
     await this.runtime.storage.syncCell(charm);
     await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
-    await this.add([charm]);
+    await this.add(tx, [charm]);
+
+    await tx.commit();
 
     return charm;
   }
@@ -940,7 +989,14 @@ export class CharmManager {
 
   async syncRecipeById(recipeId: string) {
     if (!recipeId) throw new Error("recipeId is required");
-    return await this.runtime.recipeManager.loadRecipe(recipeId, this.space);
+    const tx = this.runtime.edit();
+    const recipe = await this.runtime.recipeManager.loadRecipe(
+      tx,
+      recipeId,
+      this.space,
+    );
+    await tx.commit(); // TODO(seefeld): Retry on failure
+    return recipe;
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {

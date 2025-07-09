@@ -181,7 +181,7 @@ declare module "@commontools/api" {
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
     ): QueryResult<DeepKeyLookup<T, Path>>;
-    getAsLegacyCellLink(): LegacyDocCellLink;
+    getAsLegacyCellLink(): LegacyDocCellLink; /** @deprecated */
     getAsNormalizedFullLink(): NormalizedFullLink;
     getAsLink(
       options?: {
@@ -611,7 +611,7 @@ function subscribeToReferencedDocs<T>(
     tx,
     link,
   );
-  const log = txToReactivityLog(tx, runtime);
+  const log = txToReactivityLog(tx);
 
   // Call the callback once with initial value.
   let cleanup: Cancel | undefined = callback(value);
@@ -621,16 +621,23 @@ function subscribeToReferencedDocs<T>(
   const cancel = runtime.scheduler.subscribe((tx) => {
     if (isCancel(cleanup)) cleanup();
 
+    // Run once with tx to capture _this_ cell's read dependencies.
     validateAndTransform(runtime, tx, link);
 
-    // Copy reads to log _before_ calling the callback, as we're only interested
-    // in dependencies for the initial get, not further cells the callback might
+    // Using a new transaction for the callback, as we're only interested in
+    // dependencies for the initial get, not further cells the callback might
     // read. The callback is responsible for calling sink on those cells if it
     // wants to stay updated.
-    const tx2 = runtime.edit();
-    const newValue = validateAndTransform(runtime, tx2, link);
+
+    const extraTx = runtime.edit();
+
+    const newValue = validateAndTransform(runtime, extraTx, link);
     cleanup = callback(newValue);
-    tx2.commit();
+
+    // no async await here, but that also means no retry. TODO(seefeld): Should
+    // we add a retry? So far all sinks are read-only, so they get re-triggered
+    // on changes already.
+    extraTx.commit();
   }, log);
 
   return () => {

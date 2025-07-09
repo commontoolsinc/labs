@@ -9,12 +9,15 @@ import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { areLinksSame } from "../src/link-utils.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("recipe-binding", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -24,9 +27,11 @@ describe("recipe-binding", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -38,7 +43,7 @@ describe("recipe-binding", () => {
         "should send value to a simple binding 1",
       );
       testCell.set({ value: 0 });
-      sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
+      sendValueToBinding(tx, testCell, { $alias: { path: ["value"] } }, 42);
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
     });
 
@@ -49,6 +54,7 @@ describe("recipe-binding", () => {
       );
       testCell.set({ arr: [0, 0, 0] });
       sendValueToBinding(
+        tx,
         testCell,
         [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
         [1, 3],
@@ -99,7 +105,7 @@ describe("recipe-binding", () => {
         },
       };
 
-      sendValueToBinding(testCell, binding, value);
+      sendValueToBinding(tx, testCell, binding, value);
 
       expect(testCell.getAsQueryResult()).toEqual({
         user: {

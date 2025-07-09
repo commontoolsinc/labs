@@ -8,7 +8,11 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { toURI } from "../src/uri-utils.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { compactifyPaths } from "../src/scheduler.ts";
+import { compactifyPaths, txToReactivityLog } from "../src/scheduler.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -16,6 +20,7 @@ const space = signer.did();
 describe("Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -25,9 +30,12 @@ describe("Schema Support", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -305,8 +313,7 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       // Find the currently selected cell and read it
-      const log = { reads: [], writes: [] };
-      const first = root.key("current").withLog(log).get();
+      const first = root.key("current").withTx(tx).get();
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
@@ -318,17 +325,15 @@ describe("Schema Support", () => {
         schema: omitSchema,
         rootSchema: schema,
       });
+      const log = txToReactivityLog(tx);
       const reads = compactifyPaths(log.reads);
       expect(reads.length).toEqual(3);
       expect(
-        reads.map((r: LegacyDocCellLink) => ({
-          cell: toURI(r.cell.entityId!),
-          path: r.path,
-        })),
+        reads.map((r: IMemorySpaceAddress) => ({ id: r.id, path: r.path })),
       ).toEqual([
-        { cell: toURI(docCell.entityId!), path: ["current"] },
-        { cell: toURI(linkEntityId), path: [] },
-        { cell: toURI(initialEntityId), path: ["foo"] },
+        { id: toURI(docCell.entityId!), path: ["current"] },
+        { id: toURI(linkEntityId), path: [] },
+        { id: toURI(initialEntityId), path: ["foo"] },
       ]);
 
       // Then update it

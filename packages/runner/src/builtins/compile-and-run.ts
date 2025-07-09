@@ -188,7 +188,7 @@ export function compileAndRun(
         // inputs from other charms, we will need to think more about
         // how we pass input into the builtin.
         const syncTx = runtime.edit();
-        await runtime.runSynced(syncTx, result, recipe, input.get());
+        await runtime.runSynced(result.withTx(syncTx), recipe, input.get());
         syncTx.commit();
       }
       // TODO(seefeld): Add capturing runtime errors.

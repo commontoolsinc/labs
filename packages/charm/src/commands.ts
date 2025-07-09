@@ -1,4 +1,4 @@
-import { createJsonSchema, NAME, type JSONSchema } from "@commontools/runner";
+import { createJsonSchema, type JSONSchema, NAME } from "@commontools/runner";
 import { DEFAULT_MODEL_NAME, fixRecipePrompt } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
 
@@ -21,10 +21,13 @@ export const castSpellAsCharm = async (
     if (!recipe) return;
 
     console.log("Casting...");
+    const tx = charmManager.runtime.edit();
     const charm: Cell<Charm> = await charmManager.runPersistent(
+      tx,
       recipe,
       argument,
     );
+    await tx.commit();
     return charm;
   }
   console.log("Failed to cast");

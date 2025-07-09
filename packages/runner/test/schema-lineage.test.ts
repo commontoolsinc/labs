@@ -6,6 +6,7 @@ import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -13,6 +14,7 @@ const space = signer.did();
 describe("Schema Lineage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
@@ -24,11 +26,13 @@ describe("Schema Lineage", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
     const { commontools } = createBuilder(runtime);
     ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -236,6 +240,7 @@ describe("Schema Lineage", () => {
 describe("Schema propagation end-to-end example", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
@@ -247,11 +252,13 @@ describe("Schema propagation end-to-end example", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
     const { commontools } = createBuilder(runtime);
     ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -282,17 +289,18 @@ describe("Schema propagation end-to-end example", () => {
       },
     }));
 
-    const result = runtime.getCell<any>(
+    const resultCell = runtime.getCell<any>(
       space,
       "should propagate schema through a recipe",
     );
     runtime.run(
+      tx,
       testRecipe,
       { details: { name: "hello", age: 14 } },
-      result,
+      resultCell,
     );
 
-    const c = result.key(UI).asSchema(
+    const c = resultCell.key(UI).asSchema(
       {
         type: "object",
         properties: {

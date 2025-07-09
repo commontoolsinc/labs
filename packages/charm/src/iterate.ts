@@ -1,16 +1,15 @@
+import { isObject, Mutable } from "@commontools/utils/types";
 import {
   Cell,
+  createJsonSchema,
+  type IExtendedStorageTransaction,
   isCell,
   isStream,
+  JSONSchema,
+  JSONSchemaMutable,
   type MemorySpace,
   RecipeMeta,
   type Runtime,
-} from "@commontools/runner";
-import { isObject, Mutable } from "@commontools/utils/types";
-import {
-  createJsonSchema,
-  JSONSchema,
-  JSONSchemaMutable,
   RuntimeProgram,
 } from "@commontools/runner";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
@@ -155,7 +154,10 @@ export const generateNewRecipeVersion = async (
   if (!parentInfo.recipeId) {
     throw new Error("No recipeId found for charm");
   }
+
+  const tx = charmManager.runtime.edit();
   const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
+    tx,
     parentInfo.recipeId,
     charmManager.getSpace(),
   );
@@ -518,6 +520,7 @@ export async function castNewRecipe(
 }
 
 export async function compileRecipe(
+  tx: IExtendedStorageTransaction,
   recipeSrc: string | RuntimeProgram,
   spec: string,
   runtime: Runtime,
@@ -546,7 +549,7 @@ export async function compileRecipe(
   } else {
     recipeMeta.program = recipeSrc;
   }
-  await runtime.recipeManager.saveAndSyncRecipe({
+  await runtime.recipeManager.saveAndSyncRecipe(tx, {
     recipeId,
     space,
     recipe,
@@ -564,21 +567,29 @@ export async function compileAndRunRecipe(
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {
-  const recipe = await compileRecipe(
-    recipeSrc,
-    spec,
-    charmManager.runtime,
-    charmManager.getSpace(),
-    parents,
-  );
-  if (!recipe) {
-    throw new Error("Failed to compile recipe");
-  }
+  const tx = charmManager.runtime.edit();
 
-  return charmManager.runPersistent(
-    recipe,
-    runOptions,
-    undefined,
-    llmRequestId,
-  );
+  try {
+    const recipe = await compileRecipe(
+      tx,
+      recipeSrc,
+      spec,
+      charmManager.runtime,
+      charmManager.getSpace(),
+      parents,
+    );
+    if (!recipe) {
+      throw new Error("Failed to compile recipe");
+    }
+
+    return charmManager.runPersistent(
+      tx,
+      recipe,
+      runOptions,
+      undefined,
+      llmRequestId,
+    );
+  } finally {
+    tx.commit();
+  }
 }

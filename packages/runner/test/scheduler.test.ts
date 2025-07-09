@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
-import { type ReactivityLog } from "../src/scheduler.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Action, type EventHandler } from "../src/scheduler.ts";
 import { compactifyPaths } from "../src/scheduler.ts";
@@ -14,6 +14,7 @@ const space = signer.did();
 describe("scheduler", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -23,9 +24,11 @@ describe("scheduler", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -47,10 +50,10 @@ describe("scheduler", () => {
       "should run actions when cells change 3",
     );
     c.set(0);
-    const adder: Action = (log) => {
+    const adder: Action = (tx) => {
       runCount++;
-      c.withLog(log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      c.withTx(tx).send(
+        a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
     await runtime.scheduler.run(adder);
@@ -79,18 +82,18 @@ describe("scheduler", () => {
       "should schedule shouldn't run immediately 3",
     );
     c.set(0);
-    const adder: Action = (log) => {
+    const adder: Action = (tx) => {
       runCount++;
-      c.withLog(log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      c.withTx(tx).send(
+        a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
     runtime.scheduler.schedule(adder, {
       reads: [
-        a.getAsLegacyCellLink(),
-        b.getAsLegacyCellLink(),
+        a.getAsNormalizedFullLink(),
+        b.getAsNormalizedFullLink(),
       ],
-      writes: [c.getAsLegacyCellLink()],
+      writes: [c.getAsNormalizedFullLink()],
     });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -108,10 +111,10 @@ describe("scheduler", () => {
     b.set(2);
     const c = runtime.getCell<number>(space, "should remove actions 3");
     c.set(0);
-    const adder: Action = (log) => {
+    const adder: Action = (tx) => {
       runCount++;
-      c.withLog(log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      c.withTx(tx).send(
+        a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
     await runtime.scheduler.run(adder);
@@ -147,18 +150,18 @@ describe("scheduler", () => {
       "scheduler should return a cancel function 3",
     );
     c.set(0);
-    const adder: Action = (log) => {
+    const adder: Action = (tx) => {
       runCount++;
-      c.withLog(log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      c.withTx(tx).send(
+        a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
     const cancel = runtime.scheduler.schedule(adder, {
       reads: [
-        a.getAsLegacyCellLink(),
-        b.getAsLegacyCellLink(),
+        a.getAsNormalizedFullLink(),
+        b.getAsNormalizedFullLink(),
       ],
-      writes: [c.getAsLegacyCellLink()],
+      writes: [c.getAsNormalizedFullLink()],
     });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
@@ -200,16 +203,16 @@ describe("scheduler", () => {
       "should run actions in topological order 5",
     );
     e.set(0);
-    const adder1: Action = (log) => {
+    const adder1: Action = (tx) => {
       runs.push("adder1");
-      c.withLog(log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      c.withTx(tx).send(
+        a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    const adder2: Action = (log) => {
+    const adder2: Action = (tx) => {
       runs.push("adder2");
-      e.withLog(log).send(
-        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
+      e.withTx(tx).send(
+        c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
     await runtime.scheduler.run(adder1);
@@ -258,20 +261,20 @@ describe("scheduler", () => {
       "should stop eventually when encountering infinite loops 5",
     );
     e.set(0);
-    const adder1: Action = (log) => {
-      c.withLog(log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+    const adder1: Action = (tx) => {
+      c.withTx(tx).send(
+        a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    const adder2: Action = (log) => {
-      e.withLog(log).send(
-        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
+    const adder2: Action = (tx) => {
+      e.withTx(tx).send(
+        c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
-    const adder3: Action = (log) => {
+    const adder3: Action = (tx) => {
       if (--maxRuns <= 0) return;
-      c.withLog(log).send(
-        e.getAsQueryResult([], log) + b.getAsQueryResult([], log),
+      c.withTx(tx).send(
+        e.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
 
@@ -302,10 +305,10 @@ describe("scheduler", () => {
       "should not loop on r/w changes on its own output 2",
     );
     by.set(1);
-    const inc: Action = (log) =>
+    const inc: Action = (tx) =>
       counter
-        .withLog(log)
-        .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
+        .withTx(tx)
+        .send(counter.withTx(tx).get() + by.withTx(tx).get());
 
     const stopper = {
       stop: () => {},
@@ -491,9 +494,9 @@ describe("event handling", () => {
       eventResultCell.send(event);
     };
 
-    const action = (log: ReactivityLog) => {
+    const action = (tx: IExtendedStorageTransaction) => {
       actionCount++;
-      lastEventSeen = eventResultCell.getAsQueryResult([], log);
+      lastEventSeen = eventResultCell.withTx(tx).get();
     };
     await runtime.scheduler.run(action);
 
@@ -541,13 +544,6 @@ describe("compactifyPaths", () => {
     await storageManager?.close();
   });
 
-  // helper to normalize LegacyCellLinks because compactifyPaths() does not preserve
-  // the extra properties added by cell.getAsLegacyCellLink()
-  const normalizeCellLink = (link: any) => ({
-    cell: link.cell,
-    path: link.path,
-  });
-
   it("should compactify paths", () => {
     const testCell = runtime.getCell<Record<string, any>>(
       space,
@@ -555,18 +551,16 @@ describe("compactifyPaths", () => {
     );
     testCell.set({});
     const paths = [
-      testCell.key("a").key("b").getAsLegacyCellLink(),
-      testCell.key("a").getAsLegacyCellLink(),
-      testCell.key("c").getAsLegacyCellLink(),
+      testCell.key("a").key("b").getAsNormalizedFullLink(),
+      testCell.key("a").getAsNormalizedFullLink(),
+      testCell.key("c").getAsNormalizedFullLink(),
     ];
     const result = compactifyPaths(paths);
     const expected = [
-      testCell.key("a").getAsLegacyCellLink(),
-      testCell.key("c").getAsLegacyCellLink(),
+      testCell.key("a").getAsNormalizedFullLink(),
+      testCell.key("c").getAsNormalizedFullLink(),
     ];
-    expect(result.map(normalizeCellLink)).toEqual(
-      expected.map(normalizeCellLink),
-    );
+    expect(result).toEqual(expected);
   });
 
   it("should remove duplicate paths", () => {
@@ -576,14 +570,12 @@ describe("compactifyPaths", () => {
     );
     testCell.set({});
     const paths = [
-      testCell.key("a").key("b").getAsLegacyCellLink(),
-      testCell.key("a").key("b").getAsLegacyCellLink(),
+      testCell.key("a").key("b").getAsNormalizedFullLink(),
+      testCell.key("a").key("b").getAsNormalizedFullLink(),
     ];
     const result = compactifyPaths(paths);
-    const expected = [testCell.key("a").key("b").getAsLegacyCellLink()];
-    expect(result.map(normalizeCellLink)).toEqual(
-      expected.map(normalizeCellLink),
-    );
+    const expected = [testCell.key("a").key("b").getAsNormalizedFullLink()];
+    expect(result).toEqual(expected);
   });
 
   it("should not compactify across cells", () => {
@@ -598,11 +590,11 @@ describe("compactifyPaths", () => {
     );
     cellB.set({});
     const paths = [
-      cellA.key("a").key("b").getAsLegacyCellLink(),
-      cellB.key("a").key("b").getAsLegacyCellLink(),
+      cellA.key("a").key("b").getAsNormalizedFullLink(),
+      cellB.key("a").key("b").getAsNormalizedFullLink(),
     ];
     const result = compactifyPaths(paths);
-    expect(result.map(normalizeCellLink)).toEqual(paths.map(normalizeCellLink));
+    expect(result).toEqual(paths);
   });
 
   it("empty paths should trump all other ones", () => {
@@ -612,17 +604,15 @@ describe("compactifyPaths", () => {
     );
     cellA.set({});
 
-    const expectedResult = cellA.getAsLegacyCellLink();
+    const expectedResult = cellA.getAsNormalizedFullLink();
     const paths = [
-      cellA.key("a").key("b").getAsLegacyCellLink(),
-      cellA.key("c").getAsLegacyCellLink(),
-      cellA.key("d").getAsLegacyCellLink(),
+      cellA.key("a").key("b").getAsNormalizedFullLink(),
+      cellA.key("c").getAsNormalizedFullLink(),
+      cellA.key("d").getAsNormalizedFullLink(),
       expectedResult,
     ];
     const result = compactifyPaths(paths);
 
-    expect(result.map(normalizeCellLink)).toEqual(
-      [expectedResult].map(normalizeCellLink),
-    );
+    expect(result).toEqual([expectedResult]);
   });
 });

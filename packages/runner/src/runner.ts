@@ -260,11 +260,15 @@ export class Runner implements IRunner {
   }
 
   async runSynced(
-    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Recipe | Module,
     inputs?: any,
   ) {
+    if (!resultCell.tx) {
+      throw new Error("Result cell must have a transaction");
+    }
+    const tx = resultCell.tx;
+
     await this.runtime.storage.syncCell(resultCell);
 
     const synced = await this.syncCellsForRunningRecipe(
