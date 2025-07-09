@@ -82,6 +82,7 @@
     "npm:@hono/zod-validator@~0.4.2": "0.4.3_hono@4.7.11_zod@3.25.49",
     "npm:@lit/context@^1.1.5": "1.1.5",
     "npm:@lit/react@^1.0.7": "1.0.7_@types+react@18.3.23",
+    "npm:@lit/task@^1.0.2": "1.0.2",
     "npm:@noble/ed25519@^2.2.3": "2.2.3",
     "npm:@opentelemetry/api@^1.7.0": "1.9.0",
     "npm:@opentelemetry/api@^1.9.0": "1.9.0",
@@ -1367,6 +1368,12 @@
       "integrity": "sha512-L2qyoZSQClcBmq0qajBVbhYEcG6iK0XfLn66ifLe/RfC0/ihpc+pl0Wdn8bJ8o+hj38cG0fGXRgSS20MuXn7qA==",
       "dependencies": [
         "@lit-labs/ssr-dom-shim"
+      ]
+    },
+    "@lit/task@1.0.2": {
+      "integrity": "sha512-ofj/fahKhhS1SpbPSC57OMo2BXMxHG/y4sxH/ahWzXT5dh1kxjex7WqbL8ammb6zIlqbFCj6z2aGFYOh/qCQ+g==",
+      "dependencies": [
+        "@lit/reactive-element"
       ]
     },
     "@marijn/find-cluster-break@1.0.2": {
@@ -7014,7 +7021,8 @@
       },
       "packages/shell": {
         "dependencies": [
-          "npm:@lit/context@^1.1.5"
+          "npm:@lit/context@^1.1.5",
+          "npm:@lit/task@^1.0.2"
         ]
       },
       "packages/toolshed": {

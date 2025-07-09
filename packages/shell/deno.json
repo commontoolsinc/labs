@@ -9,6 +9,7 @@
   },
   "exports": "./src/index.ts",
   "imports": {
-    "@lit/context": "npm:@lit/context@^1.1.5"
+    "@lit/context": "npm:@lit/context@^1.1.5",
+    "@lit/task": "npm:@lit/task@^1.0.2"
   }
 }

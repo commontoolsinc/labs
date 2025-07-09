@@ -1,10 +1,8 @@
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
-import { consume } from "@lit/context";
-import { AppState } from "../lib/app/mod.ts";
-import { appContext } from "../contexts/app.ts";
+import { Identity } from "@commontools/identity";
 
-export class XHeaderView extends LitElement {
+export class XHeaderElement extends LitElement {
   static override styles = css`
     :host {
       display: block;
@@ -14,17 +12,17 @@ export class XHeaderView extends LitElement {
     }
   `;
 
-  @consume({ context: appContext, subscribe: true })
   @property({ attribute: false })
-  private app?: AppState;
+  identity?: Identity;
 
   override render() {
+    const did = this.identity ? this.identity.did() : undefined;
     return html`
       <div id="header">
-        <span></span>
+        <span>${did}</span>
       </div>
     `;
   }
 }
 
-globalThis.customElements.define("x-header-view", XHeaderView);
+globalThis.customElements.define("x-header", XHeaderElement);
