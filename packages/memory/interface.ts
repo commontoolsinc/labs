@@ -152,7 +152,7 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
           source: Subscribe<Space>["args"],
         ): Task<
           Result<Unit, SystemError | AuthorizationError>,
-          Commit<Space>
+          EnhancedCommit<Space>
         >;
         unsubscribe(
           source: Unsubscribe<Space>["args"],
@@ -641,6 +641,11 @@ export type Commit<Subject extends string = MemorySpace> = {
       };
     };
   };
+};
+
+export type EnhancedCommit<Subject extends string = MemorySpace> = {
+  revisions: Revision<State>[];
+  commit: Commit<Subject>;
 };
 
 // We include labels here so we can use the commit data to redact the transaction

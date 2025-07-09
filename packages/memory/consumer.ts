@@ -1,12 +1,11 @@
-import type { Authorization, JSONValue, SchemaContext } from "./interface.ts";
-import {
+import type {
   Abilities,
+  Authorization,
   AuthorizationError,
   Await,
   Cause,
   Clock,
   Command,
-  Commit,
   ConnectionError,
   ConsumerCommandFor,
   ConsumerCommandInvocation,
@@ -14,12 +13,14 @@ import {
   ConsumerInvocationFor,
   ConsumerResultFor,
   DID,
+  EnhancedCommit,
   Entity,
   Fact,
   FactSelection,
   InferOf,
   Invocation,
   InvocationURL,
+  JSONValue,
   MemorySpace,
   OfTheCause,
   Proto,
@@ -32,6 +33,7 @@ import {
   Reference,
   Result,
   Revision,
+  SchemaContext,
   SchemaPathSelector,
   SchemaQuery,
   SchemaQueryArgs,
@@ -47,7 +49,7 @@ import {
   UCAN,
   UTCUnixTimestampInSeconds,
 } from "./interface.ts";
-import { refer } from "./reference.ts";
+import { fromJSON, refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import {
   getSelectorRevision,
@@ -578,8 +580,10 @@ class QuerySubscriptionInvocation<
   Space extends MemorySpace,
   MemoryProtocol extends Protocol<Space>,
 > extends ConsumerInvocation<"/memory/query/subscribe", MemoryProtocol> {
-  readable: ReadableStream<Selection<Space>>;
-  controller: undefined | ReadableStreamDefaultController<Selection<Space>>;
+  readable: ReadableStream<EnhancedCommit<Space>>;
+  controller:
+    | undefined
+    | ReadableStreamDefaultController<EnhancedCommit<Space>>;
   patterns: { the?: The; of?: Entity; cause?: Cause }[];
 
   selection: Selection<Space>;
@@ -589,7 +593,7 @@ class QuerySubscriptionInvocation<
       cmd: "/memory/query/subscribe",
     });
 
-    this.readable = new ReadableStream<Selection<Space>>({
+    this.readable = new ReadableStream<EnhancedCommit<Space>>({
       start: (controller) => this.open(controller),
       cancel: () => this.close().then(),
     });
@@ -605,7 +609,7 @@ class QuerySubscriptionInvocation<
     return this.query.selector;
   }
 
-  open(controller: ReadableStreamDefaultController<Selection<Space>>) {
+  open(controller: ReadableStreamDefaultController<EnhancedCommit<Space>>) {
     this.controller = controller;
   }
   async close() {
@@ -622,11 +626,11 @@ class QuerySubscriptionInvocation<
 
   // This function is called for both subscriptions to the commit log as well as subscriptions
   // to individual docs.
-  override perform(commit: Commit<Space>) {
+  override perform(commit: EnhancedCommit<Space>) {
     const selection = this.selection[this.space];
     // Here we will collect subset of changes that match the query.
     const differential: OfTheCause<{ is?: JSONValue; since: number }> = {};
-    const fact = toRevision(commit);
+    const fact = toRevision(commit.commit);
 
     const { the, of, is } = fact;
     const cause = fact.cause.toString();
@@ -681,13 +685,18 @@ class QuerySubscriptionInvocation<
 
     if (Object.keys(differential).length !== 0) {
       this.query.integrate(differential);
-      this.integrate({ [this.space]: differential } as Selection<Space>);
     }
+    this.integrate(commit);
+    // This is a bit strange, but the revisions in here aren't proper
+    // They've lost their Reference methods, so recreate them
+    commit.revisions.forEach((item) => {
+      item.cause = fromJSON(JSON.parse(JSON.stringify(item.cause)));
+    });
 
     return { ok: {} };
   }
-  integrate(differential: Selection<Space>) {
-    this.controller?.enqueue(differential);
+  integrate(commit: EnhancedCommit<Space>) {
+    this.controller?.enqueue(commit);
   }
 
   getReader() {
