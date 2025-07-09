@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { render, VNode } from "../src/index.ts";
-import { createBuilder, Runtime } from "@commontools/runner";
+import {
+  createBuilder,
+  type IExtendedStorageTransaction,
+  Runtime,
+} from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
@@ -15,6 +19,7 @@ describe("recipes with HTML", () => {
   let document: Document;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let str: ReturnType<typeof createBuilder>["commontools"]["str"];
@@ -39,11 +44,14 @@ describe("recipes with HTML", () => {
       storageManager,
     });
 
+    tx = runtime.edit();
+
     const { commontools } = createBuilder(runtime);
     ({ lift, recipe, str, UI } = commontools);
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -57,6 +65,7 @@ describe("recipes with HTML", () => {
     );
 
     const result = runtime.run(
+      tx,
       simpleRecipe,
       { value: 5 },
       runtime.documentMap.getDoc(undefined, "simple-ui-result", space),
@@ -101,6 +110,7 @@ describe("recipes with HTML", () => {
     });
 
     const result = runtime.run(
+      tx,
       todoList,
       {
         title: "test",
@@ -143,6 +153,7 @@ describe("recipes with HTML", () => {
     });
 
     const result = runtime.run(
+      tx,
       todoList,
       {
         title: { name: "test" },
@@ -170,6 +181,7 @@ describe("recipes with HTML", () => {
     });
 
     const result = runtime.run(
+      tx,
       strRecipe,
       { name: "world" },
       runtime.documentMap.getDoc(undefined, "str-recipe-result", space),
@@ -211,6 +223,7 @@ describe("recipes with HTML", () => {
     }));
 
     const result = runtime.run(
+      tx,
       nestedMapRecipe,
       data,
       runtime.documentMap.getDoc(undefined, "nested-map-result", space),

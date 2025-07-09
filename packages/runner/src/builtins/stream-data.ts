@@ -20,7 +20,7 @@ export function streamData(
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
@@ -36,30 +36,33 @@ export function streamData(
   let pending: Cell<boolean>;
   let result: Cell<any | undefined>;
   let error: Cell<any | undefined>;
-  
+
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
       pending = runtime.getCell(
-        tx,
         parentCell.space,
         { streamData: { pending: cause } },
+        undefined,
+        tx,
       );
       pending.send(false);
 
       result = runtime.getCell<any | undefined>(
-        tx,
         parentCell.space,
         {
           streamData: { result: cause },
         },
+        undefined,
+        tx,
       );
 
       error = runtime.getCell<any | undefined>(
-        tx,
         parentCell.space,
         {
           streamData: { error: cause },
         },
+        undefined,
+        tx,
       );
 
       pending.getDoc().ephemeral = true;
@@ -72,7 +75,7 @@ export function streamData(
 
       // Since we'll only write into the docs above, we only have to call this once
       // here, instead of in the action.
-      sendResult({ pending, result, error });
+      sendResult(tx, { pending, result, error });
       cellsInitialized = true;
     }
     const pendingWithLog = pending.withTx(tx);

@@ -109,7 +109,7 @@ export function normalizeAndDiff(
         path: link.path.slice(0, -1),
       });
       if (Array.isArray(parent)) {
-        const base = runtime.getCellFromLink(tx, link);
+        const base = runtime.getCellFromLink(link, undefined, tx);
         for (const v of parent) {
           if (isLink(v)) {
             const sibling = parseLink(v, base);
@@ -238,7 +238,6 @@ export function normalizeAndDiff(
         link.schema,
         [i.toString()],
         link.rootSchema,
-        link.rootSchema,
       );
       const nestedChanges = normalizeAndDiff(
         runtime,
@@ -292,7 +291,6 @@ export function normalizeAndDiff(
         link.schema,
         [key],
         link.rootSchema,
-        link.rootSchema,
       );
       const nestedChanges = normalizeAndDiff(
         runtime,
@@ -310,7 +308,6 @@ export function normalizeAndDiff(
         const childSchema = runtime.cfc.getSchemaAtPath(
           link.schema,
           [key],
-          link.rootSchema,
           link.rootSchema,
         );
         changes.push({

@@ -228,7 +228,7 @@ declare module "@commontools/api" {
     isFrozen(): boolean;
     toJSON(): LegacyJSONCellLink;
     runtime: IRuntime;
-    tx: IExtendedStorageTransaction;
+    tx: IExtendedStorageTransaction | undefined;
     schema?: JSONSchema;
     rootSchema?: JSONSchema;
     value: T;
@@ -288,8 +288,11 @@ export function createCell<T>(
   // Resolve the path to check whether it's a stream. We're not logging this
   // right now. The corner case where during it's lifetime this changes from
   // non-stream to stream or vice versa will not be detected.
-  const resolvedLink = noResolve ? link : resolveLinkToValue(tx, link);
-  const value = tx.readValueOrThrow(resolvedLink);
+  const sideTx = runtime.edit();
+  const resolvedLink = noResolve ? link : resolveLinkToValue(sideTx, link);
+  const value = sideTx.readValueOrThrow(resolvedLink);
+  sideTx.commit();
+
   // Use schema from alias if provided and no explicit schema was set
   if (!schema && resolvedLink.schema) {
     schema = resolvedLink.schema;
@@ -488,12 +491,16 @@ function createRegularCell<T>(
     getAsQueryResult: (
       subPath: PropertyKey[] = [],
       newTx?: IExtendedStorageTransaction,
-    ) =>
-      createQueryResultProxy(
+    ) => {
+      if (!newTx && !tx) {
+        throw new Error("Transaction required for getAsQueryResult");
+      }
+      return createQueryResultProxy(
         runtime,
-        newTx ?? tx,
+        newTx ?? tx ?? runtime.edit(),
         { ...link, path: [...path, ...subPath.map((p) => p.toString())] },
-      ),
+      );
+    },
     getAsLegacyCellLink: (): LegacyDocCellLink => {
       return {
         space: doc.space,
@@ -538,7 +545,7 @@ function createRegularCell<T>(
     getRaw: () => doc.getAtPath(path as PropertyKey[]),
     setRaw: (value: any) => doc.setAtPath(path as PropertyKey[], value),
     getSourceCell: (newSchema?: JSONSchema) =>
-      doc.sourceCell?.asCell(tx, [], newSchema, newSchema) as Cell<any>,
+      doc.sourceCell?.asCell([], newSchema, newSchema, tx) as Cell<any>,
     setSourceCell: (sourceCell: Cell<any>) => {
       if (sourceCell.path.length > 0) {
         throw new Error("Source cell must have empty path for now");
@@ -552,7 +559,7 @@ function createRegularCell<T>(
     get runtime(): IRuntime {
       return runtime;
     },
-    get tx(): IExtendedStorageTransaction {
+    get tx(): IExtendedStorageTransaction | undefined {
       return tx;
     },
     get value(): T {

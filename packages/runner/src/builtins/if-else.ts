@@ -5,7 +5,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 export function ifElse(
   inputsCell: Cell<[any, any, any]>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
@@ -13,11 +13,12 @@ export function ifElse(
 ): Action {
   return (tx: IExtendedStorageTransaction) => {
     const result = runtime.getCell<any>(
-      tx,
       parentCell.space,
       { ifElse: cause },
+      undefined,
+      tx,
     );
-    sendResult(result);
+    sendResult(tx, result);
     const resultWithLog = result.withTx(tx);
     const inputsWithLog = inputsCell.withTx(tx);
 

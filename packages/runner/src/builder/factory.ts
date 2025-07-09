@@ -66,7 +66,7 @@ export const createBuilder = (
     else cause.number = frame.generatedIdCounter++;
 
     // Cast to Cell<T> is necessary to cast to interface-only Cell type
-    const cell = runtime.getCell<T>(tx, space, cause, schema) as Cell<T>;
+    const cell = runtime.getCell<T>(space, cause, schema, tx) as Cell<T>;
 
     if (value !== undefined) cell.set(value);
 

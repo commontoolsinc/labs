@@ -52,10 +52,10 @@ export class RecipeManager implements IRecipeManager {
     { recipeId, space }: { recipeId: string; space: MemorySpace },
   ): Cell<RecipeMeta> {
     const cell = this.runtime.getCell(
-      tx,
       space,
       { recipeId, type: "recipe" },
       recipeMetaSchema,
+      tx,
     );
 
     return cell;

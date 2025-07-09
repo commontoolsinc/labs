@@ -140,10 +140,10 @@ function processDefaultValue(
     // This can receive events, but at first nothing will be bound to it.
     // Normally these get created by a handler call.
     return runtime.getImmutableCell(
-      tx,
       link.space,
       { $stream: true },
       resolvedSchema,
+      tx
     );
   }
 

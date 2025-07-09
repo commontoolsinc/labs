@@ -31,7 +31,7 @@ export function map(
     list: any[];
     op: Recipe;
   }>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   addCancel: AddCancel,
   cause: any,
   parentCell: Cell<any>,
@@ -48,17 +48,18 @@ export function map(
   return (tx: IExtendedStorageTransaction) => {
     if (!result) {
       result = runtime.getCell<any[]>(
-        tx,
         parentCell.space,
         {
           map: parentCell.entityId,
           op: inputsCell.getAsQueryResult([], tx)?.op,
           cause,
         },
+        undefined,
+        tx,
       );
       result.send([]);
       result.setSourceCell(parentCell);
-      sendResult(result);
+      sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
     const { list, op } = inputsCell.asSchema(
@@ -99,9 +100,10 @@ export function map(
     // Add values that have been appended
     while (initializedUpTo < list.length) {
       const resultCell = runtime.getCell(
-        tx,
         parentCell.space,
         { result, index: initializedUpTo },
+        undefined,
+        tx,
       );
       runtime.runner.run(
         tx,

@@ -5,7 +5,7 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 export function navigateTo(
   inputsCell: Cell<any>,
-  _sendResult: (result: any) => void,
+  _sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   _cause: Cell<any>[],
   _parentCell: Cell<any>,

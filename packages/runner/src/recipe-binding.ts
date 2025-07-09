@@ -157,8 +157,9 @@ export function findAllWriteRedirectCells<T>(
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
       const linkCell = baseCell.getDoc().runtime.getCellFromLink(
-        baseCell.tx,
         link,
+        undefined,
+        baseCell.tx,
       );
       if (!linkCell) throw new Error("Link cell not found");
       find(linkCell.getRaw(), baseCell);

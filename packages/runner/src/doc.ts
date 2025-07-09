@@ -79,7 +79,7 @@ export type DocImpl<T> = {
     path?: Readonly<Path>,
     schema?: JSONSchema,
     rootSchema?: JSONSchema,
-    tx: IExtendedStorageTransaction,
+    tx?: IExtendedStorageTransaction,
   ): Cell<DeepKeyLookup<Q, Path>>;
 
   /**

@@ -27,7 +27,7 @@ import { CompilerError } from "@commontools/js-runtime/typescript";
  */
 export function compileAndRun(
   inputsCell: Cell<BuiltInCompileAndRunParams<any>>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
@@ -55,22 +55,25 @@ export function compileAndRun(
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
       pending = runtime.getCell<boolean>(
-        tx,
         parentCell.space,
         { compile: { pending: cause } },
+        undefined,
+        tx,
       );
       pending.send(false);
 
       result = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         { compile: { result: cause } },
+        undefined,
+        tx,
       );
 
       error = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         { compile: { error: cause } },
+        undefined,
+        tx,
       );
 
       errors = runtime.getCell<
@@ -85,12 +88,13 @@ export function compileAndRun(
         >
         | undefined
       >(
-        tx,
         parentCell.space,
         { compile: { errors: cause } },
+        undefined,
+        tx,
       );
 
-      sendResult({ pending, result, error, errors });
+      sendResult(tx, { pending, result, error, errors });
       cellsInitialized = true;
     }
     const thisRun = ++currentRun;

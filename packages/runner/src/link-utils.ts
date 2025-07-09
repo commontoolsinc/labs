@@ -477,9 +477,9 @@ export function parseNormalizedFullLinktoLegacyDocCellLink(
   link: NormalizedFullLink,
   runtime: IRuntime,
 ): LegacyDocCellLink {
-  const transaction = runtime.edit();
-  const cell = runtime.getCellFromLink(transaction, link);
-  transaction.commit();
+  const sideTx = runtime.edit();
+  const cell = runtime.getCellFromLink(link, undefined, sideTx);
+  sideTx.commit();
   return {
     cell: cell.getDoc(),
     path: link.path as string[],

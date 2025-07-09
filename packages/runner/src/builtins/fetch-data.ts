@@ -21,7 +21,7 @@ export function fetchData(
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: Cell<any>[],
   parentCell: Cell<any>,
@@ -38,34 +38,38 @@ export function fetchData(
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
       pending = runtime.getCell(
-        tx,
         parentCell.space,
         { fetchData: { pending: cause } },
+        undefined,
+        tx,
       );
       pending.send(false);
 
       result = runtime.getCell<any | undefined>(
-        tx,
         parentCell.space,
         {
           fetchData: { result: cause },
         },
+        undefined,
+        tx,
       );
 
       error = runtime.getCell<any | undefined>(
-        tx,
         parentCell.space,
         {
           fetchData: { error: cause },
         },
+        undefined,
+        tx,
       );
 
       requestHash = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         {
           fetchData: { requestHash: cause },
         },
+        undefined,
+        tx,
       );
 
       pending.setSourceCell(parentCell);
@@ -73,7 +77,7 @@ export function fetchData(
       error.setSourceCell(parentCell);
       requestHash.setSourceCell(parentCell);
 
-      sendResult({
+      sendResult(tx, {
         pending,
         result,
         error,

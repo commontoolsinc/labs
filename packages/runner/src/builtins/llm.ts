@@ -42,7 +42,7 @@ const client = new LLMClient();
  */
 export function llm(
   inputsCell: Cell<BuiltInLLMParams>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
@@ -59,37 +59,41 @@ export function llm(
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
       pending = runtime.getCell(
-        tx,
         parentCell.space,
         { llm: { pending: cause } },
+        undefined,
+        tx,
       );
       pending.send(false);
 
       result = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         {
           llm: { result: cause },
         },
+        undefined,
+        tx,
       );
 
       partial = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         {
           llm: { partial: cause },
         },
+        undefined,
+        tx,
       );
 
       requestHash = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         {
           llm: { requestHash: cause },
         },
+        undefined,
+        tx,
       );
 
-      sendResult({ pending, result, partial, requestHash });
+      sendResult(tx, { pending, result, partial, requestHash });
       cellsInitialized = true;
     }
     const thisRun = ++currentRun;
@@ -194,7 +198,7 @@ export function llm(
  */
 export function generateObject<T extends Record<string, unknown>>(
   inputsCell: Cell<BuiltInGenerateObjectParams>,
-  sendResult: (docs: {
+  sendResult: (tx: IExtendedStorageTransaction, docs: {
     pending: Cell<boolean>;
     result: Cell<T | undefined>;
     partial: Cell<string | undefined>;
@@ -216,37 +220,41 @@ export function generateObject<T extends Record<string, unknown>>(
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
       pending = runtime.getCell<boolean>(
-        tx,
         parentCell.space,
         { generateObject: { pending: cause } },
+        undefined,
+        tx,
       );
       pending.send(false);
 
       result = runtime.getCell<T | undefined>(
-        tx,
         parentCell.space,
         {
           generateObject: { result: cause },
         },
+        undefined,
+        tx,
       );
 
       partial = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         {
           generateObject: { partial: cause },
         },
+        undefined,
+        tx,
       );
 
       requestHash = runtime.getCell<string | undefined>(
-        tx,
         parentCell.space,
         {
           generateObject: { requestHash: cause },
         },
+        undefined,
+        tx,
       );
 
-      sendResult({ pending, result, partial, requestHash });
+      sendResult(tx, { pending, result, partial, requestHash });
       cellsInitialized = true;
     }
     const thisRun = ++currentRun;

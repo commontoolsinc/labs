@@ -106,7 +106,7 @@ export class Runner implements IRunner {
     // Convert to Cell if needed and work with Cell internally
     const resultDoc = isCell(resultCell)
       ? resultCell
-      : (resultCell as DocImpl<R>).asCell(tx);
+      : (resultCell as DocImpl<R>).asCell([], undefined, undefined, tx);
 
     type ProcessCellData = {
       [TYPE]: string;
@@ -123,9 +123,10 @@ export class Runner implements IRunner {
       processCell = sourceCell as Cell<ProcessCellData>;
     } else {
       processCell = this.runtime.getCell<ProcessCellData>(
-        tx,
         resultDoc.space,
-        resultDoc.getAsLegacyCellLink(),
+        resultDoc, // Cause
+        undefined,
+        tx,
       );
       resultDoc.getDoc().sourceCell = processCell.getDoc();
     }
@@ -327,7 +328,7 @@ export class Runner implements IRunner {
 
       if (link) {
         const maybePromise = this.runtime.storage.syncCell(
-          this.runtime.getCellFromLink(tx, link),
+          this.runtime.getCellFromLink(link, undefined, tx),
         );
         if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (isRecord(value)) {
@@ -363,7 +364,7 @@ export class Runner implements IRunner {
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
       [...inputs, ...outputs].forEach((c) => {
-        const cell = this.runtime.getCellFromLink(tx, c);
+        const cell = this.runtime.getCellFromLink(c, undefined, tx);
         cells.push(cell);
       });
     }
@@ -551,9 +552,10 @@ export class Runner implements IRunner {
         }
 
         const inputsCell = this.runtime.getImmutableCell(
-          tx,
           processCell.space,
           eventInputs,
+          undefined,
+          tx,
         );
 
         const frame = pushFrameFromCause(cause, {
@@ -582,9 +584,10 @@ export class Runner implements IRunner {
               resultRecipe,
               undefined,
               this.runtime.getCell(
-                tx,
                 processCell.space,
                 { resultFor: cause },
+                undefined,
+                tx,
               ),
             );
             addCancel(() => this.stop(resultCell));
@@ -612,9 +615,10 @@ export class Runner implements IRunner {
 
       // Schedule the action to run when the inputs change
       const inputsCell = this.runtime.getImmutableCell(
-        tx,
         processCell.space,
         inputs,
+        undefined,
+        tx,
       );
 
       let previousResultDoc: Cell<any> | undefined;
@@ -656,9 +660,10 @@ export class Runner implements IRunner {
               undefined,
               previousResultDoc ??
                 this.runtime.getCell(
-                  tx,
                   processCell.space,
                   { resultFor: { inputs, outputs, fn: fn.toString() } },
+                  undefined,
+                  tx,
                 ),
             );
             addCancel(() => this.stop(resultDoc));
@@ -734,23 +739,22 @@ export class Runner implements IRunner {
     );
 
     // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
-    const inputsCell = this.runtime.getCell(tx, processCell.space, {
-      immutable: mappedInputBindings,
-    });
-    inputsCell.setRaw(mappedInputBindings);
-    const inputsDoc = inputsCell.getDoc();
+    const inputsCell = this.runtime.getImmutableCell(
+      processCell.space,
+      mappedInputBindings,
+      undefined,
+      tx,
+    );
 
     const action = module.implementation(
-      inputsDoc.asCell(tx),
-      (result: any) => {
-        const callbackTx = this.runtime.edit();
+      inputsCell,
+      (tx: IExtendedStorageTransaction, result: any) => {
         sendValueToBinding(
-          callbackTx,
+          tx,
           processCell,
           mappedOutputBindings,
           result,
         );
-        callbackTx.commit();
       },
       addCancel,
       { inputs: inputsCell, parents: processCell.getDoc() },
@@ -778,9 +782,10 @@ export class Runner implements IRunner {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
     // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
     const inputsCell = this.runtime.getCell(
-      tx,
       processCell.space,
       { immutable: inputs },
+      undefined,
+      tx,
     );
     inputsCell.setRaw(inputs);
     const reads = findAllWriteRedirectCells(inputs, processCell);
@@ -812,7 +817,6 @@ export class Runner implements IRunner {
     );
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
     const resultCell = this.runtime.getCell(
-      tx,
       processCell.space,
       {
         recipe: module.implementation,
@@ -820,6 +824,8 @@ export class Runner implements IRunner {
         inputBindings,
         outputBindings,
       },
+      undefined,
+      tx,
     );
     this.run(tx, recipeImpl, inputs, resultCell);
     sendValueToBinding(
