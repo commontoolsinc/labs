@@ -108,54 +108,57 @@ export interface IRuntime {
   edit(): IExtendedStorageTransaction;
 
   // Cell factory methods
-  getCell<T>(
-    tx: IExtendedStorageTransaction,
-    space: MemorySpace,
-    cause: any,
-    schema?: JSONSchema,
-  ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     cause: any,
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
-  getCellFromEntityId<T>(
-    tx: IExtendedStorageTransaction,
+  getCell<T>(
     space: MemorySpace,
-    entityId: EntityId,
-    path?: PropertyKey[],
+    cause: any,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
+
   getCellFromEntityId<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     entityId: EntityId,
     path: PropertyKey[],
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
-  getCellFromLink<T>(
-    tx: IExtendedStorageTransaction,
-    cellLink: CellLink | NormalizedLink,
+  getCellFromEntityId<T>(
+    space: MemorySpace,
+    entityId: EntityId,
+    path?: PropertyKey[],
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
+
   getCellFromLink<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     cellLink: CellLink | NormalizedLink,
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
-  getImmutableCell<T>(
-    tx: IExtendedStorageTransaction,
-    space: MemorySpace,
-    data: T,
+  getCellFromLink<T>(
+    cellLink: CellLink | NormalizedLink,
     schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
+
   getImmutableCell<S extends JSONSchema = JSONSchema>(
-    tx: IExtendedStorageTransaction,
     space: MemorySpace,
     data: any,
     schema: S,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
+  getImmutableCell<T>(
+    space: MemorySpace,
+    data: T,
+    schema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
+  ): Cell<T>;
 
   // Convenience methods that delegate to the runner
   run<T, R>(
