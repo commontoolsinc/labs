@@ -155,10 +155,17 @@ export function llm(
         //normalizeToCells(text, undefined, log);
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set(text);
-        partialWithLog.set(text);
-        requestHashWithLog.set(hash);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(text);
+        partialWithLog.withTx(asyncTx).set(text);
+        requestHashWithLog.withTx(asyncTx).set(hash);
+
+        if (asyncTx !== tx) asyncTx.commit();
       })
       .catch(async (error) => {
         if (thisRun !== currentRun) return;
@@ -167,9 +174,16 @@ export function llm(
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set(undefined);
-        partialWithLog.set(undefined);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(undefined);
+        partialWithLog.withTx(asyncTx).set(undefined);
+
+        if (asyncTx !== tx) asyncTx.commit();
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.
@@ -313,9 +327,16 @@ export function generateObject<T extends Record<string, unknown>>(
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set(response.object);
-        requestHashWithLog.set(hash);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(response.object);
+        requestHashWithLog.withTx(asyncTx).set(hash);
+
+        if (asyncTx !== tx) asyncTx.commit();
       })
       .catch(async (error) => {
         if (thisRun !== currentRun) return;
@@ -324,9 +345,16 @@ export function generateObject<T extends Record<string, unknown>>(
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
-        partialWithLog.set(undefined);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
+        partialWithLog.withTx(asyncTx).set(undefined);
+
+        if (asyncTx !== tx) asyncTx.commit();
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.

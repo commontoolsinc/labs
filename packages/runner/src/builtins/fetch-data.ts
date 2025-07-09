@@ -126,17 +126,31 @@ export function fetchData(
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set(data);
-        requestHashWithLog.set(hash);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(data);
+        requestHashWithLog.withTx(asyncTx).set(hash);
+
+        if (asyncTx !== tx) asyncTx.commit();
       })
       .catch(async (err) => {
         if (thisRun !== currentRun) return;
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        errorWithLog.set(err);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the error.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        errorWithLog.withTx(asyncTx).set(err);
+
+        if (asyncTx !== tx) asyncTx.commit();
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.

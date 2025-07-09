@@ -160,9 +160,11 @@ export function compileAndRun(
       .catch(
         (err) => {
           if (thisRun !== currentRun) return;
-          errorWithLog.set(
-            err.message + (err.stack ? "\n" + err.stack : ""),
-          );
+
+          // All this code runside outside the original action, and the
+          // transaction above might have closed by the time this is called. If
+          // so, we create a new one to set the error.
+          const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
 
           // Extract structured errors if this is a CompilerError
           if (err instanceof CompilerError) {
@@ -173,12 +175,23 @@ export function compileAndRun(
               type: e.type,
               file: e.file,
             }));
-            errorsWithLog.set(structuredErrors);
+            errorsWithLog.withTx(asyncTx).set(structuredErrors);
+          } else {
+            errorWithLog.withTx(asyncTx).set(
+              err.message + (err.stack ? "\n" + err.stack : ""),
+            );
           }
+          if (asyncTx !== tx) asyncTx.commit();
         },
       ).finally(() => {
         if (thisRun !== currentRun) return;
-        pendingWithLog.set(false);
+
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the status.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        pendingWithLog.withTx(asyncTx).set(false);
+        if (asyncTx !== tx) asyncTx.commit();
       });
 
     compilePromise.then(async (recipe) => {
@@ -187,9 +200,13 @@ export function compileAndRun(
         // TODO(ja): to support editting of existing charms / running with
         // inputs from other charms, we will need to think more about
         // how we pass input into the builtin.
-        const syncTx = runtime.edit();
-        await runtime.runSynced(result.withTx(syncTx), recipe, input.get());
-        syncTx.commit();
+
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to start the charm.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        await runtime.runSynced(result.withTx(asyncTx), recipe, input.get());
+        if (asyncTx !== tx) asyncTx.commit();
       }
       // TODO(seefeld): Add capturing runtime errors.
     });

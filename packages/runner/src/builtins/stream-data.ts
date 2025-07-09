@@ -156,7 +156,10 @@ export function streamData(
 
             await runtime.idle();
 
-            resultWithLog.set(parsedData);
+            const asyncTx = runtime.edit();
+            resultWithLog.withTx(asyncTx).set(parsedData);
+            await asyncTx.commit();
+
             id = undefined;
             event = undefined;
             data = undefined;
@@ -177,9 +180,12 @@ export function streamData(
         console.error(e);
 
         await runtime.idle();
-        pendingWithLog.set(false);
-        resultWithLog.set(undefined);
-        errorWithLog.set(e);
+
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(undefined);
+        errorWithLog.withTx(asyncTx).set(e);
+        if (asyncTx !== tx) asyncTx.commit();
 
         // Allow retrying the same request.
         previousCall = "";
