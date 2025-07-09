@@ -53,10 +53,14 @@ function Launcher() {
         await charmManager.syncRecipeById(spellId);
         console.log("Recipe sync completed");
 
+        const tx = charmManager.runtime.edit();
+
         const recipe = await charmManager.runtime.recipeManager.loadRecipe(
+          tx,
           spellId,
           charmManager.getSpace(),
         );
+
         console.log("Retrieved recipe:", recipe);
 
         if (!recipe) {
@@ -89,9 +93,13 @@ function Launcher() {
         // Run the spell with the suggested values
         console.log("Creating run with suggested values");
         const spell = await charmManager.runPersistent(
+          tx,
           recipe,
           suggestionData.values || {},
         );
+
+        await tx.commit(); // TODO(seefeld): Retry?
+
         console.log("Spell run created:", spell);
 
         // Navigate to the charm show view
