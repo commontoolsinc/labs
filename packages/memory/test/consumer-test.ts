@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "@std/assert";
+import { assert, assertEquals, assertFalse, assertMatch } from "@std/assert";
 import { refer } from "merkle-reference";
 import type { JSONSchema } from "@commontools/runner";
 import * as Changes from "../changes.ts";
@@ -718,17 +718,13 @@ test("subscribe to commits", store, async (session) => {
 
   const c3 = Commit.toRevision(r3.ok);
 
-  assertEquals(await p1, {
-    done: false,
-    value: {
-      [alice.did()]: {
-        [alice.did()]: {
-          ["application/commit+json"]: {
-            [c3.cause.toString()]: {
-              is: c3.is,
-              since: c3.is.since,
-            },
-          },
+  const res1 = await p1;
+  assertFalse(res1.done);
+  assertEquals(res1.value?.commit, {
+    [alice.did() as Consumer.DID]: {
+      ["application/commit+json"]: {
+        [c3.cause.toString()]: {
+          is: c3.is,
         },
       },
     },
@@ -1129,32 +1125,29 @@ test(
     assert(r3.ok);
     const c3 = Commit.toRevision(r3.ok);
 
-    assertEquals(await p1, {
-      done: false,
-      value: {
-        [alice.did()]: {
-          [alice.did()]: {
-            ["application/commit+json"]: {
-              [c3.cause.toString()]: {
-                is: {
-                  since: c3.is.since,
-                  transaction: {
-                    ...c3.is.transaction,
-                    args: {
-                      changes: {
-                        [doc]: {
-                          "application/json": {},
-                          "application/label+json": {
-                            [v3_label.cause.toString()]: {
-                              is: { classification: ["confidential"] },
-                            },
-                          },
+    // ts-ignore
+    const res1 = await p1;
+    assertFalse(res1.done);
+    assertEquals(res1.value.commit, {
+      [alice.did()]: {
+        ["application/commit+json"]: {
+          [c3.cause.toString()]: {
+            is: {
+              since: c3.is.since,
+              transaction: {
+                ...c3.is.transaction,
+                args: {
+                  changes: {
+                    [doc]: {
+                      "application/json": {},
+                      "application/label+json": {
+                        [v3_label.cause.toString()]: {
+                          is: { classification: ["confidential"] },
                         },
                       },
                     },
                   },
                 },
-                since: c3.is.since,
               },
             },
           },

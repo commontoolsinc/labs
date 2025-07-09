@@ -9,7 +9,7 @@ import type {
   ConsumerCommandInvocation,
   ConsumerInvocationFor,
   ConsumerResultFor,
-  DID,
+  EnhancedCommit,
   Fact,
   FactAddress,
   Invocation,
@@ -309,21 +309,18 @@ class MemoryProviderSession<
     const [lastId, maxSince, facts] = await this.getSchemaSubscriptionMatches(
       commit,
     );
-    // It doesn't really matter who we say we're responding to as long as we
-    // return all the relevant objects, the client will dispatch.
-    // It *is* important that we send it to the right kind of listener.
-    if (lastId !== undefined) {
-      // this is sent to a schemaSubscription
-      this.perform({
-        the: "task/effect",
-        of: lastId,
-        is: facts,
-      });
-    }
 
-    // Now we need to remove any classified results from our commit.
+    // We need to remove any classified results from our commit.
     // The schema subscription has a classification claim, but these don't.
     const redactedCommit = redactCommit(commit);
+    const [[space, _ignored]] = Object.entries(commit);
+    // The client has a subscription to the space's commit log, but our
+    // subscriptions may trigger inclusion of other objects. Add these here.
+    const factsList = [...FactModule.iterate(facts[space as Space])];
+    const enhancedCommit: EnhancedCommit<Space> = {
+      commit: redactedCommit,
+      revisions: factsList,
+    };
     for (const [id, channels] of this.channels) {
       if (Subscription.match(redactedCommit, channels)) {
         // Note that we don't exit on the first match anymore because we need
@@ -333,7 +330,7 @@ class MemoryProviderSession<
         this.perform({
           the: "task/effect",
           of: id,
-          is: redactedCommit,
+          is: enhancedCommit,
         });
       }
     }

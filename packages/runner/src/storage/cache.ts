@@ -1,5 +1,4 @@
 import type {
-  Assertion,
   AuthorizationError,
   Changes as MemoryChanges,
   Commit,
@@ -14,9 +13,7 @@ import type {
   MemorySpace,
   Protocol,
   ProviderCommand,
-  ProviderSession,
   QueryError,
-  Reference,
   Result,
   Revision,
   SchemaContext,
@@ -29,12 +26,11 @@ import type {
   TransactionError,
   UCAN,
   Unit,
-  Variant,
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, claim, retract, unclaimed } from "@commontools/memory/fact";
-import { the, toChanges, toRevision } from "@commontools/memory/commit";
+import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import { the, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import { type Cancel, type EntityId } from "@commontools/runner";
@@ -498,7 +494,7 @@ export class Replica {
       if (next.done) {
         break;
       }
-      this.integrate(next.value[this.space] as unknown as Commit);
+      this.integrate(next.value.revisions);
     }
   }
 
@@ -822,7 +818,7 @@ export class Replica {
       this.heap.merge(
         revisions,
         Replica.put,
-        (revision) => !localFacts.has(revision),
+        (revision) => revision === undefined || !localFacts.has(revision),
       );
       // We only delete from the nursery when we've seen all of our pending
       // facts (or gotten a conflict).
@@ -878,22 +874,18 @@ export class Replica {
     this.heap.unsubscribe(entry, subscriber);
   }
 
-  integrate(commit: Commit) {
-    const { the, of, cause, is, since } = toRevision(commit);
-    const revisions = [
-      { the, of, cause, is: { since: is.since }, since },
-      ...toChanges(commit),
-    ];
-
+  integrate(revisions: Revision<State>[]) {
     // Store newer revisions into the heap.
-    // It's possible to get the same fact (including cause) twice, and we'll
-    // have a new since field on the second, so we can't clear them from
+    // It's possible to get the same fact (including cause) twice, but we
+    // should have the same since on the second, so we can clear them from
     // tracking when we see them.
     const resolvedFacts = this.getLocalFacts(revisions);
+    // We use put here instead of update, since we may have received new docs
+    // that we weren't already tracking.
     this.heap.merge(
       revisions,
-      Replica.update,
-      (state) => !resolvedFacts.has(state),
+      Replica.put,
+      (state) => state === undefined || !resolvedFacts.has(state),
     );
     return this.cache.merge(revisions, Replica.update);
   }
@@ -916,7 +908,7 @@ export class Replica {
   private getLocalFacts(
     revisions: (Revision<State> | undefined)[],
   ) {
-    const matches = new Set();
+    const matches = new Set<Revision<State>>();
     for (const revision of revisions) {
       if (revision === undefined || revision.cause === undefined) {
         continue;
