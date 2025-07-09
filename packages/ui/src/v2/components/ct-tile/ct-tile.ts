@@ -18,14 +18,14 @@ import { BaseElement } from "../../core/base-element.ts";
  */
 
 export class CTTile extends BaseElement {
-  @property({ type: Object })
-  accessor item: { title: string; [key: string]: any } = { title: "" };
+  @property()
+  item: { title: string; [key: string]: any } = { title: "" };
 
-  @property({ type: String })
-  accessor summary: string = "";
+  @property()
+  summary: string = "";
 
-  @property({ type: Boolean })
-  accessor clickable: boolean = true;
+  @property()
+  clickable: boolean = true;
 
   static override styles = css`
     :host {
@@ -44,7 +44,8 @@ export class CTTile extends BaseElement {
       --tile-padding: 1rem;
       --tile-border-radius: 0.5rem;
       --tile-border: 1px solid var(--border);
-      --tile-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+      --tile-shadow:
+        0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
     }
 
     .tile {
@@ -63,7 +64,9 @@ export class CTTile extends BaseElement {
 
     .tile.clickable:hover {
       border-color: var(--accent);
-      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      box-shadow:
+        0 4px 6px -1px rgb(0 0 0 / 0.1),
+        0 2px 4px -2px rgb(0 0 0 / 0.1);
       transform: translateY(-1px);
     }
 
@@ -125,7 +128,6 @@ export class CTTile extends BaseElement {
     }
   `;
 
-
   private handleClick() {
     if (this.clickable) {
       this.emit("ct-click", { item: this.item });
@@ -134,24 +136,25 @@ export class CTTile extends BaseElement {
 
   override render() {
     if (!this.item || !this.item.title) {
-      return html`<div class="empty-tile">No item data</div>`;
+      return html`
+        <div class="empty-tile">No item data</div>
+      `;
     }
 
     return html`
-      <div 
+      <div
         class="tile ${this.clickable ? "clickable" : ""}"
         @click="${this.handleClick}"
       >
         <div class="tile-content">
           <h3 class="tile-title">${this.item.title}</h3>
-          ${this.summary 
-            ? html`
-              <details class="summary-details">
-                <summary>${this.summary}</summary>
-              </details>
-            `
-            : ""
-          }
+          ${this.summary
+        ? html`
+          <details class="summary-details">
+            <summary>${this.summary}</summary>
+          </details>
+        `
+        : ""}
           <slot></slot>
         </div>
       </div>

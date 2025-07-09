@@ -124,14 +124,14 @@ export class CTForm extends BaseElement {
     }
   `;
 
-  @property({ type: String })
-  accessor method: "GET" | "POST" = "GET";
+  @property()
+  method: "GET" | "POST" = "GET";
 
-  @property({ type: String })
-  accessor action = "";
+  @property()
+  action = "";
 
   @query("form")
-  private accessor _form!: HTMLFormElement;
+  private _form!: HTMLFormElement;
 
   override render() {
     return html`
