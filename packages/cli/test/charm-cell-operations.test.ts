@@ -49,11 +49,11 @@ describe("parsePath", () => {
     ]);
   });
 
-  it("should handle negative numbers", () => {
-    // Negative integers are converted to numbers
+  it("should reject negative numbers and keep them as strings", () => {
+    // Negative integers are NOT converted to numbers (remain as strings)
     expect(parsePath("values/-1/negative")).toEqual([
       "values",
-      -1,
+      "-1",
       "negative",
     ]);
     // Non-integer negative numbers remain as strings

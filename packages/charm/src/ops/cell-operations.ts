@@ -6,7 +6,8 @@ export type CellPath = readonly (string | number)[];
 function parsePathSegments(segments: string[]): (string | number)[] {
   return segments.map((segment) => {
     const num = Number(segment);
-    return Number.isInteger(num) ? num : segment;
+    // Only convert to number if it's a non-negative integer
+    return Number.isInteger(num) && num >= 0 ? num : segment;
   });
 }
 
