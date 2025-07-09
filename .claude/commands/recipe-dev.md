@@ -98,6 +98,22 @@ This script guides Claude through recipe development with the `ct` utility after
 2. Help user understand why recipes might not be producing expected results
 3. Suggest logging or debug outputs in recipes
 
+**Direct data manipulation with cell operations:**
+Use the new cell get/set commands for precise data debugging and manipulation:
+
+```bash
+# Inspect specific data fields
+./dist/ct charm get --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] config/apiKey
+./dist/ct charm get --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] items/0/status
+
+# Set test data for debugging
+echo '"test-value"' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] debugField
+echo '[{"test": true}]' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] testItems
+
+# Reset or clear problematic data
+echo 'null' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] problematicField
+```
+
 **Recipe patterns:**
 - **Filter recipes**: Take collection input, output filtered subset
 - **Transformer recipes**: Convert data from one format to another
@@ -249,6 +265,8 @@ Key points:
 - Encourage incremental development and testing
 - Save modified recipes to files before using setsrc
 - Use inspect commands liberally to show current state
+- Use cell get/set commands for precise data debugging and testing
+- Leverage cell operations to set up test data and verify recipe behavior
 
 ### Quick Command Reference
 
@@ -271,6 +289,12 @@ Key points:
 
 # Inspect charm
 ./dist/ct charm inspect --identity [key] --api-url [url] --space [space] --charm [id]
+
+# Get cell data
+./dist/ct charm get --identity [key] --api-url [url] --space [space] --charm [id] [path]
+
+# Set cell data
+echo '[json-value]' | ./dist/ct charm set --identity [key] --api-url [url] --space [space] --charm [id] [path]
 
 # List all charms
 ./dist/ct charm ls --identity [key] --api-url [url] --space [space]
