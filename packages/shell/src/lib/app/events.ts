@@ -1,5 +1,5 @@
-import { Command } from "./commands.ts";
-import { AppState } from "./app.ts";
+import { Command } from "../commands.ts";
+import { AppState } from "./state.ts";
 
 export class AppUpdateEvent extends Event {
   command: Command;

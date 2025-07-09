@@ -1,6 +1,6 @@
 import { css, html } from "lit";
 import { state } from "lit/decorators.js";
-import { AppState } from "../lib/app.ts";
+import { AppState } from "../lib/app/mod.ts";
 import { appContext } from "../contexts/app.ts";
 import { consume } from "@lit/context";
 import { BaseView } from "./BaseView.ts";

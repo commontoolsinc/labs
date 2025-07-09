@@ -1,8 +1,9 @@
 import { Identity } from "@commontools/identity";
-import { Command } from "./commands.ts";
+import { Command } from "../commands.ts";
 import { CharmManager } from "@commontools/charm";
-import { createCharmManager } from "./runtime.ts";
+import { createCharmManager } from "../runtime.ts";
 
+// Primary application state.
 export interface AppState {
   identity?: Identity;
   spaceName?: string;
