@@ -10,14 +10,24 @@ import { createCharmsController } from "../lib/runtime.ts";
 export class XAppView extends BaseView {
   static override styles = css`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
       width: 100%;
-      height: 100vh;
-      background-color: #eee;
-    }
-    #body {
       height: 100%;
-      width: 100%;
+    }
+
+    .shell-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background-color: white;
+      border: var(--border-width, 2px) solid var(--border-color, #000);
+    }
+
+    .content-area {
+      flex: 1;
+      overflow-y: auto;
+      background-color: white;
     }
   `;
 
@@ -48,21 +58,32 @@ export class XAppView extends BaseView {
     const activeCharmId = Math.random() + ""; //app.activeCharmId;
     console.log("ACI", activeCharmId);
     const unauthenticated = html`
-      <x-login-view></x-login-view>
+      <div class="shell-container">
+        <x-header .identity="${app.identity}"></x-header>
+        <div class="content-area">
+          <x-login-view></x-login-view>
+        </div>
+      </div>
     `;
     const authenticated = this._cc.render({
-      pending: () => html`
-        <div>
-          <x-header .identity="${app.identity}"></x-header>
-          <x-body .cc="${undefined}" .activeCharmId="${activeCharmId}"></x-body>
-        </div>
-      `,
-      complete: (cc) => html`
-        <div>
-          <x-header .identity="${app.identity}"></x-header>
-          <x-body .cc="${cc}" .activeCharmId="${activeCharmId}"></x-body>
-        </div>
-      `
+      pending: () =>
+        html`
+          <div class="shell-container">
+            <x-header .identity="${app.identity}"></x-header>
+            <div class="content-area">
+              <x-body .cc="${undefined}" .activeCharmId="${activeCharmId}"></x-body>
+            </div>
+          </div>
+        `,
+      complete: (cc) =>
+        html`
+          <div class="shell-container">
+            <x-header .identity="${app.identity}"></x-header>
+            <div class="content-area">
+              <x-body .cc="${cc}" .activeCharmId="${activeCharmId}"></x-body>
+            </div>
+          </div>
+        `,
     });
     return this.app?.identity ? authenticated : unauthenticated;
   }

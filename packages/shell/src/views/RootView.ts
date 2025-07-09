@@ -20,8 +20,15 @@ export class XRootView extends LitElement {
       display: block;
       width: 100%;
       height: 100vh;
-      background-color: #eee;
+      padding: var(--padding-desktop, 15px);
     }
+
+    @media (max-width: 767px) {
+      :host {
+        padding: var(--padding-mobile, 5px);
+      }
+    }
+
     #body {
       height: 100%;
       width: 100%;
