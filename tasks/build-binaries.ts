@@ -52,12 +52,24 @@ class BuildConfig {
     return this.path("packages", "jumble", "dist");
   }
 
+  shellProjectPath() {
+    return this.path("packages", "shell");
+  }
+
+  shellOutPath() {
+    return this.path("packages", "shell", "dist");
+  }
+
   toolshedProjectPath() {
     return this.path("packages", "toolshed");
   }
 
   toolshedFrontendPath() {
     return this.path("packages", "toolshed", "jumble-frontend");
+  }
+
+  toolshedShellFrontendPath() {
+    return this.path("packages", "toolshed", "shell-frontend");
   }
 
   toolshedEntryPath() {
@@ -115,6 +127,7 @@ async function build(config: BuildConfig): Promise<void> {
     // Build jumble first, do not remove deno.lock
     // until after this.
     if (!config.cliOnly) await buildJumble(config);
+    if (!config.cliOnly) await buildShell(config);
     await prepareWorkspace(config);
     if (!config.cliOnly) await buildToolshed(config);
     if (!config.cliOnly) await buildBgCharmService(config);
@@ -162,6 +175,48 @@ async function buildJumble(config: BuildConfig): Promise<void> {
   await Deno.rename(jumbleOut, toolshedFrontend);
 }
 
+async function buildShell(config: BuildConfig): Promise<void> {
+  console.log("Building shell app...");
+  const { success } = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "task",
+      "production",
+    ],
+    cwd: config.shellProjectPath(),
+    stdout: "inherit",
+    stderr: "inherit",
+    env: {
+      COMMIT_SHA: Deno.env.get("COMMIT_SHA") || "development",
+    },
+  }).output();
+  if (!success) {
+    console.error("Failed to build shell app");
+    Deno.exit(1);
+    return;
+  }
+
+  const indexPath = path.join(config.shellOutPath(), "index.html");
+  let html = await Deno.readTextFile(indexPath);
+
+  // NOTE(jake): In Toolshed, once we move from /shell to /, and finally
+  // replace Jumble, we can remove this rewrite.
+  html = html
+    .replace('href="/assets/', 'href="/shell/assets/')
+    .replace('href="/styles/', 'href="/shell/styles/')
+    .replace('src="/scripts/', 'src="/shell/scripts/');
+
+  await Deno.writeTextFile(indexPath, html);
+  console.log("Updated shell app paths for /shell prefix");
+
+  const shellOut = config.shellOutPath();
+  const toolshedShellFrontend = config.toolshedShellFrontendPath();
+  if ((await exists(toolshedShellFrontend))) {
+    await Deno.remove(toolshedShellFrontend, { recursive: true });
+  }
+  await Deno.rename(shellOut, toolshedShellFrontend);
+  console.log("Shell app built successfully");
+}
+
 async function buildToolshed(config: BuildConfig): Promise<void> {
   console.log("Building toolshed binary...");
   const { success } = await new Deno.Command(Deno.execPath(), {
@@ -180,6 +235,8 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       config.distPath("toolshed"),
       "--include",
       config.toolshedFrontendPath(),
+      "--include",
+      config.toolshedShellFrontendPath(),
       "--include",
       config.toolshedEnvPath(),
       "--include",
@@ -256,7 +313,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
     "DENO_SQLITE_LOCAL",
     "DENO_DIR",
     "HOME",
-    "XDG_CACHE_HOME"
+    "XDG_CACHE_HOME",
   ];
   const { success } = await new Deno.Command(Deno.execPath(), {
     args: [
