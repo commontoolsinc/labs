@@ -8,11 +8,11 @@ import {
   resolveLinks,
   resolveLinkToWriteRedirect,
 } from "./link-resolution.ts";
-import { toURI } from "./uri-utils.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type IMemorySpaceAddress } from "./storage/interface.ts";
+import { createQueryResultProxy } from "./query-result-proxy.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -87,7 +87,7 @@ function resolveSchema(
  */
 function processDefaultValue(
   runtime: IRuntime,
-  tx: IExtendedStorageTransaction,
+  tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   defaultValue: any,
 ): any {
@@ -104,20 +104,10 @@ function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (!defaultValue && resolvedSchema?.default !== undefined) {
-      const newDoc = runtime.documentMap.getDoc(resolvedSchema.default, {
-        immutable: resolvedSchema.default,
-      }, link.space);
-      newDoc.freeze("schema asCell immutable");
-      return createCell(
-        runtime,
-        {
-          space: newDoc.space,
-          id: toURI(newDoc.entityId),
-          path: [],
-          type: "application/json",
-          schema: resolvedSchema,
-          rootSchema,
-        },
+      return runtime.getImmutableCell(
+        link.space,
+        resolvedSchema.default,
+        resolvedSchema,
         tx,
       );
     } else {
@@ -143,7 +133,7 @@ function processDefaultValue(
       link.space,
       { $stream: true },
       resolvedSchema,
-      tx
+      tx,
     );
   }
 
@@ -269,7 +259,7 @@ function mergeDefaults(
 
 export function validateAndTransform(
   runtime: IRuntime,
-  tx: IExtendedStorageTransaction,
+  tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   log?: ReactivityLog,
   seen: Array<[string, any]> = [],
@@ -282,7 +272,10 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedLink = resolveLinkToWriteRedirect(tx, link);
+  const resolvedLink = runtime.readWithOptionalTx(
+    tx,
+    (tx) => resolveLinkToWriteRedirect(tx, link),
+  );
 
   // Use schema from alias if provided and no explicit schema was set
   if (!resolvedSchema && resolvedLink.schema) {
@@ -331,10 +324,14 @@ export function validateAndTransform(
 
     // Start with empty path, iterate to full path (hence <= and not <)
     for (let i = 0; i <= link.path.length; i++) {
-      const parsedLink = readMaybeLink(tx, {
-        ...link,
-        path: link.path.slice(0, i),
-      });
+      const parsedLink = runtime.readWithOptionalTx(
+        tx,
+        (tx) =>
+          readMaybeLink(tx, {
+            ...link,
+            path: link.path.slice(0, i),
+          }),
+      );
 
       if (parsedLink?.overwrite === "redirect") {
         throw new Error(
@@ -375,16 +372,20 @@ export function validateAndTransform(
 
   // If there is no schema, return as raw data via query result proxy
   if (resolvedSchema === undefined) {
-    const doc = runtime.documentMap.getDocByEntityId(link.space, link.id, true);
-    return doc.getAsQueryResult([...link.path], tx);
+    return createQueryResultProxy(runtime, tx, link);
   }
 
   // Now resolve further links until we get the actual value. Note that `doc`
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  const ref = resolveLinks(tx, link);
-  let value = tx.readValueOrThrow(ref);
+  let value = runtime.readWithOptionalTx(
+    tx,
+    (tx) => {
+      const ref = resolveLinks(tx, link);
+      return tx.readValueOrThrow(ref);
+    },
+  );
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {

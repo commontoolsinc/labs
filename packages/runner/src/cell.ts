@@ -355,12 +355,7 @@ function createRegularCell<T>(
   const { path, schema, rootSchema } = link;
 
   const self = {
-    get: () => {
-      const transaction = tx ?? runtime.edit();
-      const value = validateAndTransform(runtime, transaction, link);
-      if (!tx) transaction.commit();
-      return value;
-    },
+    get: () => validateAndTransform(runtime, tx, link),
     set: (newValue: Cellify<T>) => {
       if (!tx) throw new Error("Transaction required for set");
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj

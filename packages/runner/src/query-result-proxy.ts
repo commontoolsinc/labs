@@ -19,6 +19,8 @@ const proxyCacheByTx = new WeakMap<
   IExtendedStorageTransaction,
   WeakMap<object, any>
 >();
+// Default key if no tx is provided
+const defaultTx = {} as IExtendedStorageTransaction;
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -63,7 +65,7 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 
 export function createQueryResultProxy<T>(
   runtime: IRuntime,
-  tx: IExtendedStorageTransaction,
+  tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   depth: number = 0,
 ): T {
@@ -74,17 +76,18 @@ export function createQueryResultProxy<T>(
     );
   }
 
-  if (!tx) throw new Error("Transaction required for createQueryResultProxy");
-
   // Resolve path and follow links to actual value.
-  link = resolveLinkToValue(tx, link);
+  link = runtime.readWithOptionalTx(tx, (tx) => resolveLinkToValue(tx, link));
 
-  const target = tx.readValueOrThrow(link) as any;
+  const target = runtime.readWithOptionalTx(
+    tx,
+    (tx) => tx.readValueOrThrow(link),
+  ) as any;
 
   if (!isRecord(target)) return target;
 
   // Get the appropriate cache index by log
-  const cacheIndex = tx;
+  const cacheIndex = tx ?? defaultTx;
   let txCache = proxyCacheByTx.get(cacheIndex);
   if (!txCache) {
     txCache = new WeakMap<object, any>();
@@ -175,6 +178,11 @@ export function createQueryResultProxy<T>(
 
             // Turn any newly added elements into cells. And if there was a
             // change at all, update the cell.
+            if (!tx) {
+              throw new Error(
+                "Transaction required for changing query result proxy",
+              );
+            }
             diffAndUpdate(runtime, tx, link, copy, {
               parent: { id: link.id, space: link.space },
               method: prop,
@@ -218,6 +226,12 @@ export function createQueryResultProxy<T>(
 
       if (isQueryResult(value)) value = value[getCellLink];
 
+      if (!tx) {
+        throw new Error(
+          "Transaction required for changing query result proxy",
+        );
+      }
+
       diffAndUpdate(
         runtime,
         tx,
@@ -245,7 +259,7 @@ const originalIndex = Symbol("original index");
 
 const createProxyForArrayValue = (
   runtime: IRuntime,
-  tx: IExtendedStorageTransaction,
+  tx: IExtendedStorageTransaction | undefined,
   source: number,
   link: NormalizedFullLink,
 ): { [originalIndex]: number } => {

@@ -133,10 +133,11 @@ describe("Schema Support", () => {
           },
           required: ["value", "current"],
         } as const satisfies JSONSchema,
+        tx,
       );
       cell.setRaw({
         value: "root",
-        current: innerCell.getAsLegacyCellLink(),
+        current: innerCell.getAsLink(),
       });
 
       const rootValues: string[] = [];
@@ -145,7 +146,7 @@ describe("Schema Support", () => {
       const currentByGetValues: string[] = [];
 
       // Nested traversal of data
-      cell.sink((value) => {
+      const cancel = cell.sink((value) => {
         rootValues.push(value.value);
         const cancel = value.current.sink((value) => {
           currentValues.push(value.label);
@@ -175,6 +176,7 @@ describe("Schema Support", () => {
       // Find the currently selected cell and update it
       const first = cell.key("current").get();
       expect(isCell(first)).toBe(true);
+      expect(first.tx).toBe(tx);
       expect(first.get()).toEqual({ label: "first" });
       first.set({ label: "first - update" });
 
@@ -189,6 +191,7 @@ describe("Schema Support", () => {
           properties: { label: { type: "string" } },
           required: ["label"],
         } as const satisfies JSONSchema,
+        tx,
       );
       second.set({ label: "second" });
       cell.key("current").set(second);
@@ -221,6 +224,10 @@ describe("Schema Support", () => {
         "second - update",
       ]);
       expect(rootValues).toEqual(["root", "cancelled", "root"]);
+
+      cancel();
+
+      expect(rootValues).toEqual(["root", "cancelled", "root", "cancelled"]);
     });
 
     it("should support nested sinks via asCell with aliases", async () => {

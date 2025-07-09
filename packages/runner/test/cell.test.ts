@@ -699,6 +699,8 @@ describe("asCell", () => {
     const c = runtime.getCell<{ stream: { $stream: true } }>(
       space,
       "should return a Sendable for stream aliases",
+      undefined,
+      tx,
     );
     c.setRaw({ stream: { $stream: true } });
     const streamCell = c.key("stream");
