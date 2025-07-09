@@ -48,7 +48,7 @@ export class RecipeManager implements IRecipeManager {
   constructor(readonly runtime: IRuntime) {}
 
   private getRecipeMetaCell(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     { recipeId, space }: { recipeId: string; space: MemorySpace },
   ): Cell<RecipeMeta> {
     const cell = this.runtime.getCell(
@@ -125,9 +125,10 @@ export class RecipeManager implements IRecipeManager {
       return false;
     }
 
-    const recipeMetaCell = this.getRecipeMetaCell(tx, { recipeId, space });
+    const recipeMetaCell = this.getRecipeMetaCell(tx, { recipeId, space })
+      .withTx(tx);
     recipeMetaCell.set(recipeMeta);
-    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
+    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell.withTx());
     return true;
   }
 
@@ -185,7 +186,7 @@ export class RecipeManager implements IRecipeManager {
       : recipeMeta.src!;
     const recipe = await this.compileRecipe(source);
     this.recipeIdMap.set(recipeId, recipe);
-    this.recipeMetaMap.set(recipe, metaCell);
+    this.recipeMetaMap.set(recipe, metaCell.withTx());
     return recipe;
   }
 

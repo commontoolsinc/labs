@@ -359,26 +359,27 @@ export class CharmManager {
     id: string | Cell<Charm>,
     runIt: boolean = true,
     asSchema?: JSONSchema,
+    tx?: IExtendedStorageTransaction,
   ): Promise<Cell<T> | undefined> {
-    const tx = this.runtime.edit();
+    const transaction = tx ?? this.runtime.edit();
 
     // Load the charm from storage.
     let charm: Cell<Charm> | undefined;
 
-    if (isCell(id)) charm = id.withTx(tx);
+    if (isCell(id)) charm = id.withTx(transaction);
     else {charm = this.runtime.getCellFromEntityId(
         this.space,
         { "/": id },
         [],
         charmSchema,
-        tx,
+        transaction,
       );}
 
     await this.runtime.storage.syncCell(charm);
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) {
-      tx.abort();
+      if (!tx) transaction.abort();
       throw new Error("recipeId is required");
     }
 
@@ -386,12 +387,12 @@ export class CharmManager {
     let recipe: Recipe | Module | undefined;
     try {
       recipe = await this.runtime.recipeManager.loadRecipe(
-        tx,
+        transaction,
         recipeId,
         this.space,
       );
     } catch (e) {
-      tx.abort();
+      if (!tx) transaction.abort();
       console.warn("loadRecipe: error", e);
       console.warn("recipeId", recipeId);
       console.warn("recipe", recipe);
@@ -426,11 +427,11 @@ export class CharmManager {
         throw new Error(`Recipe not found for charm ${getEntityId(charm)}`);
       }
       const newCharm = await this.runtime.runSynced(charm, recipe);
-      tx.commit(); // TODO(seefeld): Retry on failure? Await confirmation?
-      return newCharm.withTx().asSchema(asSchema ?? resultSchema);
+      return newCharm.withTx(tx).asSchema(asSchema ?? resultSchema);
     } else {
-      tx.commit(); // TODO(seefeld): Retry on failure? Await confirmation?
-      return charm.withTx().asSchema<T>(asSchema ?? resultSchema);
+      // TODO(seefeld): Retry on failure? Await confirmation?
+      if (!tx) transaction.commit();
+      return charm.withTx(tx).asSchema<T>(asSchema ?? resultSchema);
     }
   }
 

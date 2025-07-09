@@ -20,12 +20,11 @@ export class CharmsController {
   ): Promise<CharmController> {
     const tx = this.#manager.runtime.edit();
     const recipe = await compileProgram(this.#manager, program);
-    let charm = await this.#manager.runPersistent(tx, recipe, input);
-    charm = charm.withTx();
-    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
+    const charm = await this.#manager.runPersistent(tx, recipe, input);
+    await tx.commit(); // TODO(seefeld): Retry?
     await this.#manager.runtime.idle();
     await this.#manager.synced();
-    return new CharmController(this.#manager, charm);
+    return new CharmController(this.#manager, charm.withTx());
   }
 
   // Why is `CharmManager.get` async but `getCharms` sync?
