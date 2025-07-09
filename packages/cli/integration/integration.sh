@@ -81,7 +81,6 @@ echo "Applying charm input."
 echo '{"value":5}' | ct charm apply $SPACE_ARGS --charm $CHARM_ID
 
 # get, set and then re-get a value from the charm
-ct charm get $SPACE_ARGS --charm $CHARM_ID testField
 echo '{"value":10}' | ct charm set $SPACE_ARGS --charm $CHARM_ID testField
 
 # Verify the get returned what we expect
@@ -99,10 +98,10 @@ test_value() {
   local value="$3"
   local expected="$4"
   local flags="$5"
-  
+
   echo "$value" | ct charm set $SPACE_ARGS --charm $CHARM_ID "$path" $flags
   local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
-  
+
   if [ "$result" != "$expected" ]; then
     error "$test_name failed. Expected: $expected, Got: $result"
   fi
@@ -113,10 +112,10 @@ test_json_value() {
   local path="$2"
   local value="$3"
   local flags="$4"
-  
+
   echo "$value" | ct charm set $SPACE_ARGS --charm $CHARM_ID "$path" $flags
   local result=$(ct charm get $SPACE_ARGS --charm $CHARM_ID "$path" $flags)
-  
+
   echo "$value" | jq . > /tmp/expected.json
   echo "$result" | jq . > /tmp/actual.json
   if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
