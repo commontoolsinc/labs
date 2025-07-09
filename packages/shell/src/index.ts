@@ -1,4 +1,4 @@
-//import "@commontools/ui/v2";
+import "@commontools/ui/v2";
 import { KeyStore } from "@commontools/identity";
 import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
 import { AppUpdateEvent } from "./lib/app/events.ts";
