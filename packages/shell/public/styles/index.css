@@ -1,13 +1,93 @@
+/* CSS Reset and Base Styles */
 *, *::before, *::after {
   box-sizing: border-box;
 }
+
 * {
   margin: 0;
 }
 
-* {
-  font-family: sans-serif;
+/* Font Face Declarations */
+@font-face {
+  font-family: "JetBrainsMono";
+  font-style: normal;
+  font-weight: 100 900;
+  src: url("/fonts/JetBrainsMono[wght].ttf") format("truetype");
 }
+
+@font-face {
+  font-family: "JetBrainsMono";
+  font-style: italic;
+  font-weight: 100 900;
+  src: url("/fonts/JetBrainsMono-Italic[wght].ttf") format("truetype");
+}
+
+/* CSS Custom Properties */
+:root {
+  --font-primary: "JetBrainsMono", monospace;
+  --bg-primary: #f3f3f3;
+  --bg-secondary: #f9fafb;
+  --border-color: #000;
+  --border-width: 2px;
+  --dot-color: #ccc;
+  --dot-size: 1px;
+  --dot-spacing: 10px;
+  --padding-desktop: 15px;
+  --padding-mobile: 5px;
+  
+  /* Font settings */
+  font-family: var(--font-primary);
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* HTML and Body */
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 125px;
+  height: 100vh;
+  width: 100vw;
+}
+
 body, html {
   height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-primary);
+  background-color: var(--bg-primary);
+  background-image: radial-gradient(var(--dot-color) var(--dot-size), transparent var(--dot-size));
+  background-size: var(--dot-spacing) var(--dot-spacing);
+}
+
+/* Responsive padding */
+@media (max-width: 767px) {
+  :root {
+    scroll-padding-top: 100px;
+  }
+}
+
+/* Utility classes */
+.jetbrains-mono {
+  font-family: var(--font-primary);
+}
+
+/* Animation utilities */
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-thinking {
+  animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
