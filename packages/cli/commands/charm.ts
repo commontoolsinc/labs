@@ -5,7 +5,7 @@ import {
   CharmConfig,
   formatViewTree,
   generateSpaceMap,
-  getCellValue,
+  getCharmValue,
   getCharmView,
   inspectCharm,
   linkCharms,
@@ -13,7 +13,7 @@ import {
   MapFormat,
   newCharm,
   saveCharmRecipe,
-  setCellValue,
+  setCharmValue,
   setCharmRecipe,
   SpaceConfig,
 } from "../lib/charm.ts";
@@ -329,7 +329,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .action(async (options, pathString) => {
     const charmConfig = parseCharmOptions(options);
     const pathSegments = parsePath(pathString);
-    const value = await getCellValue(charmConfig, pathSegments, { input: options.input });
+    const value = await getCharmValue(charmConfig, pathSegments, { input: options.input });
     render(value, { json: true });
   })
   /* charm set */
@@ -350,7 +350,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     const charmConfig = parseCharmOptions(options);
     const pathSegments = parsePath(pathString);
     const value = await drainStdin();
-    await setCellValue(charmConfig, pathSegments, value, { input: options.input });
+    await setCharmValue(charmConfig, pathSegments, value, { input: options.input });
     render(`Set value at path: ${pathString}`);
   })
   /* charm map */

@@ -1,8 +1,6 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { 
-  getCellValue,
-  setCellValue,
   getCharmResult,
   getCharmInput,
   setCharmInput,
@@ -89,61 +87,6 @@ describe("Extended Cell Operations", () => {
     it("should handle empty path", () => {
       assertEquals(parsePath(""), []);
       assertEquals(parsePath("   "), []);
-    });
-  });
-
-  describe("Generic Cell Operations", () => {
-    describe("getCellValue", () => {
-      it("should get value from cell", () => {
-        const cell = new MockCell({ name: "Test", count: 42 });
-        assertEquals(getCellValue(cell as any, ["name"]), "Test");
-        assertEquals(getCellValue(cell as any, ["count"]), 42);
-      });
-
-      it("should handle nested paths", () => {
-        const cell = new MockCell({
-          config: {
-            settings: {
-              theme: "dark"
-            }
-          }
-        });
-        assertEquals(getCellValue(cell as any, ["config", "settings", "theme"]), "dark");
-      });
-
-      it("should handle empty path", () => {
-        const data = { test: "value" };
-        const cell = new MockCell(data);
-        assertEquals(getCellValue(cell as any, []), data);
-      });
-    });
-
-    describe("setCellValue", () => {
-      it("should set value in cell", () => {
-        const cell = new MockCell({});
-        setCellValue(cell as any, ["name"], "Updated");
-        
-        // Verify through the key chain
-        const nameCell = cell.key("name") as MockCell;
-        assertEquals(nameCell.get(), "Updated");
-      });
-
-      it("should handle nested paths", () => {
-        const cell = new MockCell({});
-        setCellValue(cell as any, ["config", "theme"], "light");
-        
-        // Verify through the key chain
-        const configCell = cell.key("config") as MockCell;
-        const themeCell = configCell.key("theme") as MockCell;
-        assertEquals(themeCell.get(), "light");
-      });
-
-      it("should handle empty path", () => {
-        const cell = new MockCell({ old: "value" });
-        const newData = { new: "data" };
-        setCellValue(cell as any, [], newData);
-        assertEquals(cell.get(), newData);
-      });
     });
   });
 
