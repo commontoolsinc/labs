@@ -4,6 +4,7 @@ import { XRootView } from "./views/RootView.ts";
 
 import "./components/index.ts";
 import "./views/index.ts";
+import { KeyStore } from "@commontools/identity";
 
 console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
@@ -24,7 +25,16 @@ if (ENVIRONMENT !== "production") {
 }
 {
   const location = new URL(globalThis.location.href);
-  const match = location.pathname.match(/^\/([^\/]+)\//);
+  const match = location.pathname.match(/^\/([^\/]+)\/([^\/]+)/);
   const spaceName = match && match.length > 1 ? match[1] : "common-knowledge";
-  await app.setSpace(spaceName);
+  app.setSpace(spaceName);
+  const charmId = match && match.length > 2 ? match[2] : undefined;
+  if (charmId) app.setActiveCharmId(charmId);
+
+  const ROOT_KEY = "$ROOT_KEY";
+  const keyStore = await KeyStore.open();
+  const rootKey = await keyStore.get(ROOT_KEY);
+  if (rootKey) {
+    app.setIdentity(rootKey);
+  }
 }
