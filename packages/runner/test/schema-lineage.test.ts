@@ -43,6 +43,8 @@ describe("Schema Lineage", () => {
       const targetCell = runtime.getCell<{ count: number; label: string }>(
         space,
         "schema-lineage-target",
+        undefined,
+        tx,
       );
       targetCell.set({ count: 42, label: "test" });
 
@@ -59,6 +61,8 @@ describe("Schema Lineage", () => {
       const sourceCell = runtime.getCell<any>(
         space,
         "schema-lineage-source",
+        undefined,
+        tx,
       );
       sourceCell.setRaw({
         $alias: {
@@ -88,6 +92,8 @@ describe("Schema Lineage", () => {
       const targetCell = runtime.getCell<{ count: number; label: string }>(
         space,
         "schema-lineage-target-explicit",
+        undefined,
+        tx,
       );
       targetCell.set({ count: 42, label: "test" });
 
@@ -112,6 +118,8 @@ describe("Schema Lineage", () => {
       const sourceCell = runtime.getCell<any>(
         space,
         "schema-lineage-source-explicit",
+        undefined,
+        tx,
       );
       sourceCell.setRaw({
         $alias: {
@@ -141,6 +149,8 @@ describe("Schema Lineage", () => {
       const valueCell = runtime.getCell<{ count: number; name: string }>(
         space,
         "deep-alias-value",
+        undefined,
+        tx,
       );
       valueCell.set({ count: 5, name: "test" });
 
@@ -151,6 +161,8 @@ describe("Schema Lineage", () => {
       const countCell = runtime.getCell<any>(
         space,
         "count-alias",
+        undefined,
+        tx,
       );
       countCell.setRaw({
         $alias: {
@@ -164,6 +176,8 @@ describe("Schema Lineage", () => {
       const finalCell = runtime.getCell<any>(
         space,
         "final-alias",
+        undefined,
+        tx,
       );
       finalCell.setRaw({
         $alias: countCell.getAsLegacyCellLink(),
@@ -185,6 +199,8 @@ describe("Schema Lineage", () => {
       }>(
         space,
         "nested-doc-with-alias",
+        undefined,
+        tx,
       );
       nestedCell.set({
         items: [
@@ -209,6 +225,8 @@ describe("Schema Lineage", () => {
       const itemsCell = runtime.getCell<any>(
         space,
         "items-alias",
+        undefined,
+        tx,
       );
       itemsCell.setRaw({
         $alias: {
@@ -292,6 +310,8 @@ describe("Schema propagation end-to-end example", () => {
     const resultCell = runtime.getCell<any>(
       space,
       "should propagate schema through a recipe",
+      undefined,
+      tx,
     );
     runtime.run(
       tx,

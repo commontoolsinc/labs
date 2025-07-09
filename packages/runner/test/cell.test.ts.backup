@@ -47,8 +47,6 @@ describe("Cell", () => {
     const c = runtime.getCell<number>(
       space,
       "should create a cell with initial value",
-      undefined,
-      tx,
     );
     c.set(10);
     expect(c.get()).toBe(10);
@@ -58,8 +56,6 @@ describe("Cell", () => {
     const c = runtime.getCell<number>(
       space,
       "should update cell value using send",
-      undefined,
-      tx,
     );
     c.set(10);
     c.send(20);
@@ -70,8 +66,6 @@ describe("Cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,
       "should create a proxy for the cell",
-      undefined,
-      tx,
     );
     c.set({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
@@ -83,8 +77,6 @@ describe("Cell", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,
       "should update cell value through proxy",
-      undefined,
-      tx,
     );
     c.set({ x: 1, y: 2 });
     const proxy = c.getAsQueryResult();
@@ -96,8 +88,6 @@ describe("Cell", () => {
     const c = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
       "should get value at path",
-      undefined,
-      tx,
     );
     c.set({ a: { b: { c: 42 } } });
     expect(c.key("a").key("b").key("c").get()).toBe(42);
@@ -107,8 +97,6 @@ describe("Cell", () => {
     const c = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
       "should set value at path",
-      undefined,
-      tx,
     );
     c.set({ a: { b: { c: 42 } } });
     c.getAsQueryResult().a.b.c = 100;
@@ -119,8 +107,6 @@ describe("Cell", () => {
     const cell = runtime.getCell<number>(
       space,
       "should call updates callback when value changes",
-      undefined,
-      tx,
     );
     cell.set(0);
     const values: number[] = [];
@@ -137,8 +123,6 @@ describe("Cell", () => {
     const cell = runtime.getCell<{ x: number; y: number }>(
       space,
       "should get raw value using getRaw",
-      undefined,
-      tx,
     );
     cell.set({ x: 1, y: 2 });
     expect(cell.getRaw()).toEqual({ x: 1, y: 2 });
@@ -148,8 +132,6 @@ describe("Cell", () => {
     const cell = runtime.getCell<{ x: number; y: number }>(
       space,
       "should set raw value using setRaw",
-      undefined,
-      tx,
     );
     cell.set({ x: 1, y: 2 });
     const result = cell.setRaw({ x: 10, y: 20 });
@@ -161,8 +143,6 @@ describe("Cell", () => {
     const cell = runtime.getCell<number>(
       space,
       "should work with primitive values in getRaw/setRaw",
-      undefined,
-      tx,
     );
     cell.set(42);
 
@@ -177,8 +157,6 @@ describe("Cell", () => {
     const cell = runtime.getCell<number[]>(
       space,
       "should work with arrays in getRaw/setRaw",
-      undefined,
-      tx,
     );
     cell.set([1, 2, 3]);
 
@@ -193,8 +171,6 @@ describe("Cell", () => {
     const c = runtime.getCell<{ nested: { value: number } }>(
       space,
       "should respect path in getRaw/setRaw for nested properties",
-      undefined,
-      tx,
     );
     c.set({ nested: { value: 42 } });
     const nestedCell = c.key("nested").key("value");
@@ -236,8 +212,6 @@ describe("Cell utility functions", () => {
     const c = runtime.getCell(
       space,
       "should identify a cell",
-      undefined,
-      tx,
     );
     c.set(10);
     expect(isCell(c)).toBe(true);
@@ -248,8 +222,6 @@ describe("Cell utility functions", () => {
     const c = runtime.getCell<{ x: number }>(
       space,
       "should identify a cell reference",
-      undefined,
-      tx,
     );
     c.set({ x: 10 });
     const ref = c.key("x").getAsLegacyCellLink();
@@ -261,8 +233,6 @@ describe("Cell utility functions", () => {
     const c = runtime.getCell<{ x: number }>(
       space,
       "should identify a cell proxy",
-      undefined,
-      tx,
     );
     c.set({ x: 1 });
     const proxy = c.getAsQueryResult();
@@ -296,8 +266,6 @@ describe("createProxy", () => {
     const c = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
       "should create a proxy for nested objects",
-      undefined,
-      tx,
     );
     c.set({ a: { b: { c: 42 } } });
     const proxy = c.getAsQueryResult();
@@ -308,8 +276,6 @@ describe("createProxy", () => {
     const c = runtime.getCell<{ x: number }>(
       space,
       "should support regular assigments",
-      undefined,
-      tx,
     );
     c.set({ x: 1 });
     const proxy = c.getAsQueryResult();
@@ -321,8 +287,6 @@ describe("createProxy", () => {
     const c = runtime.getCell(
       space,
       "should handle $alias in objects",
-      undefined,
-      tx,
     );
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = c.getAsQueryResult();
@@ -333,8 +297,6 @@ describe("createProxy", () => {
     const c = runtime.getCell<{ x: number; y: number }>(
       space,
       "should handle aliases when writing",
-      undefined,
-      tx,
     );
     c.setRaw({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = c.getAsQueryResult();
@@ -346,15 +308,11 @@ describe("createProxy", () => {
     const innerCell = runtime.getCell<number>(
       space,
       "should handle nested cells inner",
-      undefined,
-      tx,
     );
     innerCell.set(42);
     const outerCell = runtime.getCell<{ x: any }>(
       space,
       "should handle nested cells outer",
-      undefined,
-      tx,
     );
     outerCell.set({ x: innerCell });
     const proxy = outerCell.getAsQueryResult();
@@ -365,8 +323,6 @@ describe("createProxy", () => {
     const c = runtime.getCell<{ x: number; y?: any }>(
       space,
       "should handle cell references",
-      undefined,
-      tx,
     );
     c.set({ x: 42 });
     const ref = c.key("x").getAsLegacyCellLink();
@@ -379,8 +335,6 @@ describe("createProxy", () => {
     const c = runtime.getCell<{ x: number; y?: any }>(
       space,
       "should handle infinite loops in cell references",
-      undefined,
-      tx,
     );
     c.set({ x: 42 });
     const ref = c.key("x").getAsLegacyCellLink();
@@ -447,8 +401,6 @@ describe("createProxy", () => {
     const c = runtime.getCell<{ array: number[] }>(
       space,
       "should handle array results from array methods",
-      undefined,
-      tx,
     );
     c.set({ array: [1, 2, 3, 4, 5] });
     const proxy = c.getAsQueryResult();
@@ -477,8 +429,6 @@ describe("createProxy", () => {
     const c = runtime.getCell<{ nested: { arrays: number[][] } }>(
       space,
       "should maintain reactivity with nested array operations",
-      undefined,
-      tx,
     );
     c.set({ nested: { arrays: [[1, 2], [3, 4]] } });
     const proxy = c.getAsQueryResult();
@@ -649,8 +599,6 @@ describe("asCell", () => {
     const simpleCell = runtime.getCell<{ x: number; y: number }>(
       space,
       "should create a simple cell interface",
-      undefined,
-      tx,
     );
     simpleCell.set({ x: 1, y: 2 });
 
@@ -667,8 +615,6 @@ describe("asCell", () => {
     const c = runtime.getCell<{ nested: { value: number } }>(
       space,
       "should create a simple cell for nested properties",
-      undefined,
-      tx,
     );
     c.set({ nested: { value: 42 } });
     const nestedCell = c.key("nested").key("value");
@@ -683,8 +629,6 @@ describe("asCell", () => {
     const simpleCell = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
       "should support the key method for nested access",
-      undefined,
-      tx,
     );
     simpleCell.set({ a: { b: { c: 42 } } });
 
@@ -731,8 +675,6 @@ describe("asCell", () => {
     const c = runtime.getCell<{ a: { b: number; c: number }; d: number }>(
       space,
       "should call sink only when the cell changes on the subpath",
-      undefined,
-      tx,
     );
     c.set({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
@@ -784,8 +726,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should validate and transform according to schema",
-      undefined,
-      tx,
     );
     c.set({
       name: "test",
@@ -835,8 +775,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should return a Cell for reference properties",
-      undefined,
-      tx,
     );
     c.set({
       id: 1,
@@ -879,8 +817,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle recursive schemas with $ref",
-      undefined,
-      tx,
     );
     c.set({
       name: "root",
@@ -939,8 +875,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should propagate schema through key() navigation",
-      undefined,
-      tx,
     );
     c.set({
       user: {
@@ -1010,8 +944,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should fall back to query result proxy when no schema is present",
-      undefined,
-      tx,
     );
     c.set({
       data: {
@@ -1039,8 +971,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should allow changing schema with asSchema",
-      undefined,
-      tx,
     );
     c.set({
       id: 1,
@@ -1116,8 +1046,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle objects with additional properties as references",
-      undefined,
-      tx,
     );
     c.set({
       id: 1,
@@ -1171,8 +1099,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle additional properties with just reference: true",
-      undefined,
-      tx,
     );
     c.set({
       context: {
@@ -1215,8 +1141,6 @@ describe("asCell with schema", () => {
     const innerCell = runtime.getCell<{ value: number }>(
       space,
       "should handle references in underlying cell",
-      undefined,
-      tx,
     );
     innerCell.set({ value: 42 });
 
@@ -1228,8 +1152,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle references in underlying cell outer",
-      undefined,
-      tx,
     );
     c.set({
       context: {
@@ -1265,8 +1187,6 @@ describe("asCell with schema", () => {
     const innerCell = runtime.getCell<{ value: number }>(
       space,
       "should handle all types of references in underlying cell: inner",
-      undefined,
-      tx,
     );
     innerCell.set({ value: 42 });
     const cellRef = innerCell.getAsLegacyCellLink();
@@ -1282,8 +1202,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle all types of references in underlying cell main",
-      undefined,
-      tx,
     );
     c.set({
       context: {
@@ -1329,8 +1247,6 @@ describe("asCell with schema", () => {
     const innerCell = runtime.getCell<{ value: number }>(
       space,
       "should handle nested references: inner",
-      undefined,
-      tx,
     );
     innerCell.set({ value: 42 });
 
@@ -1339,8 +1255,6 @@ describe("asCell with schema", () => {
     const ref2Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref2",
-      undefined,
-      tx,
     );
     ref2Cell.set({ ref: ref1 });
     const ref2 = ref2Cell.key("ref").getAsLink();
@@ -1348,8 +1262,6 @@ describe("asCell with schema", () => {
     const ref3Cell = runtime.getCell<{ ref: any }>(
       space,
       "should handle nested references: ref3",
-      undefined,
-      tx,
     );
     ref3Cell.setRaw({ ref: ref2 });
     const ref3 = ref3Cell.key("ref").getAsLink();
@@ -1409,8 +1321,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle array schemas in key() navigation",
-      undefined,
-      tx,
     );
     c.set({
       items: [
@@ -1453,8 +1363,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle additionalProperties in key() navigation",
-      undefined,
-      tx,
     );
     c.set({
       defined: "known property",
@@ -1495,8 +1403,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should handle additionalProperties: true in key() navigation",
-      undefined,
-      tx,
     );
     c.set({
       defined: "known property",
@@ -1534,8 +1440,6 @@ describe("asCell with schema", () => {
     }>(
       space,
       "should partially update object values using update method",
-      undefined,
-      tx,
     );
     c.set({ name: "test", age: 42, tags: ["a", "b"] });
 
@@ -1561,8 +1465,6 @@ describe("asCell with schema", () => {
     >(
       space,
       "should handle update when there is no previous value",
-      undefined,
-      tx,
     );
     c.set(undefined);
 
@@ -1584,8 +1486,6 @@ describe("asCell with schema", () => {
     const c = runtime.getCell<{ items: number[] }>(
       space,
       "push-test",
-      undefined,
-      tx,
     );
     c.set({ items: [1, 2, 3] });
     const arrayCell = c.key("items");
@@ -1601,8 +1501,6 @@ describe("asCell with schema", () => {
     const c = runtime.getCell<{ items: null }>(
       space,
       "push-to-null",
-      undefined,
-      tx,
     );
     c.set({ items: null });
     const arrayCell = c.key("items");
@@ -1620,8 +1518,6 @@ describe("asCell with schema", () => {
     const c = runtime.getCell<{ items?: number[] }>(
       space,
       "push-to-undefined-schema",
-      undefined,
-      tx,
     );
     c.set({});
     const arrayCell = c.key("items").asSchema(schema);
@@ -1643,8 +1539,6 @@ describe("asCell with schema", () => {
     const c = runtime.getCell<{ items?: any[] }>(
       space,
       "push-to-undefined-schema-stable-id",
-      undefined,
-      tx,
     );
     c.set({});
     const arrayCell = c.key("items").asSchema(schema);
@@ -1689,7 +1583,6 @@ describe("asCell with schema", () => {
           },
         },
       } as const satisfies JSONSchema,
-      tx,
     );
     testCell.set(undefined);
 
@@ -1761,8 +1654,6 @@ describe("asCell with schema", () => {
     const c = runtime.getCell<{ items: { value: number }[] }>(
       space,
       "should push values that are already cells reusing the reference",
-      undefined,
-      tx,
     );
     c.set({ items: [] });
     const arrayCell = c.key("items");
@@ -1770,8 +1661,6 @@ describe("asCell with schema", () => {
     const d = runtime.getCell<{ value: number }>(
       space,
       "should push values that are already cells reusing the reference d",
-      undefined,
-      tx,
     );
     d.set({ value: 1 });
     const dCell = d;
@@ -1779,6 +1668,13 @@ describe("asCell with schema", () => {
     arrayCell.push(d);
     arrayCell.push(dCell);
     arrayCell.push(d.getAsQueryResult());
+
+    // helper to normalize CellLinks because different push operations
+    // may result in CellLinks with different extra properties (ex: space)
+    const normalizeCellLink = (link: any) => ({
+      cell: link.cell,
+      path: link.path,
+    });
 
     const rawItems = c.getRaw().items;
     const expectedCellLink = d.getAsNormalizedFullLink();
@@ -1794,8 +1690,6 @@ describe("asCell with schema", () => {
     const c = runtime.getCell<{ value: string }>(
       space,
       "should handle push method on non-array values",
-      undefined,
-      tx,
     );
     c.set({ value: "not an array" });
     const cell = c.key("value");
@@ -1804,12 +1698,7 @@ describe("asCell with schema", () => {
   });
 
   it("should create new entities when pushing to array in frame, but reuse IDs", () => {
-    const c = runtime.getCell<{ items: any[] }>(
-      space,
-      "push-with-id",
-      undefined,
-      tx,
-    );
+    const c = runtime.getCell<{ items: any[] }>(space, "push-with-id");
     c.set({ items: [] });
     const arrayCell = c.key("items");
     const frame = pushFrame();

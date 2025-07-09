@@ -445,10 +445,16 @@ export function txToReactivityLog(
   const log: ReactivityLog = { reads: [], writes: [] };
   for (const change of tx.log()) {
     if ("read" in change) {
-      log.reads.push({ ...change.read!.address });
+      log.reads.push({
+        ...change.read!.address,
+        path: change.read!.address.path.slice(1), // Remove the "value" prefix
+      });
     }
     if ("write" in change) {
-      log.writes.push({ ...change.write!.address });
+      log.writes.push({
+        ...change.write!.address,
+        path: change.write!.address.path.slice(1),
+      });
     }
   }
   return log;

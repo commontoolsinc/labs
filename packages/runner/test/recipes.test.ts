@@ -32,7 +32,7 @@ describe("Recipe Runner", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
-    
+
     tx = runtime.edit();
 
     const { commontools } = createBuilder(runtime);
@@ -64,6 +64,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should run a simple recipe",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, simpleRecipe, {
       value: 5,
@@ -96,6 +98,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle nested recipes",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, outerRecipe, {
       value: 4,
@@ -120,6 +124,8 @@ describe("Recipe Runner", () => {
     const resultCell1 = runtime.getCell<{ sum: number }>(
       space,
       "should handle recipes with defaults",
+      undefined,
+      tx,
     );
     const result1 = runtime.run(
       tx,
@@ -135,6 +141,8 @@ describe("Recipe Runner", () => {
     const resultCell2 = runtime.getCell<{ sum: number }>(
       space,
       "should handle recipes with defaults (2)",
+      undefined,
+      tx,
     );
     const result2 = runtime.run(tx, recipeWithDefaults, {
       a: 20,
@@ -162,6 +170,8 @@ describe("Recipe Runner", () => {
     >(
       space,
       "should handle recipes with map nodes",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, multipliedArray, {
       values: [{ x: 1 }, { x: 2 }, { x: 3 }],
@@ -190,6 +200,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ doubled: number[] }>(
       space,
       "should handle recipes with map nodes with closures",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, doubleArray, {
       values: [1, 2, 3],
@@ -217,6 +229,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ doubled: number[] }>(
       space,
       "should handle map nodes with undefined input",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, doubleArray, {
       values: undefined,
@@ -246,7 +260,7 @@ describe("Recipe Runner", () => {
 
     const resultCell = runtime.getCell<
       { counter: { value: number }; stream: any }
-    >(space, "should execute handlers");
+    >(space, "should execute handlers", undefined, tx);
     const result = runtime.run(tx, incRecipe, {
       counter: { value: 0 },
     }, resultCell);
@@ -286,6 +300,8 @@ describe("Recipe Runner", () => {
     >(
       space,
       "should execute handlers that use bind and this",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, incRecipe, {
       counter: { value: 0 },
@@ -322,6 +338,8 @@ describe("Recipe Runner", () => {
     >(
       space,
       "should execute handlers that use bind and this (no types)",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, incRecipe, {
       counter: { value: 0 },
@@ -342,11 +360,15 @@ describe("Recipe Runner", () => {
     const counter = runtime.getCell<{ value: number }>(
       space,
       "should execute recipes returned by handlers 1",
+      undefined,
+      tx,
     );
     counter.set({ value: 0 });
     const nested = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
       "should execute recipes returned by handlers 2",
+      undefined,
+      tx,
     );
     nested.set({ a: { b: { c: 0 } } });
 
@@ -379,6 +401,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ stream: any }>(
       space,
       "should execute recipes returned by handlers",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, incRecipe, {
       counter,
@@ -406,11 +430,15 @@ describe("Recipe Runner", () => {
     const x = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 1",
+      undefined,
+      tx,
     );
     x.set(2);
     const y = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 2",
+      undefined,
+      tx,
     );
     y.set(3);
 
@@ -450,6 +478,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result1: number; result2: number }>(
       space,
       "should handle recipes returned by lifted functions",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, multiplyRecipe, {
       x,
@@ -504,6 +534,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should support referenced modules",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, simpleRecipe, {
       value: 5,
@@ -545,11 +577,15 @@ describe("Recipe Runner", () => {
     const settingsCell = runtime.getCell<{ value: number }>(
       space,
       "should handle schema with cell references 1",
+      undefined,
+      tx,
     );
     settingsCell.set({ value: 5 });
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle schema with cell references",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, multiplyRecipe, {
       settings: settingsCell,
@@ -611,16 +647,22 @@ describe("Recipe Runner", () => {
     const item1 = runtime.getCell<{ value: number }>(
       space,
       "should handle nested cell references in schema 1",
+      undefined,
+      tx,
     );
     item1.set({ value: 1 });
     const item2 = runtime.getCell<{ value: number }>(
       space,
       "should handle nested cell references in schema 2",
+      undefined,
+      tx,
     );
     item2.set({ value: 2 });
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle nested cell references in schema",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, sumRecipe, {
       data: { items: [item1, item2] },
@@ -666,16 +708,22 @@ describe("Recipe Runner", () => {
     const value1 = runtime.getCell<number>(
       space,
       "should handle dynamic cell references with schema 1",
+      undefined,
+      tx,
     );
     value1.set(5);
     const value2 = runtime.getCell<number>(
       space,
       "should handle dynamic cell references with schema 2",
+      undefined,
+      tx,
     );
     value2.set(7);
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle dynamic cell references with schema",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, dynamicRecipe, {
       context: {
@@ -717,6 +765,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ counter: number; stream: any }>(
       space,
       "should execute handlers with schemas",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, incRecipe, {
       counter: 0,
@@ -764,6 +814,8 @@ describe("Recipe Runner", () => {
     const charmCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "failed handlers should be ignored",
+      undefined,
+      tx,
     );
     const charm = runtime.run(tx, divRecipe, { result: 1 }, charmCell);
 
@@ -826,12 +878,16 @@ describe("Recipe Runner", () => {
     const dividend = runtime.getCell<number>(
       space,
       "failed lifted functions should be ignored 1",
+      undefined,
+      tx,
     );
     dividend.set(1);
 
     const charmCell = runtime.getCell<{ result: number }>(
       space,
       "failed lifted handlers should be ignored",
+      undefined,
+      tx,
     );
     const charm = runtime.run(tx, divRecipe, {
       divisor: 10,
@@ -891,6 +947,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "idle should wait for slow async lifted functions",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, slowRecipe, { x: 1 }, resultCell);
 
@@ -931,6 +989,8 @@ describe("Recipe Runner", () => {
     const charmCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "idle should wait for slow async handlers",
+      undefined,
+      tx,
     );
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
 
@@ -979,6 +1039,8 @@ describe("Recipe Runner", () => {
     const charmCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "idle should not wait for deliberately async handlers",
+      undefined,
+      tx,
     );
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
 
@@ -1014,6 +1076,8 @@ describe("Recipe Runner", () => {
     const input = runtime.getCell<number>(
       space,
       "should create and use a named cell inside a lift input",
+      undefined,
+      tx,
     );
     input.set(5);
 
@@ -1026,7 +1090,7 @@ describe("Recipe Runner", () => {
         required: ["value"],
       },
     );
-    const tx = runtime.edit();
+
     const result = runtime.run(tx, wrapperRecipe, { value: input }, resultCell);
 
     await runtime.idle();
@@ -1051,7 +1115,6 @@ describe("Recipe Runner", () => {
 
     // That same value was updated, which shows that the id was stable
     expect(tx.readValueOrThrow(ref)).toBe(10);
-    tx.commit();
   });
 
   it("should handle pushing objects that reference their containing array", async () => {
@@ -1077,6 +1140,8 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ items: any[]; stream: any }>(
       space,
       "should handle pushing objects that reference their containing array",
+      undefined,
+      tx,
     );
     const result = runtime.run(tx, itemsRecipe, { items: [] }, resultCell);
 
