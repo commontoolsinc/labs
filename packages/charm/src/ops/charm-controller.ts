@@ -15,7 +15,7 @@ import {
   IFrameRecipe,
 } from "../iframe/recipe.ts";
 
-export class CharmView {
+export class CharmController {
   #cell: Cell<Charm>;
   #manager: CharmManager;
   readonly id: string;
@@ -87,15 +87,15 @@ export class CharmView {
     await execute(this.#manager, this.id, recipe);
   }
 
-  readingFrom(): CharmView[] {
+  readingFrom(): CharmController[] {
     return this.#manager.getReadingFrom(this.#cell).map((cell) =>
-      new CharmView(this.#manager, cell)
+      new CharmController(this.#manager, cell)
     );
   }
 
-  readBy(): CharmView[] {
+  readBy(): CharmController[] {
     return this.#manager.getReadByCharms(this.#cell).map((cell) =>
-      new CharmView(this.#manager, cell)
+      new CharmController(this.#manager, cell)
     );
   }
 }

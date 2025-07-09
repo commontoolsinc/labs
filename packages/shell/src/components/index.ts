@@ -1,1 +1,2 @@
-// Import all web components here, registering
+export * from "./Header.ts";
+export * from "./Body.ts";

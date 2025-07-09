@@ -1,6 +1,7 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { Runtime } from "@commontools/runner";
 import { CharmManager } from "@commontools/charm";
+import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 
 async function createSession(
@@ -19,13 +20,13 @@ async function createSession(
   };
 }
 
-export async function createCharmManager(
+export async function createCharmsController(
   { identity, spaceName, apiUrl }: {
     identity: Identity;
     spaceName: string;
     apiUrl: URL;
   },
-): Promise<CharmManager> {
+): Promise<CharmsController> {
   const session = await createSession(identity, spaceName);
   const url = apiUrl.toString();
   const runtime = new Runtime({
@@ -36,6 +37,5 @@ export async function createCharmManager(
     blobbyServerUrl: url,
   });
   const charmManager = new CharmManager(session, runtime);
-  await charmManager.synced();
-  return charmManager;
+  return new CharmsController(charmManager);
 }
