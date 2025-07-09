@@ -601,7 +601,7 @@ function createRegularCell<T>(
     [isCellMarker]: true,
     get copyTrap(): boolean {
       throw new Error(
-        "Copy trap: Don't cells. Create references instead.",
+        "Copy trap: Don't copy cells. Create references instead.",
       );
     },
     schema,
