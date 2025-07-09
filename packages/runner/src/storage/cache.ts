@@ -880,7 +880,7 @@ export class Replica {
     // should have the same since on the second, so we can clear them from
     // tracking when we see them.
     const resolvedFacts = this.getLocalFacts(revisions);
-    // We use update here instead of put, since we may have received new docs
+    // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
       revisions,
