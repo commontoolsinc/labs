@@ -47,7 +47,7 @@ class MockCharmManager {
     };
   }
 
-  async get(charmId: string): Promise<MockCell | null> {
+  get(charmId: string): MockCell | null {
     return this.charms.get(charmId) || null;
   }
 
@@ -117,7 +117,7 @@ describe("Extended Cell Operations", () => {
         await setCharmResult(manager, "charm-1", ["status"], "completed");
         
         // Get the charm cell to verify
-        const charmCell = await manager.get("charm-1") as MockCell;
+        const charmCell = manager.get("charm-1") as MockCell;
         const statusCell = charmCell.key("status") as MockCell;
         assertEquals(statusCell.get(), "completed");
       });
@@ -129,7 +129,7 @@ describe("Extended Cell Operations", () => {
         await setCharmResult(manager, "charm-1", ["data", "items", 0], { id: 1, name: "Item" });
         
         // Get the charm cell to verify
-        const charmCell = await manager.get("charm-1") as MockCell;
+        const charmCell = manager.get("charm-1") as MockCell;
         const dataCell = charmCell.key("data") as MockCell;
         const itemsCell = dataCell.key("items") as MockCell;
         const firstItemCell = itemsCell.key(0) as MockCell;
