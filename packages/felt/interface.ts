@@ -1,4 +1,5 @@
 import { join } from "@std/path/join";
+import { type TsconfigRaw } from "esbuild";
 
 export interface Config {
   // JS entry from root
@@ -38,6 +39,7 @@ export interface ESBuildConfig {
   // global variables in the bundled code.
   define?: Record<string, string | undefined>;
   metafile?: string;
+  tsconfigRaw: TsconfigRaw;
 }
 
 export class ResolvedConfig {
@@ -55,6 +57,7 @@ export class ResolvedConfig {
     minify: boolean;
     metafile?: string;
     define: Record<string, string | undefined>;
+    tsconfigRaw?: TsconfigRaw;
   };
   cwd: string;
   constructor(partial: Config, cwd = Deno.cwd()) {
@@ -75,6 +78,7 @@ export class ResolvedConfig {
       metafile: partial?.esbuild?.metafile
         ? join(cwd, partial.esbuild?.metafile)
         : undefined,
+      tsconfigRaw: partial?.esbuild?.tsconfigRaw,
     };
   }
 }
