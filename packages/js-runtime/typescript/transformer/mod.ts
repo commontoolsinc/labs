@@ -8,6 +8,9 @@ export {
 // Schema transformer
 export { createSchemaTransformer } from "./schema.ts";
 
+// Logging transformer
+export { createLoggingTransformer } from "./logging.ts";
+
 // Type checking utilities
 export {
   collectOpaqueRefs,

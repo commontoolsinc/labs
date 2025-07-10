@@ -26,6 +26,7 @@ import { Checker } from "./diagnostics/mod.ts";
 import {
   createOpaqueRefTransformer,
   createSchemaTransformer,
+  createLoggingTransformer,
 } from "./transformer/mod.ts";
 
 const DEBUG_VIRTUAL_FS = false;
@@ -321,8 +322,9 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const transformers = hasCtsEnableDirective(mainSource)
       ? {
           before: [
-            createOpaqueRefTransformer(tsProgram, { debug: true }),
-            createSchemaTransformer(tsProgram, { debug: true }),
+            createOpaqueRefTransformer(tsProgram, { debug: false }),
+            createSchemaTransformer(tsProgram, { debug: false }),
+            createLoggingTransformer(tsProgram, { debug: false }),
           ],
         }
       : undefined;
