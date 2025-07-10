@@ -100,18 +100,13 @@ await runtime.idle();
 await runtime.storage.synced();
 console.log("Storage synced");
 
-console.log("\nFinal results:");
-console.log("Array length:", charm.get().my_array.length);
-console.log("Total values sent:", sendCount);
-console.log("Expected values:", TOTAL_COUNT);
-
 // Now we should have all elements
 const actualElements = charm.get().my_array.length;
 if (actualElements === TOTAL_COUNT) {
-  console.log(`Test passed --- All ${TOTAL_COUNT} elements received!`);
+  console.log(`Test passed - all ${TOTAL_COUNT} elements received`);
 } else {
   console.error(
-    `Test failed --- Expected ${TOTAL_COUNT} elements but got ${actualElements} (missing ${
+    `Test failed - expected ${TOTAL_COUNT} elements but got ${actualElements} (missing ${
       TOTAL_COUNT - actualElements
     })`,
   );
