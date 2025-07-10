@@ -182,6 +182,7 @@ export class Storage implements IStorage {
     this.storageToDocSubs.clear();
     this.docToStorageSubs.clear();
     this.docToStoragePromises.clear();
+    this.docValues.clear();
     this.cancel();
   }
 
@@ -217,6 +218,11 @@ export class Storage implements IStorage {
     storageProvider: IStorageProvider,
     schemaContext?: SchemaContext,
   ): Promise<EntityId[]> {
+    // Don't update docs while they might be updating.
+    await this.runtime.scheduler.idle();
+    // Don't update docs while we have pending writes to storage
+    await Promise.all(this.docToStoragePromises);
+
     // Run a schema query against our local content, so we can either send
     // the set of linked docs, or load them.
     const { missing, loaded, selected } = this._queryLocal(
@@ -245,15 +251,12 @@ export class Storage implements IStorage {
       //   console.debug("missing", missing);
     }
 
-    // Don't update docs while they might be updating.
-    await this.runtime.scheduler.idle();
-
     const docMap = this.runtime.documentMap;
     // First, make sure we have all these docs in the runtime document map
     // This should also handle the source docs, since they will be included
     // in our query result.
     for (const entityId of entityIds) {
-      docMap.getDocByEntityId(doc.space, entityId, true)!;
+      docMap.getDocByEntityId(doc.space, entityId, true);
     }
     // Any objects that aren't on the server may need to be sent there.
     const valuesToSend: {
@@ -463,11 +466,11 @@ export class Storage implements IStorage {
     await this.runtime.idle();
     const lastValue = this.docValues.get(docKey);
     if (lastValue !== undefined) {
+      this.docValues.delete(docKey);
       await storageProvider.send([{
         entityId: entityId,
         value: lastValue,
       }]);
-      this.docValues.delete(docKey);
     }
   }
 
