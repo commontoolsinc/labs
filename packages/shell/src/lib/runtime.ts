@@ -32,7 +32,7 @@ export async function createCharmsController(
   const runtime = new Runtime({
     storageManager: StorageManager.open({
       as: session.as,
-      address: new URL("/api/storage/memory", url),
+      address: new URL("/api/storage/memory", apiUrl),
     }),
     blobbyServerUrl: url,
   });
