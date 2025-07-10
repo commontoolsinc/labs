@@ -42,6 +42,7 @@ export class Builder extends EventTarget {
       // and if we're bundling, we're probably running in a browser.
       tsconfigRaw: {
         compilerOptions: {
+          useDefineForClassFields: false,
           experimentalDecorators: true,
         },
       },
