@@ -379,7 +379,6 @@ jobs:
         working-directory: packages/runner
         run: |
           TOOLSHED_API_URL=http://localhost:8000/ \
-          FRONTEND_URL=http://localhost:8000/ \
           deno task integration
 
   cli-integration-test:

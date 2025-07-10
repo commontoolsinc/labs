@@ -40,11 +40,7 @@ export class Builder extends EventTarget {
       // Explicitly compile decorators, as this what Jumble->Vite
       // does, and no browsers currently support (any form of) decorators,
       // and if we're bundling, we're probably running in a browser.
-      tsconfigRaw: {
-        compilerOptions: {
-          experimentalDecorators: true,
-        },
-      },
+      tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
     };
 
     if (this.manifest.esbuild.metafile) {
