@@ -110,52 +110,116 @@ export function createOpaqueRefTransformer(
       const visit: ts.Visitor = (node) => {
         // Handle function calls with OpaqueRef arguments or method calls on OpaqueRef
         if (ts.isCallExpression(node)) {
-          // Special case: handler with type arguments
+          // Special case: handler with type arguments or inline type annotations
           const functionName = getFunctionName(node);
-          if (
-            functionName === "handler" && node.typeArguments &&
-            node.typeArguments.length >= 2
-          ) {
-            // Transform handler<E,T>(fn) to handler(toSchema<E>(), toSchema<T>(), fn)
-            if (debug) {
-              log(
-                `Found handler with type arguments at ${sourceFile.fileName}:${
-                  sourceFile.getLineAndCharacterOfPosition(node.getStart())
-                    .line + 1
-                }`,
+          if (functionName === "handler") {
+            // Case 1: handler with explicit type arguments
+            if (node.typeArguments && node.typeArguments.length >= 2) {
+              // Transform handler<E,T>(fn) to handler(toSchema<E>(), toSchema<T>(), fn)
+              if (debug) {
+                log(
+                  `Found handler with type arguments at ${sourceFile.fileName}:${
+                    sourceFile.getLineAndCharacterOfPosition(node.getStart())
+                      .line + 1
+                  }`,
+                );
+              }
+
+              const [eventType, stateType] = node.typeArguments;
+              const handlerArgs = node.arguments;
+
+              // Create toSchema calls for the type arguments
+              const toSchemaEventCall = context.factory.createCallExpression(
+                context.factory.createIdentifier("toSchema"),
+                [eventType],
+                [],
               );
+
+              const toSchemaStateCall = context.factory.createCallExpression(
+                context.factory.createIdentifier("toSchema"),
+                [stateType],
+                [],
+              );
+
+              // Create new handler call without type arguments but with schema arguments
+              const newHandlerCall = context.factory.createCallExpression(
+                node.expression,
+                undefined, // No type arguments
+                [toSchemaEventCall, toSchemaStateCall, ...handlerArgs],
+              );
+
+              // Mark that we need toSchema import
+              if (!hasCommonToolsImport(sourceFile, "toSchema")) {
+                needsToSchemaImport = true;
+              }
+
+              hasTransformed = true;
+              return ts.visitEachChild(newHandlerCall, visit, context);
             }
+            // Case 2: handler without type arguments but with inline parameter types
+            else if (
+              node.arguments.length === 1 &&
+              (ts.isFunctionExpression(node.arguments[0]) ||
+                ts.isArrowFunction(node.arguments[0]))
+            ) {
+              const handlerFn = node.arguments[0] as ts.FunctionExpression | ts.ArrowFunction;
+              
+              // Check if the function has parameter type annotations
+              if (handlerFn.parameters.length >= 2) {
+                const eventParam = handlerFn.parameters[0];
+                const stateParam = handlerFn.parameters[1];
+                
+                // Get the types of the parameters
+                const eventType = checker.getTypeAtLocation(eventParam);
+                const stateType = checker.getTypeAtLocation(stateParam);
+                
+                // Only transform if we have type annotations
+                if (eventParam.type || stateParam.type) {
+                  if (debug) {
+                    log(
+                      `Found handler with inline type annotations at ${sourceFile.fileName}:${
+                        sourceFile.getLineAndCharacterOfPosition(node.getStart())
+                          .line + 1
+                      }`,
+                    );
+                  }
 
-            const [eventType, stateType] = node.typeArguments;
-            const handlerArgs = node.arguments;
+                  // Create type nodes from the parameter types
+                  const eventTypeNode = eventParam.type || 
+                    context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+                  const stateTypeNode = stateParam.type || 
+                    context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
 
-            // Create toSchema calls for the type arguments
-            const toSchemaEventCall = context.factory.createCallExpression(
-              context.factory.createIdentifier("toSchema"),
-              [eventType],
-              [],
-            );
+                  // Create toSchema calls
+                  const toSchemaEventCall = context.factory.createCallExpression(
+                    context.factory.createIdentifier("toSchema"),
+                    [eventTypeNode],
+                    [],
+                  );
 
-            const toSchemaStateCall = context.factory.createCallExpression(
-              context.factory.createIdentifier("toSchema"),
-              [stateType],
-              [],
-            );
+                  const toSchemaStateCall = context.factory.createCallExpression(
+                    context.factory.createIdentifier("toSchema"),
+                    [stateTypeNode],
+                    [],
+                  );
 
-            // Create new handler call without type arguments but with schema arguments
-            const newHandlerCall = context.factory.createCallExpression(
-              node.expression,
-              undefined, // No type arguments
-              [toSchemaEventCall, toSchemaStateCall, ...handlerArgs],
-            );
+                  // Create new handler call with schema arguments
+                  const newHandlerCall = context.factory.createCallExpression(
+                    node.expression,
+                    undefined, // No type arguments
+                    [toSchemaEventCall, toSchemaStateCall, handlerFn],
+                  );
 
-            // Mark that we need toSchema import
-            if (!hasCommonToolsImport(sourceFile, "toSchema")) {
-              needsToSchemaImport = true;
+                  // Mark that we need toSchema import
+                  if (!hasCommonToolsImport(sourceFile, "toSchema")) {
+                    needsToSchemaImport = true;
+                  }
+
+                  hasTransformed = true;
+                  return ts.visitEachChild(newHandlerCall, visit, context);
+                }
+              }
             }
-
-            hasTransformed = true;
-            return ts.visitEachChild(newHandlerCall, visit, context);
           }
 
           // Check if this is a builder function call - these should not be transformed

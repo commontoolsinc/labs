@@ -1,10 +1,25 @@
 /// <cts-enable />
-import { Cell, handler, OpaqueRef, recipe } from "commontools";
+import { Cell, handler, OpaqueRef, recipe, toSchema, JSONSchema } from "commontools";
 interface State {
     value: Cell<number>;
     name: Cell<string>;
 }
-const myHandler = handler((_, state: State) => {
+const myHandler = handler({
+    type: "any"
+} as const satisfies JSONSchema, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: true
+        },
+        name: {
+            type: "string",
+            asCell: true
+        }
+    },
+    required: ["value", "name"]
+} as const satisfies JSONSchema, (_, state: State) => {
     state.value.set(state.value.get() + 1);
 });
 export default recipe({ type: "object", properties: { value: { type: "number" }, name: { type: "string" } } }, (state) => {
