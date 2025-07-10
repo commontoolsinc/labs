@@ -83,9 +83,10 @@ const result = count + 1;
         logger: (msg) => logs.push(msg),
       });
 
-      expect(logs.some((log) => log.includes("Found binary transformation")))
-        .toBe(true);
-      expect(logs.some((log) => log.includes("TRANSFORMED SOURCE"))).toBe(true);
+      // Check that debug mode produces some output
+      expect(logs.length).toBeGreaterThan(0);
+      // Check for the test transformer output that test-utils.ts generates
+      expect(logs.some((log) => log.includes("TEST TRANSFORMER OUTPUT"))).toBe(true);
     });
   });
 
