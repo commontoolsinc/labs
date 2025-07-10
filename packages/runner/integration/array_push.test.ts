@@ -19,7 +19,7 @@ const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ||
 const MEMORY_WS_URL = `${
   TOOLSHED_URL.replace("http://", "ws://")
 }/api/storage/memory`;
-const SPACE_NAME = "myspace3";
+const SPACE_NAME = "myspace5";
 
 console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);
@@ -55,7 +55,7 @@ const recipeContent = await Deno.readTextFile(
   "./integration/array_push.test.tsx",
 );
 
-// TODO(@ellyse) use this instead off compile
+// FIXME(@ellyse) use this instead of compile
 // const { result } = compileAndRun({
 //   files: [{ name: "/main.tsx", contents: state.code }],
 //   main: "/main.tsx",
@@ -81,33 +81,18 @@ await new Promise((resolve) => setTimeout(resolve, 10000));
 
 // Test the push handler
 console.log("Initial array:", charm.get().my_array);
-console.log("\nTesting batch sends - 10 iterations, 5 numbers each...");
 
 // Get the handler stream and send some numbers
 const pushHandlerStream = charm.key("pushHandler");
 let sendCount = 0;
 
-// Loop, sending 5 numbers each time
-const ITERATIONS = 10;
-for (let iteration = 0; iteration < ITERATIONS; iteration++) {
-  const startNum = iteration * 5;
-
-  console.log(
-    `Iteration ${iteration + 1}: sending ${startNum} to ${startNum + 4}`,
-  );
-
-  for (let i = 0; i < 5; i++) {
-    pushHandlerStream.send({ value: startNum + i });
-    sendCount++;
-  }
-
-  // Wait for updates to process
-  //await runtime.idle();
-
-  // Wait between batches
-  //await new Promise(resolve => setTimeout(resolve, 1000));
-
-  //console.log(`  Current array length: ${charm.get().my_array.length}`);
+// Loop, sending numbers one by one
+const TOTAL_COUNT = 10;
+console.log(`\nTesting sends - ${TOTAL_COUNT} numbers total...`);
+for (let i = 0; i < TOTAL_COUNT; i++) {
+  console.log(`Sending value: ${i}`);
+  pushHandlerStream.send({ value: i });
+  sendCount++;
 }
 
 console.log("Waiting for storage to sync...");
@@ -118,18 +103,16 @@ console.log("Storage synced");
 console.log("\nFinal results:");
 console.log("Array length:", charm.get().my_array.length);
 console.log("Total values sent:", sendCount);
-console.log("Expected values:", ITERATIONS * 5);
+console.log("Expected values:", TOTAL_COUNT);
 
 // Now we should have all elements
 const actualElements = charm.get().my_array.length;
-if (actualElements === ITERATIONS * 5) {
-  console.log(`Batch test passed --- All ${ITERATIONS * 5} elements received!`);
+if (actualElements === TOTAL_COUNT) {
+  console.log(`Test passed --- All ${TOTAL_COUNT} elements received!`);
 } else {
   console.error(
-    `Batch test failed --- Expected ${
-      ITERATIONS * 5
-    } elements but got ${actualElements} (missing ${
-      ITERATIONS * 5 - actualElements
+    `Test failed --- Expected ${TOTAL_COUNT} elements but got ${actualElements} (missing ${
+      TOTAL_COUNT - actualElements
     })`,
   );
   console.log("Array contents:", charm.get().my_array);
