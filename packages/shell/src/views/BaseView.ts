@@ -1,4 +1,5 @@
 import { LitElement } from "lit";
+
 import { Command } from "../lib/commands.ts";
 
 export const SHELL_COMMAND = "shell-command";

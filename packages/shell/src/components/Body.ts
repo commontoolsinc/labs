@@ -1,7 +1,8 @@
 import { css, html, PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "../views/BaseView.ts";
-import { CharmController } from "@commontools/charm/ops";
+import { CharmsController } from "@commontools/charm/ops";
+import { Identity } from "@commontools/identity";
 
 export class XBodyElement extends BaseView {
   static override styles = css`
@@ -15,19 +16,27 @@ export class XBodyElement extends BaseView {
   `;
 
   @property({ attribute: false })
-  cc?: CharmController;
+  cc?: CharmsController;
 
   @property({ attribute: false })
   activeCharmId?: string;
 
+  @property({ attribute: false })
+  identity?: Identity;
+
   override render() {
     const cc = this.cc ? "Connected" : "Not Connected";
     console.log("BODY RENDER", this.cc);
+
+    const identityDisplay = this.identity
+      ? this.identity.did()
+      : "Not authenticated";
+
     return html`
       <div>
         <h2>App!!</h2>
-        <div>${cc}</div>
-        <div>Active Charm Id: ${this.activeCharmId}</div>
+        <div>User Identity: ${identityDisplay}</div>
+        <div>Controller: ${cc}</div>
       </div>
     `;
   }

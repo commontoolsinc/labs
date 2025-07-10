@@ -1,5 +1,4 @@
 import "@commontools/ui/v2";
-import { KeyStore } from "@commontools/identity";
 import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
 import { AppUpdateEvent } from "./lib/app/events.ts";
 import { XRootView } from "./views/RootView.ts";
@@ -37,11 +36,4 @@ if (ENVIRONMENT !== "production") {
   app.setSpace(spaceName);
   const charmId = match && match.length > 2 ? match[2] : undefined;
   if (charmId) app.setActiveCharmId(charmId);
-
-  const ROOT_KEY = "$ROOT_KEY";
-  const keyStore = await KeyStore.open();
-  const rootKey = await keyStore.get(ROOT_KEY);
-  if (rootKey) {
-    app.setIdentity(rootKey);
-  }
 }

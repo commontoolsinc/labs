@@ -34,7 +34,7 @@
   --dot-spacing: 10px;
   --padding-desktop: 15px;
   --padding-mobile: 5px;
-  
+
   /* Font settings */
   font-family: var(--font-primary);
   line-height: 1.5;
@@ -61,7 +61,10 @@ body {
   margin: 0;
   font-family: var(--font-primary);
   background-color: var(--bg-primary);
-  background-image: radial-gradient(var(--dot-color) var(--dot-size), transparent var(--dot-size));
+  background-image: radial-gradient(
+    var(--dot-color) var(--dot-size),
+    transparent var(--dot-size)
+  );
   background-size: var(--dot-spacing) var(--dot-spacing);
 }
 

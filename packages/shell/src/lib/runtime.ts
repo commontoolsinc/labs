@@ -8,16 +8,40 @@ async function createSession(
   root: Identity,
   spaceName: string,
 ): Promise<Session> {
+  console.log("[createSession] Creating session for space:", spaceName);
+  console.log("[createSession] Root identity DID:", root.did());
+
   const account = spaceName.startsWith("~")
     ? root
     : await Identity.fromPassphrase(ANYONE);
+
+  console.log("[createSession] Account selection:", {
+    accountDid: account.did(),
+    isPrivateSpace: spaceName.startsWith("~"),
+    explanation: spaceName.startsWith("~")
+      ? "Using user's root identity for private space"
+      : "Using ANYONE identity for public/shared space",
+  });
+
   const user = await account.derive(spaceName);
-  return {
+  const session = {
     private: account.did() === root.did(),
     name: spaceName,
     space: user.did(),
     as: user,
   };
+
+  console.log("[createSession] Session created:", {
+    private: session.private,
+    name: session.name,
+    spaceDid: session.space,
+    sessionIdentity: session.as.did(),
+    explanation: session.private
+      ? "Using user's derived identity for private space"
+      : "Using ANYONE-derived identity for public space",
+  });
+
+  return session;
 }
 
 export async function createCharmsController(
@@ -27,8 +51,23 @@ export async function createCharmsController(
     apiUrl: URL;
   },
 ): Promise<CharmsController> {
+  console.log("[createCharmsController] Starting with:", {
+    identityDid: identity.did(),
+    spaceName,
+    apiUrl: apiUrl.toString(),
+  });
+
   const session = await createSession(identity, spaceName);
   const url = apiUrl.toString();
+
+  console.log("[createCharmsController] Creating Runtime with:", {
+    storageUrl: new URL("/api/storage/memory", url).toString(),
+    blobbyServerUrl: url,
+    sessionIdentity: session.as.did(),
+    sessionSpace: session.space,
+    isPrivateSpace: session.private,
+  });
+
   const runtime = new Runtime({
     storageManager: StorageManager.open({
       as: session.as,
@@ -36,6 +75,9 @@ export async function createCharmsController(
     }),
     blobbyServerUrl: url,
   });
+  console.log("[createCharmsController] Creating CharmManager with session");
   const charmManager = new CharmManager(session, runtime);
+
+  console.log("[createCharmsController] Creating CharmsController");
   return new CharmsController(charmManager);
 }

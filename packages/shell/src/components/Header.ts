@@ -18,9 +18,30 @@ export class XHeaderElement extends LitElement {
     #header {
       display: flex;
       align-items: center;
-      justify-content: flex-start;
+      justify-content: space-between;
       padding: 0.5rem;
       gap: 0.5rem;
+    }
+
+    .left-section {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .auth-button {
+      padding: 0.25rem 0.75rem;
+      font-family: var(--font-primary);
+      font-size: 0.875rem;
+      background-color: white;
+      border: var(--border-width, 2px) solid var(--border-color, #000);
+      cursor: pointer;
+      transition: all 0.1s ease-in-out;
+    }
+
+    .auth-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 1px 1px 0px 0px rgba(0, 0, 0, 0.5);
     }
 
     #page-title {
@@ -88,17 +109,40 @@ export class XHeaderElement extends LitElement {
     this.requestUpdate();
   };
 
+  private handleAuthClick = (): void => {
+    this.dispatchEvent(
+      new CustomEvent("shell-command", {
+        detail: { type: "clear-authentication" },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  };
+
   override render() {
     return html`
       <div id="header" @click="${this.handleHeaderClick}">
-        <ct-logo
-          width="32"
-          height="32"
-          background-color="${this.logoBackgroundColor}"
-          shape-color="${this.logoShapeColor}"
-          @click="${this.handleLogoClick}"
-        ></ct-logo>
-        <h1 id="page-title">shell</h1>
+        <div class="left-section">
+          <ct-logo
+            width="32"
+            height="32"
+            background-color="${this.logoBackgroundColor}"
+            shape-color="${this.logoShapeColor}"
+            @click="${this.handleLogoClick}"
+          ></ct-logo>
+          <h1 id="page-title">shell</h1>
+        </div>
+        ${this.identity
+        ? html`
+          <button
+            class="auth-button"
+            @click="${this.handleAuthClick}"
+            @mousedown="${(e: Event) => e.stopPropagation()}"
+          >
+            Logout
+          </button>
+        `
+        : null}
       </div>
     `;
   }
