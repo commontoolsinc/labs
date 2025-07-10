@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, h, handler, NAME, recipe, str, UI } from "commontools";
+import { Cell, h, handler, NAME, recipe, str, UI } from "commontools";
 
 interface CounterState {
   value: Cell<number>;
@@ -19,10 +19,10 @@ const decrement = handler((_, state: { value: Cell<number> }) => {
 
 export default recipe<RecipeState>("Counter", (state) => {
   return {
-    [NAME]: str`Simple counter: ${derive(state.value, String)}`,
+    [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (
       <div>
-        <ct-button onClick={decrement({ value: state.value })}>-</ct-button>
+        <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
           <li>next number: {state.value + 1}</li>
         </ul>

@@ -88,6 +88,12 @@ interface FixtureConfig {
 
 const configs: FixtureConfig[] = [
   {
+    directory: "ast-transform",
+    describe: "AST Transformation",
+    transformerOptions: { applySchemaTransformer: true },
+    formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
+  },
+  {
     directory: "handler-schema",
     describe: "Handler Schema Transformation",
     transformerOptions: { applySchemaTransformer: true },
