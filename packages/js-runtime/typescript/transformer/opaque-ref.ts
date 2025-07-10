@@ -192,9 +192,94 @@ export function createOpaqueRefTransformer(
           ) {
             if (debug) {
               log(
-                `Calling a factory function that expects Opaque parameters, skipping transformation`,
+                `Calling a factory function that expects Opaque parameters`,
               );
             }
+            
+            // Special case: Check if we're passing an object literal that reconstructs
+            // all properties from a single OpaqueRef source
+            if (node.arguments.length === 1 && ts.isObjectLiteralExpression(node.arguments[0])) {
+              const objectLiteral = node.arguments[0];
+              const properties = objectLiteral.properties;
+              
+              // Track the source OpaqueRef for all properties
+              let commonSource: ts.Expression | null = null;
+              let allFromSameSource = true;
+              const propertyNames = new Set<string>();
+              
+              for (const prop of properties) {
+                if (ts.isPropertyAssignment(prop) && ts.isPropertyAccessExpression(prop.initializer)) {
+                  const propAccess = prop.initializer;
+                  
+                  // Check if this property access is from an OpaqueRef
+                  const objType = checker.getTypeAtLocation(propAccess.expression);
+                  if (isOpaqueRefType(objType, checker)) {
+                    if (commonSource === null) {
+                      commonSource = propAccess.expression;
+                    } else if (propAccess.expression.getText() !== commonSource.getText()) {
+                      // Different sources, can't simplify
+                      allFromSameSource = false;
+                      break;
+                    }
+                    
+                    // Check that the property name matches
+                    if (ts.isIdentifier(prop.name) && prop.name.text === propAccess.name.text) {
+                      propertyNames.add(prop.name.text);
+                    } else {
+                      // Property name doesn't match the access, can't simplify
+                      allFromSameSource = false;
+                      break;
+                    }
+                  } else {
+                    // Not from OpaqueRef, can't simplify
+                    allFromSameSource = false;
+                    break;
+                  }
+                } else {
+                  // Not a simple property assignment, can't simplify
+                  allFromSameSource = false;
+                  break;
+                }
+              }
+              
+              // If all properties come from the same OpaqueRef source
+              if (allFromSameSource && commonSource) {
+                // Get the type of the OpaqueRef source to check if we have all properties
+                const sourceType = checker.getTypeAtLocation(commonSource);
+                const typeArguments = (sourceType as any).resolvedTypeArguments;
+                
+                if (typeArguments && typeArguments.length > 0) {
+                  const innerType = typeArguments[0];
+                  const sourceProperties = innerType.getProperties();
+                  const sourcePropertyNames = new Set<string>(
+                    sourceProperties.map((p: ts.Symbol) => p.getName())
+                  );
+                  
+                  // Only transform if we have ALL properties from the source
+                  const hasAllProperties = sourcePropertyNames.size === propertyNames.size &&
+                    [...sourcePropertyNames].every(name => propertyNames.has(name));
+                  
+                  if (hasAllProperties) {
+                    if (debug) {
+                      log(
+                        `Simplifying object literal to OpaqueRef source at ${sourceFile.fileName}:${
+                          sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1
+                        }`,
+                      );
+                    }
+                    
+                    hasTransformed = true;
+                    return context.factory.updateCallExpression(
+                      node,
+                      ts.visitNode(node.expression, visit) as ts.Expression,
+                      node.typeArguments,
+                      [commonSource],
+                    );
+                  }
+                }
+              }
+            }
+            
             return ts.visitEachChild(node, visit, context);
           }
 
@@ -736,14 +821,6 @@ export function createOpaqueRefTransformer(
           result = addCommonToolsImport(result, context.factory, "toSchema");
         }
 
-        // Log the transformed source if debug is enabled
-        if (debug) {
-          const printer = ts.createPrinter();
-          const transformedSource = printer.printFile(result);
-          log(
-            `\n=== TRANSFORMED SOURCE ===\n${transformedSource}\n=== END TRANSFORMED SOURCE ===`,
-          );
-        }
       }
 
       return result;
