@@ -1,6 +1,7 @@
 import { refer } from "merkle-reference";
 import { Immutable, isRecord } from "@commontools/utils/types";
 import type {
+  DID,
   JSONValue,
   MemorySpace,
   SchemaContext,
@@ -448,22 +449,26 @@ export class Storage implements IStorage {
     }
 
     this.docValues.set(docKey, storageValue);
-
-    const docToStoragePromise = this.runtime.idle().then(() => {
-      const lastValue = this.docValues.get(docKey);
-      if (lastValue !== undefined) {
-        storageProvider.send([{
-          entityId: doc.entityId,
-          value: lastValue,
-        }]);
-        this.docValues.delete(docKey);
-      }
-    });
+    const docToStoragePromise = this._sendDocValue(doc.space, doc.entityId);
 
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
       this.docToStoragePromises.delete(docToStoragePromise)
     );
+  }
+
+  private async _sendDocValue(space: DID, entityId: EntityId) {
+    const docKey = `${space}/${toURI(entityId)}`;
+    const storageProvider = this._getStorageProviderForSpace(space);
+    await this.runtime.idle();
+    const lastValue = this.docValues.get(docKey);
+    if (lastValue !== undefined) {
+      await storageProvider.send([{
+        entityId: entityId,
+        value: lastValue,
+      }]);
+      this.docValues.delete(docKey);
+    }
   }
 
   // Update the doc with the new value we got in storage.
