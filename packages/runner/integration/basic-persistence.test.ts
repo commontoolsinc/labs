@@ -12,13 +12,15 @@ const keyConfig: IdentityCreateConfig = {
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Simple object persistence ===");
+const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
+  "http://localhost:8000/";
 
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", "http://localhost:8000"),
+      address: new URL("/api/storage/memory", TOOLSHED_API_URL),
     }),
     blobbyServerUrl: "http://localhost:8000",
   });
@@ -47,7 +49,7 @@ async function test() {
   const runtime2 = new Runtime({
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", "http://localhost:8000"),
+      address: new URL("/api/storage/memory", TOOLSHED_API_URL),
     }),
     blobbyServerUrl: "http://localhost:8000",
   });
