@@ -26,6 +26,7 @@ import {
 } from "./query-result-proxy.ts";
 import { isLink } from "./link-utils.ts";
 import { uriToEntityId } from "./storage/transaction-shim.ts";
+import { toURI } from "./uri-utils.ts";
 export type { Labels, MemorySpace };
 
 /**
@@ -77,6 +78,8 @@ export class Storage implements IStorage {
 
   // Tracks promises returned by storage updates.
   private docToStoragePromises = new Set<Promise<any>>();
+  // Track the most recent storage value written
+  private docValues = new Map<string, StorageValue<JSONValue>>();
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -413,9 +416,15 @@ export class Storage implements IStorage {
     >(
       doc.entityId,
     );
-    if (deepEqual(storageValue, existingValue)) {
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+    // If we don't have a pending write (awaiting runtime idle), and our value
+    // is the same as what storage has, we don't need to do anything.
+    // If we do have a pending write, even if we match, we need to track ours
+    // since we need to defer that decision until the idle.
+    if (!this.docValues.has(docKey) && deepEqual(storageValue, existingValue)) {
       return;
     }
+
     // Track these promises for our synced call.
     // We may have linked docs that storage doesn't know about
     const storageProvider = this._getStorageProviderForSpace(doc.space);
@@ -438,10 +447,19 @@ export class Storage implements IStorage {
       this.syncCell(linkedDoc);
     }
 
-    const docToStoragePromise = storageProvider.send([{
-      entityId: doc.entityId,
-      value: storageValue,
-    }]);
+    this.docValues.set(docKey, storageValue);
+
+    const docToStoragePromise = this.runtime.idle().then(() => {
+      const lastValue = this.docValues.get(docKey);
+      if (lastValue !== undefined) {
+        storageProvider.send([{
+          entityId: doc.entityId,
+          value: lastValue,
+        }]);
+        this.docValues.delete(docKey);
+      }
+    });
+
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
       this.docToStoragePromises.delete(docToStoragePromise)
