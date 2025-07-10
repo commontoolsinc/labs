@@ -321,8 +321,8 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const transformers = hasCtsEnableDirective(mainSource)
       ? {
           before: [
-            createSchemaTransformer(tsProgram, { debug: true }),
             createOpaqueRefTransformer(tsProgram, { debug: true }),
+            createSchemaTransformer(tsProgram, { debug: true }),
           ],
         }
       : undefined;
