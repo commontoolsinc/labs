@@ -1,12 +1,12 @@
 import {
   cell,
-  handler,
-  UI,
-  NAME,
-  JSONSchema,
-  recipe,
-  h,
   derive,
+  h,
+  handler,
+  JSONSchema,
+  NAME,
+  recipe,
+  UI,
 } from "commontools";
 
 // dummy input schema
@@ -35,21 +35,23 @@ export default recipe(
   OutputSchema,
   () => {
     const my_array = cell<number[]>([]);
-    
+
     const pushHandler = handler(
       ({ value }: { value: number }, { array }: { array: number[] }) => {
         array.push(value);
-      }
+      },
     );
-    
+
     // Return the recipe
     return {
       [NAME]: "array push test",
       [UI]: (
         <div>
           <h3>Array Push Test</h3>
-          <p>Array length: {derive(my_array, arr => arr.length)}</p>
-          <p>Current values: {derive(my_array, arr => JSON.stringify(arr))}</p>
+          <p>Array length: {derive(my_array, (arr) => arr.length)}</p>
+          <p>
+            Current values: {derive(my_array, (arr) => JSON.stringify(arr))}
+          </p>
         </div>
       ),
       my_array,
@@ -57,4 +59,3 @@ export default recipe(
     };
   },
 );
-
