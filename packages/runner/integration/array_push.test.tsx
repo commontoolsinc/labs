@@ -38,6 +38,7 @@ export default recipe(
 
     const pushHandler = handler(
       ({ value }: { value: number }, { array }: { array: number[] }) => {
+        console.log("Pushing value:", value);
         array.push(value);
       },
     );
@@ -50,7 +51,7 @@ export default recipe(
           <h3>Array Push Test</h3>
           <p>Array length: {derive(my_array, (arr) => arr.length)}</p>
           <p>
-            Current values: {derive(my_array, (arr) => JSON.stringify(arr))}
+            Current values: {my_array.map((e) => <li>{e}</li>)}
           </p>
         </div>
       ),

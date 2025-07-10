@@ -19,7 +19,7 @@ const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ||
 const MEMORY_WS_URL = `${
   TOOLSHED_URL.replace("http://", "ws://")
 }/api/storage/memory`;
-const SPACE_NAME = "myspace";
+const SPACE_NAME = "myspace3";
 
 console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);
@@ -77,7 +77,7 @@ console.log("Result charm ID:", getEntityId(charm));
 // Wait so we can load the page on the browser
 // FIXME(@ellyse) we should remove this for final code,
 // don't want to slow down integration testing any more than necessary
-await new Promise((resolve) => setTimeout(resolve, 1000));
+await new Promise((resolve) => setTimeout(resolve, 10000));
 
 // Test the push handler
 console.log("Initial array:", charm.get().my_array);
@@ -88,7 +88,7 @@ const pushHandlerStream = charm.key("pushHandler");
 let sendCount = 0;
 
 // Loop, sending 5 numbers each time
-const ITERATIONS = 5;
+const ITERATIONS = 10;
 for (let iteration = 0; iteration < ITERATIONS; iteration++) {
   const startNum = iteration * 5;
 
@@ -107,17 +107,18 @@ for (let iteration = 0; iteration < ITERATIONS; iteration++) {
   // Wait between batches
   //await new Promise(resolve => setTimeout(resolve, 1000));
 
-  console.log(`  Current array length: ${charm.get().my_array.length}`);
+  //console.log(`  Current array length: ${charm.get().my_array.length}`);
 }
+
+console.log("Waiting for storage to sync...");
+await runtime.idle();
+await runtime.storage.synced();
+console.log("Storage synced");
 
 console.log("\nFinal results:");
 console.log("Array length:", charm.get().my_array.length);
 console.log("Total values sent:", sendCount);
 console.log("Expected values:", ITERATIONS * 5);
-
-console.log("Waiting for storage to sync...");
-await runtime.storage.synced();
-console.log("Storage synced");
 
 // Now we should have all elements
 const actualElements = charm.get().my_array.length;
