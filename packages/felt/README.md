@@ -27,6 +27,12 @@ export default {
     define: {
       "$DEBUG": Deno.env.get("DEBUG"),
     },
+    tsconfigRaw: {
+      compilerOptions: {
+        useDefineForClassFields: false,
+        experimentalDecorators: true,
+      }
+    }
   },
 };
 ```
