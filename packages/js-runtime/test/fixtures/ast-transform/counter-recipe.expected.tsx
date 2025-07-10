@@ -20,7 +20,18 @@ const increment = handler({
 } as const satisfies JSONSchema, (e, state) => {
     state.value.set(state.value.get() + 1);
 });
-const decrement = handler((_, state: {
+const decrement = handler({
+    type: "any"
+} as const satisfies JSONSchema, {
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            asCell: true
+        }
+    },
+    required: ["value"]
+} as const satisfies JSONSchema, (_, state: {
     value: Cell<number>;
 }) => {
     state.value.set(state.value.get() - 1);
