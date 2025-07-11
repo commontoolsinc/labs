@@ -1,2 +1,10 @@
-export { CharmsView } from "./charms-view.ts";
-export type { CharmView } from "./charm-view.ts";
+export { CharmsController } from "./charms-controller.ts";
+export type { CharmController } from "./charm-controller.ts";
+export {
+  type CellPath,
+  getCharmInput,
+  getCharmResult,
+  parsePath,
+  setCharmInput,
+  setCharmResult,
+} from "./cell-operations.ts";

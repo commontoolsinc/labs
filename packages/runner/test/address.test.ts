@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import * as Address from "../src/storage/transaction/address.ts";
+import { IMemoryAddress } from "../src/storage/interface.ts";
 
 describe("Address Module", () => {
   describe("toString function", () => {
@@ -484,6 +485,100 @@ describe("Address Module", () => {
 
       expect(result1).toBe(result2);
       expect(result1).toBe(true);
+    });
+  });
+
+  describe("isInline function", () => {
+    it("should return false for regular addresses", () => {
+      const address = {
+        id: "user:1",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = Address.isInline(address);
+
+      expect(result).toBe(false);
+    });
+
+    it("should return true for data URI addresses", () => {
+      const address = {
+        id: 'data:application/json,{"hello":"world"}',
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = Address.isInline(address);
+
+      expect(result).toBe(true);
+    });
+
+    it("should return true for base64 data URI addresses", () => {
+      const address = {
+        id: "data:application/json;base64,eyJoZWxsbyI6IndvcmxkIn0=",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = Address.isInline(address);
+
+      expect(result).toBe(true);
+    });
+
+    it("should return false for addresses with data: in the middle", () => {
+      const address = {
+        id: "user:data:123",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = Address.isInline(address);
+
+      expect(result).toBe(false);
+    });
+
+    it("should return false for empty id", () => {
+      const address = {
+        id: "",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = Address.isInline(address as any as IMemoryAddress);
+
+      expect(result).toBe(false);
+    });
+
+    it("should return false for addresses starting with 'data' but not 'data:'", () => {
+      const address = {
+        id: "data-user:1",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const result = Address.isInline(address);
+
+      expect(result).toBe(false);
+    });
+
+    it("should return true for various media types in data URIs", () => {
+      const addresses = [
+        "data:text/plain,hello%20world",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+        "data:text/html,<h1>Hello</h1>",
+        "data:application/xml,<root><item>value</item></root>",
+      ] as const;
+
+      addresses.forEach((id) => {
+        const address = {
+          id,
+          type: "application/json",
+          path: [],
+        } as const;
+
+        const result = Address.isInline(address);
+        expect(result).toBe(true);
+      });
     });
   });
 

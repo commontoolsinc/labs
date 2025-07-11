@@ -1,4 +1,5 @@
 import { join } from "@std/path/join";
+import { type TsconfigRaw } from "esbuild";
 
 export interface Config {
   // JS entry from root
@@ -22,6 +23,10 @@ export interface Config {
   // to cause a JS rebuild during `dev`.
   // Defaults to "src".
   watchDir?: string;
+  // While running a dev server, a regex to match
+  // against a path, and if successful, will return
+  // the root index.html.
+  redirectToIndex?: RegExp;
   esbuild?: ESBuildConfig;
 }
 
@@ -34,6 +39,7 @@ export interface ESBuildConfig {
   // global variables in the bundled code.
   define?: Record<string, string | undefined>;
   metafile?: string;
+  tsconfigRaw: TsconfigRaw;
 }
 
 export class ResolvedConfig {
@@ -44,12 +50,14 @@ export class ResolvedConfig {
   port: number;
   publicDir: string;
   watchDir: string;
+  redirectToIndex?: RegExp;
   esbuild: {
     sourcemap: boolean;
     external: string[];
     minify: boolean;
     metafile?: string;
     define: Record<string, string | undefined>;
+    tsconfigRaw?: TsconfigRaw;
   };
   cwd: string;
   constructor(partial: Config, cwd = Deno.cwd()) {
@@ -61,6 +69,7 @@ export class ResolvedConfig {
     this.watchDir = join(cwd, partial?.watchDir ?? "src");
     this.hostname = partial?.hostname ?? "127.0.0.1";
     this.port = partial?.port ?? 5173;
+    this.redirectToIndex = partial?.redirectToIndex;
     this.esbuild = {
       sourcemap: !!(partial?.esbuild?.sourcemap),
       minify: !!(partial?.esbuild?.minify),
@@ -69,6 +78,7 @@ export class ResolvedConfig {
       metafile: partial?.esbuild?.metafile
         ? join(cwd, partial.esbuild?.metafile)
         : undefined,
+      tsconfigRaw: partial?.esbuild?.tsconfigRaw,
     };
   }
 }

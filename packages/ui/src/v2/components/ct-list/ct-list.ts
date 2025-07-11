@@ -22,17 +22,17 @@ import { BaseElement } from "../../core/base-element.ts";
  */
 
 export class CTList extends BaseElement {
-  @property({ type: Object })
-  accessor list: {
+  @property()
+  list: {
     title: string;
     items: Array<{ title: string; done?: boolean }>;
   } = { title: "", items: [] };
 
-  @property({ type: Boolean })
-  accessor readonly: boolean = false;
+  @property()
+  readonly: boolean = false;
 
-  @property({ type: Object })
-  accessor action: {
+  @property()
+  action: {
     type: "remove" | "accept" | "custom";
     label?: string;
     event?: string;

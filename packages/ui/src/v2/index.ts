@@ -34,6 +34,7 @@ export * from "./components/ct-label/index.ts";
 export * from "./components/ct-progress/index.ts";
 export * from "./components/ct-radio/index.ts";
 export * from "./components/ct-radio-group/index.ts";
+export * from "./components/ct-render/index.ts";
 export * from "./components/ct-resizable-handle/index.ts";
 export * from "./components/ct-resizable-panel/index.ts";
 export * from "./components/ct-resizable-panel-group/index.ts";

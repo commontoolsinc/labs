@@ -1,9 +1,12 @@
 import type {
   IAttestation,
+  IInvalidDataURIError,
   IMemoryAddress,
+  IReadOnlyAddressError,
   ISpaceReplica,
   IStorageTransactionInconsistent,
   ITransaction,
+  IUnsupportedMediaTypeError,
   JSONValue,
   MemorySpace,
   Result,
@@ -13,8 +16,11 @@ import * as Address from "./address.ts";
 import {
   attest,
   claim,
+  InvalidDataURIError,
+  load,
   read,
   StateInconsistency,
+  UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
 import { unclaimed } from "@commontools/memory/fact";
@@ -22,6 +28,25 @@ import { refer } from "merkle-reference";
 import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
+
+export { InvalidDataURIError, UnsupportedMediaTypeError };
+
+export class ReadOnlyAddressError extends Error
+  implements IReadOnlyAddressError {
+  override readonly name = "ReadOnlyAddressError";
+  declare readonly address: IMemoryAddress;
+
+  constructor(address: IMemoryAddress) {
+    super(
+      `Cannot write to read-only address: ${address.id}`,
+    );
+    this.address = address;
+  }
+
+  from(space: MemorySpace) {
+    return this;
+  }
+}
 
 export class Chronicle {
   #replica: ISpaceReplica;
@@ -69,7 +94,15 @@ export class Chronicle {
   write(
     address: IMemoryAddress,
     value?: JSONValue,
-  ): Result<IAttestation, IStorageTransactionInconsistent> {
+  ): Result<
+    IAttestation,
+    IStorageTransactionInconsistent | ReadOnlyAddressError
+  > {
+    // Check if address is inline (data: URI) - these are read-only
+    if (Address.isInline(address)) {
+      return { error: new ReadOnlyAddressError(address) };
+    }
+
     // Validate against current state (replica + any overlapping novelty)
     const loaded = attest(this.load(address));
     const rebase = this.rebase(loaded);
@@ -87,7 +120,22 @@ export class Chronicle {
 
   read(
     address: IMemoryAddress,
-  ): Result<IAttestation, IStorageTransactionInconsistent> {
+  ): Result<
+    IAttestation,
+    | IStorageTransactionInconsistent
+    | IInvalidDataURIError
+    | IUnsupportedMediaTypeError
+  > {
+    // Handle data URIs
+    if (Address.isInline(address)) {
+      const { ok: attestation, error } = load(address);
+      if (error) {
+        return { error };
+      } else {
+        return read(attestation, address);
+      }
+    }
+
     // If we previously wrote into overlapping memory address we simply
     // read from it.
     const written = this.#novelty.get(address);

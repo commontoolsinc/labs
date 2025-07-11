@@ -12,6 +12,13 @@ console.log("Build source maps:", buildSourcemaps);
 
 // https://vite.dev/config/
 export default defineConfig({
+  esbuild: {
+    tsconfigRaw: {
+      compilerOptions: {
+        experimentalDecorators: true,
+      },
+   },
+  },
   plugins: [deno(), react(), tailwindcss() as any],
   server: {
     allowedHosts: [

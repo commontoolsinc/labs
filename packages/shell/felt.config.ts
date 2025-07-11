@@ -11,6 +11,7 @@ const config: Config = {
   port: 5173,
   publicDir: "public",
   watchDir: "src",
+  redirectToIndex: /^\/(?!(((assets)|(scripts)|(styles))\/.*))/,
   esbuild: {
     sourcemap: !PRODUCTION,
     minify: PRODUCTION,
@@ -24,6 +25,14 @@ const config: Config = {
       "$ENVIRONMENT": ENVIRONMENT,
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
+    },
+    tsconfigRaw: {
+      compilerOptions: {
+        // `useDefineForClassFields` is critical when using Lit
+        // with esbuild, even when not using decorators.
+        useDefineForClassFields: false,
+        experimentalDecorators: true,
+      },
     },
   },
 };

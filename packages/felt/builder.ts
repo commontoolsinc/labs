@@ -9,7 +9,14 @@ export class Builder extends EventTarget {
   }
 
   async watch(watchRoot: string, debounceTimeout: number = 200) {
-    const fn = debounce(this.build.bind(this), debounceTimeout);
+    const fn = debounce(async () => {
+      try {
+        await this.build();
+      } catch (e: any) {
+        const message = e && "message" in e ? e.message : e;
+        console.error(message);
+      }
+    }, debounceTimeout);
     const watcher = Deno.watchFs(watchRoot);
     for await (const _ of watcher) {
       await fn();
@@ -33,11 +40,7 @@ export class Builder extends EventTarget {
       // Explicitly compile decorators, as this what Jumble->Vite
       // does, and no browsers currently support (any form of) decorators,
       // and if we're bundling, we're probably running in a browser.
-      tsconfigRaw: {
-        compilerOptions: {
-          experimentalDecorators: true,
-        },
-      },
+      tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
     };
 
     if (this.manifest.esbuild.metafile) {

@@ -1,5 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import {
+  type JSONValue,
   type Recipe,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
@@ -42,10 +43,11 @@ export function sendValueToBinding<T>(
     const tx = runtime.edit();
     const ref = followWriteRedirects(tx, binding, cell);
     diffAndUpdate(
-      parseNormalizedFullLinktoLegacyDocCellLink(ref, runtime),
-      value,
-      log,
-      { doc: cell.getDoc(), binding },
+      cell.getDoc().runtime,
+      tx,
+      ref,
+      value as JSONValue,
+      { cell: cell.getAsNormalizedFullLink(), binding },
     );
     tx.commit();
     if (log) appendTxToReactivityLog(log, tx, runtime);

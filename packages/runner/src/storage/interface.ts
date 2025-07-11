@@ -336,7 +336,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param address - Memory address to write to.
    * @param value - Value to write.
    */
-  writeOrThrow(address: IMemorySpaceAddress, value: JSONValue): void;
+  writeOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
@@ -347,7 +350,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param address - Memory address to write to.
    * @param value - Value to write.
    */
-  writeValueOrThrow(address: IMemorySpaceAddress, value: JSONValue): void;
+  writeValueOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void;
 
   /**
    * Returns the log of the transaction.
@@ -487,6 +493,8 @@ export interface INotFoundError extends Error {
  */
 export interface IUnsupportedMediaTypeError extends Error {
   name: "UnsupportedMediaTypeError";
+
+  from(space: MemorySpace): IUnsupportedMediaTypeError;
 }
 
 /**
@@ -495,6 +503,8 @@ export interface IUnsupportedMediaTypeError extends Error {
 export interface IInvalidDataURIError extends Error {
   name: "InvalidDataURIError";
   cause: Error;
+
+  from(space: MemorySpace): IInvalidDataURIError;
 }
 
 export type ReadError =
@@ -506,13 +516,15 @@ export type ReadError =
 export type WriteError =
   | INotFoundError
   | IUnsupportedMediaTypeError
-  | InactiveTransactionError;
+  | InactiveTransactionError
+  | IReadOnlyAddressError;
 
 export type ReaderError = InactiveTransactionError;
 
 export type WriterError =
   | InactiveTransactionError
-  | IStorageTransactionWriteIsolationError;
+  | IStorageTransactionWriteIsolationError
+  | IReadOnlyAddressError;
 
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
@@ -681,6 +693,20 @@ export interface IStorageTransactionWriteIsolationError extends Error {
    * Memory space writer could not be opened for.
    */
   requested: MemorySpace;
+}
+
+/**
+ * Error returned when attempting to write to a read-only address (data: URI).
+ */
+export interface IReadOnlyAddressError extends Error {
+  name: "ReadOnlyAddressError";
+
+  /**
+   * The read-only address that was attempted to be written to.
+   */
+  address: IMemoryAddress;
+
+  from(space: MemorySpace): IReadOnlyAddressError;
 }
 
 /**

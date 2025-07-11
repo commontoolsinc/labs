@@ -113,7 +113,7 @@
     "ai": "npm:ai@^4.3.9",
     "esbuild": "npm:esbuild",
     "jsdom": "npm:jsdom",
-    "lit": "npm:lit@^3.2.1",
+    "lit": "npm:lit@^3.3.0",
     "merkle-reference": "npm:merkle-reference@^2.2.0",
     "multiformats": "npm:multiformats@^13.3.2",
     "react": "npm:react@^18.3.1",

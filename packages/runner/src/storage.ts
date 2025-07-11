@@ -26,6 +26,7 @@ import {
 } from "./query-result-proxy.ts";
 import { isLink } from "./link-utils.ts";
 import { uriToEntityId } from "./storage/transaction-shim.ts";
+import { toURI } from "./uri-utils.ts";
 export type { Labels, MemorySpace };
 
 /**
@@ -77,6 +78,10 @@ export class Storage implements IStorage {
 
   // Tracks promises returned by storage updates.
   private docToStoragePromises = new Set<Promise<any>>();
+  // Track the docs that have changes that need to be sent.
+  // They will be removed from here as soon as we call send, but they will
+  // still be in the docToStoragePromises until the send returns.
+  private dirtyDocs = new Set<string>();
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -95,7 +100,7 @@ export class Storage implements IStorage {
    *
    * TODO(seefeld): Should this return a `Cell` instead? Or just an empty promise?
    */
-  syncCell<T = any>(
+  async syncCell<T = any>(
     cell: DocImpl<T> | Cell<any>,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
@@ -113,63 +118,8 @@ export class Storage implements IStorage {
       };
     }
 
-    return this._syncCellHelper(cell, schemaContext);
-  }
-
-  synced(): Promise<void> {
-    return Promise.all([
-      ...this.loadingPromises.values(),
-      ...this.docToStoragePromises.values(),
-    ]).then(() => {
-      return;
-    });
-  }
-
-  async cancelAll(): Promise<void> {
-    await Promise.all(
-      Array.from(this.storageProviders.values()).map((provider) =>
-        provider.destroy()
-      ),
-    );
-    this.loadingPromises.clear();
-    this.loadingResolves.clear();
-    this.storageToDocSubs.clear();
-    this.docToStorageSubs.clear();
-    this.docToStoragePromises.clear();
-    this.cancel();
-  }
-
-  private _getStorageProviderForSpace(space: MemorySpace): IStorageProvider {
-    if (!space) throw new Error("No space set");
-
-    let provider = this.storageProviders.get(space);
-
-    if (!provider) {
-      provider = this.storageManager.open(space);
-      this.storageProviders.set(space, provider);
-    }
-    return provider;
-  }
-
-  // Given a doc and a schema context, return a string that can be used as a map key
-  private static _getSyncKey(doc: DocImpl<any>, schemaContext?: SchemaContext) {
-    // I use SchemaPathSelector here instead of just SchemaContext because
-    // it's the more general way to load a doc.
-    const selector: SchemaPathSelector = {
-      path: [],
-      schemaContext: schemaContext,
-    };
-    const selectorRef = refer(JSON.stringify(selector)).toString();
-    const docId = entityIdStr(doc.entityId);
-    return `${doc.space}/${docId}/application/json:${selectorRef}`;
-  }
-
-  // Replacement for _ensureIsSynced
-  private async _syncCellHelper<T>(
-    doc: DocImpl<T> | Cell<any>,
-    schemaContext?: SchemaContext,
-  ): Promise<DocImpl<T>> {
-    if (isCell(doc) || isStream(doc)) doc = doc.getDoc();
+    let doc = cell;
+    if (isCell(cell) || isStream(cell)) doc = cell.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
@@ -214,6 +164,54 @@ export class Storage implements IStorage {
     return doc;
   }
 
+  async synced(): Promise<void> {
+    await Promise.all([
+      ...this.loadingPromises.values(),
+      ...this.docToStoragePromises.values(),
+    ]);
+    return;
+  }
+
+  async cancelAll(): Promise<void> {
+    await Promise.all(
+      Array.from(this.storageProviders.values()).map((provider) =>
+        provider.destroy()
+      ),
+    );
+    this.loadingPromises.clear();
+    this.loadingResolves.clear();
+    this.storageToDocSubs.clear();
+    this.docToStorageSubs.clear();
+    this.docToStoragePromises.clear();
+    this.dirtyDocs.clear();
+    this.cancel();
+  }
+
+  private _getStorageProviderForSpace(space: MemorySpace): IStorageProvider {
+    if (!space) throw new Error("No space set");
+
+    let provider = this.storageProviders.get(space);
+
+    if (!provider) {
+      provider = this.storageManager.open(space);
+      this.storageProviders.set(space, provider);
+    }
+    return provider;
+  }
+
+  // Given a doc and a schema context, return a string that can be used as a map key
+  private static _getSyncKey(doc: DocImpl<any>, schemaContext?: SchemaContext) {
+    // I use SchemaPathSelector here instead of just SchemaContext because
+    // it's the more general way to load a doc.
+    const selector: SchemaPathSelector = {
+      path: [],
+      schemaContext: schemaContext,
+    };
+    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const docId = entityIdStr(doc.entityId);
+    return `${doc.space}/${docId}/application/json:${selectorRef}`;
+  }
+
   // After attempting to load the relevant documents from storage, we can
   // create any docs needed, and tie the storage and doc together.
   private async _integrateResult<T>(
@@ -221,6 +219,11 @@ export class Storage implements IStorage {
     storageProvider: IStorageProvider,
     schemaContext?: SchemaContext,
   ): Promise<EntityId[]> {
+    // Don't update docs while they might be updating.
+    await this.runtime.scheduler.idle();
+    // Don't update docs while we have pending writes to storage
+    await Promise.all(this.docToStoragePromises);
+
     // Run a schema query against our local content, so we can either send
     // the set of linked docs, or load them.
     const { missing, loaded, selected } = this._queryLocal(
@@ -249,15 +252,12 @@ export class Storage implements IStorage {
       //   console.debug("missing", missing);
     }
 
-    // Don't update docs while they might be updating.
-    await this.runtime.scheduler.idle();
-
     const docMap = this.runtime.documentMap;
     // First, make sure we have all these docs in the runtime document map
     // This should also handle the source docs, since they will be included
     // in our query result.
     for (const entityId of entityIds) {
-      docMap.getDocByEntityId(doc.space, entityId, true)!;
+      docMap.getDocByEntityId(doc.space, entityId, true);
     }
     // Any objects that aren't on the server may need to be sent there.
     const valuesToSend: {
@@ -415,15 +415,17 @@ export class Storage implements IStorage {
         : {},
       ...(labels !== undefined) ? { labels: labels } : {},
     };
-
     const existingValue = this._getStorageProviderForSpace(doc.space).get<
       JSONValue
     >(
       doc.entityId,
     );
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+    // If our value is the same as what storage has, we don't need to do anything.
     if (deepEqual(storageValue, existingValue)) {
       return;
     }
+
     // Track these promises for our synced call.
     // We may have linked docs that storage doesn't know about
     const storageProvider = this._getStorageProviderForSpace(doc.space);
@@ -443,17 +445,42 @@ export class Storage implements IStorage {
       );
       // we don't need to await this, since by the time we've resolved our
       // docToStoragePromise, we'll have added the loadingPromise.
-      this._syncCellHelper(linkedDoc);
+      this.syncCell(linkedDoc);
     }
 
-    const docToStoragePromise = storageProvider.send([{
-      entityId: doc.entityId,
-      value: storageValue,
-    }]);
+    // If we're already dirty, we don't need to add a promise
+    if (this.dirtyDocs.has(docKey)) {
+      return;
+    }
+    this.dirtyDocs.add(docKey);
+    const docToStoragePromise = this._sendDocValue(doc, labels);
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
       this.docToStoragePromises.delete(docToStoragePromise)
     );
+  }
+
+  private async _sendDocValue(doc: DocImpl<unknown>, labels?: Labels) {
+    await this.runtime.idle();
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+    const storageProvider = this._getStorageProviderForSpace(doc.space);
+    // We're dirty -- mark clean, then write to storage
+    this.dirtyDocs.delete(docKey);
+    const storageValue: StorageValue<JSONValue> = {
+      value:
+        (doc.get() === undefined
+          ? undefined
+          : JSON.parse(JSON.stringify(doc.get()))),
+      ...(doc.sourceCell?.entityId !== undefined)
+        ? { source: doc.sourceCell.entityId }
+        : {},
+      ...(labels !== undefined) ? { labels: labels } : {},
+    };
+
+    await storageProvider.send([{
+      entityId: doc.entityId,
+      value: storageValue,
+    }]);
   }
 
   // Update the doc with the new value we got in storage.

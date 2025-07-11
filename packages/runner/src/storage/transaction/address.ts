@@ -25,3 +25,10 @@ export const intersects = (
   }
   return false;
 };
+
+/**
+ * Returns true if the address represents an inline data URI.
+ */
+export const isInline = (address: IMemoryAddress): boolean => {
+  return address.id.startsWith("data:");
+};

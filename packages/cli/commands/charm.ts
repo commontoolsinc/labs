@@ -5,6 +5,7 @@ import {
   CharmConfig,
   formatViewTree,
   generateSpaceMap,
+  getCellValue,
   getCharmView,
   inspectCharm,
   linkCharms,
@@ -12,12 +13,14 @@ import {
   MapFormat,
   newCharm,
   saveCharmRecipe,
+  setCellValue,
   setCharmRecipe,
   SpaceConfig,
 } from "../lib/charm.ts";
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
+import { parsePath } from "@commontools/charm/ops";
 
 // Override usage, since we do not "require" args that can be reflected by env vars.
 const spaceUsage =
@@ -309,6 +312,51 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
 
     render(`Linked ${sourceRef} to ${targetRef}`);
   })
+  /* charm get */
+  .command("get", "Get a value from a charm at a specific path")
+  .usage(charmUsage)
+  .example(
+    `ct charm get ${EX_ID} ${EX_COMP_CHARM} name`,
+    `Get the "name" field from charm result "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `ct charm get ${EX_ID} ${EX_COMP_CHARM} data/users/0/email --input`,
+    `Get a nested field value from charm input "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--input", "Read from the charm's input cell instead of result cell")
+  .arguments("<path:string>")
+  .action(async (options, pathString) => {
+    const charmConfig = parseCharmOptions(options);
+    const pathSegments = parsePath(pathString);
+    const value = await getCellValue(charmConfig, pathSegments, {
+      input: options.input,
+    });
+    render(value, { json: true });
+  })
+  /* charm set */
+  .command("set", "Set a value in a charm at a specific path")
+  .usage(charmUsage)
+  .example(
+    `echo '"New Name"' | ct charm set ${EX_ID} ${EX_COMP_CHARM} name`,
+    `Set the "name" field in charm result "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `echo '{"foo": "bar"}' | ct charm set ${EX_ID} ${EX_COMP_CHARM} config --input`,
+    `Set a nested object value in charm input "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--input", "Write to the charm's input cell instead of result cell")
+  .arguments("<path:string>")
+  .action(async (options, pathString) => {
+    const charmConfig = parseCharmOptions(options);
+    const pathSegments = parsePath(pathString);
+    const value = await drainStdin();
+    await setCellValue(charmConfig, pathSegments, value, {
+      input: options.input,
+    });
+    render(`Set value at path: ${pathString}`);
+  })
   /* charm map */
   .command("map", "Display a visual map of all charms and their connections")
   .usage(spaceUsage)
@@ -436,12 +484,7 @@ export function parseLink(
     return { charmId };
   }
 
-  const path = parts.slice(1).map((segment) => {
-    // Check if segment is a number (array index)
-    const index = parseInt(segment, 10);
-    return isNaN(index) ? segment : index;
-  });
-
+  const path = parsePath(parts.slice(1).join("/"));
   return { charmId, path };
 }
 

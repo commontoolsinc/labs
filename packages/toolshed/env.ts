@@ -119,6 +119,9 @@ const EnvSchema = z.object({
 
   // Path to an identity key.
   IDENTITY: z.string().default(""),
+
+  // In development, you can optionally proxy the upstream SHELL
+  SHELL_URL: z.string().optional(),
 });
 
 export type env = z.infer<typeof EnvSchema>;

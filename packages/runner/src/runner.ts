@@ -230,12 +230,15 @@ export class Runner implements IRunner {
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
     if (argument) {
+      const tx = this.runtime.edit();
       diffAndUpdate(
-        processCell.key("argument").getAsLegacyCellLink(),
+        this.runtime,
+        tx,
+        processCell.key("argument").getAsNormalizedFullLink(),
         argument,
-        undefined,
-        processCell.getDoc(),
+        processCell.getAsNormalizedFullLink(),
       );
+      tx.commit();
     }
 
     // Send "query" to results to the result doc only on initial run or if recipe
@@ -644,7 +647,7 @@ export class Runner implements IRunner {
               sendValueToBinding(
                 processCell,
                 outputs,
-                resultDoc.getAsLegacyCellLink(),
+                resultDoc.getAsLink(),
                 log,
               );
             }

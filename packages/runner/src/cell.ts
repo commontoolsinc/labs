@@ -389,12 +389,10 @@ function createRegularCell<T>(
 
       // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
       const changed = diffAndUpdate(
-        parseNormalizedFullLinktoLegacyDocCellLink(
-          resolveLinkToWriteRedirect(tx, link),
-          runtime,
-        ),
+        runtime,
+        tx,
+        resolveLinkToWriteRedirect(tx, link),
         newValue,
-        log,
         getTopFrame()?.cause,
       );
       tx.commit();
@@ -470,12 +468,10 @@ function createRegularCell<T>(
       // in the array.
       if (array === undefined) {
         diffAndUpdate(
-          parseNormalizedFullLinktoLegacyDocCellLink(
-            resolvedLink,
-            runtime,
-          ),
+          runtime,
+          tx,
+          resolvedLink,
           [],
-          log,
           cause,
         );
         array = Array.isArray(schema?.default) ? schema.default : [];
@@ -483,12 +479,10 @@ function createRegularCell<T>(
 
       // Append the new values to the array.
       diffAndUpdate(
-        parseNormalizedFullLinktoLegacyDocCellLink(
-          resolvedLink,
-          runtime,
-        ),
+        runtime,
+        tx,
+        resolvedLink,
         [...array, ...valuesToWrite],
-        log,
         cause,
       );
       tx.commit();
@@ -607,7 +601,7 @@ function createRegularCell<T>(
     [isCellMarker]: true,
     get copyTrap(): boolean {
       throw new Error(
-        "Copy trap: Don't cells. Create references instead.",
+        "Copy trap: Don't copy cells. Create references instead.",
       );
     },
     schema,

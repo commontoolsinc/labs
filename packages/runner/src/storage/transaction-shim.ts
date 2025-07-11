@@ -559,7 +559,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.write(address, value);
   }
 
-  writeOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
+  writeOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void {
     const writeResult = this.tx.write(address, value);
     if (writeResult.error && writeResult.error.name === "NotFoundError") {
       // Create parent entries if needed
@@ -594,7 +597,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  writeValueOrThrow(address: IMemorySpaceAddress, value: JSONValue): void {
+  writeValueOrThrow(
+    address: IMemorySpaceAddress,
+    value: JSONValue | undefined,
+  ): void {
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 

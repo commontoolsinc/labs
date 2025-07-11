@@ -688,5 +688,202 @@ describe("Attestation Module", () => {
         expect(withSpace.message).toContain(`in space "${space}"`);
       });
     });
+
+    describe("load function", () => {
+      it("should load valid JSON data URI", () => {
+        const address = {
+          id: 'data:application/json,{"hello":"world"}' as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toEqual({ hello: "world" });
+      });
+
+      it("should load base64 encoded JSON data URI", () => {
+        const address = {
+          id: "data:application/json;base64,eyJoZWxsbyI6IndvcmxkIn0=" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toEqual({ hello: "world" });
+      });
+
+      it("should load text/plain data URI", () => {
+        const address = {
+          id: "data:text/plain,hello%20world" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toBe("hello world");
+      });
+
+      it("should load text/plain data URI with base64 encoding", () => {
+        const address = {
+          id: "data:text/plain;base64,aGVsbG8gd29ybGQ=" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toBe("hello world");
+      });
+
+      it("should handle empty media type (defaults to text/plain)", () => {
+        const address = {
+          id: "data:,hello%20world" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toBe("hello world");
+      });
+
+      it("should return UnsupportedMediaTypeError for media type mismatch", () => {
+        const address = {
+          id: "data:text/plain,hello%20world" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error).toBeInstanceOf(
+          Attestation.UnsupportedMediaTypeError,
+        );
+        expect(result.error!.name).toBe("UnsupportedMediaTypeError");
+        expect(result.error!.message).toContain("Media type mismatch");
+        expect(result.error!.message).toContain('expected "application/json"');
+        expect(result.error!.message).toContain(
+          'but data URI contains "text/plain"',
+        );
+      });
+
+      it("should return InvalidDataURIError for invalid JSON", () => {
+        const address = {
+          id: "data:application/json,{invalid-json" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error).toBeInstanceOf(Attestation.InvalidDataURIError);
+        expect(result.error!.name).toBe("InvalidDataURIError");
+        expect(result.error!.message).toContain(
+          "Failed to parse JSON from data URI",
+        );
+      });
+
+      it("should return InvalidDataURIError for malformed data URI", () => {
+        const address = {
+          id: "data:application/json;no-comma-separator" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error).toBeInstanceOf(Attestation.InvalidDataURIError);
+        expect(result.error!.name).toBe("InvalidDataURIError");
+        expect(result.error!.message).toContain("missing comma separator");
+      });
+
+      it("should return InvalidDataURIError for non-data URI", () => {
+        const address = {
+          id: "http:example.com/data.json" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.error).toBeDefined();
+        expect(result.error!.name).toBe("InvalidDataURIError");
+        expect(result.error!.message).toContain("protocol must be 'data:'");
+      });
+
+      it("should handle complex JSON objects", () => {
+        const jsonData = {
+          user: {
+            name: "Alice",
+            age: 30,
+            active: true,
+            tags: ["developer", "javascript"],
+          },
+          metadata: {
+            created: "2023-01-01T00:00:00Z",
+            version: 1,
+          },
+        };
+
+        const address = {
+          id: `data:application/json,${
+            encodeURIComponent(JSON.stringify(jsonData))
+          }` as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toEqual(jsonData);
+      });
+
+      it("should handle additional parameters in data URI", () => {
+        const address = {
+          id:
+            "data:application/json;charset=utf-8;base64,eyJoZWxsbyI6IndvcmxkIn0=" as const,
+          type: "application/json" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toEqual({ hello: "world" });
+      });
+
+      it("should handle URL-encoded special characters", () => {
+        const address = {
+          id: "data:text/plain,Hello%20World%21%20%40%23%24%25" as const,
+          type: "text/plain" as const,
+          path: [],
+        };
+
+        const result = Attestation.load(address);
+
+        expect(result.ok).toBeDefined();
+        expect(result.ok!.address).toEqual(address);
+        expect(result.ok!.value).toBe("Hello World! @#$%");
+      });
+    });
   });
 });

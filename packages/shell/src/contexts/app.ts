@@ -1,4 +1,4 @@
 import { createContext } from "@lit/context";
-import { App } from "../models/app.ts";
+import { AppState } from "../lib/app/mod.ts";
 
-export const appContext = createContext<App>("app");
+export const appContext = createContext<AppState>("app");

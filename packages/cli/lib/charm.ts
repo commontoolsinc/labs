@@ -9,7 +9,13 @@ import {
   CharmManager,
   extractUserCode,
 } from "@commontools/charm";
-import { CharmsView } from "@commontools/charm/ops";
+import {
+  CharmsController,
+  getCharmInput,
+  getCharmResult,
+  setCharmInput,
+  setCharmResult,
+} from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 
@@ -103,7 +109,7 @@ export async function listCharms(
   config: SpaceConfig,
 ): Promise<{ id: string; name?: string; recipeName?: string }[]> {
   const manager = await loadManager(config);
-  const charms = new CharmsView(manager);
+  const charms = new CharmsController(manager);
   return Promise.all(
     charms.getAllCharms().map(async (charm) => {
       return {
@@ -121,7 +127,7 @@ export async function newCharm(
   entry: EntryConfig,
 ): Promise<string> {
   const manager = await loadManager(config);
-  const charms = new CharmsView(manager);
+  const charms = new CharmsController(manager);
   const program = await getProgramFromFile(manager, entry);
   const charm = await charms.create(program);
   return charm.id;
@@ -132,7 +138,7 @@ export async function setCharmRecipe(
   entry: EntryConfig,
 ): Promise<void> {
   const manager = await loadManager(config);
-  const charms = new CharmsView(manager);
+  const charms = new CharmsController(manager);
   const charm = await charms.get(config.charm);
   if (entry.mainPath.endsWith(".iframe.js")) {
     await charm.setIframeRecipe(entry.mainPath);
@@ -147,7 +153,7 @@ export async function saveCharmRecipe(
 ): Promise<void> {
   await ensureDir(outPath);
   const manager = await loadManager(config);
-  const charms = new CharmsView(manager);
+  const charms = new CharmsController(manager);
   const charm = await charms.get(config.charm);
   const meta = await charm.getRecipeMeta();
   const iframeRecipe = await charm.getIframeRecipe();
@@ -183,7 +189,7 @@ export async function applyCharmInput(
   input: object,
 ) {
   const manager = await loadManager(config);
-  const charms = new CharmsView(manager);
+  const charms = new CharmsController(manager);
   const charm = await charms.get(config.charm);
   await charm.setInput(input);
 }
@@ -369,7 +375,7 @@ export async function inspectCharm(
   readBy: Array<{ id: string; name?: string }>;
 }> {
   const manager = await loadManager(config);
-  const charms = new CharmsView(manager);
+  const charms = new CharmsController(manager);
   const charm = await charms.get(config.charm);
 
   const id = charm.id;
@@ -431,4 +437,31 @@ export function formatViewTree(view: unknown): string {
   };
 
   return format(view, "", true);
+}
+
+export async function getCellValue(
+  config: CharmConfig,
+  path: (string | number)[],
+  options?: { input?: boolean },
+): Promise<any> {
+  const manager = await loadManager(config);
+  if (options?.input) {
+    return await getCharmInput(manager, config.charm, path);
+  } else {
+    return await getCharmResult(manager, config.charm, path);
+  }
+}
+
+export async function setCellValue(
+  config: CharmConfig,
+  path: (string | number)[],
+  value: any,
+  options?: { input?: boolean },
+): Promise<void> {
+  const manager = await loadManager(config);
+  if (options?.input) {
+    await setCharmInput(manager, config.charm, path, value);
+  } else {
+    await setCharmResult(manager, config.charm, path, value);
+  }
 }
