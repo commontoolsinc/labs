@@ -7,6 +7,7 @@ import {
 import { createPath } from "@/routes.ts";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { AuthenticationView } from "@/views/AuthenticationView.tsx";
+import { constants } from "node:buffer";
 
 function Launcher() {
   const { spellId, replicaName } = useParams<{
@@ -53,10 +54,7 @@ function Launcher() {
         await charmManager.syncRecipeById(spellId);
         console.log("Recipe sync completed");
 
-        const tx = charmManager.runtime.edit();
-
         const recipe = await charmManager.runtime.recipeManager.loadRecipe(
-          tx,
           spellId,
           charmManager.getSpace(),
         );
@@ -92,13 +90,10 @@ function Launcher() {
 
         // Run the spell with the suggested values
         console.log("Creating run with suggested values");
-        let spell = await charmManager.runPersistent(
-          tx,
+        const spell = await charmManager.runPersistent(
           recipe,
           suggestionData.values || {},
         );
-        spell = spell.withTx();
-        tx.commit(); // TODO(seefeld): Retry?
 
         console.log("Spell run created:", spell);
 

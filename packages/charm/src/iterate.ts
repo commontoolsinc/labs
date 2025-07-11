@@ -155,9 +155,7 @@ export const generateNewRecipeVersion = async (
     throw new Error("No recipeId found for charm");
   }
 
-  const tx = charmManager.runtime.edit();
   const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
-    tx,
     parentInfo.recipeId,
     charmManager.getSpace(),
   );
@@ -520,7 +518,6 @@ export async function castNewRecipe(
 }
 
 export async function compileRecipe(
-  tx: IExtendedStorageTransaction,
   recipeSrc: string | RuntimeProgram,
   spec: string,
   runtime: Runtime,
@@ -549,7 +546,7 @@ export async function compileRecipe(
   } else {
     recipeMeta.program = recipeSrc;
   }
-  await runtime.recipeManager.saveAndSyncRecipe(tx, {
+  await runtime.recipeManager.saveAndSyncRecipe({
     recipeId,
     space,
     recipe,
@@ -567,33 +564,21 @@ export async function compileAndRunRecipe(
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {
-  const tx = charmManager.runtime.edit();
-
-  try {
-    const recipe = await compileRecipe(
-      tx,
-      recipeSrc,
-      spec,
-      charmManager.runtime,
-      charmManager.getSpace(),
-      parents,
-    );
-    if (!recipe) {
-      throw new Error("Failed to compile recipe");
-    }
-
-    const charm = await charmManager.runPersistent(
-      tx,
-      recipe,
-      runOptions,
-      undefined,
-      llmRequestId,
-    );
-    return charm.withTx();
-  } catch (e) {
-    tx.abort();
-    throw e;
-  } finally {
-    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
+  const recipe = await compileRecipe(
+    recipeSrc,
+    spec,
+    charmManager.runtime,
+    charmManager.getSpace(),
+    parents,
+  );
+  if (!recipe) {
+    throw new Error("Failed to compile recipe");
   }
+
+  return await charmManager.runPersistent(
+    recipe,
+    runOptions,
+    undefined,
+    llmRequestId,
+  );
 }

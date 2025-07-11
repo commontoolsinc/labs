@@ -1,5 +1,4 @@
 import { CharmManager } from "../manager.ts";
-import { Cell } from "@commontools/runner";
 
 export type CellPath = readonly (string | number)[];
 
@@ -109,9 +108,7 @@ export async function setCharmInput(
   path: CellPath,
   value: unknown,
 ): Promise<void> {
-  const tx = manager.runtime.edit();
-
-  const charmCell = await manager.get(charmId, false, undefined, tx);
+  const charmCell = await manager.get(charmId, false, undefined);
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
@@ -124,7 +121,6 @@ export async function setCharmInput(
 
   targetCell.set(value as any);
 
-  await tx.commit();
   await manager.runtime.idle();
   await manager.synced();
 }
@@ -135,9 +131,7 @@ export async function setCharmResult(
   path: CellPath,
   value: unknown,
 ): Promise<void> {
-  const tx = manager.runtime.edit();
-
-  const charmCell = await manager.get(charmId, false, undefined, tx);
+  const charmCell = await manager.get(charmId, false, undefined);
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
@@ -149,7 +143,6 @@ export async function setCharmResult(
 
   targetCell.set(value as any);
 
-  await tx.commit();
   await manager.runtime.idle();
   await manager.synced();
 }

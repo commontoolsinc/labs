@@ -74,23 +74,25 @@ export class Runner implements IRunner {
    * @returns The result cell.
    */
   run<T, R>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
-    tx: IExtendedStorageTransaction,
+    providedTx: IExtendedStorageTransaction,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R> {
+    const tx = providedTx ?? this.runtime.edit();
+
     type ProcessCellData = {
       [TYPE]: string;
       spell?: SigilLink;
@@ -152,11 +154,11 @@ export class Runner implements IRunner {
     }
 
     recipeId ??= this.runtime.recipeManager.registerRecipe(recipe);
-    this.runtime.recipeManager.saveRecipe(tx, {
+    this.runtime.recipeManager.saveRecipe({
       recipeId,
       space: resultCell.space,
       recipe,
-    });
+    }, tx);
 
     if (this.cancels.has(resultCell.getDoc())) {
       // If it's already running and no new recipe or argument are given,
@@ -256,6 +258,10 @@ export class Runner implements IRunner {
 
     // NOTE(ja): perhaps this should actually return as a Cell<Charm>?
     // Return the correct type based on what was passed in
+
+    // We created our own transaction, so we need to commit it
+    if (!providedTx) tx.commit();
+
     return resultCell;
   }
 
@@ -264,21 +270,28 @@ export class Runner implements IRunner {
     recipe: Recipe | Module,
     inputs?: any,
   ) {
-    if (!resultCell.tx) {
-      throw new Error("Result cell must have a transaction");
-    }
-    const tx = resultCell.tx;
-
     await this.runtime.storage.syncCell(resultCell);
 
     const synced = await this.syncCellsForRunningRecipe(
-      tx,
       resultCell,
       recipe,
       inputs,
     );
 
-    this.run(tx, recipe, inputs, resultCell);
+    // Run the recipe.
+    //
+    // If the result cell has a transaction attached, and it is still open,
+    // we'll use it for all reads and writes as it might be a pending read.
+    //
+    // TODO(seefeld): There is currently likely a race condition with the
+    // scheduler if the transaction isn't committed before the first functions
+    // run. Though most likely the worst case is just extra invocations.
+    this.run(
+      resultCell.tx?.status().ok?.open ? resultCell.tx : undefined,
+      recipe,
+      inputs,
+      resultCell,
+    );
 
     // If a new recipe was specified, make sure to sync any new cells
     // TODO(seefeld): Possible race condition here with lifted functions running
@@ -286,7 +299,7 @@ export class Runner implements IRunner {
     // finishing the computation. Should be fixed by changing conflict resolution
     // for derived values to be based on what they are derived from.
     if (recipe || !synced) {
-      await this.syncCellsForRunningRecipe(tx, resultCell, recipe);
+      await this.syncCellsForRunningRecipe(resultCell, recipe);
     }
 
     return recipe?.resultSchema
@@ -295,7 +308,6 @@ export class Runner implements IRunner {
   }
 
   private async syncCellsForRunningRecipe(
-    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
     recipe: Module | Recipe,
     inputs?: any,
@@ -311,7 +323,7 @@ export class Runner implements IRunner {
 
       if (link) {
         const maybePromise = this.runtime.storage.syncCell(
-          this.runtime.getCellFromLink(link, undefined, tx),
+          this.runtime.getCellFromLink(link),
         );
         if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (isRecord(value)) {
@@ -346,9 +358,8 @@ export class Runner implements IRunner {
 
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
-      [...inputs, ...outputs].forEach((c) => {
-        const cell = this.runtime.getCellFromLink(c, undefined, tx);
-        cells.push(cell);
+      [...inputs, ...outputs].forEach((cell) => {
+        cells.push(this.runtime.getCellFromLink(cell));
       });
     }
 

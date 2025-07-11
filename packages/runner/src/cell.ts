@@ -486,16 +486,12 @@ function createRegularCell<T>(
     getAsQueryResult: (
       subPath: PropertyKey[] = [],
       newTx?: IExtendedStorageTransaction,
-    ) => {
-      if (!newTx && !tx) {
-        throw new Error("Transaction required for getAsQueryResult");
-      }
-      return createQueryResultProxy(
+    ) =>
+      createQueryResultProxy(
         runtime,
         newTx ?? tx ?? runtime.edit(),
         { ...link, path: [...path, ...subPath.map((p) => p.toString())] },
-      );
-    },
+      ),
     getAsLegacyCellLink: (): LegacyDocCellLink => {
       return {
         space: doc.space,

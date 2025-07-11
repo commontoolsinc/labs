@@ -720,14 +720,10 @@ export async function processWorkflow(
             },
           }),
         );
-        const tx = charmManager.runtime.edit();
-        let newCharm = await charmManager.runPersistent(
-          tx,
+        const newCharm = await charmManager.runPersistent(
           recipe,
           charm,
         );
-        newCharm = newCharm.withTx();
-        tx.commit(); // TODO(seefeld): Retry? Await confirmation?
 
         globalThis.dispatchEvent(
           new CustomEvent("job-complete", {

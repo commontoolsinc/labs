@@ -98,7 +98,6 @@ async function castRecipe() {
     await charmManager.ready;
     const tx = runtime.edit();
     const recipe = await compileRecipe(
-      tx,
       recipeSrc,
       "recipe",
       runtime,
@@ -106,11 +105,9 @@ async function castRecipe() {
     );
     console.log("Recipe compiled successfully");
 
-    let charm = await charmManager.runPersistent(tx, recipe, {
+    const charm = await charmManager.runPersistent(recipe, {
       charms: targetCell,
     });
-    charm = charm.withTx();
-    await tx.commit(); // TODO(seefeld): Retry?
 
     console.log("Recipe cast successfully!");
     console.log("Result charm ID:", getEntityId(charm));

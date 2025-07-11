@@ -50,13 +50,10 @@ export class CharmController {
   async getRecipe(): Promise<Recipe> {
     const recipeId = getRecipeIdFromCharm(this.#cell);
     const runtime = this.#manager.runtime;
-    const tx = runtime.edit();
     const recipe = await runtime.recipeManager.loadRecipe(
-      tx,
       recipeId,
       this.#manager.getSpace(),
     );
-    await tx.commit();
     return recipe;
   }
 

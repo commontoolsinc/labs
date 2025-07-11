@@ -48,8 +48,8 @@ export class RecipeManager implements IRecipeManager {
   constructor(readonly runtime: IRuntime) {}
 
   private getRecipeMetaCell(
-    tx: IExtendedStorageTransaction | undefined,
     { recipeId, space }: { recipeId: string; space: MemorySpace },
+    tx?: IExtendedStorageTransaction,
   ): Cell<RecipeMeta> {
     const cell = this.runtime.getCell(
       space,
@@ -92,14 +92,16 @@ export class RecipeManager implements IRecipeManager {
   }
 
   saveRecipe(
-    tx: IExtendedStorageTransaction,
     { recipeId, space, recipe, recipeMeta }: {
       recipeId: string;
       space: MemorySpace;
       recipe?: Recipe | Module;
       recipeMeta?: RecipeMeta;
     },
+    providedTx?: IExtendedStorageTransaction,
   ): boolean {
+    const tx = providedTx ?? this.runtime.edit();
+
     // FIXME(ja): should we update the recipeMeta if it already exists? when does this happen?
     if (this.recipeMetaMap.has(recipe as Recipe)) {
       return true;
@@ -125,25 +127,27 @@ export class RecipeManager implements IRecipeManager {
       return false;
     }
 
-    const recipeMetaCell = this.getRecipeMetaCell(tx, { recipeId, space })
-      .withTx(tx);
+    const recipeMetaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
     recipeMetaCell.set(recipeMeta);
+
+    if (!providedTx) tx.commit();
+
     this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell.withTx());
     return true;
   }
 
   async saveAndSyncRecipe(
-    tx: IExtendedStorageTransaction,
     { recipeId, space, recipe, recipeMeta }: {
       recipeId: string;
       space: MemorySpace;
       recipe: Recipe | Module;
       recipeMeta: RecipeMeta;
     },
+    tx?: IExtendedStorageTransaction,
   ) {
-    if (this.saveRecipe(tx, { recipeId, space, recipe, recipeMeta })) {
+    if (this.saveRecipe({ recipeId, space, recipe, recipeMeta }, tx)) {
       await this.runtime.storage.syncCell(
-        this.getRecipeMetaCell(tx, { recipeId, space }),
+        this.getRecipeMetaCell({ recipeId, space }, tx),
       );
     }
   }
@@ -169,11 +173,11 @@ export class RecipeManager implements IRecipeManager {
   // we need to ensure we only compile once otherwise we get ~12 +/- 4
   // compiles of each recipe
   private async compileRecipeOnce(
-    tx: IExtendedStorageTransaction,
     recipeId: string,
     space: MemorySpace,
+    tx?: IExtendedStorageTransaction,
   ): Promise<Recipe> {
-    const metaCell = this.getRecipeMetaCell(tx, { recipeId, space });
+    const metaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
     await this.runtime.storage.syncCell(metaCell);
     const recipeMeta = metaCell.get();
 
@@ -191,9 +195,9 @@ export class RecipeManager implements IRecipeManager {
   }
 
   async loadRecipe(
-    tx: IExtendedStorageTransaction,
     id: string,
     space: MemorySpace,
+    tx?: IExtendedStorageTransaction,
   ): Promise<Recipe> {
     const existing = this.recipeIdMap.get(id);
     if (existing) {
@@ -205,7 +209,7 @@ export class RecipeManager implements IRecipeManager {
     }
 
     // single-flight compilation
-    const compilationPromise = this.compileRecipeOnce(tx, id, space)
+    const compilationPromise = this.compileRecipeOnce(id, space, tx)
       .finally(() => this.inProgressCompilations.delete(id)); // tidy up
 
     this.inProgressCompilations.set(id, compilationPromise);

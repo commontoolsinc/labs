@@ -106,10 +106,6 @@ export interface IRuntime {
 
   // Storage transaction method
   edit(): IExtendedStorageTransaction;
-  readWithOptionalTx<T>(
-    tx: IExtendedStorageTransaction | undefined,
-    fn: (tx: IExtendedStorageTransaction) => T,
-  ): T;
 
   // Cell factory methods
   getCell<S extends JSONSchema = JSONSchema>(
@@ -214,29 +210,29 @@ export interface IRecipeManager {
   recipeById(id: string): any;
   registerRecipe(recipe: any, src?: string | RuntimeProgram): string;
   loadRecipe(
-    tx: IExtendedStorageTransaction,
     id: string,
     space?: MemorySpace,
+    tx?: IExtendedStorageTransaction,
   ): Promise<Recipe>;
   compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
   saveRecipe(
-    tx: IExtendedStorageTransaction,
     params: {
       recipeId: string;
       space: MemorySpace;
       recipe?: Recipe | Module;
       recipeMeta?: RecipeMeta;
     },
+    tx?: IExtendedStorageTransaction,
   ): boolean;
   saveAndSyncRecipe(
-    tx: IExtendedStorageTransaction,
     params: {
       recipeId: string;
       space: MemorySpace;
       recipe?: Recipe | Module;
       recipeMeta?: RecipeMeta;
     },
+    tx?: IExtendedStorageTransaction,
   ): Promise<void>;
 }
 
@@ -420,28 +416,6 @@ export class Runtime implements IRuntime {
   edit(): IExtendedStorageTransaction {
     // TODO(seefeld): Make this a flag to use the new transaction system instead
     return new ExtendedStorageTransaction(new StorageTransaction(this));
-  }
-
-  /**
-   * Read with an optional transaction. If no transaction is provided, the
-   * runtime will create a temporary transaction. Only use for reading.
-   *
-   * @param tx - The transaction to use. If not provided, the runtime will
-   * create a temporary transaction.
-   * @param fn - The function to read with.
-   * @returns The result of the function.
-   */
-  readWithOptionalTx<T>(
-    tx: IExtendedStorageTransaction | undefined,
-    fn: (tx: IExtendedStorageTransaction) => T,
-  ): T {
-    // TODO(seefeld): Can we make a transaction read-only
-    const transaction = tx ?? this.edit();
-    const result = fn(transaction);
-    // No await, no retry, this is meant to run synchronously, and so shouldn't
-    // trigger inconsistent reads
-    if (!tx) transaction.commit();
-    return result;
   }
 
   // Cell factory methods

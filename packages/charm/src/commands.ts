@@ -21,14 +21,10 @@ export const castSpellAsCharm = async (
     if (!recipe) return;
 
     console.log("Casting...");
-    const tx = charmManager.runtime.edit();
-    const charm: Cell<Charm> = await charmManager.runPersistent(
-      tx,
+    return await charmManager.runPersistent(
       recipe,
       argument,
     );
-    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
-    return charm.withTx();
   }
   console.log("Failed to cast");
   return null;

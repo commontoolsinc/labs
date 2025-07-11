@@ -13,7 +13,6 @@ const space = signer.did();
 describe("runRecipe", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -23,11 +22,9 @@ describe("runRecipe", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
-    tx = runtime.edit();
   });
 
   afterEach(async () => {
-    await tx.commit();
     await runtime?.storage.synced();
     await runtime?.dispose();
     await storageManager?.close();
@@ -59,8 +56,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should work with passthrough",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, recipe, { input: 1 });
     await runtime.idle();
@@ -129,8 +124,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should work with nested recipes",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, outerRecipe, {
       value: 5,
@@ -160,8 +153,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should run a simple module",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
@@ -194,8 +185,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should run a simple module with no outputs",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
@@ -229,8 +218,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should handle incorrect inputs gracefully",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
@@ -273,8 +260,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "should handle nested recipes",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
@@ -300,32 +285,39 @@ describe("runRecipe", () => {
       ],
     };
 
+    const tx1 = runtime.edit();
     const inputCell = runtime.getCell<{ input: number; output: number }>(
       space,
       "should allow passing a cell as a binding: input cell",
       undefined,
-      tx,
+      tx1,
     );
     inputCell.set({ input: 10, output: 0 });
+    await tx1.commit();
+
     const resultCell = runtime.getCell(
       space,
       "should allow passing a cell as a binding",
-      undefined,
-      tx,
     );
+
     const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
     await runtime.idle();
 
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
-    expect(result.getAsQueryResult()).toEqual({ output: 20 });
+    expect(result.get()).toEqual({ output: 20 });
 
     // The result should alias the original cell. Let's verify by stopping the
     // recipe and sending a new value to the input cell.
     runtime.runner.stop(result);
-    inputCell.send({ input: 10, output: 40 });
+
+    const tx2 = runtime.edit();
+    inputCell.withTx(tx2).send({ input: 10, output: 40 });
+    await tx2.commit();
+
+    expect(result.get()).toEqual({ output: 40 });
+
     await runtime.idle();
-    expect(result.getAsQueryResult()).toEqual({ output: 40 });
   });
 
   it("should allow stopping a recipe", async () => {
@@ -345,6 +337,7 @@ describe("runRecipe", () => {
       ],
     };
 
+    const tx = runtime.edit();
     const inputCell = runtime.getCell<{ input: number; output: number }>(
       space,
       "should allow stopping a recipe: input cell",
@@ -358,20 +351,30 @@ describe("runRecipe", () => {
       undefined,
       tx,
     );
+
+    // Commit the initial values before running the recipe
+    await tx.commit();
+
     const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
     await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
 
-    inputCell.send({ input: 20, output: 20 });
+    const tx2 = runtime.edit();
+    inputCell.withTx(tx2).send({ input: 20, output: 20 });
+    await tx2.commit();
     await runtime.idle();
+
     expect(inputCell.get()).toMatchObject({ input: 20, output: 40 });
 
     // Stop the recipe
     runtime.runner.stop(result);
 
-    inputCell.send({ input: 40, output: 40 });
+    const tx3 = runtime.edit();
+    inputCell.withTx(tx3).send({ input: 40, output: 40 });
+    await tx3.commit();
     await runtime.idle();
+
     expect(inputCell.get()).toMatchObject({ input: 40, output: 40 });
 
     // Restart the recipe
@@ -410,9 +413,8 @@ describe("runRecipe", () => {
     const resultWithPartialCell = runtime.getCell(
       space,
       "default values test - partial",
-      undefined,
-      tx,
     );
+
     const resultWithPartial = await runtime.runSynced(
       resultWithPartialCell,
       recipe,
@@ -425,9 +427,8 @@ describe("runRecipe", () => {
     const resultWithDefaultsCell = runtime.getCell(
       space,
       "default values test - all defaults",
-      undefined,
-      tx,
     );
+
     const resultWithDefaults = await runtime.runSynced(
       resultWithDefaultsCell,
       recipe,
@@ -489,8 +490,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "complex schema test",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, recipe, {
       config: { values: [10, 20, 30, 40], operation: "avg" },
@@ -545,8 +544,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell(
       space,
       "merge defaults test",
-      undefined,
-      tx,
     );
     const result = await runtime.runSynced(resultCell, recipe, {
       options: { value: 10 },
@@ -588,8 +585,6 @@ describe("runRecipe", () => {
     const resultCell = runtime.getCell<any>(
       space,
       "state preservation test",
-      undefined,
-      tx,
     );
 
     // First run
@@ -647,8 +642,6 @@ describe("runRecipe", () => {
     const result1Cell = runtime.getCell(
       space,
       "should create separate copies of initial values 1",
-      undefined,
-      tx,
     );
     const result1 = await runtime.runSynced(result1Cell, recipe, {
       input: 5,
@@ -659,8 +652,6 @@ describe("runRecipe", () => {
     const result2Cell = runtime.getCell(
       space,
       "should create separate copies of initial values 2",
-      undefined,
-      tx,
     );
     const result2 = await runtime.runSynced(result2Cell, recipe, {
       input: 10,

@@ -264,6 +264,14 @@ export function validateAndTransform(
   log?: ReactivityLog,
   seen: Array<[string, any]> = [],
 ): any {
+  // If the transaction is no longer open, just treat it as no transaction, i.e.
+  // create temporary transactions to read. The main reason we use transactions
+  // here is so that this operation can see open reads, that are only accessible
+  // from the tx. Once tx.commit() is called, all that data is either available
+  // via other transactions or has been rolled back. Either way, we want to
+  // reflect that reality.
+  if (!tx?.status().ok?.open) tx = undefined;
+
   // Reconstruct doc, path, schema, rootSchema from link and runtime
   const schema = link.schema;
   let rootSchema = link.rootSchema ?? schema;
@@ -272,10 +280,7 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedLink = runtime.readWithOptionalTx(
-    tx,
-    (tx) => resolveLinkToWriteRedirect(tx, link),
-  );
+  const resolvedLink = resolveLinkToWriteRedirect(tx ?? runtime.edit(), link);
 
   // Use schema from alias if provided and no explicit schema was set
   if (!resolvedSchema && resolvedLink.schema) {
@@ -324,13 +329,12 @@ export function validateAndTransform(
 
     // Start with empty path, iterate to full path (hence <= and not <)
     for (let i = 0; i <= link.path.length; i++) {
-      const parsedLink = runtime.readWithOptionalTx(
-        tx,
-        (tx) =>
-          readMaybeLink(tx, {
-            ...link,
-            path: link.path.slice(0, i),
-          }),
+      const parsedLink = readMaybeLink(
+        tx ?? runtime.edit(),
+        {
+          ...link,
+          path: link.path.slice(0, i),
+        },
       );
 
       if (parsedLink?.overwrite === "redirect") {
@@ -379,13 +383,8 @@ export function validateAndTransform(
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  let value = runtime.readWithOptionalTx(
-    tx,
-    (tx) => {
-      const ref = resolveLinks(tx, link);
-      return tx.readValueOrThrow(ref);
-    },
-  );
+  const ref = resolveLinks(tx ?? runtime.edit(), link);
+  let value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
