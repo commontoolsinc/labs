@@ -46,7 +46,7 @@ describe("CTOutliner Offline Mode", () => {
       const originalValue = outliner.value;
 
       // Modify the tree
-      outliner.tree.root.children[0].body = "Modified";
+      outliner.value.get().root.children[0].body = "Modified";
 
       // Keep offline mode disabled and emit change
       outliner.offline = false;
