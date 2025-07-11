@@ -1,9 +1,12 @@
 import { css, html } from "lit";
 import { Task } from "@lit/task";
 import { state } from "lit/decorators.js";
+import { consume } from "@lit/context";
+
+import { CharmsController } from "@commontools/charm/ops";
+
 import { AppState } from "../lib/app/mod.ts";
 import { appContext } from "../contexts/app.ts";
-import { consume } from "@lit/context";
 import { BaseView } from "./BaseView.ts";
 import { createCharmsController } from "../lib/runtime.ts";
 
@@ -35,28 +38,74 @@ export class XAppView extends BaseView {
   @state()
   private app?: AppState;
 
+  // Track the current controller to ensure proper cleanup when app state changes.
+  // This prevents WebSocket connection leaks and ensures only one runtime exists
+  // at a time, avoiding resource exhaustion and potential conflicts.
+  private _currentController: CharmsController | null = null;
+
   private _cc = new Task(this, {
     task: async ([app]) => {
-      console.log("TASK START", app);
+      console.log("[AppView] Task triggered with app state:", {
+        hasIdentity: !!app?.identity,
+        identityDid: app?.identity?.did(),
+        spaceName: app?.spaceName,
+        apiUrl: app?.apiUrl?.toString(),
+      });
+
       if (!app || !app.identity || !app.spaceName || !app.apiUrl) {
+        console.log(
+          "[AppView] Missing required app state, cleaning up controller",
+        );
+        await this._cleanupController();
         return undefined;
       }
-      console.log("TASK RUN");
-      return await createCharmsController({
+
+      console.log(
+        "[AppView] Creating new CharmsController for space:",
+        app.spaceName,
+      );
+      await this._cleanupController();
+
+      const controller = await createCharmsController({
         identity: app.identity,
         spaceName: app.spaceName,
         apiUrl: app.apiUrl,
       });
+
+      console.log("[AppView] CharmsController created successfully");
+      this._currentController = controller;
+
+      return controller;
     },
     args: () => [this.app],
   });
 
+  // Clean up the previous controller and its runtime to free resources.
+  // This disposes of WebSocket connections and other runtime resources.
+  private async _cleanupController(): Promise<void> {
+    if (!this._currentController) return;
+
+    try {
+      const charmManager = (this._currentController as any).charmManager;
+      if (charmManager?.runtime?.dispose) {
+        await charmManager.runtime.dispose();
+      }
+    } catch (error) {
+      console.error("Error cleaning up CharmsController:", error);
+    } finally {
+      this._currentController = null;
+    }
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._cleanupController();
+  }
+
   override render() {
     const cc = this._cc.value;
-    console.log("app view", cc);
     const app = (this.app ?? {}) as AppState;
-    const activeCharmId = Math.random() + ""; //app.activeCharmId;
-    console.log("ACI", activeCharmId);
+    const activeCharmId = app.activeCharmId;
     const unauthenticated = html`
       <div class="shell-container">
         <x-header .identity="${app.identity}"></x-header>
@@ -71,7 +120,11 @@ export class XAppView extends BaseView {
           <div class="shell-container">
             <x-header .identity="${app.identity}"></x-header>
             <div class="content-area">
-              <x-body .cc="${undefined}" .activeCharmId="${activeCharmId}"></x-body>
+              <x-body
+                .cc="${undefined}"
+                .activeCharmId="${activeCharmId}"
+                .identity="${app.identity}"
+              ></x-body>
             </div>
           </div>
         `,
@@ -80,7 +133,11 @@ export class XAppView extends BaseView {
           <div class="shell-container">
             <x-header .identity="${app.identity}"></x-header>
             <div class="content-area">
-              <x-body .cc="${cc}" .activeCharmId="${activeCharmId}"></x-body>
+              <x-body
+                .cc="${cc}"
+                .activeCharmId="${activeCharmId}"
+                .identity="${app.identity}"
+              ></x-body>
             </div>
           </div>
         `,
