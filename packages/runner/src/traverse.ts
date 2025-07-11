@@ -88,19 +88,28 @@ export const MinimalSchemaSelector = {
 
 export class CycleTracker<K> {
   private partial: Set<K>;
+  private totalVisited: number = 0;
+
   constructor() {
     this.partial = new Set<K>();
   }
+
   enter(k: K): boolean {
     if (this.partial.has(k)) {
       console.error("Cycle Detected!");
       return false;
     }
     this.partial.add(k);
+    this.totalVisited++;
     return true;
   }
+
   exit(k: K) {
     this.partial.delete(k);
+  }
+
+  getTotalVisited(): number {
+    return this.totalVisited;
   }
 }
 
@@ -628,7 +637,13 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
       // A value of true or {} means we match anything
       // Resolve the rest of the doc, and return
-      return this.traverseDAG(doc, this.tracker, this.schemaTracker);
+      console.time("traverse.traverseWithSchemaContext");
+      const result = this.traverseDAG(doc, this.tracker, this.schemaTracker);
+      console.log(
+        `traverse.traverseWithSchemaContext: traversed ${this.tracker.getTotalVisited()} nodes`,
+      );
+      console.timeEnd("traverse.traverseWithSchemaContext");
+      return result;
     } else if (schemaContext.schema === false) {
       // This value rejects all objects - just return
       return undefined;
