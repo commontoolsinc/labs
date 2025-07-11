@@ -549,6 +549,7 @@ export class Replica {
       const queryArgs: SchemaQueryArgs = {
         selectSchema: schemaSelector,
         subscribe: true,
+        excludeSent: true,
       };
       if (classifications.size > 0) {
         queryArgs.classification = [...classifications];

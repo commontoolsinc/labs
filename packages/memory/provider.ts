@@ -248,7 +248,7 @@ class MemoryProviderSession<
           this.memory.subscribe(this);
         }
         // Filter out any known results
-        if (result.ok !== undefined) {
+        if (result.ok !== undefined && invocation.args.excludeSent) {
           const space = invocation.sub;
           const factSelection = result.ok[space];
           const factVersions = [...FactModule.iterate(factSelection)];
