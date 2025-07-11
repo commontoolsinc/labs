@@ -199,22 +199,17 @@ async function main() {
   if (recipeFile) {
     try {
       const recipeSrc = await Deno.readTextFile(recipeFile);
-      const tx = runtime.edit();
       const recipe = await compileRecipe(
-        tx,
         recipeSrc,
         "recipe",
         runtime,
         space,
       );
-      let charm = await charmManager.runPersistent(
-        tx,
+      const charm = await charmManager.runPersistent(
         recipe,
         inputValue,
         cause,
       );
-      charm = charm.withTx();
-      tx.commit(); // TODO(seefeld): Retry?
       const charmWithSchema = (await charmManager.get(charm))!;
       charmWithSchema.sink((value) => {
         console.log("running charm:", getEntityId(charm), value);

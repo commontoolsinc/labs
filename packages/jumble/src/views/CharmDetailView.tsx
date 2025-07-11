@@ -887,9 +887,7 @@ const CodeTab = () => {
                     };
 
                     // Use compileRecipe which accepts RuntimeProgram
-                    const tx = runtime.edit();
                     const recipe = await compileRecipe(
-                      tx,
                       program,
                       spec,
                       runtime,
@@ -899,12 +897,9 @@ const CodeTab = () => {
 
                     // Run the recipe
                     newCharm = await charmManager.runPersistent(
-                      tx,
                       recipe,
                       argument,
                     );
-                    newCharm = newCharm.withTx();
-                    tx.commit(); // TODO(seefeld): Retry? Await confirmation?
                   } else {
                     // Single file recipe - use the existing compileAndRunRecipe
                     newCharm = await compileAndRunRecipe(
