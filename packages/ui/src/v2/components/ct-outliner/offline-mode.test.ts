@@ -31,7 +31,7 @@ describe("CTOutliner Offline Mode", () => {
       const originalValue = outliner.value;
 
       // Modify the tree
-      outliner.tree.root.children[0].body = "Modified";
+      outliner.value.get().root.children[0].body = "Modified";
 
       // Enable offline mode and emit change
       outliner.offline = true;
@@ -54,7 +54,7 @@ describe("CTOutliner Offline Mode", () => {
 
       // Value should have been updated
       expect(outliner.value).not.toBe(originalValue);
-      expect(outliner.value.root.children[0].body).toBe("Modified");
+      expect(outliner.value.get().root.children[0].body).toBe("Modified");
     });
   });
 
@@ -87,19 +87,21 @@ describe("CTOutliner Offline Mode", () => {
   describe("Tree Isolation in Offline Mode", () => {
     it("should deep clone tree when entering offline mode", () => {
       setupOutliner();
-      const originalTree = outliner.tree;
-      const originalFirstNode = outliner.tree.root.children[0];
+      const originalTree = outliner.value.get();
+      const originalFirstNode = outliner.value.get().root.children[0];
 
       // Enter offline mode
       outliner.offline = true;
 
       // Tree should be different object (cloned)
-      expect(outliner.tree).not.toBe(originalTree);
-      expect(outliner.tree.root.children[0]).not.toBe(originalFirstNode);
+      expect(outliner.value.get()).not.toBe(originalTree);
+      expect(outliner.value.get().root.children[0]).not.toBe(originalFirstNode);
 
       // But content should be the same
-      expect(outliner.tree.root.children[0].body).toBe(originalFirstNode.body);
-      expect(outliner.tree.root.children.length).toBe(
+      expect(outliner.value.get().root.children[0].body).toBe(
+        originalFirstNode.body,
+      );
+      expect(outliner.value.get().root.children.length).toBe(
         originalTree.root.children.length,
       );
     });
@@ -120,7 +122,7 @@ describe("CTOutliner Offline Mode", () => {
       setupOutliner();
 
       // Create a circular reference that can't be JSON.stringify'd
-      const circularNode = outliner.tree.root.children[0];
+      const circularNode = outliner.value.get().root.children[0];
       (circularNode as any).circular = circularNode;
 
       // Should not throw and should keep offline mode false
@@ -134,18 +136,18 @@ describe("CTOutliner Offline Mode", () => {
       setupOutliner();
 
       // Modify the tree to a broken state
-      outliner.tree.root.children = [];
+      outliner.value.get().root.children = [];
       outliner.focusedNode = null;
 
       // Reset the tree
       outliner.testAPI.handleReset();
 
       // Should have a clean state with default content
-      expect(outliner.tree.root.children.length).toBe(2);
-      expect(outliner.tree.root.children[0].body).toBe(
+      expect(outliner.value.get().root.children.length).toBe(2);
+      expect(outliner.value.get().root.children[0].body).toBe(
         "Welcome! Start typing here...",
       );
-      expect(outliner.focusedNode).toBe(outliner.tree.root.children[0]);
+      expect(outliner.focusedNode).toBe(outliner.value.get().root.children[0]);
       expect(outliner.collapsedNodes.size).toBe(0);
     });
 
@@ -153,7 +155,7 @@ describe("CTOutliner Offline Mode", () => {
       setupOutliner();
 
       // Set some editing state
-      outliner.testAPI.startEditing(outliner.tree.root.children[0]);
+      outliner.testAPI.startEditing(outliner.value.get().root.children[0]);
       expect(outliner.testAPI.editingNode).not.toBe(null);
 
       // Reset the tree
