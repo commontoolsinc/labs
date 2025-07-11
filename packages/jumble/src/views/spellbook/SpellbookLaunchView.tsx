@@ -7,7 +7,6 @@ import {
 import { createPath } from "@/routes.ts";
 import { useAuthentication } from "@/contexts/AuthenticationContext.tsx";
 import { AuthenticationView } from "@/views/AuthenticationView.tsx";
-import { constants } from "node:buffer";
 
 function Launcher() {
   const { spellId, replicaName } = useParams<{
