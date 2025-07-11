@@ -7,12 +7,12 @@ const tester = new CTCellTester();
 console.log("CTCellTester instantiated successfully");
 
 // Test with a cell
-const cell = createSimpleCell(42);
-tester.cell = cell;
-console.log("Cell set successfully, current value:", cell.get());
+const testCell = createSimpleCell(42);
+tester.cell = testCell;
+console.log("Cell set successfully, current value:", testCell.get());
 
 // Test cell update
-cell.set(100);
-console.log("Cell updated, new value:", cell.get());
+testCell.set(100);
+console.log("Cell updated, new value:", testCell.get());
 
 console.log("All imports and basic functionality work correctly!");

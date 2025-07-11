@@ -815,7 +815,6 @@ export class CTOutliner extends BaseElement {
       this.editingNode,
       this.editingContent,
     );
-    this.value.set(tree); // Trigger reactivity
     this.focusedNode = this.editingNode;
     this.editingNode = null;
     this.editingContent = "";
@@ -957,8 +956,7 @@ export class CTOutliner extends BaseElement {
           );
         }
 
-        this.value.set(tree); // Trigger reactivity
-      }
+          }
     }
   }
 
@@ -1105,7 +1103,6 @@ export class CTOutliner extends BaseElement {
     const newNode = TreeOperations.createNode({ body: "" });
 
     TreeOperations.insertNode(tree, parentNode, newNode, nodeIndex + 1);
-    this.value.set(tree); // Trigger reactivity
     this.focusedNode = newNode;
     this.requestUpdate();
     this.startEditing(newNode);
@@ -1123,7 +1120,6 @@ export class CTOutliner extends BaseElement {
     const newNode = TreeOperations.createNode({ body: "" });
 
     TreeOperations.insertNode(tree, node, newNode, 0);
-    this.value.set(tree); // Trigger reactivity
     this.focusedNode = newNode;
     this.requestUpdate();
     this.startEditing(newNode);
@@ -1143,8 +1139,7 @@ export class CTOutliner extends BaseElement {
     const tree = this.tree;
     const result = TreeOperations.deleteNode(tree, node);
     if (result.success) {
-      this.value.set(tree); // Trigger reactivity
-      this.focusedNode = result.data.newFocusNode;
+        this.focusedNode = result.data.newFocusNode;
       this.requestUpdate();
 
       if (this.focusedNode) {
@@ -1161,8 +1156,7 @@ export class CTOutliner extends BaseElement {
     const tree = this.tree;
     const result = TreeOperations.indentNode(tree, node);
     if (result.success) {
-      this.value.set(tree); // Trigger reactivity
-
+  
       // Restore editing state if it was being edited
       if (wasEditing) {
         this.editingNode = node;
@@ -1181,8 +1175,7 @@ export class CTOutliner extends BaseElement {
     const tree = this.tree;
     const result = TreeOperations.indentNode(tree, node);
     if (result.success) {
-      this.value.set(tree); // Trigger reactivity
-      // Maintain edit state
+        // Maintain edit state
       this.editingNode = node;
       this.editingContent = editingContent;
 
@@ -1211,8 +1204,7 @@ export class CTOutliner extends BaseElement {
     const tree = this.tree;
     const result = TreeOperations.outdentNode(tree, node);
     if (result.success) {
-      this.value.set(tree); // Trigger reactivity
-
+  
       // Restore editing state if it was being edited
       if (wasEditing) {
         this.editingNode = node;
@@ -1231,8 +1223,7 @@ export class CTOutliner extends BaseElement {
     const tree = this.tree;
     const result = TreeOperations.outdentNode(tree, node);
     if (result.success) {
-      this.value.set(tree); // Trigger reactivity
-      // Maintain edit state
+        // Maintain edit state
       this.editingNode = node;
       this.editingContent = editingContent;
 
@@ -1261,8 +1252,7 @@ export class CTOutliner extends BaseElement {
     const result = TreeOperations.deleteNode(tree, this.focusedNode!);
 
     if (result.success) {
-      this.value.set(tree); // Trigger reactivity
-      this.focusedNode = result.data.newFocusNode;
+        this.focusedNode = result.data.newFocusNode;
       this.requestUpdate();
 
       if (this.focusedNode) {
@@ -1291,8 +1281,7 @@ export class CTOutliner extends BaseElement {
     const tree = this.tree;
     const result = TreeOperations.deleteNode(tree, nextNode);
     if (result.success) {
-      this.value.set(tree); // Trigger reactivity
-      this.requestUpdate();
+        this.requestUpdate();
 
       // Re-enter editing mode at the merge point
       this.startEditing(this.focusedNode!);
@@ -1315,14 +1304,12 @@ export class CTOutliner extends BaseElement {
       // Outdent
       const result = TreeOperations.outdentNode(tree, this.focusedNode!);
       if (result.success) {
-        this.value.set(tree); // Trigger reactivity
-      }
+          }
     } else {
       // Indent
       const result = TreeOperations.indentNode(tree, this.focusedNode!);
       if (result.success) {
-        this.value.set(tree); // Trigger reactivity
-      }
+          }
     }
 
     this.requestUpdate();
@@ -1492,7 +1479,6 @@ export class CTOutliner extends BaseElement {
 
       // Mutate the tree directly
       tree.root.children.push(newNode);
-      this.value.set(tree); // Trigger reactivity
 
       this.focusedNode = newNode;
       this.requestUpdate();
@@ -1554,7 +1540,6 @@ export class CTOutliner extends BaseElement {
       this.focusedNode = parsedTree.root.children[0];
     }
 
-    this.value.set(tree); // Trigger reactivity
     this.requestUpdate();
   }
 
