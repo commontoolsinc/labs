@@ -549,6 +549,7 @@ export class Runtime implements IRuntime {
   ): Cell<any> {
     const doc = this.documentMap.getDoc<any>(data, { immutable: data }, space);
     doc.freeze("immutable cell");
+    doc.ephemeral = true; // Since soon these will be data: URIs
     return doc.asCell([], schema, undefined, tx);
   }
 
