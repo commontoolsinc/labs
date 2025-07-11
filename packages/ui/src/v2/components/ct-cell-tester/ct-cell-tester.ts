@@ -85,6 +85,17 @@ export class CTCellTester extends BaseElement {
     this.cell = {
       get: () => null,
       set: () => {},
+      send: () => {},
+      update: () => {},
+      push: () => {},
+      key: () => this.cell,
+      sink: () => () => {},
+      equals: () => false,
+      get value() {
+        return null;
+      },
+      asSchema: () => this.cell,
+      withLog: () => this.cell,
     };
   }
 
@@ -98,7 +109,7 @@ export class CTCellTester extends BaseElement {
         <div class="current-value">
           Current value: ${displayValue}
         </div>
-        <button 
+        <button
           class="test-button"
           @click="${this._handleClick}"
           ?disabled="${!this.cell}"
@@ -113,8 +124,13 @@ export class CTCellTester extends BaseElement {
     if (!this.cell) return;
 
     const randomNumber = Math.floor(Math.random() * 1000);
-    this.cell.set(randomNumber);
-    
+    const tree = this.cell.get();
+    tree.root = {
+      body: String(randomNumber),
+      children: [],
+    };
+    this.cell.set(tree);
+
     // Trigger a re-render to show the updated value
     this.requestUpdate();
   }
