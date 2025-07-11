@@ -1060,7 +1060,8 @@ test(
   },
 );
 
-// FIXME(@ubik2): disabling this test for now
+// FIXME(@ubik2): disabling this test for now, since I'm including these
+// objects until we sort out persistence issues.
 test(
   "skip subscribe to commits does not return classified objects",
   store,
@@ -1313,5 +1314,93 @@ test(
     });
 
     assert(q1.ok);
+  },
+);
+
+test(
+  "known objects are excluded from messages with exclude sent",
+  store,
+  async (session) => {
+    const clock = new Clock();
+    const memory = Consumer.open({ as: subject, session, clock })
+      .mount(subject.did());
+    const doc2 = `of:${refer({ doc: 2 })}` as const;
+
+    const facts = [
+      Fact.assert({ the, of: doc, is: { value: { v: 1 } } }),
+      Fact.assert({ the, of: doc2, is: { value: { v: 2 } } }),
+    ];
+
+    // Create multiple facts
+    const tr = await memory.transact({
+      changes: Changes.from(facts),
+    });
+    assert(tr.ok);
+    const commit = Commit.toRevision(tr.ok);
+    const expectedFacts: Record<string, any> = {};
+    for (const fact of facts) {
+      expectedFacts[fact.cause.toString()] = {
+        is: fact.is,
+        since: commit.since,
+      };
+    }
+    const factChanges = Selection.from(
+      facts.map((fact) => [fact, commit.since]),
+    );
+
+    const result1 = await memory.query({
+      selectSchema: {
+        _: {
+          [the]: {
+            _: { path: [], schemaContext: { schema: true, rootSchema: true } },
+          },
+        },
+      },
+      excludeSent: true,
+    });
+
+    // We should get the facts back
+    assertEquals(
+      result1.ok?.selection,
+      { [subject.did()]: factChanges },
+      "lists multiple facts",
+    );
+
+    // Re-run the query, but shouldn't get the result, since we already have it
+    const result2 = await memory.query({
+      selectSchema: {
+        _: {
+          [the]: {
+            _: { path: [], schemaContext: { schema: true, rootSchema: true } },
+          },
+        },
+      },
+      excludeSent: true,
+    });
+
+    // We shouldn't get the facts back
+    assertEquals(
+      result2.ok?.selection,
+      { [subject.did()]: {} },
+      "list excludes known facts",
+    );
+
+    // Re-run the query, but should get the result, since we don't exclude
+    const result3 = await memory.query({
+      selectSchema: {
+        _: {
+          [the]: {
+            _: { path: [], schemaContext: { schema: true, rootSchema: true } },
+          },
+        },
+      },
+    });
+
+    // We shouldn't get the facts back
+    assertEquals(
+      result3.ok?.selection,
+      { [subject.did()]: factChanges },
+      "list excludes known facts",
+    );
   },
 );
