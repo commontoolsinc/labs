@@ -1,7 +1,6 @@
 import { refer } from "merkle-reference";
 import { Immutable, isRecord } from "@commontools/utils/types";
 import type {
-  DID,
   JSONValue,
   MemorySpace,
   SchemaContext,
@@ -79,8 +78,10 @@ export class Storage implements IStorage {
 
   // Tracks promises returned by storage updates.
   private docToStoragePromises = new Set<Promise<any>>();
-  // Track the most recent storage value written
-  private docValues = new Map<string, StorageValue<JSONValue>>();
+  // Track the docs that have changes that need to be sent.
+  // They will be removed from here as soon as we call send, but they will
+  // still be in the docToStoragePromises until the send returns.
+  private dirtyDocs = new Set<string>();
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -182,7 +183,7 @@ export class Storage implements IStorage {
     this.storageToDocSubs.clear();
     this.docToStorageSubs.clear();
     this.docToStoragePromises.clear();
-    this.docValues.clear();
+    this.dirtyDocs.clear();
     this.cancel();
   }
 
@@ -414,18 +415,14 @@ export class Storage implements IStorage {
         : {},
       ...(labels !== undefined) ? { labels: labels } : {},
     };
-
     const existingValue = this._getStorageProviderForSpace(doc.space).get<
       JSONValue
     >(
       doc.entityId,
     );
     const docKey = `${doc.space}/${toURI(doc.entityId)}`;
-    // If we don't have a pending write (awaiting runtime idle), and our value
-    // is the same as what storage has, we don't need to do anything.
-    // If we do have a pending write, even if we match, we need to track ours
-    // since we need to defer that decision until the idle.
-    if (!this.docValues.has(docKey) && deepEqual(storageValue, existingValue)) {
+    // If our value is the same as what storage has, we don't need to do anything.
+    if (deepEqual(storageValue, existingValue)) {
       return;
     }
 
@@ -451,27 +448,39 @@ export class Storage implements IStorage {
       this.syncCell(linkedDoc);
     }
 
-    this.docValues.set(docKey, storageValue);
-    const docToStoragePromise = this._sendDocValue(doc.space, doc.entityId);
-
+    // If we're already dirty, we don't need to add a promise
+    if (this.dirtyDocs.has(docKey)) {
+      return;
+    }
+    this.dirtyDocs.add(docKey);
+    const docToStoragePromise = this._sendDocValue(doc, labels);
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
       this.docToStoragePromises.delete(docToStoragePromise)
     );
   }
 
-  private async _sendDocValue(space: DID, entityId: EntityId) {
-    const docKey = `${space}/${toURI(entityId)}`;
-    const storageProvider = this._getStorageProviderForSpace(space);
+  private async _sendDocValue(doc: DocImpl<unknown>, labels?: Labels) {
     await this.runtime.idle();
-    const lastValue = this.docValues.get(docKey);
-    if (lastValue !== undefined) {
-      this.docValues.delete(docKey);
-      await storageProvider.send([{
-        entityId: entityId,
-        value: lastValue,
-      }]);
-    }
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+    const storageProvider = this._getStorageProviderForSpace(doc.space);
+    // We're dirty -- mark clean, then write to storage
+    this.dirtyDocs.delete(docKey);
+    const storageValue: StorageValue<JSONValue> = {
+      value:
+        (doc.get() === undefined
+          ? undefined
+          : JSON.parse(JSON.stringify(doc.get()))),
+      ...(doc.sourceCell?.entityId !== undefined)
+        ? { source: doc.sourceCell.entityId }
+        : {},
+      ...(labels !== undefined) ? { labels: labels } : {},
+    };
+
+    await storageProvider.send([{
+      entityId: doc.entityId,
+      value: storageValue,
+    }]);
   }
 
   // Update the doc with the new value we got in storage.
