@@ -601,7 +601,7 @@ export class CTOutliner extends BaseElement {
    */
   private getNodeByPath(path: number[]): OutlineTreeNode | null {
     try {
-      let currentNode = this.value.root;
+      let currentNode = this.tree.root;
 
       for (const index of path) {
         if (index < currentNode.children.length) {
@@ -662,7 +662,7 @@ export class CTOutliner extends BaseElement {
           );
         }
 
-        this.tree = data;
+        this.value.set(data);
         this.focusedNode = this.tree.root.children[0] || null;
         this.requestUpdate();
 
@@ -682,7 +682,7 @@ export class CTOutliner extends BaseElement {
   private handleReset() {
     try {
       // Reset to a clean, usable tree state
-      this.tree = {
+      this.value.set({
         root: {
           body: "",
           children: [
@@ -699,10 +699,10 @@ export class CTOutliner extends BaseElement {
           ],
           attachments: [],
         },
-      };
+      });
 
       // Reset UI state
-      this.focusedNode = this.value.root.children[0];
+      this.focusedNode = this.tree.root.children[0];
       this.collapsedNodes = new Set();
       this.editingNode = null;
       this.editingContent = "";
@@ -724,7 +724,7 @@ export class CTOutliner extends BaseElement {
     } catch (error) {
       console.error("Failed to reset tree:", error);
       // Fallback to absolute minimum state
-      this.value = TreeOperations.createEmptyTree();
+      this.value.set(TreeOperations.createEmptyTree());
       this.focusedNode = null;
       this.collapsedNodes = new Set();
       this.requestUpdate();
