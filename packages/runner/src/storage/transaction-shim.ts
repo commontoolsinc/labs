@@ -51,12 +51,14 @@ function validateParentPath(
   value: any,
   path: readonly MemoryAddressPathComponent[],
 ): INotFoundError | null {
-  if (path.length === 0) {
+  const pathLength = path.length;
+
+  if (pathLength === 0) {
     return null; // Root write, no validation needed
   }
 
-  // Check if the document itself exists and is a record for first-level writes
-  if (path.length === 1) {
+  // Check if the document itself exists and is an object for first-level writes
+  if (pathLength === 1) {
     if (value === undefined || !isRecord(value)) {
       const pathError: INotFoundError = new Error(
         `Cannot access path [${String(path[0])}] - document is not a record`,
@@ -67,33 +69,31 @@ function validateParentPath(
     return null;
   }
 
-  // For deeper paths, check that the parent path exists and is a record
-  const parentPath = path.slice(0, -1);
+  // For deeper paths, check that the parent path exists and is an object
+  const lastIndex = pathLength - 1;
+  let parentValue = value;
 
-  const parentValue = getValueAtPath(value, parentPath);
+  let parentIndex = 0;
+  for (parentIndex = 0; parentIndex < lastIndex; parentIndex++) {
+    if (!isRecord(parentValue)) {
+      parentValue = undefined;
+      break;
+    }
+    parentValue = parentValue[path[parentIndex] as keyof typeof parentValue];
+  }
 
   if (
     value === undefined || parentValue === undefined || !isRecord(parentValue)
   ) {
     const pathError: INotFoundError = new Error(
-      `Cannot access path [${
-        path.map((p) => String(p)).join(", ")
-      }] - parent path [${
-        parentPath.map((p) => String(p)).join(", ")
+      `Cannot access path [${path.join(", ")}] - parent path [${
+        path.slice(0, lastIndex).join(", ")
       }] does not exist or is not a record`,
     ) as INotFoundError;
     pathError.name = "NotFoundError";
 
     // Set pathError.path to last valid parent path component
-    if (isRecord(value)) {
-      pathError.path = [];
-      while (parentPath.length > 0) {
-        const segment = parentPath.shift()!;
-        value = value[segment];
-        if (!isRecord(value)) break;
-        pathError.path.push(segment);
-      }
-    }
+    if (parentIndex > 0) pathError.path = path.slice(0, parentIndex - 1);
 
     return pathError;
   }
@@ -567,10 +567,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (writeResult.error && writeResult.error.name === "NotFoundError") {
       // Create parent entries if needed
       const lastValidPath = writeResult.error.path;
-      const valueObj = (lastValidPath
+      const valueObj = lastValidPath
         ? this.readValueOrThrow({ ...address, path: lastValidPath })
-        : {}) as Record<string, any>;
-      if (!isObject(valueObj)) {
+        : {};
+      if (!isRecord(valueObj)) {
         throw new Error(
           `Value at path ${address.path.join("/")} is not an object`,
         );
@@ -584,7 +584,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       const lastKey = remainingPath.pop()!;
       let nextValue = valueObj;
       for (const key of remainingPath) {
-        nextValue = nextValue[key] = typeof Number(key) === "number" ? [] : {};
+        nextValue =
+          nextValue[key] =
+            (typeof Number(key) === "number" ? [] : {}) as typeof nextValue;
       }
       nextValue[lastKey] = value;
       const parentAddress = { ...address, path: lastValidPath ?? [] };
