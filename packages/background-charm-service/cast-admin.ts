@@ -96,7 +96,6 @@ async function castRecipe() {
     // Create charm manager for the specified space
     const charmManager = new CharmManager(session, runtime);
     await charmManager.ready;
-    const tx = runtime.edit();
     const recipe = await compileRecipe(
       recipeSrc,
       "recipe",
