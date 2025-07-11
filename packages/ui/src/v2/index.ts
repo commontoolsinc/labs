@@ -60,6 +60,7 @@ export * from "./components/ct-vstack/index.ts";
 export * from "./components/ct-select/index.ts";
 export * from "./components/ct-message-input/ct-message-input.ts";
 export * from "./components/ct-outliner/index.ts";
+export * from "./components/ct-cell-tester/index.ts";
 
 // Type exports
 export type * from "./utils/types.ts";
