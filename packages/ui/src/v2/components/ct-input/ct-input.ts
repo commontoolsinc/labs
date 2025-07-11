@@ -1,6 +1,7 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import type { Cell } from "@commontools/runner";
 
 /**
  * CTInput - Text input field with support for various types and validation
@@ -182,7 +183,7 @@ export class CTInput extends BaseElement {
 
   declare type: InputType;
   declare placeholder: string;
-  declare value: string;
+  declare value: Cell<string>;
   declare disabled: boolean;
   declare readonly: boolean;
   declare error: boolean;
@@ -203,7 +204,6 @@ export class CTInput extends BaseElement {
     super();
     this.type = "text";
     this.placeholder = "";
-    this.value = "";
     this.disabled = false;
     this.readonly = false;
     this.error = false;
@@ -241,7 +241,7 @@ export class CTInput extends BaseElement {
         type="${this.type}"
         class="${this.error ? "error" : ""}"
         placeholder="${ifDefined(this.placeholder || undefined)}"
-        .value="${this.value}"
+        .value="${this.value?.get?.()}"
         ?disabled="${this.disabled}"
         ?readonly="${this.readonly}"
         ?required="${this.required}"
@@ -266,7 +266,7 @@ export class CTInput extends BaseElement {
   private _handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
     const oldValue = this.value;
-    this.value = input.value;
+    this.value.set(input.value);
 
     // Emit custom input event
     this.emit("ct-input", {
@@ -278,7 +278,7 @@ export class CTInput extends BaseElement {
   private _handleChange(event: Event) {
     const input = event.target as HTMLInputElement;
     const oldValue = this.value;
-    this.value = input.value;
+    this.value.set(input.value);
 
     // Emit custom change event
     this.emit("ct-change", {
