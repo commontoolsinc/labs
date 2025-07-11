@@ -1,6 +1,5 @@
-import { MapSet } from "@commontools/runner/traverse";
 import * as Access from "./access.ts";
-import type {
+import {
   AsyncResult,
   Await,
   CloseResult,
@@ -26,7 +25,6 @@ import type {
   Reference,
   Result,
   Revision,
-  SchemaPathSelector,
   SchemaQuery,
   Selection,
   Subscribe,
@@ -40,6 +38,7 @@ import { refer } from "./reference.ts";
 import { redactCommit } from "./space.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
+import { setRevision } from "@commontools/memory/selection";
 
 export * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -154,7 +153,8 @@ class MemoryProviderSession<
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
-  watchedObjects: MapSet<string, SchemaPathSelector> = new MapSet();
+  // Mapping from fact key to since value of the last fact sent to the client
+  lastRevision: Map<string, number> = new Map();
 
   constructor(
     public memory: MemorySession,
@@ -248,6 +248,15 @@ class MemoryProviderSession<
           this.addSchemaSubscription(of, invocation, result.ok);
           this.memory.subscribe(this);
         }
+        // Filter out any known results
+        if (result.ok !== undefined && invocation.args.excludeSent) {
+          const space = invocation.sub;
+          const factSelection = result.ok[space];
+          const factVersions = [...FactModule.iterate(factSelection)];
+          result.ok[space] = this.toSelection(
+            this.filterKnownFacts(factVersions),
+          );
+        }
         return this.perform({
           the: "task/return",
           of,
@@ -314,18 +323,24 @@ class MemoryProviderSession<
     // The schema subscription has a classification claim, but these don't.
     const redactedCommit = redactCommit(commit);
     const [[space, _ignored]] = Object.entries(commit);
-    // The client has a subscription to the space's commit log, but our
-    // subscriptions may trigger inclusion of other objects. Add these here.
-    const factsList = [...FactModule.iterate(facts[space as Space])];
-    const enhancedCommit: EnhancedCommit<Space> = {
-      commit: redactedCommit,
-      revisions: factsList,
-    };
+
+    const jobIds: InvocationURL<Reference<Subscribe>>[] = [];
     for (const [id, channels] of this.channels) {
       if (Subscription.match(redactedCommit, channels)) {
-        // Note that we don't exit on the first match anymore because we need
-        // to keep these subscriptions distinct.
-        // TODO(@ubik2) - can I go back to just one here now that remote is gone?
+        jobIds.push(id);
+      }
+    }
+
+    if (jobIds.length > 0) {
+      // The client has a subscription to the space's commit log, but our
+      // subscriptions may trigger inclusion of other objects. Add these here.
+      const factsList = [...FactModule.iterate(facts[space as Space])];
+      const enhancedCommit: EnhancedCommit<Space> = {
+        commit: redactedCommit,
+        revisions: this.filterKnownFacts(factsList),
+      };
+
+      for (const id of jobIds) {
         // this is sent to a standard subscription (application/commit+json)
         this.perform({
           the: "task/effect",
@@ -336,6 +351,35 @@ class MemoryProviderSession<
     }
 
     return { ok: {} };
+  }
+
+  private filterKnownFacts(
+    factVersions: Revision<Fact>[],
+  ): Revision<Fact>[] {
+    // Filter out any known results
+    const newFactsList = [];
+    for (const fact of factVersions) {
+      const factKey = this.toKey(fact);
+      const previous = this.lastRevision.get(factKey);
+      if (previous === undefined || previous < fact.since) {
+        this.lastRevision.set(factKey, fact.since);
+        newFactsList.push(fact);
+      }
+    }
+    return newFactsList;
+  }
+
+  private toSelection(factVersions: Revision<Fact>[]) {
+    const selection: Memory.OfTheCause<
+      { is?: Memory.JSONValue; since: number }
+    > = {};
+    for (const fact of factVersions) {
+      setRevision(selection, fact.of, fact.the, fact.cause.toString(), {
+        is: fact.is,
+        since: fact.since,
+      });
+    }
+    return selection;
   }
 
   private formatAddress<Space extends MemorySpace>(
@@ -370,13 +414,6 @@ class MemoryProviderSession<
       since,
     );
     this.schemaChannels.set(of, subscription);
-
-    // We don't know which schema path selector caused this fact to be included (it may have been included by multiple)
-    for (const fact of factVersions) {
-      const factKey = this.toKey(fact);
-      // FIXME(@ubik2)
-      this.watchedObjects.add(factKey, { path: [] });
-    }
   }
 
   private async getSchemaSubscriptionMatches<Space extends MemorySpace>(

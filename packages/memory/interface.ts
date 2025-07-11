@@ -164,6 +164,7 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
             selectSchema: SchemaSelector;
             since?: number;
             subscribe?: boolean;
+            excludeSent?: boolean;
           },
         ): Task<
           Result<Selection<Space>, AuthorizationError | QueryError>,
@@ -753,6 +754,7 @@ export type SchemaQueryArgs = {
   selectSchema: SchemaSelector;
   since?: number;
   subscribe?: boolean; // set to true to be notified of changes to any reachable entities
+  excludeSent?: boolean; // set to true to remove entities already sent in this session
   classification?: string[]; // classifications to claim for access
 };
 
