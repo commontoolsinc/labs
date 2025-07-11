@@ -65,6 +65,10 @@ export type {
   toJSON,
   VNode,
 } from "@commontools/api";
+import {
+  type IExtendedStorageTransaction,
+  type MemorySpace,
+} from "../storage/interface.ts";
 
 export type JSONSchemaMutable = Mutable<JSONSchema>;
 
@@ -182,8 +186,8 @@ declare module "@commontools/api" {
     [unsafe_originalRecipe]?: Recipe;
     [unsafe_parentRecipe]?: Recipe;
     [unsafe_materializeFactory]?: (
-      tx: any,
-    ) => (path: readonly PropertyKey[]) => any;
+      tx: IExtendedStorageTransaction,
+    ) => (path: readonly PropertyKey[]) => unknown;
   }
 }
 
@@ -231,8 +235,8 @@ export function isShadowRef(value: unknown): value is ShadowRef {
 export type UnsafeBinding = {
   recipe: Recipe;
   materialize: (path: readonly PropertyKey[]) => any;
-  space: any;
-  tx: any;
+  space: MemorySpace;
+  tx: IExtendedStorageTransaction;
   parent?: UnsafeBinding;
 };
 
@@ -295,16 +299,16 @@ export interface BuilderFunctionsAndConstants {
 // Runtime interface needed by createCell
 export interface BuilderRuntime {
   getCell<T>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema?: JSONSchema,
-    log?: any,
+    tx?: IExtendedStorageTransaction,
   ): Cell<T>;
   getCell<S extends JSONSchema = JSONSchema>(
-    space: string,
+    space: MemorySpace,
     cause: any,
     schema: S,
-    log?: any,
+    tx?: IExtendedStorageTransaction,
   ): Cell<Schema<S>>;
 }
 
