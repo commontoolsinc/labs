@@ -119,7 +119,9 @@ export async function setCharmInput(
     targetCell = targetCell.key(segment);
   }
 
-  targetCell.set(value as any);
+  const tx = manager.runtime.edit();
+  targetCell.withTx(tx).set(value as any);
+  await tx.commit();
 
   await manager.runtime.idle();
   await manager.synced();
@@ -141,7 +143,9 @@ export async function setCharmResult(
     targetCell = targetCell.key(segment);
   }
 
-  targetCell.set(value as any);
+  const tx = manager.runtime.edit();
+  targetCell.withTx(tx).set(value as any);
+  await tx.commit();
 
   await manager.runtime.idle();
   await manager.synced();
