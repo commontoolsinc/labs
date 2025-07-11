@@ -21,6 +21,8 @@ import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import { FocusUtils } from "./focus-utils.ts";
+import type { Cell } from "./simple-cell.ts";
+import { createSimpleCell } from "./simple-cell.ts";
 
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
@@ -103,7 +105,6 @@ export class CTOutliner extends BaseElement {
     value: { type: Object },
     readonly: { type: Boolean },
     mentionable: { type: Array },
-    tree: { type: Object, state: true },
     collapsedNodes: { type: Object, state: true },
     focusedNode: { type: Object, state: true },
     showingMentions: { type: Boolean, state: true },
@@ -113,10 +114,9 @@ export class CTOutliner extends BaseElement {
     showDebugPanel: { type: Boolean, state: true },
   };
 
-  declare value: Tree;
+  declare value: Cell<Tree>;
   declare readonly: boolean;
   declare mentionable: MentionableItem[];
-  declare tree: Tree;
   declare collapsedNodes: Set<OutlineTreeNode>;
   declare focusedNode: OutlineTreeNode | null;
   declare showingMentions: boolean;
@@ -152,7 +152,7 @@ export class CTOutliner extends BaseElement {
         ).filter((item) => item.path !== null);
 
         // Clone the tree
-        this.tree = JSON.parse(JSON.stringify(this.tree));
+        this.value = JSON.parse(JSON.stringify(this.value));
 
         // Update node references after cloning using the stored paths
         this.focusedNode = focusedNodePath
@@ -178,6 +178,11 @@ export class CTOutliner extends BaseElement {
 
   // Node indexer for stable DOM element IDs
   private nodeIndexer = NodeUtils.createNodeIndexer();
+
+  // Helper getter for convenient tree access
+  private get tree(): Tree {
+    return this.value.get();
+  }
 
   // Test API - expose internal state for testing
   get testAPI() {
@@ -513,29 +518,25 @@ export class CTOutliner extends BaseElement {
     super();
     this.readonly = false;
     this.mentionable = [];
-    this.tree = TreeOperations.createEmptyTree();
+    this.value = createSimpleCell(TreeOperations.createEmptyTree());
     this.collapsedNodes = new Set<OutlineTreeNode>();
     this.focusedNode = null;
     this.showingMentions = false;
     this.mentionQuery = "";
     this.selectedMentionIndex = 0;
-    this.value = this.tree;
     this._offline = false;
     this.showDebugPanel = false;
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    // Only initialize if tree is empty
-    if (!this.tree || this.tree.root.children.length === 0) {
-      // Initialize with empty tree if no value provided
-      if (!this.value) {
-        this.value = TreeOperations.createEmptyTree();
-      }
-      // Set initial focus to first node if we have nodes
-      if (this.tree.root.children.length > 0 && !this.focusedNode) {
-        this.focusedNode = this.tree.root.children[0];
-      }
+    // Initialize with empty tree if no value provided
+    if (!this.value) {
+      this.value = createSimpleCell(TreeOperations.createEmptyTree());
+    }
+    // Set initial focus to first node if we have nodes
+    if (this.tree.root.children.length > 0 && !this.focusedNode) {
+      this.focusedNode = this.tree.root.children[0];
     }
   }
 
@@ -546,7 +547,6 @@ export class CTOutliner extends BaseElement {
       // Don't update tree from value if we're internally managing it or in offline mode
       // This prevents focus loss when we programmatically update the value
       if (!this.isInternalUpdate && !this.offline) {
-        this.tree = this.value;
         // Reset focus if the focused node no longer exists
         this.focusedNode = FocusUtils.findValidFocus(
           this.tree,
@@ -619,7 +619,7 @@ export class CTOutliner extends BaseElement {
 
   private handleSave() {
     try {
-      const jsonContent = JSON.stringify(this.tree, null, 2);
+      const jsonContent = JSON.stringify(this.value, null, 2);
       const blob = new Blob([jsonContent], { type: "application/json" });
       const url = URL.createObjectURL(blob);
 
@@ -662,7 +662,7 @@ export class CTOutliner extends BaseElement {
           );
         }
 
-        this.tree = data;
+        this.value.set(data);
         this.focusedNode = this.tree.root.children[0] || null;
         this.requestUpdate();
 
@@ -682,7 +682,7 @@ export class CTOutliner extends BaseElement {
   private handleReset() {
     try {
       // Reset to a clean, usable tree state
-      this.tree = {
+      this.value.set({
         root: {
           body: "",
           children: [
@@ -699,7 +699,7 @@ export class CTOutliner extends BaseElement {
           ],
           attachments: [],
         },
-      };
+      });
 
       // Reset UI state
       this.focusedNode = this.tree.root.children[0];
@@ -724,7 +724,7 @@ export class CTOutliner extends BaseElement {
     } catch (error) {
       console.error("Failed to reset tree:", error);
       // Fallback to absolute minimum state
-      this.tree = TreeOperations.createEmptyTree();
+      this.value.set(TreeOperations.createEmptyTree());
       this.focusedNode = null;
       this.collapsedNodes = new Set();
       this.requestUpdate();
@@ -744,10 +744,11 @@ export class CTOutliner extends BaseElement {
       // In offline mode, don't emit changes
       return;
     }
+
+    // @bf: wat?
     this.isInternalUpdate = true;
-    this.value = this.tree;
     this.isInternalUpdate = false;
-    this.emit("ct-change", { value: this.tree });
+    this.emit("ct-change", { value: this.value });
   }
 
   /**
@@ -808,9 +809,9 @@ export class CTOutliner extends BaseElement {
   finishEditing() {
     if (!this.editingNode) return;
 
-    // Tree is mutated in place, no need to reassign
+    const tree = this.tree;
     TreeOperations.updateNodeBody(
-      this.tree,
+      tree,
       this.editingNode,
       this.editingContent,
     );
@@ -818,7 +819,6 @@ export class CTOutliner extends BaseElement {
     this.editingNode = null;
     this.editingContent = "";
     this.requestUpdate();
-    this.emitChange();
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
@@ -934,8 +934,9 @@ export class CTOutliner extends BaseElement {
     if (lines.length > 1) {
       this.finishEditing();
 
+      const tree = this.tree;
       const parentNode = TreeOperations.findParentNode(
-        this.tree.root,
+        tree.root,
         this.focusedNode!,
       );
       if (parentNode) {
@@ -947,16 +948,15 @@ export class CTOutliner extends BaseElement {
         // Insert new nodes after current one
         for (let i = 1; i < lines.length; i++) {
           const newNode = TreeOperations.createNode({ body: lines[i] });
-          this.tree = TreeOperations.insertNode(
-            this.tree,
+          TreeOperations.insertNode(
+            tree,
             parentNode,
             newNode,
             nodeIndex + i,
           );
         }
 
-        this.emitChange();
-      }
+          }
     }
   }
 
@@ -1095,17 +1095,16 @@ export class CTOutliner extends BaseElement {
    * focuses it, and immediately enters edit mode.
    */
   createNewNodeAfter(node: OutlineTreeNode) {
-    const parentNode = TreeOperations.findParentNode(this.tree.root, node);
+    const tree = this.tree;
+    const parentNode = TreeOperations.findParentNode(tree.root, node);
     if (!parentNode) return;
 
     const nodeIndex = TreeOperations.getNodeIndex(parentNode, node);
     const newNode = TreeOperations.createNode({ body: "" });
 
-    // Tree is mutated in place, no need to reassign
-    TreeOperations.insertNode(this.tree, parentNode, newNode, nodeIndex + 1);
+    TreeOperations.insertNode(tree, parentNode, newNode, nodeIndex + 1);
     this.focusedNode = newNode;
     this.requestUpdate();
-    this.emitChange();
     this.startEditing(newNode);
   }
 
@@ -1117,13 +1116,12 @@ export class CTOutliner extends BaseElement {
    * focuses it, and immediately enters edit mode.
    */
   createChildNode(node: OutlineTreeNode) {
+    const tree = this.tree;
     const newNode = TreeOperations.createNode({ body: "" });
 
-    // Insert as first child of the current node - tree is mutated in place
-    TreeOperations.insertNode(this.tree, node, newNode, 0);
+    TreeOperations.insertNode(tree, node, newNode, 0);
     this.focusedNode = newNode;
     this.requestUpdate();
-    this.emitChange();
     this.startEditing(newNode);
   }
 
@@ -1138,12 +1136,11 @@ export class CTOutliner extends BaseElement {
   }
 
   deleteNode(node: OutlineTreeNode) {
-    const result = TreeOperations.deleteNode(this.tree, node);
+    const tree = this.tree;
+    const result = TreeOperations.deleteNode(tree, node);
     if (result.success) {
-      // Tree is mutated in place, no need to reassign
-      this.focusedNode = result.data.newFocusNode;
+        this.focusedNode = result.data.newFocusNode;
       this.requestUpdate();
-      this.emitChange();
 
       if (this.focusedNode) {
         OutlinerEffects.focusOutliner(this.shadowRoot);
@@ -1156,10 +1153,10 @@ export class CTOutliner extends BaseElement {
     const wasEditing = this.editingNode === node;
     const editingContent = wasEditing ? this.editingContent : "";
 
-    const result = TreeOperations.indentNode(this.tree, node);
+    const tree = this.tree;
+    const result = TreeOperations.indentNode(tree, node);
     if (result.success) {
-      // Tree is mutated in place, no need to reassign
-
+  
       // Restore editing state if it was being edited
       if (wasEditing) {
         this.editingNode = node;
@@ -1167,7 +1164,6 @@ export class CTOutliner extends BaseElement {
       }
 
       this.requestUpdate();
-      this.emitChange();
     }
   }
 
@@ -1176,14 +1172,14 @@ export class CTOutliner extends BaseElement {
     editingContent: string,
     cursorPosition: number,
   ) {
-    const result = TreeOperations.indentNode(this.tree, node);
+    const tree = this.tree;
+    const result = TreeOperations.indentNode(tree, node);
     if (result.success) {
-      // Maintain edit state
+        // Maintain edit state
       this.editingNode = node;
       this.editingContent = editingContent;
 
       this.requestUpdate();
-      this.emitChange();
 
       // Restore focus and cursor position after re-render
       setTimeout(() => {
@@ -1205,10 +1201,10 @@ export class CTOutliner extends BaseElement {
     const wasEditing = this.editingNode === node;
     const editingContent = wasEditing ? this.editingContent : "";
 
-    const result = TreeOperations.outdentNode(this.tree, node);
+    const tree = this.tree;
+    const result = TreeOperations.outdentNode(tree, node);
     if (result.success) {
-      // Tree is mutated in place, no need to reassign
-
+  
       // Restore editing state if it was being edited
       if (wasEditing) {
         this.editingNode = node;
@@ -1216,7 +1212,6 @@ export class CTOutliner extends BaseElement {
       }
 
       this.requestUpdate();
-      this.emitChange();
     }
   }
 
@@ -1225,14 +1220,14 @@ export class CTOutliner extends BaseElement {
     editingContent: string,
     cursorPosition: number,
   ) {
-    const result = TreeOperations.outdentNode(this.tree, node);
+    const tree = this.tree;
+    const result = TreeOperations.outdentNode(tree, node);
     if (result.success) {
-      // Maintain edit state
+        // Maintain edit state
       this.editingNode = node;
       this.editingContent = editingContent;
 
       this.requestUpdate();
-      this.emitChange();
 
       // Restore focus and cursor position after re-render
       setTimeout(() => {
@@ -1253,13 +1248,12 @@ export class CTOutliner extends BaseElement {
     if (!this.editingNode) return;
 
     this.cancelEditing();
-    const result = TreeOperations.deleteNode(this.tree, this.focusedNode!);
+    const tree = this.tree;
+    const result = TreeOperations.deleteNode(tree, this.focusedNode!);
 
     if (result.success) {
-      // Tree is mutated in place, no need to reassign
-      this.focusedNode = result.data.newFocusNode;
+        this.focusedNode = result.data.newFocusNode;
       this.requestUpdate();
-      this.emitChange();
 
       if (this.focusedNode) {
         OutlinerEffects.focusOutliner(this.shadowRoot);
@@ -1284,11 +1278,10 @@ export class CTOutliner extends BaseElement {
     this.finishEditing();
 
     // Delete the next node
-    const result = TreeOperations.deleteNode(this.tree, nextNode);
+    const tree = this.tree;
+    const result = TreeOperations.deleteNode(tree, nextNode);
     if (result.success) {
-      // Tree is mutated in place, no need to reassign
-      this.requestUpdate();
-      this.emitChange();
+        this.requestUpdate();
 
       // Re-enter editing mode at the merge point
       this.startEditing(this.focusedNode!);
@@ -1306,20 +1299,17 @@ export class CTOutliner extends BaseElement {
 
     this.finishEditing();
 
+    const tree = this.tree;
     if (shiftKey) {
       // Outdent
-      const result = TreeOperations.outdentNode(this.tree, this.focusedNode!);
+      const result = TreeOperations.outdentNode(tree, this.focusedNode!);
       if (result.success) {
-        // Tree is mutated in place, no need to reassign
-        this.emitChange();
-      }
+          }
     } else {
       // Indent
-      const result = TreeOperations.indentNode(this.tree, this.focusedNode!);
+      const result = TreeOperations.indentNode(tree, this.focusedNode!);
       if (result.success) {
-        // Tree is mutated in place, no need to reassign
-        this.emitChange();
-      }
+          }
     }
 
     this.requestUpdate();
@@ -1479,21 +1469,19 @@ export class CTOutliner extends BaseElement {
     // Handle clicks on the main placeholder (when no nodes exist)
     if (
       target.matches(".placeholder") &&
-      (!this.tree || this.tree.root.children.length === 0)
+      (!this.value || this.tree.root.children.length === 0)
     ) {
       event.preventDefault();
 
       // Create new node
       const newNode = TreeOperations.createNode({ body: "" });
+      const tree = this.tree;
 
-      this.tree = {
-        ...this.tree,
-        root: { ...this.tree.root, children: [newNode] },
-      };
+      // Mutate the tree directly
+      tree.root.children.push(newNode);
 
       this.focusedNode = newNode;
       this.requestUpdate();
-      this.emitChange();
       this.startEditing(newNode);
     }
   }
@@ -1512,9 +1500,10 @@ export class CTOutliner extends BaseElement {
 
     if (parsedTree.root.children.length === 0) return;
 
+    const tree = this.tree;
     if (this.focusedNode) {
       const parentNode = TreeOperations.findParentNode(
-        this.tree.root,
+        tree.root,
         this.focusedNode,
       );
 
@@ -1525,47 +1514,37 @@ export class CTOutliner extends BaseElement {
         );
 
         // Insert all parsed nodes after the focused node
-        let currentTree = this.tree;
         parsedTree.root.children.forEach((node, index) => {
-          currentTree = TreeOperations.insertNode(
-            currentTree,
+          TreeOperations.insertNode(
+            tree,
             parentNode,
             node,
             nodeIndex + 1 + index,
           );
         });
 
-        this.tree = currentTree;
-
         // Focus the first newly inserted node
         this.focusedNode = parsedTree.root.children[0];
       }
-    } else if (this.tree.root.children.length === 0) {
+    } else if (tree.root.children.length === 0) {
       // No nodes exist, replace root children
-      this.tree = {
-        root: {
-          ...this.tree.root,
-          children: parsedTree.root.children,
-        },
-      };
+      tree.root.children.splice(
+        0,
+        tree.root.children.length,
+        ...parsedTree.root.children,
+      );
       this.focusedNode = parsedTree.root.children[0];
     } else {
       // No focused node but tree has nodes, append to the end
-      this.tree = {
-        root: {
-          ...this.tree.root,
-          children: [...this.tree.root.children, ...parsedTree.root.children],
-        },
-      };
+      tree.root.children.push(...parsedTree.root.children);
       this.focusedNode = parsedTree.root.children[0];
     }
 
     this.requestUpdate();
-    this.emitChange();
   }
 
   override render() {
-    const hasNodes = this.tree && this.tree.root.children.length > 0;
+    const hasNodes = this.value && this.tree.root.children.length > 0;
 
     return html`
       <div style="position: relative;">
@@ -1625,7 +1604,6 @@ export class CTOutliner extends BaseElement {
           <div class="placeholder">Click to start typing...</div>
         `
         : this.renderNodes(this.tree.root.children, 0)}
-        </div>
       </div>
     `;
   }
