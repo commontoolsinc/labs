@@ -153,6 +153,7 @@ class MemoryProviderSession<
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
   schemaChannels: Map<JobId, SchemaSubscription> = new Map();
+  // Mapping from fact key to since value of the last fact sent to the client
   lastRevision: Map<string, number> = new Map();
 
   constructor(
