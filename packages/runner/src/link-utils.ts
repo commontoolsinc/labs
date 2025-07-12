@@ -477,7 +477,7 @@ export function parseNormalizedFullLinktoLegacyDocCellLink(
   runtime: IRuntime,
 ): LegacyDocCellLink {
   return {
-    cell: runtime.getCellFromLink(link).getDoc(),
+    cell: runtime.documentMap.getDocByEntityId(link.space, link.id),
     path: link.path as string[],
   } satisfies LegacyDocCellLink;
 }
