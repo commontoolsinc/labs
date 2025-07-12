@@ -1,16 +1,15 @@
+import { isObject, Mutable } from "@commontools/utils/types";
 import {
   Cell,
+  createJsonSchema,
+  type IExtendedStorageTransaction,
   isCell,
   isStream,
+  JSONSchema,
+  JSONSchemaMutable,
   type MemorySpace,
   RecipeMeta,
   type Runtime,
-} from "@commontools/runner";
-import { isObject, Mutable } from "@commontools/utils/types";
-import {
-  createJsonSchema,
-  JSONSchema,
-  JSONSchemaMutable,
   RuntimeProgram,
 } from "@commontools/runner";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
@@ -155,6 +154,7 @@ export const generateNewRecipeVersion = async (
   if (!parentInfo.recipeId) {
     throw new Error("No recipeId found for charm");
   }
+
   const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
     parentInfo.recipeId,
     charmManager.getSpace(),
@@ -575,7 +575,7 @@ export async function compileAndRunRecipe(
     throw new Error("Failed to compile recipe");
   }
 
-  return charmManager.runPersistent(
+  return await charmManager.runPersistent(
     recipe,
     runOptions,
     undefined,

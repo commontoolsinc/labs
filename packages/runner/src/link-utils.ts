@@ -476,8 +476,9 @@ export function parseNormalizedFullLinktoLegacyDocCellLink(
   link: NormalizedFullLink,
   runtime: IRuntime,
 ): LegacyDocCellLink {
+  const cell = runtime.getCellFromLink(link, undefined);
   return {
-    cell: runtime.getCellFromLink(link).getDoc(),
+    cell: cell.getDoc(),
     path: link.path as string[],
   } satisfies LegacyDocCellLink;
 }

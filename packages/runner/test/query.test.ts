@@ -17,6 +17,7 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
 import { StoreObjectManager } from "../src/storage/query.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -24,6 +25,7 @@ const space = signer.did();
 describe("Query", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
   const store: Map<string, Revision<State>> = new Map<
     string,
     Revision<State>
@@ -39,11 +41,13 @@ describe("Query", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
     manager = new StoreObjectManager(store);
     tracker = new CycleTracker<JSONValue>();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     //store.clear();
   });
@@ -57,6 +61,8 @@ describe("Query", () => {
     >(
       space,
       `query test cell 1`,
+      undefined,
+      tx,
     );
     testCell1.set(docValue1);
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
@@ -78,6 +84,8 @@ describe("Query", () => {
     >(
       space,
       `query test cell 2`,
+      undefined,
+      tx,
     );
     testCell2.setRaw(docValue2);
     const entityId2 = testCell2.entityId!;
@@ -148,6 +156,8 @@ describe("Query", () => {
     >(
       space,
       `query test cell 1`,
+      undefined,
+      tx,
     );
     testCell1.set({ employees: [{ name: { first: "Bob" } }] });
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));
@@ -163,6 +173,8 @@ describe("Query", () => {
     >(
       space,
       `query test cell 2`,
+      undefined,
+      tx,
     );
     testCell2.setRaw({
       name: {
@@ -241,6 +253,8 @@ describe("Query", () => {
     >(
       space,
       `query test cell 1`,
+      undefined,
+      tx,
     );
     testCell1.setRaw({
       name: {
@@ -305,6 +319,8 @@ describe("Query", () => {
     >(
       space,
       `query test cell 1`,
+      undefined,
+      tx,
     );
     testCell1.set(docValue1);
     const entityId1 = JSON.parse(JSON.stringify(testCell1.entityId!));

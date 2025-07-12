@@ -6,7 +6,6 @@ import {
   applyChangeSet,
   diffAndUpdate,
   normalizeAndDiff,
-  setNestedValue,
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -19,10 +18,9 @@ import {
 } from "../src/link-utils.ts";
 import type { LegacyDocCellLink } from "../src/sigil-types.ts";
 import { arrayEqual } from "../src/path-utils.ts";
-import { type ReactivityLog } from "../src/scheduler.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -54,10 +52,16 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,
         "should set a value at a path 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const success = setNestedValue(testCell.getDoc(), ["b", "c"], 3);
-      expect(success).toBe(true);
+      diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("b").key("c").getAsNormalizedFullLink(),
+        3,
+      );
       expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
     });
 
@@ -67,10 +71,13 @@ describe("data-updating", () => {
       >(
         space,
         "should delete no longer used fields 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: 1, b: { c: 2, d: 3 } });
-      const success = setNestedValue(testCell.getDoc(), ["b"], { c: 4 });
-      expect(success).toBe(true);
+      diffAndUpdate(runtime, tx, testCell.key("b").getAsNormalizedFullLink(), {
+        c: 4,
+      });
       expect(testCell.get()).toEqual({ a: 1, b: { c: 4 } });
     });
 
@@ -78,57 +85,74 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,
         "should log no changes 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], {
-        a: 1,
-        b: { c: 2 },
-      }, log);
-      expect(success).toBe(true); // No changes is still a success
-      expect(testCell.get()).toEqual({ a: 1, b: { c: 2 } });
-      expect(log.writes).toEqual([]);
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        {
+          a: 1,
+          b: { c: 2 },
+        },
+      );
+      expect(changes.length).toEqual(0);
     });
 
     it("should log minimal changes when setting a nested value", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,
         "should log minimal changes 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
-      const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], {
-        a: 1,
-        b: { c: 3 },
-      }, log);
-      expect(success).toBe(true);
-      expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
-      expect(log.writes.length).toEqual(1);
-      expect(log.writes[0].path).toEqual(["b", "c"]);
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        testCell.getAsNormalizedFullLink(),
+        {
+          a: 1,
+          b: { c: 3 },
+        },
+      );
+      expect(changes.length).toEqual(1);
+      expect(changes[0].location.path).toEqual(["b", "c"]);
     });
 
     it("should fail when setting a nested value on a frozen cell", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,
         "should fail when setting a nested value on a frozen cell 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
       testCell.freeze("test");
-      const log: ReactivityLog = { reads: [], writes: [] };
-      const success = setNestedValue(testCell.getDoc(), [], {
-        a: 1,
-        b: { c: 3 },
-      }, log);
-      expect(success).toBe(false);
+      expect(() =>
+        diffAndUpdate(runtime, tx, testCell.getAsNormalizedFullLink(), {
+          a: 1,
+          b: { c: 3 },
+        })
+      ).toThrow();
     });
 
     it("should correctly update with shorter arrays", () => {
       const testCell = runtime.getCell<{ a: number[] }>(
         space,
         "should correctly update with shorter arrays 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: [1, 2, 3] });
-      const success = setNestedValue(testCell.getDoc(), ["a"], [1, 2]);
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        [1, 2],
+      );
       expect(success).toBe(true);
       expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2] });
     });
@@ -137,9 +161,16 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ a: number[] }>(
         space,
         "should correctly update with a longer arrays 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: [1, 2, 3] });
-      const success = setNestedValue(testCell.getDoc(), ["a"], [1, 2, 3, 4]);
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        [1, 2, 3, 4],
+      );
       expect(success).toBe(true);
       expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2, 3, 4] });
     });
@@ -148,9 +179,16 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ a: any }>(
         space,
         "should overwrite an object with an array 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: { b: 1 } });
-      const success = setNestedValue(testCell.getDoc(), ["a"], [1, 2, 3]);
+      const success = diffAndUpdate(
+        runtime,
+        tx,
+        testCell.key("a").getAsNormalizedFullLink(),
+        [1, 2, 3],
+      );
       expect(success).toBeTruthy();
       expect(testCell.get()).toHaveProperty("a");
       expect(testCell.get().a).toHaveLength(3);
@@ -163,6 +201,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
         "normalizeAndDiff simple value changes",
+        undefined,
+        tx,
       );
       testCell.set({ value: 42 });
       const current = testCell.key("value").getAsNormalizedFullLink();
@@ -177,6 +217,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ user: { name: string; age: number } }>(
         space,
         "normalizeAndDiff object property changes",
+        undefined,
+        tx,
       );
       testCell.set({ user: { name: "John", age: 30 } });
       const current = testCell.key("user").getAsNormalizedFullLink();
@@ -201,6 +243,8 @@ describe("data-updating", () => {
       >(
         space,
         "normalizeAndDiff added object properties",
+        undefined,
+        tx,
       );
       testCell.set({ user: { name: "John" } });
       const current = testCell.key("user").getAsNormalizedFullLink();
@@ -223,6 +267,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ user: { name: string; age: number } }>(
         space,
         "normalizeAndDiff removed object properties",
+        undefined,
+        tx,
       );
       testCell.set({ user: { name: "John", age: 30 } });
       const current = testCell.key("user").getAsNormalizedFullLink();
@@ -242,6 +288,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ items: number[] }>(
         space,
         "normalizeAndDiff array length changes",
+        undefined,
+        tx,
       );
       testCell.set({ items: [1, 2, 3] });
       const current = testCell.key("items").getAsNormalizedFullLink();
@@ -261,6 +309,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ items: number[] }>(
         space,
         "normalizeAndDiff array element changes",
+        undefined,
+        tx,
       );
       testCell.set({ items: [1, 2, 3] });
       const current = testCell.key("items").getAsNormalizedFullLink();
@@ -283,6 +333,8 @@ describe("data-updating", () => {
       }>(
         space,
         "normalizeAndDiff follow aliases",
+        undefined,
+        tx,
       );
       testCell.setRaw({
         value: 42,
@@ -310,6 +362,8 @@ describe("data-updating", () => {
       }>(
         space,
         "normalizeAndDiff update aliases",
+        undefined,
+        tx,
       );
       testCell.setRaw({
         value: 42,
@@ -373,6 +427,8 @@ describe("data-updating", () => {
       }>(
         space,
         "normalizeAndDiff nested changes",
+        undefined,
+        tx,
       );
       testCell.set({
         user: {
@@ -413,6 +469,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ items: any[] }>(
         space,
         "should handle ID-based entity objects",
+        undefined,
+        tx,
       );
       testCell.set({ items: [] });
       const current = testCell.key("items").key(0).getAsNormalizedFullLink();
@@ -442,6 +500,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<any>(
         space,
         "should update the same document with ID-based entity objects",
+        undefined,
+        tx,
       );
       testCell.set({ items: [] });
       const current = testCell.key("items").key(0).getAsNormalizedFullLink();
@@ -495,6 +555,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<any>(
         space,
         "should update the same document with ID-based entity objects",
+        undefined,
+        tx,
       );
       testCell.set({ items: [] });
       const current = testCell.key("items").key(0).getAsNormalizedFullLink();
@@ -546,6 +608,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<any>(
         space,
         "should handle ID_FIELD redirects",
+        undefined,
+        tx,
       );
       testCell.set({ items: [] });
 
@@ -605,6 +669,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<any>(
         space,
         "it should treat different properties as different ID namespaces",
+        undefined,
+        tx,
       );
       testCell.set(undefined);
       const current = testCell.getAsNormalizedFullLink();
@@ -642,6 +708,8 @@ describe("data-updating", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
         "normalizeAndDiff no changes",
+        undefined,
+        tx,
       );
       testCell.set({ value: 42 });
       const current = testCell.key("value").getAsNormalizedFullLink();
@@ -654,11 +722,15 @@ describe("data-updating", () => {
       const cellA = runtime.getCell<{ name: string }>(
         space,
         "normalizeAndDiff doc reference A",
+        undefined,
+        tx,
       );
       cellA.set({ name: "Doc A" });
       const cellB = runtime.getCell<{ value: { name: string } }>(
         space,
         "normalizeAndDiff doc reference B",
+        undefined,
+        tx,
       );
       cellB.set({ value: { name: "Original" } });
 
@@ -674,11 +746,15 @@ describe("data-updating", () => {
       const cellA = runtime.getCell<{ name: string }>(
         space,
         "normalizeAndDiff doc reference no change A",
+        undefined,
+        tx,
       );
       cellA.set({ name: "Doc A" });
       const cellB = runtime.getCell<{ value: { name: string } }>(
         space,
         "normalizeAndDiff doc reference no change B",
+        undefined,
+        tx,
       );
       cellB.set({ value: { name: "Original" } });
 
@@ -708,12 +784,16 @@ describe("data-updating", () => {
       const itemCell = runtime.getCell<{ id: string; name: string }>(
         space,
         "addCommonIDfromObjectID reuse items",
+        undefined,
+        tx,
       );
       itemCell.set({ id: "item1", name: "Original Item" });
 
       const testCell = runtime.getCell<{ items: any[] }>(
         space,
         "addCommonIDfromObjectID arrays",
+        undefined,
+        tx,
       );
       testCell.setRaw({ items: [itemCell.getAsLink()] });
 

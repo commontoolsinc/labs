@@ -5,6 +5,7 @@ import { refer } from "merkle-reference";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -20,6 +21,7 @@ describe("refer", () => {
 describe("cell-map", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     // Create memory service for testing
@@ -29,9 +31,11 @@ describe("cell-map", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -54,7 +58,7 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const cell = runtime.getCell(space, "test-cell");
+      const cell = runtime.getCell(space, "test-cell", undefined, tx);
       cell.set({});
       const id = getEntityId(cell);
 
@@ -67,6 +71,8 @@ describe("cell-map", () => {
       const c = runtime.getCell<{ foo: { bar: number } }>(
         space,
         "test-with-paths",
+        undefined,
+        tx,
       );
       c.set({ foo: { bar: 42 } });
       const id = getEntityId(c);
@@ -87,7 +93,12 @@ describe("cell-map", () => {
 
   describe("getCellByEntityId and setCellByEntityId", () => {
     it("should set and get a cell by entity ID", () => {
-      const c = runtime.getCell<{ value: number }>(space, "test-by-entity-id");
+      const c = runtime.getCell<{ value: number }>(
+        space,
+        "test-by-entity-id",
+        undefined,
+        tx,
+      );
       c.set({ value: 42 });
 
       // Use Cell API to retrieve by entity ID
@@ -115,7 +126,12 @@ describe("cell-map", () => {
 
   describe("cells as JSON", () => {
     it("should serialize the entity ID", () => {
-      const c = runtime.getCell<{ value: number }>(space, "test-json");
+      const c = runtime.getCell<{ value: number }>(
+        space,
+        "test-json",
+        undefined,
+        tx,
+      );
       c.set({ value: 42 });
 
       const expected = JSON.stringify({

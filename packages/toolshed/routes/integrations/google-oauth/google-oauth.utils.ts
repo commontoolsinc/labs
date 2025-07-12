@@ -186,7 +186,9 @@ export async function persistTokens(
     };
 
     // Set the new tokens to the auth cell
-    authCell.set(tokenData);
+    const tx = authCell.runtime.edit();
+    authCell.withTx(tx).set(tokenData);
+    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
     // Ensure the cell is synced
     await runtime.storage.synced();
@@ -300,7 +302,9 @@ export async function clearAuthData(authCellDocLink: string) {
     };
 
     // Set the empty data to the auth cell
-    authCell.set(emptyAuthData);
+    const tx = authCell.runtime.edit();
+    authCell.withTx(tx).set(emptyAuthData);
+    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
     // Ensure the cell is synced
     await runtime.storage.synced();

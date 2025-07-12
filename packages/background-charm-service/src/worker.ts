@@ -177,7 +177,9 @@ async function runCharm(data: RunData): Promise<void> {
     }
 
     // Execute the background updater
-    updater.send({});
+    const tx = updater.runtime.edit();
+    updater.withTx(tx).send({});
+    tx.commit(); // No retry, since events already do that
 
     // Wait for any pending operations to complete
     if (runtime) {

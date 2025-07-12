@@ -1,19 +1,18 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { isAnyCellLink, isWriteRedirectLink, parseLink } from "./link-utils.ts";
 import { createCell, isCell } from "./cell.ts";
-import { type LegacyDocCellLink, LINK_V1_TAG } from "./sigil-types.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import {
   readMaybeLink,
   resolveLinks,
   resolveLinkToWriteRedirect,
 } from "./link-resolution.ts";
-import { toURI } from "./uri-utils.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
+import { type IMemorySpaceAddress } from "./storage/interface.ts";
+import { createQueryResultProxy } from "./query-result-proxy.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -88,10 +87,9 @@ function resolveSchema(
  */
 function processDefaultValue(
   runtime: IRuntime,
-  tx: IExtendedStorageTransaction,
+  tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   defaultValue: any,
-  log?: ReactivityLog,
 ): any {
   const schema = link.schema;
   const rootSchema = link.rootSchema ?? schema;
@@ -106,21 +104,11 @@ function processDefaultValue(
     // document when the value is changed. A classic example is
     // `currentlySelected` with a default of `null`.
     if (!defaultValue && resolvedSchema?.default !== undefined) {
-      const newDoc = runtime.documentMap.getDoc(resolvedSchema.default, {
-        immutable: resolvedSchema.default,
-      }, link.space);
-      newDoc.freeze("schema asCell immutable");
-      return createCell(
-        runtime,
-        {
-          space: newDoc.space,
-          id: toURI(newDoc.entityId),
-          path: [],
-          type: "application/json",
-          schema: resolvedSchema,
-          rootSchema,
-        },
-        log,
+      return runtime.getImmutableCell(
+        link.space,
+        resolvedSchema.default,
+        resolvedSchema,
+        tx,
       );
     } else {
       return createCell(
@@ -130,7 +118,7 @@ function processDefaultValue(
           schema: mergeDefaults(resolvedSchema, defaultValue),
           rootSchema,
         },
-        log,
+        tx,
       );
     }
   }
@@ -145,7 +133,7 @@ function processDefaultValue(
       link.space,
       { $stream: true },
       resolvedSchema,
-      log,
+      tx,
     );
   }
 
@@ -167,7 +155,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             defaultValue[key as keyof typeof defaultValue],
-            log,
           );
           processedKeys.add(key);
         } else if (propSchema.asCell) {
@@ -177,7 +164,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             undefined,
-            log,
           );
         } else if (propSchema.default !== undefined) {
           result[key] = processDefaultValue(
@@ -185,7 +171,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             propSchema.default,
-            log,
           );
         } else if (
           resolvedSchema?.required?.includes(key) &&
@@ -196,7 +181,6 @@ function processDefaultValue(
             tx,
             { ...link, schema: propSchema, path: [...link.path, key] },
             propSchema.type === "object" ? {} : [],
-            log,
           );
         }
       }
@@ -221,7 +205,6 @@ function processDefaultValue(
               path: [...link.path, key],
             },
             defaultValue[key as keyof typeof defaultValue],
-            log,
           );
         }
       }
@@ -245,7 +228,6 @@ function processDefaultValue(
           path: [...link.path, String(i)],
         },
         item,
-        log,
       )
     );
   }
@@ -277,11 +259,19 @@ function mergeDefaults(
 
 export function validateAndTransform(
   runtime: IRuntime,
-  tx: IExtendedStorageTransaction,
+  tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
   log?: ReactivityLog,
   seen: Array<[string, any]> = [],
 ): any {
+  // If the transaction is no longer open, just treat it as no transaction, i.e.
+  // create temporary transactions to read. The main reason we use transactions
+  // here is so that this operation can see open reads, that are only accessible
+  // from the tx. Once tx.commit() is called, all that data is either available
+  // via other transactions or has been rolled back. Either way, we want to
+  // reflect that reality.
+  if (!tx?.status().ok?.open) tx = undefined;
+
   // Reconstruct doc, path, schema, rootSchema from link and runtime
   const schema = link.schema;
   let rootSchema = link.rootSchema ?? schema;
@@ -290,7 +280,7 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedLink = resolveLinkToWriteRedirect(tx, link);
+  const resolvedLink = resolveLinkToWriteRedirect(tx ?? runtime.edit(), link);
 
   // Use schema from alias if provided and no explicit schema was set
   if (!resolvedSchema && resolvedLink.schema) {
@@ -339,10 +329,13 @@ export function validateAndTransform(
 
     // Start with empty path, iterate to full path (hence <= and not <)
     for (let i = 0; i <= link.path.length; i++) {
-      const parsedLink = readMaybeLink(tx, {
-        ...link,
-        path: link.path.slice(0, i),
-      });
+      const parsedLink = readMaybeLink(
+        tx ?? runtime.edit(),
+        {
+          ...link,
+          path: link.path.slice(0, i),
+        },
+      );
 
       if (parsedLink?.overwrite === "redirect") {
         throw new Error(
@@ -374,25 +367,24 @@ export function validateAndTransform(
             schema: newSchema,
             rootSchema,
           },
-          log,
+          tx,
         );
       }
     }
-    return createCell(runtime, link, log);
+    return createCell(runtime, link, tx);
   }
 
   // If there is no schema, return as raw data via query result proxy
   if (resolvedSchema === undefined) {
-    const doc = runtime.documentMap.getDocByEntityId(link.space, link.id, true);
-    return doc.getAsQueryResult([...link.path], log);
+    return createQueryResultProxy(runtime, tx, link);
   }
 
   // Now resolve further links until we get the actual value. Note that `doc`
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  const ref = resolveLinks(tx, link);
-  let value = tx.readValueOrThrow(ref);
+  const ref = resolveLinks(tx ?? runtime.edit(), link);
+  let value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
@@ -401,7 +393,6 @@ export function validateAndTransform(
       tx,
       { ...link, schema: resolvedSchema },
       resolvedSchema.default,
-      log,
     );
     seen.push([seenKey, result]);
     return result;
@@ -496,7 +487,7 @@ export function validateAndTransform(
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      const extraReads: LegacyDocCellLink[] = [];
+      const extraReads: IMemorySpaceAddress[] = [];
       for (const { result, extraLog } of candidates) {
         if (isCell(result)) {
           merged = result;
@@ -586,7 +577,6 @@ export function validateAndTransform(
             tx,
             { ...link, path: [...link.path, key], schema: childSchema },
             childSchema.default,
-            log,
           );
         }
       }
@@ -651,7 +641,6 @@ export function validateAndTransform(
       tx,
       { ...link, schema: resolvedSchema },
       resolvedSchema.default,
-      log,
     );
     seen.push([seenKey, result]);
     return result;

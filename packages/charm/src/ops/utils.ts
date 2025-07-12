@@ -6,11 +6,12 @@ export async function compileProgram(
   manager: CharmManager,
   program: RuntimeProgram | string,
 ) {
-  return await compileRecipe(
+  const recipe = await compileRecipe(
     program,
     "recipe",
     manager.runtime,
     manager.getSpace(),
     undefined, // parents
   );
+  return recipe;
 }

@@ -3,6 +3,7 @@ import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
 import { RuntimeProgram } from "./harness/types.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 export const recipeMetaSchema = {
   type: "object",
@@ -48,11 +49,13 @@ export class RecipeManager implements IRecipeManager {
 
   private getRecipeMetaCell(
     { recipeId, space }: { recipeId: string; space: MemorySpace },
+    tx?: IExtendedStorageTransaction,
   ): Cell<RecipeMeta> {
     const cell = this.runtime.getCell(
       space,
       { recipeId, type: "recipe" },
       recipeMetaSchema,
+      tx,
     );
 
     return cell;
@@ -95,7 +98,10 @@ export class RecipeManager implements IRecipeManager {
       recipe?: Recipe | Module;
       recipeMeta?: RecipeMeta;
     },
+    providedTx?: IExtendedStorageTransaction,
   ): boolean {
+    const tx = providedTx ?? this.runtime.edit();
+
     // FIXME(ja): should we update the recipeMeta if it already exists? when does this happen?
     if (this.recipeMetaMap.has(recipe as Recipe)) {
       return true;
@@ -121,9 +127,12 @@ export class RecipeManager implements IRecipeManager {
       return false;
     }
 
-    const recipeMetaCell = this.getRecipeMetaCell({ recipeId, space });
+    const recipeMetaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
     recipeMetaCell.set(recipeMeta);
-    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell);
+
+    if (!providedTx) tx.commit();
+
+    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell.withTx());
     return true;
   }
 
@@ -134,10 +143,11 @@ export class RecipeManager implements IRecipeManager {
       recipe: Recipe | Module;
       recipeMeta: RecipeMeta;
     },
+    tx?: IExtendedStorageTransaction,
   ) {
-    if (this.saveRecipe({ recipeId, space, recipe, recipeMeta })) {
+    if (this.saveRecipe({ recipeId, space, recipe, recipeMeta }, tx)) {
       await this.runtime.storage.syncCell(
-        this.getRecipeMetaCell({ recipeId, space }),
+        this.getRecipeMetaCell({ recipeId, space }, tx),
       );
     }
   }
@@ -165,8 +175,9 @@ export class RecipeManager implements IRecipeManager {
   private async compileRecipeOnce(
     recipeId: string,
     space: MemorySpace,
+    tx?: IExtendedStorageTransaction,
   ): Promise<Recipe> {
-    const metaCell = this.getRecipeMetaCell({ recipeId, space });
+    const metaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
     await this.runtime.storage.syncCell(metaCell);
     const recipeMeta = metaCell.get();
 
@@ -179,11 +190,15 @@ export class RecipeManager implements IRecipeManager {
       : recipeMeta.src!;
     const recipe = await this.compileRecipe(source);
     this.recipeIdMap.set(recipeId, recipe);
-    this.recipeMetaMap.set(recipe, metaCell);
+    this.recipeMetaMap.set(recipe, metaCell.withTx());
     return recipe;
   }
 
-  async loadRecipe(id: string, space: MemorySpace): Promise<Recipe> {
+  async loadRecipe(
+    id: string,
+    space: MemorySpace,
+    tx?: IExtendedStorageTransaction,
+  ): Promise<Recipe> {
     const existing = this.recipeIdMap.get(id);
     if (existing) {
       return existing;
@@ -194,7 +209,7 @@ export class RecipeManager implements IRecipeManager {
     }
 
     // single-flight compilation
-    const compilationPromise = this.compileRecipeOnce(id, space)
+    const compilationPromise = this.compileRecipeOnce(id, space, tx)
       .finally(() => this.inProgressCompilations.delete(id)); // tidy up
 
     this.inProgressCompilations.set(id, compilationPromise);

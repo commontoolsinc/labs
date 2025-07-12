@@ -16,6 +16,7 @@ import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -23,6 +24,7 @@ const space = signer.did();
 describe("link-utils", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -30,11 +32,13 @@ describe("link-utils", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
     await runtime?.dispose();
     await storageManager?.close();
+    await tx.commit();
   });
 
   describe("isSigilValue", () => {
@@ -116,7 +120,7 @@ describe("link-utils", () => {
 
   describe("isLink", () => {
     it("should identify query results as links", () => {
-      const cell = runtime.getCell(space, "test");
+      const cell = runtime.getCell(space, "test", undefined, tx);
       // Has to be an object, otherwise asQueryResult() returns a literal
       cell.set({ value: 42 });
       const queryResult = cell.getAsQueryResult();
@@ -124,18 +128,18 @@ describe("link-utils", () => {
     });
 
     it("should identify cell links as links", () => {
-      const cell = runtime.getCell(space, "test");
+      const cell = runtime.getCell(space, "test", undefined, tx);
       const cellLink = cell.getAsLegacyCellLink();
       expect(isLink(cellLink)).toBe(true);
     });
 
     it("should identify cells as links", () => {
-      const cell = runtime.getCell(space, "test");
+      const cell = runtime.getCell(space, "test", undefined, tx);
       expect(isLink(cell)).toBe(true);
     });
 
     it("should identify docs as links", () => {
-      const cell = runtime.getCell(space, "test");
+      const cell = runtime.getCell(space, "test", undefined, tx);
       const doc = cell.getDoc();
       expect(isLink(doc)).toBe(true);
     });
@@ -204,7 +208,7 @@ describe("link-utils", () => {
 
   describe("parseLink", () => {
     it("should parse cells to normalized links", () => {
-      const cell = runtime.getCell(space, "test");
+      const cell = runtime.getCell(space, "test", undefined, tx);
       cell.set({ value: 42 });
       const result = parseLink(cell);
 
@@ -219,7 +223,7 @@ describe("link-utils", () => {
     });
 
     it("should parse cells with paths to normalized links", () => {
-      const cell = runtime.getCell<any>(space, "test");
+      const cell = runtime.getCell<any>(space, "test", undefined, tx);
       cell.set({ nested: { value: 42 } });
       const nestedCell = cell.key("nested");
       const result = parseLink(nestedCell);

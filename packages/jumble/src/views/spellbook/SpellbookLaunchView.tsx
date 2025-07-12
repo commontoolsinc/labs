@@ -57,6 +57,7 @@ function Launcher() {
           spellId,
           charmManager.getSpace(),
         );
+
         console.log("Retrieved recipe:", recipe);
 
         if (!recipe) {
@@ -92,6 +93,7 @@ function Launcher() {
           recipe,
           suggestionData.values || {},
         );
+
         console.log("Spell run created:", spell);
 
         // Navigate to the charm show view

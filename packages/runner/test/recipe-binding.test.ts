@@ -9,12 +9,15 @@ import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { areLinksSame } from "../src/link-utils.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
 describe("recipe-binding", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -24,9 +27,11 @@ describe("recipe-binding", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -36,9 +41,11 @@ describe("recipe-binding", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
         "should send value to a simple binding 1",
+        undefined,
+        tx,
       );
       testCell.set({ value: 0 });
-      sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
+      sendValueToBinding(tx, testCell, { $alias: { path: ["value"] } }, 42);
       expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
     });
 
@@ -46,9 +53,12 @@ describe("recipe-binding", () => {
       const testCell = runtime.getCell<{ arr: number[] }>(
         space,
         "should handle array bindings 1",
+        undefined,
+        tx,
       );
       testCell.set({ arr: [0, 0, 0] });
       sendValueToBinding(
+        tx,
         testCell,
         [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
         [1, 3],
@@ -68,6 +78,8 @@ describe("recipe-binding", () => {
       }>(
         space,
         "should handle bindings with multiple levels 1",
+        undefined,
+        tx,
       );
       testCell.set({
         user: {
@@ -99,7 +111,7 @@ describe("recipe-binding", () => {
         },
       };
 
-      sendValueToBinding(testCell, binding, value);
+      sendValueToBinding(tx, testCell, binding, value);
 
       expect(testCell.getAsQueryResult()).toEqual({
         user: {
@@ -118,6 +130,8 @@ describe("recipe-binding", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,
         "should map bindings to cell aliases 1",
+        undefined,
+        tx,
       );
       testCell.set({ a: 1, b: { c: 2 } });
       const binding = {
@@ -142,7 +156,12 @@ describe("recipe-binding", () => {
 
   describe("findAllWriteRedirectCells", () => {
     it("should find a single legacy alias binding", () => {
-      const testCell = runtime.getCell<{ foo: number }>(space, "single legacy");
+      const testCell = runtime.getCell<{ foo: number }>(
+        space,
+        "single legacy",
+        undefined,
+        tx,
+      );
       testCell.set({ foo: 123 });
       const binding = { $alias: { path: ["foo"] } };
       const links = findAllWriteRedirectCells(binding, testCell);
@@ -156,6 +175,8 @@ describe("recipe-binding", () => {
       const testCell = runtime.getCell<{ a: Record<string, any> }>(
         space,
         "nested legacy",
+        undefined,
+        tx,
       );
       testCell.set({ a: { b: { c: 42 } } });
       const binding = { $alias: { path: ["a"] } };
@@ -179,6 +200,8 @@ describe("recipe-binding", () => {
       const testCell = runtime.getCell<{ arr: number[] }>(
         space,
         "array legacy",
+        undefined,
+        tx,
       );
       testCell.set({ arr: [1, 2, 3] });
       const binding = [
@@ -199,6 +222,8 @@ describe("recipe-binding", () => {
       const testCell = runtime.getCell<{ x: number; y: number }>(
         space,
         "object legacy",
+        undefined,
+        tx,
       );
       testCell.set({ x: 1, y: 2 });
       const binding = {
@@ -212,7 +237,12 @@ describe("recipe-binding", () => {
     });
 
     it("should return empty array if there are no write redirect links", () => {
-      const testCell = runtime.getCell<{ foo: number }>(space, "no links");
+      const testCell = runtime.getCell<{ foo: number }>(
+        space,
+        "no links",
+        undefined,
+        tx,
+      );
       testCell.set({ foo: 1 });
       const binding = { bar: 2 };
       const links = findAllWriteRedirectCells(binding, testCell);
@@ -220,7 +250,12 @@ describe("recipe-binding", () => {
     });
 
     it("should find write redirect links using sigil format", () => {
-      const testCell = runtime.getCell<{ foo: number }>(space, "sigil link");
+      const testCell = runtime.getCell<{ foo: number }>(
+        space,
+        "sigil link",
+        undefined,
+        tx,
+      );
       testCell.set({ foo: 99 });
       const links = findAllWriteRedirectCells(
         testCell.key("foo").getAsWriteRedirectLink({ base: testCell }),

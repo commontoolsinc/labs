@@ -274,6 +274,11 @@ export class Storage implements IStorage {
     for (const entityId of entityIds) {
       const storageValue = storageProvider.get<JSONValue>(entityId);
       const newDoc = docMap.getDocByEntityId(doc.space, entityId, false)!;
+      // We don't need to hook up ephemeral docs
+      if (newDoc.ephemeral) {
+        console.log("Found link to ephemeral doc from", doc.entityId);
+        continue;
+      }
       // NOTE(@ubik2): I can't recall if a retraction will come over as a missing isValue.
       // We may still be doing the "value" wrapping in the network protocol, even though
       // that's not what they look like on the server. Not urgent, since we don't do

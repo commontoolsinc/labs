@@ -16,6 +16,7 @@ export { createRef, entityIdStr, getEntityId } from "./doc-map.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
+export type { IExtendedStorageTransaction } from "./storage/interface.ts";
 export { isDoc } from "./doc.ts";
 export { isCell, isStream } from "./cell.ts";
 export {
