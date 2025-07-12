@@ -274,6 +274,7 @@ export interface Stream<T> {
   getDoc(): DocImpl<any>;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
+  runtime: IRuntime;
   [isStreamMarker]: true;
 }
 
@@ -341,6 +342,7 @@ function createStreamCell<T>(
     schema: link.schema,
     rootSchema: link.rootSchema,
     [isStreamMarker]: true,
+    runtime,
   } satisfies Stream<T>;
 
   return self;
