@@ -117,7 +117,7 @@ async function main() {
         Deno.exit(1);
       }
       console.log("charm:", charmId);
-      console.log("charm:", JSON.stringify(charm.get(), null, 2));
+      console.log("charm:", JSON.stringify(charm.asSchema().get(), null, 2));
       console.log(
         "sourceCell:",
         JSON.stringify(charm.getSourceCell()?.get(), null, 2),
