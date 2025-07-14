@@ -352,11 +352,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before?: JSONValue;
+  before: JSONValue | undefined;
   /**
    * Value memory address has after change.
    */
-  after?: JSONValue;
+  after: JSONValue | undefined;
 }
 
 export type IStorageTransactionProgress = Variant<{
