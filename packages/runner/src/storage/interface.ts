@@ -791,7 +791,7 @@ export interface ISpaceReplica extends ISpace {
 
   commit(
     transaction: ITransaction,
-    source: IStorageTransaction,
+    source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
