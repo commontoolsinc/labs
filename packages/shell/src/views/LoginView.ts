@@ -433,7 +433,7 @@ export class XLoginView extends BaseView {
     }
   }
 
-  private async handleRegister() {
+  private handleRegister() {
     if (this.method === AUTH_METHOD_PASSKEY) {
       this.dispatchAuthEvent("passkey-register");
     } else {
