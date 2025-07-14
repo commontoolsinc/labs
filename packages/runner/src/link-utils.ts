@@ -508,6 +508,16 @@ export function areLinksSame(
   return areNormalizedLinksSame(link1, link2);
 }
 
+export function areMaybeLinkAndNormalizedLinkSame(
+  link: any,
+  normalizedLink: NormalizedLink,
+  base?: Cell | NormalizedLink,
+): boolean {
+  const normalizedLink2 = parseLink(link, base);
+  if (!normalizedLink2) return false;
+  return areNormalizedLinksSame(normalizedLink, normalizedLink2);
+}
+
 /**
  * Compare two normalized links for equality
  */

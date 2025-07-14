@@ -6,6 +6,7 @@ import { isCell } from "./cell.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
+  areMaybeLinkAndNormalizedLinkSame,
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
   isAnyCellLink,
@@ -14,10 +15,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import {
-  getCellLinkOrThrow,
-  isQueryResultForDereferencing,
-} from "./query-result-proxy.ts";
+import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import {
   type IExtendedStorageTransaction,
   type JSONValue,
@@ -143,6 +141,11 @@ export function normalizeAndDiff(
     throw new Error("Docs are not supported anymore");
   }
   if (isCell(newValue)) newValue = newValue.getAsLink();
+
+  // If we're about to create a reference to ourselves, no-op
+  if (areMaybeLinkAndNormalizedLinkSame(newValue, link)) {
+    return [];
+  }
 
   // Get current value to compare against
   let currentValue = tx.readValueOrThrow(link);

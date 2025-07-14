@@ -14,6 +14,9 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
+// This file primarily tests Schema<> & co from commontools/api/index.ts, which
+// gets transitively loaded by the above
+
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
