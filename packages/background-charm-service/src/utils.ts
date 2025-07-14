@@ -135,7 +135,8 @@ export async function setBGCharm({
 
   if (existingCharmIndex === -1) {
     console.log("Adding charm to BGUpdater charms cell");
-    charmsCell.push({
+    const tx = runtime.edit();
+    charmsCell.withTx(tx).push({
       [ID]: `${space}/${charmId}`,
       space,
       charmId,
@@ -146,6 +147,7 @@ export async function setBGCharm({
       lastRun: 0,
       status: "Initializing",
     } as unknown as Cell<BGCharmEntry>);
+    await tx.commit();
 
     // Ensure changes are synced
     await runtime.storage.synced();
@@ -154,12 +156,13 @@ export async function setBGCharm({
   } else {
     console.log("Charm already exists in BGUpdater charms cell, re-enabling");
     const existingCharm = charms[existingCharmIndex];
-    existingCharm.update({
+    const tx = runtime.edit();
+    existingCharm.withTx(tx).update({
       disabledAt: 0,
       updatedAt: Date.now(),
       status: "Re-initializing",
     });
-
+    tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
     await runtime.storage.synced();
 
     return false;

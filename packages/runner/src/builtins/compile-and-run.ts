@@ -2,8 +2,8 @@ import { type BuiltInCompileAndRunParams } from "commontools";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
-import { type ReactivityLog } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { Program } from "@commontools/js-runtime";
 import { CompilerError } from "@commontools/js-runtime/typescript";
 
@@ -27,47 +27,81 @@ import { CompilerError } from "@commontools/js-runtime/typescript";
  */
 export function compileAndRun(
   inputsCell: Cell<BuiltInCompileAndRunParams<any>>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  const pending = runtime.getCell<boolean>(
-    parentCell.space,
-    { compile: { pending: cause } },
-  );
-  pending.send(false);
-
-  const result = runtime.getCell<string | undefined>(
-    parentCell.space,
-    { compile: { result: cause } },
-  );
-
-  const error = runtime.getCell<string | undefined>(
-    parentCell.space,
-    { compile: { error: cause } },
-  );
-
-  const errors = runtime.getCell<
-    | Array<{ line: number; column: number; message: string; type: string; file?: string }>
-    | undefined
-  >(
-    parentCell.space,
-    { compile: { errors: cause } },
-  );
-
-  sendResult({ pending, result, error, errors });
-
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  let cellsInitialized = false;
+  let pending: Cell<boolean>;
+  let result: Cell<string | undefined>;
+  let error: Cell<string | undefined>;
+  let errors: Cell<
+    | Array<
+      {
+        line: number;
+        column: number;
+        message: string;
+        type: string;
+        file?: string;
+      }
+    >
+    | undefined
+  >;
 
-  return (log: ReactivityLog) => {
+  return (tx: IExtendedStorageTransaction) => {
+    if (!cellsInitialized) {
+      pending = runtime.getCell<boolean>(
+        parentCell.space,
+        { compile: { pending: cause } },
+        undefined,
+        tx,
+      );
+      pending.send(false);
+
+      result = runtime.getCell<string | undefined>(
+        parentCell.space,
+        { compile: { result: cause } },
+        undefined,
+        tx,
+      );
+
+      error = runtime.getCell<string | undefined>(
+        parentCell.space,
+        { compile: { error: cause } },
+        undefined,
+        tx,
+      );
+
+      errors = runtime.getCell<
+        | Array<
+          {
+            line: number;
+            column: number;
+            message: string;
+            type: string;
+            file?: string;
+          }
+        >
+        | undefined
+      >(
+        parentCell.space,
+        { compile: { errors: cause } },
+        undefined,
+        tx,
+      );
+
+      sendResult(tx, { pending, result, error, errors });
+      cellsInitialized = true;
+    }
     const thisRun = ++currentRun;
-    const pendingWithLog = pending.withLog(log);
-    const resultWithLog = result.withLog(log);
-    const errorWithLog = error.withLog(log);
-    const errorsWithLog = errors.withLog(log);
+    const pendingWithLog = pending.withTx(tx);
+    const resultWithLog = result.withTx(tx);
+    const errorWithLog = error.withTx(tx);
+    const errorsWithLog = errors.withTx(tx);
 
     // TODO(seefeld): Ideally, this cell already has this schema, because we set
     // it on the node itself.
@@ -90,8 +124,8 @@ export function compileAndRun(
       },
       required: ["files", "main"],
       additionalProperties: false,
-    }).withLog(log).get();
-    const input = inputsCell.withLog(log).key("input");
+    }).withTx(tx).get();
+    const input = inputsCell.withTx(tx).key("input");
 
     const hash = refer(program ?? { files: [], main: "" }).toString();
 
@@ -126,9 +160,11 @@ export function compileAndRun(
       .catch(
         (err) => {
           if (thisRun !== currentRun) return;
-          errorWithLog.set(
-            err.message + (err.stack ? "\n" + err.stack : ""),
-          );
+
+          // All this code runside outside the original action, and the
+          // transaction above might have closed by the time this is called. If
+          // so, we create a new one to set the error.
+          const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
 
           // Extract structured errors if this is a CompilerError
           if (err instanceof CompilerError) {
@@ -139,12 +175,23 @@ export function compileAndRun(
               type: e.type,
               file: e.file,
             }));
-            errorsWithLog.set(structuredErrors);
+            errorsWithLog.withTx(asyncTx).set(structuredErrors);
+          } else {
+            errorWithLog.withTx(asyncTx).set(
+              err.message + (err.stack ? "\n" + err.stack : ""),
+            );
           }
+          if (asyncTx !== tx) asyncTx.commit();
         },
       ).finally(() => {
         if (thisRun !== currentRun) return;
-        pendingWithLog.set(false);
+
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the status.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        pendingWithLog.withTx(asyncTx).set(false);
+        if (asyncTx !== tx) asyncTx.commit();
       });
 
     compilePromise.then(async (recipe) => {
@@ -153,7 +200,13 @@ export function compileAndRun(
         // TODO(ja): to support editting of existing charms / running with
         // inputs from other charms, we will need to think more about
         // how we pass input into the builtin.
-        await runtime.runSynced(result, recipe, input.get());
+
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to start the charm.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        await runtime.runSynced(result.withTx(asyncTx), recipe, input.get());
+        if (asyncTx !== tx) asyncTx.commit();
       }
       // TODO(seefeld): Add capturing runtime errors.
     });

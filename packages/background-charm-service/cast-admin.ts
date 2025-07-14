@@ -96,13 +96,17 @@ async function castRecipe() {
     // Create charm manager for the specified space
     const charmManager = new CharmManager(session, runtime);
     await charmManager.ready;
-    const recipe = await compileRecipe(recipeSrc, "recipe", runtime, spaceId);
+    const recipe = await compileRecipe(
+      recipeSrc,
+      "recipe",
+      runtime,
+      spaceId,
+    );
     console.log("Recipe compiled successfully");
 
-    const charm = await charmManager.runPersistent(
-      recipe,
-      { charms: targetCell },
-    );
+    const charm = await charmManager.runPersistent(recipe, {
+      charms: targetCell,
+    });
 
     console.log("Recipe cast successfully!");
     console.log("Result charm ID:", getEntityId(charm));

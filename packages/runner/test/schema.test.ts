@@ -8,7 +8,11 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { toURI } from "../src/uri-utils.ts";
 import { parseLink } from "../src/link-utils.ts";
-import { compactifyPaths } from "../src/scheduler.ts";
+import { compactifyPaths, txToReactivityLog } from "../src/scheduler.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -16,6 +20,7 @@ const space = signer.did();
 describe("Schema Support", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -25,9 +30,12 @@ describe("Schema Support", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -44,6 +52,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "allows mapping of fields via interim cells 1",
+        undefined,
+        tx,
       );
       c.set({
         id: 1,
@@ -102,6 +112,8 @@ describe("Schema Support", () => {
       const innerCell = runtime.getCell<{ label: string }>(
         space,
         "should support nested sinks 1",
+        undefined,
+        tx,
       );
       innerCell.set({ label: "first" });
 
@@ -121,10 +133,11 @@ describe("Schema Support", () => {
           },
           required: ["value", "current"],
         } as const satisfies JSONSchema,
+        tx,
       );
       cell.setRaw({
         value: "root",
-        current: innerCell.getAsLegacyCellLink(),
+        current: innerCell.getAsLink(),
       });
 
       const rootValues: string[] = [];
@@ -133,7 +146,7 @@ describe("Schema Support", () => {
       const currentByGetValues: string[] = [];
 
       // Nested traversal of data
-      cell.sink((value) => {
+      const cancel = cell.sink((value) => {
         rootValues.push(value.value);
         const cancel = value.current.sink((value) => {
           currentValues.push(value.label);
@@ -163,6 +176,7 @@ describe("Schema Support", () => {
       // Find the currently selected cell and update it
       const first = cell.key("current").get();
       expect(isCell(first)).toBe(true);
+      expect(first.tx).toBe(tx);
       expect(first.get()).toEqual({ label: "first" });
       first.set({ label: "first - update" });
 
@@ -177,6 +191,7 @@ describe("Schema Support", () => {
           properties: { label: { type: "string" } },
           required: ["label"],
         } as const satisfies JSONSchema,
+        tx,
       );
       second.set({ label: "second" });
       cell.key("current").set(second);
@@ -209,6 +224,10 @@ describe("Schema Support", () => {
         "second - update",
       ]);
       expect(rootValues).toEqual(["root", "cancelled", "root"]);
+
+      cancel();
+
+      expect(rootValues).toEqual(["root", "cancelled", "root", "cancelled"]);
     });
 
     it("should support nested sinks via asCell with aliases", async () => {
@@ -235,6 +254,8 @@ describe("Schema Support", () => {
       const initial = runtime.getCell<{ foo: { label: string } }>(
         space,
         "should support nested sinks via asCell with aliases 1",
+        undefined,
+        tx,
       );
       initial.set({ foo: { label: "first" } });
       const initialEntityId = initial.entityId!;
@@ -242,6 +263,8 @@ describe("Schema Support", () => {
       const linkCell = runtime.getCell<any>(
         space,
         "should support nested sinks via asCell with aliases 2",
+        undefined,
+        tx,
       );
       linkCell.setRaw(initial.getAsLegacyCellLink());
       const linkEntityId = linkCell.entityId!;
@@ -252,6 +275,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should support nested sinks via asCell with aliases 3",
+        undefined,
+        tx,
       );
       docCell.setRaw({
         value: "root",
@@ -305,8 +330,8 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       // Find the currently selected cell and read it
-      const log = { reads: [], writes: [] };
-      const first = root.key("current").withLog(log).get();
+      const tx2 = runtime.edit();
+      const first = root.key("current").withTx(tx2).get();
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
@@ -318,18 +343,17 @@ describe("Schema Support", () => {
         schema: omitSchema,
         rootSchema: schema,
       });
+      const log = txToReactivityLog(tx2);
       const reads = compactifyPaths(log.reads);
       expect(reads.length).toEqual(3);
       expect(
-        reads.map((r: LegacyDocCellLink) => ({
-          cell: toURI(r.cell.entityId!),
-          path: r.path,
-        })),
+        reads.map((r: IMemorySpaceAddress) => ({ id: r.id, path: r.path }))
+          .sort((a, b) => a.id.localeCompare(b.id)),
       ).toEqual([
-        { cell: toURI(docCell.entityId!), path: ["current"] },
-        { cell: toURI(linkEntityId), path: [] },
-        { cell: toURI(initialEntityId), path: ["foo"] },
-      ]);
+        { id: toURI(docCell.entityId!), path: ["current"] },
+        { id: toURI(linkEntityId), path: [] },
+        { id: toURI(initialEntityId), path: ["foo"] },
+      ].sort((a, b) => a.id.localeCompare(b.id)));
 
       // Then update it
       initial.set({ foo: { label: "first - update" } });
@@ -342,6 +366,8 @@ describe("Schema Support", () => {
       const second = runtime.getCell<{ foo: { label: string } }>(
         space,
         "should support nested sinks via asCell with aliases 4",
+        undefined,
+        tx,
       );
       second.set({ foo: { label: "second" } });
       linkCell.setRaw(second.getAsLegacyCellLink());
@@ -383,6 +409,8 @@ describe("Schema Support", () => {
       const third = runtime.getCell<{ label: string }>(
         space,
         "should support nested sinks via asCell with aliases 5",
+        undefined,
+        tx,
       );
       third.set({ label: "third" });
       docCell.key("current").setRaw({
@@ -396,6 +424,8 @@ describe("Schema Support", () => {
       second.set({ foo: { label: "second - updated again" } });
       third.set({ label: "third - updated" });
       await runtime.idle();
+
+      await tx2.commit();
 
       expect(currentByGetValues).toEqual([
         "first",
@@ -441,6 +471,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle primitive types 1",
+        undefined,
+        tx,
       );
       c.set({
         str: "hello",
@@ -476,6 +508,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle nested objects 1",
+        undefined,
+        tx,
       );
       c.set({
         user: {
@@ -517,6 +551,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle arrays 1",
+        undefined,
+        tx,
       );
       c.set({
         items: [1, 2, 3],
@@ -550,6 +586,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should return a Cell for reference properties 1",
+        undefined,
+        tx,
       );
       c.set({
         id: 1,
@@ -589,6 +627,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "Should support a reference at the root 1",
+        undefined,
+        tx,
       );
       c.set({
         id: 1,
@@ -623,6 +663,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle self-references with $ref 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "root",
@@ -660,6 +702,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle circular references in objects 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "root",
@@ -714,6 +758,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle nested circular references 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "root",
@@ -788,6 +834,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle circular references with anyOf 1",
+        undefined,
+        tx,
       );
       c.set({
         type: "node",
@@ -857,6 +905,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should preserve schema when using key 1",
+        undefined,
+        tx,
       );
       c.set({
         user: {
@@ -906,6 +956,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<{ value: number }>(
         space,
         "should select the correct candidate for primitive types (number) 1",
+        undefined,
+        tx,
       );
       c.set({ value: 42 });
       const schema = {
@@ -926,6 +978,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<{ value: string }>(
         space,
         "should select the correct candidate for primitive types (string) 1",
+        undefined,
+        tx,
       );
       c.set({ value: "hello" });
       const schema = {
@@ -946,6 +1000,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<{ item: { a: number; b: string } }>(
         space,
         "should merge object candidates in anyOf 1",
+        undefined,
+        tx,
       );
       c.set({ item: { a: 100, b: "merged" } });
       const schema = {
@@ -979,6 +1035,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<{ value: boolean }>(
         space,
         "should return undefined if no anyOf candidate matches 1",
+        undefined,
+        tx,
       );
       c.set({ value: true });
       const schema = {
@@ -999,6 +1057,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<{ value: { a: number } }>(
         space,
         "should return undefined when value is an object 1",
+        undefined,
+        tx,
       );
       c.set({ value: { a: 1 } });
       const schema = {
@@ -1019,6 +1079,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<{ arr: any[] }>(
         space,
         "should handle anyOf in array items 1",
+        undefined,
+        tx,
       );
       c.set({ arr: [42, space, true] });
       const schema = {
@@ -1046,6 +1108,8 @@ describe("Schema Support", () => {
       const cObject = runtime.getCell<{ mixed: { foo: string } }>(
         space,
         "should select the correct candidate when mixing 1",
+        undefined,
+        tx,
       );
       cObject.set({ mixed: { foo: "bar" } });
       const schemaObject = {
@@ -1076,6 +1140,8 @@ describe("Schema Support", () => {
       const cArray = runtime.getCell<{ mixed: string[] }>(
         space,
         "should select the correct candidate when mixing 2",
+        undefined,
+        tx,
       );
       cArray.set({ mixed: ["bar", "baz"] });
       const schemaArray = {
@@ -1104,6 +1170,8 @@ describe("Schema Support", () => {
         const c = runtime.getCell<{ data: number[] }>(
           space,
           "should handle multiple array type options 1",
+          undefined,
+          tx,
         );
         c.set({ data: [1, 2, 3] });
         const schema = {
@@ -1127,6 +1195,8 @@ describe("Schema Support", () => {
         const c = runtime.getCell<{ data: any[] }>(
           space,
           "should merge item schemas when multiple array options 1",
+          undefined,
+          tx,
         );
         c.set({ data: ["hello", 42, true] });
         const schema = {
@@ -1153,6 +1223,8 @@ describe("Schema Support", () => {
         }>(
           space,
           "should handle nested anyOf in array items 1",
+          undefined,
+          tx,
         );
         c.set({
           data: [
@@ -1199,6 +1271,8 @@ describe("Schema Support", () => {
         const c = runtime.getCell<{ data: { key: string } }>(
           space,
           "should return empty array when no array options match 1",
+          undefined,
+          tx,
         );
         c.set({ data: { key: "value" } });
         const schema = {
@@ -1227,6 +1301,8 @@ describe("Schema Support", () => {
         }>(
           space,
           "should work for the vdom schema with $ref 1",
+          undefined,
+          tx,
         );
         plain.set({
           type: "vnode",
@@ -1245,18 +1321,24 @@ describe("Schema Support", () => {
         const styleCell = runtime.getCell<{ color: string }>(
           space,
           "should work for the vdom schema with $ref 2",
+          undefined,
+          tx,
         );
         styleCell.set({ color: "red" });
 
         const innerTextCell = runtime.getCell<{ type: string; value: string }>(
           space,
           "should work for the vdom schema with $ref 4",
+          undefined,
+          tx,
         );
         innerTextCell.set({ type: "text", value: "world" });
 
         const childrenArrayCell = runtime.getCell<any[]>(
           space,
           "should work for the vdom schema with $ref 5",
+          undefined,
+          tx,
         );
         childrenArrayCell.set([
           { type: "text", value: "hello" },
@@ -1276,6 +1358,8 @@ describe("Schema Support", () => {
         }>(
           space,
           "should work for the vdom schema with $ref 3",
+          undefined,
+          tx,
         );
         withLinks.set({
           type: "vnode",
@@ -1354,6 +1438,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should use the default value when property is undefined 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "John",
@@ -1382,6 +1468,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should use the default value with asCell for objects 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "John",
@@ -1430,6 +1518,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should use the default value with asCell for arrays 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "John",
@@ -1505,6 +1595,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should use the default value with nested schema 1",
+        undefined,
+        tx,
       );
       c.set({
         user: {
@@ -1534,6 +1626,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should use the default value with nested schema 2",
+        undefined,
+        tx,
       );
       c2.set({
         user: {
@@ -1596,6 +1690,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should use the default value for array items 1",
+        undefined,
+        tx,
       );
       c.set({
         items: [
@@ -1616,6 +1712,8 @@ describe("Schema Support", () => {
       const c2 = runtime.getCell<any>(
         space,
         "should use the default value for array items 2",
+        undefined,
+        tx,
       );
       c2.set(undefined);
       const cell2 = c2.asSchema(schema);
@@ -1667,6 +1765,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<any>(
         space,
         "should handle default values with additionalProperties 1",
+        undefined,
+        tx,
       );
       c.set(undefined);
       const cell = c.asSchema(schema);
@@ -1710,6 +1810,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<any>(
         space,
         "should use the default value at the root level 1",
+        undefined,
+        tx,
       );
       c.set(undefined);
       const cell = c.asSchema(schema);
@@ -1749,6 +1851,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<any>(
         space,
         "should make immutable cells if they provide the default value 1",
+        undefined,
+        tx,
       );
       c.set(undefined);
       const cell = c.asSchema(schema);
@@ -1776,6 +1880,8 @@ describe("Schema Support", () => {
       const c = runtime.getCell<any>(
         space,
         "should make mutable cells if parent provides the default value 1",
+        undefined,
+        tx,
       );
       c.set(undefined);
       const cell = c.asSchema(schema);
@@ -1798,6 +1904,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should create a stream for properties marked with asStream 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "Test Doc",
@@ -1836,6 +1944,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should handle nested streams in objects 1",
+        undefined,
+        tx,
       );
       c.set({
         user: {
@@ -1881,6 +1991,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should not create a stream when property is missing 1",
+        undefined,
+        tx,
       );
       c.set({
         name: "Test Doc",
@@ -1912,6 +2024,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "should behave correctly when both asCell and asStream are in the schema 1",
+        undefined,
+        tx,
       );
       c.set({
         cellData: { value: 42 },

@@ -53,28 +53,20 @@ export const createBuilder = (
     value?: T,
   ): Cell<T> {
     const frame = getTopFrame();
-    // This is a rather hacky way to get the context, based on the
-    // unsafe_binding pattern. Once we replace that mechanism, let's add nicer
-    // abstractions for context here as well.
-    const cellLink = frame?.unsafe_binding?.materialize([]);
-    if (!frame || !frame.cause || !cellLink) {
+    if (!frame || !frame.cause || !frame.unsafe_binding) {
       throw new Error(
         "Can't invoke createCell outside of a lifted function or handler",
       );
     }
-    if (!getCellLinkOrThrow) {
-      throw new Error(
-        "getCellLinkOrThrow function not provided to createBuilder",
-      );
-    }
-    const space = getCellLinkOrThrow(cellLink).cell.space;
+    const space = frame.unsafe_binding.space;
+    const tx = frame.unsafe_binding.tx;
 
     const cause = { parent: frame.cause } as Record<string, any>;
     if (name) cause.name = name;
     else cause.number = frame.generatedIdCounter++;
 
     // Cast to Cell<T> is necessary to cast to interface-only Cell type
-    const cell = runtime.getCell<T>(space, cause, schema) as Cell<T>;
+    const cell = runtime.getCell<T>(space, cause, schema, tx) as Cell<T>;
 
     if (value !== undefined) cell.set(value);
 

@@ -12,6 +12,7 @@ import { popFrame, pushFrame, recipe } from "../src/builder/recipe.ts";
 import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -24,6 +25,7 @@ describe("Schema-to-TS Type Conversion", () => {
   let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -33,10 +35,12 @@ describe("Schema-to-TS Type Conversion", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
     frame = pushFrame();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -519,6 +523,8 @@ describe("Schema-to-TS Type Conversion", () => {
     const settingsCell = runtime.getCell(
       space,
       "settings-cell",
+      undefined,
+      tx,
     );
     settingsCell.set({ theme: "dark", notifications: true });
 

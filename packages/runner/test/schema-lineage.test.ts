@@ -6,6 +6,7 @@ import { isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -13,6 +14,7 @@ const space = signer.did();
 describe("Schema Lineage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
@@ -24,11 +26,13 @@ describe("Schema Lineage", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
     const { commontools } = createBuilder(runtime);
     ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -39,6 +43,8 @@ describe("Schema Lineage", () => {
       const targetCell = runtime.getCell<{ count: number; label: string }>(
         space,
         "schema-lineage-target",
+        undefined,
+        tx,
       );
       targetCell.set({ count: 42, label: "test" });
 
@@ -55,6 +61,8 @@ describe("Schema Lineage", () => {
       const sourceCell = runtime.getCell<any>(
         space,
         "schema-lineage-source",
+        undefined,
+        tx,
       );
       sourceCell.setRaw({
         $alias: {
@@ -84,6 +92,8 @@ describe("Schema Lineage", () => {
       const targetCell = runtime.getCell<{ count: number; label: string }>(
         space,
         "schema-lineage-target-explicit",
+        undefined,
+        tx,
       );
       targetCell.set({ count: 42, label: "test" });
 
@@ -108,6 +118,8 @@ describe("Schema Lineage", () => {
       const sourceCell = runtime.getCell<any>(
         space,
         "schema-lineage-source-explicit",
+        undefined,
+        tx,
       );
       sourceCell.setRaw({
         $alias: {
@@ -137,6 +149,8 @@ describe("Schema Lineage", () => {
       const valueCell = runtime.getCell<{ count: number; name: string }>(
         space,
         "deep-alias-value",
+        undefined,
+        tx,
       );
       valueCell.set({ count: 5, name: "test" });
 
@@ -147,6 +161,8 @@ describe("Schema Lineage", () => {
       const countCell = runtime.getCell<any>(
         space,
         "count-alias",
+        undefined,
+        tx,
       );
       countCell.setRaw({
         $alias: {
@@ -160,6 +176,8 @@ describe("Schema Lineage", () => {
       const finalCell = runtime.getCell<any>(
         space,
         "final-alias",
+        undefined,
+        tx,
       );
       finalCell.setRaw({
         $alias: countCell.getAsLegacyCellLink(),
@@ -181,6 +199,8 @@ describe("Schema Lineage", () => {
       }>(
         space,
         "nested-doc-with-alias",
+        undefined,
+        tx,
       );
       nestedCell.set({
         items: [
@@ -205,6 +225,8 @@ describe("Schema Lineage", () => {
       const itemsCell = runtime.getCell<any>(
         space,
         "items-alias",
+        undefined,
+        tx,
       );
       itemsCell.setRaw({
         $alias: {
@@ -236,6 +258,7 @@ describe("Schema Lineage", () => {
 describe("Schema propagation end-to-end example", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let UI: ReturnType<typeof createBuilder>["commontools"]["UI"];
 
@@ -247,11 +270,13 @@ describe("Schema propagation end-to-end example", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
     const { commontools } = createBuilder(runtime);
     ({ recipe, UI } = commontools);
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -282,17 +307,20 @@ describe("Schema propagation end-to-end example", () => {
       },
     }));
 
-    const result = runtime.getCell<any>(
+    const resultCell = runtime.getCell<any>(
       space,
       "should propagate schema through a recipe",
+      undefined,
+      tx,
     );
     runtime.run(
+      tx,
       testRecipe,
       { details: { name: "hello", age: 14 } },
-      result,
+      resultCell,
     );
 
-    const c = result.key(UI).asSchema(
+    const c = resultCell.key(UI).asSchema(
       {
         type: "object",
         properties: {

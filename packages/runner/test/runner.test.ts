@@ -5,6 +5,7 @@ import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -52,7 +53,10 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const resultCell = runtime.getCell(space, "should work with passthrough");
+    const resultCell = runtime.getCell(
+      space,
+      "should work with passthrough",
+    );
     const result = await runtime.runSynced(resultCell, recipe, { input: 1 });
     await runtime.idle();
 
@@ -146,7 +150,10 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.getCell(space, "should run a simple module");
+    const resultCell = runtime.getCell(
+      space,
+      "should run a simple module",
+    );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
     });
@@ -250,7 +257,10 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.getCell(space, "should handle nested recipes");
+    const resultCell = runtime.getCell(
+      space,
+      "should handle nested recipes",
+    );
     const result = await runtime.runSynced(resultCell, mockRecipe, {
       value: 1,
     });
@@ -275,28 +285,39 @@ describe("runRecipe", () => {
       ],
     };
 
+    const tx1 = runtime.edit();
     const inputCell = runtime.getCell<{ input: number; output: number }>(
       space,
       "should allow passing a cell as a binding: input cell",
+      undefined,
+      tx1,
     );
     inputCell.set({ input: 10, output: 0 });
+    await tx1.commit();
+
     const resultCell = runtime.getCell(
       space,
       "should allow passing a cell as a binding",
     );
+
     const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
     await runtime.idle();
 
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
-    expect(result.getAsQueryResult()).toEqual({ output: 20 });
+    expect(result.get()).toEqual({ output: 20 });
 
     // The result should alias the original cell. Let's verify by stopping the
     // recipe and sending a new value to the input cell.
     runtime.runner.stop(result);
-    inputCell.send({ input: 10, output: 40 });
+
+    const tx2 = runtime.edit();
+    inputCell.withTx(tx2).send({ input: 10, output: 40 });
+    await tx2.commit();
+
+    expect(result.get()).toEqual({ output: 40 });
+
     await runtime.idle();
-    expect(result.getAsQueryResult()).toEqual({ output: 40 });
   });
 
   it("should allow stopping a recipe", async () => {
@@ -316,26 +337,44 @@ describe("runRecipe", () => {
       ],
     };
 
+    const tx = runtime.edit();
     const inputCell = runtime.getCell<{ input: number; output: number }>(
       space,
       "should allow stopping a recipe: input cell",
+      undefined,
+      tx,
     );
     inputCell.set({ input: 10, output: 0 });
-    const resultCell = runtime.getCell(space, "should allow stopping a recipe");
+    const resultCell = runtime.getCell(
+      space,
+      "should allow stopping a recipe",
+      undefined,
+      tx,
+    );
+
+    // Commit the initial values before running the recipe
+    await tx.commit();
+
     const result = await runtime.runSynced(resultCell, recipe, inputCell);
 
     await runtime.idle();
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
 
-    inputCell.send({ input: 20, output: 20 });
+    const tx2 = runtime.edit();
+    inputCell.withTx(tx2).send({ input: 20, output: 20 });
+    await tx2.commit();
     await runtime.idle();
+
     expect(inputCell.get()).toMatchObject({ input: 20, output: 40 });
 
     // Stop the recipe
     runtime.runner.stop(result);
 
-    inputCell.send({ input: 40, output: 40 });
+    const tx3 = runtime.edit();
+    inputCell.withTx(tx3).send({ input: 40, output: 40 });
+    await tx3.commit();
     await runtime.idle();
+
     expect(inputCell.get()).toMatchObject({ input: 40, output: 40 });
 
     // Restart the recipe
@@ -375,6 +414,7 @@ describe("runRecipe", () => {
       space,
       "default values test - partial",
     );
+
     const resultWithPartial = await runtime.runSynced(
       resultWithPartialCell,
       recipe,
@@ -388,6 +428,7 @@ describe("runRecipe", () => {
       space,
       "default values test - all defaults",
     );
+
     const resultWithDefaults = await runtime.runSynced(
       resultWithDefaultsCell,
       recipe,
@@ -446,7 +487,10 @@ describe("runRecipe", () => {
       ],
     };
 
-    const resultCell = runtime.getCell(space, "complex schema test");
+    const resultCell = runtime.getCell(
+      space,
+      "complex schema test",
+    );
     const result = await runtime.runSynced(resultCell, recipe, {
       config: { values: [10, 20, 30, 40], operation: "avg" },
     });
@@ -497,7 +541,10 @@ describe("runRecipe", () => {
     };
 
     // Provide partial options - should merge with defaults
-    const resultCell = runtime.getCell(space, "merge defaults test");
+    const resultCell = runtime.getCell(
+      space,
+      "merge defaults test",
+    );
     const result = await runtime.runSynced(resultCell, recipe, {
       options: { value: 10 },
       input: 5,
@@ -596,7 +643,9 @@ describe("runRecipe", () => {
       space,
       "should create separate copies of initial values 1",
     );
-    const result1 = await runtime.runSynced(result1Cell, recipe, { input: 5 });
+    const result1 = await runtime.runSynced(result1Cell, recipe, {
+      input: 5,
+    });
     await runtime.idle();
 
     // Create second instance
@@ -604,7 +653,9 @@ describe("runRecipe", () => {
       space,
       "should create separate copies of initial values 2",
     );
-    const result2 = await runtime.runSynced(result2Cell, recipe, { input: 10 });
+    const result2 = await runtime.runSynced(result2Cell, recipe, {
+      input: 10,
+    });
     await runtime.idle();
 
     // Get the internal state objects
@@ -627,6 +678,7 @@ describe("runRecipe", () => {
 describe("runner utils", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -636,9 +688,11 @@ describe("runner utils", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -709,6 +763,8 @@ describe("runner utils", () => {
       const testCell = runtime.getCell<{ a: any }>(
         space,
         "should treat cell aliases and references as values 1",
+        undefined,
+        tx,
       );
       const obj1 = { a: { $alias: { path: [] } } };
       const obj2 = { a: 2, b: { c: testCell.getAsLegacyCellLink() } };

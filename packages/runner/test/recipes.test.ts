@@ -8,6 +8,7 @@ import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/link-resolution.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -15,6 +16,7 @@ const space = signer.did();
 describe("Recipe Runner", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
   let lift: ReturnType<typeof createBuilder>["commontools"]["lift"];
   let recipe: ReturnType<typeof createBuilder>["commontools"]["recipe"];
   let createCell: ReturnType<typeof createBuilder>["commontools"]["createCell"];
@@ -31,6 +33,8 @@ describe("Recipe Runner", () => {
       storageManager,
     });
 
+    tx = runtime.edit();
+
     const { commontools } = createBuilder(runtime);
     ({
       lift,
@@ -43,6 +47,7 @@ describe("Recipe Runner", () => {
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -59,8 +64,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should run a simple recipe",
+      undefined,
+      tx,
     );
-    const result = runtime.run(simpleRecipe, {
+    const result = runtime.run(tx, simpleRecipe, {
       value: 5,
     }, resultCell);
 
@@ -91,8 +98,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle nested recipes",
+      undefined,
+      tx,
     );
-    const result = runtime.run(outerRecipe, {
+    const result = runtime.run(tx, outerRecipe, {
       value: 4,
     }, resultCell);
 
@@ -115,8 +124,11 @@ describe("Recipe Runner", () => {
     const resultCell1 = runtime.getCell<{ sum: number }>(
       space,
       "should handle recipes with defaults",
+      undefined,
+      tx,
     );
     const result1 = runtime.run(
+      tx,
       recipeWithDefaults,
       {},
       resultCell1,
@@ -129,8 +141,10 @@ describe("Recipe Runner", () => {
     const resultCell2 = runtime.getCell<{ sum: number }>(
       space,
       "should handle recipes with defaults (2)",
+      undefined,
+      tx,
     );
-    const result2 = runtime.run(recipeWithDefaults, {
+    const result2 = runtime.run(tx, recipeWithDefaults, {
       a: 20,
     }, resultCell2);
 
@@ -156,8 +170,10 @@ describe("Recipe Runner", () => {
     >(
       space,
       "should handle recipes with map nodes",
+      undefined,
+      tx,
     );
-    const result = runtime.run(multipliedArray, {
+    const result = runtime.run(tx, multipliedArray, {
       values: [{ x: 1 }, { x: 2 }, { x: 3 }],
     }, resultCell);
 
@@ -184,8 +200,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ doubled: number[] }>(
       space,
       "should handle recipes with map nodes with closures",
+      undefined,
+      tx,
     );
-    const result = runtime.run(doubleArray, {
+    const result = runtime.run(tx, doubleArray, {
       values: [1, 2, 3],
       factor: 3,
     }, resultCell);
@@ -211,8 +229,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ doubled: number[] }>(
       space,
       "should handle map nodes with undefined input",
+      undefined,
+      tx,
     );
-    const result = runtime.run(doubleArray, {
+    const result = runtime.run(tx, doubleArray, {
       values: undefined,
     }, resultCell);
 
@@ -240,8 +260,8 @@ describe("Recipe Runner", () => {
 
     const resultCell = runtime.getCell<
       { counter: { value: number }; stream: any }
-    >(space, "should execute handlers");
-    const result = runtime.run(incRecipe, {
+    >(space, "should execute handlers", undefined, tx);
+    const result = runtime.run(tx, incRecipe, {
       counter: { value: 0 },
     }, resultCell);
 
@@ -280,8 +300,10 @@ describe("Recipe Runner", () => {
     >(
       space,
       "should execute handlers that use bind and this",
+      undefined,
+      tx,
     );
-    const result = runtime.run(incRecipe, {
+    const result = runtime.run(tx, incRecipe, {
       counter: { value: 0 },
     }, resultCell);
 
@@ -316,8 +338,10 @@ describe("Recipe Runner", () => {
     >(
       space,
       "should execute handlers that use bind and this (no types)",
+      undefined,
+      tx,
     );
-    const result = runtime.run(incRecipe, {
+    const result = runtime.run(tx, incRecipe, {
       counter: { value: 0 },
     }, resultCell);
 
@@ -336,11 +360,15 @@ describe("Recipe Runner", () => {
     const counter = runtime.getCell<{ value: number }>(
       space,
       "should execute recipes returned by handlers 1",
+      undefined,
+      tx,
     );
     counter.set({ value: 0 });
     const nested = runtime.getCell<{ a: { b: { c: number } } }>(
       space,
       "should execute recipes returned by handlers 2",
+      undefined,
+      tx,
     );
     nested.set({ a: { b: { c: 0 } } });
 
@@ -373,8 +401,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ stream: any }>(
       space,
       "should execute recipes returned by handlers",
+      undefined,
+      tx,
     );
-    const result = runtime.run(incRecipe, {
+    const result = runtime.run(tx, incRecipe, {
       counter,
       nested,
     }, resultCell);
@@ -400,11 +430,15 @@ describe("Recipe Runner", () => {
     const x = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 1",
+      undefined,
+      tx,
     );
     x.set(2);
     const y = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 2",
+      undefined,
+      tx,
     );
     y.set(3);
 
@@ -444,8 +478,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result1: number; result2: number }>(
       space,
       "should handle recipes returned by lifted functions",
+      undefined,
+      tx,
     );
-    const result = runtime.run(multiplyRecipe, {
+    const result = runtime.run(tx, multiplyRecipe, {
       x,
       y,
     }, resultCell);
@@ -498,8 +534,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should support referenced modules",
+      undefined,
+      tx,
     );
-    const result = runtime.run(simpleRecipe, {
+    const result = runtime.run(tx, simpleRecipe, {
       value: 5,
     }, resultCell);
 
@@ -539,13 +577,17 @@ describe("Recipe Runner", () => {
     const settingsCell = runtime.getCell<{ value: number }>(
       space,
       "should handle schema with cell references 1",
+      undefined,
+      tx,
     );
     settingsCell.set({ value: 5 });
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle schema with cell references",
+      undefined,
+      tx,
     );
-    const result = runtime.run(multiplyRecipe, {
+    const result = runtime.run(tx, multiplyRecipe, {
       settings: settingsCell,
       multiplier: 3,
     }, resultCell);
@@ -605,18 +647,24 @@ describe("Recipe Runner", () => {
     const item1 = runtime.getCell<{ value: number }>(
       space,
       "should handle nested cell references in schema 1",
+      undefined,
+      tx,
     );
     item1.set({ value: 1 });
     const item2 = runtime.getCell<{ value: number }>(
       space,
       "should handle nested cell references in schema 2",
+      undefined,
+      tx,
     );
     item2.set({ value: 2 });
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle nested cell references in schema",
+      undefined,
+      tx,
     );
-    const result = runtime.run(sumRecipe, {
+    const result = runtime.run(tx, sumRecipe, {
       data: { items: [item1, item2] },
     }, resultCell);
 
@@ -660,18 +708,24 @@ describe("Recipe Runner", () => {
     const value1 = runtime.getCell<number>(
       space,
       "should handle dynamic cell references with schema 1",
+      undefined,
+      tx,
     );
     value1.set(5);
     const value2 = runtime.getCell<number>(
       space,
       "should handle dynamic cell references with schema 2",
+      undefined,
+      tx,
     );
     value2.set(7);
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle dynamic cell references with schema",
+      undefined,
+      tx,
     );
-    const result = runtime.run(dynamicRecipe, {
+    const result = runtime.run(tx, dynamicRecipe, {
       context: {
         first: value1,
         second: value2,
@@ -711,8 +765,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ counter: number; stream: any }>(
       space,
       "should execute handlers with schemas",
+      undefined,
+      tx,
     );
-    const result = runtime.run(incRecipe, {
+    const result = runtime.run(tx, incRecipe, {
       counter: 0,
     }, resultCell);
 
@@ -758,8 +814,10 @@ describe("Recipe Runner", () => {
     const charmCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "failed handlers should be ignored",
+      undefined,
+      tx,
     );
-    const charm = runtime.run(divRecipe, { result: 1 }, charmCell);
+    const charm = runtime.run(tx, divRecipe, { result: 1 }, charmCell);
 
     await runtime.idle();
 
@@ -820,14 +878,18 @@ describe("Recipe Runner", () => {
     const dividend = runtime.getCell<number>(
       space,
       "failed lifted functions should be ignored 1",
+      undefined,
+      tx,
     );
     dividend.set(1);
 
     const charmCell = runtime.getCell<{ result: number }>(
       space,
       "failed lifted handlers should be ignored",
+      undefined,
+      tx,
     );
-    const charm = runtime.run(divRecipe, {
+    const charm = runtime.run(tx, divRecipe, {
       divisor: 10,
       dividend,
     }, charmCell);
@@ -885,8 +947,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "idle should wait for slow async lifted functions",
+      undefined,
+      tx,
     );
-    const result = runtime.run(slowRecipe, { x: 1 }, resultCell);
+    const result = runtime.run(tx, slowRecipe, { x: 1 }, resultCell);
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(liftCalled).toBe(true);
@@ -925,8 +989,10 @@ describe("Recipe Runner", () => {
     const charmCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "idle should wait for slow async handlers",
+      undefined,
+      tx,
     );
-    const charm = runtime.run(slowHandlerRecipe, { result: 0 }, charmCell);
+    const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
 
     await runtime.idle();
 
@@ -944,10 +1010,11 @@ describe("Recipe Runner", () => {
     expect(charm.get()).toMatchObject({ result: 10 });
   });
 
-  it("idle should not wait for deliberately async handlers", async () => {
+  it("idle should not wait for deliberately async handlers and writes should fail", async () => {
     let handlerCalled = false;
     let timeoutCalled = false;
     let timeoutPromise: Promise<void> | undefined;
+    let caughtErrorTryingToSetResult: Error | undefined;
 
     const slowHandler = handler<{ value: number }, { result: number }>(
       ({ value }, state) => {
@@ -956,7 +1023,11 @@ describe("Recipe Runner", () => {
         timeoutPromise = new Promise<void>((resolve) =>
           setTimeout(() => {
             timeoutCalled = true;
-            state.result = value * 2;
+            try {
+              state.result = value * 2;
+            } catch (error) {
+              caughtErrorTryingToSetResult = error as Error;
+            }
             resolve();
           }, 10)
         );
@@ -973,8 +1044,10 @@ describe("Recipe Runner", () => {
     const charmCell = runtime.getCell<{ result: number; updater: any }>(
       space,
       "idle should not wait for deliberately async handlers",
+      undefined,
+      tx,
     );
-    const charm = runtime.run(slowHandlerRecipe, { result: 0 }, charmCell);
+    const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
 
     await runtime.idle();
 
@@ -988,7 +1061,8 @@ describe("Recipe Runner", () => {
     // Now idle should wait for the handler's promise to resolve
     await timeoutPromise;
     expect(timeoutCalled).toBe(true);
-    expect(charm.get()).toMatchObject({ result: 10 });
+    expect(caughtErrorTryingToSetResult).toBeDefined();
+    expect(charm.get()?.result).toBe(0); // No change
   });
 
   it("should create and use a named cell inside a lift", async () => {
@@ -1008,7 +1082,8 @@ describe("Recipe Runner", () => {
     const input = runtime.getCell<number>(
       space,
       "should create and use a named cell inside a lift input",
-      { type: "number" },
+      undefined,
+      tx,
     );
     input.set(5);
 
@@ -1021,7 +1096,8 @@ describe("Recipe Runner", () => {
         required: ["value"],
       },
     );
-    const result = runtime.run(wrapperRecipe, { value: input }, resultCell);
+
+    const result = runtime.run(tx, wrapperRecipe, { value: input }, resultCell);
 
     await runtime.idle();
 
@@ -1031,7 +1107,6 @@ describe("Recipe Runner", () => {
     expect(wrapperCell.get()).toBe(5);
 
     // Follow all the links until we get to the doc holding the value
-    const tx = runtime.edit();
     const ref = resolveLinks(
       tx,
       wrapperCell.getAsNormalizedFullLink(),
@@ -1046,7 +1121,6 @@ describe("Recipe Runner", () => {
 
     // That same value was updated, which shows that the id was stable
     expect(tx.readValueOrThrow(ref)).toBe(10);
-    tx.commit();
   });
 
   it("should handle pushing objects that reference their containing array", async () => {
@@ -1072,8 +1146,10 @@ describe("Recipe Runner", () => {
     const resultCell = runtime.getCell<{ items: any[]; stream: any }>(
       space,
       "should handle pushing objects that reference their containing array",
+      undefined,
+      tx,
     );
-    const result = runtime.run(itemsRecipe, { items: [] }, resultCell);
+    const result = runtime.run(tx, itemsRecipe, { items: [] }, resultCell);
 
     await runtime.idle();
 

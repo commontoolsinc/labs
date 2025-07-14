@@ -7,8 +7,8 @@ import { v1 } from "@commontools/ui";
 import {
   Action,
   addCommonIDfromObjectID,
+  type IExtendedStorageTransaction,
   isCell,
-  ReactivityLog,
   type Runtime,
 } from "@commontools/runner";
 import { DEFAULT_IFRAME_MODELS, LLMClient } from "@commontools/llm";
@@ -201,7 +201,9 @@ export const setupIframe = (runtime: Runtime) =>
             (type === "integer" && typeof value === "number") ||
             (type === typeof value as string)
           ) {
-            context.key(key).set(value);
+            const tx = context.runtime.edit();
+            context.withTx(tx).key(key).set(value);
+            tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
           } else {
             console.warn(
               "write skipped due to type",
@@ -222,13 +224,13 @@ export const setupIframe = (runtime: Runtime) =>
       callback: (key: string, value: any) => void,
       doNotSendMyDataBack: boolean,
     ): any {
-      const action: Action = (log: ReactivityLog) => {
+      const action: Action = (tx: IExtendedStorageTransaction) => {
         const data = key === "*"
           // No withLog because we don't want to schedule more runs, see below
           ? (isCell(context) ? context.get() : context)
           : (isCell(context)
             // get?.() because streams don't have a get, set undefined for those
-            ? context.withLog(log).key(key).get?.()
+            ? context.withTx(tx).key(key).get?.()
             : context?.[key]);
         const serialized = removeNonJsonData(data);
         const serializedString = JSON.stringify(serialized);
@@ -251,7 +253,7 @@ export const setupIframe = (runtime: Runtime) =>
       };
 
       // Schedule the action with appropriate reactivity log
-      const reads = isCell(context) ? [context.getAsLegacyCellLink()] : [];
+      const reads = isCell(context) ? [context.getAsNormalizedFullLink()] : [];
       const cancel = runtime.scheduler.schedule(action, { reads, writes: [] });
       return { action, cancel };
     },
