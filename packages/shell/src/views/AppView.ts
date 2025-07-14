@@ -106,7 +106,7 @@ export class XAppView extends BaseView {
     const cc = this._cc.value;
     const app = (this.app ?? {}) as AppState;
     const unauthenticated = html`
-      <x-login-view></x-login-view>
+      <x-login-view .keyStore="${app.keyStore}"></x-login-view>
     `;
     const authenticated = html`
       <x-body
