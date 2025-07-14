@@ -5,6 +5,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -12,6 +13,7 @@ const space = signer.did();
 describe("Nested Cell Array", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -20,9 +22,11 @@ describe("Nested Cell Array", () => {
       blobbyServerUrl: import.meta.url,
       storageManager,
     });
+    tx = runtime.edit();
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -63,8 +67,9 @@ describe("Nested Cell Array", () => {
       space,
       "normal-array",
       normalArraySchema,
+      tx,
     );
-    const cellArray = runtime.getCell(space, "cell-array", cellArraySchema);
+    const cellArray = runtime.getCell(space, "cell-array", cellArraySchema, tx);
 
     // Add the same data to both
     const testData = { name: "test", value: 42 };
@@ -105,7 +110,7 @@ describe("Nested Cell Array", () => {
       },
       default: [],
     } as const satisfies JSONSchema;
-    const arrayCell = runtime.getCell(space, "test-array-with-id", schema);
+    const arrayCell = runtime.getCell(space, "test-array-with-id", schema, tx);
 
     // Push an object WITHOUT [ID]
     arrayCell.push({
