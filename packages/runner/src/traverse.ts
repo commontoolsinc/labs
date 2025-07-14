@@ -17,6 +17,7 @@ import type {
 import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import type { URI } from "./sigil-types.ts";
+import { fromURI } from "./uri-utils.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -483,12 +484,23 @@ function loadLinkedRecipe<K, S>(
   }
   // We also want to include the source cells
   const value = targetObj["value"];
-  if (!isObject(value) || !("$TYPE" in value) || !isString(value["$TYPE"])) {
+  if (!isObject(value)) {
     return;
   }
-  const recipeId = value["$TYPE"];
-  const entityId = refer({ causal: { recipeId, type: "recipe" } });
-  const entryDoc = manager.toAddress(entityId.toJSON()["/"]);
+  let entryDoc;
+  // Check for a spell link first, since this is more efficient
+  // Older recipes will only have a $TYPE
+  if ("spell" in value && isAnyCellLink(value["spell"])) {
+    const link = parseLink(value["spell"])!;
+    entryDoc = manager.toAddress(fromURI(link.id!));
+  } else if ("$TYPE" in value && isString(value["$TYPE"])) {
+    const recipeId = value["$TYPE"];
+    const entityId = refer({ causal: { recipeId, type: "recipe" } });
+    entryDoc = manager.toAddress(entityId.toJSON()["/"]);
+  }
+  if (entryDoc === undefined) {
+    return;
+  }
   const entry = manager.load(entryDoc);
   if (entry === null || entry.value === undefined || !entry.source) {
     return;

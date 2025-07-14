@@ -61,6 +61,7 @@ export type ErrorWithContext = Error & {
   charmId: string;
   space: MemorySpace;
   recipeId: string;
+  spellId: string | undefined;
 };
 
 export type ConsoleHandler = (
