@@ -231,13 +231,12 @@ export interface IStorageSubscription {
  * implying that object has only one of the fields with a cerrosponding
  * value. Property name denotes type of notification.
  */
-type StorageNotification = Variant<{
-  commit: ICommitNotification;
-  revert: IRevertNotification;
-  load: ILoadNotification;
-  pull: IPullNotification;
-  sync: IIntegrateNotification;
-}>;
+type StorageNotification =
+  | ICommitNotification
+  | IRevertNotification
+  | ILoadNotification
+  | IPullNotification
+  | IIntegrateNotification;
 
 /**
  * This notification is broadcasted after commit on {@link IStorageTransaction}
@@ -246,6 +245,8 @@ type StorageNotification = Variant<{
  * storage provider in which case they will be reverted.
  */
 interface ICommitNotification {
+  type: "commit";
+
   /**
    * The space into which changes were made.
    */
@@ -264,11 +265,13 @@ interface ICommitNotification {
  * This notification is broadcasted if commited changes were denied and had to
  * be reverted.
  */
-interface IRevertNotification extends ICommitNotification {
+interface IRevertNotification {
+  type: "revert";
+
   /**
-   * Reason storage had to revert changes.
+   * The space into which changes were made.
    */
-  reason: StorageTransactionRejected;
+  space: MemorySpace;
   /**
    * Set of changes merged. Note that this is not necessary resetting every
    * change commit made to a state it had pre-commit as things may have changed
@@ -280,6 +283,15 @@ interface IRevertNotification extends ICommitNotification {
    * revert.
    */
   changes: IMergedChanges;
+  /**
+   * Transaction that committed changes.
+   */
+  source: IStorageTransaction;
+
+  /**
+   * Reason storage had to revert changes.
+   */
+  reason: StorageTransactionRejected;
 }
 
 /**
@@ -287,6 +299,7 @@ interface IRevertNotification extends ICommitNotification {
  * cache into a storage.
  */
 interface ILoadNotification {
+  type: "load";
   space: MemorySpace;
   changes: IMergedChanges;
 }
@@ -296,6 +309,7 @@ interface ILoadNotification {
  * storage provider and merges them into the local replica.
  */
 interface IPullNotification {
+  type: "pull";
   space: MemorySpace;
   changes: IMergedChanges;
 }
@@ -305,6 +319,7 @@ interface IPullNotification {
  * the remote storage provider into a local replica.
  */
 interface IIntegrateNotification {
+  type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
 }
