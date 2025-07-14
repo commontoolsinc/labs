@@ -1,4 +1,4 @@
-import { cache } from "@commontools/static";
+import { type StaticCache } from "@commontools/static";
 
 // Returns an object mapping typescript lib name
 // to a string of standalone .d.ts content.
@@ -8,7 +8,7 @@ import { cache } from "@commontools/static";
 // * "dom"
 export const getTypeScriptEnvironmentTypes = (() => {
   let cached: Record<string, string> | undefined;
-  return async (): Promise<Record<string, string>> => {
+  return async (cache: StaticCache): Promise<Record<string, string>> => {
     if (cached) {
       return cached;
     }

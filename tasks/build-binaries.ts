@@ -1,5 +1,4 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-run
-import { assets, cache as staticCache } from "@commontools/static";
 import { exists } from "@std/fs";
 import * as path from "@std/path";
 
@@ -87,10 +86,6 @@ class BuildConfig {
       "src",
       "worker.ts",
     );
-  }
-
-  staticBundleFilePath(filename: string): string[] {
-    return this.path("packages", "static-bundle", "assets", filename);
   }
 
   toolshedEnvPath() {

@@ -3,6 +3,7 @@ import { Runtime } from "@commontools/runner";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
+import { API_URL } from "./env.ts";
 
 async function createSession(
   root: Identity,
@@ -74,6 +75,7 @@ export async function createCharmsController(
       address: new URL("/api/storage/memory", url),
     }),
     blobbyServerUrl: url,
+    staticAssetServerUrl: API_URL,
   });
   console.log("[createCharmsController] Creating CharmManager with session");
   const charmManager = new CharmManager(session, runtime);

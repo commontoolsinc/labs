@@ -47,6 +47,7 @@ import { RecipeManager, RecipeMeta } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
+import { StaticCache } from "@commontools/static";
 
 export type {
   IExtendedStorageTransaction,
@@ -85,6 +86,7 @@ export interface RuntimeOptions {
   blobbyServerUrl: string;
   recipeEnvironment?: RecipeEnvironment;
   navigateCallback?: NavigateCallback;
+  staticAssetServerUrl?: URL;
   debug?: boolean;
 }
 
@@ -100,6 +102,7 @@ export interface IRuntime {
   readonly blobbyServerUrl: string;
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
+  readonly staticCache: StaticCache;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -326,8 +329,14 @@ export class Runtime implements IRuntime {
   readonly blobbyServerUrl: string;
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
+  readonly staticCache: StaticCache;
 
   constructor(options: RuntimeOptions) {
+    this.staticCache = options.staticAssetServerUrl
+      ? new StaticCache({
+        baseUrl: options.staticAssetServerUrl,
+      })
+      : new StaticCache();
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
     this.id = options.storageManager.id;

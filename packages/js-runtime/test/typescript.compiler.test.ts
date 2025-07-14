@@ -6,6 +6,7 @@ import {
   TypeScriptCompiler,
   TypeScriptCompilerOptions,
 } from "../mod.ts";
+import { StaticCache } from "@commontools/static";
 
 type TestDef =
   & { name: string; source: string; expectedError?: string }
@@ -40,7 +41,7 @@ const TESTS: TestDef[] = [
   },
 ];
 
-const types = await getTypeScriptEnvironmentTypes();
+const types = await getTypeScriptEnvironmentTypes(new StaticCache());
 
 describe("TypeScriptCompiler", () => {
   it("compiles a filesystem graph", async () => {

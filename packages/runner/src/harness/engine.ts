@@ -20,6 +20,7 @@ import {
 import * as RuntimeModules from "./runtime-modules.ts";
 import { IRuntime } from "../runtime.ts";
 import * as merkleReference from "merkle-reference";
+import { StaticCache } from "@commontools/static";
 
 const RUNTIME_ENGINE_CONSOLE_HOOK = "RUNTIME_ENGINE_CONSOLE_HOOK";
 const INJECTED_SCRIPT =
@@ -34,13 +35,14 @@ type Exports = Record<string, any>;
 // Extends a TypeScript program with 3P module types, if referenced.
 export class EngineProgramResolver extends InMemoryProgram {
   private runtimeModuleTypes: Record<string, string> | undefined;
-
-  constructor(program: Program) {
+  private cache: StaticCache;
+  constructor(program: Program, cache: StaticCache) {
     const modules = program.files.reduce((mod, file) => {
       mod[file.name] = file.contents;
       return mod;
     }, {} as Record<string, string>);
     super(program.main, modules);
+    this.cache = cache;
   }
 
   // Add `.d.ts` files for known supported 3P modules.
@@ -53,7 +55,9 @@ export class EngineProgramResolver extends InMemoryProgram {
         RuntimeModules.isRuntimeModuleIdentifier(origSource)
       ) {
         if (!this.runtimeModuleTypes) {
-          this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes();
+          this.runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
+            this.cache,
+          );
         }
         if (
           origSource in this.runtimeModuleTypes &&
@@ -84,6 +88,7 @@ interface Internals {
 export class Engine extends EventTarget implements Harness {
   private internals: Internals | undefined;
   private ctRuntime: IRuntime;
+
   constructor(ctRuntime: IRuntime) {
     super();
     this.ctRuntime = ctRuntime;
@@ -93,7 +98,9 @@ export class Engine extends EventTarget implements Harness {
   }
 
   async initialize() {
-    const environmentTypes = await Engine.getEnvironmentTypes();
+    const environmentTypes = await Engine.getEnvironmentTypes(
+      this.ctRuntime.staticCache,
+    );
     const compiler = new TypeScriptCompiler(environmentTypes);
     const runtime = new UnsafeEvalRuntime();
     const isolate = runtime.getIsolate("");
@@ -140,7 +147,10 @@ export class Engine extends EventTarget implements Harness {
     const id = options.identifier ?? computeId(program);
     const filename = options.filename ?? `${id}.js`;
     const mappedProgram = mapPrefixProgramFiles(program, id);
-    const resolver = new EngineProgramResolver(mappedProgram);
+    const resolver = new EngineProgramResolver(
+      mappedProgram,
+      this.ctRuntime.staticCache,
+    );
 
     const { compiler, isolate, runtimeExports, exportsCallback } = await this
       .getInternals();
@@ -205,12 +215,12 @@ export class Engine extends EventTarget implements Harness {
   }
 
   // Returns a map of runtime module types.
-  static getRuntimeModuleTypes() {
-    return RuntimeModules.getTypes();
+  static getRuntimeModuleTypes(cache: StaticCache) {
+    return RuntimeModules.getTypes(cache);
   }
 
-  static getEnvironmentTypes() {
-    return getTypeScriptEnvironmentTypes();
+  static getEnvironmentTypes(cache: StaticCache) {
+    return getTypeScriptEnvironmentTypes(cache);
   }
 
   static runtimeModuleNames() {
