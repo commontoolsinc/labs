@@ -1,10 +1,9 @@
-import { Identity, KeyStore } from "@commontools/identity";
+import { Identity } from "@commontools/identity";
 
 export type Command =
   | { type: "set-active-charm-id"; charmId: string }
   | { type: "set-identity"; identity: Identity }
   | { type: "set-space"; spaceName: string }
-  | { type: "set-keystore"; keyStore: KeyStore }
   | { type: "clear-authentication" };
 
 export function isCommand(value: unknown): value is Command {
@@ -25,9 +24,6 @@ export function isCommand(value: unknown): value is Command {
     case "set-active-charm-id": {
       return "charmId" in value && !!value.charmId &&
         typeof value.charmId === "string";
-    }
-    case "set-keystore": {
-      return "keyStore" in value && value.keyStore instanceof KeyStore;
     }
     case "clear-authentication": {
       return true;

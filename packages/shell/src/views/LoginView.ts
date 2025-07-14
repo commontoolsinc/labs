@@ -244,13 +244,11 @@ export class XLoginView extends BaseView {
 
   private availableMethods: AuthMethod[] = [];
 
-  @property({ attribute: false })
-  keyStore?: KeyStore;
-
   override connectedCallback() {
     super.connectedCallback();
     this.checkAvailableMethods();
     this.addEventListener(AUTH_EVENT, this.onAuthEvent as EventListener);
+    this.checkExistingAuth();
   }
 
   override disconnectedCallback() {
@@ -277,6 +275,37 @@ export class XLoginView extends BaseView {
     // If only one method available, pre-select it
     if (methods.length === 1) {
       this.method = methods[0];
+    }
+  }
+
+  private async getKeyStore(): Promise<KeyStore | null> {
+    try {
+      return await KeyStore.open();
+    } catch (error) {
+      console.error("[LoginView] Failed to open KeyStore:", error);
+      return null;
+    }
+  }
+
+  private async checkExistingAuth() {
+    console.log("[LoginView] Checking for existing authentication");
+    try {
+      const keyStore = await this.getKeyStore();
+      if (!keyStore) return;
+
+      const root = await keyStore.get(ROOT_KEY);
+      if (root) {
+        console.log("[LoginView] Found existing root key:", {
+          did: root.did(),
+          timestamp: new Date().toISOString(),
+        });
+        // Send identity to root
+        this.command({ type: "set-identity", identity: root });
+      } else {
+        console.log("[LoginView] No existing root key found");
+      }
+    } catch (error) {
+      console.error("[LoginView] Failed to check existing auth:", error);
     }
   }
 
@@ -335,8 +364,9 @@ export class XLoginView extends BaseView {
       const identity = await passkey.createRootKey();
 
       // Save identity to keyStore
-      if (this.keyStore) {
-        await this.keyStore.set(ROOT_KEY, identity);
+      const keyStore = await this.getKeyStore();
+      if (keyStore) {
+        await keyStore.set(ROOT_KEY, identity);
       }
 
       // Send identity to root
@@ -367,8 +397,9 @@ export class XLoginView extends BaseView {
       const identity = await passkey.createRootKey();
 
       // Save identity to keyStore
-      if (this.keyStore) {
-        await this.keyStore.set(ROOT_KEY, identity);
+      const keyStore = await this.getKeyStore();
+      if (keyStore) {
+        await keyStore.set(ROOT_KEY, identity);
       }
 
       // Store credential info for future logins
@@ -413,8 +444,9 @@ export class XLoginView extends BaseView {
       const identity = await Identity.fromMnemonic(mnemonic);
 
       // Save identity to keyStore
-      if (this.keyStore) {
-        await this.keyStore.set(ROOT_KEY, identity);
+      const keyStore = await this.getKeyStore();
+      if (keyStore) {
+        await keyStore.set(ROOT_KEY, identity);
       }
 
       // Store credential indicator if not already stored
