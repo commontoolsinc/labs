@@ -1,9 +1,10 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { Runtime } from "@commontools/runner";
-import { CharmManager } from "@commontools/charm";
+import { charmId, CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { API_URL } from "./env.ts";
+import { navigateToCharm } from "./navigate.ts";
 
 async function createSession(
   root: Identity,
@@ -78,7 +79,28 @@ export async function createCharmsController(
     }),
     blobbyServerUrl: url,
     staticAssetServerUrl: staticAssetUrl,
+    errorHandlers: [(error) => {
+      console.error(error);
+      //Sentry.captureException(error);
+    }],
+    consoleHandler: (metadata, method, args) => {
+      // Handle console messages depending on charm context.
+      // This is essentially the same as the default handling currently,
+      // but adding this here for future use.
+      if (metadata?.charmId) {
+        return [`Charm(${metadata.charmId}) [${method}]:`, ...args];
+      }
+      return [`Console [${method}]:`, ...args];
+    },
+    navigateCallback: (target) => {
+      const id = charmId(target);
+      if (!id) {
+        throw new Error(`Could not navigate to cell that is not a charm.`);
+      }
+      navigateToCharm(target.space, id);
+    },
   });
+
   console.log("[createCharmsController] Creating CharmManager with session");
   const charmManager = new CharmManager(session, runtime);
   await charmManager.synced();
