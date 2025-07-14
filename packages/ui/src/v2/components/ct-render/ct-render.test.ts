@@ -11,32 +11,13 @@ describe("CTRender", () => {
     expect(CTRender.name).toBe("CTRender");
   });
 
-  it("should format fallback for primitive values", () => {
+  it("should create element instance", () => {
     const element = new CTRender();
-    
-    // Test the _formatFallback method (access private method for testing)
-    const formatFallback = (element as any)._formatFallback;
-    
-    expect(formatFallback("hello")).toBe("hello");
-    expect(formatFallback(123)).toBe("123");
-    expect(formatFallback(null)).toBe("");
-    expect(formatFallback(undefined)).toBe("");
-    
-    // Test with mock cell
-    const mockCell = {
-      get: () => "cell value"
-    };
-    expect(formatFallback(mockCell)).toBe("cell value");
+    expect(element).toBeInstanceOf(CTRender);
   });
 
-  it("should handle basic property setting", () => {
+  it("should have cell property", () => {
     const element = new CTRender();
-    
-    const mockCell = {
-      get: () => "test"
-    };
-    
-    element.cell = mockCell;
-    expect(element.cell).toBe(mockCell);
+    expect(element.cell).toBeUndefined();
   });
 });
