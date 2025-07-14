@@ -1,8 +1,9 @@
 import { html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
-import { UI } from "@commontools/runner";
+import { isCell, UI } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
+import { getRecipeIdFromCharm } from "@commontools/charm";
 
 /**
  * CTRender - Renders a cell or object with a [UI] property as VDOM
@@ -23,79 +24,123 @@ export class CTRender extends BaseElement {
 
   private _renderContainer?: HTMLDivElement;
   private _cleanup?: () => void;
+  private _instanceId = Math.random().toString(36).substring(7);
+  private _renderInProgress = false;
 
   protected override render() {
-    return html`<div class="render-container"></div>`;
+    return html`
+      <div class="render-container"></div>
+    `;
   }
 
   protected override firstUpdated() {
-    this._renderContainer = this.shadowRoot?.querySelector(".render-container") as HTMLDivElement;
-    this._renderCell();
-  }
-
-  protected override updated(changedProperties: PropertyValues) {
-    if (changedProperties.has("cell")) {
+    console.log(`[ct-render ${this._instanceId}] firstUpdated called`);
+    console.trace(`[ct-render ${this._instanceId}] Component created from:`);
+    this._renderContainer = this.shadowRoot?.querySelector(
+      ".render-container",
+    ) as HTMLDivElement;
+    // Skip initial render if cell is already set - updated() will handle it
+    if (!this.cell) {
       this._renderCell();
     }
   }
 
-  private _renderCell() {
-    if (!this._renderContainer) return;
+  protected override updated(changedProperties: PropertyValues) {
+    console.log(`[ct-render ${this._instanceId}] updated called, changedProperties:`, Array.from(changedProperties.keys()));
+    if (changedProperties.has("cell")) {
+      console.log(`[ct-render ${this._instanceId}] cell changed, calling _renderCell`);
+      this._renderCell();
+    }
+  }
+
+  private async _startRecipe(recipeId: string) {
+    console.log(`[ct-render ${this._instanceId}] _startRecipe called with recipeId:`, recipeId);
+    const recipe = await this.cell.runtime.recipeManager.loadRecipe(
+      recipeId,
+    );
+    console.log(`[ct-render ${this._instanceId}] recipe loaded, running synced`);
+    await this.cell.runtime.runSynced(this.cell, recipe);
+    await this.cell.runtime.idle();
+
+    if (!this._renderContainer) {
+      throw new Error("Render container not found");
+    }
+    console.log(`[ct-render ${this._instanceId}] calling render() for UI`);
+    this._cleanup = render(this._renderContainer, this.cell.key(UI));
+    console.log(`[ct-render ${this._instanceId}] render complete, cleanup function stored`);
+  }
+
+  private async _renderCell() {
+    console.log(`[ct-render ${this._instanceId}] _renderCell called`);
+    
+    // Prevent concurrent renders
+    if (this._renderInProgress) {
+      console.log(`[ct-render ${this._instanceId}] render already in progress, skipping`);
+      return;
+    }
+    
+    if (!this._renderContainer) {
+      console.log(`[ct-render ${this._instanceId}] no render container, returning`);
+      return;
+    }
 
     // Clean up any previous render
     if (this._cleanup) {
+      console.log(`[ct-render ${this._instanceId}] cleaning up previous render`);
       this._cleanup();
       this._cleanup = undefined;
     }
 
     // Clear the container
+    console.log(`[ct-render ${this._instanceId}] clearing container innerHTML`);
     this._renderContainer.innerHTML = "";
 
-    if (!this.cell) return;
+    if (!this.cell) {
+      console.log(`[ct-render ${this._instanceId}] no cell, returning`);
+      return;
+    }
 
     try {
+      this._renderInProgress = true;
       let content;
 
       // Check if it's a Cell
-      if (this.cell && typeof this.cell.get === "function") {
-        const value = this.cell.get();
-        content = value?.[UI];
-      } else if (this.cell?.[UI]) {
-        // Direct object with UI property
-        content = this.cell[UI];
-      }
-
-      if (content) {
-        // Use the html render function which returns a cleanup function
-        this._cleanup = render(this._renderContainer, content);
+      if (isCell(this.cell)) {
+        const recipeId = getRecipeIdFromCharm(this.cell);
+        console.log(`[ct-render ${this._instanceId}] recipeId from charm:`, recipeId);
+        if (recipeId) {
+          await this._startRecipe(recipeId);
+        }
       } else {
-        // Fallback for non-renderable content
-        this._renderContainer.textContent = this._formatFallback(this.cell);
+        throw new Error("Invalid cell");
       }
     } catch (error) {
       // Error boundary
-      console.error("Error rendering cell:", error);
-      this._renderContainer.innerHTML = `<div style="color: var(--ct-color-destructive)">Error rendering content</div>`;
+      console.error(`[ct-render ${this._instanceId}] Error rendering cell:`, error);
+      this._renderContainer.innerHTML =
+        `<div style="color: var(--ct-color-destructive)">Error rendering content</div>`;
+    } finally {
+      this._renderInProgress = false;
     }
-  }
-
-  private _formatFallback(value: any): string {
-    if (value === null || value === undefined) return "";
-    if (typeof value === "string" || typeof value === "number") return String(value);
-    if (value && typeof value.get === "function") {
-      const cellValue = value.get();
-      if (typeof cellValue === "string" || typeof cellValue === "number") {
-        return String(cellValue);
-      }
-    }
-    return "";
   }
 
   override disconnectedCallback() {
+    console.log(`[ct-render ${this._instanceId}] disconnectedCallback called`);
     super.disconnectedCallback();
+    
+    // Cancel any in-progress renders
+    this._renderInProgress = false;
+    
+    // Clean up any existing render
     if (this._cleanup) {
+      console.log(`[ct-render ${this._instanceId}] cleaning up in disconnectedCallback`);
       this._cleanup();
       this._cleanup = undefined;
+    }
+    
+    // Clear the container
+    if (this._renderContainer) {
+      this._renderContainer.innerHTML = "";
     }
   }
 }
