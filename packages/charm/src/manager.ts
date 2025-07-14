@@ -3,6 +3,7 @@ import {
   Classification,
   EntityId,
   getEntityId,
+  type IExtendedStorageTransaction,
   isCell,
   isLink,
   JSONSchema,
@@ -213,22 +214,28 @@ export class CharmManager {
     await this.syncCharms(this.trashedCharms);
     await this.syncCharms(this.charms);
 
+    const tx = this.runtime.edit();
+
+    const trashedCharms = this.trashedCharms.withTx(tx);
+
     const id = getEntityId(idOrCharm);
     if (!id) return false;
 
     // Find the charm in trash
-    const trashedCharm = this.trashedCharms.get().find((charm) =>
+    const trashedCharm = trashedCharms.get().find((charm) =>
       isSameEntity(charm, id)
     );
 
     if (!trashedCharm) return false;
 
     // Remove from trash
-    const newTrashedCharms = filterOutEntity(this.trashedCharms, id);
-    this.trashedCharms.set(newTrashedCharms);
+    const newTrashedCharms = filterOutEntity(trashedCharms, id);
+    trashedCharms.set(newTrashedCharms);
 
     // Add back to charms
-    await this.add([trashedCharm]);
+    await this.add([trashedCharm], tx);
+
+    await tx.commit(); // TODO(seefeld): Retry?
 
     await this.runtime.idle();
     return true;
@@ -251,17 +258,20 @@ export class CharmManager {
     return this.charms;
   }
 
-  async add(newCharms: Cell<Charm>[]) {
+  async add(newCharms: Cell<Charm>[], tx?: IExtendedStorageTransaction) {
     await this.syncCharms(this.charms);
     await this.runtime.idle();
 
+    const transaction = tx ?? this.runtime.edit();
+    const charms = this.charms.withTx(transaction);
+
     newCharms.forEach((charm) => {
-      if (!this.charms.get().some((otherCharm) => otherCharm.equals(charm))) {
-        this.charms.push(charm);
+      if (!charms.get().some((otherCharm) => otherCharm.equals(charm))) {
+        charms.push(charm);
       }
     });
 
-    await this.runtime.idle();
+    if (!tx) await transaction.commit(); // TODO(seefeld): Retry?
   }
 
   syncCharms(cell: Cell<Cell<Charm>[]>) {
@@ -340,9 +350,14 @@ export class CharmManager {
     let charm: Cell<Charm> | undefined;
 
     if (isCell(id)) charm = id;
-    else charm = this.runtime.getCellFromEntityId(this.space, { "/": id });
+    else {charm = this.runtime.getCellFromEntityId(
+        this.space,
+        { "/": id },
+        [],
+        charmSchema,
+      );}
 
-    await this.runtime.storage.syncCell(charm.asSchema(charmSchema));
+    await this.runtime.storage.syncCell(charm);
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) throw new Error("recipeId is required");
@@ -388,9 +403,8 @@ export class CharmManager {
       if (!recipe) {
         throw new Error(`Recipe not found for charm ${getEntityId(charm)}`);
       }
-      return (await this.runtime.runSynced(charm, recipe)).asSchema(
-        asSchema ?? resultSchema,
-      );
+      const newCharm = await this.runtime.runSynced(charm, recipe);
+      return newCharm.asSchema(asSchema ?? resultSchema);
     } else {
       return charm.asSchema<T>(asSchema ?? resultSchema);
     }
@@ -893,9 +907,10 @@ export class CharmManager {
     await this.add([charm]);
 
     if (llmRequestId) {
-      charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId").set(
-        llmRequestId,
-      );
+      charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
+        .set(
+          llmRequestId,
+        );
     }
 
     return charm;
@@ -910,12 +925,18 @@ export class CharmManager {
     charmId: string,
     inputs?: object,
   ): Promise<Cell<Charm>> {
-    const charm = this.runtime.getCellFromEntityId<Charm>(this.space, {
-      "/": charmId,
-    });
+    const charm = this.runtime.getCellFromEntityId<Charm>(
+      this.space,
+      {
+        "/": charmId,
+      },
+      [],
+      charmSchema,
+    );
     await this.runtime.storage.syncCell(charm);
     await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
+
     await this.add([charm]);
 
     return charm;
@@ -939,7 +960,11 @@ export class CharmManager {
 
   async syncRecipeById(recipeId: string) {
     if (!recipeId) throw new Error("recipeId is required");
-    return await this.runtime.recipeManager.loadRecipe(recipeId, this.space);
+    const recipe = await this.runtime.recipeManager.loadRecipe(
+      recipeId,
+      this.space,
+    );
+    return recipe;
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {

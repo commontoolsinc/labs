@@ -14,7 +14,7 @@ import { refer } from "merkle-reference";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
-import { type ReactivityLog } from "../scheduler.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 const client = new LLMClient();
 
@@ -42,53 +42,68 @@ const client = new LLMClient();
  */
 export function llm(
   inputsCell: Cell<BuiltInLLMParams>,
-  sendResult: (result: any) => void,
+  sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
 ): Action {
-  const pending = runtime.getCell(
-    parentCell.space,
-    { llm: { pending: cause } },
-  );
-  pending.send(false);
-
-  const result = runtime.getCell<string | undefined>(
-    parentCell.space,
-    {
-      llm: { result: cause },
-    },
-  );
-
-  const partial = runtime.getCell<string | undefined>(
-    parentCell.space,
-    {
-      llm: { partial: cause },
-    },
-  );
-
-  const requestHash = runtime.getCell<string | undefined>(
-    parentCell.space,
-    {
-      llm: { requestHash: cause },
-    },
-  );
-
-  sendResult({ pending, result, partial, requestHash });
-
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  let cellsInitialized = false;
+  let pending: Cell<boolean>;
+  let result: Cell<string | undefined>;
+  let partial: Cell<string | undefined>;
+  let requestHash: Cell<string | undefined>;
 
-  return (log: ReactivityLog) => {
+  return (tx: IExtendedStorageTransaction) => {
+    if (!cellsInitialized) {
+      pending = runtime.getCell(
+        parentCell.space,
+        { llm: { pending: cause } },
+        undefined,
+        tx,
+      );
+      pending.send(false);
+
+      result = runtime.getCell<string | undefined>(
+        parentCell.space,
+        {
+          llm: { result: cause },
+        },
+        undefined,
+        tx,
+      );
+
+      partial = runtime.getCell<string | undefined>(
+        parentCell.space,
+        {
+          llm: { partial: cause },
+        },
+        undefined,
+        tx,
+      );
+
+      requestHash = runtime.getCell<string | undefined>(
+        parentCell.space,
+        {
+          llm: { requestHash: cause },
+        },
+        undefined,
+        tx,
+      );
+
+      sendResult(tx, { pending, result, partial, requestHash });
+      cellsInitialized = true;
+    }
     const thisRun = ++currentRun;
-    const pendingWithLog = pending.withLog(log);
-    const resultWithLog = result.withLog(log);
-    const partialWithLog = partial.withLog(log);
-    const requestHashWithLog = requestHash.withLog(log);
+    const pendingWithLog = pending.withTx(tx);
+    const resultWithLog = result.withTx(tx);
+    const partialWithLog = partial.withTx(tx);
+    const requestHashWithLog = requestHash.withTx(tx);
 
     const { system, messages, stop, maxTokens, model } =
-      inputsCell.getAsQueryResult([], log) ?? {};
+      inputsCell.getAsQueryResult([], tx) ?? {};
 
     const llmParams: LLMRequest = {
       system: system ?? "",
@@ -140,10 +155,17 @@ export function llm(
         //normalizeToCells(text, undefined, log);
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set(text);
-        partialWithLog.set(text);
-        requestHashWithLog.set(hash);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(text);
+        partialWithLog.withTx(asyncTx).set(text);
+        requestHashWithLog.withTx(asyncTx).set(hash);
+
+        if (asyncTx !== tx) asyncTx.commit();
       })
       .catch(async (error) => {
         if (thisRun !== currentRun) return;
@@ -152,9 +174,16 @@ export function llm(
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set(undefined);
-        partialWithLog.set(undefined);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(undefined);
+        partialWithLog.withTx(asyncTx).set(undefined);
+
+        if (asyncTx !== tx) asyncTx.commit();
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.
@@ -183,7 +212,7 @@ export function llm(
  */
 export function generateObject<T extends Record<string, unknown>>(
   inputsCell: Cell<BuiltInGenerateObjectParams>,
-  sendResult: (docs: {
+  sendResult: (tx: IExtendedStorageTransaction, docs: {
     pending: Cell<boolean>;
     result: Cell<T | undefined>;
     partial: Cell<string | undefined>;
@@ -194,47 +223,62 @@ export function generateObject<T extends Record<string, unknown>>(
   parentCell: Cell<any>,
   runtime: IRuntime,
 ): Action {
-  const pending = runtime.getCell<boolean>(
-    parentCell.space,
-    { generateObject: { pending: cause } },
-  );
-  pending.send(false);
-
-  const result = runtime.getCell<T | undefined>(
-    parentCell.space,
-    {
-      generateObject: { result: cause },
-    },
-  );
-
-  const partial = runtime.getCell<string | undefined>(
-    parentCell.space,
-    {
-      generateObject: { partial: cause },
-    },
-  );
-
-  const requestHash = runtime.getCell<string | undefined>(
-    parentCell.space,
-    {
-      generateObject: { requestHash: cause },
-    },
-  );
-
-  sendResult({ pending, result, partial, requestHash });
-
   let currentRun = 0;
   let previousCallHash: string | undefined = undefined;
+  let cellsInitialized = false;
+  let pending: Cell<boolean>;
+  let result: Cell<T | undefined>;
+  let partial: Cell<string | undefined>;
+  let requestHash: Cell<string | undefined>;
 
-  return (log: ReactivityLog) => {
+  return (tx: IExtendedStorageTransaction) => {
+    if (!cellsInitialized) {
+      pending = runtime.getCell<boolean>(
+        parentCell.space,
+        { generateObject: { pending: cause } },
+        undefined,
+        tx,
+      );
+      pending.send(false);
+
+      result = runtime.getCell<T | undefined>(
+        parentCell.space,
+        {
+          generateObject: { result: cause },
+        },
+        undefined,
+        tx,
+      );
+
+      partial = runtime.getCell<string | undefined>(
+        parentCell.space,
+        {
+          generateObject: { partial: cause },
+        },
+        undefined,
+        tx,
+      );
+
+      requestHash = runtime.getCell<string | undefined>(
+        parentCell.space,
+        {
+          generateObject: { requestHash: cause },
+        },
+        undefined,
+        tx,
+      );
+
+      sendResult(tx, { pending, result, partial, requestHash });
+      cellsInitialized = true;
+    }
     const thisRun = ++currentRun;
-    const pendingWithLog = pending.withLog(log);
-    const resultWithLog = result.withLog(log);
-    const partialWithLog = partial.withLog(log);
-    const requestHashWithLog = requestHash.withLog(log);
+    const pendingWithLog = pending.withTx(tx);
+    const resultWithLog = result.withTx(tx);
+    const partialWithLog = partial.withTx(tx);
+    const requestHashWithLog = requestHash.withTx(tx);
 
     const { prompt, maxTokens, model, schema, system, cache, metadata } =
-      inputsCell.getAsQueryResult([], log) ?? {};
+      inputsCell.getAsQueryResult([], tx) ?? {};
 
     if (!prompt || !schema) {
       pendingWithLog.set(false);
@@ -283,9 +327,16 @@ export function generateObject<T extends Record<string, unknown>>(
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set(response.object);
-        requestHashWithLog.set(hash);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set(response.object);
+        requestHashWithLog.withTx(asyncTx).set(hash);
+
+        if (asyncTx !== tx) asyncTx.commit();
       })
       .catch(async (error) => {
         if (thisRun !== currentRun) return;
@@ -294,9 +345,16 @@ export function generateObject<T extends Record<string, unknown>>(
 
         await runtime.idle();
 
-        pendingWithLog.set(false);
-        resultWithLog.set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
-        partialWithLog.set(undefined);
+        // All this code runside outside the original action, and the
+        // transaction above might have closed by the time this is called. If
+        // so, we create a new one to set the result.
+        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+
+        pendingWithLog.withTx(asyncTx).set(false);
+        resultWithLog.withTx(asyncTx).set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict
+        partialWithLog.withTx(asyncTx).set(undefined);
+
+        if (asyncTx !== tx) asyncTx.commit();
 
         // TODO(seefeld): Not writing now, so we retry the request after failure.
         // Replace this with more fine-grained retry logic.

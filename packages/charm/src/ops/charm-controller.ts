@@ -53,10 +53,12 @@ export class CharmController {
 
   async getRecipe(): Promise<Recipe> {
     const recipeId = getRecipeIdFromCharm(this.#cell);
-    return await this.#manager.runtime.recipeManager.loadRecipe(
+    const runtime = this.#manager.runtime;
+    const recipe = await runtime.recipeManager.loadRecipe(
       recipeId,
       this.#manager.getSpace(),
     );
+    return recipe;
   }
 
   async getRecipeMeta(): Promise<RecipeMeta> {

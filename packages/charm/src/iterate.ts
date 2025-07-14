@@ -1,16 +1,15 @@
+import { isObject, Mutable } from "@commontools/utils/types";
 import {
   Cell,
+  createJsonSchema,
+  type IExtendedStorageTransaction,
   isCell,
   isStream,
+  JSONSchema,
+  JSONSchemaMutable,
   type MemorySpace,
   RecipeMeta,
   type Runtime,
-} from "@commontools/runner";
-import { isObject, Mutable } from "@commontools/utils/types";
-import {
-  createJsonSchema,
-  JSONSchema,
-  JSONSchemaMutable,
   RuntimeProgram,
 } from "@commontools/runner";
 import { Charm, CharmManager, charmSourceCellSchema } from "./manager.ts";
@@ -160,6 +159,7 @@ export const generateNewRecipeVersion = async (
   if (!parentInfo.recipeId) {
     throw new Error("No recipeId found for charm");
   }
+
   const parentRecipe = await charmManager.runtime.recipeManager.loadRecipe(
     parentInfo.recipeId,
     charmManager.getSpace(),
@@ -203,11 +203,15 @@ export const generateNewRecipeVersion = async (
     llmRequestId,
   );
 
-  newCharm.getSourceCell(charmSourceCellSchema)?.key("lineage").push({
-    charm: parent,
-    relation: "iterate",
-    timestamp: Date.now(),
-  });
+  const tx = newCharm.runtime.edit();
+  newCharm.withTx(tx).getSourceCell(charmSourceCellSchema)?.key("lineage").push(
+    {
+      charm: parent,
+      relation: "iterate",
+      timestamp: Date.now(),
+    },
+  );
+  await tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
   return newCharm;
 };
@@ -581,7 +585,7 @@ export async function compileAndRunRecipe(
     throw new Error("Failed to compile recipe");
   }
 
-  return charmManager.runPersistent(
+  return await charmManager.runPersistent(
     recipe,
     runOptions,
     undefined,

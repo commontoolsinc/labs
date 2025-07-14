@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
+import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -11,7 +12,8 @@ const space = signer.did();
 describe("Storage", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
-  let testDoc: Cell<any>;
+  let tx: IExtendedStorageTransaction;
+  let testCell: Cell<any>;
   let n = 0;
 
   beforeEach(() => {
@@ -23,13 +25,18 @@ describe("Storage", () => {
       storageManager,
     });
 
-    testDoc = runtime.getCell<string>(
+    tx = runtime.edit();
+
+    testCell = runtime.getCell<string>(
       space,
       `storage test cell ${n++}`,
+      undefined,
+      tx,
     );
   });
 
   afterEach(async () => {
+    await tx.commit();
     await runtime?.storage.cancelAll();
     await storageManager?.close();
     // _processCurrentBatch leaves sleep behind that makes deno error
@@ -39,9 +46,9 @@ describe("Storage", () => {
   describe("persistDoc", () => {
     it("should persist a doc", async () => {
       const testValue = { data: "test" };
-      testDoc.send(testValue);
+      testCell.send(testValue);
 
-      await runtime.storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testCell);
 
       const query = storageManager
         .mount(space)
@@ -57,50 +64,54 @@ describe("Storage", () => {
     });
 
     it("should persist a cells and referenced cell references within it", async () => {
-      const refDoc = runtime.getCell<string>(
+      const refCell = runtime.getCell<string>(
         space,
         "should persist a cells and referenced cell references within it",
+        undefined,
+        tx,
       );
-      refDoc.set("hello");
+      refCell.set("hello");
 
       const testValue = {
         data: "test",
-        ref: refDoc.getAsLegacyCellLink(),
+        ref: refCell.getAsLegacyCellLink(),
       };
-      testDoc.send(testValue);
+      testCell.send(testValue);
 
-      await runtime.storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testCell);
 
-      const entry = storageManager.open(space).get(refDoc.entityId!);
+      const entry = storageManager.open(space).get(refCell.entityId!);
       expect(entry?.value).toEqual("hello");
     });
 
     it("should persist a cells and referenced cells within it", async () => {
-      const refDoc = runtime.getCell<string>(
+      const refCell = runtime.getCell<string>(
         space,
         "should persist a cells and referenced cells 1",
+        undefined,
+        tx,
       );
-      refDoc.set("hello");
+      refCell.set("hello");
 
       const testValue = {
         data: "test",
-        otherDoc: refDoc,
+        otherDoc: refCell,
       };
-      testDoc.send(testValue);
+      testCell.send(testValue);
 
-      await runtime.storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testCell);
 
-      const entry = storageManager.open(space).get(refDoc.entityId!);
+      const entry = storageManager.open(space).get(refCell.entityId!);
       expect(entry?.value).toEqual("hello");
     });
   });
 
   describe("doc updates", () => {
     it("should persist doc updates", async () => {
-      await runtime.storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testCell);
 
-      testDoc.send("value 1");
-      testDoc.send("value 2");
+      testCell.send("value 1");
+      testCell.send("value 2");
 
       await runtime.storage.synced();
 
@@ -122,24 +133,24 @@ describe("Storage", () => {
     it("should wait for a doc to appear", async () => {
       let synced = false;
 
-      storageManager.open(space).sync(testDoc.entityId!, true).then(
+      storageManager.open(space).sync(testCell.entityId!, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
 
-      testDoc.send("test");
-      await runtime.storage.syncCell(testDoc);
+      testCell.send("test");
+      await runtime.storage.syncCell(testCell);
       expect(synced).toBe(true);
     });
 
     it("should wait for a undefined doc to appear", async () => {
       let synced = false;
-      storageManager.open(space).sync(testDoc.entityId!, true).then(
+      storageManager.open(space).sync(testCell.entityId!, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
 
-      await runtime.storage.syncCell(testDoc);
+      await runtime.storage.syncCell(testCell);
       expect(synced).toBe(true);
     });
   });
@@ -149,6 +160,8 @@ describe("Storage", () => {
       const ephemeralDoc = runtime.getCell<string>(
         space,
         "ephemeral",
+        undefined,
+        tx,
       );
       ephemeralDoc.set("transient");
       ephemeralDoc.getDoc().ephemeral = true;
@@ -163,13 +176,13 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates with schema", async () => {
-      await runtime.storage.syncCell(testDoc, false, {
+      await runtime.storage.syncCell(testCell, false, {
         schema: true,
         rootSchema: true,
       });
 
-      testDoc.send("value 1");
-      testDoc.send("value 2");
+      testCell.send("value 1");
+      testCell.send("value 2");
 
       await runtime.storage.synced();
 

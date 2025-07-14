@@ -1,5 +1,4 @@
 import { CharmManager } from "../manager.ts";
-import { Cell } from "@commontools/runner";
 
 export type CellPath = readonly (string | number)[];
 
@@ -109,7 +108,7 @@ export async function setCharmInput(
   path: CellPath,
   value: unknown,
 ): Promise<void> {
-  const charmCell = await manager.get(charmId);
+  const charmCell = await manager.get(charmId, false, undefined);
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
@@ -120,7 +119,9 @@ export async function setCharmInput(
     targetCell = targetCell.key(segment);
   }
 
-  targetCell.set(value as any);
+  const tx = manager.runtime.edit();
+  targetCell.withTx(tx).set(value as any);
+  await tx.commit();
 
   await manager.runtime.idle();
   await manager.synced();
@@ -132,7 +133,7 @@ export async function setCharmResult(
   path: CellPath,
   value: unknown,
 ): Promise<void> {
-  const charmCell = await manager.get(charmId);
+  const charmCell = await manager.get(charmId, false, undefined);
   if (!charmCell) {
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
@@ -142,7 +143,9 @@ export async function setCharmResult(
     targetCell = targetCell.key(segment);
   }
 
-  targetCell.set(value as any);
+  const tx = manager.runtime.edit();
+  targetCell.withTx(tx).set(value as any);
+  await tx.commit();
 
   await manager.runtime.idle();
   await manager.synced();

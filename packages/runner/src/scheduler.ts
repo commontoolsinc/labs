@@ -1,8 +1,7 @@
+import type { MemorySpace, URI } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
-import type { DocImpl } from "./doc.ts";
 import type { Cancel } from "./cancel.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
 import {
   getCellLinkOrThrow,
   isQueryResultForDereferencing,
@@ -14,18 +13,21 @@ import type {
   ErrorWithContext,
   IRuntime,
   IScheduler,
-  MemorySpace,
 } from "./runtime.ts";
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+} from "./storage/interface.ts";
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 
-export type Action = (log: ReactivityLog) => any;
+export type Action = (tx: IExtendedStorageTransaction) => any;
 export type EventHandler = (event: any) => any;
 
 /**
@@ -35,9 +37,11 @@ export type EventHandler = (event: any) => any;
  * dependencies and to topologically sort pending actions before executing them.
  */
 export type ReactivityLog = {
-  reads: LegacyDocCellLink[];
-  writes: LegacyDocCellLink[];
+  reads: IMemorySpaceAddress[];
+  writes: IMemorySpaceAddress[];
 };
+
+type SpaceAndURI = `${MemorySpace}:${URI}`;
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
@@ -45,7 +49,7 @@ export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
   private eventQueue: (() => any)[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
-  private dirty = new Set<DocImpl<any>>();
+  private dirty = new Set<SpaceAndURI>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel[]>();
   private idlePromises: (() => void)[] = [];
@@ -100,7 +104,7 @@ export class Scheduler implements IScheduler {
 
   schedule(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
-    reads.forEach(({ cell: doc }) => this.dirty.add(doc));
+    reads.forEach((addr) => this.dirty.add(`${addr.space}:${addr.id}`));
 
     this.queueExecution();
     this.pending.add(action);
@@ -117,27 +121,33 @@ export class Scheduler implements IScheduler {
 
   subscribe(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
-
+    // Use runtime to get docs and call .updates
     this.cancels.set(
       action,
-      reads.map(({ cell: doc, path }) =>
-        doc.updates((_newValue: any, changedPath: readonly PropertyKey[]) => {
-          if (pathAffected(changedPath, path)) {
-            this.dirty.add(doc);
-            this.queueExecution();
-            this.pending.add(action);
-          }
-        })
-      ),
+      reads.map((addr) => {
+        const doc = this.runtime.documentMap.getDocByEntityId(
+          addr.space,
+          addr.id,
+          true,
+        );
+        return doc.updates(
+          (_newValue: any, changedPath: readonly PropertyKey[]) => {
+            if (pathAffected(changedPath, addr.path)) {
+              this.dirty.add(`${addr.space}:${addr.id}`);
+              this.queueExecution();
+              this.pending.add(action);
+            }
+          },
+        );
+      }),
     );
-
     return () => this.unschedule(action);
   }
 
   async run(action: Action): Promise<any> {
-    const log: ReactivityLog = { reads: [], writes: [] };
-
     if (this.runningPromise) await this.runningPromise;
+
+    const tx = this.runtime.edit();
 
     let result: any;
     this.runningPromise = new Promise((resolve) => {
@@ -147,13 +157,15 @@ export class Scheduler implements IScheduler {
         } finally {
           // Set up reactive subscriptions after the action runs
           // This matches the original scheduler behavior
+          tx.commit();
+          const log = txToReactivityLog(tx);
           this.subscribe(action, log);
           resolve(result);
         }
       };
 
       try {
-        Promise.resolve(action(log))
+        Promise.resolve(action(tx))
           .then((actionResult) => {
             result = actionResult;
             finalizeAction();
@@ -220,7 +232,7 @@ export class Scheduler implements IScheduler {
   private setDependencies(
     action: Action,
     log: ReactivityLog,
-  ): LegacyDocCellLink[] {
+  ): IMemorySpaceAddress[] {
     const reads = compactifyPaths(log.reads);
     const writes = compactifyPaths(log.writes);
     this.dependencies.set(action, { reads, writes });
@@ -315,7 +327,7 @@ export class Scheduler implements IScheduler {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
-  dirty: Set<DocImpl<any>>,
+  dirty: Set<SpaceAndURI>,
 ): Action[] {
   const relevantActions = new Set<Action>();
   const graph = new Map<Action, Set<Action>>();
@@ -329,7 +341,7 @@ function topologicalSort(
       // Actions with no dependencies are always relevant. Note that they must
       // be manually added to `pending`, which happens only once on `schedule`.
       relevantActions.add(action);
-    } else if (reads.some(({ cell: doc }) => dirty.has(doc))) {
+    } else if (reads.some((addr) => dirty.has(`${addr.space}:${addr.id}`))) {
       relevantActions.add(action);
     }
   }
@@ -347,8 +359,10 @@ function topologicalSort(
               dependencies
                 .get(relevantAction)!
                 .reads.some(
-                  ({ cell, path }) =>
-                    cell === write.cell && pathAffected(write.path, path),
+                  (addr) =>
+                    addr.space === write.space &&
+                    addr.id === write.id &&
+                    pathAffected(write.path, addr.path),
                 )
             )
           ) {
@@ -375,8 +389,11 @@ function topologicalSort(
         if (actionA !== actionB && !graphA.has(actionB)) {
           const { reads } = dependencies.get(actionB)!;
           if (
-            reads.some(({ cell, path }) =>
-              cell === write.cell && pathAffected(write.path, path)
+            reads.some(
+              (addr) =>
+                addr.space === write.space &&
+                addr.id === write.id &&
+                pathAffected(write.path, addr.path),
             )
           ) {
             graphA.add(actionB);
@@ -425,33 +442,59 @@ function topologicalSort(
   return result;
 }
 
+export function txToReactivityLog(
+  tx: IExtendedStorageTransaction,
+): ReactivityLog {
+  const log: ReactivityLog = { reads: [], writes: [] };
+  for (const change of tx.log()) {
+    if ("read" in change) {
+      log.reads.push({
+        ...change.read!.address,
+        path: change.read!.address.path.slice(1), // Remove the "value" prefix
+      });
+    }
+    if ("write" in change) {
+      log.writes.push({
+        ...change.write!.address,
+        path: change.write!.address.path.slice(1),
+      });
+    }
+  }
+  return log;
+}
+
 // Remove longer paths already covered by shorter paths
 export function compactifyPaths(
-  entries: LegacyDocCellLink[],
-): LegacyDocCellLink[] {
-  // First group by doc via a Map
-  const docToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
-  for (const { cell: doc, path } of entries) {
-    const paths = docToPaths.get(doc) || [];
-    paths.push(path.map((key) => key.toString())); // Normalize to strings as keys
-    docToPaths.set(doc, paths);
+  entries: IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  // Group by space+id
+  const idToPaths = new Map<
+    SpaceAndURI,
+    { paths: (string[])[]; space: MemorySpace; id: URI }
+  >();
+  for (const entry of entries) {
+    const key = `${entry.space}:${entry.id}` as SpaceAndURI;
+    const paths = idToPaths.get(key)?.paths || [];
+    paths.push(entry.path.map((k: string | number) => k.toString()));
+    idToPaths.set(key, { paths, space: entry.space, id: entry.id });
   }
 
   // For each cell, sort the paths by length, then only return those that don't
   // have a prefix earlier in the list
-  const result: LegacyDocCellLink[] = [];
-  for (const [doc, paths] of docToPaths.entries()) {
+  const result: IMemorySpaceAddress[] = [];
+  for (const { paths, space, id } of idToPaths.values()) {
     paths.sort((a, b) => a.length - b.length);
     for (let i = 0; i < paths.length; i++) {
       const earlier = paths.slice(0, i);
-      if (
-        earlier.some((path) =>
-          path.every((key, index) => key === paths[i][index])
-        )
-      ) {
+      if (earlier.some((path) => path.every((k, idx) => k === paths[i][idx]))) {
         continue;
       }
-      result.push({ cell: doc, path: paths[i] });
+      result.push({
+        space: space as any,
+        id: id as any,
+        type: "application/json",
+        path: paths[i],
+      });
     }
   }
   return result;
@@ -461,7 +504,6 @@ function pathAffected(
   changedPath: readonly PropertyKey[],
   path: readonly PropertyKey[],
 ) {
-  changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
   return (
     (changedPath.length <= path.length &&
       changedPath.every((key, index) => key === path[index])) ||

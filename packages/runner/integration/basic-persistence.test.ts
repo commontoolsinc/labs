@@ -38,7 +38,9 @@ async function test() {
   const cell1 = runtime1.getCell(identity.did(), cause, schema);
   await runtime1.storage.syncCell(cell1);
 
-  cell1.set({ message: "Hello World", count: 42 });
+  const tx = runtime1.edit();
+  cell1.withTx(tx).set({ message: "Hello World", count: 42 });
+  tx.commit();
 
   await runtime1.storage.synced();
   const cell1Contents = JSON.parse(JSON.stringify(cell1.get()));
