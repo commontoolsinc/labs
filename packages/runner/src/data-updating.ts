@@ -212,8 +212,6 @@ export function normalizeAndDiff(
       space: link.space,
       path: [],
       type: link.type,
-      schema: link.schema,
-      rootSchema: link.rootSchema,
     };
     return [
       // If it wasn't already, set the current value to be a doc link to this doc
@@ -308,13 +306,8 @@ export function normalizeAndDiff(
     // Handle removed keys
     for (const key in currentValue) {
       if (!(key in newValue)) {
-        const childSchema = runtime.cfc.getSchemaAtPath(
-          link.schema,
-          [key],
-          link.rootSchema,
-        );
         changes.push({
-          location: { ...link, path: [...link.path, key], schema: childSchema },
+          location: { ...link, path: [...link.path, key] },
           value: undefined,
         });
       }
