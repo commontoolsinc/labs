@@ -507,14 +507,14 @@ function createRegularCell<T>(
         log,
       ) as T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
     },
-
     asSchema: (newSchema?: JSONSchema) =>
-      createCell(
+      createRegularCell(
         runtime,
         { ...link, schema: newSchema, rootSchema: newSchema },
         log,
       ),
-    withLog: (newLog: ReactivityLog) => createCell(runtime, link, newLog),
+    withLog: (newLog: ReactivityLog) =>
+      createRegularCell(runtime, link, newLog),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, runtime, link),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
