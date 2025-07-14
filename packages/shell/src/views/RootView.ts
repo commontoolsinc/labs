@@ -121,13 +121,12 @@ export class XRootView extends LitElement {
 
     try {
       // Apply command synchronously
-      let state = applyCommand(this._provider.value, command);
-      
+      const state = applyCommand(this._provider.value, command);
+
       // Handle clear-authentication specially - need to clear keystore
       if (command.type === "clear-authentication" && state.keyStore) {
         await state.keyStore.clear();
       }
-      
 
       this._provider.setValue(state);
 
