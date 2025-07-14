@@ -198,11 +198,15 @@ export const generateNewRecipeVersion = async (
     llmRequestId,
   );
 
-  newCharm.getSourceCell(charmSourceCellSchema)?.key("lineage").push({
-    charm: parent,
-    relation: "iterate",
-    timestamp: Date.now(),
-  });
+  const tx = newCharm.runtime.edit();
+  newCharm.withTx(tx).getSourceCell(charmSourceCellSchema)?.key("lineage").push(
+    {
+      charm: parent,
+      relation: "iterate",
+      timestamp: Date.now(),
+    },
+  );
+  await tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
 
   return newCharm;
 };
