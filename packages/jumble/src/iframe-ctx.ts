@@ -201,7 +201,9 @@ export const setupIframe = (runtime: Runtime) =>
             (type === "integer" && typeof value === "number") ||
             (type === typeof value as string)
           ) {
-            context.key(key).set(value);
+            const tx = context.runtime.edit();
+            context.withTx(tx).key(key).set(value);
+            tx.commit(); // TODO(seefeld): We don't retry writing this. Should we?
           } else {
             console.warn(
               "write skipped due to type",
