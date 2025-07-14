@@ -1,7 +1,8 @@
 import { css, html } from "lit";
-import { state } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 
-import { Identity, PassKey } from "@commontools/identity";
+import { Identity, KeyStore, PassKey } from "@commontools/identity";
+import { ROOT_KEY } from "../lib/app/state.ts";
 
 import { BaseView } from "./BaseView.ts";
 import {
@@ -20,9 +21,9 @@ import {
 type AuthFlow = "register" | "login";
 
 // Internal auth events for LoginView
-type AuthEventType = 
+type AuthEventType =
   | "passkey-register"
-  | "passkey-authenticate" 
+  | "passkey-authenticate"
   | "passphrase-generate"
   | "passphrase-authenticate"
   | "clear-stored-credential";
@@ -243,6 +244,9 @@ export class XLoginView extends BaseView {
 
   private availableMethods: AuthMethod[] = [];
 
+  @property({ attribute: false })
+  keyStore?: KeyStore;
+
   override connectedCallback() {
     super.connectedCallback();
     this.checkAvailableMethods();
@@ -289,9 +293,9 @@ export class XLoginView extends BaseView {
   private onAuthEvent = async (event: Event) => {
     const e = event as CustomEvent<AuthEventDetail>;
     e.stopPropagation(); // Ensure event doesn't bubble up
-    
+
     const { type, data } = e.detail;
-    
+
     try {
       switch (type) {
         case "passkey-register":
@@ -312,7 +316,9 @@ export class XLoginView extends BaseView {
       }
     } catch (error) {
       console.error("[LoginView] Auth event error:", error);
-      this.error = error instanceof Error ? error.message : "Authentication failed";
+      this.error = error instanceof Error
+        ? error.message
+        : "Authentication failed";
     }
   };
 
@@ -320,17 +326,27 @@ export class XLoginView extends BaseView {
   private async handlePasskeyRegister() {
     this.isProcessing = true;
     this.error = null;
-    
+
     try {
-      const passkey = await PassKey.create("Common Tools User", "commontoolsuser");
+      const passkey = await PassKey.create(
+        "Common Tools User",
+        "commontoolsuser",
+      );
       const identity = await passkey.createRootKey();
-      
+
+      // Save identity to keyStore
+      if (this.keyStore) {
+        await this.keyStore.set(ROOT_KEY, identity);
+      }
+
       // Send identity to root
       this.command({ type: "set-identity", identity });
       this.registrationSuccess = true;
     } catch (e) {
       console.error("[LoginView] Passkey register error:", e);
-      this.error = e instanceof Error ? e.message : "Passkey registration failed";
+      this.error = e instanceof Error
+        ? e.message
+        : "Passkey registration failed";
       this.flow = null;
       this.method = null;
     } finally {
@@ -338,26 +354,35 @@ export class XLoginView extends BaseView {
     }
   }
 
-  private async handlePasskeyAuthenticate(descriptor?: PublicKeyCredentialDescriptor) {
+  private async handlePasskeyAuthenticate(
+    descriptor?: PublicKeyCredentialDescriptor,
+  ) {
     this.isProcessing = true;
     this.error = null;
-    
+
     try {
       const passkey = await PassKey.get({
         allowCredentials: descriptor ? [descriptor] : [],
       });
       const identity = await passkey.createRootKey();
-      
+
+      // Save identity to keyStore
+      if (this.keyStore) {
+        await this.keyStore.set(ROOT_KEY, identity);
+      }
+
       // Store credential info for future logins
       const credential = createPasskeyCredential(passkey.id());
       saveCredential(credential);
       this.storedCredential = credential;
-      
+
       // Send identity to root
       this.command({ type: "set-identity", identity });
     } catch (e) {
       console.error("[LoginView] Passkey authenticate error:", e);
-      this.error = e instanceof Error ? e.message : "Passkey authentication failed";
+      this.error = e instanceof Error
+        ? e.message
+        : "Passkey authentication failed";
     } finally {
       this.isProcessing = false;
     }
@@ -366,13 +391,15 @@ export class XLoginView extends BaseView {
   private async handlePassphraseGenerate() {
     this.isProcessing = true;
     this.error = null;
-    
+
     try {
       const [, mnemonic] = await Identity.generateMnemonic();
       this.mnemonic = mnemonic;
     } catch (e) {
       console.error("[LoginView] Passphrase generate error:", e);
-      this.error = e instanceof Error ? e.message : "Failed to generate passphrase";
+      this.error = e instanceof Error
+        ? e.message
+        : "Failed to generate passphrase";
     } finally {
       this.isProcessing = false;
     }
@@ -381,17 +408,22 @@ export class XLoginView extends BaseView {
   private async handlePassphraseAuthenticate(mnemonic: string) {
     this.isProcessing = true;
     this.error = null;
-    
+
     try {
       const identity = await Identity.fromMnemonic(mnemonic);
-      
+
+      // Save identity to keyStore
+      if (this.keyStore) {
+        await this.keyStore.set(ROOT_KEY, identity);
+      }
+
       // Store credential indicator if not already stored
       if (!this.storedCredential) {
         const credential = createPassphraseCredential();
         saveCredential(credential);
         this.storedCredential = credential;
       }
-      
+
       // Send identity to root
       this.command({ type: "set-identity", identity });
     } catch (e) {
@@ -454,7 +486,9 @@ export class XLoginView extends BaseView {
       );
       this.dispatchAuthEvent("passkey-authenticate", { descriptor });
     } else if (passphrase) {
-      this.dispatchAuthEvent("passphrase-authenticate", { mnemonic: passphrase });
+      this.dispatchAuthEvent("passphrase-authenticate", {
+        mnemonic: passphrase,
+      });
     }
   }
 
@@ -510,8 +544,8 @@ export class XLoginView extends BaseView {
               this.flow = "login";
               this.method = AUTH_METHOD_PASSKEY;
               this.handleLogin();
-            }}">"
-              🔑 Login w/ Passkey
+            }}">
+              " 🔑 Login w/ Passkey
             </button>
           `
           : !isPassphrase
