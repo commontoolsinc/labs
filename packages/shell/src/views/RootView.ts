@@ -2,7 +2,6 @@ import { css, html, LitElement } from "lit";
 import { ContextProvider } from "@lit/context";
 import { applyCommand, AppState, ROOT_KEY } from "../lib/app/mod.ts";
 import { appContext } from "../contexts/app.ts";
-import { Runtime } from "@commontools/runner";
 import { SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/commands.ts";
 import { API_URL } from "../lib/env.ts";

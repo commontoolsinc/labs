@@ -105,44 +105,25 @@ export class XAppView extends BaseView {
   override render() {
     const cc = this._cc.value;
     const app = (this.app ?? {}) as AppState;
-    const activeCharmId = app.activeCharmId;
     const unauthenticated = html`
+      <x-login-view></x-login-view>
+    `;
+    const authenticated = html`
+      <x-body
+        .cc="${cc}"
+        .activeCharmId="${app.activeCharmId}"
+      ></x-body>
+    `;
+
+    const content = this.app?.identity ? authenticated : unauthenticated;
+    return html`
       <div class="shell-container">
         <x-header .identity="${app.identity}"></x-header>
         <div class="content-area">
-          <x-login-view></x-login-view>
+          ${content}
         </div>
       </div>
     `;
-    const authenticated = this._cc.render({
-      pending: () =>
-        html`
-          <div class="shell-container">
-            <x-header .identity="${app.identity}"></x-header>
-            <div class="content-area">
-              <x-body
-                .cc="${undefined}"
-                .activeCharmId="${activeCharmId}"
-                .identity="${app.identity}"
-              ></x-body>
-            </div>
-          </div>
-        `,
-      complete: (cc) =>
-        html`
-          <div class="shell-container">
-            <x-header .identity="${app.identity}"></x-header>
-            <div class="content-area">
-              <x-body
-                .cc="${cc}"
-                .activeCharmId="${activeCharmId}"
-                .identity="${app.identity}"
-              ></x-body>
-            </div>
-          </div>
-        `,
-    });
-    return this.app?.identity ? authenticated : unauthenticated;
   }
 }
 

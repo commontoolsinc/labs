@@ -34,6 +34,10 @@ export class CharmController {
     return this.#cell.get()[NAME];
   }
 
+  getCell(): Cell<Charm> {
+    return this.#cell;
+  }
+
   async setInput(input: object): Promise<void> {
     const recipe = await this.getRecipe();
     await execute(this.#manager, this.id, recipe, input);

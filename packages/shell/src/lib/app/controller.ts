@@ -1,11 +1,14 @@
 import { Identity } from "@commontools/identity";
 import { XRootView } from "../../views/RootView.ts";
 import { Command } from "../commands.ts";
-import { AppUpdateEvent } from "./mod.ts";
+import { AppState, AppUpdateEvent } from "./mod.ts";
 
 // Interact with application state outside of the application.
 export class AppController extends EventTarget {
   #element: XRootView;
+  identity: any;
+  spaceName: any;
+  apiUrl: any;
   constructor(element: XRootView) {
     super();
     this.#element = element;
@@ -15,6 +18,10 @@ export class AppController extends EventTarget {
         new AppUpdateEvent(e.command, { state: e.state, error: e.error }),
       );
     });
+  }
+
+  state(): AppState {
+    return this.#element.state();
   }
 
   async setSpace(spaceName: string) {

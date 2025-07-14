@@ -69,17 +69,19 @@ export async function createCharmsController(
     isPrivateSpace: session.private,
   });
 
+  const staticAssetUrl = new URL(API_URL);
+  staticAssetUrl.pathname = "/static";
   const runtime = new Runtime({
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", url),
     }),
     blobbyServerUrl: url,
-    staticAssetServerUrl: API_URL,
+    staticAssetServerUrl: staticAssetUrl,
   });
   console.log("[createCharmsController] Creating CharmManager with session");
   const charmManager = new CharmManager(session, runtime);
-
+  await charmManager.synced();
   console.log("[createCharmsController] Creating CharmsController");
   return new CharmsController(charmManager);
 }
