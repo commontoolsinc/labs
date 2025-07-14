@@ -793,7 +793,7 @@ describe("asCell", () => {
     );
     c.set({ a: 1 });
     c.set(c.get());
-    expect(c.get()).toEqual({ a: 1 });
+    expect(c.get().get()).toEqual({ a: 1 });
   });
 });
 
