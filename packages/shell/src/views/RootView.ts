@@ -9,7 +9,7 @@ import { API_URL } from "../lib/env.ts";
 import { AppUpdateEvent } from "../lib/app/events.ts";
 import { WorkQueue } from "../lib/queue.ts";
 import { clone } from "../lib/app/state.ts";
-import { ANYONE, Identity, KeyStore } from "@commontools/identity";
+import { KeyStore } from "@commontools/identity";
 import { sleep } from "@commontools/utils/sleep";
 
 // The root element for the shell application.
@@ -83,21 +83,6 @@ export class XRootView extends LitElement {
     return clone(this._provider.value);
   }
 
-  private async createSession(identity: Identity, spaceName: string) {
-    const isPrivateSpace = spaceName.startsWith("~");
-    const account = isPrivateSpace
-      ? identity
-      : await Identity.fromPassphrase(ANYONE);
-    const user = await account.derive(spaceName);
-
-    return {
-      private: isPrivateSpace,
-      name: spaceName,
-      space: user.did(),
-      as: user,
-    };
-  }
-
   private async initializeKeyStore() {
     console.log("[RootView] Initializing KeyStore");
     try {
@@ -143,15 +128,6 @@ export class XRootView extends LitElement {
         await state.keyStore.clear();
       }
       
-      // Update session if identity or space changed
-      if (
-        (state.identity !== this._provider.value.identity ||
-          state.spaceName !== this._provider.value.spaceName) &&
-        state.identity && state.spaceName
-      ) {
-        const session = await this.createSession(state.identity, state.spaceName);
-        state = { ...state, session };
-      }
 
       this._provider.setValue(state);
 

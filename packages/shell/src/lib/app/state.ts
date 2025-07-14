@@ -1,22 +1,5 @@
-import {
-  ANYONE,
-  DID,
-  Identity,
-  KeyStore,
-} from "@commontools/identity";
+import { Identity, KeyStore } from "@commontools/identity";
 import { Command } from "../commands.ts";
-
-// Representation of authorization session.
-export interface Session {
-  // Whether session is for a private space vs public access space.
-  private: boolean;
-  // Session name, which is pet name of the space session is for.
-  name: string;
-  // DID identifier of the space this is a session for.
-  space: DID;
-  // Identity used in this session.
-  as: Identity;
-}
 
 // Primary application state.
 export interface AppState {
@@ -25,7 +8,6 @@ export interface AppState {
   activeCharmId?: string;
   apiUrl: URL;
   keyStore?: KeyStore;
-  session?: Session;
 }
 
 export function clone(state: AppState): AppState {
@@ -57,13 +39,8 @@ export function applyCommand(
       next.keyStore = command.keyStore;
       break;
     }
-    case "set-session": {
-      next.session = command.session;
-      break;
-    }
     case "clear-authentication": {
       next.identity = undefined;
-      next.session = undefined;
       break;
     }
   }
