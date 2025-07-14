@@ -1,4 +1,4 @@
-import { Identity, KeyStore } from "@commontools/identity";
+import { Identity } from "@commontools/identity";
 import { Command } from "../commands.ts";
 
 // Primary application state.
@@ -7,7 +7,6 @@ export interface AppState {
   spaceName?: string;
   activeCharmId?: string;
   apiUrl: URL;
-  keyStore?: KeyStore;
 }
 
 export function clone(state: AppState): AppState {
@@ -33,10 +32,6 @@ export function applyCommand(
     }
     case "set-space": {
       next.spaceName = command.spaceName;
-      break;
-    }
-    case "set-keystore": {
-      next.keyStore = command.keyStore;
       break;
     }
     case "clear-authentication": {

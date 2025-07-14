@@ -1,15 +1,14 @@
 import { css, html, LitElement } from "lit";
 import { ContextProvider } from "@lit/context";
-import { applyCommand, AppState, ROOT_KEY } from "../lib/app/mod.ts";
+import { applyCommand, AppState } from "../lib/app/mod.ts";
 import { appContext } from "../contexts/app.ts";
 import { SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/commands.ts";
 import { API_URL } from "../lib/env.ts";
 import { AppUpdateEvent } from "../lib/app/events.ts";
 import { WorkQueue } from "../lib/queue.ts";
-import { clone } from "../lib/app/state.ts";
+import { clone, ROOT_KEY } from "../lib/app/state.ts";
 import { KeyStore } from "@commontools/identity";
-import { sleep } from "@commontools/utils/sleep";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
@@ -58,7 +57,6 @@ export class XRootView extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener(SHELL_COMMAND, this.onCommand);
-    this.initializeKeyStore();
   }
 
   override disconnectedCallback(): void {
@@ -82,35 +80,6 @@ export class XRootView extends LitElement {
     return clone(this._provider.value);
   }
 
-  private async initializeKeyStore() {
-    console.log("[RootView] Initializing KeyStore");
-    try {
-      // There is some issue in CI where we wait on `KeyStore.open`
-      // indefinitely. Possibly on load, the indexedDB request is queued
-      // behind some startup processing. Waiting alleviates this issue.
-      await sleep(100);
-
-      console.log("[RootView] Opening KeyStore");
-      const keyStore = await KeyStore.open();
-      await this.apply({ type: "set-keystore", keyStore });
-
-      // Check if we have a stored root key
-      console.log("[RootView] Checking for existing root key");
-      const root = await keyStore.get(ROOT_KEY);
-      if (root) {
-        console.log("[RootView] Found existing root key:", {
-          did: root.did(),
-          timestamp: new Date().toISOString(),
-        });
-        await this.apply({ type: "set-identity", identity: root });
-      } else {
-        console.log("[RootView] No existing root key found");
-      }
-    } catch (error) {
-      console.error("[RootView] Failed to initialize KeyStore:", error);
-    }
-  }
-
   private onCommandProcess = async (command: Command) => {
     console.log("[RootView] Processing command:", {
       type: command.type,
@@ -122,9 +91,18 @@ export class XRootView extends LitElement {
       // Apply command synchronously
       const state = applyCommand(this._provider.value, command);
 
-      // Handle clear-authentication specially - need to clear keystore
-      if (command.type === "clear-authentication" && state.keyStore) {
-        await state.keyStore.clear();
+      // Handle clear-authentication specially - need to clear ROOT_KEY from IDB
+      if (command.type === "clear-authentication") {
+        try {
+          const keyStore = await KeyStore.open();
+          await keyStore.clear();
+          console.log("[RootView] Cleared ROOT_KEY from keystore");
+        } catch (error) {
+          console.error(
+            "[RootView] Failed to clear ROOT_KEY from keystore:",
+            error,
+          );
+        }
       }
 
       this._provider.setValue(state);
@@ -132,7 +110,6 @@ export class XRootView extends LitElement {
       if (command.type === "set-identity") {
         console.log("[RootView] Identity set in app state:", {
           did: state.identity?.did(),
-          hasKeyStore: !!state.keyStore,
         });
       }
 
