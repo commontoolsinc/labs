@@ -231,12 +231,13 @@ export interface IStorageSubscription {
  * implying that object has only one of the fields with a cerrosponding
  * value. Property name denotes type of notification.
  */
-type StorageNotification =
+export type StorageNotification =
   | ICommitNotification
   | IRevertNotification
   | ILoadNotification
   | IPullNotification
-  | IIntegrateNotification;
+  | IIntegrateNotification
+  | IResetNotification;
 
 /**
  * This notification is broadcasted after commit on {@link IStorageTransaction}
@@ -256,9 +257,10 @@ interface ICommitNotification {
    */
   changes: IMergedChanges;
   /**
-   * Transaction that committed changes.
+   * Transaction that committed changes. If legacy API is used it will not have
+   * a source transaction.
    */
-  source: IStorageTransaction;
+  source?: IStorageTransaction;
 }
 
 /**
@@ -283,15 +285,17 @@ interface IRevertNotification {
    * revert.
    */
   changes: IMergedChanges;
-  /**
-   * Transaction that committed changes.
-   */
-  source: IStorageTransaction;
 
   /**
    * Reason storage had to revert changes.
    */
   reason: StorageTransactionRejected;
+
+  /**
+   * Transaction that committed changes. If legacy API is used it will not have
+   * a source transaction.
+   */
+  source?: IStorageTransaction;
 }
 
 /**
@@ -325,12 +329,22 @@ interface IIntegrateNotification {
 }
 
 /**
- * Set of changes that were merged into the local replica.
+ * This notification is broadcasted after storage has being reset, which can happen
+ * on network errors. It implies that all in memory caches have being cleared and
+ * will be populated with data from persisted cache and remote storage provider.
  */
-interface IMergedChanges extends Iterable<IMemoryChange> {
+interface IResetNotification {
+  type: "reset";
+  space: MemorySpace;
 }
 
-interface IMemoryChange {
+/**
+ * Set of changes that were merged into the local replica.
+ */
+export interface IMergedChanges extends Iterable<IMemoryChange> {
+}
+
+export interface IMemoryChange {
   /**
    * Memory address that was changed.
    */
@@ -777,6 +791,7 @@ export interface ISpaceReplica extends ISpace {
 
   commit(
     transaction: ITransaction,
+    source: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
