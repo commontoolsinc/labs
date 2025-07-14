@@ -3,21 +3,14 @@ import { ContextProvider } from "@lit/context";
 import { applyCommand, AppState, ROOT_KEY } from "../lib/app/mod.ts";
 import { appContext } from "../contexts/app.ts";
 import { Runtime } from "@commontools/runner";
-import { SHELL_COMMAND, SHELL_COMMAND_RESULT, CommandResultEvent } from "./BaseView.ts";
+import { SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/commands.ts";
 import { API_URL } from "../lib/env.ts";
 import { AppUpdateEvent } from "../lib/app/events.ts";
 import { WorkQueue } from "../lib/queue.ts";
 import { clone } from "../lib/app/state.ts";
-import { KeyStore } from "@commontools/identity";
+import { ANYONE, Identity, KeyStore } from "@commontools/identity";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  handlePasskeyRegister,
-  handlePasskeyAuthenticate,
-  handlePassphraseAuthenticate,
-  handleClearAuthentication,
-  createSessionForIdentity,
-} from "../lib/auth-handlers.ts";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
@@ -56,7 +49,7 @@ export class XRootView extends LitElement {
     },
   });
 
-  #commandQueue: WorkQueue<{ command: Command; commandId: string }>;
+  #commandQueue: WorkQueue<Command>;
 
   constructor() {
     super();
@@ -75,22 +68,34 @@ export class XRootView extends LitElement {
   }
 
   onCommand = async (e: Event) => {
-    const { detail } = e as CustomEvent;
-    const { command, commandId } = detail;
+    const { detail: command } = e as CustomEvent;
     if (!isCommand(command)) {
       throw new Error(`Received a non-command: ${command}`);
     }
-    await this.apply(command, commandId);
+    await this.apply(command);
   };
 
-  apply(command: Command, commandId?: string): Promise<void> {
-    // Generate commandId if not provided (for backwards compatibility)
-    const id = commandId || crypto.randomUUID();
-    return this.#commandQueue.submit({ command, commandId: id });
+  apply(command: Command): Promise<void> {
+    return this.#commandQueue.submit(command);
   }
 
   state(): AppState {
     return clone(this._provider.value);
+  }
+
+  private async createSession(identity: Identity, spaceName: string) {
+    const isPrivateSpace = spaceName.startsWith("~");
+    const account = isPrivateSpace
+      ? identity
+      : await Identity.fromPassphrase(ANYONE);
+    const user = await account.derive(spaceName);
+
+    return {
+      private: isPrivateSpace,
+      name: spaceName,
+      space: user.did(),
+      as: user,
+    };
   }
 
   private async initializeKeyStore() {
@@ -122,59 +127,32 @@ export class XRootView extends LitElement {
     }
   }
 
-  private onCommandProcess = async ({ command, commandId }: { command: Command; commandId: string }) => {
+  private onCommandProcess = async (command: Command) => {
     console.log("[RootView] Processing command:", {
       type: command.type,
-      commandId,
       hasIdentity: "identity" in command,
       timestamp: new Date().toISOString(),
     });
 
     try {
-      let state = this._provider.value;
+      // Apply command synchronously
+      let state = applyCommand(this._provider.value, command);
       
-      // Handle async authentication commands specially
-      switch (command.type) {
-        case "passkey-register": {
-          const { name, displayName } = command;
-          const identity = await handlePasskeyRegister(state, name, displayName);
-          state = applyCommand(state, { type: "set-identity", identity });
-          break;
-        }
-        case "passkey-authenticate": {
-          const { descriptor } = command;
-          const identity = await handlePasskeyAuthenticate(state, descriptor);
-          state = applyCommand(state, { type: "set-identity", identity });
-          break;
-        }
-        case "passphrase-authenticate": {
-          const { mnemonic } = command;
-          const identity = await handlePassphraseAuthenticate(state, mnemonic);
-          state = applyCommand(state, { type: "set-identity", identity });
-          break;
-        }
-        case "clear-authentication": {
-          await handleClearAuthentication(state.keyStore);
-          state = applyCommand(state, command);
-          break;
-        }
-        default: {
-          // All other commands are handled synchronously
-          state = applyCommand(state, command);
-          break;
-        }
+      // Handle clear-authentication specially - need to clear keystore
+      if (command.type === "clear-authentication" && state.keyStore) {
+        await state.keyStore.clear();
       }
       
       // Update session if identity or space changed
       if (
-        (state.identity !== this._provider.value.identity || 
-         state.spaceName !== this._provider.value.spaceName) &&
+        (state.identity !== this._provider.value.identity ||
+          state.spaceName !== this._provider.value.spaceName) &&
         state.identity && state.spaceName
       ) {
-        const session = await createSessionForIdentity(state.identity, state.spaceName);
+        const session = await this.createSession(state.identity, state.spaceName);
         state = { ...state, session };
       }
-      
+
       this._provider.setValue(state);
 
       if (command.type === "set-identity") {
@@ -185,35 +163,15 @@ export class XRootView extends LitElement {
       }
 
       this.dispatchEvent(new AppUpdateEvent(command, { state }));
-      
-      // Emit command result event for successful completion
-      const resultEvent = new CustomEvent(SHELL_COMMAND_RESULT, {
-        detail: { commandId, command },
-        bubbles: true,
-        composed: true,
-      }) as CustomEvent & CommandResultEvent;
-      Object.assign(resultEvent, { commandId, command });
-      this.dispatchEvent(resultEvent);
     } catch (e) {
       const error = e as Error;
       console.error("[RootView] Command processing error:", {
         command: command.type,
-        commandId,
         error: error.message,
       });
       this.dispatchEvent(
         new AppUpdateEvent(command, { error: error as Error }),
       );
-      
-      // Emit command result event for error
-      const resultEvent = new CustomEvent(SHELL_COMMAND_RESULT, {
-        detail: { commandId, command, error },
-        bubbles: true,
-        composed: true,
-      }) as CustomEvent & CommandResultEvent;
-      Object.assign(resultEvent, { commandId, command, error });
-      this.dispatchEvent(resultEvent);
-      
       throw new Error(error.message, { cause: error });
     }
   };

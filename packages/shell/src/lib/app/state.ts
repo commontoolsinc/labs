@@ -3,10 +3,8 @@ import {
   DID,
   Identity,
   KeyStore,
-  PassKey,
 } from "@commontools/identity";
 import { Command } from "../commands.ts";
-import { createPasskeyCredential, saveCredential } from "../credentials.ts";
 
 // Representation of authorization session.
 export interface Session {
@@ -63,12 +61,6 @@ export function applyCommand(
       next.session = command.session;
       break;
     }
-    case "passkey-register":
-    case "passkey-authenticate":
-    case "passphrase-register":
-    case "passphrase-authenticate":
-      // Authentication commands are handled by RootView before state update
-      break;
     case "clear-authentication": {
       next.identity = undefined;
       next.session = undefined;
