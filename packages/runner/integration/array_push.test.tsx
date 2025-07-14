@@ -51,7 +51,11 @@ export default recipe(
           <h3>Array Push Test</h3>
           <p>Array length: {derive(my_array, (arr) => arr.length)}</p>
           <p>
-            Current values: {my_array.map((e) => <li>{e}</li>)}
+            <ul>
+            Current values: {my_array.map((e) => (
+              <li>{e}</li>
+            ))}
+            </ul>
           </p>
         </div>
       ),
