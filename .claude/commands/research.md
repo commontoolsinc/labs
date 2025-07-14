@@ -101,6 +101,8 @@ Research report created! View it here:
 https://toolshed.saga-castor.ts.net/YYYY-MM-DD-claude-dev/<CHARM_ID>
 ```
 
+Make sure to clean up the temp file.
+
 ### 3. Research Content Structure
 The research content should include:
 - Executive summary of findings
