@@ -25,15 +25,13 @@ if (ENVIRONMENT !== "production") {
 }
 {
   const location = new URL(globalThis.location.href);
-  const match = location.pathname.match(/^\/([^\/]+)\/([^\/]+)/);
-  let spaceName;
-  if (match && match.length > 1) {
-    spaceName = match[1];
-  } else {
+  const segments = location.pathname.split("/");
+  segments.shift(); // shift off the pathnames' prefix "/";
+  let [spaceName, charmId] = segments;
+  if (!spaceName) {
     spaceName = "common-knowledge";
     globalThis.history.replaceState({}, "", "/common-knowledge");
   }
   app.setSpace(spaceName);
-  const charmId = match && match.length > 2 ? match[2] : undefined;
   if (charmId) app.setActiveCharmId(charmId);
 }
