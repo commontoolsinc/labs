@@ -46,3 +46,17 @@ if (ENVIRONMENT !== "production") {
   app.setSpace(spaceName);
   if (charmId) app.setActiveCharmId(charmId);
 }
+
+globalThis.addEventListener("navigate-to-charm", (e) => {
+  const { spaceName, charmId } = (e as CustomEvent).detail ?? {};
+  if (!spaceName) {
+    console.warn(`Navigation event missing 'spaceName'.`);
+    return;
+  }
+  if (!charmId) {
+    console.warn(`Navigation event missing 'charmId'.`);
+    return;
+  }
+  app.setSpace(spaceName);
+  app.setActiveCharmId(charmId);
+});

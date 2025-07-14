@@ -4,6 +4,7 @@ import { BaseView } from "../views/BaseView.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import { Task } from "@lit/task";
 import { USE_SHELL_PREFIX } from "../lib/env.ts";
+import { getNavigationHref } from "../lib/navigate.ts";
 
 export class XCharmListElement extends BaseView {
   static override styles = css`
@@ -32,7 +33,7 @@ export class XCharmListElement extends BaseView {
     const list = (charmList ?? []).map((charm) => {
       const name = charm.name();
       const id = charm.id;
-      const href = makeHref(spaceName, id);
+      const href = getNavigationHref(spaceName, id);
       return html`
         <li><a href="${href}">${name}</a></li>
       `;
@@ -42,11 +43,6 @@ export class XCharmListElement extends BaseView {
       <ul>${list}</ul>
     `;
   }
-}
-
-function makeHref(spaceName: string, id: string) {
-  const href = `/${spaceName}/${id}`;
-  return USE_SHELL_PREFIX ? `/shell${href}` : href;
 }
 
 globalThis.customElements.define("x-charm-list", XCharmListElement);
