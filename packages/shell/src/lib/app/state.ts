@@ -37,10 +37,10 @@ export function clone(state: AppState): AppState {
 // Key store key name for user's key
 export const ROOT_KEY = "$ROOT_KEY";
 
-export async function applyCommand(
+export function applyCommand(
   state: AppState,
   command: Command,
-): Promise<AppState> {
+): AppState {
   const next = clone(state);
   switch (command.type) {
     case "set-active-charm-id": {
@@ -63,79 +63,17 @@ export async function applyCommand(
       next.session = command.session;
       break;
     }
-    case "passkey-register": {
-      const { name, displayName } = command;
-      const passkey = await PassKey.create(name, displayName);
-      const root = await passkey.createRootKey();
-      if (state.keyStore) {
-        await state.keyStore.set(ROOT_KEY, root);
-      }
-      next.identity = root;
+    case "passkey-register":
+    case "passkey-authenticate":
+    case "passphrase-register":
+    case "passphrase-authenticate":
+      // Authentication commands are handled by RootView before state update
       break;
-    }
-    case "passkey-authenticate": {
-      const { descriptor } = command;
-      const passkey = await PassKey.get({
-        allowCredentials: descriptor ? [descriptor] : [],
-      });
-      const root = await passkey.createRootKey();
-      if (state.keyStore) {
-        await state.keyStore.set(ROOT_KEY, root);
-      }
-      next.identity = root;
-
-      // Store credential info for future logins
-      const credential = createPasskeyCredential(passkey.id());
-      saveCredential(credential);
-      break;
-    }
-    case "passphrase-register": {
-      // Generate mnemonic but don't store identity yet - let user save it first
-      const [, mnemonic] = await Identity.generateMnemonic();
-      // Store the mnemonic temporarily in the state so the UI can access it
-      (next as any).__tempMnemonic = mnemonic;
-      break;
-    }
-    case "passphrase-display-mnemonic": {
-      // This command is just for tracking - the mnemonic is already in the UI
-      break;
-    }
-    case "passphrase-authenticate": {
-      const { mnemonic } = command;
-      const root = await Identity.fromMnemonic(mnemonic);
-      if (state.keyStore) {
-        await state.keyStore.set(ROOT_KEY, root);
-      }
-      next.identity = root;
-      break;
-    }
     case "clear-authentication": {
-      if (state.keyStore) {
-        await state.keyStore.clear();
-      }
       next.identity = undefined;
       next.session = undefined;
       break;
     }
-  }
-
-  // Update session when identity or space changes
-  if (
-    (next.identity !== state.identity || next.spaceName !== state.spaceName) &&
-    next.identity && next.spaceName
-  ) {
-    const isPrivateSpace = next.spaceName.startsWith("~");
-    const account = isPrivateSpace
-      ? next.identity
-      : await Identity.fromPassphrase(ANYONE);
-    const user = await account.derive(next.spaceName);
-
-    next.session = {
-      private: isPrivateSpace,
-      name: next.spaceName,
-      space: user.did(),
-      as: user,
-    };
   }
 
   return next;

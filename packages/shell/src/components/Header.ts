@@ -1,9 +1,10 @@
-import { css, html, LitElement } from "lit";
+import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { Identity } from "@commontools/identity";
+import { BaseView } from "../views/BaseView.ts";
 import "./CTLogo.ts";
 
-export class XHeaderElement extends LitElement {
+export class XHeaderElement extends BaseView {
   static override styles = css`
     :host {
       display: block;
@@ -109,14 +110,8 @@ export class XHeaderElement extends LitElement {
     this.requestUpdate();
   };
 
-  private handleAuthClick = (): void => {
-    this.dispatchEvent(
-      new CustomEvent("shell-command", {
-        detail: { type: "clear-authentication" },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+  private handleAuthClick = async (): Promise<void> => {
+    await this.command({ type: "clear-authentication" });
   };
 
   override render() {

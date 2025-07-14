@@ -283,18 +283,17 @@ export class XLoginView extends BaseView {
 
   private async handleRegister() {
     if (this.method === AUTH_METHOD_PASSKEY) {
-      await this.handleAuth(() => {
-        this.command({
+      await this.handleAuth(async () => {
+        await this.command({
           type: "passkey-register",
           name: "Common Tools User",
           displayName: "commontoolsuser",
         });
-        // Note: We'll need to handle the passkey ID return differently
         this.registrationSuccess = true;
       });
     } else {
-      // For passphrase, we need to generate and display the mnemonic
-      const result = await this.handleAuth(async () => {
+      // For passphrase, generate mnemonic locally in the UI
+      await this.handleAuth(async () => {
         const [, mnemonic] = await Identity.generateMnemonic();
         this.mnemonic = mnemonic;
         return mnemonic;
@@ -313,17 +312,17 @@ export class XLoginView extends BaseView {
       const descriptor = getPublicKeyCredentialDescriptor(
         this.storedCredential,
       );
-      await this.handleAuth(() => {
+      await this.handleAuth(async () => {
         console.log("[LoginView] Sending passkey-authenticate command");
-        this.command({
+        await this.command({
           type: "passkey-authenticate",
           descriptor,
         });
       });
     } else if (passphrase) {
-      await this.handleAuth(() => {
+      await this.handleAuth(async () => {
         console.log("[LoginView] Authenticating with passphrase");
-        this.command({
+        await this.command({
           type: "passphrase-authenticate",
           mnemonic: passphrase,
         });
@@ -534,12 +533,15 @@ export class XLoginView extends BaseView {
       </p>
       <button
         class="primary"
-        @click="${() => {
+        @click="${async () => {
+        // User has saved the mnemonic, now authenticate with it
+        if (this.mnemonic) {
+          await this.handleLogin(this.mnemonic);
+        }
         this.mnemonic = null;
-        this.flow = "login";
       }}"
       >
-        🔒 Continue to Login
+        🔒 I've Saved It - Continue
       </button>
     `;
   }

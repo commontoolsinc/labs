@@ -10,7 +10,6 @@ export type Command =
   | { type: "passkey-register"; name: string; displayName: string }
   | { type: "passkey-authenticate"; descriptor?: PublicKeyCredentialDescriptor }
   | { type: "passphrase-register" }
-  | { type: "passphrase-display-mnemonic"; mnemonic: string }
   | { type: "passphrase-authenticate"; mnemonic: string }
   | { type: "clear-authentication" };
 
@@ -51,9 +50,6 @@ export function isCommand(value: unknown): value is Command {
     }
     case "passphrase-register": {
       return true;
-    }
-    case "passphrase-display-mnemonic": {
-      return "mnemonic" in value && typeof value.mnemonic === "string";
     }
     case "passphrase-authenticate": {
       return "mnemonic" in value && typeof value.mnemonic === "string";
