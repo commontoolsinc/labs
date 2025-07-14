@@ -1,9 +1,14 @@
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
-import { cache as staticCache } from "@commontools/static";
+import { StaticCache } from "@commontools/static";
 import { getMimeType } from "@/lib/mime-type.ts";
 
 const router = createRouter();
+
+// Notably this uses a different cache
+// than the runtime that runs in this context, negigible
+// cost of not incorporating the runtime here.
+const cache = new StaticCache();
 
 router.use(
   "*",
@@ -18,7 +23,7 @@ router.use(
 
 router.get("/static/*", async (c) => {
   const reqPath = c.req.path.substring("/static/".length);
-  const buffer = await staticCache.get(reqPath);
+  const buffer = await cache.get(reqPath);
   const mimeType = getMimeType(reqPath);
   return new Response(buffer, {
     status: 200,

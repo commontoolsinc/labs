@@ -7,6 +7,7 @@ import {
   type LLMRequest,
 } from "@commontools/llm";
 import { extractUserCode, staticSystemMd } from "./static.ts";
+import { type StaticCache } from "@commontools/static";
 
 export const RESPONSE_PREFILL = "```javascript\n";
 
@@ -16,12 +17,14 @@ export const buildPrompt = async ({
   newSpec,
   schema,
   steps,
+  staticCache,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
   steps?: string[];
+  staticCache: StaticCache;
 }, options: GenerationOptions): Promise<LLMRequest> => {
   const { model, cache, space, generationId } = applyDefaults(options);
 
@@ -69,7 +72,7 @@ ${steps.map((step, index) => `<step>${step}</step>`).join("\n")}
     content: RESPONSE_PREFILL,
   });
 
-  const systemPrompt = await staticSystemMd();
+  const systemPrompt = await staticSystemMd(staticCache);
   const system = hydratePrompt(systemPrompt, {
     SCHEMA: JSON.stringify(schema, null, 2),
   });

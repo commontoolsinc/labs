@@ -1,5 +1,5 @@
 import { createBuilder } from "../builder/factory.ts";
-import { cache } from "@commontools/static";
+import { StaticCache } from "@commontools/static";
 import turndown from "turndown";
 import { IRuntime } from "../runtime.ts";
 
@@ -33,7 +33,7 @@ export const getTypes = (() => {
   let depTypes:
     | Record<RuntimeModuleIdentifier, string>
     | undefined;
-  return async () => {
+  return async (cache: StaticCache) => {
     if (depTypes) {
       return depTypes;
     }

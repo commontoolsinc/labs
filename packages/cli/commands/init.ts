@@ -2,6 +2,7 @@ import { Command } from "@cliffy/command";
 import { Engine } from "@commontools/runner";
 import { join } from "@std/path/join";
 import { getCompilerOptions } from "@commontools/js-runtime/typescript";
+import { StaticCache } from "@commontools/static";
 
 export const init = new Command()
   .name("init")
@@ -75,8 +76,11 @@ function createTsConfig() {
 // implicitly loaded jsx-runtime (`react/jsx-runtime`) and the
 // environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
 async function initWorkspace(cwd: string) {
-  const runtimeModuleTypes = await Engine.getRuntimeModuleTypes();
-  const { dom, es2023, jsx } = await Engine.getEnvironmentTypes();
+  const cache = new StaticCache();
+  const runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
+    cache,
+  );
+  const { dom, es2023, jsx } = await Engine.getEnvironmentTypes(cache);
 
   // Concatenate all environment types into a single "lib",
   // which will be referred to as "ct-env" in the typescript config

@@ -1,5 +1,5 @@
 import { hydratePrompt, LlmPrompt, llmPrompt } from "@commontools/llm";
-import { cache as promptCache } from "@commontools/static";
+import { type StaticCache } from "@commontools/static";
 
 const libraries = {
   "imports": {
@@ -863,8 +863,10 @@ function onReady(mount, sourceData, libs) {
 );
 
 // Update the system message to reflect the new interface
-export const staticSystemMd = async (): Promise<LlmPrompt> => {
-  const promptText = await promptCache.getText("prompts/system.md");
+export const staticSystemMd = async (
+  staticCache: StaticCache,
+): Promise<LlmPrompt> => {
+  const promptText = await staticCache.getText("prompts/system.md");
   const prompt = llmPrompt(
     "iframe-react-system",
     promptText,

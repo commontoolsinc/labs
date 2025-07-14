@@ -27,6 +27,7 @@ import {
 import { injectUserCode } from "./iframe/static.ts";
 import { IFrameRecipe, WorkflowForm } from "./index.ts";
 import { console } from "./conditional-console.ts";
+import { StaticCache } from "@commontools/static";
 
 const llm = new LLMClient();
 
@@ -40,12 +41,14 @@ export const genSrc = async (
     newSpec,
     schema,
     steps,
+    staticCache,
   }: {
     src?: string;
     spec?: string;
     newSpec: string;
     schema: JSONSchema;
     steps?: string[];
+    staticCache: StaticCache;
   },
   options?: GenerationOptions,
 ): Promise<{ content: string; llmRequestId?: string }> => {
@@ -58,6 +61,7 @@ export const genSrc = async (
     newSpec,
     schema,
     steps,
+    staticCache,
   }, optionsWithDefaults);
 
   globalThis.dispatchEvent(
@@ -119,6 +123,7 @@ export async function iterate(
     newSpec,
     schema: iframe?.argumentSchema || { type: "object" },
     steps: plan?.features,
+    staticCache: charmManager.runtime.staticCache,
   }, optionsWithDefaults);
 
   return {
@@ -434,6 +439,7 @@ async function twoPhaseCodeGeneration(
     newSpec,
     schema,
     steps: form.plan?.features,
+    staticCache: form.meta.charmManager.runtime.staticCache,
   }, {
     model: form.meta.model,
     generationId: form.meta.generationId,
