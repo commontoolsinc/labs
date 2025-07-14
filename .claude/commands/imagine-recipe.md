@@ -45,6 +45,7 @@ The imagine-recipe command uses a multi-agent approach:
 **Task: Recipe Specification and Research**
 - Take the user's initial prompt and ask clarifying questions to narrow the requirements
 - Research existing recipes in the user's recipe repository to understand patterns and avoid duplication
+  - the `/research` slash command can be used for deep research
 - Optionally examine the user's current space using CT commands to understand existing charms and data flow
 - Produce a detailed specification document for the new recipe
 
