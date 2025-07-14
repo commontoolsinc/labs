@@ -91,27 +91,30 @@ export class XRootView extends LitElement {
       // Apply command synchronously
       const state = applyCommand(this._provider.value, command);
 
-      // Handle clear-authentication specially - need to clear ROOT_KEY from IDB
-      if (command.type === "clear-authentication") {
-        try {
-          const keyStore = await KeyStore.open();
-          await keyStore.clear();
-          console.log("[RootView] Cleared ROOT_KEY from keystore");
-        } catch (error) {
-          console.error(
-            "[RootView] Failed to clear ROOT_KEY from keystore:",
-            error,
-          );
+      // Handle command-specific side effects
+      switch (command.type) {
+        case "clear-authentication": {
+          try {
+            const keyStore = await KeyStore.open();
+            await keyStore.clear();
+            console.log("[RootView] Cleared ROOT_KEY from keystore");
+          } catch (error) {
+            console.error(
+              "[RootView] Failed to clear ROOT_KEY from keystore:",
+              error,
+            );
+          }
+          break;
+        }
+        case "set-identity": {
+          console.log("[RootView] Identity set in app state:", {
+            did: state.identity?.did(),
+          });
+          break;
         }
       }
 
       this._provider.setValue(state);
-
-      if (command.type === "set-identity") {
-        console.log("[RootView] Identity set in app state:", {
-          did: state.identity?.did(),
-        });
-      }
 
       this.dispatchEvent(new AppUpdateEvent(command, { state }));
     } catch (e) {
