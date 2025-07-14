@@ -780,7 +780,7 @@ describe("asCell", () => {
   });
 
   it("behaves correctly when setting a cell to itself, asCell schema", () => {
-    const c = runtime.getCell<{ a: number }>(
+    const c = runtime.getCell(
       space,
       "behaves correctly when setting a cell to itself, asCell schema",
       {
@@ -793,8 +793,7 @@ describe("asCell", () => {
     );
     c.set({ a: 1 });
     c.set(c.get());
-    // TODO(seefeld): This type cast should not be necessary, separate bug
-    expect((c.get() as any).get()).toEqual({ a: 1 });
+    expect(c.get()).toEqual({ a: 1 });
   });
 });
 
