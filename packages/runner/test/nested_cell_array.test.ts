@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isCell, type Cell } from "../src/cell.ts";
+import { type Cell, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
-import { type JSONSchema, ID } from "../src/builder/types.ts";
+import { ID, type JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -43,7 +43,7 @@ describe("Nested Cell Array", () => {
       default: [],
     } as const satisfies JSONSchema;
 
-    // Schema WITH asCell on items  
+    // Schema WITH asCell on items
     const cellArraySchema = {
       type: "array",
       items: {
@@ -53,13 +53,17 @@ describe("Nested Cell Array", () => {
           value: { type: "number" },
         },
         required: ["name", "value"],
-        asCell: true,  // This wraps each item in a Cell
+        asCell: true, // This wraps each item in a Cell
       },
       default: [],
     } as const satisfies JSONSchema;
 
     // Create cells with each schema
-    const normalArray = runtime.getCell(space, "normal-array", normalArraySchema);
+    const normalArray = runtime.getCell(
+      space,
+      "normal-array",
+      normalArraySchema,
+    );
     const cellArray = runtime.getCell(space, "cell-array", cellArraySchema);
 
     // Add the same data to both
@@ -82,7 +86,7 @@ describe("Nested Cell Array", () => {
     // Cell array: items are cells containing objects
     expect(isCell(cellItems[0])).toBe(true);
     expect(cellItems[0].get()).toEqual(testData);
-    
+
     // cellItems[0].get() should NOT be a cell
     expect(isCell(cellItems[0].get())).toBe(false);
   });
