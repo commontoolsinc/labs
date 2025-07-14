@@ -6,6 +6,7 @@ import type {
   IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
+  IReadOptions,
   IStorageInvariant,
   IStorageTransaction,
   IStorageTransactionComplete,
@@ -140,6 +141,7 @@ class TransactionReader implements ITransactionReader {
 
   read(
     address: IMemorySpaceAddress,
+    options?: IReadOptions,
   ): Result<Read, ReadError> {
     if (address.type !== "application/json") {
       const error = new Error(
@@ -413,13 +415,13 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: reader };
   }
 
-  read(address: IMemorySpaceAddress): Result<Read, ReadError> {
+  read(address: IMemorySpaceAddress, options?: IReadOptions): Result<Read, ReadError> {
     const readerResult = this.reader(address.space);
     if (readerResult.error) {
       return { ok: undefined, error: readerResult.error };
     }
 
-    const readResult = readerResult.ok!.read(address);
+    const readResult = readerResult.ok!.read(address, options);
     if (readResult.error) {
       return { ok: undefined, error: readResult.error };
     }
@@ -532,8 +534,8 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.reader(space);
   }
 
-  read(address: IMemorySpaceAddress): Result<Read, ReadError> {
-    return this.tx.read(address);
+  read(address: IMemorySpaceAddress, options?: IReadOptions): Result<Read, ReadError> {
+    return this.tx.read(address, options);
   }
 
   readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {

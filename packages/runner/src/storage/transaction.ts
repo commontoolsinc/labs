@@ -3,6 +3,7 @@ import type {
   IAttestation,
   IMemorySpaceAddress,
   InactiveTransactionError,
+  IReadOptions,
   IStorageManager,
   IStorageTransaction,
   IStorageTransactionAborted,
@@ -84,8 +85,8 @@ class StorageTransaction implements IStorageTransaction {
     return writer(this, space);
   }
 
-  read(address: IMemorySpaceAddress) {
-    return read(this, address);
+  read(address: IMemorySpaceAddress, options?: IReadOptions) {
+    return read(this, address, options);
   }
 
   write(address: IMemorySpaceAddress, value?: JSONValue) {
@@ -199,13 +200,14 @@ export const writer = (
 export const read = (
   transaction: StorageTransaction,
   address: IMemorySpaceAddress,
+  options?: IReadOptions,
 ) => {
   const { ok: space, error } = reader(transaction, address.space);
   if (error) {
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    return space.read(memoryAddress);
+    return space.read(memoryAddress, options);
   }
 };
 
