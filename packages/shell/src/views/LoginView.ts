@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { state } from "lit/decorators.js";
 
-import { Identity } from "@commontools/identity";
+import { Identity, PassKey } from "@commontools/identity";
 
 import { BaseView } from "./BaseView.ts";
 import {
@@ -18,6 +18,21 @@ import {
 } from "../lib/credentials.ts";
 
 type AuthFlow = "register" | "login";
+
+// Internal auth events for LoginView
+type AuthEventType = 
+  | "passkey-register"
+  | "passkey-authenticate" 
+  | "passphrase-generate"
+  | "passphrase-authenticate"
+  | "clear-stored-credential";
+
+interface AuthEventDetail {
+  type: AuthEventType;
+  data?: any;
+}
+
+const AUTH_EVENT = "auth-event";
 
 export class XLoginView extends BaseView {
   static override styles = css`
@@ -231,6 +246,12 @@ export class XLoginView extends BaseView {
   override connectedCallback() {
     super.connectedCallback();
     this.checkAvailableMethods();
+    this.addEventListener(AUTH_EVENT, this.onAuthEvent as EventListener);
+  }
+
+  override disconnectedCallback() {
+    this.removeEventListener(AUTH_EVENT, this.onAuthEvent as EventListener);
+    super.disconnectedCallback();
   }
 
   private checkAvailableMethods() {
@@ -253,6 +274,137 @@ export class XLoginView extends BaseView {
     if (methods.length === 1) {
       this.method = methods[0];
     }
+  }
+
+  private dispatchAuthEvent(type: AuthEventType, data?: any) {
+    this.dispatchEvent(
+      new CustomEvent(AUTH_EVENT, {
+        detail: { type, data },
+        bubbles: false, // Don't bubble up - auth events are internal
+        composed: false,
+      }),
+    );
+  }
+
+  private onAuthEvent = async (event: Event) => {
+    const e = event as CustomEvent<AuthEventDetail>;
+    e.stopPropagation(); // Ensure event doesn't bubble up
+    
+    const { type, data } = e.detail;
+    
+    try {
+      switch (type) {
+        case "passkey-register":
+          await this.handlePasskeyRegister();
+          break;
+        case "passkey-authenticate":
+          await this.handlePasskeyAuthenticate(data?.descriptor);
+          break;
+        case "passphrase-generate":
+          await this.handlePassphraseGenerate();
+          break;
+        case "passphrase-authenticate":
+          await this.handlePassphraseAuthenticate(data?.mnemonic);
+          break;
+        case "clear-stored-credential":
+          this.handleClearStoredCredential();
+          break;
+      }
+    } catch (error) {
+      console.error("[LoginView] Auth event error:", error);
+      this.error = error instanceof Error ? error.message : "Authentication failed";
+    }
+  };
+
+  // Auth event handlers
+  private async handlePasskeyRegister() {
+    this.isProcessing = true;
+    this.error = null;
+    
+    try {
+      const passkey = await PassKey.create("Common Tools User", "commontoolsuser");
+      const identity = await passkey.createRootKey();
+      
+      // Send identity to root
+      this.command({ type: "set-identity", identity });
+      this.registrationSuccess = true;
+    } catch (e) {
+      console.error("[LoginView] Passkey register error:", e);
+      this.error = e instanceof Error ? e.message : "Passkey registration failed";
+      this.flow = null;
+      this.method = null;
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  private async handlePasskeyAuthenticate(descriptor?: PublicKeyCredentialDescriptor) {
+    this.isProcessing = true;
+    this.error = null;
+    
+    try {
+      const passkey = await PassKey.get({
+        allowCredentials: descriptor ? [descriptor] : [],
+      });
+      const identity = await passkey.createRootKey();
+      
+      // Store credential info for future logins
+      const credential = createPasskeyCredential(passkey.id());
+      saveCredential(credential);
+      this.storedCredential = credential;
+      
+      // Send identity to root
+      this.command({ type: "set-identity", identity });
+    } catch (e) {
+      console.error("[LoginView] Passkey authenticate error:", e);
+      this.error = e instanceof Error ? e.message : "Passkey authentication failed";
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  private async handlePassphraseGenerate() {
+    this.isProcessing = true;
+    this.error = null;
+    
+    try {
+      const [, mnemonic] = await Identity.generateMnemonic();
+      this.mnemonic = mnemonic;
+    } catch (e) {
+      console.error("[LoginView] Passphrase generate error:", e);
+      this.error = e instanceof Error ? e.message : "Failed to generate passphrase";
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  private async handlePassphraseAuthenticate(mnemonic: string) {
+    this.isProcessing = true;
+    this.error = null;
+    
+    try {
+      const identity = await Identity.fromMnemonic(mnemonic);
+      
+      // Store credential indicator if not already stored
+      if (!this.storedCredential) {
+        const credential = createPassphraseCredential();
+        saveCredential(credential);
+        this.storedCredential = credential;
+      }
+      
+      // Send identity to root
+      this.command({ type: "set-identity", identity });
+    } catch (e) {
+      console.error("[LoginView] Passphrase authenticate error:", e);
+      this.error = e instanceof Error ? e.message : "Invalid passphrase";
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  private handleClearStoredCredential() {
+    clearStoredCredential();
+    this.storedCredential = null;
   }
 
   private async handleAuth<T>(
@@ -281,28 +433,15 @@ export class XLoginView extends BaseView {
     }
   }
 
-  private async handleRegister() {
+  private handleRegister() {
     if (this.method === AUTH_METHOD_PASSKEY) {
-      await this.handleAuth(() => {
-        this.command({
-          type: "passkey-register",
-          name: "Common Tools User",
-          displayName: "commontoolsuser",
-        });
-        // Note: We'll need to handle the passkey ID return differently
-        this.registrationSuccess = true;
-      });
+      this.dispatchAuthEvent("passkey-register");
     } else {
-      // For passphrase, we need to generate and display the mnemonic
-      const result = await this.handleAuth(async () => {
-        const [, mnemonic] = await Identity.generateMnemonic();
-        this.mnemonic = mnemonic;
-        return mnemonic;
-      });
+      this.dispatchAuthEvent("passphrase-generate");
     }
   }
 
-  private async handleLogin(passphrase?: string) {
+  private handleLogin(passphrase?: string) {
     console.log("[LoginView] Handling login:", {
       method: this.method,
       hasPassphrase: !!passphrase,
@@ -313,28 +452,9 @@ export class XLoginView extends BaseView {
       const descriptor = getPublicKeyCredentialDescriptor(
         this.storedCredential,
       );
-      await this.handleAuth(() => {
-        console.log("[LoginView] Sending passkey-authenticate command");
-        this.command({
-          type: "passkey-authenticate",
-          descriptor,
-        });
-      });
+      this.dispatchAuthEvent("passkey-authenticate", { descriptor });
     } else if (passphrase) {
-      await this.handleAuth(() => {
-        console.log("[LoginView] Authenticating with passphrase");
-        this.command({
-          type: "passphrase-authenticate",
-          mnemonic: passphrase,
-        });
-
-        // Store credential indicator
-        if (!this.storedCredential) {
-          const credential = createPassphraseCredential();
-          saveCredential(credential);
-          this.storedCredential = credential;
-        }
-      });
+      this.dispatchAuthEvent("passphrase-authenticate", { mnemonic: passphrase });
     }
   }
 
@@ -367,8 +487,7 @@ export class XLoginView extends BaseView {
               <button
                 class="delete-button"
                 @click="${() => {
-              clearStoredCredential();
-              this.storedCredential = null;
+              this.dispatchAuthEvent("clear-stored-credential");
             }}"
                 title="Remove saved credential"
               >
@@ -387,11 +506,11 @@ export class XLoginView extends BaseView {
         <div class="button-row">
           ${isPassphrase && isPasskeyAvailable
           ? html`
-            <button @click="${async () => {
+            <button @click="${() => {
               this.flow = "login";
               this.method = AUTH_METHOD_PASSKEY;
-              await this.handleLogin();
-            }}">
+              this.handleLogin();
+            }}">"
               🔑 Login w/ Passkey
             </button>
           `
@@ -422,14 +541,14 @@ export class XLoginView extends BaseView {
     `;
   }
 
-  private async handleQuickUnlock() {
+  private handleQuickUnlock() {
     if (!this.storedCredential) return;
 
     this.method = this.storedCredential.method;
     this.flow = "login";
 
     if (this.storedCredential.method === AUTH_METHOD_PASSKEY) {
-      await this.handleLogin();
+      this.handleLogin();
     }
   }
 
@@ -456,12 +575,12 @@ export class XLoginView extends BaseView {
     `;
   }
 
-  private async handleMethodSelect(method: AuthMethod) {
+  private handleMethodSelect(method: AuthMethod) {
     this.method = method;
     if (this.flow === "register") {
-      await this.handleRegister();
+      this.handleRegister();
     } else if (this.flow === "login" && method === AUTH_METHOD_PASSKEY) {
-      await this.handleLogin();
+      this.handleLogin();
     }
   }
 
@@ -535,11 +654,14 @@ export class XLoginView extends BaseView {
       <button
         class="primary"
         @click="${() => {
+        // User has saved the mnemonic, now authenticate with it
+        if (this.mnemonic) {
+          this.handleLogin(this.mnemonic);
+        }
         this.mnemonic = null;
-        this.flow = "login";
       }}"
       >
-        🔒 Continue to Login
+        🔒 I've Saved It - Continue
       </button>
     `;
   }

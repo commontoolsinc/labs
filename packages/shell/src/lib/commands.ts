@@ -1,17 +1,10 @@
-import { Identity, KeyStore, PassKey } from "@commontools/identity";
-import { Session } from "./app/state.ts";
+import { Identity, KeyStore } from "@commontools/identity";
 
 export type Command =
   | { type: "set-active-charm-id"; charmId: string }
   | { type: "set-identity"; identity: Identity }
   | { type: "set-space"; spaceName: string }
   | { type: "set-keystore"; keyStore: KeyStore }
-  | { type: "set-session"; session: Session }
-  | { type: "passkey-register"; name: string; displayName: string }
-  | { type: "passkey-authenticate"; descriptor?: PublicKeyCredentialDescriptor }
-  | { type: "passphrase-register" }
-  | { type: "passphrase-display-mnemonic"; mnemonic: string }
-  | { type: "passphrase-authenticate"; mnemonic: string }
   | { type: "clear-authentication" };
 
 export function isCommand(value: unknown): value is Command {
@@ -33,30 +26,8 @@ export function isCommand(value: unknown): value is Command {
       return "charmId" in value && !!value.charmId &&
         typeof value.charmId === "string";
     }
-    // ========================================================================
-    // Authentication commands
-    // ========================================================================
     case "set-keystore": {
       return "keyStore" in value && value.keyStore instanceof KeyStore;
-    }
-    case "set-session": {
-      return "session" in value && typeof value.session === "object";
-    }
-    case "passkey-register": {
-      return "name" in value && typeof value.name === "string" &&
-        "displayName" in value && typeof value.displayName === "string";
-    }
-    case "passkey-authenticate": {
-      return true;
-    }
-    case "passphrase-register": {
-      return true;
-    }
-    case "passphrase-display-mnemonic": {
-      return "mnemonic" in value && typeof value.mnemonic === "string";
-    }
-    case "passphrase-authenticate": {
-      return "mnemonic" in value && typeof value.mnemonic === "string";
     }
     case "clear-authentication": {
       return true;
