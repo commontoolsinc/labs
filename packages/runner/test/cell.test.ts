@@ -386,7 +386,7 @@ describe("createProxy", () => {
     const ref = c.key("x").getAsLegacyCellLink();
     const proxy = c.getAsQueryResult();
     proxy.x = ref;
-    expect(() => proxy.x).toThrow();
+    expect(proxy.x).toBe(42);
   });
 
   it.skip("should support modifying array methods and log reads and writes", () => {
@@ -753,6 +753,48 @@ describe("asCell", () => {
     await runtime.idle();
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
     expect(values).toEqual([42, 300]); // Got called again
+  });
+
+  it("behaves correctly when setting a cell to itself", () => {
+    const c = runtime.getCell<{ a: number }>(
+      space,
+      "behaves correctly when setting a cell to itself",
+      undefined,
+      tx,
+    );
+    c.set({ a: 1 });
+    c.set(c);
+    expect(c.get()).toEqual({ a: 1 });
+  });
+
+  it("behaves correctly when setting a cell to itself, any schema", () => {
+    const c = runtime.getCell<{ a: number }>(
+      space,
+      "behaves correctly when setting a cell to itself, any schema",
+      undefined,
+      tx,
+    );
+    c.set({ a: 1 });
+    c.set(c.get());
+    expect(c.get()).toEqual({ a: 1 });
+  });
+
+  it("behaves correctly when setting a cell to itself, asCell schema", () => {
+    const c = runtime.getCell<{ a: number }>(
+      space,
+      "behaves correctly when setting a cell to itself, asCell schema",
+      {
+        type: "object",
+        properties: { a: { type: "number" } },
+        required: ["a"],
+        asCell: true,
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    c.set({ a: 1 });
+    c.set(c.get());
+    // TODO(seefeld): This type cast should not be necessary, separate bug
+    expect((c.get() as any).get()).toEqual({ a: 1 });
   });
 });
 
