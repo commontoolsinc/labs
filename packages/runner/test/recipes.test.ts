@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/link-resolution.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -832,9 +833,15 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
-    const recipeId = charm.getSourceCell()?.get()?.[TYPE];
+    const sourceCellValue = charm.getSourceCell()?.getRaw();
+    const recipeId = sourceCellValue?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);
+    expect(isAnyCellLink(sourceCellValue?.["spell"])).toBe(true);
+    const spellLink = parseLink(sourceCellValue["spell"]);
+    const spellId = spellLink?.id;
+    expect(spellId).toBeDefined();
+    expect(lastError?.spellId).toBe(spellId);
     expect(lastError?.space).toBe(space);
     expect(lastError?.charmId).toBe(
       JSON.parse(JSON.stringify(charm.entityId))["/"],

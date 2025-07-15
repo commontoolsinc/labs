@@ -17,6 +17,7 @@ import type {
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
+  parseLink,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -239,11 +240,13 @@ export class Scheduler implements IScheduler {
   }
 
   private handleError(error: Error, action: any) {
-    const { charmId, recipeId, space } = getCharmMetadataFromFrame() ?? {};
+    const { charmId, spellId, recipeId, space } = getCharmMetadataFromFrame() ??
+      {};
 
     const errorWithContext = error as ErrorWithContext;
     errorWithContext.action = action;
     if (charmId) errorWithContext.charmId = charmId;
+    if (spellId) errorWithContext.spellId = spellId;
     if (recipeId) errorWithContext.recipeId = recipeId;
     if (space) errorWithContext.space = space as MemorySpace;
 
@@ -509,6 +512,7 @@ function pathAffected(
 }
 
 function getCharmMetadataFromFrame(): {
+  spellId?: string;
   recipeId?: string;
   space?: string;
   charmId?: string;
@@ -525,6 +529,8 @@ function getCharmMetadataFromFrame(): {
   }
   const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
   const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
+  const spellLink = parseLink(source?.get()?.["spell"]);
+  result.spellId = spellLink?.id;
   result.recipeId = source?.get()?.[TYPE];
   const resultDoc = source?.get()?.resultRef?.cell;
   result.space = resultDoc?.space;
