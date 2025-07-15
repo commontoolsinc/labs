@@ -22,7 +22,7 @@ export default recipe<RecipeState>("Counter", (state) => {
     [NAME]: str`Simple counter: ${derive(state.value, String)}`,
     [UI]: (
       <div>
-        <ct-button onClick={decrement({ value: state.value })}>-</ct-button>
+        <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
           <li>next number: {state.value + 1}</li>
         </ul>

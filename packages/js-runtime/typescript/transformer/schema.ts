@@ -1,5 +1,5 @@
 import ts from "typescript";
-import { addCommonToolsImport, hasCommonToolsImport } from "./imports.ts";
+import { addCommonToolsImport, hasCommonToolsImport, removeCommonToolsImport } from "./imports.ts";
 
 /**
  * Transformer that converts TypeScript types to JSONSchema objects.
@@ -15,6 +15,7 @@ export function createSchemaTransformer(
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
       let needsJSONSchemaImport = false;
+      let hasTransformedToSchema = false;
 
       const visit: ts.Visitor = (node) => {
         // Look for toSchema<T>() calls
@@ -72,6 +73,7 @@ export function createSchemaTransformer(
             needsJSONSchemaImport = true;
           }
 
+          hasTransformedToSchema = true;
           return satisfiesExpression;
         }
 
@@ -83,6 +85,32 @@ export function createSchemaTransformer(
       // Add JSONSchema import if needed
       if (needsJSONSchemaImport) {
         result = addCommonToolsImport(result, context.factory, "JSONSchema");
+      }
+      
+      // Log for debugging the handler-object-literal case
+      if (sourceFile.fileName.includes("handler-object-literal")) {
+        console.log(`[SchemaTransformer] Processing ${sourceFile.fileName}`);
+        console.log(`  - hasTransformedToSchema: ${hasTransformedToSchema}`);
+        console.log(`  - hasCommonToolsImport(result, "toSchema"): ${hasCommonToolsImport(result, "toSchema")}`);
+      }
+      
+      // Remove toSchema import if we transformed all its uses
+      if (hasCommonToolsImport(result, "toSchema")) {
+        // Check if toSchema is still used anywhere in the transformed code
+        const stillUsesToSchema = containsToSchemaReference(result);
+        
+        if (debug) {
+          console.log(`[SchemaTransformer] Checking toSchema import removal:`);
+          console.log(`  - hasCommonToolsImport(toSchema): true`);
+          console.log(`  - stillUsesToSchema: ${stillUsesToSchema}`);
+        }
+        
+        if (!stillUsesToSchema) {
+          if (debug) {
+            console.log(`[SchemaTransformer] Removing toSchema import`);
+          }
+          result = removeCommonToolsImport(result, context.factory, "toSchema");
+        }
       }
       
       return result;
@@ -342,4 +370,47 @@ function evaluateObjectLiteral(
   }
 
   return result;
+}
+
+/**
+ * Check if the source file contains any remaining references to toSchema
+ * after transformation.
+ */
+function containsToSchemaReference(sourceFile: ts.SourceFile): boolean {
+  let found = false;
+  let count = 0;
+
+  const visit: ts.Visitor = (node) => {
+    if (found) return node;
+
+    // Check for toSchema identifier references
+    if (ts.isIdentifier(node) && node.text === "toSchema") {
+      count++;
+      // Make sure it's not part of an import declaration
+      let parent = node.parent;
+      while (parent) {
+        if (ts.isImportDeclaration(parent)) {
+          // This is part of an import, not a usage
+          return node;
+        }
+        parent = parent.parent;
+      }
+      // Found a usage of toSchema outside of imports
+      found = true;
+      return node;
+    }
+
+    return ts.visitEachChild(node, visit, undefined);
+  };
+
+  ts.visitNode(sourceFile, visit);
+  
+  // Debug log for handler-object-literal
+  if (sourceFile.fileName.includes("handler-object-literal")) {
+    console.log(`[containsToSchemaReference] ${sourceFile.fileName}:`);
+    console.log(`  - Total toSchema identifiers found: ${count}`);
+    console.log(`  - Found non-import usage: ${found}`);
+  }
+  
+  return found;
 }
