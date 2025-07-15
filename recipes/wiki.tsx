@@ -54,17 +54,17 @@ const updatePageContent = handler<
 
 // Select a different page
 const selectPage = handler<
-  {},
+  Record<PropertyKey, never>,
   { slug: string; currentPage: string }
 >(
-  ({}, state) => {
+  (_props, state) => {
     state.currentPage = state.slug;
   },
 );
 
 // Create new page
 const createPage = handler<
-  {},
+  Record<PropertyKey, never>,
   { pages: Record<string, string>; currentPage: string }
 >(
   (_, state) => {
@@ -77,10 +77,10 @@ const createPage = handler<
 
 // Delete current page
 const deletePage = handler<
-  {},
+  Record<PropertyKey, never>,
   { slug: string; pages: Record<string, string>; currentPage: string }
 >(
-  ({}, state) => {
+  (_props, state) => {
     const pageKeys = Object.keys(state.pages);
     if (pageKeys.length <= 1) return; // Prevent deleting last page
 
