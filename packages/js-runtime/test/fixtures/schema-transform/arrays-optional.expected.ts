@@ -12,13 +12,7 @@ const todoSchema = {
             type: "string"
         },
         done: {
-            oneOf: [{
-                    type: "undefined"
-                }, {
-                    type: "any"
-                }, {
-                    type: "any"
-                }]
+            type: "boolean"
         },
         tags: {
             type: "array",
