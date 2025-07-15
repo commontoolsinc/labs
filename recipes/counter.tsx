@@ -33,5 +33,8 @@ export default recipe(model, model, (cell) => {
       </div>
     ),
     value: cell.value,
+    // Expose handlers as streams for CLI access
+    increment: increment(cell),
+    decrement: decrement(cell),
   };
 });
