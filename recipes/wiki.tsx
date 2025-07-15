@@ -176,7 +176,7 @@ export default recipe(
                     value={currentTitle}
                     placeholder="Page title..."
                     style="flex: 1; font-size: 1.2rem; font-weight: bold;"
-                    onInput={updatePageTitle({ pages, currentPage })}
+                    onct-input={updatePageTitle({ pages, currentPage })}
                   />
                   <ct-button
                     variant="destructive"
