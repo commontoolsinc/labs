@@ -167,6 +167,10 @@ function typeToJsonSchema(
   if (type.flags & ts.TypeFlags.Boolean) {
     return { type: "boolean" };
   }
+  if (type.flags & ts.TypeFlags.BooleanLiteral) {
+    // Handle boolean literals (true/false) as boolean type
+    return { type: "boolean" };
+  }
   if (type.flags & ts.TypeFlags.Null) {
     return { type: "null" };
   }
@@ -401,13 +405,22 @@ function typeToJsonSchema(
     const nonNullTypes = unionTypes.filter((t) =>
       !(t.flags & ts.TypeFlags.Undefined)
     );
+    
+    // Special handling for boolean | undefined (which appears as false | true | undefined)
+    if (unionTypes.length === 3 && 
+        unionTypes.filter(t => t.flags & ts.TypeFlags.BooleanLiteral).length === 2 &&
+        unionTypes.filter(t => t.flags & ts.TypeFlags.Undefined).length === 1) {
+      // This is boolean | undefined, return boolean schema
+      return { type: "boolean" };
+    }
+    
     if (nonNullTypes.length === 1 && unionTypes.length === 2) {
       // This is an optional type, just return the non-null type schema
-      return typeToJsonSchema(nonNullTypes[0], checker);
+      return typeToJsonSchema(nonNullTypes[0], checker, typeNode);
     }
     // Otherwise, use oneOf
     return {
-      oneOf: unionTypes.map((t) => typeToJsonSchema(t, checker)),
+      oneOf: unionTypes.map((t) => typeToJsonSchema(t, checker, typeNode)),
     };
   }
 
