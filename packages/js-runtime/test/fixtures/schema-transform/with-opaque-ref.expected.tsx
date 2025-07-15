@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, h, recipe, toSchema, UI, JSONSchema } from "commontools";
+import { Cell, derive, h, recipe, UI, JSONSchema } from "commontools";
 interface State {
     value: Cell<number>;
 }

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, OpaqueRef, recipe } from "commontools";
+import { Cell, handler, recipe } from "commontools";
 
 interface State {
   value: Cell<number>;

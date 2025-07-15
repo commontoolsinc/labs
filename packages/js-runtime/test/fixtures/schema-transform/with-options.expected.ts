@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { toSchema, JSONSchema } from "commontools";
+import { JSONSchema } from "commontools";
 interface Config {
     value: number;
 }
