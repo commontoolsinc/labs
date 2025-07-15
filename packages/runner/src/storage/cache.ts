@@ -50,6 +50,7 @@ import type {
   IStorageProvider,
   IStorageProviderWithReplica,
   IStorageSubscription,
+  IStorageSubscriptionCapability,
   IStorageTransaction,
   IStoreError,
   ITransaction,
@@ -1585,7 +1586,11 @@ export interface Options {
   settings?: IRemoteStorageProviderSettings;
 }
 
-export class StorageManager implements IStorageManager, IStorageManagerV2 {
+export class StorageManager
+  implements
+    IStorageManager,
+    IStorageManagerV2,
+    IStorageSubscriptionCapability {
   address: URL;
   as: Signer;
   id: string;
@@ -1656,6 +1661,13 @@ export class StorageManager implements IStorageManager, IStorageManagerV2 {
    */
   edit(): IStorageTransaction {
     return Transaction.create(this);
+  }
+
+  /**
+   * Subscribes to changes in the storage.
+   */
+  subscribe(subscription: IStorageSubscription): void {
+    this.#subscription.subscribe(subscription);
   }
 }
 
