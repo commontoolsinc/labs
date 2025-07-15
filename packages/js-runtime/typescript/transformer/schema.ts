@@ -29,7 +29,7 @@ export function createSchemaTransformer(
           const typeArg = node.typeArguments[0];
           const type = checker.getTypeFromTypeNode(typeArg);
 
-          if (debug) {
+          if (debug && typeArg) {
             console.log(
               `[SchemaTransformer] Found toSchema<${typeArg.getText()}>() call`,
             );
