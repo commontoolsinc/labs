@@ -1,7 +1,7 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { ensureDir } from "@std/fs";
 import { loadIdentity } from "./identity.ts";
-import { Cell, Runtime, RuntimeProgram, UI } from "@commontools/runner";
+import { Cell, Runtime, RuntimeProgram, UI, isStream } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import {
   Charm,
@@ -464,4 +464,33 @@ export async function setCellValue(
   } else {
     await setCharmResult(manager, config.charm, path, value);
   }
+}
+
+/**
+ * Calls a handler within a charm by sending an event to its stream.
+ */
+export async function callCharmHandler(
+  config: CharmConfig,
+  handlerName: string,
+  args: any,
+): Promise<void> {
+  const manager = await loadManager(config);
+  const charms = new CharmsController(manager);
+  const charm = await charms.get(config.charm);
+  
+  // Get the cell and traverse to the handler using .key()
+  const cell = charm.getCell();
+  const handlerStream = cell.key(handlerName);
+  
+  // The handlerStream should be the actual stream object
+  if (!handlerStream || !isStream(handlerStream)) {
+    throw new Error(`Handler "${handlerName}" not found or not a stream`);
+  }
+  
+  // Send the event to trigger the handler
+  handlerStream.send(args);
+  
+  // Wait for processing to complete
+  await manager.runtime.idle();
+  await manager.synced();
 }

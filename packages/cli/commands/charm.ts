@@ -2,6 +2,7 @@ import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
 import {
   applyCharmInput,
+  callCharmHandler,
   CharmConfig,
   formatViewTree,
   generateSpaceMap,
@@ -379,6 +380,25 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
 
     const map = await generateSpaceMap(spaceConfig, format);
     render(map);
+  })
+  /* charm call */
+  .command("call", "Call a handler within a charm")
+  .usage(charmUsage)
+  .example(
+    `ct charm call ${EX_ID} ${EX_COMP_CHARM} increment`,
+    `Call the "increment" handler on charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .example(
+    `ct charm call ${EX_ID} ${EX_COMP_CHARM} setName '{"value":"My Name"}'`,
+    `Call the "setName" handler with arguments on charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .arguments("<handler:string> [args:string]")
+  .action(async (options, handlerName, argsJson) => {
+    const charmConfig = parseCharmOptions(options);
+    const args = argsJson ? JSON.parse(argsJson) : {};
+    await callCharmHandler(charmConfig, handlerName, args);
+    render(`Called handler "${handlerName}" on charm ${charmConfig.charm}`);
   });
 
 interface CharmCLIOptions {
