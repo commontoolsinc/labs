@@ -1,117 +1,66 @@
 # Research Command
 
-This command creates a dedicated research subagent that uses ultrathinking to preserve context while conducting thorough codebase investigation.
+Research topics thoroughly using codebase exploration, documentation review, and analysis.
 
-## Overview
+## Usage
 
-Research objective: `$ARGUMENTS`
+`/research [question or topic]`
 
-## DELIVERABLE: CT Research Report at Toolshed URL
+## Process
 
-**PRIMARY TASK**: Conduct research, then deploy findings as a CommonTools research report and provide the clickable URL.
+Launch a research subagent using the Task tool, then always ask about deployment:
+
+```
+Task: Research [topic/question]
+
+You are a research specialist. Conduct thorough investigation of the topic using all available tools.
+
+**First, learn how to use ct:** Read .claude/commands/common/ct.md to understand how to use the CommonTools system.
+
+**Your Task:**
+1. **Consult the wiki first** - Read .claude/commands/search-wiki.md to learn how to check for existing knowledge on this topic
+2. **Explore the codebase** using Glob, Grep, and Read tools
+3. **Review documentation** (README.md, CLAUDE.md, etc.)
+4. **Analyze git history** for relevant changes
+5. **Examine tests** to understand behavior
+6. **Provide comprehensive findings** with specific code references
+
+**Return to me:** Detailed research report with executive summary, analysis, architecture insights, and actionable findings.
+
+**CRITICAL:** After delivering the report, you MUST ask the user if they want to deploy it using the .claude/commands/deploy-research.md command.
+```
 
 ## Research Methodology
 
-### 1. Documentation Review
-- Start with `README.md` and `CLAUDE.md` for project overview and AI-specific guidelines
-- Look for architecture decision records (ADRs) and design documents
-- Check for wikis or other canonical documentation sources
+### Core Steps
+- **Learn ct usage first** - Read .claude/commands/common/ct.md to understand CommonTools
+- **Start with wiki search** to avoid duplicating previous research
+- Use Task tool for systematic codebase exploration
+- Check recent git history and commits
+- Review existing documentation and tests
+- Find relevant files, patterns, and implementations
+- Provide specific file paths and line numbers
 
-### 2. Recent Changes Analysis
-- Review recent git history for relevant changes
-- Use GitHub CLI (`gh`) to examine:
-  - Recent issues related to the research topic
-  - Pull requests that might have addressed the question
-- Use Linear CLI (`lr`) if available for additional project management context
+### Required Final Step
+- **Always ask about deployment** - Even if the user doesn't seem interested, you must offer the .claude/commands/deploy-research.md option
 
-### 3. Codebase Exploration
-- Systematically explore the codebase to understand the implementation
-- Focus on finding the most relevant files and patterns
-- Consider the scope needed for a thorough understanding
+### Output Format
+- **Executive summary** of key findings
+- **Detailed analysis** with code references
+- **Architecture insights** and design decisions
+- **Recent changes** and development history
+- **Recommendations** or next steps if applicable
 
-### 4. Test Analysis
-- Read existing tests to understand:
-  - Current features and behaviors
-  - Assertions made about the codebase
-  - Whether the research question is already covered by test cases
-- Verify if tests are passing to validate assumptions
+## Required: Ask About Deployment
 
-### 5. Production Environment Research
-- Use the `ct` binary for production environment research
-- Reference `./claude/commands/common/ct.md` for CT-specific research patterns
+After research is complete, you MUST ask: "Would you like me to deploy this as a CommonTools research report?"
 
-## Research Best Practices
+If yes, use the .claude/commands/deploy-research.md command. Make sure to read .claude/commands/common/ct.md first to understand how to use the CommonTools system properly.
 
-### Self-Service First
-1. Exhaust all available self-service documentation and code exploration
-2. Identify specific blockers before seeking human input
-3. When asking questions, provide:
-   - Specific context about what you've already tried
-   - Exactly what you're blocked on
-   - What you've learned so far
+## When to Use
 
-### Domain Knowledge
-For business domain questions:
-1. Find canonical documentation
-2. Identify the domain owner
-3. Record answers in a searchable place for future reference
-
-### Information Quality
-The goal is to minimize interruptions while maximizing information quality:
-- Be thorough in self-service research
-- Ask targeted questions when needed
-- Document findings for reusability
-
-## Research Content Structure
-
-The research content should include:
-- Executive summary of findings
-- Detailed research methodology
-- Key discoveries and insights
-- Code references and examples
-- Recommendations or conclusions
-- Any remaining open questions
-
-## CT Report Deployment Steps (After Research Complete)
-
-### 1. Generate Claude Identity (if needed)
-```bash
-# Check for existing Claude identity
-ls -la claude-research.key
-
-# If not found, generate new identity for Claude's research
-./dist/ct id new > claude-research.key
-```
-
-### 2. Deploy Research Report Recipe
-```bash
-./dist/ct charm new --identity claude-research.key --api-url https://toolshed.saga-castor.ts.net --space YYYY-MM-DD-claude-dev recipes/research-report.tsx
-```
-
-### 3. Set Title and Content
-```bash
-# Set the title
-echo '"Research: <sanitized_question>"' | ./dist/ct charm set --identity claude-research.key --api-url https://toolshed.saga-castor.ts.net --space YYYY-MM-DD-claude-dev --charm <CHARM_ID> title
-
-# Set the research content (write to temp file first to avoid formatting issues)
-cat research-content.tmp | jq -Rs . | ./dist/ct charm set --identity claude-research.key --api-url https://toolshed.saga-castor.ts.net --space YYYY-MM-DD-claude-dev --charm <CHARM_ID> content
-
-# Clean up temp file
-rm research-content.tmp
-```
-
-### 4. Provide URL to User
-```
-Research report created! View it here:
-https://toolshed.saga-castor.ts.net/YYYY-MM-DD-claude-dev/<CHARM_ID>
-```
-
-## Notes for Subagent
-
-- Use ultrathinking to work through complex research paths
-- Be systematic and thorough in exploration
-- Document the research journey, not just the destination
-- Include relevant code snippets and file references
-- Consider edge cases and alternative interpretations
-- Complete all research before deploying the CT report
-- End by providing the CT research report URL to the user
+- Understanding how specific code works
+- Exploring new areas of the codebase
+- Before making architectural changes
+- Investigating bugs or issues
+- Learning about patterns and conventions

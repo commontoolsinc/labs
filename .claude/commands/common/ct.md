@@ -1,188 +1,221 @@
-# Common CT Binary Setup and Configuration
+# CT Binary Usage
 
-This document contains shared setup instructions for the CT binary that are used by multiple command scripts.
+## Essential Commands (90% of usage)
 
-## Initial CT Binary Check
+**Standard Parameters** (use these for all commands):
+- Identity: `claude.key` (created automatically if missing)
+- API URL: `https://toolshed.saga-castor.ts.net/`
+- Space: Your choice (e.g., `2025-wiki`, `2024-07-15-claude-dev`)
+
+```bash
+# READ data from charm
+./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [your-space] --charm [charm-id] [path]
+
+# SET data directly in charm (value via stdin)
+echo '[value]' | ./dist/ct charm set --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [your-space] --charm [charm-id] [path]
+
+# CALL charm handler (JSON via stdin)
+echo '[json-data]' | ./dist/ct charm call --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [your-space] --charm [charm-id] [handler-name]
+
+# LIST charms in space
+./dist/ct charm ls --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [your-space]
+
+# DEPLOY new charm
+./dist/ct charm new --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [your-space] [recipe-path]
+```
+
+**When to use each:**
+- **GET**: Read any data from charm
+- **SET**: Directly modify specific values (simple, fast)  
+- **CALL**: Use charm's handlers (for complex operations, validation, side effects)
+- **LS**: Discover what charms exist in a space
+- **NEW**: Deploy a recipe as a new charm
+
+**Path Examples:**
+```bash
+# Read specific values
+./dist/ct charm get [params] --charm [id] title
+./dist/ct charm get [params] --charm [id] items/0/name
+./dist/ct charm get [params] --charm [id] config/database/host
+
+# Set specific values  
+echo '"New Title"' | ./dist/ct charm set [params] --charm [id] title
+echo 'true' | ./dist/ct charm set [params] --charm [id] items/0/done
+echo '{"host": "localhost"}' | ./dist/ct charm set [params] --charm [id] config/database
+
+# Call handlers
+echo '{"title": "New item"}' | ./dist/ct charm call [params] --charm [id] addItem
+echo '{"key": "page", "value": "content"}' | ./dist/ct charm call [params] --charm [id] update
+```
+
+## Setup & Deployment
+
+### Initial Setup
 
 **Check CT binary:**
 - Run `ls -la ./dist/ct`
-- If missing: Run `deno task build-binaries --cli-only` (this takes a few minutes)
+- If missing: Run `deno task build-binaries --cli-only` (takes a few minutes)
 - Verify with `./dist/ct --help`
 
-## Identity Management
+**Identity management:**
+- Run `ls -la claude.key`
+- If missing: Run `./dist/ct id new > claude.key`
 
-**Check for identity keyfile:**
-- Run `ls -la *.key`
-- If no keyfiles found: Run `./dist/ct id new > space-identity.key`
-- If keyfiles exist, ask user which one to use or create a new one
-
-## Recipe Development Setup
-
-**Initialize TypeScript environment:**
-- Navigate to your recipes repository (or any folder where you'll develop recipes)
+**Recipe development setup:**
+- Navigate to your recipes repository 
 - Run `./dist/ct init` to set up TypeScript types for recipe development
 - This creates/updates tsconfig.json and provides proper type definitions
-- Run this command whenever you update CT to get the latest types
 
-## Environment Setup
+### Environment Variables (Optional)
 
-**Set up environment (recommend but don't require):**
-- Ask if they want to set environment variables to make commands shorter
-- If yes: Guide them to set `CT_API_URL="[their-api-url]"` and `CT_IDENTITY="./their-keyfile.key"`
-- This will allow shorter commands without repeating --identity and --api-url flags
+Set these to shorten commands:
+- `CT_API_URL="https://toolshed.saga-castor.ts.net/"`
+- `CT_IDENTITY="./claude.key"`
 
-## Parameter Collection
+**Important:** For `*.ts.net` URLs, you must be connected to the CT Tailnet. Commands will hang or timeout if not connected.
 
-**Get API URL:**
-- Ask user: "What is your CT API URL? (e.g., https://ct.dev, https://toolshed.saga-castor.ts.net/, or your custom instance)"
-- Store as variable for all commands
-- **IMPORTANT:** For toolshed.saga-castor.ts.net or any *.ts.net URL, you must be connected to the CT Tailnet. If commands fail or hang, this is likely the issue.
-- Test connectivity: `./dist/ct charm ls --identity <keyfile> --api-url <user-api-url> --space test-connection` (this might fail but shows if URL works)
+### Recipe Development Commands
 
-**Get space name:**
-- Ask user what space they want to work with
-- Store as variable for commands
-
-**Find recipe path:**
-- Ask user: "Where is your recipe repository located? Please provide the full path (e.g., /Users/username/my-recipes or ../my-recipe-repo)"
-- User will need to provide the path to their recipe repository
-- Once they provide a path, verify it exists: `ls -la [user-provided-path]`
-- Look for recipe files in their repo: `find [user-provided-path] -name "*.tsx" | head -10`
-
-## Error Handling
-
-**If any command fails:**
-- Show the error
-- Check common issues (file permissions, network, file existence)
-- Offer solutions or ask user for clarification
-
-**If API connection fails:**
-- Verify the URL is correct and accessible
-- Check network connectivity
-- Verify identity file permissions
-- **For *.ts.net URLs:** Ensure you're connected to the CT Tailnet (commands will hang or timeout if not connected)
-
-## Key CT Commands Reference
-
-### Identity Management:
-- `./dist/ct id new` - Create a new identity keyfile
-- `./dist/ct id` - Interact with common identities
-
-### Recipe Development Setup:
-- `./dist/ct init` - Initialize TypeScript environment for recipe development (run this in your recipes repo)
-
-### Basic Commands:
-- `./dist/ct charm new --identity <keyfile> --api-url <api-url> --space <spacename> <recipe-path>` - Create charm
-- `./dist/ct charm new --identity <keyfile> --api-url <api-url> --space <spacename> --main-export <export> <recipe-path>` - Create charm with named export
-- `./dist/ct charm link --identity <keyfile> --api-url <api-url> --space <spacename> <source> <target>/<field>` - Link data
-- `./dist/ct charm ls --identity <keyfile> --api-url <api-url> --space <spacename>` - List charms
-- `./dist/ct charm inspect --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id>` - Inspect charm details
-- `./dist/ct charm inspect --identity <keyfile> --url <full-url-with-charm-id>` - Inspect charm details (URL syntax)
-- `./dist/ct charm inspect --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> --json` - Output raw JSON data
-- `./dist/ct charm map --identity <keyfile> --api-url <api-url> --space <spacename>` - Display visual map of charms and connections (ASCII format)
-- `./dist/ct charm map --identity <keyfile> --api-url <api-url> --space <spacename> --format dot` - Output Graphviz DOT format
-- `./dist/ct charm apply --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id>` - Apply new inputs to charm (pipe JSON via stdin)
-
-### Recipe Development Commands:
-- `./dist/ct charm getsrc --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <outpath>` - Get recipe source code
-- `./dist/ct charm setsrc --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <recipe-path>` - Update recipe source
-- `./dist/ct charm setsrc --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> --main-export <export> <recipe-path>` - Update recipe source with named export
-- `./dist/ct dev <recipe-path>` - Compile and execute recipe locally
-- `./dist/ct dev <recipe-path> --no-run` - Type check recipe without executing
-- `./dist/ct dev <recipe-path> --no-check` - Execute recipe without type checking
-- `./dist/ct dev <recipe-path> --no-run --output <file>` - Compile recipe to JavaScript file
-- `./dist/ct dev <recipe-path> --filename <name>` - Set filename for source maps
-
-### Cell Data Management Commands:
-
-**Understanding Input vs Result Cells:**
-- **Result Cell**: Contains the computed output/result of a charm (default for get/set)
-- **Input Cell**: Contains the input parameters/arguments passed to a charm
-- Use `--input` flag to access input cell instead of result cell
-
-**Get Commands:**
-- `./dist/ct charm get --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Get cell value at path (from result cell)
-- `./dist/ct charm get --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path> --input` - Get cell value at path (from input cell)
-
-**Set Commands:**
-- `./dist/ct charm set --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path>` - Set cell value at path (to result cell)
-- `./dist/ct charm set --identity <keyfile> --api-url <api-url> --space <spacename> --charm <id> <path> --input` - Set cell value at path (to input cell)
-
-#### Cell Data Management Examples:
-
-**Get cell values:**
 ```bash
-# Get from result cell (default) - computed output
-./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 name
-./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 data/users/0/email
+# Test recipe syntax
+./dist/ct dev [recipe-path] --no-run
 
-# Get from input cell - parameters passed to charm
-./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config/apiKey --input
-./dist/ct charm get --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 settings/theme --input
+# Test recipe execution  
+./dist/ct dev [recipe-path]
+
+# Get recipe source from deployed charm
+./dist/ct charm getsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] [output-path]
+
+# Update recipe source in deployed charm
+./dist/ct charm setsrc --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] [recipe-path]
 ```
 
-**Set cell values:**
-```bash
-# Set to result cell (default) - modify computed output
-echo '"New Name"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 name
-echo '{"status": "complete"}' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 metadata
+## Advanced Features
 
-# Set to input cell - modify parameters passed to charm
-echo '{"apiKey": "abc123", "enabled": true}' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 config --input
-echo '"dark"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev --space myspace --charm bafycharm123 settings/theme --input
+### Working with Input vs Result Cells
+
+**Result Cell** (default): Contains the computed output/result of a charm
+**Input Cell**: Contains the input parameters/arguments passed to a charm
+
+```bash
+# Access input cell instead of result cell
+./dist/ct charm get [params] --charm [id] [path] --input
+echo '[value]' | ./dist/ct charm set [params] --charm [id] [path] --input
 ```
 
-**Path Format:**
-- Use forward slashes to separate path components: `config/database/host`
-- Array indices are numeric: `users/0/profile` (first user's profile)
-- Support nested objects and arrays: `data/items/2/metadata/tags`
+### Charm Inspection and Debugging
 
-## Understanding Linking
+```bash
+# Inspect charm details
+./dist/ct charm inspect --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id]
+
+# Get raw JSON output
+./dist/ct charm inspect [params] --charm [id] --json
+```
+
+### Linking Charms (Core Concept)
+
+**Linking is how you connect charms together** - it's the primary way to build complex applications from simple recipes.
 
 **Basic Syntax:** `ct charm link [source] [target]/[field]`
 
-**Charm-to-Charm Linking:**
-- `ct charm link charmA/fieldName charmB/inputField` means `charmB.input.inputField = charmA.result.fieldName`
-- The source reads from the charm's computed result/output
-- The target writes to the charm's input parameters
+```bash
+# Link charm output to another charm's input
+./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] [source-charm]/[field] [target-charm]/[input-field]
 
-**Well-Known ID Linking:**
-- `ct charm link wellKnownCellId charmB/inputField` links a well-known cell directly to a charm's input
-- Well-known IDs don't need field paths since they reference specific cells
+# Link well-known ID to charm input  
+./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] [well-known-id] [target-charm]/[input-field]
+```
 
-**Important:**
-- Source can be either `charmId/fieldName` (reads from charm result) or just `wellKnownId` (reads entire cell)
-- Target is always `charmId/fieldName` (writes to charm input)
-- The link creates live data flow - when source updates, target receives new data
+**How Links Work:**
+- **Data Flow**: `charmA/fieldName → charmB/inputField` means `charmB.input.inputField = charmA.result.fieldName`
+- **Source Side**: Reads from a charm's computed result/output field
+- **Target Side**: Writes to another charm's input parameters
+- **Live Updates**: When source charm updates, target automatically receives new data
+- **Reactive**: Changes propagate through the entire linked chain automatically
 
-## Visualizing Space Maps
+**Common Patterns:**
 
-The `ct charm map` command helps visualize the connections between charms in a space:
+```bash
+# Email list → Feed into document generator
+./dist/ct charm link [email-list-charm]/emails [doc-gen-charm]/emailData
 
-**ASCII Format (default):**
-- Shows charms with their connections in a readable text format
-- Lists what each charm reads from and what reads from it
-- Sorted by connection count for better visibility
+# Search results → Feed into summarizer
+./dist/ct charm link [search-charm]/results [summarizer-charm]/content
 
-**Graphviz DOT Format:**
-- Use `--format dot` to output in Graphviz format
-- Can be rendered to images using Graphviz tools:
-  ```bash
-  # Install Graphviz (macOS: brew install graphviz, Linux: apt-get install graphviz)
-  ct charm map --identity <key> --api-url <url> --space <space> --format dot | dot -Tpng -o map.png
-  ```
-- Alternatively, use online visualization:
-  1. Run: `ct charm map --identity <key> --api-url <url> --space <space> --format dot`
-  2. Copy the DOT output
-  3. URL encode the output and append to: `https://dreampuf.github.io/GraphvizOnline/?engine=dot#`
-  4. Or paste directly into https://dreampuf.github.io/GraphvizOnline/
+# Well-known charm list → Feed into page manager
+./dist/ct charm link baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [page-manager]/allCharms
+```
 
-## Important Notes
+**Why Links Matter:**
+- **Composability**: Build complex workflows from simple parts
+- **Separation of Concerns**: Each charm does one thing well
+- **Data Synchronization**: No manual copying between charms
+- **Scalability**: Add new functionality by linking new charms
 
-- Recipes are typically in a separate repository, not in the labs repo
-- Always use absolute paths or full relative paths to recipes
-- Charm IDs start with "bafy" and are long content hashes
-- Environment variables CT_API_URL and CT_IDENTITY can simplify commands
+### Primary Operations
+
+**Call handlers** (most common for user actions):
+```bash
+# Call a handler with no arguments
+./dist/ct charm call --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] handlerName
+
+# Call a handler with JSON arguments
+./dist/ct charm call --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] handlerName '{"key": "value"}'
+```
+
+**Get/Set data** (direct field access):
+```bash
+# Get a field from charm result
+./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] fieldName
+
+# Get nested field with path syntax
+./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] data/users/0/email
+
+# Set a field in charm result
+echo '"New Value"' | ./dist/ct charm set --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] fieldName
+
+# Set a field in charm input (use --input flag)
+echo '{"config": "value"}' | ./dist/ct charm set --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id] config --input
+```
+
+### Space Visualization
+
+**Map command** (see charm connections):
+```bash
+# ASCII map of all charms and links
+./dist/ct charm map --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space]
+
+# Graphviz DOT format for visualization tools
+./dist/ct charm map --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --format dot
+```
+
+### Advanced Operations
+
+**Apply inputs** (bulk input replacement - rarely needed):
+```bash
+# Replace all inputs at once (prefer call/set for most cases)
+echo '{"input1": "value1", "input2": "value2"}' | ./dist/ct charm apply --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] --charm [id]
+```
+
+### Visualizing Space Maps
+
+```bash
+# ASCII format (default)
+./dist/ct charm map --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space]
+
+# Graphviz DOT format
+./dist/ct charm map [params] --space [space] --format dot
+
+# Render to image (requires Graphviz: brew install graphviz)
+./dist/ct charm map [params] --space [space] --format dot | dot -Tpng -o map.png
+```
+
+**Online visualization:**
+1. Run: `./dist/ct charm map [params] --space [space] --format dot`
+2. Copy the DOT output
+3. URL encode and append to: `https://dreampuf.github.io/GraphvizOnline/?engine=dot#`
+4. Or paste directly into: `https://dreampuf.github.io/GraphvizOnline/`
 
 ## Well-Known IDs
 
@@ -192,4 +225,25 @@ CommonTools provides well-known IDs for accessing system-level data:
 - ID: `baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye`
 - Contains a list of all charms in the current space
 - Common usage: Link to charm inputs that need to access the full charm list
-- Example: `ct charm link baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye targetCharm/allCharms`
+- Example: `./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [target-charm]/allCharms`
+
+## Important Notes
+
+- **Recipes**: Typically in a separate repository, not in the labs repo
+- **Paths**: Always use absolute paths or full relative paths to recipes
+- **Charm IDs**: Start with "bafy" and are long content hashes
+- **Environment variables**: CT_API_URL and CT_IDENTITY can simplify commands
+- **Tailnet**: For `*.ts.net` URLs, ensure you're connected to the CT Tailnet
+
+## Error Handling
+
+**If commands fail:**
+- Check network connectivity and Tailnet connection
+- Verify identity file permissions
+- Ensure space name and charm ID are correct
+- For recipe syntax errors, use `./dist/ct dev [recipe] --no-run`
+
+**Path Format:**
+- Use forward slashes: `config/database/host`
+- Array indices are numeric: `users/0/profile`
+- Support nested objects: `data/items/2/metadata/tags`
