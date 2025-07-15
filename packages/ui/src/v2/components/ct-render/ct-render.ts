@@ -3,7 +3,7 @@ import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
 import { isCell, UI } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
-import { getRecipeIdFromCharm } from "@commontools/charm";
+import { getIframeRecipe, getRecipeIdFromCharm } from "@commontools/charm";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -116,6 +116,10 @@ export class CTRender extends BaseElement {
       const recipeId = getRecipeIdFromCharm(this.cell);
       if (!recipeId) {
         throw new Error("No recipe ID found in charm");
+      }
+
+      if (getIframeRecipe(this.cell, this.cell.runtime).iframe) {
+        throw new Error("Cannot render IFrame recipe.");
       }
 
       // Load and render the recipe
