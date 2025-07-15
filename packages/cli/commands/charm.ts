@@ -396,7 +396,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .arguments("<handler:string> [args:string]")
   .action(async (options, handlerName, argsJson) => {
     const charmConfig = parseCharmOptions(options);
-    const args = argsJson ? JSON.parse(argsJson) : {};
+    const args = argsJson ? JSON.parse(argsJson) : await drainStdin();
     await callCharmHandler(charmConfig, handlerName, args);
     render(`Called handler "${handlerName}" on charm ${charmConfig.charm}`);
   });
