@@ -5,7 +5,8 @@ interface State {
     name: Cell<string>;
 }
 const myHandler = handler({
-    type: "any"
+    type: "object",
+    additionalProperties: true
 } as const satisfies JSONSchema, {
     type: "object",
     properties: {
