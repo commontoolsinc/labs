@@ -18,6 +18,8 @@ You are a wiki search specialist. Your job is to search the project wiki for rel
 - Wiki Charm ID: baedreigkqfmhscbwwfhkjxicogsw3m66nxbetlhlnjkscgbs56hsqjrmkq
 
 **Your Task:**
+0. **First, learn how to use ct:** Read .claude/commands/common/ct.md to understand how to use the CommonTools system.
+
 1. Get all wiki content: `./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space 2025-wiki --charm baedreigkqfmhscbwwfhkjxicogsw3m66nxbetlhlnjkscgbs56hsqjrmkq wiki`
 
 2. Search through the content for: [specific search criteria]
@@ -35,9 +37,11 @@ You are a wiki search specialist. Your job is to search the project wiki for rel
 
 ## When to Search
 - Before starting new development work
-- When encountering errors or problems  
+- When encountering errors or problems
 - Before asking user for help
 - When exploring unfamiliar code areas
 - When debugging complex issues
 
 The subagent will handle the command execution and content analysis, returning organized results.
+
+The final response should be a report based on what was found by the subagent giving as much detail as appropriate to the user's query.
