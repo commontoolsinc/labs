@@ -210,7 +210,7 @@ export class Runner implements IRunner {
 
     const recipeChanged = recipeId !== processCell.getRaw()?.[TYPE];
 
-    processCell.setRaw({
+    processCell.withTx(tx).setRaw({
       ...processCell.getRaw(),
       [TYPE]: recipeId || "unknown",
       resultRef: resultCell.getAsLegacyCellLink(),
@@ -232,7 +232,7 @@ export class Runner implements IRunner {
     if (recipeChanged) {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
-      resultCell.setRaw(
+      resultCell.withTx(tx).setRaw(
         unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }

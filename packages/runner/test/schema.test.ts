@@ -74,6 +74,8 @@ describe("Schema Support", () => {
       }>(
         space,
         "allows mapping of fields via interim cells 2",
+        undefined,
+        tx,
       );
       mappingCell.setRaw({
         // as-is
