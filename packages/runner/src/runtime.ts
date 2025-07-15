@@ -14,7 +14,7 @@ import type {
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
-import { type Cell, isCell } from "./cell.ts";
+import { type Cell, createCell } from "./cell.ts";
 import { type LegacyDocCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
 import { isDoc } from "./doc.ts";
@@ -540,17 +540,7 @@ export class Runtime implements IRuntime {
         ? cellLink
         : undefined;
       if (!link) throw new Error("Invalid cell link");
-      doc = this.documentMap.getDocByEntityId(
-        link.space as MemorySpace,
-        getEntityId(link.id)!,
-        true,
-      )!;
-      return doc.asCell(
-        link.path,
-        schema ?? link.schema,
-        schema ? undefined : link.rootSchema,
-        tx,
-      );
+      return createCell(this, link as NormalizedFullLink, tx);
     }
   }
 
@@ -572,10 +562,16 @@ export class Runtime implements IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    const doc = this.documentMap.getDoc<any>(data, { immutable: data }, space);
-    doc.freeze("immutable cell");
-    doc.ephemeral = true; // Since soon these will be data: URIs
-    return doc.asCell([], schema, undefined, tx);
+    const dataURI = `data:application/json,${
+      encodeURIComponent(JSON.stringify({ value: data }))
+    }` as `${string}:${string}`;
+    return createCell(this, {
+      space,
+      id: dataURI,
+      path: [],
+      schema,
+      type: "application/json",
+    }, tx);
   }
 
   // Convenience methods that delegate to the runner

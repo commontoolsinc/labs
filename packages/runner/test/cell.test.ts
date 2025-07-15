@@ -153,7 +153,6 @@ describe("Cell", () => {
     );
     cell.set({ x: 1, y: 2 });
     const result = cell.setRaw({ x: 10, y: 20 });
-    expect(result).toBe(true); // setRaw returns boolean from doc.send()
     expect(cell.getRaw()).toEqual({ x: 10, y: 20 });
   });
 
@@ -169,7 +168,6 @@ describe("Cell", () => {
     expect(cell.getRaw()).toBe(42);
 
     const result = cell.setRaw(100);
-    expect(result).toBe(true);
     expect(cell.getRaw()).toBe(100);
   });
 
@@ -185,7 +183,6 @@ describe("Cell", () => {
     expect(cell.getRaw()).toEqual([1, 2, 3]);
 
     const result = cell.setRaw([4, 5, 6]);
-    expect(result).toBe(true);
     expect(cell.getRaw()).toEqual([4, 5, 6]);
   });
 

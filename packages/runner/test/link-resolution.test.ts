@@ -107,6 +107,8 @@ describe("link-resolution", () => {
       const testCell = runtime.getCell<any>(
         space,
         "should allow aliases in aliased paths 1",
+        undefined,
+        tx,
       );
       testCell.setRaw({
         a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },

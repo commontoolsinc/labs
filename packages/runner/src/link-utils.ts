@@ -248,16 +248,7 @@ export function parseLink(
   // see userland "/".
   if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);
 
-  if (isCell(value)) {
-    return {
-      id: toURI(value.getDoc().entityId),
-      path: value.path.map((p) => p.toString()),
-      space: value.space,
-      type: "application/json",
-      schema: value.schema,
-      rootSchema: value.rootSchema,
-    };
-  }
+  if (isCell(value)) return value.getAsNormalizedFullLink();
 
   if (isDoc(value)) {
     // Extract from DocImpl

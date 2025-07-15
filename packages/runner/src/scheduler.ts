@@ -124,7 +124,7 @@ export class Scheduler implements IScheduler {
     // Use runtime to get docs and call .updates
     this.cancels.set(
       action,
-      reads.map((addr) => {
+      reads.filter((addr) => !addr.id.startsWith("data:")).map((addr) => {
         const doc = this.runtime.documentMap.getDocByEntityId(
           addr.space,
           addr.id,

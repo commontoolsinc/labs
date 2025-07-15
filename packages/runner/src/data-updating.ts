@@ -171,6 +171,12 @@ export function normalizeAndDiff(
   }
 
   if (isAnyCellLink(newValue)) {
+    const parsedLink = parseLink(newValue, link);
+    if (parsedLink.id.startsWith("data:")) {
+      // Use the tx code to make sure we read it the same way
+      const dataValue = runtime.edit().readValueOrThrow(parsedLink);
+      return normalizeAndDiff(runtime, tx, link, dataValue, context);
+    }
     if (
       isAnyCellLink(currentValue) &&
       areLinksSame(newValue, currentValue, link)

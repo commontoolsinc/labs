@@ -36,6 +36,7 @@ import {
 import { areLinksSame, isLink } from "./link-utils.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
+import { getValueAtPath } from "./path-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 /**
@@ -107,7 +108,6 @@ import type { IExtendedStorageTransaction } from "./storage/interface.ts";
  * transformation, and alias resolution. Writes directly to the cell without
  * following aliases.
  * @param {any} value - Raw value to write directly to document
- * @returns {boolean} - Result from underlying doc.send()
  *
  * @method getSourceCell Returns the source cell with optional schema.
  * @param {JSONSchema} schema - Optional schema to apply.
@@ -199,7 +199,7 @@ declare module "@commontools/api" {
     ): SigilWriteRedirectLink;
     getDoc(): DocImpl<any>;
     getRaw(): any;
-    setRaw(value: any): boolean;
+    setRaw(value: any): void;
     getSourceCell<T>(
       schema?: JSONSchema,
     ):
@@ -355,8 +355,10 @@ function createRegularCell<T>(
   link: NormalizedFullLink,
   tx?: IExtendedStorageTransaction,
 ): Cell<T> {
-  const doc = runtime.documentMap.getDocByEntityId(link.space, link.id);
-  const { path, schema, rootSchema } = link;
+  const doc = link.id.startsWith("data:")
+    ? undefined as unknown as DocImpl<any>
+    : runtime.documentMap.getDocByEntityId(link.space, link.id);
+  const { space, path, schema, rootSchema } = link;
 
   const self = {
     get: () => validateAndTransform(runtime, tx, link),
@@ -461,7 +463,7 @@ function createRegularCell<T>(
     key: <K extends T extends Cell<infer S> ? keyof S : keyof T>(
       valueKey: K,
     ): T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]> => {
-      const childSchema = doc.runtime.cfc.getSchemaAtPath(
+      const childSchema = runtime.cfc.getSchemaAtPath(
         schema,
         [valueKey.toString()],
         rootSchema,
@@ -498,7 +500,7 @@ function createRegularCell<T>(
       ),
     getAsLegacyCellLink: (): LegacyDocCellLink => {
       return {
-        space: doc.space,
+        space: space,
         cell: doc,
         path: path as string[],
         schema,
@@ -513,13 +515,7 @@ function createRegularCell<T>(
         includeSchema?: boolean;
       },
     ): SigilLink => {
-      return createSigilLink(
-        doc,
-        path,
-        schema,
-        rootSchema,
-        options,
-      ) as SigilLink;
+      return createSigilLink(link, options) as SigilLink;
     },
     getAsWriteRedirectLink: (
       options?: {
@@ -528,17 +524,19 @@ function createRegularCell<T>(
         includeSchema?: boolean;
       },
     ): SigilWriteRedirectLink => {
-      return createSigilLink(
-        doc,
-        path,
-        schema,
-        rootSchema,
-        { ...options, overwrite: "redirect" },
-      ) as SigilWriteRedirectLink;
+      return createSigilLink(link, {
+        ...options,
+        overwrite: "redirect",
+      }) as SigilWriteRedirectLink;
     },
     getDoc: () => doc,
-    getRaw: () => doc.getAtPath(path as PropertyKey[]),
-    setRaw: (value: any) => doc.setAtPath(path as PropertyKey[], value),
+    getRaw: () =>
+      (tx?.status().ok?.open ? tx : runtime.edit())
+        .readValueOrThrow(link),
+    setRaw: (value: any) => {
+      if (!tx) throw new Error("Transaction required for setRaw");
+      tx.writeValueOrThrow(link, value);
+    },
     getSourceCell: (newSchema?: JSONSchema) =>
       doc.sourceCell?.asCell([], newSchema, newSchema, tx) as Cell<any>,
     setSourceCell: (sourceCell: Cell<any>) => {
@@ -562,7 +560,7 @@ function createRegularCell<T>(
     },
     get cellLink(): LegacyDocCellLink {
       return {
-        space: doc.space,
+        space: space,
         cell: doc,
         path: path as string[],
         schema,
@@ -570,7 +568,7 @@ function createRegularCell<T>(
       };
     },
     get space(): MemorySpace {
-      return doc.space;
+      return space;
     },
     get entityId(): EntityId | undefined {
       return getEntityId({ cell: doc, path });
@@ -645,10 +643,7 @@ function subscribeToReferencedDocs<T>(
  * Creates a sigil reference (link or alias) with shared logic
  */
 function createSigilLink(
-  doc: DocImpl<any>,
-  path: readonly PropertyKey[],
-  schema?: JSONSchema,
-  rootSchema?: JSONSchema,
+  link: NormalizedFullLink,
   options: {
     base?: Cell<any>;
     baseSpace?: MemorySpace;
@@ -660,7 +655,7 @@ function createSigilLink(
   const sigil: SigilLink = {
     "/": {
       [LINK_V1_TAG]: {
-        path: path.map((p) => p.toString()),
+        path: link.path.map((p) => p.toString()),
       },
     },
   };
@@ -669,26 +664,26 @@ function createSigilLink(
 
   // Handle base cell for relative references
   if (options.base) {
-    const baseDoc = options.base.getDoc();
+    const baseLink = options.base.getAsNormalizedFullLink();
 
     // Only include id if it's different from base
-    if (getEntityId(doc)!["/"] !== getEntityId(baseDoc)?.["/"]) {
-      reference.id = toURI(doc.entityId);
-    }
+    if (link.id !== baseLink.id) reference.id = toURI(link.id);
 
     // Only include space if it's different from base
-    if (doc.space && doc.space !== baseDoc.space) reference.space = doc.space;
+    if (link.space && link.space !== baseLink.space) {
+      reference.space = link.space;
+    }
   } else {
-    reference.id = toURI(doc.entityId);
+    reference.id = link.id;
 
     // Handle baseSpace option - only include space if different from baseSpace
-    if (doc.space !== options.baseSpace) reference.space = doc.space;
+    if (link.space !== options.baseSpace) reference.space = link.space;
   }
 
   // Include schema if requested
-  if (options.includeSchema && schema) {
-    reference.schema = schema;
-    reference.rootSchema = rootSchema;
+  if (options.includeSchema && link.schema) {
+    reference.schema = link.schema;
+    reference.rootSchema = link.rootSchema;
   }
 
   // Include overwrite if present and it's a redirect
