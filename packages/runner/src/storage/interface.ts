@@ -245,7 +245,7 @@ export type StorageNotification =
  * this represents a local optimistic update which can be denied by remote
  * storage provider in which case they will be reverted.
  */
-interface ICommitNotification {
+export interface ICommitNotification {
   type: "commit";
 
   /**
@@ -267,7 +267,7 @@ interface ICommitNotification {
  * This notification is broadcasted if commited changes were denied and had to
  * be reverted.
  */
-interface IRevertNotification {
+export interface IRevertNotification {
   type: "revert";
 
   /**
@@ -302,7 +302,7 @@ interface IRevertNotification {
  * This notification is broadcasted when storage loads changes from the local
  * cache into a storage.
  */
-interface ILoadNotification {
+export interface ILoadNotification {
   type: "load";
   space: MemorySpace;
   changes: IMergedChanges;
@@ -312,7 +312,7 @@ interface ILoadNotification {
  * This notification is broadcasted when storage pulls changes from the remote
  * storage provider and merges them into the local replica.
  */
-interface IPullNotification {
+export interface IPullNotification {
   type: "pull";
   space: MemorySpace;
   changes: IMergedChanges;
@@ -322,7 +322,7 @@ interface IPullNotification {
  * This notification is broadcasted after storage receives integrates changes from
  * the remote storage provider into a local replica.
  */
-interface IIntegrateNotification {
+export interface IIntegrateNotification {
   type: "integrate";
   space: MemorySpace;
   changes: IMergedChanges;
@@ -333,7 +333,7 @@ interface IIntegrateNotification {
  * on network errors. It implies that all in memory caches have being cleared and
  * will be populated with data from persisted cache and remote storage provider.
  */
-interface IResetNotification {
+export interface IResetNotification {
   type: "reset";
   space: MemorySpace;
 }

@@ -843,7 +843,7 @@ export class Replica {
         result.error.conflict.actual;
       // We also update heap so it holds latest record
       if (fact) {
-        this.heap.merge([fact], Replica.update);
+        this.heap.merge([fact], Replica.put);
       }
 
       // Notify storage subscribers about the reverted transaction.

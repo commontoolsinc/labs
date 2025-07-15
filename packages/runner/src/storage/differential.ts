@@ -107,6 +107,10 @@ class Changes implements IMergedChanges {
     return this;
   }
 
+  toJSON() {
+    return [...this.#model.values()];
+  }
+
   close(): IMergedChanges {
     return this;
   }
