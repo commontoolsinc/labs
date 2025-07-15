@@ -34,7 +34,7 @@ export class XCharmElement extends BaseView {
   override render() {
     if (!this._charm.value) {
       return html`
-        <div></div>
+        <x-spinner></x-spinner>
       `;
     }
     const cell = this._charm.value.getCell();
