@@ -1,3 +1,4 @@
+import "@commontools/ui/v1";
 import "@commontools/ui/v2";
 import {
   API_URL,
