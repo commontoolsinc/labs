@@ -183,3 +183,82 @@ export function addCommonToolsImport(
     sourceFile.libReferenceDirectives,
   );
 }
+
+/**
+ * Removes an import from the commontools module.
+ */
+export function removeCommonToolsImport(
+  sourceFile: ts.SourceFile,
+  factory: ts.NodeFactory,
+  importName: string,
+): ts.SourceFile {
+  let existingImport: ts.ImportDeclaration | undefined;
+  let existingImportIndex: number = -1;
+
+  // Find existing commontools import
+  sourceFile.statements.forEach((statement, index) => {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        moduleSpecifier.text === "commontools"
+      ) {
+        existingImport = statement;
+        existingImportIndex = index;
+      }
+    }
+  });
+
+  if (!existingImport || !existingImport.importClause || 
+      !existingImport.importClause.namedBindings ||
+      !ts.isNamedImports(existingImport.importClause.namedBindings)) {
+    return sourceFile;
+  }
+
+  const existingElements = existingImport.importClause.namedBindings.elements;
+  const newElements = existingElements.filter(
+    (element) => element.name.text !== importName
+  );
+
+  // If no imports left, remove the entire import statement
+  if (newElements.length === 0) {
+    const newStatements = sourceFile.statements.filter(
+      (_, index) => index !== existingImportIndex
+    );
+    return factory.updateSourceFile(
+      sourceFile,
+      newStatements,
+      sourceFile.isDeclarationFile,
+      sourceFile.referencedFiles,
+      sourceFile.typeReferenceDirectives,
+      sourceFile.hasNoDefaultLib,
+      sourceFile.libReferenceDirectives,
+    );
+  }
+
+  // Otherwise, update the import with remaining imports
+  const newImport = factory.updateImportDeclaration(
+    existingImport,
+    undefined,
+    factory.createImportClause(
+      false,
+      existingImport.importClause.name,
+      factory.createNamedImports(newElements),
+    ),
+    existingImport.moduleSpecifier,
+    undefined,
+  );
+
+  const newStatements = [...sourceFile.statements];
+  newStatements[existingImportIndex] = newImport;
+
+  return factory.updateSourceFile(
+    sourceFile,
+    newStatements,
+    sourceFile.isDeclarationFile,
+    sourceFile.referencedFiles,
+    sourceFile.typeReferenceDirectives,
+    sourceFile.hasNoDefaultLib,
+    sourceFile.libReferenceDirectives,
+  );
+}
