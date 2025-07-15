@@ -3,19 +3,12 @@ import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type {
-  ICommitNotification,
-  IRevertNotification,
   IStorageSubscription,
-  IStorageTransaction,
   StorageNotification,
 } from "../src/storage/interface.ts";
 import type { Entity } from "@commontools/memory/interface";
-import { refer } from "merkle-reference";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
 import * as Fact from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
-import { Provider } from "../src/storage/cache.ts";
 
 const signer = await Identity.fromPassphrase("test storage subscription");
 const space = signer.did();
@@ -372,18 +365,8 @@ describe("Storage Subscription", () => {
     });
   });
 
-  describe.skip("reset notifications", () => {
+  describe("reset notifications", () => {
     it("should receive reset notification when storage is reset", async () => {
-      const notifications: StorageNotification[] = [];
-      const subscription: IStorageSubscription = {
-        next(notification) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      };
-
-      storageManager.subscribe(subscription);
-
       // Create an entity first
       const tx = storageManager.edit();
       const entityId = `test:reset-${Date.now()}` as Entity;
@@ -397,38 +380,32 @@ describe("Storage Subscription", () => {
 
       await tx.commit();
 
-      // Clear notifications from initial commit
-      notifications.length = 0;
+      // Subscribe to notifications after commit
+      const subscription = new Subscription();
+      storageManager.subscribe(subscription);
 
       // Get the provider and trigger a reset operation
-      const provider = storageManager.open(space);
-      const replica = provider.replica as any;
+      const { replica } = storageManager.open(space);
 
       // Trigger a reset operation
-      replica.reset();
+      (replica as any).reset();
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Check for reset notifications
-      const resetNotifications = notifications.filter((n) =>
-        n.type === "reset"
-      );
-      if (resetNotifications.length > 0) {
-        const resetNotification = resetNotifications[0];
-        expect(resetNotification.type).toBe("reset");
-        expect(resetNotification.space).toBe(space);
-      }
+      expect(subscription.resets.length).toBeGreaterThan(0);
+
+      const reset = subscription.resets[0];
+      expect(reset.type).toBe("reset");
+      expect(reset.space).toBe(space);
     });
   });
 
-  describe.skip("subscription lifecycle", () => {
+  describe("subscription lifecycle", () => {
     it("should stop receiving notifications when subscription returns done", async () => {
-      const notifications: StorageNotification[] = [];
       let notificationCount = 0;
-
       const subscription: IStorageSubscription = {
         next(notification) {
-          notifications.push(notification);
           notificationCount++;
           // Return done after first notification
           return { done: notificationCount >= 1 };
@@ -462,35 +439,28 @@ describe("Storage Subscription", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Should only have received one notification
-      expect(notifications.length).toBe(1);
+      expect(notificationCount).toBe(1);
     });
 
     it("should handle subscription errors gracefully", async () => {
-      const notifications: StorageNotification[] = [];
       let errorThrown = false;
 
-      const subscription: IStorageSubscription = {
+      const errorSubscription: IStorageSubscription = {
         next(notification) {
           if (!errorThrown) {
             errorThrown = true;
             throw new Error("Subscription error");
           }
-          notifications.push(notification);
           return { done: false };
         },
       };
 
       // Subscribe with error-throwing subscription
-      storageManager.subscribe(subscription);
+      storageManager.subscribe(errorSubscription);
 
       // Also subscribe with a normal subscription to verify system continues
-      const normalNotifications: StorageNotification[] = [];
-      storageManager.subscribe({
-        next(notification) {
-          normalNotifications.push(notification);
-          return { done: false };
-        },
-      });
+      const normalSubscription = new Subscription();
+      storageManager.subscribe(normalSubscription);
 
       const tx = storageManager.edit();
       tx.write({
@@ -506,129 +476,7 @@ describe("Storage Subscription", () => {
       // Error subscription should have been called but error handled
       expect(errorThrown).toBe(true);
       // Normal subscription should still work
-      expect(normalNotifications.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe.skip("notification content", () => {
-    it("should include correct changes in commit notification", async () => {
-      const notifications: StorageNotification[] = [];
-      const subscription: IStorageSubscription = {
-        next(notification) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      };
-
-      storageManager.subscribe(subscription);
-
-      const tx = storageManager.edit();
-      const entities = [
-        {
-          id: `test:entity-1-${Date.now()}` as Entity,
-          value: { name: "Entity 1" },
-        },
-        {
-          id: `test:entity-2-${Date.now()}` as Entity,
-          value: { name: "Entity 2" },
-        },
-        {
-          id: `test:entity-3-${Date.now()}` as Entity,
-          value: { name: "Entity 3" },
-        },
-      ];
-
-      // Write multiple entities
-      for (const { id, value } of entities) {
-        tx.write({
-          space,
-          id,
-          type: "application/json",
-          path: [],
-        }, value);
-      }
-
-      await tx.commit();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      // Find the commit notification
-      const commitNotification = notifications.find((n) => n.type === "commit");
-      expect(commitNotification).toBeDefined();
-
-      if (commitNotification && commitNotification.type === "commit") {
-        const changes = [...commitNotification.changes];
-
-        // Should have changes for each entity we wrote
-        const entityChanges = changes.filter((change) =>
-          entities.some((e) => e.id === change.address.id)
-        );
-
-        expect(entityChanges.length).toBe(entities.length);
-
-        // Verify each change
-        for (const change of entityChanges) {
-          const entity = entities.find((e) => e.id === change.address.id);
-          expect(entity).toBeDefined();
-          expect(change.before).toBeUndefined();
-          expect(change.after).toEqual(entity?.value);
-        }
-      }
-    });
-
-    it("should show before and after values for updates", async () => {
-      const notifications: StorageNotification[] = [];
-      const subscription: IStorageSubscription = {
-        next(notification) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      };
-
-      storageManager.subscribe(subscription);
-
-      const entityId = `test:update-test-${Date.now()}` as Entity;
-      const initialValue = { version: 1, data: "initial" };
-      const updatedValue = { version: 2, data: "updated" };
-
-      // Initial write
-      const tx1 = storageManager.edit();
-      tx1.write({
-        space,
-        id: entityId,
-        type: "application/json",
-        path: [],
-      }, initialValue);
-      await tx1.commit();
-
-      // Clear notifications
-      notifications.length = 0;
-
-      // Update
-      const tx2 = storageManager.edit();
-      tx2.write({
-        space,
-        id: entityId,
-        type: "application/json",
-        path: [],
-      }, updatedValue);
-      await tx2.commit();
-
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      // Find the commit notification
-      const commitNotification = notifications.find((n) => n.type === "commit");
-      expect(commitNotification).toBeDefined();
-
-      if (commitNotification && commitNotification.type === "commit") {
-        const changes = [...commitNotification.changes];
-        const updateChange = changes.find((change) =>
-          change.address.id === entityId
-        );
-
-        expect(updateChange).toBeDefined();
-        expect(updateChange?.before).toEqual(initialValue);
-        expect(updateChange?.after).toEqual(updatedValue);
-      }
+      expect(normalSubscription.notifications.length).toBeGreaterThan(0);
     });
   });
 });
