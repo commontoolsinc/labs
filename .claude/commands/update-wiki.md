@@ -4,12 +4,7 @@ Add knowledge, solutions, progress reports, and documentation to the project wik
 
 ## Command Pattern
 
-When you need to update the wiki, launch an update subagent using the Task tool:
-
-```
-Task: Add [content-type] to wiki
-
-You are a wiki documentation specialist. Your job is to add well-formatted, useful content to the project wiki.
+When you need to update the wiki, follow these steps:
 
 **Standard Parameters:**
 - Identity: claude.key
@@ -17,10 +12,10 @@ You are a wiki documentation specialist. Your job is to add well-formatted, usef
 - Space: 2025-wiki
 - Wiki Charm ID: baedreigkqfmhscbwwfhkjxicogsw3m66nxbetlhlnjkscgbs56hsqjrmkq
 
-**Content to Document:**
-[Provide the specific information/solution/discovery to document]
+**Process:**
 
-**Your Task:**
+0. **First, learn how to use ct:** Read .claude/commands/common/ct.md to understand how to use the CommonTools system.
+
 1. Choose appropriate page key following naming conventions:
    - Solutions: `[problem-type]-solution` or `fix-[specific-issue]`
    - How-to guides: `how-to-[action]`
@@ -41,7 +36,7 @@ You are a wiki documentation specialist. Your job is to add well-formatted, usef
      "value": "# Title\n\nFormatted content here..."
    }
    EOF
-   
+
    cat /tmp/wiki-update.json | ./dist/ct charm call --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space 2025-wiki --charm baedreigkqfmhscbwwfhkjxicogsw3m66nxbetlhlnjkscgbs56hsqjrmkq update
    ```
 
@@ -50,9 +45,6 @@ You are a wiki documentation specialist. Your job is to add well-formatted, usef
    ./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space 2025-wiki --charm baedreigkqfmhscbwwfhkjxicogsw3m66nxbetlhlnjkscgbs56hsqjrmkq wiki/[your-page-key]
    ```
 
-**Return to me**: Confirmation of what was added, including the page key and a brief summary of the content.
-```
-
 ## When to Update
 - After solving non-trivial problems
 - When discovering useful patterns or techniques
@@ -60,4 +52,4 @@ You are a wiki documentation specialist. Your job is to add well-formatted, usef
 - When finding workarounds for common issues
 - At end of debugging sessions with lessons learned
 
-The subagent will handle content formatting, command execution, and verification of the update.
+Updates should be well-formatted and include all necessary context for future reference.

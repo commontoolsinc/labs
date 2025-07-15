@@ -6,7 +6,7 @@ This script guides Claude through recipe development with the `ct` utility after
 
 **Before starting recipe development:**
 - User should have already run the space setup script or have an existing space
-- Claude should read the common CT setup instructions in `.claude/commands/common/ct.md`
+- Claude MUST read the common CT setup instructions in `.claude/commands/common/ct.md`
 
 ## Script Flow for Claude
 
@@ -157,7 +157,7 @@ Multi-file recipes allow you to compose functionality from multiple source files
    // list.tsx
    export const TodoItemSchema = { ... };
    export const TodoListSchema = { ... };
-   
+
    // suggestions.tsx
    import { TodoListSchema } from "./list.tsx";
    ```
