@@ -28,6 +28,10 @@ export const dev = new Command()
     "--filename <value:string>",
     "The filename used when compiling the recipe, used in source maps.",
   )
+  .option(
+    "--debug",
+    "Enable debug logging for transformers (shows transformed code).",
+  )
   .arguments("<main:string>")
   .action(async (options, main) => {
     const { main: exports } = await process({
@@ -36,6 +40,7 @@ export const dev = new Command()
       run: options.run,
       output: options.output,
       filename: options.filename,
+      debug: options.debug,
     });
     if (exports) {
       const mainExport = "default" in exports ? exports.default : exports;
