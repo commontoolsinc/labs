@@ -110,11 +110,60 @@ export function createOpaqueRefTransformer(
       const visit: ts.Visitor = (node) => {
         // Handle function calls with OpaqueRef arguments or method calls on OpaqueRef
         if (ts.isCallExpression(node)) {
-          // Special case: handler with type arguments or inline type annotations
+          // Special case: handler and recipe with type arguments or inline type annotations
           const functionName = getFunctionName(node);
-          if (functionName === "handler") {
+          if (functionName === "handler" || functionName === "recipe") {
+            // Handle recipe with type arguments
+            if (functionName === "recipe" && node.typeArguments && node.typeArguments.length >= 1) {
+              // Transform recipe<T>(name, fn) to recipe(toSchema<T>(), name, fn)
+              // Transform recipe<T,R>(name, fn) to recipe(toSchema<T>(), toSchema<R>(), name, fn)
+              if (debug) {
+                log(
+                  `Found recipe with type arguments at ${sourceFile.fileName}:${
+                    sourceFile.getLineAndCharacterOfPosition(node.getStart())
+                      .line + 1
+                  }`,
+                );
+              }
+
+              const recipeArgs = node.arguments;
+              const schemaArgs: ts.Expression[] = [];
+
+              // Create toSchema calls for each type argument
+              for (const typeArg of node.typeArguments) {
+                const toSchemaCall = context.factory.createCallExpression(
+                  context.factory.createIdentifier("toSchema"),
+                  [typeArg],
+                  [],
+                );
+                schemaArgs.push(toSchemaCall);
+              }
+
+              // Skip the first argument (name) if it's a string literal
+              const argsArray = Array.from(recipeArgs);
+              let remainingArgs = argsArray;
+              if (argsArray.length > 0 && ts.isStringLiteral(argsArray[0])) {
+                // Skip the name parameter
+                remainingArgs = argsArray.slice(1);
+              }
+
+              // Create new recipe call without type arguments but with schema arguments prepended
+              const newRecipeCall = context.factory.createCallExpression(
+                node.expression,
+                undefined, // No type arguments
+                [...schemaArgs, ...remainingArgs],
+              );
+
+              // Mark that we need toSchema import
+              if (!hasCommonToolsImport(sourceFile, "toSchema")) {
+                needsToSchemaImport = true;
+              }
+
+              hasTransformed = true;
+              return ts.visitEachChild(newRecipeCall, visit, context);
+            }
             // Case 1: handler with explicit type arguments
-            if (node.typeArguments && node.typeArguments.length >= 2) {
+            else if (functionName === "handler" && node.typeArguments && node.typeArguments.length >= 2) {
               // Transform handler<E,T>(fn) to handler(toSchema<E>(), toSchema<T>(), fn)
               if (debug) {
                 log(

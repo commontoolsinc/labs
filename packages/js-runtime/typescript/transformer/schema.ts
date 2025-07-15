@@ -126,6 +126,37 @@ function typeToJsonSchema(
   checker: ts.TypeChecker,
   typeNode?: ts.TypeNode,
 ): any {
+
+  // If we have a type node, check if it's a type reference to Default<T, V>
+  if (typeNode && ts.isTypeReferenceNode(typeNode)) {
+    const typeName = typeNode.typeName;
+    if (ts.isIdentifier(typeName) && typeName.text === "Default") {
+      if (typeNode.typeArguments && typeNode.typeArguments.length >= 2) {
+        const innerTypeNode = typeNode.typeArguments[0];
+        const defaultValueNode = typeNode.typeArguments[1];
+        
+        // Get the inner type
+        const innerType = checker.getTypeFromTypeNode(innerTypeNode);
+        const schema = typeToJsonSchema(innerType, checker, innerTypeNode);
+        
+        // Extract the default value from the literal type node
+        if (ts.isLiteralTypeNode(defaultValueNode)) {
+          const literal = defaultValueNode.literal;
+          if (ts.isNumericLiteral(literal)) {
+            schema.default = Number(literal.text);
+          } else if (ts.isStringLiteral(literal)) {
+            schema.default = literal.text;
+          } else if (literal.kind === ts.SyntaxKind.TrueKeyword) {
+            schema.default = true;
+          } else if (literal.kind === ts.SyntaxKind.FalseKeyword) {
+            schema.default = false;
+          }
+        }
+        
+        return schema;
+      }
+    }
+  }
   // Handle primitive types
   if (type.flags & ts.TypeFlags.String) {
     return { type: "string" };
@@ -177,6 +208,87 @@ function typeToJsonSchema(
     return { type: "string", format: "date-time" };
   }
 
+  // Check if this is a type reference (e.g., Default<T, V>)
+  if ((type as any).target) {
+    const typeRef = type as ts.TypeReference;
+    const target = (typeRef as any).target;
+    
+    // Check if it's Default type by checking the symbol name
+    if (target.symbol && target.symbol.name === "Default") {
+      // This is a generic type Default<T, V>
+      if (typeRef.typeArguments && typeRef.typeArguments.length >= 2) {
+        const innerType = typeRef.typeArguments[0];
+        const defaultValueType = typeRef.typeArguments[1];
+        
+        // Get the schema for the inner type
+        const schema = typeToJsonSchema(innerType, checker, typeNode);
+        
+        // Try to extract the literal value from the default value type
+        if (defaultValueType.isNumberLiteral && defaultValueType.isNumberLiteral()) {
+          // @ts-ignore - accessing value property 
+          schema.default = (defaultValueType as any).value;
+        } else if (defaultValueType.isStringLiteral && defaultValueType.isStringLiteral()) {
+          // @ts-ignore - accessing value property
+          schema.default = (defaultValueType as any).value;
+        } else if ((defaultValueType as any).intrinsicName === "true") {
+          schema.default = true;
+        } else if ((defaultValueType as any).intrinsicName === "false") {
+          schema.default = false;
+        } else if (defaultValueType.flags & ts.TypeFlags.NumberLiteral) {
+          // @ts-ignore - accessing value property 
+          schema.default = (defaultValueType as any).value;
+        } else if (defaultValueType.flags & ts.TypeFlags.StringLiteral) {
+          // @ts-ignore - accessing value property
+          schema.default = (defaultValueType as any).value;
+        } else if (defaultValueType.flags & ts.TypeFlags.BooleanLiteral) {
+          // @ts-ignore - accessing intrinsicName property
+          schema.default = (defaultValueType as any).intrinsicName === "true";
+        }
+        
+        return schema;
+      }
+    }
+  }
+
+  // Handle Default<T, V> type via symbol check (fallback)
+  if (symbol && symbol.name === "Default") {
+    // This is a generic type Default<T, V>
+    const typeRef = type as ts.TypeReference;
+    if (typeRef.typeArguments && typeRef.typeArguments.length >= 2) {
+      const innerType = typeRef.typeArguments[0];
+      const defaultValueType = typeRef.typeArguments[1];
+      
+      // Get the schema for the inner type
+      const schema = typeToJsonSchema(innerType, checker, typeNode);
+      
+      // Try to extract the literal value from the default value type
+      if (defaultValueType.isNumberLiteral && defaultValueType.isNumberLiteral()) {
+        // @ts-ignore - accessing value property 
+        schema.default = (defaultValueType as any).value;
+      } else if (defaultValueType.isStringLiteral && defaultValueType.isStringLiteral()) {
+        // @ts-ignore - accessing value property
+        schema.default = (defaultValueType as any).value;
+      } else if ((defaultValueType as any).intrinsicName === "true") {
+        schema.default = true;
+      } else if ((defaultValueType as any).intrinsicName === "false") {
+        schema.default = false;
+      } else if (defaultValueType.flags & ts.TypeFlags.NumberLiteral) {
+        // @ts-ignore - accessing value property 
+        schema.default = (defaultValueType as any).value;
+      } else if (defaultValueType.flags & ts.TypeFlags.StringLiteral) {
+        // @ts-ignore - accessing value property
+        schema.default = (defaultValueType as any).value;
+      } else if (defaultValueType.flags & ts.TypeFlags.BooleanLiteral) {
+        // @ts-ignore - accessing intrinsicName property
+        schema.default = (defaultValueType as any).intrinsicName === "true";
+      }
+      
+      return schema;
+    }
+    // If we can't extract type arguments, just return the inner type
+    return { type: "any" };
+  }
+
   // Handle object types (interfaces, type literals)
   if (type.flags & ts.TypeFlags.Object) {
     const properties: any = {};
@@ -192,7 +304,7 @@ function typeToJsonSchema(
 
       const propType = checker.getTypeOfSymbolAtLocation(
         prop,
-        typeNode || prop.valueDeclaration!,
+        prop.valueDeclaration || typeNode || prop.declarations?.[0]!,
       );
 
       // Check if property is optional
@@ -201,12 +313,22 @@ function typeToJsonSchema(
         required.push(propName);
       }
 
-      // Check if the property type is Cell<T> or Stream<T>
+      // Check if the property has a type node we can analyze directly
+      const propDecl = prop.valueDeclaration;
+      let propTypeNode: ts.TypeNode | undefined;
+      if (propDecl && ts.isPropertySignature(propDecl) && propDecl.type) {
+        propTypeNode = propDecl.type;
+      }
+
+      // Check if the property type is Cell<T>, Stream<T>, or Default<T, V>
       const propTypeString = checker.typeToString(propType);
       let actualPropType = propType;
       let isCell = false;
       let isStream = false;
 
+      // Check if we have a Cell<T> or Stream<T> type node
+      let innerTypeNode: ts.TypeNode | undefined;
+      
       // Check if this is a Cell<T> type
       if (propTypeString.startsWith("Cell<") && propTypeString.endsWith(">")) {
         isCell = true;
@@ -214,6 +336,11 @@ function typeToJsonSchema(
         const typeRef = propType as ts.TypeReference;
         if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
           actualPropType = typeRef.typeArguments[0];
+        }
+        // If we have a type node, extract the inner type node
+        if (propTypeNode && ts.isTypeReferenceNode(propTypeNode) && 
+            propTypeNode.typeArguments && propTypeNode.typeArguments.length > 0) {
+          innerTypeNode = propTypeNode.typeArguments[0];
         }
       } // Check if this is a Stream<T> type
       else if (
@@ -225,10 +352,15 @@ function typeToJsonSchema(
         if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
           actualPropType = typeRef.typeArguments[0];
         }
+        // If we have a type node, extract the inner type node
+        if (propTypeNode && ts.isTypeReferenceNode(propTypeNode) && 
+            propTypeNode.typeArguments && propTypeNode.typeArguments.length > 0) {
+          innerTypeNode = propTypeNode.typeArguments[0];
+        }
       }
 
       // Get property schema for the actual type (unwrapped if it was Cell/Stream)
-      const propSchema = typeToJsonSchema(actualPropType, checker);
+      const propSchema = typeToJsonSchema(actualPropType, checker, innerTypeNode || propTypeNode);
 
       // Add asCell/asStream flags
       if (isCell) {

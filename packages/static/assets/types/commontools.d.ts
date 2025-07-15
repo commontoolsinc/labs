@@ -220,6 +220,7 @@ export type CreateCellFunction = {
     <T>(schema?: JSONSchema, name?: string, value?: T): Cell<T>;
     <S extends JSONSchema = JSONSchema>(schema: S, name?: string, value?: Schema<S>): Cell<Schema<S>>;
 };
+export type Default<T, V extends T = T> = T;
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
