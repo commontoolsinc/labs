@@ -35,11 +35,11 @@ export function render(value: unknown, { json }: { json?: boolean } = {}) {
   if (json) {
     // For JSON mode, output raw JSON without additional formatting
     const jsonValue = `${JSON.stringify(value, null, 2)}\n`;
-    Deno.stdout.write(encode(jsonValue));
+    Deno.stdout.writeSync(encode(jsonValue));
     return;
   }
   // Append a `\n` to the stdout for TTY legibility and
   // unix file compatibility.
   const stringValue = `${stringify(value)}\n`;
-  Deno.stdout.write(encode(stringValue));
+  Deno.stdout.writeSync(encode(stringValue));
 }
