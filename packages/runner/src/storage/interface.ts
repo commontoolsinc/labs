@@ -174,6 +174,191 @@ export interface IStorageManagerV2 {
   edit(): IStorageTransaction;
 }
 
+/**
+ * Extension of {@link IStorageManagerV2} which is supposed to merge into
+ * {@link IStorageManager} in the future. It provides capability to subscribe
+ * to the storage notifications.
+ */
+export interface IStorageSubscriptionCapability {
+  /**
+   * Subscribes to the storage manager's notifications.
+   *
+   * @example
+   * ```ts
+   * storage.subscribe({
+   *   next(notification) {
+   *     console.log(notification);
+   *     return { done: true };
+   *   }
+   * });
+   * ```
+   *
+   * Although note that function takes a generalized {@link Iterator} as an
+   * argument so you could subscribe with a generator.
+   *
+   * @example
+   * ```ts
+   * function* log(n) {
+   *   while (n-- > 0) {
+   *     const notification = yield;
+   *     console.log(notification);
+   *   }
+   * }
+   * storage.subscribe(log(5));
+   * ```
+   */
+  subscribe(subscription: IStorageSubscription): void;
+}
+
+/**
+ * Subscription that can be used to receive storage notifications.
+ */
+export interface IStorageSubscription {
+  /**
+   * Called with a next notification, if returs `{ done: true }` or throws an
+   * exception, subscription will be cancelled and method will not be called
+   * again until re-subscribed through another `subscribe` on
+   * `IStorageSubscriptionCapability`. Returning any other return value implies
+   * continued subscription.
+   */
+  next(
+    notification: StorageNotification,
+  ): Omit<IteratorResult<unknown, unknown>, "value"> | undefined;
+}
+
+/**
+ * Notification produced by the underlying storage. It is a variant type
+ * implying that object has only one of the fields with a cerrosponding
+ * value. Property name denotes type of notification.
+ */
+export type StorageNotification =
+  | ICommitNotification
+  | IRevertNotification
+  | ILoadNotification
+  | IPullNotification
+  | IIntegrateNotification
+  | IResetNotification;
+
+/**
+ * This notification is broadcasted after commit on {@link IStorageTransaction}
+ * is called and underlying changes are written to the local replica. Note that
+ * this represents a local optimistic update which can be denied by remote
+ * storage provider in which case they will be reverted.
+ */
+export interface ICommitNotification {
+  type: "commit";
+
+  /**
+   * The space into which changes were made.
+   */
+  space: MemorySpace;
+  /**
+   * Set of changes merged.
+   */
+  changes: IMergedChanges;
+  /**
+   * Transaction that committed changes. If legacy API is used it will not have
+   * a source transaction.
+   */
+  source?: IStorageTransaction;
+}
+
+/**
+ * This notification is broadcasted if commited changes were denied and had to
+ * be reverted.
+ */
+export interface IRevertNotification {
+  type: "revert";
+
+  /**
+   * The space into which changes were made.
+   */
+  space: MemorySpace;
+  /**
+   * Set of changes merged. Note that this is not necessary resetting every
+   * change commit made to a state it had pre-commit as things may have changed
+   * since and `before` values will represent state in the replica before we
+   * reverted them to the state in the `after`. Also note that set of changes
+   * in the commit may be larger than set of changes here because commit may
+   * have being stacked on to of the other and if first commit was denied and
+   * reverted changes are some state may have already being updated by previous
+   * revert.
+   */
+  changes: IMergedChanges;
+
+  /**
+   * Reason storage had to revert changes.
+   */
+  reason: StorageTransactionRejected;
+
+  /**
+   * Transaction that committed changes. If legacy API is used it will not have
+   * a source transaction.
+   */
+  source?: IStorageTransaction;
+}
+
+/**
+ * This notification is broadcasted when storage loads changes from the local
+ * cache into a storage.
+ */
+export interface ILoadNotification {
+  type: "load";
+  space: MemorySpace;
+  changes: IMergedChanges;
+}
+
+/**
+ * This notification is broadcasted when storage pulls changes from the remote
+ * storage provider and merges them into the local replica.
+ */
+export interface IPullNotification {
+  type: "pull";
+  space: MemorySpace;
+  changes: IMergedChanges;
+}
+
+/**
+ * This notification is broadcasted after storage receives integrates changes from
+ * the remote storage provider into a local replica.
+ */
+export interface IIntegrateNotification {
+  type: "integrate";
+  space: MemorySpace;
+  changes: IMergedChanges;
+}
+
+/**
+ * This notification is broadcasted after storage has being reset, which can happen
+ * on network errors. It implies that all in memory caches have being cleared and
+ * will be populated with data from persisted cache and remote storage provider.
+ */
+export interface IResetNotification {
+  type: "reset";
+  space: MemorySpace;
+}
+
+/**
+ * Set of changes that were merged into the local replica.
+ */
+export interface IMergedChanges extends Iterable<IMemoryChange> {
+}
+
+export interface IMemoryChange {
+  /**
+   * Memory address that was changed.
+   */
+  address: IMemoryAddress;
+  /**
+   * Value memory address had before change.
+   */
+  before: JSONValue | undefined;
+  /**
+   * Value memory address has after change.
+   */
+  after: JSONValue | undefined;
+}
+
 export type IStorageTransactionProgress = Variant<{
   open: IStorageTransactionLog;
   pending: IStorageTransactionLog;
@@ -280,7 +465,7 @@ export interface IStorageTransaction {
    *
    * If transaction is still active and no consistency guarantees have being
    * invalidated it will be send upstream and status will be updated to
-   * `pending`. Transaction may still fail with {@link IStorageTransactionRejected}
+   * `pending`. Transaction may still fail with {@link StorageTransactionRejected}
    * if state upstream affects values read from updated space have changed,
    * which can happen if another client concurrently updates them. Transaction
    * MAY also fail due to insufficient authorization level or due to various IO
@@ -470,9 +655,9 @@ export type InactiveTransactionError =
 export type StorageTransactionFailed =
   | IStorageTransactionInconsistent
   | IStorageTransactionAborted
-  | IStorageTransactionRejected;
+  | StorageTransactionRejected;
 
-export type IStorageTransactionRejected =
+export type StorageTransactionRejected =
   | IConflictError
   | IStoreError
   | TransactionError
@@ -481,7 +666,7 @@ export type IStorageTransactionRejected =
 
 export type CommitError =
   | InactiveTransactionError
-  | IStorageTransactionRejected;
+  | StorageTransactionRejected;
 
 export interface INotFoundError extends Error {
   name: "NotFoundError";
@@ -606,7 +791,8 @@ export interface ISpaceReplica extends ISpace {
 
   commit(
     transaction: ITransaction,
-  ): Promise<Result<Unit, IStorageTransactionRejected>>;
+    source?: IStorageTransaction,
+  ): Promise<Result<Unit, StorageTransactionRejected>>;
 }
 
 export type PushError =

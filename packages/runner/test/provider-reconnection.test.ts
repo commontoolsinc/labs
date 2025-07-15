@@ -6,6 +6,7 @@ import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import type { Entity, SchemaContext } from "@commontools/memory/interface";
 import type { EntityId } from "@commontools/runner";
+import * as Subscription from "../src/storage/subscription.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -25,6 +26,7 @@ describe("Provider Reconnection", () => {
     provider = Provider.open({
       space: signer.did(),
       session: consumer,
+      subscription: Subscription.create(),
     });
   });
 

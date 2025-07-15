@@ -7,7 +7,7 @@ import { isAnyCellLink } from "../src/link-utils.ts";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import { Provider } from "../src/storage/cache.ts";
-
+import * as Subscription from "../src/storage/subscription.ts";
 const signer = await Identity.fromPassphrase("test operator");
 
 // In the transition to TX we had to remove the current push retry logic
@@ -23,6 +23,7 @@ describe.skip("Push conflict", () => {
     open: (space: Consumer.MemorySpace) =>
       Provider.open({
         space,
+        subscription: Subscription.create(),
         session: consumer,
       }),
   };
@@ -70,6 +71,7 @@ describe.skip("Push conflict", () => {
     memory = Provider.open({
       space: signer.did(),
       session: consumer,
+      subscription: Subscription.create(),
     });
 
     // Update memory without notifying main storage
@@ -134,6 +136,7 @@ describe.skip("Push conflict", () => {
     memory = Provider.open({
       space: signer.did(),
       session: consumer,
+      subscription: Subscription.create(),
     });
 
     // Update memory without notifying main storage
@@ -202,6 +205,7 @@ describe.skip("Push conflict", () => {
     memory = Provider.open({
       space: signer.did(),
       session: consumer,
+      subscription: Subscription.create(),
     });
 
     // Update memory without notifying main storage

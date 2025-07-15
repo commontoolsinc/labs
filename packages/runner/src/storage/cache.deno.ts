@@ -5,11 +5,14 @@ import {
   Provider,
   StorageManager as BaseStorageManager,
 } from "./cache.ts";
+import * as StorageSubscription from "./subscription.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
+import type { IStorageSubscription } from "./interface.ts";
 export * from "./cache.ts";
 
 export class StorageManagerEmulator extends BaseStorageManager {
   #session?: Consumer.MemoryConsumer<MemorySpace>;
+  #subscription = StorageSubscription.create();
 
   #providers: Map<string, Provider> = new Map();
 
@@ -27,11 +30,19 @@ export class StorageManagerEmulator extends BaseStorageManager {
     return Provider.open({
       space,
       session: this.session(),
+      subscription: this.#subscription,
     });
   }
 
   mount(space: MemorySpace) {
     return this.session().mount(space);
+  }
+
+  /**
+   * Subscribes to changes in the storage.
+   */
+  override subscribe(subscription: IStorageSubscription): void {
+    this.#subscription.subscribe(subscription);
   }
 }
 
