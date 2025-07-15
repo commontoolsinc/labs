@@ -67,6 +67,14 @@ export class XHeaderElement extends BaseView {
   @property({ attribute: false })
   identity?: Identity;
 
+  @property({ type: String })
+  connectionStatus:
+    | "connecting"
+    | "connected"
+    | "disconnected"
+    | "error"
+    | "conflict" = "disconnected";
+
   @state()
   private headerColor = "#f9fafb";
 
@@ -74,19 +82,44 @@ export class XHeaderElement extends BaseView {
   private logoShapeColor = "#000000";
 
   @state()
-  private logoBackgroundColor = "#d2d2d2";
+  private logoBackgroundColor = "hsl(60, 65%, 50%)"; // Start with yellow (connecting)
+
+  private getConnectionColor(): string {
+    const saturation = 65;
+    const lightness = 50;
+
+    const colorMap = {
+      connecting: 60, // Yellow
+      connected: 120, // Green
+      conflict: 30, // Orange
+      disconnected: 0, // Red
+      error: 0, // Red
+    };
+
+    const hue = colorMap[this.connectionStatus] ?? 60; // Default to yellow
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    // Set initial color based on connection status
+    this.logoBackgroundColor = this.getConnectionColor();
+  }
+
+  override updated(changedProperties: Map<string, any>) {
+    super.updated(changedProperties);
+    if (changedProperties.has("connectionStatus")) {
+      const color = this.getConnectionColor();
+      this.logoBackgroundColor = color;
+      this.logoShapeColor = this.headerColor;
+      this.requestUpdate();
+    }
+  }
 
   private generateRandomColor(): string {
     const hue = Math.floor(Math.random() * 360);
     const saturation = Math.floor(Math.random() * 30) + 15;
     const lightness = Math.floor(Math.random() * 20) + 70;
-    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-  }
-
-  private generateLogoColor(): string {
-    const hue = Math.floor(Math.random() * 360);
-    const saturation = Math.floor(Math.random() * 30) + 50;
-    const lightness = Math.floor(Math.random() * 20) + 40;
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
   }
 
@@ -96,18 +129,9 @@ export class XHeaderElement extends BaseView {
       const newColor = this.generateRandomColor();
       this.headerColor = newColor;
       this.style.setProperty("--header-bg-color", newColor);
-
-      this.logoBackgroundColor = this.generateLogoColor();
       this.logoShapeColor = newColor;
       this.requestUpdate();
     }
-  };
-
-  private handleLogoClick = (e: Event): void => {
-    e.stopPropagation();
-    this.logoBackgroundColor = this.generateLogoColor();
-    this.logoShapeColor = this.headerColor;
-    this.requestUpdate();
   };
 
   private handleAuthClick = async (): Promise<void> => {
@@ -123,7 +147,6 @@ export class XHeaderElement extends BaseView {
             height="32"
             background-color="${this.logoBackgroundColor}"
             shape-color="${this.logoShapeColor}"
-            @click="${this.handleLogoClick}"
           ></ct-logo>
           <h1 id="page-title">shell</h1>
         </div>

@@ -1,9 +1,10 @@
 import { css, html } from "lit";
-import { Task } from "@lit/task";
+import { Task, TaskStatus } from "@lit/task";
 import { state } from "lit/decorators.js";
 import { consume } from "@lit/context";
 
 import { CharmsController } from "@commontools/charm/ops";
+import * as Inspector from "@commontools/runner/storage/inspector";
 
 import { AppState } from "../lib/app/mod.ts";
 import { appContext } from "../contexts/app.ts";
@@ -43,6 +44,101 @@ export class XAppView extends BaseView {
   // at a time, avoiding resource exhaustion and potential conflicts.
   private _currentController: CharmsController | null = null;
 
+  // Storage broadcast channel for receiving status updates
+  private _storageChannel: Inspector.Channel | null = null;
+
+  // Storage status monitoring for conflict detection
+  @state()
+  private _storageStatus = Inspector.create();
+
+  // Update storage status from broadcast events
+  private _updateStorageStatus = (command: Inspector.BroadcastCommand) => {
+    Inspector.update(this._storageStatus, command);
+
+    // Log conflict detection
+    const pushErrorCount = Object.values(this._storageStatus.push).filter(
+      (v) => v.error,
+    ).length;
+    const pullErrorCount = Object.values(this._storageStatus.pull).filter(
+      (v) => v.error,
+    ).length;
+
+    if (pushErrorCount > 0 || pullErrorCount > 0) {
+      console.log("[AppView] Conflict detected:", {
+        pushErrors: pushErrorCount,
+        pullErrors: pullErrorCount,
+        pushDetails: Object.entries(this._storageStatus.push)
+          .filter(([_, v]) => v.error)
+          .map(([id, v]) => ({ id, error: v.error })),
+        pullDetails: Object.entries(this._storageStatus.pull)
+          .filter(([_, v]) => v.error)
+          .map(([id, v]) => ({ id, error: v.error })),
+      });
+    }
+
+    this.requestUpdate();
+  };
+
+  // Track previous connection status for change detection
+  private _previousConnectionStatus: string | undefined;
+
+  // Get the current connection status based on task state
+  get connectionStatus():
+    | "connecting"
+    | "connected"
+    | "disconnected"
+    | "error"
+    | "conflict" {
+    // Check for conflicts (push/pull errors) - filter once for efficiency
+    const pushErrors = Object.values(this._storageStatus.push).filter(
+      (v) => v.error,
+    );
+    const pullErrors = Object.values(this._storageStatus.pull).filter(
+      (v) => v.error,
+    );
+    const hasConflict = pushErrors.length > 0 || pullErrors.length > 0;
+
+    let status:
+      | "connecting"
+      | "connected"
+      | "disconnected"
+      | "error"
+      | "conflict";
+
+    // Determine base status from task
+    switch (this._cc.status) {
+      case TaskStatus.INITIAL:
+      case TaskStatus.PENDING:
+        status = "connecting";
+        break;
+      case TaskStatus.COMPLETE:
+        status = this._cc.value ? "connected" : "disconnected";
+        break;
+      case TaskStatus.ERROR:
+        status = "error";
+        break;
+      default:
+        status = "disconnected";
+    }
+
+    // Override with conflict if present and connected
+    if (hasConflict && status === "connected") {
+      status = "conflict";
+    }
+
+    // Log status changes
+    if (this._previousConnectionStatus !== status) {
+      console.log("[AppView] Connection status changed:", {
+        from: this._previousConnectionStatus,
+        to: status,
+        timestamp: new Date().toISOString(),
+      });
+      this._previousConnectionStatus = status;
+    }
+
+    return status;
+  }
+
   private _cc = new Task(this, {
     task: async ([app]) => {
       console.log("[AppView] Task triggered with app state:", {
@@ -75,6 +171,44 @@ export class XAppView extends BaseView {
       console.log("[AppView] CharmsController created successfully");
       this._currentController = controller;
 
+      // Set up storage broadcast listener for conflict detection
+      console.log("[AppView] Attempting to set up storage broadcast listener");
+
+      const charmManager = controller.manager();
+      console.log("[AppView] CharmManager exists:", !!charmManager);
+
+      if (charmManager) {
+        const runtime = charmManager.runtime;
+        console.log("[AppView] Runtime exists:", !!runtime);
+        console.log("[AppView] Runtime ID:", runtime?.id);
+
+        if (runtime?.id) {
+          // Close any existing channel before creating a new one
+          if (this._storageChannel) {
+            this._storageChannel.close();
+          }
+
+          try {
+            // Create new channel for storage status updates
+            this._storageChannel = new Inspector.Channel(
+              runtime.id,
+              this._updateStorageStatus,
+            );
+            console.log(
+              "[AppView] Subscribed to storage status updates with ID:",
+              runtime.id,
+            );
+          } catch (error) {
+            console.error("[AppView] Failed to create storage channel:", error);
+            // Continue without storage monitoring - app still functions
+          }
+        } else {
+          console.log("[AppView] No runtime ID available for subscription");
+        }
+      } else {
+        console.log("[AppView] No CharmManager found on controller");
+      }
+
       return controller;
     },
     args: () => [this.app],
@@ -86,9 +220,19 @@ export class XAppView extends BaseView {
     if (!this._currentController) return;
 
     try {
-      const charmManager = (this._currentController as any).charmManager;
-      if (charmManager?.runtime?.dispose) {
-        await charmManager.runtime.dispose();
+      const charmManager = this._currentController.manager();
+
+      if (charmManager?.runtime) {
+        // Close storage broadcast channel
+        if (this._storageChannel) {
+          this._storageChannel.close();
+          this._storageChannel = null;
+          console.log("[AppView] Closed storage status update channel");
+        }
+
+        if (charmManager.runtime.dispose) {
+          await charmManager.runtime.dispose();
+        }
       }
     } catch (error) {
       console.error("Error cleaning up CharmsController:", error);
@@ -99,6 +243,11 @@ export class XAppView extends BaseView {
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    // Close any open storage channel
+    if (this._storageChannel) {
+      this._storageChannel.close();
+      this._storageChannel = null;
+    }
     this._cleanupController();
   }
 
@@ -118,7 +267,10 @@ export class XAppView extends BaseView {
     const content = this.app?.identity ? authenticated : unauthenticated;
     return html`
       <div class="shell-container">
-        <x-header .identity="${app.identity}"></x-header>
+        <x-header
+          .identity="${app.identity}"
+          .connectionStatus="${this.connectionStatus}"
+        ></x-header>
         <div class="content-area">
           ${content}
         </div>
