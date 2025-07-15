@@ -1,10 +1,10 @@
 /// <cts-enable />
-import { Cell, h, handler, NAME, recipe, str, UI, derive, toSchema, JSONSchema } from "commontools";
+import { Cell, Default, h, handler, NAME, recipe, str, UI, derive, toSchema, JSONSchema } from "commontools";
 interface CounterState {
     value: Cell<number>;
 }
 interface RecipeState {
-    value: number;
+    value: Default<number, 0>;
 }
 const increment = handler({
     type: "any"
@@ -36,7 +36,16 @@ const decrement = handler({
 }) => {
     state.value.set(state.value.get() - 1);
 });
-export default recipe<RecipeState>("Counter", (state) => {
+export default recipe({
+    type: "object",
+    properties: {
+        value: {
+            type: "number",
+            default: 0
+        }
+    },
+    required: ["value"]
+} as const satisfies JSONSchema, (state) => {
     return {
         [NAME]: str `Simple counter: ${state.value}`,
         [UI]: (<div>

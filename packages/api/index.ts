@@ -417,6 +417,9 @@ export type CreateCellFunction = {
   ): Cell<Schema<S>>;
 };
 
+// Default type for specifying default values in type definitions
+export type Default<T, V extends T = T> = T;
+
 // Re-export opaque ref creators
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
