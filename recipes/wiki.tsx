@@ -1,4 +1,4 @@
-import { h, handler, JSONSchema, NAME, recipe, UI, derive } from "commontools";
+import { derive, h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
 
 const WikiSchema = {
   type: "object",
@@ -117,9 +117,8 @@ const update = handler<
   { pages: Record<string, string>; currentPage: string }
 >(
   ({ key, value }, state) => {
+    console.log(`Updating page ${key} with value ${value}`);
     state.pages[key] = value;
-    // Optionally switch to the updated page
-    state.currentPage = key;
   },
 );
 
@@ -128,8 +127,17 @@ export default recipe(
   OutputSchema,
   ({ pages, currentPage }) => {
     const pageKeys = derive(pages, (pages) => Object.keys(pages).sort());
-    const currentContent = derive([pages, currentPage], ([pages, currentPage]) => (pages as any)[currentPage as any] || "");
-    const currentTitle = derive(currentPage, (currentPage) => currentPage.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '));
+    const currentContent = derive(
+      [pages, currentPage],
+      ([pages, currentPage]) => (pages as any)[currentPage as any] || "",
+    );
+    const currentTitle = derive(
+      currentPage,
+      (currentPage) =>
+        (currentPage || "").split("-").map((word) =>
+          word.charAt(0).toUpperCase() + word.slice(1)
+        ).join(" "),
+    );
     const canDelete = derive(pages, (pages) => Object.keys(pages).length > 1);
 
     return {
@@ -151,16 +159,28 @@ export default recipe(
                     + New Page
                   </ct-button>
                   <ct-separator />
-                  {pageKeys.map((slug) => (
-                    <ct-button
-                      key={slug}
-                      variant={currentPage === slug ? "default" : "ghost"}
-                      onClick={selectPage({ slug, currentPage })}
-                      style="width: 100%; justify-content: flex-start; text-align: left;"
-                    >
-                      {derive([slug], ([slug]) => slug.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' '))}
-                    </ct-button>
-                  ))}
+                  <div style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; background: white;">
+                    {pageKeys.map((slug) => (
+                      <div
+                        key={slug}
+                        onClick={selectPage({ slug, currentPage })}
+                        style={derive(
+                          [currentPage, slug],
+                          ([currentPage, slug]) =>
+                            `padding: 0.75rem 1rem; cursor: pointer; border-bottom: 1px solid #f1f5f9; ${
+                              currentPage === slug
+                                ? "background: #f1f5f9; border-left: 3px solid #3b82f6; font-weight: 500;"
+                                : "background: white;"
+                            }`,
+                        )}
+                      >
+                        {derive([slug], ([slug]) =>
+                          (slug || "").split("-").map((word) =>
+                            word.charAt(0).toUpperCase() + word.slice(1)
+                          ).join(" "))}
+                      </div>
+                    ))}
+                  </div>
                 </ct-vstack>
               </div>
             </ct-resizable-panel>
