@@ -11,12 +11,12 @@ interface UserEvent {
 }
 
 interface UserState {
-  users: Array<{
+  users: Cell<Array<{
     id: string;
     name: string;
     email: string;
-  }>;
-  lastAction: string;
+  }>>;
+  lastAction: Cell<string>;
   count: Cell<number>;
 }
 
@@ -29,7 +29,14 @@ const userHandler = handler<UserEvent, UserState>((event, state) => {
     });
     state.count.set(state.count.get() + 1);
   }
-  state.lastAction = event.action;
+  state.lastAction.set(event.action);
 });
+
+const updateTags = handler<{ detail: { tags: string[] } }, { tags: Cell<string[]> }>(
+  ({ detail }, state) => {
+    state.tags.set(detail?.tags ?? []);
+  },
+);
+
 
 export { userHandler };

@@ -330,21 +330,28 @@ export type LiftFunction = {
   ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 };
 
+// Helper type to make non-Cell and non-Stream properties readonly in handler state
+export type HandlerState<T> = T extends Cell<any> ? T
+  : T extends Stream<any> ? T
+  : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
+  : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
+  : T;
+
 export type HandlerFunction = {
   <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(
     eventSchema: E,
     stateSchema: T,
-    handler: (event: Schema<E>, props: Schema<T>) => any,
+    handler: (event: Schema<E>, props: HandlerState<Schema<T>>) => any,
   ): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
 
   <E, T>(
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
-    handler: (event: E, props: T) => any,
+    handler: (event: E, props: HandlerState<T>) => any,
   ): ModuleFactory<CellToOpaque<T>, E>;
 
   <E, T>(
-    handler: (event: E, props: T) => any,
+    handler: (event: E, props: HandlerState<T>) => any,
   ): ModuleFactory<CellToOpaque<T>, E>;
 };
 

@@ -9,12 +9,12 @@ interface UserEvent {
     action: "create" | "update" | "delete";
 }
 interface UserState {
-    users: Array<{
+    users: Cell<Array<{
         id: string;
         name: string;
         email: string;
-    }>;
-    lastAction: string;
+    }>>;
+    lastAction: Cell<string>;
     count: Cell<number>;
 }
 const userHandler = handler({
@@ -37,11 +37,14 @@ const userHandler = handler({
         },
         action: {
             oneOf: [{
-                    type: "any"
+                    type: "object",
+                    additionalProperties: true
                 }, {
-                    type: "any"
+                    type: "object",
+                    additionalProperties: true
                 }, {
-                    type: "any"
+                    type: "object",
+                    additionalProperties: true
                 }]
         }
     },
@@ -65,10 +68,12 @@ const userHandler = handler({
                     }
                 },
                 required: ["id", "name", "email"]
-            }
+            },
+            asCell: true
         },
         lastAction: {
-            type: "string"
+            type: "string",
+            asCell: true
         },
         count: {
             type: "number",
@@ -85,6 +90,38 @@ const userHandler = handler({
         });
         state.count.set(state.count.get() + 1);
     }
-    state.lastAction = event.action;
+    state.lastAction.set(event.action);
+});
+const updateTags = handler({
+    type: "object",
+    properties: {
+        detail: {
+            type: "object",
+            properties: {
+                tags: {
+                    type: "array",
+                    items: {
+                        type: "string"
+                    }
+                }
+            },
+            required: ["tags"]
+        }
+    },
+    required: ["detail"]
+} as const satisfies JSONSchema, {
+    type: "object",
+    properties: {
+        tags: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: true
+        }
+    },
+    required: ["tags"]
+} as const satisfies JSONSchema, ({ detail }, state) => {
+    state.tags.set(detail?.tags ?? []);
 });
 export { userHandler };
