@@ -285,8 +285,8 @@ function typeToJsonSchema(
       
       return schema;
     }
-    // If we can't extract type arguments, just return the inner type
-    return { type: "any" };
+    // If we can't extract type arguments, return a permissive schema
+    return { type: "object", additionalProperties: true };
   }
 
   // Handle object types (interfaces, type literals)
@@ -333,9 +333,18 @@ function typeToJsonSchema(
       if (propTypeString.startsWith("Cell<") && propTypeString.endsWith(">")) {
         isCell = true;
         // Extract the inner type
-        const typeRef = propType as ts.TypeReference;
-        if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
-          actualPropType = typeRef.typeArguments[0];
+        if (propType.symbol && propType.symbol.getName() === "Cell") {
+          // This is a type alias, get its type arguments
+          const typeRef = propType as ts.TypeReference;
+          if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+            actualPropType = typeRef.typeArguments[0];
+          }
+        } else if ((propType as any).resolvedTypeArguments) {
+          // Handle resolved type arguments
+          const resolvedArgs = (propType as any).resolvedTypeArguments;
+          if (resolvedArgs.length > 0) {
+            actualPropType = resolvedArgs[0];
+          }
         }
         // If we have a type node, extract the inner type node
         if (propTypeNode && ts.isTypeReferenceNode(propTypeNode) && 
@@ -402,8 +411,8 @@ function typeToJsonSchema(
     };
   }
 
-  // Default fallback
-  return { type: "any" };
+  // Default fallback - for "any" type, use a permissive schema
+  return { type: "object", additionalProperties: true };
 }
 
 /**

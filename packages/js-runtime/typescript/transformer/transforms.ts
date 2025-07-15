@@ -797,6 +797,16 @@ export function checkTransformation(
           type: null,
         };
       }
+      
+      // Also skip if this is a method call (e.g., array.map)
+      if (ts.isPropertyAccessExpression(node.expression.expression)) {
+        // This is a method call, it should be handled at the CallExpression level
+        return {
+          transformed: false,
+          node,
+          type: null,
+        };
+      }
     }
 
     // Skip simple OpaqueRef accesses

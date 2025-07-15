@@ -7,7 +7,8 @@ interface RecipeState {
     value: Default<number, 0>;
 }
 const increment = handler({
-    type: "any"
+    type: "object",
+    additionalProperties: true
 } as const satisfies JSONSchema, {
     type: "object",
     properties: {
@@ -21,7 +22,8 @@ const increment = handler({
     state.value.set(state.value.get() + 1);
 });
 const decrement = handler({
-    type: "any"
+    type: "object",
+    additionalProperties: true
 } as const satisfies JSONSchema, {
     type: "object",
     properties: {
