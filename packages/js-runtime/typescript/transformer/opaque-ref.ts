@@ -110,6 +110,33 @@ export function createOpaqueRefTransformer(
       const visit: ts.Visitor = (node) => {
         // Handle function calls with OpaqueRef arguments or method calls on OpaqueRef
         if (ts.isCallExpression(node)) {
+          // Check if this is a method call on an OpaqueRef (e.g., values.map(...))
+          if (ts.isPropertyAccessExpression(node.expression)) {
+            const objectType = checker.getTypeAtLocation(node.expression.expression);
+            if (isOpaqueRefType(objectType, checker)) {
+              // This is a method call on an OpaqueRef, add .get() before the method
+              const objectWithGet = context.factory.createCallExpression(
+                context.factory.createPropertyAccessExpression(
+                  node.expression.expression,
+                  context.factory.createIdentifier("get"),
+                ),
+                undefined,
+                [],
+              );
+              
+              const newMethodCall = context.factory.createCallExpression(
+                context.factory.createPropertyAccessExpression(
+                  objectWithGet,
+                  node.expression.name,
+                ),
+                node.typeArguments,
+                node.arguments.map(arg => ts.visitNode(arg, visit) as ts.Expression),
+              );
+              
+              return newMethodCall;
+            }
+          }
+          
           // Special case: handler and recipe with type arguments or inline type annotations
           const functionName = getFunctionName(node);
           if (functionName === "handler" || functionName === "recipe") {
