@@ -137,6 +137,31 @@ echo '"dark"' | ./dist/ct charm set --identity key.file --api-url https://ct.dev
 - Array indices are numeric: `users/0/profile` (first user's profile)
 - Support nested objects and arrays: `data/items/2/metadata/tags`
 
+## Quick CT Command Reference
+
+**Using standard parameters** (claude.key, https://toolshed.saga-castor.ts.net/, your-space):
+
+```bash
+# READ data from charm
+./dist/ct charm get [standard-params] --charm [id] [path]
+
+# WRITE data to charm via handler (JSON via stdin)
+echo '[json-data]' | ./dist/ct charm call [standard-params] --charm [id] [handler-name]
+
+# SET data directly in charm (value via stdin)
+echo '[value]' | ./dist/ct charm set [standard-params] --charm [id] [path]
+
+# Examples with actual paths:
+./dist/ct charm get [params] --charm [id] items/0/title
+echo 'true' | ./dist/ct charm set [params] --charm [id] items/0/done
+echo '{"title": "New item"}' | ./dist/ct charm call [params] --charm [id] addItem
+```
+
+**When to use each:**
+- **GET**: Read any data from charm
+- **SET**: Directly modify specific values (simple, fast)  
+- **CALL**: Use charm's handlers (for complex operations, validation, side effects)
+
 ## Understanding Linking
 
 **Basic Syntax:** `ct charm link [source] [target]/[field]`
