@@ -12,6 +12,10 @@ The instructions in this document apply to the entire repository.
 - To test a specific package, `cd` into the package directory and run
   `deno task test`.
 
+### `ct`
+
+Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
+
 ### Formatting
 
 - Line width is **80 characters**.
@@ -288,7 +292,7 @@ async function getData(): Promise<string | undefined> {
     throw new Error("Unsuccessful HTTP response");
   } catch(e) {
     console.error(e);
-  } 
+  }
 }
 
 async function run() {
