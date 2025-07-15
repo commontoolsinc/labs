@@ -1,4 +1,4 @@
-import { recipe, handler, toSchema, Cell, Stream, JSONSchema } from "commontools";
+import { recipe, handler, Cell, Stream, JSONSchema } from "commontools";
 // Define types using TypeScript - more compact!
 interface UpdaterInput {
     newValues: string[];

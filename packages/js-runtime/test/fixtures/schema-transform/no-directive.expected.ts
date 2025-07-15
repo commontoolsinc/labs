@@ -1,4 +1,4 @@
-import { toSchema } from "commontools";
+import { } from "commontools";
 
 interface User {
   name: string;

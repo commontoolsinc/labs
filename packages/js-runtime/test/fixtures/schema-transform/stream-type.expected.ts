@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Stream, toSchema, JSONSchema } from "commontools";
+import { Stream, JSONSchema } from "commontools";
 interface State {
     events: Stream<string>;
     label: string;
