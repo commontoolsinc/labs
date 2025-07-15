@@ -161,6 +161,7 @@ export class Engine extends EventTarget implements Harness {
       injectedScript: INJECTED_SCRIPT,
       runtimeModules: Engine.runtimeModuleNames(),
       bundleExportAll: true,
+      debug: options.debug,
     });
 
     if (!options.noRun) {

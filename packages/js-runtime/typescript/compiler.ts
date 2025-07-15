@@ -224,6 +224,8 @@ export interface TypeScriptCompilerOptions {
   //     Record<string, any>;
   // ```
   //
+  // Enable debug logging for transformers (shows transformed code).
+  debug?: boolean;
   // to
   //
   // ```ts
@@ -322,9 +324,9 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
     const transformers = hasCtsEnableDirective(mainSource)
       ? {
           before: [
-            createOpaqueRefTransformer(tsProgram, { debug: false }),
-            createSchemaTransformer(tsProgram, { debug: false }),
-            createLoggingTransformer(tsProgram, { debug: false }),
+            createOpaqueRefTransformer(tsProgram, { debug: inputOptions.debug ?? false }),
+            createSchemaTransformer(tsProgram, { debug: inputOptions.debug ?? false }),
+            createLoggingTransformer(tsProgram, { debug: inputOptions.debug ?? false }),
           ],
         }
       : undefined;
