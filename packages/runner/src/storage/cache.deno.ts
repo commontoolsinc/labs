@@ -7,6 +7,7 @@ import {
 } from "./cache.ts";
 import * as StorageSubscription from "./subscription.ts";
 import type { MemorySpace } from "@commontools/memory/interface";
+import type { IStorageSubscription } from "./interface.ts";
 export * from "./cache.ts";
 
 export class StorageManagerEmulator extends BaseStorageManager {
@@ -35,6 +36,13 @@ export class StorageManagerEmulator extends BaseStorageManager {
 
   mount(space: MemorySpace) {
     return this.session().mount(space);
+  }
+
+  /**
+   * Subscribes to changes in the storage.
+   */
+  override subscribe(subscription: IStorageSubscription): void {
+    this.#subscription.subscribe(subscription);
   }
 }
 
