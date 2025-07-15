@@ -272,6 +272,7 @@ export interface Stream<T> {
   getRaw(): any;
   getAsNormalizedFullLink(): NormalizedFullLink;
   getDoc(): DocImpl<any>;
+  withTx(tx?: IExtendedStorageTransaction): Stream<T>;
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
   runtime: IRuntime;
@@ -339,6 +340,7 @@ function createStreamCell<T>(
     getRaw: () => self.getDoc().getAtPath(link.path as PropertyKey[]),
     getAsNormalizedFullLink: () => link,
     getDoc: () => runtime.documentMap.getDocByEntityId(link.space, link.id),
+    withTx: (_tx?: IExtendedStorageTransaction) => self, // No-op for streams
     schema: link.schema,
     rootSchema: link.rootSchema,
     [isStreamMarker]: true,
