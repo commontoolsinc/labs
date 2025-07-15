@@ -17,3 +17,4 @@ packages/seeder/results
 .pr-desc.tmp
 dist/
 .claude/settings.local.json
+claude-research.key
