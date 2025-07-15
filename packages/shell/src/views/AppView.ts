@@ -269,6 +269,9 @@ export class XAppView extends BaseView {
       <div class="shell-container">
         <x-header
           .identity="${app.identity}"
+          .spaceName="${app.spaceName}"
+          .cc="${cc}"
+          .charmId="${app.activeCharmId}"
           .connectionStatus="${this.connectionStatus}"
         ></x-header>
         <div class="content-area">

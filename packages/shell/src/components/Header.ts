@@ -2,7 +2,9 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { Identity } from "@commontools/identity";
 import { BaseView } from "../views/BaseView.ts";
-import "./CTLogo.ts";
+import { CharmsController } from "@commontools/charm/ops";
+import { Task } from "@lit/task";
+import { getNavigationHref } from "../lib/navigate.ts";
 
 export class XHeaderElement extends BaseView {
   static override styles = css`
@@ -64,10 +66,29 @@ export class XHeaderElement extends BaseView {
     }
   `;
 
+  private _charm = new Task(this, {
+    task: async ([charmId, cc]) => {
+      if (!this.charmId || !this.cc) {
+        return;
+      }
+      return await cc!.get(charmId!);
+    },
+    args: () => [this.charmId, this.cc],
+  });
+
+  @property({ attribute: false })
+  charmId?: string;
+
+  @property({ attribute: false })
+  spaceName?: string;
+
+  @property({ attribute: false })
+  cc?: CharmsController;
+
   @property({ attribute: false })
   identity?: Identity;
 
-  @property({ type: String })
+  @property({ attribute: false })
   connectionStatus:
     | "connecting"
     | "connected"
@@ -139,6 +160,29 @@ export class XHeaderElement extends BaseView {
   };
 
   override render() {
+    const activeCharmName = this._charm.value
+      ? this._charm.value.name()
+      : undefined;
+    const spaceLink = this.spaceName
+      ? html`
+        <a class="space-link" href="${getNavigationHref(this.spaceName)}">${this
+          .spaceName}</a>
+      `
+      : null;
+    const charmLink = activeCharmName && this.spaceName && this.charmId
+      ? html`
+        <a class="charm-link" href="${getNavigationHref(
+          this.spaceName,
+          this.charmId,
+        )}">${activeCharmName}</a>
+      `
+      : null;
+    const title = html`
+      <h1 id="page-title">
+        ${spaceLink} ${charmLink ? "/" : ""} ${charmLink}
+      </h1>
+    `;
+
     return html`
       <div id="header" @click="${this.handleHeaderClick}">
         <div class="left-section">
@@ -148,7 +192,7 @@ export class XHeaderElement extends BaseView {
             background-color="${this.logoBackgroundColor}"
             shape-color="${this.logoShapeColor}"
           ></ct-logo>
-          <h1 id="page-title">shell</h1>
+          ${title}
         </div>
         ${this.identity
         ? html`
