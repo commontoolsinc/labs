@@ -3,7 +3,6 @@ import { property } from "lit/decorators.js";
 import { BaseView } from "../views/BaseView.ts";
 import { CharmsController } from "@commontools/charm/ops";
 import { Task } from "@lit/task";
-import { USE_SHELL_PREFIX } from "../lib/env.ts";
 import { getNavigationHref } from "../lib/navigate.ts";
 
 export class XCharmListElement extends BaseView {
@@ -28,8 +27,15 @@ export class XCharmListElement extends BaseView {
   });
 
   override render() {
-    const spaceName = this.cc ? this.cc.manager().getSpaceName() : "No Space.";
+    const spaceName = this.cc ? this.cc.manager().getSpaceName() : undefined;
     const charmList = this._charmList.value;
+
+    if (!spaceName || !charmList) {
+      return html`
+        <x-spinner></x-spinner>
+      `;
+    }
+
     const list = (charmList ?? []).map((charm) => {
       const name = charm.name();
       const id = charm.id;
