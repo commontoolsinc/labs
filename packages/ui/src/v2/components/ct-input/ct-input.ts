@@ -1,7 +1,7 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type { Cell } from "@commontools/runner";
+import { type Cell, isCell } from "@commontools/runner";
 
 /**
  * CTInput - Text input field with support for various types and validation
@@ -10,7 +10,7 @@ import type { Cell } from "@commontools/runner";
  *
  * @attr {string} type - Input type: "text" | "email" | "password" | "number" | "search" | "tel" | "url" | "date" | "time" | "datetime-local"
  * @attr {string} placeholder - Placeholder text
- * @attr {string} value - Input value
+ * @attr {string|Cell<string>} value - Input value (supports both plain string and Cell<string>)
  * @attr {boolean} disabled - Whether the input is disabled
  * @attr {boolean} readonly - Whether the input is read-only
  * @attr {boolean} required - Whether the input is required
@@ -183,7 +183,7 @@ export class CTInput extends BaseElement {
 
   declare type: InputType;
   declare placeholder: string;
-  declare value: Cell<string>;
+  declare value: Cell<string> | string;
   declare disabled: boolean;
   declare readonly: boolean;
   declare error: boolean;
@@ -226,6 +226,21 @@ export class CTInput extends BaseElement {
     return this._input;
   }
 
+  private getValue(): string {
+    if (isCell(this.value)) {
+      return this.value.get?.() || "";
+    }
+    return this.value || "";
+  }
+
+  private setValue(newValue: string): void {
+    if (isCell(this.value)) {
+      this.value.set(newValue);
+    } else {
+      this.value = newValue;
+    }
+  }
+
   override firstUpdated() {
     // Cache the input element reference
     this._input = this.shadowRoot?.querySelector("input") || null;
@@ -241,7 +256,7 @@ export class CTInput extends BaseElement {
         type="${this.type}"
         class="${this.error ? "error" : ""}"
         placeholder="${ifDefined(this.placeholder || undefined)}"
-        .value="${this.value?.get?.()}"
+        .value="${this.getValue()}"
         ?disabled="${this.disabled}"
         ?readonly="${this.readonly}"
         ?required="${this.required}"
@@ -265,54 +280,60 @@ export class CTInput extends BaseElement {
 
   private _handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
-    const oldValue = this.value;
-    this.value.set(input.value);
+    const oldValue = this.getValue();
+    this.setValue(input.value);
 
     // Emit custom input event
     this.emit("ct-input", {
       value: input.value,
       oldValue,
+      name: this.name,
     });
   }
 
   private _handleChange(event: Event) {
     const input = event.target as HTMLInputElement;
-    const oldValue = this.value;
-    this.value.set(input.value);
+    const oldValue = this.getValue();
+    this.setValue(input.value);
 
     // Emit custom change event
     this.emit("ct-change", {
       value: input.value,
       oldValue,
+      name: this.name,
     });
   }
 
   private _handleFocus(_event: Event) {
     this.emit("ct-focus", {
-      value: this.value,
+      value: this.getValue(),
+      name: this.name,
     });
   }
 
   private _handleBlur(_event: Event) {
     this.emit("ct-blur", {
-      value: this.value,
+      value: this.getValue(),
+      name: this.name,
     });
   }
 
   private _handleKeyDown(event: KeyboardEvent) {
     this.emit("ct-keydown", {
       key: event.key,
-      value: this.value,
+      value: this.getValue(),
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
       altKey: event.altKey,
+      name: this.name,
     });
 
     // Special handling for Enter key
     if (event.key === "Enter") {
       this.emit("ct-submit", {
-        value: this.value,
+        value: this.getValue(),
+        name: this.name,
       });
     }
   }
