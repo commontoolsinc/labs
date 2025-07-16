@@ -1,6 +1,6 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { Runtime } from "@commontools/runner";
-import { charmId, CharmManager } from "@commontools/charm";
+import { charmId, CharmManager, processSchema } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { API_URL } from "./env.ts";
@@ -73,7 +73,10 @@ export async function createCharmsController(
   const staticAssetUrl = new URL(API_URL);
   staticAssetUrl.pathname = "/static";
 
-  // Create a variable to hold the charmManager reference
+  // We're hoisting CharmManager so that
+  // we can create it after the runtime, but still reference
+  // its `getSpaceName` method in a runtime callback.
+  // deno-lint-ignore prefer-const
   let charmManager: CharmManager;
 
   const runtime = new Runtime({
