@@ -335,7 +335,7 @@ export function normalizeAndDiff(
           i++
         ) {
           changes.push({
-            location: { ...link, path: [...link.path, i.toString()] },
+            location: { ...link, path: [...link.path.slice(0, -1), i.toString()] },
             value: undefined,
           });
         }

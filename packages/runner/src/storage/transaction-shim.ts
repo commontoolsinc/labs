@@ -312,6 +312,12 @@ class TransactionWriter extends TransactionReader
       throw new Error(`Failed to get or create document: ${address.id}`);
     }
 
+    // Rewrite creating new documents as setting the value
+    if (address.path.length === 0 && isObject(value) && "value" in value) {
+      address = { ...address, path: ["value"] };
+      value = value.value;
+    }
+
     // Path-based logic
     if (!address.path.length) {
       const notFoundError: INotFoundError = new Error(
@@ -588,7 +594,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       for (const key of remainingPath) {
         nextValue =
           nextValue[key] =
-            (typeof Number(key) === "number" ? [] : {}) as typeof nextValue;
+            (!Number.isNaN(Number(key)) ? [] : {}) as typeof nextValue;
       }
       nextValue[lastKey] = value;
       const parentAddress = { ...address, path: lastValidPath ?? [] };
