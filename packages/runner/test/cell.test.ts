@@ -205,6 +205,40 @@ describe("Cell", () => {
     // Verify the document structure is preserved
     expect(c.get()).toEqual({ nested: { value: 100 } });
   });
+
+  it("should set and get the source cell", () => {
+    // Create two cells
+    const sourceCell = runtime.getCell<{ foo: number }>(
+      space,
+      "source cell for setSourceCell/getSourceCell test",
+      undefined,
+      tx,
+    );
+    sourceCell.set({ foo: 123 });
+
+    const targetCell = runtime.getCell<{ bar: string }>(
+      space,
+      "target cell for setSourceCell/getSourceCell test",
+      undefined,
+      tx,
+    );
+    targetCell.set({ bar: "baz" });
+
+    // Initially, getSourceCell should return undefined
+    expect(targetCell.getSourceCell()).toBeUndefined();
+
+    // Set the source cell
+    targetCell.setSourceCell(sourceCell);
+
+    // Now getSourceCell should return a Cell with the same value as sourceCell
+    const retrievedSource = targetCell.getSourceCell();
+    expect(isCell(retrievedSource)).toBe(true);
+    expect(retrievedSource?.get()).toEqual({ foo: 123 });
+
+    // Changing the source cell's value should be reflected
+    sourceCell.set({ foo: 456 });
+    expect(retrievedSource?.get()).toEqual({ foo: 456 });
+  });
 });
 
 describe("Cell utility functions", () => {
