@@ -8,6 +8,8 @@ This script guides Claude through recipe development with the `ct` utility after
 - User should have already run the space setup script or have an existing space
 - Claude MUST read the common CT setup instructions in `.claude/commands/common/ct.md`
 
+The user may provide config as arguments: $ARGUMENTS
+
 ## Script Flow for Claude
 
 ### STEP 1: Initial Setup and Context
