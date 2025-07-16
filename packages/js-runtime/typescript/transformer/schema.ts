@@ -1,5 +1,6 @@
 import ts from "typescript";
 import { addCommonToolsImport, hasCommonToolsImport, removeCommonToolsImport } from "./imports.ts";
+import { createDebugger, TransformerOptions } from "./debug.ts";
 
 /**
  * Transformer that converts TypeScript types to JSONSchema objects.
@@ -7,13 +8,32 @@ import { addCommonToolsImport, hasCommonToolsImport, removeCommonToolsImport } f
  */
 export function createSchemaTransformer(
   program: ts.Program,
-  options: { debug?: boolean } = {},
+  options: TransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
-  const { debug = false } = options;
+  const debugLogger = createDebugger('SchemaTransformer', options);
   const checker = program.getTypeChecker();
 
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
+      // Check if this file has the /// <cts-enable /> directive
+      const hasCtsEnableDirective = (): boolean => {
+        const text = sourceFile.getFullText();
+        const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
+
+        for (const comment of tripleSlashDirectives) {
+          const commentText = text.substring(comment.pos, comment.end);
+          if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      // Skip transformation if directive is not present
+      if (!hasCtsEnableDirective()) {
+        return sourceFile;
+      }
+
       let needsJSONSchemaImport = false;
       let hasTransformedToSchema = false;
 
@@ -29,9 +49,9 @@ export function createSchemaTransformer(
           const typeArg = node.typeArguments[0];
           const type = checker.getTypeFromTypeNode(typeArg);
 
-          if (debug && typeArg) {
-            console.log(
-              `[SchemaTransformer] Found toSchema<${typeArg.getText()}>() call`,
+          if (debugLogger.isEnabled() && typeArg) {
+            debugLogger.log(
+              `Found toSchema<${typeArg.getText()}>() call`
             );
           }
 
@@ -99,15 +119,15 @@ export function createSchemaTransformer(
         // Check if toSchema is still used anywhere in the transformed code
         const stillUsesToSchema = containsToSchemaReference(result);
         
-        if (debug) {
-          console.log(`[SchemaTransformer] Checking toSchema import removal:`);
-          console.log(`  - hasCommonToolsImport(toSchema): true`);
-          console.log(`  - stillUsesToSchema: ${stillUsesToSchema}`);
+        if (debugLogger.isEnabled()) {
+          debugLogger.log(`Checking toSchema import removal:`);
+          debugLogger.log(`  - hasCommonToolsImport(toSchema): true`);
+          debugLogger.log(`  - stillUsesToSchema: ${stillUsesToSchema}`);
         }
         
         if (!stillUsesToSchema) {
-          if (debug) {
-            console.log(`[SchemaTransformer] Removing toSchema import`);
+          if (debugLogger.isEnabled()) {
+            debugLogger.log(`Removing toSchema import`);
           }
           result = removeCommonToolsImport(result, context.factory, "toSchema");
         }
