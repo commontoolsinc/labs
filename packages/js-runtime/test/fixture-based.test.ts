@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { compareFixtureTransformation } from "./test-utils.ts";
-import { cache } from "@commontools/static";
+import { StaticCache } from "@commontools/static";
 import { walk } from "@std/fs/walk";
 import { basename, dirname, relative, resolve } from "@std/path";
 
@@ -197,7 +197,8 @@ async function getFileExtension(basePath: string): Promise<string> {
 }
 
 // Get type definitions once
-const commontools = await cache.getText("types/commontools.d.ts");
+const staticCache = new StaticCache();
+const commontools = await staticCache.getText("types/commontools.d.ts");
 
 // Collect all fixtures first
 const configsWithFixtures = await Promise.all(
@@ -327,7 +328,7 @@ describe("Schema Transformer - Compiler Tests", () => {
     const { getTypeScriptEnvironmentTypes, TypeScriptCompiler } = await import(
       "../mod.ts"
     );
-    const types = await getTypeScriptEnvironmentTypes();
+    const types = await getTypeScriptEnvironmentTypes(new StaticCache());
     const typeLibs = { ...types, commontools };
     const compiler = new TypeScriptCompiler(typeLibs);
 

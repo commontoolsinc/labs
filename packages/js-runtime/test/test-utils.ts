@@ -5,6 +5,7 @@ import {
 } from "../typescript/transformer/mod.ts";
 import { getTypeScriptEnvironmentTypes } from "../mod.ts";
 import { join } from "@std/path";
+import { StaticCache } from "@commontools/static";
 
 // Cache environment types
 let envTypesCache: Record<string, string> | undefined;
@@ -32,7 +33,8 @@ export async function transformSource(
 
   // Get environment types if not cached
   if (!envTypesCache) {
-    envTypesCache = await getTypeScriptEnvironmentTypes();
+    const cache = new StaticCache();
+    envTypesCache = await getTypeScriptEnvironmentTypes(cache);
   }
 
   // Create a minimal program for testing
