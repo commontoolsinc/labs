@@ -10,7 +10,6 @@ import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
-import { isLegacyCellLink } from "../src/link-utils.ts";
 import { areLinksSame, isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
