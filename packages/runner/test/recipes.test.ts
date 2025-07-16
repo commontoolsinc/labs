@@ -988,8 +988,6 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
     expect(timeoutCalled).toBe(true);
-    console.log("raw", result.getRaw());
-    console.log("get", result.get());
     expect(result.get()).toMatchObject({ result: 2 });
   });
 
