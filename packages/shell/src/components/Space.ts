@@ -5,21 +5,8 @@ import { CharmsController } from "@commontools/charm/ops";
 import { Task } from "@lit/task";
 import * as DefaultRecipe from "../lib/default-recipe.ts";
 
-type CharmData = {
-  name: string;
-  id: string;
-  href: string;
-};
-
 export class XSpaceElement extends BaseView {
   static override styles = css`
-    :host {
-      display: block;
-      width: 100%;
-      height: 100%;
-      background-color: white;
-      padding: 1rem;
-    }
   `;
 
   @property({ attribute: false })
@@ -87,16 +74,17 @@ export class XSpaceElement extends BaseView {
       : !defaultRecipe
       ? (this.creatingDefaultRecipe
         ? html`
-          <div>
-            <span>Creating default recipe...</span>
+          <v-box center="${true}">
+            <div>Creating default recipe...</div>
             <x-spinner></x-spinner>
-          </div>
+          </v-box>
         `
         : html`
-          <div>
-            <span>Create default recipe?</span>
-            <button @click="${this.onRequestDefaultRecipe}">Go!</button>
-          </div>
+          <v-box center="${true}">
+            <div>Create default recipe?</div>
+            <x-button variant="primary" @click="${this
+            .onRequestDefaultRecipe}">Go!</x-button>
+          </v-box>
         `)
       // TBD if we want to use x-charm or ct-render directly here
       : html`
@@ -104,12 +92,12 @@ export class XSpaceElement extends BaseView {
       `;
 
     return html`
-      <div>
+      <v-box>
         <button @click="${this.onViewToggle}">${this.showCharmList
         ? "show default"
         : "show list"}</button>
         ${inner}
-      </div>
+      </v-box>
     `;
   }
 }

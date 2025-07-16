@@ -25,6 +25,7 @@
 /* CSS Custom Properties */
 :root {
   --font-primary: "JetBrainsMono", monospace;
+  --font-color: #000;
   --bg-primary: #f3f3f3;
   --bg-secondary: #f9fafb;
   --border-color: #000;
@@ -66,6 +67,7 @@ body {
     transparent var(--dot-size)
   );
   background-size: var(--dot-spacing) var(--dot-spacing);
+  color: var(--font-color);
 }
 
 /* Responsive padding */

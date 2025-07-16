@@ -1,6 +1,6 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
 import { Runtime } from "@commontools/runner";
-import { charmId, CharmManager, processSchema } from "@commontools/charm";
+import { charmId, CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { API_URL } from "./env.ts";

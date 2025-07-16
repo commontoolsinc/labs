@@ -71,36 +71,6 @@ export class XLoginView extends BaseView {
       height: 80px;
     }
 
-    button {
-      width: 100%;
-      padding: 0.75rem 1rem;
-      margin-bottom: 0.5rem;
-      font-family: var(--font-primary);
-      background-color: white;
-      border: var(--border-width, 2px) solid var(--border-color, #000);
-      cursor: pointer;
-      transition: all 0.1s ease-in-out;
-    }
-
-    button:hover:not(:disabled) {
-      transform: translateY(-2px);
-      box-shadow: 2px 2px 0px 0px rgba(0, 0, 0, 0.5);
-    }
-
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    button.primary {
-      background-color: black;
-      color: white;
-    }
-
-    button.primary:hover:not(:disabled) {
-      background-color: #333;
-    }
-
     .method-list button {
       text-align: left;
       display: flex;
@@ -156,22 +126,11 @@ export class XLoginView extends BaseView {
       border: var(--border-width, 2px) solid var(--border-color, #000);
     }
 
-    .mnemonic-text {
+    [name=mnemonic-text] {
       font-family: monospace;
       font-size: 1rem;
       line-height: 1.5;
-      padding-right: 80px;
       word-break: break-word;
-    }
-
-    .copy-button {
-      position: absolute;
-      right: 0.5rem;
-      top: 0.5rem;
-      padding: 0.25rem 0.5rem;
-      font-size: 0.875rem;
-      width: auto;
-      margin: 0;
     }
 
     .info-text {
@@ -185,15 +144,6 @@ export class XLoginView extends BaseView {
       font-size: 1.25rem;
     }
 
-    .button-row {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .button-row button {
-      flex: 1;
-    }
-
     .login-row {
       display: flex;
       gap: 0.5rem;
@@ -201,7 +151,7 @@ export class XLoginView extends BaseView {
       margin-bottom: 0.5rem;
     }
 
-    .login-row .primary {
+    .login-row [variant="primary"] {
       flex: 1;
       margin-bottom: 0;
     }
@@ -544,13 +494,13 @@ export class XLoginView extends BaseView {
         ${!isPassphrase
           ? html`
             <div class="login-row">
-              <button
-                class="primary"
+              <x-button
+                primary=${true}
                 @click="${() => this.handleQuickUnlock()}"
               >
                 🔒 Login with Passkey (${this.storedCredential.id.slice(-4)})
               </button>
-              <button
+              <x-button
                 class="delete-button"
                 @click="${() => {
               this.dispatchAuthEvent("clear-stored-credential");
@@ -558,52 +508,50 @@ export class XLoginView extends BaseView {
                 title="Remove saved credential"
               >
                 🗑️
-              </button>
+              </x-button>
             </div>
           `
           : html`
-            <button
-              class="primary"
+            <x-button
+              primary=${true}
               @click="${() => this.handleQuickUnlock()}"
             >
               🔒 Login with Passphrase
-            </button>
+            </x-button>
           `}
-        <div class="button-row">
           ${isPassphrase && isPasskeyAvailable
           ? html`
-            <button @click="${() => {
+            <x-button @click="${() => {
               this.flow = "login";
               this.method = AUTH_METHOD_PASSKEY;
               this.handleLogin();
             }}">
               " 🔑 Login w/ Passkey
-            </button>
+            </x-button>
           `
           : !isPassphrase
           ? html`
-            <button @click="${() => {
+            <x-button @click="${() => {
               this.flow = "login";
               this.method = AUTH_METHOD_PASSPHRASE;
             }}">
               🔑 Login w/ Passphrase
-            </button>
+            </x-button>
           `
           : null}
-          <button @click="${() => this.flow = "register"}">
+          <x-button @click="${() => this.flow = "register"}">
             ➕ Register New Key
-          </button>
-        </div>
+          </x-button>
       `;
     }
 
     return html`
-      <button class="primary" @click="${() => this.flow = "register"}">
+      <x-button variant="primary" @click="${() => this.flow = "register"}">
         ➕ Register
-      </button>
-      <button class="primary" @click="${() => this.flow = "login"}">
+      </x-button>
+      <x-button variant="primary" @click="${() => this.flow = "login"}">
         🔒 Login
-      </button>
+      </x-button>
     `;
   }
 
@@ -624,20 +572,20 @@ export class XLoginView extends BaseView {
       <div class="method-list">
         ${this.availableMethods.map((method) =>
         html`
-          <button @click="${() => this.handleMethodSelect(method)}">
+          <x-button @click="${() => this.handleMethodSelect(method)}">
             ${method === AUTH_METHOD_PASSKEY
             ? "🔑 Use Passkey"
             : "📝 Use Passphrase"}
-          </button>
+          </x-button>
         `
       )}
       </div>
-      <button @click="${() => {
+      <x-button @click="${() => {
         this.flow = null;
         this.method = null;
       }}">
         ← Back
-      </button>
+      </x-button>
     `;
   }
 
@@ -656,15 +604,15 @@ export class XLoginView extends BaseView {
         return this.renderMnemonicDisplay();
       }
       return html`
-        <button class="primary" @click="${() => this.handleRegister()}">
+        <x-button variant="primary" @click="${() => this.handleRegister()}">
           🔑 Generate Passphrase
-        </button>
-        <button @click="${() => {
+        </x-button>
+        <x-button @click="${() => {
           this.flow = null;
           this.method = null;
         }}">
           ← Back
-        </button>
+        </x-button>
       `;
     }
 
@@ -677,16 +625,16 @@ export class XLoginView extends BaseView {
           autocomplete="current-password"
           required
         />
-        <button type="submit" class="primary">
+        <x-button type="submit" variant="primary">
           🔒 Login
-        </button>
+        </x-button>
       </form>
-      <button @click="${() => {
+      <x-button @click="${() => {
         this.flow = null;
         this.method = null;
       }}">
         ← Back
-      </button>
+      </x-button>
     `;
   }
 
@@ -704,21 +652,21 @@ export class XLoginView extends BaseView {
         <p>Your Secret Recovery Phrase:</p>
       </div>
       <div class="mnemonic-display">
-        <button
-          class="copy-button"
-          @click="${this.copyToClipboard}"
-        >
-          ${this.copied ? "✓ Copied" : "📋 Copy"}
-        </button>
-        <div class="mnemonic-text">
-          ${this.mnemonic || ""}
-        </div>
+        <v-box>
+          <textarea rows="7" name="mnemonic-text">${this.mnemonic || ""}</textarea>
+          <x-button
+            class="copy-button"
+            @click="${this.copyToClipboard}"
+          >
+            ${this.copied ? "✓ Copied" : "📋 Copy"}
+          </x-button>
+        </v-box>
       </div>
       <p class="info-text">
         ⚠️ Keep this secret, it's your password.
       </p>
-      <button
-        class="primary"
+      <x-button
+        variant="primary"
         @click="${() => {
         // User has saved the mnemonic, now authenticate with it
         if (this.mnemonic) {
@@ -728,7 +676,7 @@ export class XLoginView extends BaseView {
       }}"
       >
         🔒 I've Saved It - Continue
-      </button>
+      </x-button>
     `;
   }
 
@@ -739,15 +687,15 @@ export class XLoginView extends BaseView {
         ? "Passkey"
         : "Passphrase"} successfully registered!</p>
       </div>
-      <button
-        class="primary"
+      <x-button
+        variant="primary"
         @click="${() => {
         this.registrationSuccess = false;
         this.flow = "login";
       }}"
       >
         🔒 Continue to Login
-      </button>
+      </x-button>
     `;
   }
 
