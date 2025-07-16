@@ -121,33 +121,53 @@ export function createOpaqueRefTransformer(
             
             const objectType = checker.getTypeAtLocation(node.expression.expression);
             if (isOpaqueRefType(objectType, checker)) {
-              // Array methods that should use .get() instead of derive
-              const arrayMethods = ["map", "filter", "reduce", "forEach", "find", "findIndex", "some", "every", "includes", "indexOf", "slice", "concat", "join", "sort", "reverse"];
+              // Methods explicitly defined on OpaqueRefMethods interface
+              // These methods should NOT be transformed with .get()
+              const opaqueRefMethods = ["get", "set", "key", "setDefault", "setName", "setSchema", "map"];
               
-              if (arrayMethods.includes(methodName)) {
-                // This is an array method on an OpaqueRef<Array>, add .get() before the method
-                const objectWithGet = context.factory.createCallExpression(
-                  context.factory.createPropertyAccessExpression(
-                    node.expression.expression,
-                    context.factory.createIdentifier("get"),
-                  ),
-                  undefined,
-                  [],
-                );
-                
-                const newMethodCall = context.factory.createCallExpression(
-                  context.factory.createPropertyAccessExpression(
-                    objectWithGet,
-                    node.expression.name,
-                  ),
-                  node.typeArguments,
-                  // Visit arguments to handle any nested transformations
-                  node.arguments.map(arg => ts.visitNode(arg, visit) as ts.Expression),
-                );
-                
-                return newMethodCall;
+              const methodExistsOnOpaqueRef = opaqueRefMethods.includes(methodName);
+              
+              if (debug) {
+                log(`Found method call '${methodName}' on OpaqueRef type`);
+                log(`OpaqueRef type: ${checker.typeToString(objectType)}`);
+                log(`Method '${methodName}' is OpaqueRef method: ${methodExistsOnOpaqueRef}`);
               }
-              // For non-array methods, let it fall through to be handled by transformExpressionWithOpaqueRef
+              
+              // Only apply .get() transformation for array methods on OpaqueRef<Array>
+              // when the OpaqueRef is a simple identifier (not a property access)
+              if (!methodExistsOnOpaqueRef && ts.isIdentifier(node.expression.expression)) {
+                // Check if this is an array type
+                const typeString = checker.typeToString(objectType);
+                if (typeString.includes("[]") || typeString.includes("Array<")) {
+                  // This is an array method on an OpaqueRef<Array>, add .get() before the method
+                  const objectWithGet = context.factory.createCallExpression(
+                    context.factory.createPropertyAccessExpression(
+                      node.expression.expression,
+                      context.factory.createIdentifier("get"),
+                    ),
+                    undefined,
+                    [],
+                  );
+                  
+                  const newMethodCall = context.factory.createCallExpression(
+                    context.factory.createPropertyAccessExpression(
+                      objectWithGet,
+                      node.expression.name,
+                    ),
+                    node.typeArguments,
+                    // Visit arguments to handle any nested transformations
+                    node.arguments.map(arg => ts.visitNode(arg, visit) as ts.Expression),
+                  );
+                  
+                  return newMethodCall;
+                }
+              } else if (methodExistsOnOpaqueRef) {
+                // Method exists on OpaqueRef, so just visit children normally
+                // This handles methods like map() that are defined on OpaqueRef itself
+                return ts.visitEachChild(node, visit, context);
+              }
+              // For other cases (like person.name.toUpperCase()), let it fall through
+              // to be handled by the general transformation logic
             }
           }
           

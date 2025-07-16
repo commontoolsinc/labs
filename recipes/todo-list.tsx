@@ -1,4 +1,15 @@
-import { derive, h, handler, NAME, recipe, toSchema, UI } from "commontools";
+/// <cts-enable />
+import {
+  Cell,
+  Default,
+  derive,
+  h,
+  handler,
+  NAME,
+  recipe,
+  Stream,
+  UI,
+} from "commontools";
 
 // Define types using TypeScript interfaces
 export interface TodoItem {
@@ -6,66 +17,29 @@ export interface TodoItem {
   done: boolean;
 }
 
-interface TodoListInput {
+interface RecipeInput {
   title: string;
-  items: TodoItem[];
+  items: Default<TodoItem[], []>;
 }
 
-interface TodoResult {
-  items: TodoItem[];
-  addItem: {
-    title: string;
-  }; // @asStream
-  "/action/drop/schema": object;
-  "/action/drop/handler": string; // @asStream
-}
+// interface TodoResult {
+//   items: Default<TodoItem[], []>;
+//   addItem: Stream<{ title: string }>;
+// }
 
-// Transform to schemas at compile time
-const TodoItemSchema = toSchema<TodoItem>();
-
-const TodoListSchema = toSchema<TodoListInput>({
-  default: { title: "untitled", items: [] },
-});
-
-const ResultSchema = toSchema<TodoResult>({
-  properties: {
-    addItem: {
-      asStream: true,
-      example: { title: "New item" },
-    },
-  },
-});
-
-interface AddTaskEvent {
-  detail: {
-    message: string;
-  };
-}
-
-interface ItemsState {
-  items: TodoItem[];
-}
-
-const addTask = handler<AddTaskEvent, ItemsState>(
-  (event, { items }) => {
+const addTask = handler<
+  { detail: { message: string } },
+  { items: Cell<TodoItem[]> }
+>(
+  (event, state) => {
+    console.log("addTask", event, state);
+    const items = state.items;
     const task = event.detail?.message?.trim();
-    if (task) items.push({ title: task, done: false });
+    if (task) items.set([...items.get(), { title: task, done: false }]);
   },
 );
 
-interface AddItemEvent {
-  title: string;
-}
-
-interface AddItemState {
-  items: TodoItem[]; // @asCell
-}
-
-const addItem = handler(
-  toSchema<AddItemEvent>(),
-  toSchema<AddItemState>({
-    default: { items: [] },
-  }),
+const addItem = handler<{ title: string }, { items: Cell<TodoItem[]> }>(
   ({ title }, { items }) => {
     items.push({ title, done: false });
   },
@@ -77,13 +51,9 @@ interface UpdateTitleEvent {
   };
 }
 
-interface TitleState {
-  title: string;
-}
-
-const updateTitle = handler<UpdateTitleEvent, TitleState>(
-  ({ detail }, state) => {
-    state.title = detail?.value ?? "untitled";
+const updateTitle = handler<UpdateTitleEvent, { title: Cell<string> }>(
+  ({ detail }, { title }) => {
+    title.set(detail?.value ?? "untitled");
   },
 );
 
@@ -94,65 +64,48 @@ interface UpdateItemEvent {
   };
 }
 
-interface ItemState {
-  item: TodoItem;
-}
-
-const updateItem = handler<UpdateItemEvent, ItemState>(
+const updateItem = handler<UpdateItemEvent, { item: Cell<TodoItem> }>(
   ({ detail }, { item }) => {
-    (item as any).done = detail.checked;
-    (item as any).title = detail.value;
+    item.update({ done: detail.checked, title: detail.value });
   },
 );
 
-interface DeleteItemState {
-  items: TodoItem[];
-  item: TodoItem;
-}
-
-const deleteItem = handler<never, DeleteItemState>(
+const deleteItem = handler<
+  unknown,
+  { items: Cell<TodoItem[]>; item: TodoItem }
+>(
   (_, { item, items }) => {
-    const idx = items.findIndex((i) => i.title === item.title);
-    if (idx !== -1) items.splice(idx, 1);
+    const idx = items.get().findIndex((i) => i.title === item.title);
+    if (idx !== -1) {
+      // THIS IS UGLY AND SLOW.
+      items.set([...items.get().slice(0, idx), ...items.get().slice(idx + 1)]);
+    }
   },
 );
 
-export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
-  derive(items, (items) => {
-    console.log("todo list items changed", { items });
-  });
-  return {
-    [NAME]: title,
-    [UI]: (
-      <os-container>
-        <common-input
-          value={title}
-          placeholder="List title"
-          oncommon-input={updateTitle({ title })}
-        />
-        <common-vstack gap="sm">
-          {items.map((item: any) => (
-            <common-draggable
-              $entity={item}
-              spell={JSON.stringify(
-                recipe(TodoItemSchema, {}, (item) => ({
-                  [UI]: (
-                    <common-todo
-                      checked={item.done}
-                      value={item.title}
-                      ontodo-checked={updateItem({ item: item as any })}
-                      ontodo-input={updateItem({ item: item as any })}
-                    />
-                  ),
-                })),
-              )}
-            >
+export default recipe<RecipeInput>(
+  "todo list",
+  ({ title, items }) => {
+    derive(items, (items) => {
+      console.log("todo list items changed", JSON.stringify(items));
+    });
+    return {
+      [NAME]: title,
+      [UI]: (
+        <os-container>
+          <common-input
+            value={title}
+            placeholder="List title"
+            oncommon-input={updateTitle({ title })}
+          />
+          <common-vstack gap="sm">
+            {items.map((item) => (
               <common-hstack>
                 <common-todo
                   checked={item.done}
                   value={item.title}
-                  ontodo-checked={updateItem({ item: item as any })}
-                  ontodo-input={updateItem({ item: item as any })}
+                  ontodo-checked={updateItem({ item })}
+                  ontodo-input={updateItem({ item })}
                 />
                 <sl-button
                   outline
@@ -162,35 +115,19 @@ export default recipe(TodoListSchema, ResultSchema, ({ title, items }) => {
                   Delete
                 </sl-button>
               </common-hstack>
-            </common-draggable>
-          ))}
-        </common-vstack>
-        <common-send-message
-          name="Add"
-          placeholder="New task"
-          appearance="rounded"
-          onmessagesend={addTask({ items })}
-        />
-      </os-container>
-    ),
-    title,
-    items,
-    addItem: addItem({ items }),
-    "action/drop/schema": { type: "string" },
-    "action/drop/handler": handler<any[], ItemsState>(
-      (event, { items }) => {
-        console.log("todo drag handler", event);
-        event.forEach((item) => {
-          let newItem;
-          if (typeof item === "object" && item !== null && "title" in item) {
-            newItem = item;
-          } else if (typeof item === "string") {
-            newItem = { title: item, done: false };
-          } else newItem = { title: item.toString(), done: false };
-          console.log("todo drag handler newItem", newItem, item);
-          items.push(newItem);
-        });
-      },
-    )({ items }),
-  };
-});
+            ))}
+          </common-vstack>
+          <common-send-message
+            name="Add"
+            placeholder="New task"
+            appearance="rounded"
+            onmessagesend={addTask({ items })}
+          />
+        </os-container>
+      ),
+      title,
+      items,
+      addItem: addItem({ items }),
+    };
+  },
+);
