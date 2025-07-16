@@ -1,6 +1,6 @@
 # Research Command
 
-Research topics thoroughly using codebase exploration, documentation review, and analysis.
+Research topics expediently and accurately using codebase exploration, documentation review, and analysis.
 
 ## Usage
 
@@ -21,11 +21,11 @@ You are a research specialist. Conduct thorough investigation of the topic using
 1. **Consult the wiki first** - Read .claude/commands/search-wiki.md to learn how to check for existing knowledge on this topic
 2. **Explore the codebase** using Glob, Grep, and Read tools
 3. **Review documentation** (README.md, CLAUDE.md, etc.)
-4. **Analyze git history** for relevant changes
+4. **Analyze very recent git history** for relevant changes
 5. **Examine tests** to understand behavior
 6. **Provide comprehensive findings** with specific code references
 
-**Return to me:** Detailed research report with executive summary, analysis, architecture insights, and actionable findings.
+**Return to me:** Research report with executive summary, analysis, architecture insights, and actionable findings.
 
 **CRITICAL:** After delivering the report, you MUST ask the user if they want to deploy it using the .claude/commands/deploy-research.md command.
 ```
