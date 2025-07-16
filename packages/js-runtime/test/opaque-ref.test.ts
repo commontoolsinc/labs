@@ -1,10 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { checkWouldTransform, transformSource } from "./test-utils.ts";
-import { cache } from "@commontools/static";
+import { StaticCache } from "@commontools/static";
 import { getTypeScriptEnvironmentTypes, TypeScriptCompiler } from "../mod.ts";
 
-const commonToolsTypes = await cache.getText("types/commontools.d.ts");
+const staticCache = new StaticCache();
+const commonToolsTypes = await staticCache.getText("types/commontools.d.ts");
 
 describe("OpaqueRef Transformer", () => {
   const types = { "commontools.d.ts": commonToolsTypes };
@@ -129,7 +130,7 @@ import { OpaqueRef, derive } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const result = count + 1;
 `;
-      const envTypes = await getTypeScriptEnvironmentTypes();
+      const envTypes = await getTypeScriptEnvironmentTypes(new StaticCache());
       const fullTypes = { ...envTypes, commontools: commonToolsTypes };
       const compiler = new TypeScriptCompiler(fullTypes);
 

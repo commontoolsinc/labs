@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { transformSource } from "./test-utils.ts";
 import { getTypeScriptEnvironmentTypes } from "../mod.ts";
+import { StaticCache } from "@commontools/static";
 
 describe("Recipe with Array Map", () => {
   it("transforms recipe with array.map in JSX", async () => {
@@ -23,7 +24,7 @@ export default recipe<{ items: string[] }>("Test Recipe", ({ items }) => {
 });
 `;
 
-    const envTypes = await getTypeScriptEnvironmentTypes();
+    const envTypes = await getTypeScriptEnvironmentTypes(new StaticCache());
     const commontools = envTypes["commontools.d.ts"] || "";
 
     const result = await transformSource(source, {
@@ -59,7 +60,7 @@ export default recipe<{ values: string[] }>("Values", ({ values }) => {
 });
 `;
 
-    const envTypes = await getTypeScriptEnvironmentTypes();
+    const envTypes = await getTypeScriptEnvironmentTypes(new StaticCache());
     const commontools = envTypes["commontools.d.ts"] || "";
 
     const result = await transformSource(source, {
