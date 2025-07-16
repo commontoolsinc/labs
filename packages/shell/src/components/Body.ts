@@ -21,19 +21,15 @@ export class XBodyElement extends BaseView {
   activeCharmId?: string;
 
   override render() {
-    const connected = this.cc ? "Connected" : "Not Connected";
     const charmView = html`
       <x-charm .cc="${this.cc}" .charmId="${this.activeCharmId}"></x-charm>
     `;
-    const charmList = html`
-      <x-charm-list .cc="${this.cc}"></x-charm-list>
+    const spaceView = html`
+      <x-space .cc="${this.cc}"></x-space>
     `;
-    const view = this.activeCharmId ? charmView : charmList;
+    const view = this.activeCharmId ? charmView : spaceView;
     return html`
-      <div>
-        <h2>App!! (${connected})</h2>
-        <div>${view}</div>
-      </div>
+      <div>${view}</div>
     `;
   }
 }

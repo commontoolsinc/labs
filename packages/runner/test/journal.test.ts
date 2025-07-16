@@ -123,6 +123,64 @@ describe("Journal", () => {
       const result = reader!.read(nestedAddress);
       expect(result.ok?.value).toBe("dark");
     });
+
+    it("should read with metadata options", async () => {
+      // Pre-populate replica
+      const testData = { name: "MetaTest", version: 1 };
+      const replica = storage.open(space).replica;
+      await replica.commit({
+        facts: [
+          assert({
+            the: "application/json",
+            of: "user:meta",
+            is: testData,
+          }),
+        ],
+        claims: [],
+      });
+
+      const freshJournal = Journal.open(storage);
+      const { ok: reader } = freshJournal.reader(space);
+      const address = {
+        id: "user:meta",
+        type: "application/json",
+        path: [],
+      } as const;
+      const metadata = {
+        source: "test",
+        operation: "read",
+        context: "journal",
+      };
+
+      // Read with metadata
+      const result = reader!.read(address, { meta: metadata });
+      expect(result.ok).toBeDefined();
+      expect(result.ok?.value).toEqual(testData);
+    });
+
+    it("should handle various metadata types in reader", () => {
+      const { ok: reader } = journal.reader(space);
+      const address = {
+        id: "test:reader-meta-types",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      // Test different metadata shapes
+      const metadataVariants = [
+        { type: "string", value: "test" },
+        { numbers: [1, 2, 3], count: 42 },
+        { nested: { deep: { value: true } } },
+        { mixed: "string", count: 10, enabled: false },
+        {}, // empty metadata
+      ];
+
+      metadataVariants.forEach((meta, index) => {
+        const result = reader!.read(address, { meta });
+        expect(result.ok).toBeDefined();
+        expect(result.ok?.value).toBeUndefined(); // No data written
+      });
+    });
   });
 
   describe("Writer Operations", () => {
@@ -214,6 +272,57 @@ describe("Journal", () => {
       expect(noveltyEntries).toHaveLength(1);
       expect(noveltyEntries[0].address.path).toEqual([]);
       expect(noveltyEntries[0].value).toEqual({ name: "Alice" });
+    });
+
+    it("should read with metadata using writer interface", () => {
+      const { ok: writer } = journal.writer(space);
+      const address = {
+        id: "test:writer-meta",
+        type: "application/json",
+        path: [],
+      } as const;
+      const value = { name: "WriterMeta", test: true };
+      const metadata = { writer: "interface", operation: "read" };
+
+      // Write first
+      writer!.write(address, value);
+
+      // Read with metadata using writer interface
+      const readResult = writer!.read(address, { meta: metadata });
+      expect(readResult.ok).toBeDefined();
+      expect(readResult.ok?.value).toEqual(value);
+    });
+
+    it("should handle metadata with nested paths in writer", () => {
+      const { ok: writer } = journal.writer(space);
+      const rootAddress = {
+        id: "test:nested-meta",
+        type: "application/json",
+        path: [],
+      } as const;
+      const nestedAddress = {
+        id: "test:nested-meta",
+        type: "application/json",
+        path: ["profile", "settings"],
+      } as const;
+      const metadata = { path: "nested", level: 2 };
+
+      // Write root object
+      writer!.write(rootAddress, {
+        profile: { name: "User", settings: { theme: "light" } },
+      });
+
+      // Read nested path with metadata
+      const nestedResult = writer!.read(nestedAddress, { meta: metadata });
+      expect(nestedResult.ok).toBeDefined();
+      expect(nestedResult.ok?.value).toEqual({ theme: "light" });
+
+      // Read root with metadata
+      const rootResult = writer!.read(rootAddress, { meta: metadata });
+      expect(rootResult.ok).toBeDefined();
+      expect(rootResult.ok?.value).toEqual({
+        profile: { name: "User", settings: { theme: "light" } },
+      });
     });
   });
 
@@ -596,7 +705,123 @@ describe("Journal", () => {
       expect(activity[0].write).toEqual({ ...address, space });
 
       expect(activity[1]).toHaveProperty("read");
-      expect(activity[1].read).toEqual({ ...address, space });
+      expect(activity[1].read).toEqual({ ...address, space, meta: {} });
+    });
+
+    it("should track activity with metadata for read operations", () => {
+      const { ok: writer } = journal.writer(space);
+      const { ok: reader } = journal.reader(space);
+
+      const address = {
+        id: "user:activity-meta",
+        type: "application/json",
+        path: [],
+      } as const;
+      const metadata = {
+        source: "test",
+        operation: "read",
+        timestamp: Date.now(),
+        user: "test-user",
+      };
+
+      // Write operation (no metadata for writes)
+      writer!.write(address, { name: "ActivityUser" });
+
+      // Read operation with metadata
+      reader!.read(address, { meta: metadata });
+
+      // Check activity log
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(2);
+
+      // Write activity should not have metadata
+      expect(activity[0]).toHaveProperty("write");
+      expect(activity[0].write).toEqual({ ...address, space });
+      expect(activity[0].write).not.toHaveProperty("meta");
+
+      // Read activity should include metadata
+      expect(activity[1]).toHaveProperty("read");
+      expect(activity[1].read).toEqual({ ...address, space, meta: metadata });
+    });
+
+    it("should track activity with different metadata for multiple reads", () => {
+      const { ok: reader } = journal.reader(space);
+
+      const address = {
+        id: "user:multi-meta",
+        type: "application/json",
+        path: [],
+      } as const;
+
+      const metadata1 = { context: "first", priority: "high" };
+      const metadata2 = { context: "second", priority: "low" };
+      const metadata3 = { context: "third", nested: { deep: "value" } };
+
+      // Multiple read operations with different metadata
+      reader!.read(address, { meta: metadata1 });
+      reader!.read(address, { meta: metadata2 });
+      reader!.read(address, { meta: metadata3 });
+      reader!.read(address); // Read without metadata
+
+      // Check activity log
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(4);
+
+      // First read with metadata1
+      expect(activity[0]).toHaveProperty("read");
+      expect(activity[0].read).toEqual({ ...address, space, meta: metadata1 });
+
+      // Second read with metadata2
+      expect(activity[1]).toHaveProperty("read");
+      expect(activity[1].read).toEqual({ ...address, space, meta: metadata2 });
+
+      // Third read with metadata3
+      expect(activity[2]).toHaveProperty("read");
+      expect(activity[2].read).toEqual({ ...address, space, meta: metadata3 });
+
+      // Fourth read without metadata (should not have meta property)
+      expect(activity[3]).toHaveProperty("read");
+      expect(activity[3].read).toEqual({ ...address, space, meta: {} });
+    });
+
+    it("should track activity with metadata for nested path reads", () => {
+      const { ok: writer } = journal.writer(space);
+
+      const rootAddress = {
+        id: "user:nested-activity",
+        type: "application/json",
+        path: [],
+      } as const;
+      const nestedAddress = {
+        id: "user:nested-activity",
+        type: "application/json",
+        path: ["profile", "name"],
+      } as const;
+      const metadata = { path: "nested", level: 2, tracking: true };
+
+      // Write root object
+      writer!.write(rootAddress, {
+        profile: { name: "NestedUser", age: 25 },
+      });
+
+      // Read nested path with metadata
+      writer!.read(nestedAddress, { meta: metadata });
+
+      // Check activity log
+      const activity = [...journal.activity()];
+      expect(activity).toHaveLength(2);
+
+      // Write activity
+      expect(activity[0]).toHaveProperty("write");
+      expect(activity[0].write).toEqual({ ...rootAddress, space });
+
+      // Read activity should include metadata and nested path
+      expect(activity[1]).toHaveProperty("read");
+      expect(activity[1].read).toEqual({
+        ...nestedAddress,
+        space,
+        meta: metadata,
+      });
     });
 
     it("should track read invariants in history", async () => {

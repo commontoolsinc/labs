@@ -128,6 +128,85 @@ describe("StorageTransaction", () => {
       }
     });
 
+    it("should read with metadata options", () => {
+      const address = {
+        space,
+        id: "test:metadata",
+        type: "application/json",
+        path: [],
+      } as const;
+      const value = { name: "Bob", age: 25 };
+      const metadata = { source: "test", version: 1, priority: "high" };
+
+      // Write value
+      transaction.write(address, value);
+
+      // Read with metadata
+      const readResult = transaction.read(address, { meta: metadata });
+      expect(readResult.ok).toBeDefined();
+      if (readResult.ok) {
+        expect(readResult.ok.value).toEqual(value);
+      }
+    });
+
+    it("should read without metadata (default behavior)", () => {
+      const address = {
+        space,
+        id: "test:no-metadata",
+        type: "application/json",
+        path: [],
+      } as const;
+      const value = { name: "Charlie", age: 35 };
+
+      // Write value
+      transaction.write(address, value);
+
+      // Read without metadata options (should work as before)
+      const readResult = transaction.read(address);
+      expect(readResult.ok).toBeDefined();
+      if (readResult.ok) {
+        expect(readResult.ok.value).toEqual(value);
+      }
+    });
+
+    it("should handle various metadata types", () => {
+      const address = {
+        space,
+        id: "test:metadata-types",
+        type: "application/json",
+        path: [],
+      } as const;
+      const value = { test: "data" };
+
+      // Write value first
+      transaction.write(address, value);
+
+      // Test string metadata
+      const stringMeta = { type: "string", data: "test string" };
+      const stringResult = transaction.read(address, { meta: stringMeta });
+      expect(stringResult.ok).toBeDefined();
+
+      // Test number metadata
+      const numberMeta = { count: 42, weight: 3.14 };
+      const numberResult = transaction.read(address, { meta: numberMeta });
+      expect(numberResult.ok).toBeDefined();
+
+      // Test boolean metadata
+      const booleanMeta = { enabled: true, debug: false };
+      const booleanResult = transaction.read(address, { meta: booleanMeta });
+      expect(booleanResult.ok).toBeDefined();
+
+      // Test nested object metadata
+      const nestedMeta = { config: { nested: { value: "deep" } }, array: [1, 2, 3] };
+      const nestedResult = transaction.read(address, { meta: nestedMeta });
+      expect(nestedResult.ok).toBeDefined();
+
+      // Test empty metadata object
+      const emptyMeta = {};
+      const emptyResult = transaction.read(address, { meta: emptyMeta });
+      expect(emptyResult.ok).toBeDefined();
+    });
+
     it("should handle cross-space operations", () => {
       const address1 = {
         space,
@@ -156,6 +235,76 @@ describe("StorageTransaction", () => {
       expect(read2.ok).toBeDefined();
       if (read2.ok) {
         expect(read2.ok.value).toBeUndefined(); // No data written
+      }
+    });
+
+    it("should handle cross-space operations with metadata", () => {
+      const address1 = {
+        space,
+        id: "test:cross-space-meta",
+        type: "application/json",
+        path: [],
+      } as const;
+      const address2 = {
+        space: space2,
+        id: "test:cross-space-meta",
+        type: "application/json",
+        path: [],
+      } as const;
+      const metadata1 = { space: "first", operation: "test" };
+      const metadata2 = { space: "second", operation: "test" };
+
+      // Write to first space
+      transaction.write(address1, { data: "space1" });
+
+      // Read from first space with metadata
+      const read1 = transaction.read(address1, { meta: metadata1 });
+      expect(read1.ok).toBeDefined();
+      if (read1.ok) {
+        expect(read1.ok.value).toEqual({ data: "space1" });
+      }
+
+      // Read from second space with metadata (should work, but no data)
+      const read2 = transaction.read(address2, { meta: metadata2 });
+      expect(read2.ok).toBeDefined();
+      if (read2.ok) {
+        expect(read2.ok.value).toBeUndefined(); // No data written
+      }
+    });
+
+    it("should support metadata in reader and writer interfaces", () => {
+      const address = {
+        id: "test:interface-meta",
+        type: "application/json",
+        path: [],
+      } as const;
+      const value = { name: "Interface Test" };
+      const metadata = { interface: "reader", test: true };
+
+      // Get reader and writer
+      const readerResult = transaction.reader(space);
+      const writerResult = transaction.writer(space);
+      expect(readerResult.ok).toBeDefined();
+      expect(writerResult.ok).toBeDefined();
+
+      const reader = readerResult.ok!;
+      const writer = writerResult.ok!;
+
+      // Write using writer
+      writer.write(address, value);
+
+      // Read using reader with metadata
+      const readResult = reader.read(address, { meta: metadata });
+      expect(readResult.ok).toBeDefined();
+      if (readResult.ok) {
+        expect(readResult.ok.value).toEqual(value);
+      }
+
+      // Read using writer with metadata (writer extends reader)
+      const writerReadResult = writer.read(address, { meta: metadata });
+      expect(writerReadResult.ok).toBeDefined();
+      if (writerReadResult.ok) {
+        expect(writerReadResult.ok.value).toEqual(value);
       }
     });
   });

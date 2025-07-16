@@ -15,7 +15,7 @@ export class CharmsController {
   }
 
   async create(
-    program: RuntimeProgram,
+    program: RuntimeProgram | string,
     input?: object,
   ): Promise<CharmController> {
     const recipe = await compileProgram(this.#manager, program);
