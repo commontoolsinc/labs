@@ -218,7 +218,9 @@ export class Runner implements IRunner {
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
-    if (!processCell.key("argument").getRaw()) {
+    if (
+      !processCell.key("argument").getRaw({ meta: ignoreReadForScheduling })
+    ) {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 

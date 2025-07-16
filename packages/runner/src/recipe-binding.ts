@@ -163,7 +163,7 @@ export function findAllWriteRedirectCells<T>(
         baseCell.tx,
       );
       if (!linkCell) throw new Error("Link cell not found");
-      find(linkCell.getRaw(), baseCell);
+      find(linkCell.getRaw({ meta: ignoreReadForScheduling }), baseCell);
     } else if (isLink(binding)) {
       // Links that are not write redirects: Ignore them.
       return;

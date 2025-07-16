@@ -36,6 +36,7 @@ import type { IRuntime } from "../runtime.ts";
 import type { EntityId } from "../doc-map.ts";
 import { getValueAtPath } from "../path-utils.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
+import { ignoreReadForScheduling } from "../scheduler.ts";
 
 /**
  * Convert a URI string to an EntityId object
@@ -630,7 +631,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // Create parent entries if needed
       const lastValidPath = writeResult.error.path;
       const valueObj = lastValidPath
-        ? this.readValueOrThrow({ ...address, path: lastValidPath })
+        ? this.readValueOrThrow({ ...address, path: lastValidPath }, {
+          meta: ignoreReadForScheduling,
+        })
         : {};
       if (!isRecord(valueObj)) {
         throw new Error(
