@@ -79,7 +79,6 @@ const result = count + 1;
 `;
 
       await transformSource(source, {
-        debug: true,
         types,
         logger: (msg) => logs.push(msg),
       });

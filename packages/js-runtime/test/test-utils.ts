@@ -17,7 +17,6 @@ export async function transformSource(
   source: string,
   options: {
     mode?: "transform" | "error";
-    debug?: boolean;
     types?: Record<string, string>;
     logger?: (message: string) => void;
     applySchemaTransformer?: boolean;
@@ -25,7 +24,6 @@ export async function transformSource(
 ): Promise<string> {
   const {
     mode = "transform",
-    debug = false,
     types = {},
     logger,
     applySchemaTransformer = false,
@@ -158,8 +156,8 @@ export async function transformSource(
   // Create the program
   const program = ts.createProgram([fileName], compilerOptions, host);
 
-  // Debug: Check for errors
-  if (debug && logger) {
+  // Check for errors when logger is provided
+  if (logger) {
     const diagnostics = ts.getPreEmitDiagnostics(program);
     if (diagnostics.length > 0) {
       logger("=== TypeScript Diagnostics ===");
@@ -180,13 +178,12 @@ export async function transformSource(
   // Always add OpaqueRef transformer first
   transformers.push(createOpaqueRefTransformer(program, {
     mode,
-    debug,
     logger,
   }));
 
   // Optionally add schema transformer
   if (applySchemaTransformer) {
-    transformers.push(createSchemaTransformer(program, { debug }));
+    transformers.push(createSchemaTransformer(program, {}));
   }
 
   // Transform the source file
@@ -200,7 +197,7 @@ export async function transformSource(
   });
   const output = printer.printFile(result.transformed[0]);
 
-  if (debug && logger) {
+  if (logger) {
     logger(`\n=== TEST TRANSFORMER OUTPUT ===\n${output}\n=== END OUTPUT ===`);
   }
 
