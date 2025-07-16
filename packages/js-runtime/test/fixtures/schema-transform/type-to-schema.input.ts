@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { recipe, handler, toSchema, Cell, Stream } from "commontools";
 
 // Define types using TypeScript - more compact!
