@@ -26,12 +26,11 @@ const MEMORY_WS_URL = `${
 const SPACE_NAME = "runner_integration";
 
 const TOTAL_COUNT = 100; // how many elements we push to the array
-const TIMEOUT_MS = 60000; // timeout for the test in ms
+const TIMEOUT_MS = 30000; // timeout for the test in ms
 
 console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);
 console.log(`Toolshed URL: ${TOOLSHED_URL}`);
-console.log(`Space Name: ${SPACE_NAME}`);
 
 // Set up timeout
 const timeoutPromise = new Promise((_, reject) => {
@@ -93,22 +92,18 @@ async function runTest() {
   console.log("Result charm ID:", getEntityId(charm));
 
   // Wait so we can load the page on the browser
-  await new Promise((resolve) => setTimeout(resolve, 15000));
+  // await new Promise((resolve) => setTimeout(resolve, 10000));
 
-  // BATCH VERSION - causes errors
+  // Get the handler stream and send some numbers
   const pushHandlerStream = charm.key("pushHandler");
-  console.log("Sending event to push all items at once");
-  pushHandlerStream.send({});
+  let sendCount = 0;
 
-  // ORIGINAL VERSION - works without errors
-  // const pushHandlerStream = charm.key("pushHandler");
-  // let sendCount = 0;
-  // // Loop, sending numbers one by one
-  // for (let i = 0; i < TOTAL_COUNT; i++) {
-  //   console.log(`Sending value: ${i}`);
-  //   pushHandlerStream.send({ value: i });
-  //   sendCount++;
-  // }
+  // Loop, sending numbers one by one
+  for (let i = 0; i < TOTAL_COUNT; i++) {
+    console.log(`Sending value: ${i}`);
+    pushHandlerStream.send({ value: i });
+    sendCount++;
+  }
 
   console.log("Waiting for runtime to finish and storage to sync...");
   await runtime.idle();
