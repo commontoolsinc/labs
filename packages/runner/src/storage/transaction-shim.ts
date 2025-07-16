@@ -245,6 +245,7 @@ class TransactionReader implements ITransactionReader {
 
     // Path-based logic
     if (!address.path.length) {
+      console.error("Path must not be empty for address:", address);
       const notFoundError: INotFoundError = new Error(
         `Path must not be empty`,
       ) as INotFoundError;
@@ -348,6 +349,14 @@ class TransactionWriter extends TransactionReader
 
     if (!doc) {
       throw new Error(`Failed to get or create document: ${address.id}`);
+    }
+
+    if (!address.path.length) {
+      console.error("Path must not be empty for address:", address);
+      console.error("Value: ", value);
+      console.error("value is object:", isObject(value));
+      console.error("'value' in value:", "value" in value);
+      console.error("value.value:", value?.value);
     }
 
     // Rewrite creating new documents as setting the value
@@ -628,6 +637,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): void {
     const writeResult = this.tx.write(address, value);
     if (writeResult.error && writeResult.error.name === "NotFoundError") {
+      console.log("[writeOrThrow] NotFoundError retry logic");
+      console.log("[writeOrThrow] address:", address);
+      console.log("[writeOrThrow] value:", value);
+      console.log("[writeOrThrow] error.path:", writeResult.error.path);
+      
       // Create parent entries if needed
       const lastValidPath = writeResult.error.path;
       const valueObj = lastValidPath
@@ -635,26 +649,38 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           meta: ignoreReadForScheduling,
         })
         : {};
+      console.log("[writeOrThrow] valueObj after read:", valueObj);
+      
       if (!isRecord(valueObj)) {
         throw new Error(
           `Value at path ${address.path.join("/")} is not an object`,
         );
       }
       const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
+      console.log("[writeOrThrow] remainingPath:", remainingPath);
+      
       if (remainingPath.length === 0) {
         throw new Error(
           `Invalid error path: ${lastValidPath?.join("/")}`,
         );
       }
       const lastKey = remainingPath.pop()!;
+      console.log("[writeOrThrow] lastKey:", lastKey);
+      
       let nextValue = valueObj;
       for (const key of remainingPath) {
+        console.log("[writeOrThrow] Creating structure for key:", key);
+        console.log("[writeOrThrow] typeof Number(key):", typeof Number(key));
+        console.log("[writeOrThrow] Number.isNaN(Number(key)):", Number.isNaN(Number(key)));
         nextValue =
           nextValue[key] =
             (Number.isInteger(Number(key)) ? [] : {}) as typeof nextValue;
       }
       nextValue[lastKey] = value;
+      console.log("[writeOrThrow] Final valueObj to write:", valueObj);
+      
       const parentAddress = { ...address, path: lastValidPath ?? [] };
+      console.log("[writeOrThrow] parentAddress:", parentAddress);
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
       if (writeResultRetry.error) {
         throw writeResultRetry.error;
@@ -668,6 +694,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     address: IMemorySpaceAddress,
     value: JSONValue | undefined,
   ): void {
+    console.log("[writeValueOrThrow] Input address:", address);
+    console.log("[writeValueOrThrow] Input path:", address.path);
+    console.log("[writeValueOrThrow] Input value:", value);
+    console.log("[writeValueOrThrow] Transformed path:", ["value", ...address.path]);
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 

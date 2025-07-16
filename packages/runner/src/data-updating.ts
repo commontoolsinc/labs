@@ -269,6 +269,10 @@ export function normalizeAndDiff(
 
   // Handle arrays
   if (Array.isArray(newValue)) {
+    console.log("[normalizeAndDiff] Array case - newValue:", newValue);
+    console.log("[normalizeAndDiff] Array case - currentValue:", currentValue);
+    console.log("[normalizeAndDiff] Array case - link:", link);
+    
     // If the current value is not an array, set it to an empty array
     if (!Array.isArray(currentValue)) {
       changes.push({ location: link, value: [] });
@@ -362,20 +366,32 @@ export function normalizeAndDiff(
   if (
     link.path.length > 0 && link.path[link.path.length - 1] === "length"
   ) {
+    console.log("[normalizeAndDiff] Length property case");
+    console.log("[normalizeAndDiff] link.path:", link.path);
+    console.log("[normalizeAndDiff] newValue:", newValue);
+    
     const maybeCurrentArray = tx.readValueOrThrow({
       ...link,
       path: link.path.slice(0, -1),
     }, options);
+    console.log("[normalizeAndDiff] Parent array:", maybeCurrentArray);
     if (Array.isArray(maybeCurrentArray)) {
       const currentLength = maybeCurrentArray.length;
       const newLength = newValue as number;
+      console.log("[normalizeAndDiff] currentLength:", currentLength);
+      console.log("[normalizeAndDiff] newLength:", newLength);
+      
       if (currentLength !== newLength) {
         changes.push({ location: link, value: newLength });
+        console.log("[normalizeAndDiff] Array length changed, need to update elements");
+        console.log("[normalizeAndDiff] Loop from", Math.min(currentLength, newLength), "to", Math.max(currentLength, newLength));
+        
         for (
           let i = Math.min(currentLength, newLength);
           i < Math.max(currentLength, newLength);
           i++
         ) {
+          console.log("[normalizeAndDiff] Adding undefined at path:", [...link.path.slice(0, -1), i.toString()]);
           changes.push({
             location: {
               ...link,
@@ -386,7 +402,9 @@ export function normalizeAndDiff(
         }
         return changes;
       }
-    } // else, i.e. parent is not an array: fall through to the primitive case
+    } else {
+      console.log("[normalizeAndDiff] Parent is not an array, falling through");
+    }
   }
 
   // Handle primitive values and other cases (Object.is handles NaN and -0)
