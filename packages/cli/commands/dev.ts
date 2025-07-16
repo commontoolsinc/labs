@@ -29,8 +29,8 @@ export const dev = new Command()
     "The filename used when compiling the recipe, used in source maps.",
   )
   .option(
-    "--debug",
-    "Enable debug logging for transformers (shows transformed code).",
+    "--show-transformed",
+    "Show only the transformed TypeScript source code without executing the recipe.",
   )
   .arguments("<main:string>")
   .action(async (options, main) => {
@@ -40,9 +40,11 @@ export const dev = new Command()
       run: options.run,
       output: options.output,
       filename: options.filename,
-      debug: options.debug,
+      showTransformed: options.showTransformed,
     });
-    if (exports) {
+    // If --show-transformed is used, the transformed source is already printed to stdout
+    // and we don't want to print the JSON output
+    if (!options.showTransformed && exports) {
       const mainExport = "default" in exports ? exports.default : exports;
       try {
         // Stringify before rendering, as the exported

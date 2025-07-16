@@ -11,6 +11,15 @@ export { createSchemaTransformer } from "./schema.ts";
 // Logging transformer
 export { createLoggingTransformer } from "./logging.ts";
 
+// Debug utilities
+export { 
+  type TransformerDebugger, 
+  type TransformerOptions,
+  type TransformerDebugInfo,
+  createDebugger,
+  TRANSFORMATION_TYPES 
+} from "./debug.ts";
+
 // Type checking utilities
 export {
   collectOpaqueRefs,

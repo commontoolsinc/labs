@@ -20,8 +20,8 @@ export interface TypeScriptHarnessProcessOptions {
   // Filename to use in the compiled JS code, for engines
   // that apply source maps.
   filename?: string;
-  // Enable debug logging for transformers (shows transformed code).
-  debug?: boolean;
+  // Show only the transformed TypeScript source code without executing.
+  showTransformed?: boolean;
 }
 
 // A `Harness` wraps a flow of compiling, bundling, and executing typescript.
