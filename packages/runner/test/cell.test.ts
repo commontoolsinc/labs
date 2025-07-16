@@ -249,9 +249,9 @@ describe("Cell utility functions", () => {
       tx,
     );
     c.set({ x: 10 });
-    const ref = c.key("x").getAsLegacyCellLink();
-    expect(isLegacyCellLink(ref)).toBe(true);
-    expect(isLegacyCellLink({})).toBe(false);
+    const ref = c.key("x").getAsLink();
+    expect(isAnyCellLink(ref)).toBe(true);
+    expect(isAnyCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
@@ -366,7 +366,7 @@ describe("createProxy", () => {
       tx,
     );
     c.set({ x: 42 });
-    const ref = c.key("x").getAsLegacyCellLink();
+    const ref = c.key("x").getAsLink();
     const proxy = c.getAsQueryResult();
     proxy.y = ref;
     expect(proxy.y).toBe(42);
@@ -380,7 +380,7 @@ describe("createProxy", () => {
       tx,
     );
     c.set({ x: 42 });
-    const ref = c.key("x").getAsLegacyCellLink();
+    const ref = c.key("x").getAsLink();
     const proxy = c.getAsQueryResult();
     proxy.x = ref;
     expect(proxy.x).toBe(42);
@@ -583,9 +583,9 @@ describe("createProxy", () => {
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
     const log = txToReactivityLog(tx);
-    expect(areLinksSame(log.writes[0], c.key("length").getAsLegacyCellLink()))
+    expect(areLinksSame(log.writes[0], c.key("length").getAsLink()))
       .toBe(true);
-    expect(areLinksSame(log.writes[1], c.key(2).getAsLegacyCellLink())).toBe(
+    expect(areLinksSame(log.writes[1], c.key(2).getAsLink())).toBe(
       true,
     );
     proxy.length = 4;
@@ -1309,8 +1309,8 @@ describe("asCell with schema", () => {
       tx,
     );
     innerCell.set({ value: 42 });
-    const cellRef = innerCell.getAsLegacyCellLink();
-    const aliasRef = { $alias: innerCell.getAsLegacyCellLink() };
+    const cellRef = innerCell.getAsLink();
+    const aliasRef = innerCell.getAsWriteRedirectLink();
 
     // Create a cell that uses all reference types
     const c = runtime.getCell<{
@@ -2200,5 +2200,38 @@ describe("getAsWriteRedirectLink method", () => {
 
     // Should omit space
     expect(alias["/"][LINK_V1_TAG].space).toBeUndefined();
+  });
+});
+
+describe("getImmutableCell", () => {
+  describe("asCell", () => {
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+
+      runtime = new Runtime({
+        blobbyServerUrl: import.meta.url,
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("should create a cell with the correct schema", () => {
+      const schema = {
+        type: "object",
+        properties: { value: { type: "number" } },
+      } as const satisfies JSONSchema;
+      const cell = runtime.getImmutableCell(space, { value: 42 }, schema, tx);
+      expect(cell.get()).toEqual({ value: 42 });
+    });
   });
 });

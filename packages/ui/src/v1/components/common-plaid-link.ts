@@ -115,7 +115,7 @@ export class CommonPlaidLinkElement extends LitElement {
     this.isLoading = true;
     this.authStatus = "Creating link session...";
 
-    const authCellId = JSON.stringify(this.auth?.getAsLegacyCellLink());
+    const authCellId = JSON.stringify(this.auth?.getAsLink());
 
     const container = CommonCharmElement.findCharmContainer(this);
     if (!container) {
@@ -264,7 +264,7 @@ export class CommonPlaidLinkElement extends LitElement {
     this.isLoading = true;
     this.authStatus = "Removing bank connection...";
 
-    const authCellId = JSON.stringify(this.auth?.getAsLegacyCellLink());
+    const authCellId = JSON.stringify(this.auth?.getAsLink());
 
     try {
       const response = await fetch(

@@ -175,7 +175,7 @@ describe("Recipe Runner", () => {
           multiplied: {
             type: "array",
             items: {
-              type: "number",
+              type: "object",
               properties: { multiplied: { type: "number" } },
             },
           },
@@ -939,8 +939,8 @@ describe("Recipe Runner", () => {
     // Make sure it recovers:
     dividend.send(2);
     await runtime.idle();
-    expect((charm.getRaw() as any).result.$alias.cell).toBe(
-      charm.getSourceCell()?.getDoc(),
+    expect((charm.getRaw() as any).result.$alias.cell).toEqual(
+      JSON.parse(JSON.stringify(charm.getSourceCell()?.getDoc())),
     );
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });
@@ -982,6 +982,8 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
     expect(timeoutCalled).toBe(true);
+    console.log("raw", result.getRaw());
+    console.log("get", result.get());
     expect(result.get()).toMatchObject({ result: 2 });
   });
 

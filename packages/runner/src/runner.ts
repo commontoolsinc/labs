@@ -32,16 +32,15 @@ import {
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
   isLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
-  parseToLegacyAlias,
 } from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { isCell } from "./cell.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
@@ -103,7 +102,7 @@ export class Runner implements IRunner {
 
     let processCell: Cell<ProcessCellData>;
 
-    const sourceCell = resultCell.getSourceCell();
+    const sourceCell = resultCell.withTx(tx).getSourceCell();
     if (sourceCell !== undefined) {
       processCell = sourceCell as Cell<ProcessCellData>;
     } else {
@@ -113,7 +112,7 @@ export class Runner implements IRunner {
         undefined,
         tx,
       );
-      resultCell.getDoc().sourceCell = processCell.getDoc();
+      resultCell.withTx(tx).setSourceCell(processCell);
     }
 
     let recipeId: string | undefined;
@@ -181,7 +180,10 @@ export class Runner implements IRunner {
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
     if (isLink(argument)) {
-      argument = parseToLegacyAlias(argument) as T;
+      argument = createSigilLinkFromParsedLink(
+        parseLink(argument),
+        processCell,
+      ) as T;
     }
 
     // Walk the recipe's schema and extract all default values
@@ -213,7 +215,7 @@ export class Runner implements IRunner {
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw(),
       [TYPE]: recipeId || "unknown",
-      resultRef: resultCell.getAsLegacyCellLink(),
+      resultRef: resultCell.getAsLink({ base: processCell }),
       internal,
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
@@ -826,7 +828,7 @@ export class Runner implements IRunner {
       tx,
       processCell,
       outputBindings,
-      resultCell.getAsLegacyCellLink(),
+      resultCell.getAsLink({ base: processCell }),
     );
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving

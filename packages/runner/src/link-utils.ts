@@ -16,7 +16,7 @@ import {
 import { toURI } from "./uri-utils.ts";
 import { arrayEqual } from "./path-utils.ts";
 import {
-  getCellLinkOrThrow,
+  getCellOrThrow,
   isQueryResultForDereferencing,
   QueryResultInternals,
 } from "./query-result-proxy.ts";
@@ -246,7 +246,7 @@ export function parseLink(
 ): NormalizedLink | undefined {
   // Has to be first, since below we check for "/" in value and we don't want to
   // see userland "/".
-  if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);
+  if (isQueryResultForDereferencing(value)) value = getCellOrThrow(value);
 
   if (isCell(value)) return value.getAsNormalizedFullLink();
 
@@ -271,7 +271,7 @@ export function parseLink(
 
     // If no id provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.getDoc().entityId) : base.id;
+      id = isCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {
@@ -334,7 +334,7 @@ export function parseLink(
 
     // If no cell provided, use base cell's document
     if (!id && base) {
-      id = isCell(base) ? toURI(base.getDoc().entityId) : base.id;
+      id = isCell(base) ? toURI(base.entityId) : base.id;
     }
 
     return {
@@ -364,114 +364,6 @@ export function parseLinkOrThrow(
     throw new Error(`Cannot parse value as link: ${JSON.stringify(value)}`);
   }
   return result;
-}
-
-/**
- * Parse a link to a legacy CellLink format
- *
- * @deprecated Switch to parseLink instead.
- *
- * @param value - The value to parse
- * @param baseCell - The base cell to use for resolving relative references
- * @returns The parsed cell link, or undefined if the value cannot be parsed
- */
-export function parseToLegacyCellLink(
-  value: CellLink,
-  baseCell?: Cell,
-): LegacyDocCellLink;
-export function parseToLegacyCellLink(
-  value: any,
-  baseCell?: Cell,
-): LegacyDocCellLink | undefined;
-export function parseToLegacyCellLink(
-  value: any,
-  baseCell?: Cell,
-): LegacyDocCellLink | undefined {
-  const partial = parseToLegacyCellLinkWithMaybeACell(value, baseCell);
-  if (!partial) return undefined;
-  if (!isDoc(partial.cell)) throw new Error("No id or base cell provided");
-  return partial as LegacyDocCellLink;
-}
-
-/**
- * Parse a link to a legacy Alias format
- *
- * @deprecated Switch to parseLink instead.
- *
- * @param value - The value to parse
- * @param baseCell - The base cell to use for resolving relative references
- * @returns The parsed alias, or undefined if the value cannot be parsed
- */
-export function parseToLegacyAlias(
-  value: CellLink,
-): LegacyAlias;
-export function parseToLegacyAlias(value: any): LegacyAlias | undefined;
-export function parseToLegacyAlias(value: any): LegacyAlias | undefined {
-  const partial = parseToLegacyCellLinkWithMaybeACell(value);
-  if (!partial) return undefined;
-  return { $alias: partial } as LegacyAlias;
-}
-
-function parseToLegacyCellLinkWithMaybeACell(
-  value: any,
-  baseCell?: Cell,
-): Partial<LegacyDocCellLink> | undefined {
-  // Has to be first, since below we check for "/" in value and we don't want to
-  // see userland "/".
-  if (isQueryResultForDereferencing(value)) value = getCellLinkOrThrow(value);
-
-  // parseLink "forgets" the legacy docs, so we for now parse it here as well.
-  // This is in case no baseCell was provided.
-  const doc = isDoc(value)
-    ? value
-    : isCell(value)
-    ? value.getDoc()
-    : (isRecord(value) && isDoc((value as any).cell))
-    ? (value as any).cell
-    : (isRecord(value) && (value as any).$alias &&
-        isDoc((value as any).$alias.cell))
-    ? (value as any).$alias.cell
-    : undefined;
-
-  const link = parseLink(value, baseCell);
-  if (!link) return undefined;
-
-  const cellValue = doc ??
-    (link.id && baseCell
-      ? baseCell.getDoc().runtime!.documentMap.getDocByEntityId(
-        link.space ?? baseCell!.space!,
-        link.id!,
-        true,
-      )
-      : undefined);
-
-  return {
-    cell: cellValue,
-    path: link.path as string[] ?? [],
-    space: link.space,
-    schema: link.schema,
-    rootSchema: link.rootSchema,
-  } satisfies Partial<LegacyDocCellLink>;
-}
-
-/**
- * Parse a normalized full link to a legacy doc cell link
- *
- * @deprecated
- *
- * @param link - The normalized full link to parse
- * @param runtime - The runtime to use for getting the cell
- * @returns The parsed legacy doc cell link
- */
-export function parseNormalizedFullLinktoLegacyDocCellLink(
-  link: NormalizedFullLink,
-  runtime: IRuntime,
-): LegacyDocCellLink {
-  const cell = runtime.getCellFromLink(link, undefined);
-  return {
-    cell: cell.getDoc(),
-    path: link.path as string[],
-  } satisfies LegacyDocCellLink;
 }
 
 /**
@@ -524,6 +416,7 @@ export function areNormalizedLinksSame(
 export function createSigilLinkFromParsedLink(
   link: NormalizedLink,
   base?: Cell | NormalizedLink,
+  overwrite?: "redirect",
 ): SigilLink {
   const sigilLink: SigilLink = {
     "/": {
@@ -531,6 +424,7 @@ export function createSigilLinkFromParsedLink(
         path: link.path as string[],
         schema: link.schema,
         rootSchema: link.rootSchema,
+        ...(overwrite === "redirect" ? { overwrite } : {}),
       },
     },
   };
@@ -542,7 +436,7 @@ export function createSigilLinkFromParsedLink(
 
   // Only add id if different from base
   const baseId = base
-    ? (isCell(base) ? toURI(base.getDoc().entityId) : base.id)
+    ? (isCell(base) ? toURI(base.entityId) : base.id)
     : undefined;
   if (link.id !== baseId) {
     sigilLink["/"][LINK_V1_TAG].id = link.id;

@@ -562,16 +562,10 @@ export class Runtime implements IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    const dataURI = `data:application/json,${
-      encodeURIComponent(JSON.stringify({ value: data }))
-    }` as `${string}:${string}`;
-    return createCell(this, {
-      space,
-      id: dataURI,
-      path: [],
-      schema,
-      type: "application/json",
-    }, tx);
+    const doc = this.documentMap.getDoc<any>(data, { immutable: data }, space);
+    doc.freeze("immutable cell");
+    doc.ephemeral = true; // Since soon these will be data: URIs
+    return doc.asCell([], schema, undefined, tx);
   }
 
   // Convenience methods that delegate to the runner

@@ -225,7 +225,7 @@ export function normalizeAndDiff(
         runtime,
         tx,
         link,
-        createSigilLinkFromParsedLink(newEntryLink),
+        createSigilLinkFromParsedLink(newEntryLink, link),
         context,
       ),
       // And see whether the value of the document itself changed

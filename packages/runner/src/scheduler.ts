@@ -3,7 +3,7 @@ import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
-  getCellLinkOrThrow,
+  getCellOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { ConsoleEvent } from "./harness/console.ts";
@@ -532,14 +532,21 @@ function getCharmMetadataFromFrame(): {
     return;
   }
   const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
-  const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
-  const spellLink = parseLink(source?.get()?.["spell"]);
-  result.spellId = spellLink?.id;
-  result.recipeId = source?.get()?.[TYPE];
-  const resultDoc = source?.get()?.resultRef?.cell;
-  result.space = resultDoc?.space;
+  const source = getCellOrThrow(sourceAsProxy).asSchema({
+    type: "object",
+    properties: {
+      [TYPE]: { type: "string" },
+      resultRef: {
+        type: "object",
+        asCell: true,
+      },
+    },
+  });
+  result.recipeId = source.get()?.[TYPE];
+  const resultCell = source.get()?.resultRef;
+  result.space = source.space;
   result.charmId = JSON.parse(
-    JSON.stringify(resultDoc?.entityId ?? {}),
+    JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;
 }

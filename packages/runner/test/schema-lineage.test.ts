@@ -64,13 +64,11 @@ describe("Schema Lineage", () => {
         undefined,
         tx,
       );
-      sourceCell.setRaw({
-        $alias: {
-          ...targetCell.getAsLegacyCellLink(),
-          schema,
-          rootSchema: schema,
-        },
-      });
+      sourceCell.setRaw(
+        targetCell.asSchema(schema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
 
       // Access the cell without providing a schema
       // (Type script type is just to avoid compiler errors)
@@ -121,13 +119,11 @@ describe("Schema Lineage", () => {
         undefined,
         tx,
       );
-      sourceCell.setRaw({
-        $alias: {
-          ...targetCell.getAsLegacyCellLink(),
-          schema: aliasSchema,
-          rootSchema: aliasSchema,
-        },
-      });
+      sourceCell.setRaw(
+        targetCell.asSchema(aliasSchema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
 
       // Access the cell with explicit schema
       const cell = sourceCell.asSchema(explicitSchema);
@@ -155,7 +151,7 @@ describe("Schema Lineage", () => {
       valueCell.set({ count: 5, name: "test" });
 
       // Create a schema for our first level alias
-      const numberSchema = { type: "number" };
+      const numberSchema = { type: "number" } as const satisfies JSONSchema;
 
       // Create a cell with an alias specifically for the count field
       const countCell = runtime.getCell<any>(
@@ -164,13 +160,11 @@ describe("Schema Lineage", () => {
         undefined,
         tx,
       );
-      countCell.setRaw({
-        $alias: {
-          ...valueCell.key("count").getAsLegacyCellLink(),
-          schema: numberSchema,
-          rootSchema: numberSchema,
-        },
-      });
+      countCell.setRaw(
+        valueCell.key("count").asSchema(numberSchema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
 
       // Create a third level of aliasing
       const finalCell = runtime.getCell<any>(
@@ -179,9 +173,9 @@ describe("Schema Lineage", () => {
         undefined,
         tx,
       );
-      finalCell.setRaw({
-        $alias: countCell.getAsLegacyCellLink(),
-      });
+      finalCell.setRaw(countCell.getAsWriteRedirectLink({
+        includeSchema: true,
+      }));
 
       // Access the cell without providing a schema
       const cell = finalCell.asSchema();
@@ -228,12 +222,11 @@ describe("Schema Lineage", () => {
         undefined,
         tx,
       );
-      itemsCell.setRaw({
-        $alias: {
-          ...nestedCell.key("items").getAsLegacyCellLink(),
-          schema: arraySchema,
-        },
-      });
+      itemsCell.setRaw(
+        nestedCell.key("items").asSchema(arraySchema).getAsWriteRedirectLink({
+          includeSchema: true,
+        }),
+      );
 
       // Access the items with a schema that specifies array items should be cells
       const itemsCellWithSchema = itemsCell.asSchema(

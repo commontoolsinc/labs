@@ -69,7 +69,7 @@ describe("runRecipe", () => {
       output: {
         $alias: {
           path: ["internal", "output"],
-          cell: result.getSourceCell()?.getDoc(),
+          cell: JSON.parse(JSON.stringify(result.getSourceCell()?.getDoc())),
         },
       },
     });
@@ -767,16 +767,16 @@ describe("runner utils", () => {
         tx,
       );
       const obj1 = { a: { $alias: { path: [] } } };
-      const obj2 = { a: 2, b: { c: testCell.getAsLegacyCellLink() } };
+      const obj2 = { a: 2, b: { c: testCell.getAsLink() } };
       const obj3 = {
-        a: { $alias: testCell.key("a").getAsLegacyCellLink() },
+        a: testCell.key("a").getAsWriteRedirectLink(),
         b: { c: 4 },
       };
 
       const result = mergeObjects<unknown>(obj1, obj2, obj3);
       expect(result).toEqual({
         a: { $alias: { path: [] } },
-        b: { c: testCell.getAsLegacyCellLink() },
+        b: { c: testCell.getAsLink() },
       });
     });
   });

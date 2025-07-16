@@ -20,7 +20,7 @@ export type { IExtendedStorageTransaction } from "./storage/interface.ts";
 export { isDoc } from "./doc.ts";
 export { isCell, isStream } from "./cell.ts";
 export {
-  getCellLinkOrThrow,
+  getCellOrThrow,
   isQueryResult,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
@@ -44,7 +44,6 @@ export {
   isWriteRedirectLink,
   parseLink,
   parseLinkOrThrow,
-  parseToLegacyCellLink,
 } from "./link-utils.ts";
 export * from "./recipe-manager.ts";
 

@@ -142,14 +142,18 @@ describe("recipe-binding", () => {
 
       const result = unwrapOneLevelAndBindtoDoc(binding, testCell);
       expect(
-        areLinksSame(result.x, {
-          $alias: testCell.key("a").getAsLegacyCellLink(),
-        }),
+        areLinksSame(
+          result.x,
+          testCell.key("a").getAsWriteRedirectLink(),
+          testCell,
+        ),
       ).toBe(true);
       expect(
-        areLinksSame(result.y, {
-          $alias: testCell.key("b").key("c").getAsLegacyCellLink(),
-        }),
+        areLinksSame(
+          result.y,
+          testCell.key("b").key("c").getAsWriteRedirectLink(),
+          testCell,
+        ),
       ).toBe(true);
     });
   });

@@ -79,13 +79,13 @@ describe("Schema Support", () => {
       );
       mappingCell.setRaw({
         // as-is
-        id: c.key("id").getAsLegacyCellLink(),
+        id: c.key("id").getAsLink(),
         // turn single value to set
-        changes: [c.key("metadata").key("createdAt").getAsLegacyCellLink()],
+        changes: [c.key("metadata").key("createdAt").getAsLink()],
         // rename field and uplift from nested element
-        kind: c.key("metadata").key("type").getAsLegacyCellLink(),
+        kind: c.key("metadata").key("type").getAsLink(),
         // turn set into a single value
-        tag: c.key("tags").key(0).getAsLegacyCellLink(),
+        tag: c.key("tags").key(0).getAsLink(),
       });
 
       // This schema is how the recipient specifies what they want
@@ -268,7 +268,7 @@ describe("Schema Support", () => {
         undefined,
         tx,
       );
-      linkCell.setRaw(initial.getAsLegacyCellLink());
+      linkCell.setRaw(initial.getAsLink());
       const linkEntityId = linkCell.entityId!;
 
       const docCell = runtime.getCell<{
@@ -282,7 +282,7 @@ describe("Schema Support", () => {
       );
       docCell.setRaw({
         value: "root",
-        current: { $alias: linkCell.key("foo").getAsLegacyCellLink() },
+        current: linkCell.key("foo").getAsWriteRedirectLink(),
       });
       const root = docCell.asSchema(schema);
 
@@ -372,7 +372,7 @@ describe("Schema Support", () => {
         tx,
       );
       second.set({ foo: { label: "second" } });
-      linkCell.setRaw(second.getAsLegacyCellLink());
+      linkCell.setRaw(second.getAsLink());
 
       await runtime.idle();
 
@@ -415,9 +415,7 @@ describe("Schema Support", () => {
         tx,
       );
       third.set({ label: "third" });
-      docCell.key("current").setRaw({
-        $alias: third.getAsLegacyCellLink(),
-      });
+      docCell.key("current").setRaw(third.getAsWriteRedirectLink());
 
       await runtime.idle();
 
@@ -717,9 +715,9 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("parent").setRaw(c.getAsLegacyCellLink());
-      c.key("children").key(0).key("parent").setRaw(c.getAsLegacyCellLink());
-      c.key("children").key(1).key("parent").setRaw(c.getAsLegacyCellLink());
+      c.key("parent").setRaw(c.getAsLink());
+      c.key("children").key(0).key("parent").setRaw(c.getAsLink());
+      c.key("children").key(1).key("parent").setRaw(c.getAsLink());
 
       const schema = {
         type: "object",
@@ -776,10 +774,10 @@ describe("Schema Support", () => {
 
       // Set up circular references using cell links
       c.key("nested").key("items").key(0).key("value").setRaw(
-        c.getAsLegacyCellLink(),
+        c.getAsLink(),
       );
       c.key("nested").key("items").key(1).key("value").setRaw(
-        c.key("nested").getAsLegacyCellLink(),
+        c.key("nested").getAsLink(),
       );
 
       const schema = {
@@ -849,7 +847,7 @@ describe("Schema Support", () => {
       });
 
       // Set up circular references using cell links
-      c.key("children").key(1).key("value").setRaw(c.getAsLegacyCellLink());
+      c.key("children").key(1).key("value").setRaw(c.getAsLink());
 
       const schema = {
         type: "object",
@@ -1344,17 +1342,14 @@ describe("Schema Support", () => {
         );
         childrenArrayCell.set([
           { type: "text", value: "hello" },
-          innerTextCell.getAsLegacyCellLink(),
+          innerTextCell.getAsLink(),
         ]);
 
         const withLinks = runtime.getCell<{
           type: string;
           name: string;
           props: {
-            style: {
-              cell: any;
-              path: any[];
-            };
+            style: any;
           };
           children: any[];
         }>(
@@ -1367,11 +1362,11 @@ describe("Schema Support", () => {
           type: "vnode",
           name: "div",
           props: {
-            style: styleCell.getAsLegacyCellLink(),
+            style: styleCell,
           },
           children: [
             { type: "text", value: "single" },
-            childrenArrayCell.getAsLegacyCellLink(),
+            childrenArrayCell,
             "or just text",
           ],
         });

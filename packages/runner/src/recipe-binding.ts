@@ -38,7 +38,7 @@ export function sendValueToBinding<T>(
   if (isLegacyAlias(binding)) {
     const ref = followWriteRedirects(tx, binding, cell);
     diffAndUpdate(
-      cell.getDoc().runtime,
+      cell.runtime,
       tx,
       ref,
       value as JSONValue,
@@ -85,9 +85,8 @@ export function sendValueToBinding<T>(
  */
 export function unwrapOneLevelAndBindtoDoc<T, U>(
   binding: T,
-  docOrCell: DocImpl<U> | Cell<U>,
+  cell: Cell<U>,
 ): T {
-  const doc = isCell(docOrCell) ? docOrCell.getDoc() : docOrCell;
   function convert(binding: unknown): unknown {
     if (isLegacyAlias(binding)) {
       const alias = { ...binding.$alias };
@@ -100,7 +99,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           alias.cell = alias.cell - 1;
         }
       } else if (!alias.cell) {
-        alias.cell = doc;
+        alias.cell = cell.entityId;
       }
       return { $alias: alias };
     } else if (isDoc(binding)) {
@@ -156,7 +155,7 @@ export function findAllWriteRedirectCells<T>(
       const link = parseLink(binding, baseCell);
       if (seen.find((s) => areNormalizedLinksSame(s, link))) return;
       seen.push(link);
-      const linkCell = baseCell.getDoc().runtime.getCellFromLink(
+      const linkCell = baseCell.runtime.getCellFromLink(
         link,
         undefined,
         baseCell.tx,
