@@ -40,7 +40,7 @@ export default recipe({
         [UI]: (<div>
           <button type="button" onClick={adder({ values })}>Add Value</button>
           <div>
-            {values.get().map((value, index) => (<div>
+            {values.map((value, index) => (<div>
                 {index}: {value}
               </div>))}
           </div>
