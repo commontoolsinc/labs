@@ -545,13 +545,13 @@ function getCharmMetadataFromFrame(): {
     type: "object",
     properties: {
       [TYPE]: { type: "string" },
-      resultRef: {
-        type: "object",
-        asCell: true,
-      },
+      spell: { type: "object", asCell: true },
+      resultRef: { type: "object", asCell: true },
     },
   });
   result.recipeId = source.get()?.[TYPE];
+  const spellCell = source.get()?.spell;
+  result.spellId = spellCell?.getAsNormalizedFullLink().id;
   const resultCell = source.get()?.resultRef;
   result.space = source.space;
   result.charmId = JSON.parse(
