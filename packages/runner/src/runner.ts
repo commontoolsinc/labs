@@ -117,8 +117,8 @@ export class Runner implements IRunner {
 
     let recipeId: string | undefined;
 
-    if (!recipeOrModule && processCell.getRaw()?.[TYPE]) {
-      recipeId = processCell.getRaw()[TYPE];
+    if (!recipeOrModule && processCell.key(TYPE).getRaw()) {
+      recipeId = processCell.key(TYPE).getRaw();
       recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
       if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
     } else if (!recipeOrModule) {
@@ -162,7 +162,10 @@ export class Runner implements IRunner {
     if (this.cancels.has(resultCell.getDoc())) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
-      if (argument === undefined && recipeId === processCell.getRaw()?.[TYPE]) {
+      if (
+        argument === undefined &&
+        recipeId === processCell.key(TYPE).getRaw()
+      ) {
         return resultCell;
       }
 
@@ -190,7 +193,7 @@ export class Runner implements IRunner {
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
-    const previousInternal = processCell.getRaw()?.internal;
+    const previousInternal = processCell.key("internal").getRaw();
     const internal: JSONValue = Object.assign(
       {},
       cellAwareDeepCopy(
@@ -206,11 +209,11 @@ export class Runner implements IRunner {
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
-    if (!processCell.getRaw()?.argument) {
+    if (!processCell.key("argument").getRaw()) {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    const recipeChanged = recipeId !== processCell.getRaw()?.[TYPE];
+    const recipeChanged = recipeId !== processCell.key(TYPE).getRaw();
 
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw(),
