@@ -30,8 +30,8 @@ import { type Cell, isCell } from "@commontools/runner";
  * @attr {boolean} showValidation - Show validation state visually
  * @attr {boolean} error - Manual error state override
  *
- * @fires ct-input - Fired on input with detail: { value, oldValue, name }
- * @fires ct-change - Fired on change with detail: { value, oldValue, name }
+ * @fires ct-input - Fired on input with detail: { value, oldValue, name, files? }
+ * @fires ct-change - Fired on change with detail: { value, oldValue, name, files? }
  * @fires ct-focus - Fired on focus with detail: { value, name }
  * @fires ct-blur - Fired on blur with detail: { value, name }
  * @fires ct-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
@@ -40,10 +40,10 @@ import { type Cell, isCell } from "@commontools/runner";
  *
  * @example
  * <ct-input type="email" placeholder="Enter email" required showValidation></ct-input>
- * 
+ *
  * @example
  * <ct-input type="tel" validationPattern="tel-us" placeholder="(123) 456-7890"></ct-input>
- * 
+ *
  * @example
  * <ct-input type="number" min="0" max="100" step="5"></ct-input>
  */
@@ -321,6 +321,7 @@ export class CTInput extends BaseElement {
   declare showValidation: boolean;
 
   private _input: HTMLInputElement | null = null;
+  private _cellUnsubscribe: (() => void) | null = null;
 
   constructor() {
     super();
@@ -365,7 +366,9 @@ export class CTInput extends BaseElement {
 
   private setValue(newValue: string): void {
     if (isCell(this.value)) {
-      this.value.set(newValue);
+      const tx = this.value.runtime.edit();
+      this.value.withTx(tx).set(newValue);
+      tx.commit(); // TODO: Should we retry?
     } else {
       this.value = newValue;
     }
@@ -376,12 +379,12 @@ export class CTInput extends BaseElement {
     if (this.pattern) {
       return this.pattern;
     }
-    
+
     // Use validation pattern if specified
     if (this.validationPattern && this.validationPattern in INPUT_PATTERNS) {
       return INPUT_PATTERNS[this.validationPattern];
     }
-    
+
     // Use default patterns for specific types
     if (this.type === "email" && !this.pattern) {
       return INPUT_PATTERNS.email;
@@ -389,7 +392,7 @@ export class CTInput extends BaseElement {
     if (this.type === "url" && !this.pattern) {
       return INPUT_PATTERNS.url;
     }
-    
+
     return "";
   }
 
@@ -398,7 +401,7 @@ export class CTInput extends BaseElement {
     if (this.inputmode && this.inputmode !== "text") {
       return this.inputmode;
     }
-    
+
     // Return appropriate inputmode based on type
     switch (this.type) {
       case "email":
@@ -420,10 +423,30 @@ export class CTInput extends BaseElement {
     if (!this.showValidation) {
       return this.error ? "error" : "";
     }
-    
+
     // Check native validation
     const isValid = this.checkValidity();
     return isValid ? "" : "error";
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this._setupCellSubscription();
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this._cleanupCellSubscription();
+  }
+
+  override updated(changedProperties: Map<string, any>) {
+    super.updated(changedProperties);
+    
+    // If the value property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has('value')) {
+      this._cleanupCellSubscription();
+      this._setupCellSubscription();
+    }
   }
 
   override firstUpdated() {
@@ -435,17 +458,37 @@ export class CTInput extends BaseElement {
     }
   }
 
+  private _setupCellSubscription(): void {
+    if (isCell(this.value)) {
+      // Subscribe to cell changes
+      this._cellUnsubscribe = this.value.sink(() => {
+        // Trigger a re-render when the cell value changes
+        this.requestUpdate();
+      });
+    }
+  }
+
+  private _cleanupCellSubscription(): void {
+    if (this._cellUnsubscribe) {
+      this._cellUnsubscribe();
+      this._cellUnsubscribe = null;
+    }
+  }
+
   override render() {
     const pattern = this.getPattern();
     const inputMode = this.getInputMode();
     const validationClass = this.getValidationClass();
-    
+
+    // For file inputs, we can't set the value programmatically
+    const inputValue = this.type === 'file' ? undefined : this.getValue();
+
     return html`
       <input
         type="${this.type}"
         class="${validationClass}"
         placeholder="${ifDefined(this.placeholder || undefined)}"
-        .value="${this.getValue()}"
+        .value="${ifDefined(inputValue)}"
         ?disabled="${this.disabled}"
         ?readonly="${this.readonly}"
         ?required="${this.required}"
@@ -477,26 +520,36 @@ export class CTInput extends BaseElement {
   private _handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
     const oldValue = this.getValue();
-    this.setValue(input.value);
+    
+    // For file inputs, we can't set the value programmatically
+    if (this.type !== 'file') {
+      this.setValue(input.value);
+    }
 
     // Emit custom input event
     this.emit("ct-input", {
       value: input.value,
       oldValue,
       name: this.name,
+      files: this.type === 'file' ? input.files : undefined,
     });
   }
 
   private _handleChange(event: Event) {
     const input = event.target as HTMLInputElement;
     const oldValue = this.getValue();
-    this.setValue(input.value);
+    
+    // For file inputs, we can't set the value programmatically
+    if (this.type !== 'file') {
+      this.setValue(input.value);
+    }
 
     // Emit custom change event
     this.emit("ct-change", {
       value: input.value,
       oldValue,
       name: this.name,
+      files: this.type === 'file' ? input.files : undefined,
     });
   }
 
@@ -536,7 +589,7 @@ export class CTInput extends BaseElement {
 
   private _handleInvalid(event: Event) {
     event.preventDefault(); // Prevent browser's default validation UI
-    
+
     const input = event.target as HTMLInputElement;
     this.emit("ct-invalid", {
       value: this.getValue(),
@@ -544,7 +597,7 @@ export class CTInput extends BaseElement {
       validationMessage: input.validationMessage,
       validity: input.validity,
     });
-    
+
     // Update visual state if showValidation is enabled
     if (this.showValidation) {
       this.requestUpdate();
