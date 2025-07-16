@@ -6,8 +6,8 @@ import {
   unsafe_parentRecipe,
 } from "./builder/types.ts";
 import { isLegacyAlias, isLink } from "./link-utils.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
-import { type Cell, isCell } from "./cell.ts";
+import { isDoc } from "./doc.ts";
+import { type Cell } from "./cell.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
@@ -17,6 +17,7 @@ import {
   parseLink,
 } from "./link-utils.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 
 /**
  * Sends a value to a binding. If the binding is an array or object, it'll
@@ -43,6 +44,7 @@ export function sendValueToBinding<T>(
       ref,
       value as JSONValue,
       { cell: cell.getAsNormalizedFullLink(), binding },
+      { meta: ignoreReadForScheduling },
     );
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value)) {

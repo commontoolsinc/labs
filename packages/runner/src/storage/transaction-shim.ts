@@ -589,16 +589,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.read(address, options);
   }
 
-  readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
-    const readResult = this.tx.read(address);
+  readOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    const readResult = this.tx.read(address, options);
     if (readResult.error && readResult.error.name !== "NotFoundError") {
       throw readResult.error;
     }
     return readResult.ok?.value;
   }
 
-  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
-    return this.readOrThrow({ ...address, path: ["value", ...address.path] });
+  readValueOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    return this.readOrThrow(
+      { ...address, path: ["value", ...address.path] },
+      options,
+    );
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {

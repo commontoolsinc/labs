@@ -44,6 +44,7 @@ import "./builtins/index.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 
 export class Runner implements IRunner {
   readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
@@ -117,8 +118,13 @@ export class Runner implements IRunner {
 
     let recipeId: string | undefined;
 
-    if (!recipeOrModule && processCell.key(TYPE).getRaw()) {
-      recipeId = processCell.key(TYPE).getRaw();
+    if (
+      !recipeOrModule &&
+      processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
+    ) {
+      recipeId = processCell.key(TYPE).getRaw({
+        meta: ignoreReadForScheduling,
+      });
       recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
       if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
     } else if (!recipeOrModule) {
@@ -164,7 +170,8 @@ export class Runner implements IRunner {
       // we are just returning the result doc
       if (
         argument === undefined &&
-        recipeId === processCell.key(TYPE).getRaw()
+        recipeId ===
+          processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
       ) {
         return resultCell;
       }
@@ -193,7 +200,9 @@ export class Runner implements IRunner {
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
-    const previousInternal = processCell.key("internal").getRaw();
+    const previousInternal = processCell.key("internal").getRaw({
+      meta: ignoreReadForScheduling,
+    });
     const internal: JSONValue = Object.assign(
       {},
       cellAwareDeepCopy(
@@ -213,10 +222,12 @@ export class Runner implements IRunner {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    const recipeChanged = recipeId !== processCell.key(TYPE).getRaw();
+    const recipeChanged = recipeId !== processCell.key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    });
 
     processCell.withTx(tx).setRaw({
-      ...processCell.getRaw(),
+      ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: recipeId || "unknown",
       resultRef: resultCell.getAsLink({ base: processCell }),
       internal,

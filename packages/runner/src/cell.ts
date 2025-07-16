@@ -20,7 +20,6 @@ import {
   resolveLinkToWriteRedirect,
 } from "./link-resolution.ts";
 import { txToReactivityLog } from "./scheduler.ts";
-import { type EntityId } from "./doc-map.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
@@ -34,7 +33,10 @@ import {
 import { areLinksSame, isLink } from "./link-utils.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IReadOptions,
+} from "./storage/interface.ts";
 import { fromURI } from "./uri-utils.ts";
 
 /**
@@ -97,6 +99,7 @@ import { fromURI } from "./uri-utils.ts";
  *
  * @method getRaw Raw access method, without following aliases (which would
  * write to the destination instead of the cell itself).
+ * @param {IReadOptions} options - Optional read options.
  * @returns {any} - Raw document data
  *
  * @method setRaw Raw write method that bypasses Cell validation,
@@ -192,7 +195,7 @@ declare module "@commontools/api" {
       },
     ): SigilWriteRedirectLink;
     getDoc(): DocImpl<any>;
-    getRaw(): any;
+    getRaw(options?: IReadOptions): any;
     setRaw(value: any): void;
     getSourceCell<T>(
       schema?: JSONSchema,
@@ -263,7 +266,7 @@ export type Cellify<T> =
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
-  getRaw(): any;
+  getRaw(options?: IReadOptions): any;
   getAsNormalizedFullLink(): NormalizedFullLink;
   getDoc(): DocImpl<any>;
   withTx(tx?: IExtendedStorageTransaction): Stream<T>;
@@ -309,7 +312,7 @@ export function createCell<T>(
 function createStreamCell<T>(
   runtime: IRuntime,
   link: NormalizedFullLink,
-  _tx?: IExtendedStorageTransaction,
+  tx?: IExtendedStorageTransaction,
 ): Stream<T> {
   const listeners = new Set<(event: T) => Cancel | undefined>();
 
@@ -331,7 +334,9 @@ function createStreamCell<T>(
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
-    getRaw: () => self.getDoc().getAtPath(link.path as PropertyKey[]),
+    getRaw: (options?: IReadOptions) =>
+      (tx?.status().ok?.open ? tx : runtime.edit())
+        .readValueOrThrow(link, options),
     getAsNormalizedFullLink: () => link,
     getDoc: () => runtime.documentMap.getDocByEntityId(link.space, link.id),
     withTx: (_tx?: IExtendedStorageTransaction) => self, // No-op for streams
@@ -513,9 +518,9 @@ function createRegularCell<T>(
       }) as SigilWriteRedirectLink;
     },
     getDoc: () => runtime.documentMap.getDocByEntityId(link.space, link.id),
-    getRaw: () =>
+    getRaw: (options?: IReadOptions) =>
       (tx?.status().ok?.open ? tx : runtime.edit())
-        .readValueOrThrow(link),
+        .readValueOrThrow(link, options),
     setRaw: (value: any) => {
       if (!tx) throw new Error("Transaction required for setRaw");
       tx.writeValueOrThrow(link, value);

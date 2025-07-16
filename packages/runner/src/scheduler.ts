@@ -17,11 +17,11 @@ import type {
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
-  parseLink,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  Metadata,
 } from "./storage/interface.ts";
 
 // Re-export types that tests expect from scheduler
@@ -39,6 +39,14 @@ export type EventHandler = (event: any) => any;
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
+};
+
+const ignoreReadForSchedulingMarker: unique symbol = Symbol(
+  "ignoreReadForSchedulingMarker",
+);
+
+export const ignoreReadForScheduling: Metadata = {
+  [ignoreReadForSchedulingMarker]: true,
 };
 
 type SpaceAndURI = `${MemorySpace}:${URI}`;
@@ -448,6 +456,7 @@ export function txToReactivityLog(
   const log: ReactivityLog = { reads: [], writes: [] };
   for (const activity of tx.journal.activity()) {
     if ("read" in activity && activity.read) {
+      if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
       log.reads.push({
         space: activity.read.space,
         id: activity.read.id,
