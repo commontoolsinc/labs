@@ -246,7 +246,7 @@ describe("Recipe Runner", () => {
       "should handle map nodes with undefined input",
       {
         type: "object",
-        properties: { values: { type: "array", items: { type: "number" } } },
+        properties: { doubled: { type: "array", items: { type: "number" } } },
       } as const satisfies JSONSchema,
       tx,
     );
