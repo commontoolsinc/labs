@@ -504,6 +504,12 @@ describe("Recipe Runner", () => {
       y,
     }, resultCell);
 
+    expect(runCounts).toMatchObject({
+      multiply: 0,
+      multiplyGenerator: 0,
+      multiplyGenerator2: 0,
+    });
+
     await runtime.idle();
 
     expect(result.getAsQueryResult()).toMatchObject({

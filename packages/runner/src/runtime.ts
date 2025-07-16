@@ -507,41 +507,14 @@ export class Runtime implements IRuntime {
     schema?: JSONSchema,
     tx?: IExtendedStorageTransaction,
   ): Cell<any> {
-    let doc;
-
-    if (isLegacyCellLink(cellLink)) {
-      const link = cellLink as LegacyDocCellLink;
-      if (isDoc(cellLink.cell)) {
-        doc = cellLink.cell;
-      } else if (link.space) {
-        doc = this.documentMap.getDocByEntityId(
-          link.space,
-          getEntityId(cellLink.cell)!,
-          true,
-        )!;
-        if (!doc) {
-          throw new Error(`Can't find ${link.space}/${link.cell}!`);
-        }
-      } else {
-        throw new Error("Cell link has no space");
-      }
-
-      // If we aren't passed a schema, use the one in the cellLink
-      return doc.asCell(
-        link.path,
-        schema ?? link.schema,
-        schema ? undefined : link.rootSchema,
-        tx,
-      );
-    } else {
-      const link = isLink(cellLink)
-        ? parseLink(cellLink)
-        : isNormalizedFullLink(cellLink)
-        ? cellLink
-        : undefined;
-      if (!link) throw new Error("Invalid cell link");
-      return createCell(this, link as NormalizedFullLink, tx);
-    }
+    let link = isLink(cellLink)
+      ? parseLink(cellLink)
+      : isNormalizedFullLink(cellLink)
+      ? cellLink
+      : undefined;
+    if (!link) throw new Error("Invalid cell link");
+    if (schema) link = { ...link, schema, rootSchema: schema };
+    return createCell(this, link as NormalizedFullLink, tx);
   }
 
   getImmutableCell<T>(

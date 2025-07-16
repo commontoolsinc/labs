@@ -562,9 +562,7 @@ export class Runner implements IRunner {
           tx,
         });
 
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).get()
-          : inputsCell.getAsQueryResult([], undefined);
+        const argument = inputsCell.asSchema(module.argumentSchema).get();
         const result = fn(argument);
 
         const postRun = (result: any) => {
@@ -621,9 +619,8 @@ export class Runner implements IRunner {
       let previousResultRecipeAsString: string | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-          : inputsCell.getAsQueryResult([], tx);
+        const argument = inputsCell.asSchema(module.argumentSchema).withTx(tx)
+          .get();
 
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
@@ -650,7 +647,7 @@ export class Runner implements IRunner {
             if (previousResultRecipeAsString === resultRecipeAsString) return;
             previousResultRecipeAsString = resultRecipeAsString;
 
-            const resultDoc = this.run(
+            const resultCell = this.run(
               tx,
               resultRecipe,
               undefined,
@@ -662,15 +659,15 @@ export class Runner implements IRunner {
                   tx,
                 ),
             );
-            addCancel(() => this.stop(resultDoc));
+            addCancel(() => this.stop(resultCell));
 
             if (!previousResultDoc) {
-              previousResultDoc = resultDoc;
+              previousResultDoc = resultCell;
               sendValueToBinding(
                 tx,
                 processCell,
                 outputs,
-                resultDoc.getAsLink(),
+                resultCell.getAsLink({ base: processCell }),
               );
             }
           } else {
