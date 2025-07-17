@@ -35,7 +35,7 @@ const addTask = handler<
     console.log("addTask", event, state);
     const items = state.items;
     const task = event.detail?.message?.trim();
-    if (task) items.set([...items.get(), { title: task, done: false }]);
+    if (task) items.push({ title: task, done: false });
   },
 );
 
