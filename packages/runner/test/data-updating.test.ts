@@ -305,6 +305,44 @@ describe("data-updating", () => {
       expect(changes[0].value).toBe(2);
     });
 
+    it("should generate correct paths when setting array length to 0", () => {
+      const testCell = runtime.getCell<{ items: number[] }>(
+        space,
+        "normalizeAndDiff array length to zero",
+        undefined,
+        tx,
+      );
+      // Create array with 100 items
+      const largeArray = Array.from({ length: 100 }, (_, i) => i);
+      testCell.set({ items: largeArray });
+
+      // Now set length to 0 through the length property
+      const lengthLink = testCell.key("items").key("length")
+        .getAsNormalizedFullLink();
+      const changes = normalizeAndDiff(runtime, tx, lengthLink, 0);
+
+      // Should have 101 changes total
+      expect(changes.length).toBe(101);
+
+      // Find the length change
+      const lengthChange = changes.find((c) =>
+        c.location.path[c.location.path.length - 1] === "length"
+      );
+      expect(lengthChange).toBeDefined();
+      expect(lengthChange!.value).toBe(0);
+
+      // Verify all elements are marked undefined with correct paths
+      const elementChanges = changes.filter((c) =>
+        c.location.path[c.location.path.length - 1] !== "length"
+      );
+      expect(elementChanges.length).toBe(100);
+
+      elementChanges.forEach((change, i) => {
+        expect(change.location.path).toEqual(["items", i.toString()]);
+        expect(change.value).toBe(undefined);
+      });
+    });
+
     it("should handle array element changes", () => {
       const testCell = runtime.getCell<{ items: number[] }>(
         space,
