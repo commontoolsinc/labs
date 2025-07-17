@@ -49,12 +49,7 @@ import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { StaticCache } from "@commontools/static";
 
-export type {
-  IExtendedStorageTransaction,
-  IStorageManager,
-  IStorageProvider,
-  MemorySpace,
-};
+export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -89,6 +84,13 @@ export interface RuntimeOptions {
   navigateCallback?: NavigateCallback;
   staticAssetServerUrl?: URL;
   debug?: boolean;
+  /**
+   * When true, uses the StorageManager's native transaction API instead of the
+   * transaction shim. This allows for better integration with the underlying
+   * storage system's transaction capabilities.
+   * @default false
+   */
+  useStorageManagerTransactions?: boolean;
 }
 
 export interface IRuntime {
@@ -104,6 +106,8 @@ export interface IRuntime {
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
+  readonly useStorageManagerTransactions?: boolean;
+  readonly storageManager: IStorageManager;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -324,6 +328,8 @@ export class Runtime implements IRuntime {
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
+  readonly storageManager: IStorageManager;
+  readonly useStorageManagerTransactions?: boolean;
 
   constructor(options: RuntimeOptions) {
     this.staticCache = options.staticAssetServerUrl
@@ -334,6 +340,8 @@ export class Runtime implements IRuntime {
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
     this.id = options.storageManager.id;
+    this.useStorageManagerTransactions =
+      options.useStorageManagerTransactions ?? false;
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -346,6 +354,7 @@ export class Runtime implements IRuntime {
       throw new Error("blobbyServerUrl is required");
     }
 
+    this.storageManager = options.storageManager;
     this.storage = new Storage(this, options.storageManager);
 
     this.documentMap = new DocumentMap(this);
@@ -384,6 +393,7 @@ export class Runtime implements IRuntime {
         documentMap: !!this.documentMap,
         harness: !!this.harness,
         runner: !!this.runner,
+        useStorageManagerTransactions: this.useStorageManagerTransactions,
       });
     }
   }
@@ -424,8 +434,13 @@ export class Runtime implements IRuntime {
    * multiple spaces but writing only to one space.
    */
   edit(): IExtendedStorageTransaction {
-    // TODO(seefeld): Make this a flag to use the new transaction system instead
-    return new ExtendedStorageTransaction(new StorageTransaction(this));
+    // Use transaction API from storage manager if enabled, otherwise
+    // use a shim.
+    const transaction = this.useStorageManagerTransactions
+      ? this.storageManager.edit()
+      : new StorageTransaction(this);
+
+    return new ExtendedStorageTransaction(transaction);
   }
 
   // Cell factory methods

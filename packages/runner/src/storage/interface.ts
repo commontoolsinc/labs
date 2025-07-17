@@ -84,7 +84,16 @@ export interface StorageValue<T = any> {
 
 export interface IStorageManager {
   id: string;
+  /**
+   * @deprecated
+   */
   open(space: MemorySpace): IStorageProviderWithReplica;
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IStorageTransaction;
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -177,17 +186,8 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 }
 
-export interface IStorageManagerV2 {
-  /**
-   * Creates a storage transaction that can be used to read / write data into
-   * locally replicated memory spaces. Transaction allows reading from many
-   * multiple spaces but writing only to one space.
-   */
-  edit(): IStorageTransaction;
-}
-
 /**
- * Extension of {@link IStorageManagerV2} which is supposed to merge into
+ * Extension of {@link IStorageManager} which is supposed to merge into
  * {@link IStorageManager} in the future. It provides capability to subscribe
  * to the storage notifications.
  */
