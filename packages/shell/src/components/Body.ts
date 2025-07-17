@@ -7,10 +7,8 @@ export class XBodyElement extends BaseView {
   static override styles = css`
     :host {
       display: block;
-      width: 100%;
-      height: 100%;
-      background-color: white;
       padding: 1rem;
+      overflow: hidden;
     }
   `;
 

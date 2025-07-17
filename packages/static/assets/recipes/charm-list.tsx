@@ -53,7 +53,7 @@ export default recipe(
     return {
       [NAME]: str`DefaultCharmList (${charmCount})`,
       [UI]: (
-        <div style="padding: 2rem; max-width: 600px;">
+        <div>
           <h2 style="margin-bottom: 1.5rem;">
             Charms ({charmCount})
           </h2>

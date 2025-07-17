@@ -1,4 +1,4 @@
-import { css, html, LitElement, svg } from "lit";
+import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 
 export class CTLogo extends LitElement {
@@ -13,28 +13,17 @@ export class CTLogo extends LitElement {
     }
   `;
 
-  @property({ type: Number })
+  @property()
   width = 32;
 
-  @property({ type: Number })
+  @property()
   height = 32;
 
-  @property({ type: String, attribute: "background-color" })
+  @property({ attribute: "background-color" })
   backgroundColor = "white";
 
-  @property({ type: String, attribute: "shape-color" })
+  @property({ attribute: "shape-color" })
   shapeColor = "black";
-
-  override attributeChangedCallback(
-    name: string,
-    old: string | null,
-    value: string | null,
-  ) {
-    super.attributeChangedCallback(name, old, value);
-    if (old !== value) {
-      this.requestUpdate();
-    }
-  }
 
   override render() {
     return html`
