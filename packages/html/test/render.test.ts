@@ -18,6 +18,7 @@ beforeEach(() => {
   globalThis.KeyboardEvent = dom.window.KeyboardEvent;
   globalThis.MouseEvent = dom.window.MouseEvent;
   globalThis.CustomEvent = dom.window.CustomEvent;
+  globalThis.HTMLSelectElement = dom.window.HTMLSelectElement;
 });
 
 describe("render", () => {
@@ -138,6 +139,12 @@ describe("serializableEvent", () => {
       true,
       "Result should be a plain serializable object",
     );
+    // Should not include non-allow-listed fields
+    assert.equal(
+      "timeStamp" in (result as any),
+      false,
+      "Should not include timeStamp",
+    );
   });
 
   it("serializes a KeyboardEvent", () => {
@@ -166,6 +173,11 @@ describe("serializableEvent", () => {
       true,
       "Result should be a plain serializable object",
     );
+    assert.equal(
+      "timeStamp" in (result as any),
+      false,
+      "Should not include timeStamp",
+    );
   });
 
   it("serializes a MouseEvent", () => {
@@ -192,11 +204,17 @@ describe("serializableEvent", () => {
       true,
       "Result should be a plain serializable object",
     );
+    assert.equal(
+      "timeStamp" in (result as any),
+      false,
+      "Should not include timeStamp",
+    );
   });
 
   it("serializes an InputEvent with target value", () => {
     const input = document.createElement("input");
     input.value = "hello";
+    input.id = "should-not-appear";
     const event = new InputEvent("input", {
       data: "h",
       inputType: "insertText",
@@ -214,6 +232,16 @@ describe("serializableEvent", () => {
       true,
       "Result should be a plain serializable object",
     );
+    assert.equal(
+      "timeStamp" in (result as any),
+      false,
+      "Should not include timeStamp",
+    );
+    assert.equal(
+      (result as any).target && "id" in (result as any).target,
+      false,
+      "Should not include id on target",
+    );
   });
 
   it("serializes a CustomEvent with detail", () => {
@@ -227,6 +255,103 @@ describe("serializableEvent", () => {
       isPlainSerializableObject(result),
       true,
       "Result should be a plain serializable object",
+    );
+    assert.equal(
+      "timeStamp" in (result as any),
+      false,
+      "Should not include timeStamp",
+    );
+  });
+
+  it("serializes an event with HTMLSelectElement target and selectedOptions", () => {
+    const select = document.createElement("select");
+    select.multiple = true;
+    select.id = "should-not-appear";
+    // Create option elements
+    const option1 = document.createElement("option");
+    option1.value = "option1";
+    option1.text = "Option 1";
+    const option2 = document.createElement("option");
+    option2.value = "option2";
+    option2.text = "Option 2";
+    const option3 = document.createElement("option");
+    option3.value = "option3";
+    option3.text = "Option 3";
+    select.appendChild(option1);
+    select.appendChild(option2);
+    select.appendChild(option3);
+    // Select multiple options
+    option1.selected = true;
+    option3.selected = true;
+    const event = new Event("change");
+    Object.defineProperty(event, "target", { value: select });
+    const result = serializableEvent(event);
+    assert.matchObject(result, {
+      type: "change",
+      target: {
+        selectedOptions: [
+          { value: "option1" },
+          { value: "option3" },
+        ],
+      },
+    });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
+    assert.equal(
+      "timeStamp" in (result as any),
+      false,
+      "Should not include timeStamp",
+    );
+    assert.equal(
+      (result as any).target && "id" in (result as any).target,
+      false,
+      "Should not include id on target",
+    );
+  });
+
+  it("serializes an event with single-select HTMLSelectElement target", () => {
+    const select = document.createElement("select");
+    select.multiple = false; // single select
+    select.id = "should-not-appear";
+    // Create option elements
+    const option1 = document.createElement("option");
+    option1.value = "option1";
+    option1.text = "Option 1";
+    const option2 = document.createElement("option");
+    option2.value = "option2";
+    option2.text = "Option 2";
+    select.appendChild(option1);
+    select.appendChild(option2);
+    // Select single option
+    option2.selected = true;
+    const event = new Event("change");
+    Object.defineProperty(event, "target", { value: select });
+    const result = serializableEvent(event);
+    assert.matchObject(result, {
+      type: "change",
+      target: {
+        selectedOptions: [
+          { value: "option2" },
+        ],
+      },
+    });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
+    assert.equal(
+      "timeStamp" in (result as any),
+      false,
+      "Should not include timeStamp",
+    );
+    assert.equal(
+      (result as any).target && "id" in (result as any).target,
+      false,
+      "Should not include id on target",
     );
   });
 });

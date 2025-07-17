@@ -338,7 +338,6 @@ const allowListedEventTargetProperties = [
   "checked", // checkbox
   "selected", // option
   "selectedIndex", // select
-  "selectedOptions", // select, multiple
 ];
 
 /**
@@ -368,9 +367,19 @@ export function serializableEvent<T>(event: Event): T {
   for (const property of allowListedEventTargetProperties) {
     targetObject[property] = event.target?.[property as keyof EventTarget];
   }
+  if (
+    event.target instanceof HTMLSelectElement && event.target.selectedOptions
+  ) {
+    // To support multiple selections, we create serializable option elements
+    targetObject.selectedOptions = Array.from(event.target.selectedOptions).map(
+      (option) => ({ value: option.value }),
+    );
+  }
   if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;
 
   if ((event as CustomEvent).detail !== undefined) {
+    // Could be anything, but should only come from our own custom elements.
+    // Step below will remove any direct references.
     eventObject.detail = (event as CustomEvent).detail;
   }
 
