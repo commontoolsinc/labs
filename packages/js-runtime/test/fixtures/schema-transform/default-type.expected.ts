@@ -98,13 +98,15 @@ const listConfigSchema = {
             type: "array",
             items: {
                 type: "string"
-            }
+            },
+            default: ["item1", "item2"]
         },
         selectedIndices: {
             type: "array",
             items: {
                 type: "number"
-            }
+            },
+            default: [0]
         }
     },
     required: ["items", "selectedIndices"]
@@ -139,7 +141,11 @@ const complexDefaultSchema = {
                     type: "string"
                 }
             },
-            required: ["version", "author"]
+            required: ["version", "author"],
+            default: {
+                version: 1,
+                author: "system"
+            }
         },
         config: {
             type: "object",
@@ -151,7 +157,11 @@ const complexDefaultSchema = {
                     type: "number"
                 }
             },
-            required: ["enabled", "value"]
+            required: ["enabled", "value"],
+            default: {
+                enabled: true,
+                value: 100
+            }
         }
     },
     required: ["metadata", "config"]
@@ -175,6 +185,7 @@ const cellDefaultsSchema = {
             items: {
                 type: "string"
             },
+            default: [],
             asCell: true
         }
     },
