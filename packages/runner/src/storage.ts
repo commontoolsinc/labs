@@ -276,7 +276,12 @@ export class Storage implements IStorage {
       const newDoc = docMap.getDocByEntityId(doc.space, entityId, false)!;
       // We don't need to hook up ephemeral docs
       if (newDoc.ephemeral) {
-        console.log("Found link to ephemeral doc from", doc.entityId);
+        console.log(
+          "Found link to ephemeral doc",
+          entityIdStr(newDoc.entityId),
+          "from",
+          entityIdStr(doc.entityId),
+        );
         continue;
       }
       // NOTE(@ubik2): I can't recall if a retraction will come over as a missing isValue.
