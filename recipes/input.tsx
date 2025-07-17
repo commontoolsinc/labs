@@ -30,11 +30,33 @@ export default recipe(
       [NAME]: "<ct-input /> test",
       [UI]: (
         <div style="padding: 1rem; max-width: 1200px; margin: 0 auto;">
-          <label>Text:</label>
+          <label>Text (Default - Debounced):</label>
           <ct-input
             $value={content}
             type="text"
+            placeholder="Search..."
+          />
+          <label>Text (Blur):</label>
+          <ct-input
+            $value={content}
+            type="text"
+            timingStrategy="blur"
+            placeholder="Enter value"
+          />
+          <label>Text (Throttled):</label>
+          <ct-input
+            $value={content}
+            type="text"
+            timingStrategy="throttle"
+            timingDelay="100"
             placeholder="Enter something..."
+          />
+          <label>Text (Immediate):</label>
+          <ct-input
+            $value={content}
+            type="text"
+            timingStrategy="immediate"
+            placeholder="Updates instantly..."
           />
           <label>Email:</label>
           <ct-input

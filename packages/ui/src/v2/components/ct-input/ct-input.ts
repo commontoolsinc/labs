@@ -2,6 +2,10 @@ import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell, isCell } from "@commontools/runner";
+import {
+  InputTimingController,
+  type InputTimingOptions,
+} from "../../core/input-timing-controller.ts";
 
 /**
  * CTInput - Enhanced input field with support for various types, validation patterns, and reactive data binding
@@ -29,9 +33,10 @@ import { type Cell, isCell } from "@commontools/runner";
  * @attr {string} spellcheck - Enable/disable spellcheck
  * @attr {boolean} showValidation - Show validation state visually
  * @attr {boolean} error - Manual error state override
+ * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
+ * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 300)
  *
- * @fires ct-input - Fired on input with detail: { value, oldValue, name, files? }
- * @fires ct-change - Fired on change with detail: { value, oldValue, name, files? }
+ * @fires ct-change - Fired when value changes (timing depends on strategy) with detail: { value, oldValue, name, files? }
  * @fires ct-focus - Fired on focus with detail: { value, name }
  * @fires ct-blur - Fired on blur with detail: { value, name }
  * @fires ct-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
@@ -46,6 +51,14 @@ import { type Cell, isCell } from "@commontools/runner";
  *
  * @example
  * <ct-input type="number" min="0" max="100" step="5"></ct-input>
+ *
+ * @example
+ * <!-- Debounced input - waits 500ms after user stops typing -->
+ * <ct-input timingStrategy="debounce" timingDelay="500" placeholder="Search..."></ct-input>
+ *
+ * @example
+ * <!-- Only emit events when input loses focus -->
+ * <ct-input timingStrategy="blur" placeholder="Enter value"></ct-input>
  */
 
 export type InputType =
@@ -85,7 +98,8 @@ export const INPUT_PATTERNS = {
   // US Phone pattern (various formats)
   "tel-us": "\\+?1?[-.]?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})",
   // International phone
-  "tel-intl": "\\+?[0-9]{1,4}?[-.]?\\(?([0-9]{1,4})\\)?[-.]?([0-9]{1,4})[-.]?([0-9]{1,9})",
+  "tel-intl":
+    "\\+?[0-9]{1,4}?[-.]?\\(?([0-9]{1,4})\\)?[-.]?([0-9]{1,4})[-.]?([0-9]{1,9})",
   // Credit card (basic - digits with optional spaces/dashes)
   "credit-card": "[0-9]{4}[-\\s]?[0-9]{4}[-\\s]?[0-9]{4}[-\\s]?[0-9]{4}",
   // ZIP code (US 5 or 9 digit)
@@ -293,6 +307,8 @@ export class CTInput extends BaseElement {
     spellcheck: { type: Boolean },
     validationPattern: { type: String },
     showValidation: { type: Boolean },
+    timingStrategy: { type: String },
+    timingDelay: { type: Number },
   };
 
   declare type: InputType;
@@ -319,9 +335,12 @@ export class CTInput extends BaseElement {
   declare spellcheck: boolean;
   declare validationPattern: keyof typeof INPUT_PATTERNS | "";
   declare showValidation: boolean;
+  declare timingStrategy: InputTimingOptions["strategy"];
+  declare timingDelay: number;
 
   private _input: HTMLInputElement | null = null;
   private _cellUnsubscribe: (() => void) | null = null;
+  private _inputTiming: InputTimingController;
 
   constructor() {
     super();
@@ -348,6 +367,14 @@ export class CTInput extends BaseElement {
     this.spellcheck = true;
     this.validationPattern = "";
     this.showValidation = false;
+    this.timingStrategy = "debounce";
+    this.timingDelay = 300;
+
+    // Initialize input timing controller
+    this._inputTiming = new InputTimingController(this, {
+      strategy: this.timingStrategy,
+      delay: this.timingDelay,
+    });
   }
 
   private get input(): HTMLInputElement | null {
@@ -364,14 +391,26 @@ export class CTInput extends BaseElement {
     return this.value || "";
   }
 
-  private setValue(newValue: string): void {
-    if (isCell(this.value)) {
-      const tx = this.value.runtime.edit();
-      this.value.withTx(tx).set(newValue);
-      tx.commit(); // TODO: Should we retry?
-    } else {
-      this.value = newValue;
-    }
+  private setValue(newValue: string, files?: FileList | null): void {
+    const oldValue = this.getValue();
+    
+    this._inputTiming.schedule(() => {
+      if (isCell(this.value)) {
+        const tx = this.value.runtime.edit();
+        this.value.withTx(tx).set(newValue);
+        tx.commit(); // TODO: Should we retry?
+      } else {
+        this.value = newValue;
+      }
+
+      // Emit the value change event after the value is actually set
+      this.emit("ct-change", {
+        value: newValue,
+        oldValue,
+        name: this.name,
+        files: this.type === "file" ? files : undefined,
+      });
+    });
   }
 
   private getPattern(): string {
@@ -441,11 +480,22 @@ export class CTInput extends BaseElement {
 
   override updated(changedProperties: Map<string, any>) {
     super.updated(changedProperties);
-    
+
     // If the value property itself changed (e.g., switched to a different cell)
-    if (changedProperties.has('value')) {
+    if (changedProperties.has("value")) {
       this._cleanupCellSubscription();
       this._setupCellSubscription();
+    }
+
+    // Update timing controller if timing options changed
+    if (
+      changedProperties.has("timingStrategy") ||
+      changedProperties.has("timingDelay")
+    ) {
+      this._inputTiming.updateOptions({
+        strategy: this.timingStrategy,
+        delay: this.timingDelay,
+      });
     }
   }
 
@@ -460,7 +510,8 @@ export class CTInput extends BaseElement {
 
   private _setupCellSubscription(): void {
     if (isCell(this.value)) {
-      // Subscribe to cell changes
+      // Subscribe to cell changes using sink() which returns a cleanup function
+      // This ensures the input re-renders when the cell value changes externally
       this._cellUnsubscribe = this.value.sink(() => {
         // Trigger a re-render when the cell value changes
         this.requestUpdate();
@@ -481,7 +532,7 @@ export class CTInput extends BaseElement {
     const validationClass = this.getValidationClass();
 
     // For file inputs, we can't set the value programmatically
-    const inputValue = this.type === 'file' ? undefined : this.getValue();
+    const inputValue = this.type === "file" ? undefined : this.getValue();
 
     return html`
       <input
@@ -502,8 +553,10 @@ export class CTInput extends BaseElement {
         minlength="${ifDefined(this.minlength || undefined)}"
         inputmode="${ifDefined(inputMode || undefined)}"
         size="${ifDefined(this.size || undefined)}"
-        ?multiple="${this.multiple && this.type === 'file'}"
-        accept="${ifDefined(this.accept && this.type === 'file' ? this.accept : undefined)}"
+        ?multiple="${this.multiple && this.type === "file"}"
+        accept="${ifDefined(
+        this.accept && this.type === "file" ? this.accept : undefined,
+      )}"
         list="${ifDefined(this.list || undefined)}"
         ?spellcheck="${this.spellcheck}"
         @input="${this._handleInput}"
@@ -519,41 +572,30 @@ export class CTInput extends BaseElement {
 
   private _handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
-    const oldValue = this.getValue();
-    
-    // For file inputs, we can't set the value programmatically
-    if (this.type !== 'file') {
-      this.setValue(input.value);
-    }
 
-    // Emit custom input event
-    this.emit("ct-input", {
-      value: input.value,
-      oldValue,
-      name: this.name,
-      files: this.type === 'file' ? input.files : undefined,
-    });
+    // For file inputs, we can't set the value programmatically
+    if (this.type !== "file") {
+      this.setValue(input.value, input.files);
+    } else {
+      // For file inputs, still emit the event with files
+      this.setValue("", input.files);
+    }
   }
 
   private _handleChange(event: Event) {
     const input = event.target as HTMLInputElement;
-    const oldValue = this.getValue();
-    
-    // For file inputs, we can't set the value programmatically
-    if (this.type !== 'file') {
-      this.setValue(input.value);
-    }
 
-    // Emit custom change event
-    this.emit("ct-change", {
-      value: input.value,
-      oldValue,
-      name: this.name,
-      files: this.type === 'file' ? input.files : undefined,
-    });
+    // Change events use the same setValue logic as input events
+    // The timing controller will determine when to actually emit
+    if (this.type !== "file") {
+      this.setValue(input.value, input.files);
+    } else {
+      this.setValue("", input.files);
+    }
   }
 
   private _handleFocus(_event: Event) {
+    this._inputTiming.onFocus();
     this.emit("ct-focus", {
       value: this.getValue(),
       name: this.name,
@@ -561,6 +603,7 @@ export class CTInput extends BaseElement {
   }
 
   private _handleBlur(_event: Event) {
+    this._inputTiming.onBlur();
     this.emit("ct-blur", {
       value: this.getValue(),
       name: this.name,
