@@ -10,7 +10,21 @@ export function getCommonToolsModuleAlias(
 ): string | null {
   // In AMD output, TypeScript transforms module imports to parameters
   // For imports from "commontools", it typically becomes "commontools_1"
-  // However, we should not use this alias unless we're actually generating AMD output
+  for (const statement of sourceFile.statements) {
+    if (ts.isImportDeclaration(statement)) {
+      const moduleSpecifier = statement.moduleSpecifier;
+      if (
+        ts.isStringLiteral(moduleSpecifier) &&
+        moduleSpecifier.text === "commontools"
+      ) {
+        // For named imports in AMD, TypeScript generates a module parameter
+        // like "commontools_1". Since we're working at the AST level before
+        // AMD transformation, we need to anticipate this pattern.
+        // Return the expected AMD module alias
+        return "commontools_1";
+      }
+    }
+  }
   return null;
 }
 
