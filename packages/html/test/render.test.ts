@@ -3,6 +3,7 @@ import { h, UI } from "@commontools/api";
 import { render, renderImpl } from "../src/render.ts";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
+import { serializableEvent } from "../src/render.ts";
 
 let dom: JSDOM;
 
@@ -13,6 +14,10 @@ beforeEach(() => {
   globalThis.Element = dom.window.Element;
   globalThis.Node = dom.window.Node;
   globalThis.Text = dom.window.Text;
+  globalThis.InputEvent = dom.window.InputEvent;
+  globalThis.KeyboardEvent = dom.window.KeyboardEvent;
+  globalThis.MouseEvent = dom.window.MouseEvent;
+  globalThis.CustomEvent = dom.window.CustomEvent;
 });
 
 describe("render", () => {
@@ -107,5 +112,121 @@ describe("renderImpl", () => {
     assert.equal(div, null);
     cancel();
     assert.equal(parent.children.length, 0);
+  });
+});
+
+describe("serializableEvent", () => {
+  function isPlainSerializableObject(obj: any): boolean {
+    if (typeof obj !== "object" || obj === null) return true; // primitives are serializable
+    if (Array.isArray(obj)) {
+      return obj.every(isPlainSerializableObject);
+    }
+    if (Object.getPrototypeOf(obj) !== Object.prototype) return false;
+    for (const key in obj) {
+      if (typeof obj[key] === "function") return false;
+      if (!isPlainSerializableObject(obj[key])) return false;
+    }
+    return true;
+  }
+
+  it("serializes a basic Event", () => {
+    const event = new Event("test");
+    const result = serializableEvent(event);
+    assert.matchObject(result, { type: "test" });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
+  });
+
+  it("serializes a KeyboardEvent", () => {
+    const event = new KeyboardEvent("keydown", {
+      key: "a",
+      code: "KeyA",
+      repeat: true,
+      altKey: true,
+      ctrlKey: false,
+      metaKey: true,
+      shiftKey: false,
+    });
+    const result = serializableEvent(event);
+    assert.matchObject(result, {
+      type: "keydown",
+      key: "a",
+      code: "KeyA",
+      repeat: true,
+      altKey: true,
+      ctrlKey: false,
+      metaKey: true,
+      shiftKey: false,
+    });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
+  });
+
+  it("serializes a MouseEvent", () => {
+    const event = new MouseEvent("click", {
+      button: 0,
+      buttons: 1,
+      altKey: false,
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: true,
+    });
+    const result = serializableEvent(event);
+    assert.matchObject(result, {
+      type: "click",
+      button: 0,
+      buttons: 1,
+      altKey: false,
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: true,
+    });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
+  });
+
+  it("serializes an InputEvent with target value", () => {
+    const input = document.createElement("input");
+    input.value = "hello";
+    const event = new InputEvent("input", {
+      data: "h",
+      inputType: "insertText",
+    });
+    Object.defineProperty(event, "target", { value: input });
+    const result = serializableEvent(event);
+    assert.matchObject(result, {
+      type: "input",
+      data: "h",
+      inputType: "insertText",
+      target: { value: "hello" },
+    });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
+  });
+
+  it("serializes a CustomEvent with detail", () => {
+    const event = new CustomEvent("custom", { detail: { foo: [42, 43] } });
+    const result = serializableEvent(event);
+    assert.matchObject(result, {
+      type: "custom",
+      detail: { foo: [42, 43] },
+    });
+    assert.equal(
+      isPlainSerializableObject(result),
+      true,
+      "Result should be a plain serializable object",
+    );
   });
 });
