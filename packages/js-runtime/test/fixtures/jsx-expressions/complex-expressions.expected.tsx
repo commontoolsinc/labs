@@ -1,12 +1,30 @@
 /// <cts-enable />
-import { OpaqueRef, derive, h, recipe, UI } from "commontools";
-export default recipe("ComplexExpressions", (state) => {
-    const price: OpaqueRef<number> = {} as any;
+import { cell, derive, h, recipe, UI, toSchema, JSONSchema } from "commontools";
+interface Problem {
+    price: number;
+    discount: number;
+    tax: number;
+}
+export default recipe({
+    type: "object",
+    properties: {
+        price: {
+            type: "number"
+        },
+        discount: {
+            type: "number"
+        },
+        tax: {
+            type: "number"
+        }
+    },
+    required: ["price", "discount", "tax"]
+} as const satisfies JSONSchema, ({ price, discount, tax }) => {
     return {
         [UI]: (<div>
         <p>Price: {price}</p>
-        <p>With tax: {commontools_1.derive(price, _v1 => _v1 * 1.1)}</p>
-        <p>Discount: {commontools_1.derive(price, _v1 => _v1 - 10)}</p>
+        <p>Discount: {commontools_1.derive({ price, discount }, ({ price: _v1, discount: _v2 }) => _v1 - _v2)}</p>
+        <p>With tax: {commontools_1.derive({ price, discount, tax }, ({ price: _v1, discount: _v2, tax: _v3 }) => (_v1 - _v2) * (1 + _v3))}</p>
       </div>)
     };
 });
