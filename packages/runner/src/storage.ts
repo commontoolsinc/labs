@@ -190,6 +190,7 @@ export class Storage implements IStorage {
     this.dirtyDocs.clear();
     this.activeUpdateFromStorageCount = 0;
     this.updateFromStoragePromise = undefined;
+    this._updateFromStorageResolver = undefined;
     this.cancel();
   }
 
@@ -427,7 +428,6 @@ export class Storage implements IStorage {
     >(
       doc.entityId,
     );
-    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
     // If our value is the same as what storage has, we don't need to do anything.
     if (deepEqual(storageValue, existingValue)) {
       return;
@@ -456,15 +456,17 @@ export class Storage implements IStorage {
     }
 
     // If we're already dirty, we don't need to add a promise
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
     if (this.dirtyDocs.has(docKey)) {
       return;
     }
     this.dirtyDocs.add(docKey);
     const docToStoragePromise = this._sendDocValue(doc, labels);
     this.docToStoragePromises.add(docToStoragePromise);
-    docToStoragePromise.finally(() =>
-      this.docToStoragePromises.delete(docToStoragePromise)
-    );
+    docToStoragePromise.finally(() => {
+      this.docToStoragePromises.delete(docToStoragePromise);
+      this.dirtyDocs.delete(docKey);
+    });
   }
 
   private async _sendDocValue(doc: DocImpl<unknown>, labels?: Labels) {
@@ -479,24 +481,10 @@ export class Storage implements IStorage {
       await this.runtime.idle();
     }
 
-    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
     const storageProvider = this._getStorageProviderForSpace(doc.space);
-    // We're dirty -- mark clean, then write to storage
-    this.dirtyDocs.delete(docKey);
 
     // Create storage value using the helper to ensure consistency
     const storageValue = Storage._cellLinkToJSON(doc, labels);
-
-    // Compare again, since the value might have changed since we last checked
-    const existingValue = this._getStorageProviderForSpace(doc.space).get<
-      JSONValue
-    >(
-      doc.entityId,
-    );
-    // If our value is the same as what storage has, we don't need to do anything.
-    if (deepEqual(storageValue, existingValue)) {
-      return;
-    }
 
     await storageProvider.send([{
       entityId: doc.entityId,
@@ -509,6 +497,10 @@ export class Storage implements IStorage {
     doc: DocImpl<JSONValue>,
     storageValue: StorageValue<JSONValue>,
   ) {
+    // Mark this doc as being processed
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+    this.dirtyDocs.add(docKey);
+
     // Increment the counter at the start
     this.activeUpdateFromStorageCount++;
 
@@ -522,7 +514,7 @@ export class Storage implements IStorage {
 
     try {
       // Don't update docs while they might be updating.
-      await this.runtime.scheduler.idle();
+      await this.runtime.idle();
 
       if (!deepEqual(storageValue.value, doc.get())) {
         // values differ
@@ -540,6 +532,9 @@ export class Storage implements IStorage {
         doc.sourceCell = newSourceCell;
       }
     } finally {
+      // Remove the processing flag
+      this.dirtyDocs.delete(docKey);
+
       // Decrement the counter
       this.activeUpdateFromStorageCount--;
 
