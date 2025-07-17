@@ -142,6 +142,13 @@ export default recipe(
             type="range"
             placeholder="Enter something..."
           />
+          <hr />
+          <ct-code-editor
+            $value={content}
+            language="text/x-markdown"
+            placeholder="Enter something..."
+            style="height: 256px"
+          />
         </div>
       ),
       content,
