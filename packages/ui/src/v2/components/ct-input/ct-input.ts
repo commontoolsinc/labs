@@ -393,12 +393,12 @@ export class CTInput extends BaseElement {
 
   private setValue(newValue: string, files?: FileList | null): void {
     const oldValue = this.getValue();
-    
+
     this._inputTiming.schedule(() => {
       if (isCell(this.value)) {
         const tx = this.value.runtime.edit();
         this.value.withTx(tx).set(newValue);
-        tx.commit(); // TODO: Should we retry?
+        tx.commit();
       } else {
         this.value = newValue;
       }
