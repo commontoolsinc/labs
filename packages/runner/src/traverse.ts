@@ -87,12 +87,16 @@ export const MinimalSchemaSelector = {
   schemaContext: { schema: false, rootSchema: false },
 } as const;
 
+interface IDisposable {
+  [Symbol.dispose](): void;
+}
+
 export class CycleTracker<K> {
   private partial: Set<K>;
   constructor() {
     this.partial = new Set<K>();
   }
-  include(k: K, context?: unknown) {
+  include(k: K, context?: unknown): IDisposable | null {
     if (this.partial.has(k)) {
       console.error(
         "Cycle Detected!",
@@ -102,7 +106,6 @@ export class CycleTracker<K> {
     }
     this.partial.add(k);
     return {
-      tracker: this,
       [Symbol.dispose]: () => {
         this.partial.delete(k);
       },
