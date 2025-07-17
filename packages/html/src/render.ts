@@ -314,9 +314,79 @@ export const setNodeSanitizer = (fn: (node: VNode) => VNode | null) => {
 
 export type EventSanitizer<T> = (event: Event) => T;
 
-const passthroughEvent: EventSanitizer<Event> = (event: Event): Event => event;
+export const passthroughEvent: EventSanitizer<Event> = (event: Event): Event =>
+  event;
 
-let sanitizeEvent: EventSanitizer<unknown> = passthroughEvent;
+const allowListedEventProperties = [
+  "type", // general
+  "key", // keyboard event
+  "code", // keyboard event
+  "repeat", // keyboard event
+  "altKey", // keyboard & mouse event
+  "ctrlKey", // keyboard & mouse event
+  "metaKey", // keyboard & mouse event
+  "shiftKey", // keyboard & mouse event
+  "inputType", // input event
+  "data", // input event
+  "button", // mouse event
+  "buttons", // mouse event
+];
+
+const allowListedEventTargetProperties = [
+  "name", // general input
+  "value", // general input
+  "checked", // checkbox
+  "selected", // option
+  "selectedIndex", // select
+];
+
+/**
+ * Sanitize an event so it can be serialized.
+ *
+ * NOTE: This isn't yet vetted for security, it's just a coarse first pass with
+ * the primary objective of making events serializable.
+ *
+ * E.g. one glaring omission is that this can leak data via bubbling and we
+ * should sanitize quite differently if the target isn't the same as
+ * eventTarget.
+ *
+ * This code also doesn't make any effort to only copy properties that are
+ * allowed on various event types, or otherwise tailor sanitization to the event
+ * type.
+ *
+ * @param event - The event to sanitize.
+ * @returns The serializable event.
+ */
+export function serializableEvent<T>(event: Event): T {
+  const eventObject: Record<string, any> = {};
+  for (const property of allowListedEventProperties) {
+    eventObject[property] = event[property as keyof Event];
+  }
+
+  const targetObject: Record<string, any> = {};
+  for (const property of allowListedEventTargetProperties) {
+    targetObject[property] = event.target?.[property as keyof EventTarget];
+  }
+  if (
+    event.target instanceof HTMLSelectElement && event.target.selectedOptions
+  ) {
+    // To support multiple selections, we create serializable option elements
+    targetObject.selectedOptions = Array.from(event.target.selectedOptions).map(
+      (option) => ({ value: option.value }),
+    );
+  }
+  if (Object.keys(targetObject).length > 0) eventObject.target = targetObject;
+
+  if ((event as CustomEvent).detail !== undefined) {
+    // Could be anything, but should only come from our own custom elements.
+    // Step below will remove any direct references.
+    eventObject.detail = (event as CustomEvent).detail;
+  }
+
+  return JSON.parse(JSON.stringify(eventObject)) as T;
+}
+
+let sanitizeEvent: EventSanitizer<unknown> = serializableEvent;
 
 export const setEventSanitizer = (sanitize: EventSanitizer<unknown>) => {
   sanitizeEvent = sanitize;
