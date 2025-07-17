@@ -376,15 +376,11 @@ export type IStorageTransactionProgress = Variant<{
   pending: IStorageTransactionLog;
   done: IStorageTransactionLog;
 }>;
-export type StorageTransactionStatus = Result<
-  IStorageTransactionState,
-  StorageTransactionFailed
->;
-
-export type IStorageTransactionState =
+export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }
   | { status: "pending"; journal: ITransactionJournal }
-  | { status: "done"; journal: ITransactionJournal };
+  | { status: "done"; journal: ITransactionJournal }
+  | { status: "error"; journal: ITransactionJournal; error: StorageTransactionFailed };
 
 /**
  * Representation of a storage transaction, which can be used to query facts and
