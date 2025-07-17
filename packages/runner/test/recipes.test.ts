@@ -345,6 +345,7 @@ describe("Recipe Runner", () => {
       function (this: { counter: { value: number } }, { amount }) {
         this.counter.value += amount;
       },
+      { proxy: true },
     );
 
     const incRecipe = recipe<{ counter: { value: number } }>(
