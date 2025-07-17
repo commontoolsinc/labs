@@ -130,6 +130,7 @@ const configs: FixtureConfig[] = [
   {
     directory: "jsx-expressions",
     describe: "JSX Expression Transformer",
+    transformerOptions: { applySchemaTransformer: true },
     formatTestName: (name) => {
       const formatted = name.replace(/-/g, " ");
       if (name.includes("no-transform")) {

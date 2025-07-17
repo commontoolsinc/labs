@@ -35,102 +35,127 @@ OpaqueRef is a type representing reactive values in CommonTools. It wraps:
 const count = cell(0); // count is OpaqueRef<number>
 ```
 
-### Core Transformation Patterns
+### Important Scope Limitation
 
-#### 1. Binary Operations
-
-Operations on OpaqueRef values are wrapped in `derive()`:
+**OpaqueRef transformations only apply within JSX expressions.** Statement-level transformations (like if statements, loops, etc.) are not supported because they require complex control flow analysis and handling of side effects.
 
 ```typescript
-// Input
-const next = count + 1;
-const total = price * quantity;
-const isValid = age > 18;
+// ✅ Transformed - JSX expression context
+<div>{count + 1}</div>  // → <div>{derive(count, _v => _v + 1)}</div>
+
+// ❌ Not transformed - statement context
+if (count > 5) {  // Statements with OpaqueRef are not transformed
+  console.log("High");
+}
+```
+
+### Core Transformation Patterns (JSX Expression Context Only)
+
+The following transformations apply **only within JSX expressions**. OpaqueRef operations in regular TypeScript statements are not transformed.
+
+#### 1. Binary Operations in JSX
+
+Operations on OpaqueRef values inside JSX are wrapped in `derive()`:
+
+```typescript
+// Input - JSX context
+<div>
+  <span>Next: {count + 1}</span>
+  <span>Total: {price * quantity}</span>
+  <span>Valid: {age > 18 ? "Yes" : "No"}</span>
+</div>
 
 // Output
-const next = derive(count, (_v) => _v + 1);
-const total = derive(
-  { price, quantity },
-  ({ price: _v1, quantity: _v2 }) => _v1 * _v2,
-);
-const isValid = derive(age, (_v) => _v > 18);
+<div>
+  <span>Next: {derive(count, (_v) => _v + 1)}</span>
+  <span>Total: {derive({ price, quantity }, ({ price: _v1, quantity: _v2 }) => _v1 * _v2)}</span>
+  <span>Valid: {ifElse(derive(age, (_v) => _v > 18), "Yes", "No")}</span>
+</div>
 ```
 
 Supported operators: `+`, `-`, `*`, `/`, `%`, `>`, `<`, `>=`, `<=`, `==`, `===`,
 `!=`, `!==`
 
-#### 2. Ternary Conditionals
+#### 2. Ternary Conditionals in JSX
 
-When a ternary operator's condition is an OpaqueRef, it transforms to
+When a ternary operator's condition is an OpaqueRef inside JSX, it transforms to
 `ifElse()`:
 
 ```typescript
-// Input
-const status = isActive ? "on" : "off";
+// Input - JSX context
+<div>{isActive ? "on" : "off"}</div>
 
 // Output
-const status = ifElse(isActive, "on", "off");
+<div>{ifElse(isActive, "on", "off")}</div>
 ```
 
 Note: This transformation only occurs when the condition (`isActive`) is an
 OpaqueRef type.
 
-#### 3. Property Access and Method Calls
+#### 3. Property Access and Method Calls in JSX
 
-When accessing properties or calling methods on OpaqueRef values:
+When accessing properties or calling methods on OpaqueRef values inside JSX:
 
 ```typescript
-// Input
-const len = str.length;
-const upper = str.toUpperCase();
-const firstName = user.name;
+// Input - JSX context
+<div>
+  <span>Length: {str.length}</span>
+  <span>Upper: {str.toUpperCase()}</span>
+  <span>Name: {user.name}</span>
+</div>
 
 // Output
-const len = derive(str, (_v) => _v.length);
-const upper = derive(str, (_v) => _v.toUpperCase());
-const firstName = user.name; // No transform - property access on object returns nested OpaqueRef
+<div>
+  <span>Length: {derive(str, (_v) => _v.length)}</span>
+  <span>Upper: {derive(str, (_v) => _v.toUpperCase())}</span>
+  <span>Name: {user.name}</span>
+</div>
 ```
 
 Key principle: Direct property access on an OpaqueRef object returns another
 OpaqueRef, while operations on the value require `derive()`.
 
-#### 4. JSX Expressions
+#### 4. Direct OpaqueRef References in JSX
 
-Operations on OpaqueRef values inside JSX expressions are transformed:
+Direct OpaqueRef references inside JSX are preserved as-is, allowing the UI framework to handle reactivity:
 
 ```typescript
-// Input
-<div>Count: {count + 1}</div>
-<span>{user.name.toUpperCase()}</span>
-
-// Output
-<div>Count: {derive(count, _v => _v + 1)}</div>
-<span>{derive(user.name, _v => _v.toUpperCase())}</span>
+// Input & Output (no transformation needed)
+<div>{count}</div>
+<span>{user.name}</span>
 ```
 
-Note: Direct OpaqueRef references like `<div>{count}</div>` are preserved as-is,
-allowing the UI framework to handle reactivity.
+#### 5. Array and Object Literals in JSX
 
-#### 5. Array and Object Literals
-
-Each element/property is transformed independently:
+Each element/property is transformed independently when used in JSX:
 
 ```typescript
-// Input
-const arr = [count + 1, price * 2];
-const obj = { next: count + 1, total: price * tax };
+// Input - JSX context
+<div data-values={[count + 1, price * 2]} />
+<div data-info={{ next: count + 1, total: price * tax }} />
 
 // Output
-const arr = [derive(count, (_v) => _v + 1), derive(price, (_v) => _v * 2)];
-const obj = {
+<div data-values={[derive(count, (_v) => _v + 1), derive(price, (_v) => _v * 2)]} />
+<div data-info={{
   next: derive(count, (_v) => _v + 1),
   total: derive({ price, tax }, ({ price: _v1, tax: _v2 }) => _v1 * _v2),
-};
+}} />
 ```
 
 ### Current Limitations
 
-1. **Array Methods** - Not yet supported:
+1. **Statement-Level Transformations** - Not supported:
+   ```typescript
+   // These patterns in regular statements are NOT transformed
+   if (count > 5) { ... }           // ❌ If statements
+   while (count < 10) { ... }       // ❌ Loops
+   const result = count + 1;        // ❌ Variable declarations outside JSX
+   ```
+   **Why:** Statement transformations require complex control flow analysis and
+   handling of side effects. OpaqueRef transformations are limited to JSX
+   expression contexts where the transformation is straightforward.
+
+2. **Array Methods** - Not yet supported:
    ```typescript
    const items = cell([1, 2, 3]);
    const doubled = items.map((x) => x * 2); // ❌ Not transformed
@@ -139,7 +164,7 @@ const obj = {
    **Why:** Array methods require special handling to maintain reactivity
    through the callback function.
 
-2. **Async Operations** - Not yet supported:
+3. **Async Operations** - Not yet supported:
    ```typescript
    const url = cell("https://api.example.com");
    const data = await fetch(url); // ❌ Not transformed
@@ -147,7 +172,7 @@ const obj = {
    **Why:** Async operations with OpaqueRef require special handling for promise
    resolution and error states.
 
-3. **Destructuring** - Extracts values, losing reactivity:
+4. **Destructuring** - Extracts values, losing reactivity:
    ```typescript
    const user = cell({ name: "John", age: 25 });
    const { name, age } = user; // ❌ name and age are plain values, not OpaqueRef
@@ -182,7 +207,50 @@ const userSchema = {
     email: { type: "string" },
   },
   required: ["name", "age"],
-};
+} as const satisfies JSONSchema;
+```
+
+### Handler and Recipe Transformations
+
+The schema transformer also converts `handler` and `recipe` calls with type arguments:
+
+```typescript
+/// <cts-enable />
+import { handler, recipe, Cell } from "commontools";
+
+// Handler with type arguments
+const myHandler = handler<ClickEvent, { count: Cell<number> }>((event, state) => {
+  state.count.set(state.count.get() + 1);
+});
+
+// Recipe with type argument
+export default recipe<CounterState>("Counter", (state) => {
+  return { [UI]: <div>Count: {state.count}</div> };
+});
+
+// Transforms to:
+const myHandler = handler({
+  type: "object",
+  additionalProperties: true
+} as const satisfies JSONSchema, {
+  type: "object",
+  properties: {
+    count: { type: "number", asCell: true }
+  },
+  required: ["count"]
+} as const satisfies JSONSchema, (event, state) => {
+  state.count.set(state.count.get() + 1);
+});
+
+export default recipe({
+  type: "object",
+  properties: {
+    count: { type: "number" }
+  },
+  required: ["count"]
+} as const satisfies JSONSchema, "Counter", (state) => {
+  return { [UI]: <div>Count: {state.count}</div> };
+});
 ```
 
 ### Schema Options
@@ -220,7 +288,7 @@ const schema = {
     },
   },
   required: ["count", "messages"],
-};
+} as const satisfies JSONSchema;
 ```
 
 ## Implementation Strategy
@@ -418,6 +486,16 @@ const transformer = createOpaqueRefTransformer(program, {
 });
 ```
 
+## Current Transformer Architecture
+
+The OpaqueRef transformer handles both OpaqueRef transformations AND schema transformations for `handler` and `recipe` calls. This is intentional - the OpaqueRef transformer:
+
+1. **Transforms JSX expressions** - Wraps OpaqueRef operations in `derive()` and `ifElse()`
+2. **Transforms handler/recipe calls** - Converts type arguments to schema objects
+3. **Manages imports** - Adds necessary imports for `derive`, `ifElse`, `toSchema`
+
+The separate schema transformer is used for standalone `toSchema<T>()` calls.
+
 ## Key Design Principles
 
 1. **Minimal Transformation** - Only transform what's necessary
@@ -430,6 +508,7 @@ const transformer = createOpaqueRefTransformer(program, {
 6. **Always Validate** - Semantic validation runs regardless of transformation
    mode
 7. **Helpful Errors** - Error messages guide users to correct patterns
+8. **Statement vs JSX Context** - Only transform OpaqueRef operations within JSX expressions
 
 ## Testing Strategy
 
@@ -462,7 +541,7 @@ interface TransformerOptions {
 
 ```typescript
 /// <cts-enable />
-import { cell, derive, ifElse, recipe, toSchema, UI } from "commontools";
+import { cell, derive, ifElse, recipe, toSchema, UI, Cell } from "commontools";
 
 interface TodoItem {
   id: string;
@@ -471,31 +550,66 @@ interface TodoItem {
 }
 
 interface TodoState {
-  items: Cell<TodoItem[]>;
-  filter: Cell<"all" | "active" | "completed">;
+  items: TodoItem[];
+  filter: "all" | "active" | "completed";
 }
 
-const schema = toSchema<TodoState>({
-  default: { items: [], filter: "all" },
-});
-
-export default recipe(schema, schema, (state) => {
-  // These operations will be automatically transformed:
-  // state.items is OpaqueRef<TodoItem[]>, so this becomes a derive() call
-  const activeItems = state.items.filter((item) => !item.completed);
-  const activeCount = activeItems.length;
-  const hasActive = activeCount > 0;
-
+export default recipe<TodoState>("TodoList", (state) => {
+  // These statement-level operations are NOT transformed:
+  // They will fail at runtime if you try to use OpaqueRef directly
+  // const activeItems = state.items.filter((item) => !item.completed); // ❌ Not transformed
+  // const activeCount = activeItems.length; // ❌ Not transformed
+  
   return {
     [UI]: (
       <div>
         <h1>Todo List</h1>
-        <p>Active: {activeCount}</p>
-        {ifElse(
-          hasActive,
-          <button>Clear completed</button>,
-          <span>All done!</span>,
-        )}
+        {/* These JSX expressions ARE transformed: */}
+        <p>Total: {state.items.length}</p>
+        <p>Status: {state.filter === "all" ? "All Items" : "Filtered"}</p>
+        <div>
+          {/* Complex expressions in JSX get wrapped in derive: */}
+          <span>Active: {derive(state.items, items => items.filter(item => !item.completed).length)}</span>
+        </div>
+      </div>
+    ),
+    items: state.items,
+    filter: state.filter,
+  };
+});
+
+// After transformation:
+export default recipe({
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          text: { type: "string" },
+          completed: { type: "boolean" }
+        },
+        required: ["id", "text", "completed"]
+      }
+    },
+    filter: {
+      type: "string",
+      enum: ["all", "active", "completed"]
+    }
+  },
+  required: ["items", "filter"]
+} as const satisfies JSONSchema, "TodoList", (state) => {
+  return {
+    [UI]: (
+      <div>
+        <h1>Todo List</h1>
+        <p>Total: {derive(state.items, _v => _v.length)}</p>
+        <p>Status: {ifElse(derive(state.filter, _v => _v === "all"), "All Items", "Filtered")}</p>
+        <div>
+          <span>Active: {derive(state.items, items => items.filter(item => !item.completed).length)}</span>
+        </div>
       </div>
     ),
     items: state.items,

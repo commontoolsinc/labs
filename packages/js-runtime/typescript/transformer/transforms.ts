@@ -822,39 +822,10 @@ export function checkTransformation(
     }
   }
 
-  // Check if it's a binary expression with OpaqueRef values
-  if (ts.isBinaryExpression(node) && containsOpaqueRef(node, checker)) {
-    return {
-      transformed: true,
-      node,
-      type: "binary",
-    };
-  }
-
-  // Check if it's an element access expression (array indexing) with OpaqueRef
-  if (ts.isElementAccessExpression(node) && node.argumentExpression) {
-    if (containsOpaqueRef(node.argumentExpression, checker)) {
-      return {
-        transformed: true,
-        node,
-        type: "element-access",
-      };
-    }
-  }
-
-  // Check if it's a template expression with OpaqueRef
-  if (ts.isTemplateExpression(node)) {
-    const hasOpaqueRefSpans = node.templateSpans.some((span) =>
-      containsOpaqueRef(span.expression, checker)
-    );
-    if (hasOpaqueRefSpans) {
-      return {
-        transformed: true,
-        node,
-        type: "template",
-      };
-    }
-  }
+  // Note: Binary expressions, element access, and template expressions
+  // are no longer transformed at the statement level.
+  // They are only transformed when they appear inside JSX expressions,
+  // which is handled by the JSX expression case above.
 
   return {
     transformed: false,

@@ -111,6 +111,31 @@ export function createOpaqueRefTransformer(
         });
       };
 
+      // Helper to check if a node is inside a JSX expression
+      const isInsideJsxExpression = (node: ts.Node): boolean => {
+        let current: ts.Node | undefined = node;
+        while (current) {
+          if (ts.isJsxExpression(current)) {
+            // Check if this JSX expression is in an event handler attribute
+            const parent = current.parent;
+            if (parent && ts.isJsxAttribute(parent)) {
+              const attrName = parent.name.getText();
+              // Event handlers like onClick expect functions, not derived values
+              if (attrName.startsWith("on")) {
+                return false;
+              }
+            }
+            return true;
+          }
+          // If we hit a statement boundary, we're definitely not in a JSX expression
+          if (ts.isStatement(current) || ts.isSourceFile(current)) {
+            return false;
+          }
+          current = current.parent;
+        }
+        return false;
+      };
+
       const visit: ts.Visitor = (node) => {
         // Handle function calls with OpaqueRef arguments or method calls on OpaqueRef
         if (ts.isCallExpression(node)) {
@@ -547,7 +572,8 @@ export function createOpaqueRefTransformer(
 
           // Check if the entire call expression contains OpaqueRef values
           // This handles both arguments and method calls on OpaqueRef objects
-          if (containsOpaqueRef(node, checker)) {
+          // Only transform if we're inside a JSX expression
+          if (containsOpaqueRef(node, checker) && isInsideJsxExpression(node)) {
             // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
 
@@ -574,11 +600,13 @@ export function createOpaqueRefTransformer(
 
         // Handle property access expressions (e.g., person.name.length)
         // Skip if it's part of a larger expression that will handle it
+        // Only transform if we're inside a JSX expression
         if (
           ts.isPropertyAccessExpression(node) &&
           node.parent &&
           !ts.isCallExpression(node.parent) &&
-          !ts.isPropertyAccessExpression(node.parent)
+          !ts.isPropertyAccessExpression(node.parent) &&
+          isInsideJsxExpression(node)
         ) {
           // Check if we're accessing a property on an OpaqueRef
           // For example: person.name is OpaqueRef<string>, and we're accessing .length
@@ -611,7 +639,8 @@ export function createOpaqueRefTransformer(
         }
 
         // Handle element access (array indexing)
-        if (ts.isElementAccessExpression(node) && node.argumentExpression) {
+        // Only transform if we're inside a JSX expression
+        if (ts.isElementAccessExpression(node) && node.argumentExpression && isInsideJsxExpression(node)) {
           if (containsOpaqueRef(node.argumentExpression, checker)) {
             log(
               `Found element access transformation at ${sourceFile.fileName}:${
@@ -688,7 +717,8 @@ export function createOpaqueRefTransformer(
         }
 
         // Handle template expressions
-        if (ts.isTemplateExpression(node)) {
+        // Only transform if we're inside a JSX expression
+        if (ts.isTemplateExpression(node) && isInsideJsxExpression(node)) {
           // Check if any template span contains OpaqueRef
           if (containsOpaqueRef(node, checker)) {
             log(
@@ -820,7 +850,8 @@ export function createOpaqueRefTransformer(
         }
 
         // Special handling for ternary expressions
-        if (ts.isConditionalExpression(node)) {
+        // Only transform if we're inside a JSX expression
+        if (ts.isConditionalExpression(node) && isInsideJsxExpression(node)) {
           // Check if condition contains OpaqueRef (before transformation)
           const originalConditionType = checker.getTypeAtLocation(
             node.condition,
@@ -965,22 +996,6 @@ export function createOpaqueRefTransformer(
               break;
             }
 
-            case "binary": {
-              const transformed = transformExpressionWithOpaqueRef(
-                node as ts.Expression,
-                checker,
-                context.factory,
-                sourceFile,
-                context,
-              );
-              if (transformed !== node) {
-                if (!hasCommonToolsImport(sourceFile, "derive")) {
-                  needsDeriveImport = true;
-                }
-                return transformed;
-              }
-              break;
-            }
           }
         }
 
