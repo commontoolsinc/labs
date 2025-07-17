@@ -186,9 +186,24 @@ export type HandlerState<T> = T extends Cell<any> ? T : T extends Stream<any> ? 
     readonly [K in keyof T]: HandlerState<T[K]>;
 } : T;
 export type HandlerFunction = {
-    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: HandlerState<Schema<T>>) => any): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
-    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<CellToOpaque<T>, E>;
-    <E, T>(handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<CellToOpaque<T>, E>;
+    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: Schema<T>) => any, options: {
+        proxy: true;
+    }): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
+    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: HandlerState<Schema<T>>) => any, options?: {
+        proxy?: false;
+    }): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
+    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: T) => any, options: {
+        proxy: true;
+    }): ModuleFactory<CellToOpaque<T>, E>;
+    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: HandlerState<T>) => any, options?: {
+        proxy?: false;
+    }): ModuleFactory<CellToOpaque<T>, E>;
+    <E, T>(handler: (event: E, props: T) => any, options: {
+        proxy: true;
+    }): ModuleFactory<CellToOpaque<T>, E>;
+    <E, T>(handler: (event: E, props: HandlerState<T>) => any, options?: {
+        proxy?: false;
+    }): ModuleFactory<CellToOpaque<T>, E>;
 };
 export type DeriveFunction = <In, Out>(input: Opaque<In>, f: (input: In) => Out | Promise<Out>) => OpaqueRef<Out>;
 export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
