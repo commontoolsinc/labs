@@ -560,6 +560,94 @@ describe("URI Utils", () => {
   });
 });
 
+describe("root value rewriting", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      storageManager,
+      blobbyServerUrl: "http://localhost:8080",
+    });
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should rewrite root writes with value property", () => {
+    const transaction = runtime.edit();
+
+    // Write to empty path with object containing "value" property
+    const writeResult = transaction.write({
+      space,
+      id: "of:test-root",
+      type: "application/json",
+      path: [],
+    }, { value: { foo: "bar" } });
+
+    expect(writeResult.ok).toBeDefined();
+
+    // Should be able to read the value at path ["value"]
+    const readResult = transaction.readOrThrow({
+      space,
+      id: "of:test-root",
+      type: "application/json",
+      path: ["value"],
+    });
+
+    expect(readResult).toEqual({ foo: "bar" });
+  });
+
+  it("should not rewrite non-empty paths", () => {
+    const transaction = runtime.edit();
+
+    // First create a document
+    transaction.write({
+      space,
+      id: "of:test-nested",
+      type: "application/json",
+      path: ["value"],
+    }, {});
+
+    // Write to non-empty path with object containing "value" property
+    transaction.write({
+      space,
+      id: "of:test-nested",
+      type: "application/json",
+      path: ["value", "nested"],
+    }, { value: "should not be rewritten" });
+
+    // Should store the object as-is
+    const readResult = transaction.readOrThrow({
+      space,
+      id: "of:test-nested",
+      type: "application/json",
+      path: ["value", "nested"],
+    });
+
+    expect(readResult).toEqual({ value: "should not be rewritten" });
+  });
+
+  it("should not rewrite non-objects", () => {
+    const transaction = runtime.edit();
+
+    // Write non-object to empty path
+    const writeResult = transaction.write({
+      space,
+      id: "of:test-string",
+      type: "application/json",
+      path: [],
+    }, "plain string");
+
+    // Should get an error since path is empty and value is not rewritten
+    expect(writeResult.error).toBeDefined();
+    expect(writeResult.error?.name).toBe("NotFoundError");
+  });
+});
+
 describe("data: URI behaviors", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

@@ -3,6 +3,7 @@ import type {
   IAttestation,
   IMemoryAddress,
   InactiveTransactionError,
+  IReadOptions,
   IStorageManager,
   IStorageTransactionAborted,
   IStorageTransactionComplete,
@@ -102,17 +103,24 @@ export const read = (
   journal: IJournal,
   space: MemorySpace,
   address: IMemoryAddress,
+  options?: IReadOptions,
 ): Result<IAttestation, ReadError> => {
   const { ok: branch, error } = checkout(journal, space);
   if (error) {
     return { error };
   } else {
-    const result = branch.read(address);
+    const result = branch.read(address, options);
     if (result.error) {
       return { error: result.error.from(space) };
     } else {
-      // Track read activity
-      journal.state.activity.push({ read: { ...address, space } });
+      // Track read activity with metadata
+      journal.state.activity.push({
+        read: {
+          ...address,
+          space,
+          meta: options?.meta ?? {},
+        },
+      });
       return result;
     }
   }
@@ -300,8 +308,8 @@ export class TransactionReader implements ITransactionReader {
     return this.#space;
   }
 
-  read(address: IMemoryAddress) {
-    return read(this.#journal, this.#space, address);
+  read(address: IMemoryAddress, options?: IReadOptions) {
+    return read(this.#journal, this.#space, address, options);
   }
 }
 
@@ -324,8 +332,8 @@ export class TransactionWriter implements ITransactionWriter {
     return this.#space;
   }
 
-  read(address: IMemoryAddress) {
-    return read(this.#journal, this.#space, address);
+  read(address: IMemoryAddress, options?: IReadOptions) {
+    return read(this.#journal, this.#space, address, options);
   }
 
   /**

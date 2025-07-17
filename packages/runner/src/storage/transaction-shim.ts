@@ -6,6 +6,7 @@ import type {
   IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
+  IReadOptions,
   IStorageInvariant,
   IStorageTransaction,
   IStorageTransactionComplete,
@@ -140,6 +141,7 @@ class TransactionReader implements ITransactionReader {
 
   read(
     address: IMemorySpaceAddress,
+    options?: IReadOptions,
   ): Result<Read, ReadError> {
     if (address.type !== "application/json") {
       const error = new Error(
@@ -428,13 +430,16 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: reader };
   }
 
-  read(address: IMemorySpaceAddress): Result<Read, ReadError> {
+  read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<Read, ReadError> {
     const readerResult = this.reader(address.space);
     if (readerResult.error) {
       return { ok: undefined, error: readerResult.error };
     }
 
-    const readResult = readerResult.ok!.read(address);
+    const readResult = readerResult.ok!.read(address, options);
     if (readResult.error) {
       return { ok: undefined, error: readResult.error };
     }
@@ -547,8 +552,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.reader(space);
   }
 
-  read(address: IMemorySpaceAddress): Result<Read, ReadError> {
-    return this.tx.read(address);
+  read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<Read, ReadError> {
+    return this.tx.read(address, options);
   }
 
   readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
@@ -584,14 +592,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       console.log("[writeOrThrow] address:", address);
       console.log("[writeOrThrow] value:", value);
       console.log("[writeOrThrow] error.path:", writeResult.error.path);
-      
+
       // Create parent entries if needed
       const lastValidPath = writeResult.error.path;
       const valueObj = lastValidPath
         ? this.readValueOrThrow({ ...address, path: lastValidPath })
         : {};
       console.log("[writeOrThrow] valueObj after read:", valueObj);
-      
+
       if (!isRecord(valueObj)) {
         throw new Error(
           `Value at path ${address.path.join("/")} is not an object`,
@@ -599,7 +607,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       const remainingPath = address.path.slice(lastValidPath?.length ?? 0);
       console.log("[writeOrThrow] remainingPath:", remainingPath);
-      
+
       if (remainingPath.length === 0) {
         throw new Error(
           `Invalid error path: ${lastValidPath?.join("/")}`,
@@ -607,19 +615,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       }
       const lastKey = remainingPath.pop()!;
       console.log("[writeOrThrow] lastKey:", lastKey);
-      
+
       let nextValue = valueObj;
       for (const key of remainingPath) {
         console.log("[writeOrThrow] Creating structure for key:", key);
         console.log("[writeOrThrow] typeof Number(key):", typeof Number(key));
-        console.log("[writeOrThrow] Number.isNaN(Number(key)):", Number.isNaN(Number(key)));
+        console.log(
+          "[writeOrThrow] Number.isNaN(Number(key)):",
+          Number.isNaN(Number(key)),
+        );
         nextValue =
           nextValue[key] =
             (!Number.isNaN(Number(key)) ? [] : {}) as typeof nextValue;
       }
       nextValue[lastKey] = value;
       console.log("[writeOrThrow] Final valueObj to write:", valueObj);
-      
+
       const parentAddress = { ...address, path: lastValidPath ?? [] };
       console.log("[writeOrThrow] parentAddress:", parentAddress);
       const writeResultRetry = this.tx.write(parentAddress, valueObj);
@@ -638,7 +649,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     console.log("[writeValueOrThrow] Input address:", address);
     console.log("[writeValueOrThrow] Input path:", address.path);
     console.log("[writeValueOrThrow] Input value:", value);
-    console.log("[writeValueOrThrow] Transformed path:", ["value", ...address.path]);
+    console.log("[writeValueOrThrow] Transformed path:", [
+      "value",
+      ...address.path,
+    ]);
     this.writeOrThrow({ ...address, path: ["value", ...address.path] }, value);
   }
 

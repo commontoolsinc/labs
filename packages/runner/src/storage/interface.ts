@@ -36,6 +36,18 @@ export type {
 };
 
 /**
+ * Metadata that can be attached to read operations
+ */
+export interface Metadata extends Record<PropertyKey, unknown> {}
+
+/**
+ * Options for read operations
+ */
+export interface IReadOptions {
+  meta?: Metadata;
+}
+
+/**
  * @deprecated - Use IAttestation instead
  */
 export type Read = IAttestation;
@@ -72,7 +84,16 @@ export interface StorageValue<T = any> {
 
 export interface IStorageManager {
   id: string;
+  /**
+   * @deprecated
+   */
   open(space: MemorySpace): IStorageProviderWithReplica;
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IStorageTransaction;
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -165,17 +186,8 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 }
 
-export interface IStorageManagerV2 {
-  /**
-   * Creates a storage transaction that can be used to read / write data into
-   * locally replicated memory spaces. Transaction allows reading from many
-   * multiple spaces but writing only to one space.
-   */
-  edit(): IStorageTransaction;
-}
-
 /**
- * Extension of {@link IStorageManagerV2} which is supposed to merge into
+ * Extension of {@link IStorageManager} which is supposed to merge into
  * {@link IStorageManager} in the future. It provides capability to subscribe
  * to the storage notifications.
  */
@@ -412,9 +424,13 @@ export interface IStorageTransaction {
    * opposed to value stored.
    *
    * @param address - Memory address to read from.
+   * @param options - Optional read options including metadata
    * @returns Result containing the read value or an error.
    */
-  read(address: IMemorySpaceAddress): Result<IAttestation, ReadError>;
+  read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<IAttestation, ReadError>;
 
   /**
    * Creates a memory space writer for this transaction. Fails if transaction is
@@ -587,8 +603,14 @@ export interface ITransactionReader {
    *  // Referencing non-existing facts produces errors
    *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
    * ```
+   *
+   * @param address - Memory address to read from
+   * @param options - Optional read options including metadata
    */
-  read(address: IMemoryAddress): Result<IAttestation, ReadError>;
+  read(
+    address: IMemoryAddress,
+    options?: IReadOptions,
+  ): Result<IAttestation, ReadError>;
 }
 
 export interface ITransactionWriter extends ITransactionReader {
@@ -859,9 +881,13 @@ export interface IStorageEdit {
 }
 
 export type Activity = Variant<{
-  read: IMemorySpaceAddress;
+  read: IReadActivity;
   write: IMemorySpaceAddress;
 }>;
+
+export interface IReadActivity extends IMemorySpaceAddress {
+  meta: Metadata;
+}
 
 /**
  * Error is returned on an attempt to open writer in a transaction that already

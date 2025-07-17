@@ -1,32 +1,64 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { type Cell, isCell } from "@commontools/runner";
+import {
+  InputTimingController,
+  type InputTimingOptions,
+} from "../../core/input-timing-controller.ts";
 
 /**
- * CTInput - Text input field with support for various types and validation
+ * CTInput - Enhanced input field with support for various types, validation patterns, and reactive data binding
  *
  * @element ct-input
  *
- * @attr {string} type - Input type: "text" | "email" | "password" | "number" | "search" | "tel" | "url" | "date" | "time" | "datetime-local"
+ * @attr {string} type - Input type: "text" | "email" | "password" | "number" | "search" | "tel" | "url" | "date" | "time" | "datetime-local" | "month" | "week" | "color" | "file" | "range" | "hidden"
  * @attr {string} placeholder - Placeholder text
- * @attr {string} value - Input value
+ * @attr {string|Cell<string>} value - Input value (supports both plain string and Cell<string>)
  * @attr {boolean} disabled - Whether the input is disabled
  * @attr {boolean} readonly - Whether the input is read-only
  * @attr {boolean} required - Whether the input is required
  * @attr {string} name - Name attribute for form submission
- * @attr {string|number} min - Minimum value (for number, date inputs)
- * @attr {string|number} max - Maximum value (for number, date inputs)
- * @attr {string|number} step - Step value (for number inputs)
- * @attr {string} pattern - Validation pattern
+ * @attr {string|number} min - Minimum value (for number, date, range inputs)
+ * @attr {string|number} max - Maximum value (for number, date, range inputs)
+ * @attr {string|number} step - Step value (for number, range inputs)
+ * @attr {string} pattern - Custom validation pattern (regex)
+ * @attr {string} validationPattern - Predefined pattern: "email" | "url" | "tel-us" | "tel-intl" | "credit-card" | "zip-us" | "alphanumeric" | "letters" | "numbers"
  * @attr {string} autocomplete - Autocomplete hint
+ * @attr {string} inputmode - Virtual keyboard mode: "none" | "text" | "decimal" | "numeric" | "tel" | "search" | "email" | "url"
+ * @attr {number} size - Width of input in characters
+ * @attr {boolean} multiple - Allow multiple files (file input only)
+ * @attr {string} accept - File types to accept (file input only)
+ * @attr {string} list - ID of datalist element for suggestions
+ * @attr {string} spellcheck - Enable/disable spellcheck
+ * @attr {boolean} showValidation - Show validation state visually
+ * @attr {boolean} error - Manual error state override
+ * @attr {string} timingStrategy - Input timing strategy: "immediate" | "debounce" | "throttle" | "blur"
+ * @attr {number} timingDelay - Delay in milliseconds for debounce/throttle (default: 300)
  *
- * @fires ct-input - Fired on input with detail: { value, name }
- * @fires ct-change - Fired on change with detail: { value, name }
- * @fires ct-focus - Fired on focus
- * @fires ct-blur - Fired on blur
+ * @fires ct-change - Fired when value changes (timing depends on strategy) with detail: { value, oldValue, name, files? }
+ * @fires ct-focus - Fired on focus with detail: { value, name }
+ * @fires ct-blur - Fired on blur with detail: { value, name }
+ * @fires ct-keydown - Fired on keydown with detail: { key, value, shiftKey, ctrlKey, metaKey, altKey, name }
+ * @fires ct-submit - Fired on Enter key with detail: { value, name }
+ * @fires ct-invalid - Fired on validation failure with detail: { value, name, validationMessage, validity }
  *
  * @example
- * <ct-input type="email" placeholder="Enter email" required></ct-input>
+ * <ct-input type="email" placeholder="Enter email" required showValidation></ct-input>
+ *
+ * @example
+ * <ct-input type="tel" validationPattern="tel-us" placeholder="(123) 456-7890"></ct-input>
+ *
+ * @example
+ * <ct-input type="number" min="0" max="100" step="5"></ct-input>
+ *
+ * @example
+ * <!-- Debounced input - waits 500ms after user stops typing -->
+ * <ct-input timingStrategy="debounce" timingDelay="500" placeholder="Search..."></ct-input>
+ *
+ * @example
+ * <!-- Only emit events when input loses focus -->
+ * <ct-input timingStrategy="blur" placeholder="Enter value"></ct-input>
  */
 
 export type InputType =
@@ -43,7 +75,42 @@ export type InputType =
   | "month"
   | "week"
   | "color"
-  | "file";
+  | "file"
+  | "range"
+  | "hidden";
+
+export type InputMode =
+  | "none"
+  | "text"
+  | "decimal"
+  | "numeric"
+  | "tel"
+  | "search"
+  | "email"
+  | "url";
+
+// Common validation patterns for different input types
+export const INPUT_PATTERNS = {
+  // Email pattern (basic validation)
+  email: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
+  // URL pattern (http/https)
+  url: "https?://.+",
+  // US Phone pattern (various formats)
+  "tel-us": "\\+?1?[-.]?\\(?([0-9]{3})\\)?[-.]?([0-9]{3})[-.]?([0-9]{4})",
+  // International phone
+  "tel-intl":
+    "\\+?[0-9]{1,4}?[-.]?\\(?([0-9]{1,4})\\)?[-.]?([0-9]{1,4})[-.]?([0-9]{1,9})",
+  // Credit card (basic - digits with optional spaces/dashes)
+  "credit-card": "[0-9]{4}[-\\s]?[0-9]{4}[-\\s]?[0-9]{4}[-\\s]?[0-9]{4}",
+  // ZIP code (US 5 or 9 digit)
+  "zip-us": "[0-9]{5}(-[0-9]{4})?",
+  // Alphanumeric only
+  alphanumeric: "[a-zA-Z0-9]+",
+  // Letters only
+  letters: "[a-zA-Z]+",
+  // Numbers only
+  numbers: "[0-9]+",
+} as const;
 
 export class CTInput extends BaseElement {
   static override styles = css`
@@ -159,6 +226,60 @@ export class CTInput extends BaseElement {
     input[type="search"]::-webkit-search-cancel-button {
       -webkit-appearance: none;
     }
+
+    /* Range input */
+    input[type="range"] {
+      padding: 0.5rem 0;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-track {
+      width: 100%;
+      height: 4px;
+      background: var(--muted, hsl(0, 0%, 96%));
+      border-radius: 2px;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      background: var(--primary, hsl(212, 100%, 47%));
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-moz-range-track {
+      width: 100%;
+      height: 4px;
+      background: var(--muted, hsl(0, 0%, 96%));
+      border-radius: 2px;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      background: var(--primary, hsl(212, 100%, 47%));
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+    }
+
+    /* Hidden input */
+    input[type="hidden"] {
+      display: none;
+    }
+
+    /* Valid state (when showValidation is true) */
+    input:valid:not(:placeholder-shown) {
+      border-color: var(--success, hsl(120, 60%, 40%));
+    }
+
+    input:valid:not(:placeholder-shown):focus {
+      border-color: var(--success, hsl(120, 60%, 40%));
+      box-shadow: 0 0 0 3px var(--success-alpha, hsla(120, 60%, 40%, 0.1));
+    }
   `;
 
   static override properties = {
@@ -178,11 +299,21 @@ export class CTInput extends BaseElement {
     pattern: { type: String },
     maxlength: { type: String },
     minlength: { type: String },
+    inputmode: { type: String },
+    size: { type: Number },
+    multiple: { type: Boolean },
+    accept: { type: String },
+    list: { type: String },
+    spellcheck: { type: Boolean },
+    validationPattern: { type: String },
+    showValidation: { type: Boolean },
+    timingStrategy: { type: String },
+    timingDelay: { type: Number },
   };
 
   declare type: InputType;
   declare placeholder: string;
-  declare value: string;
+  declare value: Cell<string> | string;
   declare disabled: boolean;
   declare readonly: boolean;
   declare error: boolean;
@@ -196,14 +327,25 @@ export class CTInput extends BaseElement {
   declare pattern: string;
   declare maxlength: string;
   declare minlength: string;
+  declare inputmode: InputMode;
+  declare size: number;
+  declare multiple: boolean;
+  declare accept: string;
+  declare list: string;
+  declare spellcheck: boolean;
+  declare validationPattern: keyof typeof INPUT_PATTERNS | "";
+  declare showValidation: boolean;
+  declare timingStrategy: InputTimingOptions["strategy"];
+  declare timingDelay: number;
 
   private _input: HTMLInputElement | null = null;
+  private _cellUnsubscribe: (() => void) | null = null;
+  private _inputTiming: InputTimingController;
 
   constructor() {
     super();
     this.type = "text";
     this.placeholder = "";
-    this.value = "";
     this.disabled = false;
     this.readonly = false;
     this.error = false;
@@ -217,6 +359,22 @@ export class CTInput extends BaseElement {
     this.pattern = "";
     this.maxlength = "";
     this.minlength = "";
+    this.inputmode = "text";
+    this.size = 0;
+    this.multiple = false;
+    this.accept = "";
+    this.list = "";
+    this.spellcheck = true;
+    this.validationPattern = "";
+    this.showValidation = false;
+    this.timingStrategy = "debounce";
+    this.timingDelay = 300;
+
+    // Initialize input timing controller
+    this._inputTiming = new InputTimingController(this, {
+      strategy: this.timingStrategy,
+      delay: this.timingDelay,
+    });
   }
 
   private get input(): HTMLInputElement | null {
@@ -224,6 +382,121 @@ export class CTInput extends BaseElement {
       this._input = this.shadowRoot?.querySelector("input") || null;
     }
     return this._input;
+  }
+
+  private getValue(): string {
+    if (isCell(this.value)) {
+      return this.value.get?.() || "";
+    }
+    return this.value || "";
+  }
+
+  private setValue(newValue: string, files?: FileList | null): void {
+    const oldValue = this.getValue();
+
+    this._inputTiming.schedule(() => {
+      if (isCell(this.value)) {
+        const tx = this.value.runtime.edit();
+        this.value.withTx(tx).set(newValue);
+        tx.commit();
+      } else {
+        this.value = newValue;
+      }
+
+      // Emit the value change event after the value is actually set
+      this.emit("ct-change", {
+        value: newValue,
+        oldValue,
+        name: this.name,
+        files: this.type === "file" ? files : undefined,
+      });
+    });
+  }
+
+  private getPattern(): string {
+    // Use custom pattern if provided
+    if (this.pattern) {
+      return this.pattern;
+    }
+
+    // Use validation pattern if specified
+    if (this.validationPattern && this.validationPattern in INPUT_PATTERNS) {
+      return INPUT_PATTERNS[this.validationPattern];
+    }
+
+    // Use default patterns for specific types
+    if (this.type === "email" && !this.pattern) {
+      return INPUT_PATTERNS.email;
+    }
+    if (this.type === "url" && !this.pattern) {
+      return INPUT_PATTERNS.url;
+    }
+
+    return "";
+  }
+
+  private getInputMode(): InputMode {
+    // Use explicit inputmode if provided
+    if (this.inputmode && this.inputmode !== "text") {
+      return this.inputmode;
+    }
+
+    // Return appropriate inputmode based on type
+    switch (this.type) {
+      case "email":
+        return "email";
+      case "tel":
+        return "tel";
+      case "url":
+        return "url";
+      case "number":
+        return "numeric";
+      case "search":
+        return "search";
+      default:
+        return "text";
+    }
+  }
+
+  private getValidationClass(): string {
+    if (!this.showValidation) {
+      return this.error ? "error" : "";
+    }
+
+    // Check native validation
+    const isValid = this.checkValidity();
+    return isValid ? "" : "error";
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this._setupCellSubscription();
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this._cleanupCellSubscription();
+  }
+
+  override updated(changedProperties: Map<string, any>) {
+    super.updated(changedProperties);
+
+    // If the value property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("value")) {
+      this._cleanupCellSubscription();
+      this._setupCellSubscription();
+    }
+
+    // Update timing controller if timing options changed
+    if (
+      changedProperties.has("timingStrategy") ||
+      changedProperties.has("timingDelay")
+    ) {
+      this._inputTiming.updateOptions({
+        strategy: this.timingStrategy,
+        delay: this.timingDelay,
+      });
+    }
   }
 
   override firstUpdated() {
@@ -235,13 +508,38 @@ export class CTInput extends BaseElement {
     }
   }
 
+  private _setupCellSubscription(): void {
+    if (isCell(this.value)) {
+      // Subscribe to cell changes using sink() which returns a cleanup function
+      // This ensures the input re-renders when the cell value changes externally
+      this._cellUnsubscribe = this.value.sink(() => {
+        // Trigger a re-render when the cell value changes
+        this.requestUpdate();
+      });
+    }
+  }
+
+  private _cleanupCellSubscription(): void {
+    if (this._cellUnsubscribe) {
+      this._cellUnsubscribe();
+      this._cellUnsubscribe = null;
+    }
+  }
+
   override render() {
+    const pattern = this.getPattern();
+    const inputMode = this.getInputMode();
+    const validationClass = this.getValidationClass();
+
+    // For file inputs, we can't set the value programmatically
+    const inputValue = this.type === "file" ? undefined : this.getValue();
+
     return html`
       <input
         type="${this.type}"
-        class="${this.error ? "error" : ""}"
+        class="${validationClass}"
         placeholder="${ifDefined(this.placeholder || undefined)}"
-        .value="${this.value}"
+        .value="${ifDefined(inputValue)}"
         ?disabled="${this.disabled}"
         ?readonly="${this.readonly}"
         ?required="${this.required}"
@@ -250,14 +548,23 @@ export class CTInput extends BaseElement {
         min="${ifDefined(this.min || undefined)}"
         max="${ifDefined(this.max || undefined)}"
         step="${ifDefined(this.step || undefined)}"
-        pattern="${ifDefined(this.pattern || undefined)}"
+        pattern="${ifDefined(pattern || undefined)}"
         maxlength="${ifDefined(this.maxlength || undefined)}"
         minlength="${ifDefined(this.minlength || undefined)}"
+        inputmode="${ifDefined(inputMode || undefined)}"
+        size="${ifDefined(this.size || undefined)}"
+        ?multiple="${this.multiple && this.type === "file"}"
+        accept="${ifDefined(
+        this.accept && this.type === "file" ? this.accept : undefined,
+      )}"
+        list="${ifDefined(this.list || undefined)}"
+        ?spellcheck="${this.spellcheck}"
         @input="${this._handleInput}"
         @change="${this._handleChange}"
         @focus="${this._handleFocus}"
         @blur="${this._handleBlur}"
         @keydown="${this._handleKeyDown}"
+        @invalid="${this._handleInvalid}"
         part="input"
       />
     `;
@@ -265,55 +572,78 @@ export class CTInput extends BaseElement {
 
   private _handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
-    const oldValue = this.value;
-    this.value = input.value;
 
-    // Emit custom input event
-    this.emit("ct-input", {
-      value: input.value,
-      oldValue,
-    });
+    // For file inputs, we can't set the value programmatically
+    if (this.type !== "file") {
+      this.setValue(input.value, input.files);
+    } else {
+      // For file inputs, still emit the event with files
+      this.setValue("", input.files);
+    }
   }
 
   private _handleChange(event: Event) {
     const input = event.target as HTMLInputElement;
-    const oldValue = this.value;
-    this.value = input.value;
 
-    // Emit custom change event
-    this.emit("ct-change", {
-      value: input.value,
-      oldValue,
-    });
+    // Change events use the same setValue logic as input events
+    // The timing controller will determine when to actually emit
+    if (this.type !== "file") {
+      this.setValue(input.value, input.files);
+    } else {
+      this.setValue("", input.files);
+    }
   }
 
   private _handleFocus(_event: Event) {
+    this._inputTiming.onFocus();
     this.emit("ct-focus", {
-      value: this.value,
+      value: this.getValue(),
+      name: this.name,
     });
   }
 
   private _handleBlur(_event: Event) {
+    this._inputTiming.onBlur();
     this.emit("ct-blur", {
-      value: this.value,
+      value: this.getValue(),
+      name: this.name,
     });
   }
 
   private _handleKeyDown(event: KeyboardEvent) {
     this.emit("ct-keydown", {
       key: event.key,
-      value: this.value,
+      value: this.getValue(),
       shiftKey: event.shiftKey,
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
       altKey: event.altKey,
+      name: this.name,
     });
 
     // Special handling for Enter key
     if (event.key === "Enter") {
       this.emit("ct-submit", {
-        value: this.value,
+        value: this.getValue(),
+        name: this.name,
       });
+    }
+  }
+
+  private _handleInvalid(event: Event) {
+    event.preventDefault(); // Prevent browser's default validation UI
+
+    const input = event.target as HTMLInputElement;
+    this.emit("ct-invalid", {
+      value: this.getValue(),
+      name: this.name,
+      validationMessage: input.validationMessage,
+      validity: input.validity,
+    });
+
+    // Update visual state if showValidation is enabled
+    if (this.showValidation) {
+      this.requestUpdate();
     }
   }
 

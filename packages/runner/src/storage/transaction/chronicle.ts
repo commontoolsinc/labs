@@ -120,6 +120,7 @@ export class Chronicle {
 
   read(
     address: IMemoryAddress,
+    options?: { meta?: unknown },
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent

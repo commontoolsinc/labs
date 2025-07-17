@@ -72,6 +72,13 @@ export async function createCharmsController(
 
   const staticAssetUrl = new URL(API_URL);
   staticAssetUrl.pathname = "/static";
+
+  // We're hoisting CharmManager so that
+  // we can create it after the runtime, but still reference
+  // its `getSpaceName` method in a runtime callback.
+  // deno-lint-ignore prefer-const
+  let charmManager: CharmManager;
+
   const runtime = new Runtime({
     storageManager: StorageManager.open({
       as: session.as,
@@ -97,12 +104,19 @@ export async function createCharmsController(
       if (!id) {
         throw new Error(`Could not navigate to cell that is not a charm.`);
       }
-      navigateToCharm(target.space, id);
+
+      // NOTE(jake): Eventually, once we're doing multi-space navigation, we will
+      // need to replace this charmManager.getSpaceName() with a call to some
+      // sort of address book / dns-style server, OR just navigate to the DID.
+
+      // Use the human-readable space name from CharmManager instead of the DID
+      navigateToCharm(charmManager.getSpaceName(), id);
     },
   });
 
   console.log("[createCharmsController] Creating CharmManager with session");
-  const charmManager = new CharmManager(session, runtime);
+  charmManager = new CharmManager(session, runtime);
+
   await charmManager.synced();
   console.log("[createCharmsController] Creating CharmsController");
   return new CharmsController(charmManager);
