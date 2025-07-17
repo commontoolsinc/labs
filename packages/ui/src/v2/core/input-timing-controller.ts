@@ -1,22 +1,22 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
 
-export type InputTimingStrategy = 
-  | "immediate"     // Dispatch immediately
-  | "debounce"      // Debounce with delay (default)
-  | "throttle"      // Throttle with interval
-  | "blur"          // Only dispatch on blur
+export type InputTimingStrategy =
+  | "immediate" // Dispatch immediately
+  | "debounce" // Debounce with delay (default)
+  | "throttle" // Throttle with interval
+  | "blur"; // Only dispatch on blur
 
 export interface InputTimingOptions {
   strategy?: InputTimingStrategy;
-  delay?: number;  // For debounce/throttle (ms)
-  leading?: boolean;  // For throttle - fire on leading edge
+  delay?: number; // For debounce/throttle (ms)
+  leading?: boolean; // For throttle - fire on leading edge
   trailing?: boolean; // For throttle - fire on trailing edge
 }
 
 /**
  * A reactive controller that manages input timing strategies (debounce, throttle, blur-only)
  * for Lit components. This controller can be shared across multiple input components.
- * 
+ *
  * @example
  * ```typescript
  * class MyInput extends LitElement {
@@ -24,10 +24,10 @@ export interface InputTimingOptions {
  *     strategy: 'debounce',
  *     delay: 300
  *   });
- * 
+ *
  *   private handleInput(event: Event) {
  *     this.inputTiming.schedule(() => {
- *       this.dispatchEvent(new CustomEvent('value-change', { 
+ *       this.dispatchEvent(new CustomEvent('value-change', {
  *         detail: { value: event.target.value }
  *       }));
  *     });
@@ -44,12 +44,12 @@ export class InputTimingController implements ReactiveController {
   private hasFocus = false;
 
   constructor(
-    host: ReactiveControllerHost, 
-    options: InputTimingOptions = {}
+    host: ReactiveControllerHost,
+    options: InputTimingOptions = {},
   ) {
     this.host = host;
     this.options = {
-      strategy: options.strategy ?? 'debounce',
+      strategy: options.strategy ?? "debounce",
       delay: options.delay ?? 300,
       leading: options.leading ?? true,
       trailing: options.trailing ?? true,
@@ -66,19 +66,19 @@ export class InputTimingController implements ReactiveController {
    */
   schedule(callback: () => void): void {
     switch (this.options.strategy) {
-      case 'immediate':
+      case "immediate":
         callback();
         break;
-      
-      case 'debounce':
+
+      case "debounce":
         this.debounce(callback);
         break;
-      
-      case 'throttle':
+
+      case "throttle":
         this.throttle(callback);
         break;
-      
-      case 'blur':
+
+      case "blur":
         this.pendingCallback = callback;
         // Will be executed on blur
         break;
@@ -108,15 +108,15 @@ export class InputTimingController implements ReactiveController {
    */
   onBlur(): void {
     this.hasFocus = false;
-    
+
     // Execute pending callback if using blur strategy
-    if (this.options.strategy === 'blur' && this.pendingCallback) {
+    if (this.options.strategy === "blur" && this.pendingCallback) {
       this.pendingCallback();
       this.pendingCallback = null;
     }
-    
+
     // For debounce, execute any pending callback immediately on blur
-    if (this.options.strategy === 'debounce' && this.timeoutId !== null) {
+    if (this.options.strategy === "debounce" && this.timeoutId !== null) {
       this.cancel();
       if (this.pendingCallback) {
         this.pendingCallback();
@@ -132,7 +132,7 @@ export class InputTimingController implements ReactiveController {
     this.cancel();
     this.options = {
       ...this.options,
-      ...options
+      ...options,
     };
   }
 
@@ -141,10 +141,10 @@ export class InputTimingController implements ReactiveController {
     if (this.timeoutId !== null) {
       clearTimeout(this.timeoutId);
     }
-    
+
     // Store the callback for potential immediate execution on blur
     this.pendingCallback = callback;
-    
+
     // Set new timeout
     this.timeoutId = setTimeout(() => {
       this.timeoutId = null;
@@ -156,13 +156,13 @@ export class InputTimingController implements ReactiveController {
   private throttle(callback: () => void): void {
     const now = Date.now();
     const timeSinceLastCall = now - this.lastCallTime;
-    
+
     // Clear any existing timeout
     if (this.timeoutId !== null) {
       clearTimeout(this.timeoutId);
       this.timeoutId = null;
     }
-    
+
     // Leading edge execution
     if (timeSinceLastCall >= this.options.delay && this.options.leading) {
       this.lastCallTime = now;
