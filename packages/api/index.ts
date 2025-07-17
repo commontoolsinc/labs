@@ -338,20 +338,48 @@ export type HandlerState<T> = T extends Cell<any> ? T
   : T;
 
 export type HandlerFunction = {
+  // Overload with proxy: true - uses proxy types
+  <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(
+    eventSchema: E,
+    stateSchema: T,
+    handler: (event: Schema<E>, props: Schema<T>) => any,
+    options: { proxy: true },
+  ): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
+
+  // Overload with proxy: false or undefined - uses direct types
   <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(
     eventSchema: E,
     stateSchema: T,
     handler: (event: Schema<E>, props: HandlerState<Schema<T>>) => any,
+    options?: { proxy?: false },
   ): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
 
+  // Overload with proxy: true - uses proxy types
+  <E, T>(
+    eventSchema: JSONSchema,
+    stateSchema: JSONSchema,
+    handler: (event: E, props: T) => any,
+    options: { proxy: true },
+  ): ModuleFactory<CellToOpaque<T>, E>;
+
+  // Overload with proxy: false or undefined - uses direct types
   <E, T>(
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => any,
+    options?: { proxy?: false },
   ): ModuleFactory<CellToOpaque<T>, E>;
 
+  // Overload with proxy: true - uses proxy types
+  <E, T>(
+    handler: (event: E, props: T) => any,
+    options: { proxy: true },
+  ): ModuleFactory<CellToOpaque<T>, E>;
+
+  // Overload with proxy: false or undefined - uses direct types
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
+    options?: { proxy?: false },
   ): ModuleFactory<CellToOpaque<T>, E>;
 };
 
