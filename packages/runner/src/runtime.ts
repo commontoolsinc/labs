@@ -11,7 +11,6 @@ import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageManager,
-  IStorageManagerV2,
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
@@ -50,13 +49,7 @@ import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { StaticCache } from "@commontools/static";
 
-export type {
-  IExtendedStorageTransaction,
-  IStorageManager,
-  IStorageManagerV2,
-  IStorageProvider,
-  MemorySpace,
-};
+export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -114,6 +107,7 @@ export interface IRuntime {
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly useStorageManagerTransactions?: boolean;
+  readonly storageManager: IStorageManager;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -334,6 +328,7 @@ export class Runtime implements IRuntime {
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
+  readonly storageManager: IStorageManager;
   readonly useStorageManagerTransactions?: boolean;
 
   constructor(options: RuntimeOptions) {
@@ -359,6 +354,7 @@ export class Runtime implements IRuntime {
       throw new Error("blobbyServerUrl is required");
     }
 
+    this.storageManager = options.storageManager;
     this.storage = new Storage(this, options.storageManager);
 
     this.documentMap = new DocumentMap(this);
@@ -438,17 +434,13 @@ export class Runtime implements IRuntime {
    * multiple spaces but writing only to one space.
    */
   edit(): IExtendedStorageTransaction {
-    if (this.useStorageManagerTransactions) {
-      // Use the StorageManager's transaction API
-      const storageManager = (this.storage as any).storageManager;
-      if (storageManager && typeof storageManager.edit === 'function') {
-        return new ExtendedStorageTransaction(storageManager.edit());
-      } else {
-        console.warn("StorageManager does not support edit() method, falling back to transaction shim");
-      }
-    }
-    // Use the transaction shim as default/fallback
-    return new ExtendedStorageTransaction(new StorageTransaction(this));
+    // Use transaction API from storage manager if enabled, otherwise
+    // use a shim.
+    const transaction = this.useStorageManagerTransactions
+      ? this.storageManager.edit()
+      : new StorageTransaction(this);
+
+    return new ExtendedStorageTransaction(transaction);
   }
 
   // Cell factory methods

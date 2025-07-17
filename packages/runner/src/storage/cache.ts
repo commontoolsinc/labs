@@ -46,7 +46,6 @@ import type {
   Claim,
   IRemoteStorageProviderSettings,
   IStorageManager,
-  IStorageManagerV2,
   IStorageProvider,
   IStorageProviderWithReplica,
   IStorageSubscription,
@@ -1588,10 +1587,7 @@ export interface Options {
 }
 
 export class StorageManager
-  implements
-    IStorageManager,
-    IStorageManagerV2,
-    IStorageSubscriptionCapability {
+  implements IStorageManager, IStorageSubscriptionCapability {
   address: URL;
   as: Signer;
   id: string;
