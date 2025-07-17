@@ -197,7 +197,10 @@ describe("StorageTransaction", () => {
       expect(booleanResult.ok).toBeDefined();
 
       // Test nested object metadata
-      const nestedMeta = { config: { nested: { value: "deep" } }, array: [1, 2, 3] };
+      const nestedMeta = {
+        config: { nested: { value: "deep" } },
+        array: [1, 2, 3],
+      };
       const nestedResult = transaction.read(address, { meta: nestedMeta });
       expect(nestedResult.ok).toBeDefined();
 
@@ -466,7 +469,7 @@ describe("StorageTransaction", () => {
         of: "user:consistency",
         is: { name: "Initial", version: 1 },
       });
-      
+
       const initialCommit = await replica.commit({
         facts: [v1],
         claims: [],
@@ -497,7 +500,7 @@ describe("StorageTransaction", () => {
         is: { name: "Modified", version: 2 },
         cause: v1,
       });
-      
+
       const modifyCommit = await replica.commit({
         facts: [v2],
         claims: [],
@@ -505,7 +508,10 @@ describe("StorageTransaction", () => {
       expect(modifyCommit.ok).toBeDefined();
 
       // Verify the replica state actually changed
-      const updatedState = replica.get({ the: "application/json", of: "user:consistency" });
+      const updatedState = replica.get({
+        the: "application/json",
+        of: "user:consistency",
+      });
       expect(updatedState?.is).toEqual({ name: "Modified", version: 2 });
 
       // Now attempt to commit - should fail due to read invariant violation

@@ -11,6 +11,7 @@ import { setRecipeEnvironment } from "./builder/env.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageManager,
+  IStorageManagerV2,
   IStorageProvider,
   MemorySpace,
 } from "./storage/interface.ts";
@@ -52,6 +53,7 @@ import { StaticCache } from "@commontools/static";
 export type {
   IExtendedStorageTransaction,
   IStorageManager,
+  IStorageManagerV2,
   IStorageProvider,
   MemorySpace,
 };
@@ -89,6 +91,13 @@ export interface RuntimeOptions {
   navigateCallback?: NavigateCallback;
   staticAssetServerUrl?: URL;
   debug?: boolean;
+  /**
+   * When true, uses the StorageManager's native transaction API instead of the
+   * transaction shim. This allows for better integration with the underlying
+   * storage system's transaction capabilities.
+   * @default false
+   */
+  useStorageManagerTransactions?: boolean;
 }
 
 export interface IRuntime {
@@ -104,6 +113,7 @@ export interface IRuntime {
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
+  readonly useStorageManagerTransactions?: boolean;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -324,6 +334,7 @@ export class Runtime implements IRuntime {
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
+  readonly useStorageManagerTransactions?: boolean;
 
   constructor(options: RuntimeOptions) {
     this.staticCache = options.staticAssetServerUrl
@@ -334,6 +345,8 @@ export class Runtime implements IRuntime {
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
     this.id = options.storageManager.id;
+    this.useStorageManagerTransactions =
+      options.useStorageManagerTransactions ?? false;
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -384,6 +397,7 @@ export class Runtime implements IRuntime {
         documentMap: !!this.documentMap,
         harness: !!this.harness,
         runner: !!this.runner,
+        useStorageManagerTransactions: this.useStorageManagerTransactions,
       });
     }
   }
@@ -424,7 +438,16 @@ export class Runtime implements IRuntime {
    * multiple spaces but writing only to one space.
    */
   edit(): IExtendedStorageTransaction {
-    // TODO(seefeld): Make this a flag to use the new transaction system instead
+    if (this.useStorageManagerTransactions) {
+      // Use the StorageManager's transaction API
+      const storageManager = (this.storage as any).storageManager;
+      if (storageManager && typeof storageManager.edit === 'function') {
+        return new ExtendedStorageTransaction(storageManager.edit());
+      } else {
+        console.warn("StorageManager does not support edit() method, falling back to transaction shim");
+      }
+    }
+    // Use the transaction shim as default/fallback
     return new ExtendedStorageTransaction(new StorageTransaction(this));
   }
 
