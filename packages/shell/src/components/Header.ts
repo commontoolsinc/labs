@@ -32,21 +32,6 @@ export class XHeaderElement extends BaseView {
       gap: 0.5rem;
     }
 
-    .auth-button {
-      padding: 0.25rem 0.75rem;
-      font-family: var(--font-primary);
-      font-size: 0.875rem;
-      background-color: white;
-      border: var(--border-width, 2px) solid var(--border-color, #000);
-      cursor: pointer;
-      transition: all 0.1s ease-in-out;
-    }
-
-    .auth-button:hover {
-      transform: translateY(-1px);
-      box-shadow: 1px 1px 0px 0px rgba(0, 0, 0, 0.5);
-    }
-
     #page-title {
       font-size: 1rem;
       font-weight: 600;
@@ -63,6 +48,10 @@ export class XHeaderElement extends BaseView {
 
     ct-logo:hover {
       transform: scale(1.05);
+    }
+
+    a, a:visited {
+      color: var(--primary-font, "#000");
     }
   `;
 
@@ -146,18 +135,21 @@ export class XHeaderElement extends BaseView {
 
   private handleHeaderClick = (e: Event): void => {
     const target = e.target as HTMLElement;
-    if (!target.closest("ct-logo")) {
-      const newColor = this.generateRandomColor();
-      this.headerColor = newColor;
-      this.style.setProperty("--header-bg-color", newColor);
-      this.logoShapeColor = newColor;
-      this.requestUpdate();
+    if (target.closest("ct-logo")) {
+      return;
     }
+    const newColor = this.generateRandomColor();
+    this.headerColor = newColor;
+    this.style.setProperty("--header-bg-color", newColor);
+    this.logoShapeColor = newColor;
+    this.requestUpdate();
   };
 
-  private handleAuthClick = async (): Promise<void> => {
+  private async handleAuthClick(e: Event): Promise<void> {
+    e.preventDefault();
+    e.stopPropagation();
     await this.command({ type: "clear-authentication" });
-  };
+  }
 
   override render() {
     const activeCharmName = this._charm.value
@@ -187,22 +179,20 @@ export class XHeaderElement extends BaseView {
       <div id="header" @click="${this.handleHeaderClick}">
         <div class="left-section">
           <ct-logo
-            width="32"
-            height="32"
-            background-color="${this.logoBackgroundColor}"
-            shape-color="${this.logoShapeColor}"
+            .backgroundColor="${this.logoBackgroundColor}"
+            .shapeColor="${this.logoShapeColor}"
           ></ct-logo>
           ${title}
         </div>
         ${this.identity
         ? html`
-          <button
+          <x-button
             class="auth-button"
+            size="small"
             @click="${this.handleAuthClick}"
-            @mousedown="${(e: Event) => e.stopPropagation()}"
           >
             Logout
-          </button>
+          </x-button>
         `
         : null}
       </div>
