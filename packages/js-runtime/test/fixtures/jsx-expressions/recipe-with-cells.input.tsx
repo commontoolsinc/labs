@@ -1,15 +1,7 @@
 /// <cts-enable />
-import { derive, h, recipe, schema, UI } from "commontools";
+import {  h, recipe, UI } from "commontools";
 
-const model = schema({
-  type: "object",
-  properties: {
-    value: { type: "number", default: 0, asCell: true },
-  },
-  default: { value: 0 },
-});
-
-export default recipe(model, model, (cell) => {
+export default recipe<{ value: number }>("simple-recipe", (cell) => {
   return {
     [UI]: (
       <div>

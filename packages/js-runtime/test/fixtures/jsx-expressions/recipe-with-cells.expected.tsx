@@ -1,13 +1,14 @@
 /// <cts-enable />
-import { derive, h, recipe, schema, UI } from "commontools";
-const model = schema({
+import { h, recipe, UI, derive, toSchema, JSONSchema } from "commontools";
+export default recipe({
     type: "object",
     properties: {
-        value: { type: "number", default: 0, asCell: true },
+        value: {
+            type: "number"
+        }
     },
-    default: { value: 0 },
-});
-export default recipe(model, model, (cell) => {
+    required: ["value"]
+} as const satisfies JSONSchema, (cell) => {
     return {
         [UI]: (<div>
         <p>Current value: {cell.value}</p>
