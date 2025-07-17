@@ -185,7 +185,10 @@ export class CharmManager {
     const newPinnedCharms = filterOutEntity(this.pinnedCharms, charmId);
 
     if (newPinnedCharms.length !== this.pinnedCharms.get().length) {
-      this.pinnedCharms.set(newPinnedCharms);
+      const tx = this.runtime.edit();
+      const pinnedCharms = this.pinnedCharms.withTx(tx);
+      pinnedCharms.set(newPinnedCharms);
+      await tx.commit();
       await this.runtime.idle();
       return true;
     }
@@ -243,7 +246,10 @@ export class CharmManager {
 
   async emptyTrash() {
     await this.syncCharms(this.trashedCharms);
-    this.trashedCharms.set([]);
+    const tx = this.runtime.edit();
+    const trashedCharms = this.trashedCharms.withTx(tx);
+    trashedCharms.set([]);
+    await tx.commit();
     await this.runtime.idle();
     return true;
   }
@@ -861,13 +867,19 @@ export class CharmManager {
 
     // Move to trash if not already there
     if (!this.trashedCharms.get().some((c) => isSameEntity(c, id))) {
-      this.trashedCharms.push(charm);
+      const tx = this.runtime.edit();
+      const trashedCharms = this.trashedCharms.withTx(tx);
+      trashedCharms.push(charm);
+      await tx.commit();
     }
 
     // Remove from main list
     const newCharms = filterOutEntity(this.charms, id);
     if (newCharms.length !== this.charms.get().length) {
-      this.charms.set(newCharms);
+      const tx = this.runtime.edit();
+      const charms = this.charms.withTx(tx);
+      charms.set(newCharms);
+      await tx.commit();
       await this.runtime.idle();
       return true;
     }
@@ -885,7 +897,9 @@ export class CharmManager {
     // Remove from trash if present
     const newTrashedCharms = filterOutEntity(this.trashedCharms, id);
     if (newTrashedCharms.length !== this.trashedCharms.get().length) {
-      this.trashedCharms.set(newTrashedCharms);
+      const tx = this.runtime.edit();
+      this.trashedCharms.withTx(tx).set(newTrashedCharms);
+      tx.commit();
       await this.runtime.idle();
       return true;
     }
