@@ -1,18 +1,6 @@
 /// <cts-enable />
 
-import {
-  Cell,
-  Default,
-  derive,
-  h,
-  handler,
-  ifElse,
-  lift,
-  NAME,
-  recipe,
-  str,
-  UI,
-} from "commontools";
+import { Cell, Default, h, handler, NAME, recipe, UI } from "commontools";
 
 const incCounter = handler<undefined, { counter: Cell<number> }>(
   (_, { counter }) => {
@@ -20,27 +8,19 @@ const incCounter = handler<undefined, { counter: Cell<number> }>(
   },
 );
 
-const isEven = lift<{ counter: number }, boolean>(({ counter }) => {
-  console.log("isEven", counter);
-  return counter % 2 === 0;
-});
-
 export default recipe<{
   counter: Default<number, 0>;
 }>("IfElseTest", ({ counter }) => {
-  derive(counter, (c) => {
-    console.log("derive counter: ", c);
-  });
+  console.log("counter", counter);
+
   return {
-    [NAME]: str`counter: ${counter}`,
+    [NAME]: `counter: ${counter}`,
     [UI]: (
       <div>
-        {isEven({ counter })
-          ? <p>counter is even : {counter}</p>
-          : <p>counter is odd : {counter}</p>}
+        {counter % 2 ? <p>odd: {counter}</p> : <p>even: {counter}</p>}
         <p />
         <button type="button" onClick={incCounter({ counter })}>
-          |click me|
+          click me
         </button>
       </div>
     ),
