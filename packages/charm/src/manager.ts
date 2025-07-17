@@ -1028,8 +1028,9 @@ export class CharmManager {
       targetInputCell = targetInputCell.key(segment);
     }
 
-    targetInputCell.key(targetKey).set(sourceResultCell);
-
+    const tx = this.runtime.edit();
+    targetInputCell.key(targetKey).withTx(tx).set(sourceResultCell);
+    await tx.commit();
     await this.runtime.idle();
     await this.synced();
   }
