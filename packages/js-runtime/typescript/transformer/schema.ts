@@ -159,18 +159,10 @@ function typeToJsonSchema(
         const innerType = checker.getTypeFromTypeNode(innerTypeNode);
         const schema = typeToJsonSchema(innerType, checker, innerTypeNode);
         
-        // Extract the default value from the literal type node
-        if (ts.isLiteralTypeNode(defaultValueNode)) {
-          const literal = defaultValueNode.literal;
-          if (ts.isNumericLiteral(literal)) {
-            schema.default = Number(literal.text);
-          } else if (ts.isStringLiteral(literal)) {
-            schema.default = literal.text;
-          } else if (literal.kind === ts.SyntaxKind.TrueKeyword) {
-            schema.default = true;
-          } else if (literal.kind === ts.SyntaxKind.FalseKeyword) {
-            schema.default = false;
-          }
+        // Extract the default value from the type node
+        const defaultValue = extractValueFromTypeNode(defaultValueNode, checker);
+        if (defaultValue !== undefined) {
+          schema.default = defaultValue;
         }
         
         return schema;
@@ -519,31 +511,124 @@ function evaluateObjectLiteral(
   for (const prop of node.properties) {
     if (ts.isPropertyAssignment(prop) && ts.isIdentifier(prop.name)) {
       const key = prop.name.text;
-
-      if (ts.isStringLiteral(prop.initializer)) {
-        result[key] = prop.initializer.text;
-      } else if (ts.isNumericLiteral(prop.initializer)) {
-        result[key] = Number(prop.initializer.text);
-      } else if (prop.initializer.kind === ts.SyntaxKind.TrueKeyword) {
-        result[key] = true;
-      } else if (prop.initializer.kind === ts.SyntaxKind.FalseKeyword) {
-        result[key] = false;
-      } else if (ts.isObjectLiteralExpression(prop.initializer)) {
-        result[key] = evaluateObjectLiteral(prop.initializer, checker);
-      } else if (ts.isArrayLiteralExpression(prop.initializer)) {
-        result[key] = prop.initializer.elements.map((elem) => {
-          if (ts.isStringLiteral(elem)) return elem.text;
-          if (ts.isNumericLiteral(elem)) return Number(elem.text);
-          if (ts.isObjectLiteralExpression(elem)) {
-            return evaluateObjectLiteral(elem, checker);
-          }
-          return undefined;
-        }).filter((x) => x !== undefined);
+      const value = evaluateExpression(prop.initializer, checker);
+      if (value !== undefined) {
+        result[key] = value;
       }
     }
   }
 
   return result;
+}
+
+// Helper function to evaluate any expression to a literal value
+function evaluateExpression(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): any {
+  if (ts.isStringLiteral(node)) {
+    return node.text;
+  } else if (ts.isNumericLiteral(node)) {
+    return Number(node.text);
+  } else if (node.kind === ts.SyntaxKind.TrueKeyword) {
+    return true;
+  } else if (node.kind === ts.SyntaxKind.FalseKeyword) {
+    return false;
+  } else if (node.kind === ts.SyntaxKind.NullKeyword) {
+    return null;
+  } else if (node.kind === ts.SyntaxKind.UndefinedKeyword) {
+    return undefined;
+  } else if (ts.isObjectLiteralExpression(node)) {
+    return evaluateObjectLiteral(node, checker);
+  } else if (ts.isArrayLiteralExpression(node)) {
+    const values: any[] = [];
+    for (const elem of node.elements) {
+      const value = evaluateExpression(elem, checker);
+      // Keep undefined values in arrays
+      values.push(value);
+    }
+    return values;
+  }
+  // Return a special marker for unknown expressions
+  return undefined;
+}
+
+// Helper function to extract values from type nodes (for Default<T, V>)
+function extractValueFromTypeNode(
+  node: ts.TypeNode,
+  checker: ts.TypeChecker,
+): any {
+  // Handle literal type nodes
+  if (ts.isLiteralTypeNode(node)) {
+    const literal = node.literal;
+    if (ts.isStringLiteral(literal)) {
+      return literal.text;
+    } else if (ts.isNumericLiteral(literal)) {
+      return Number(literal.text);
+    } else if (literal.kind === ts.SyntaxKind.TrueKeyword) {
+      return true;
+    } else if (literal.kind === ts.SyntaxKind.FalseKeyword) {
+      return false;
+    } else if (literal.kind === ts.SyntaxKind.NullKeyword) {
+      return null;
+    }
+  }
+  
+  // Handle tuple types (array literals in type position)
+  if (ts.isTupleTypeNode(node)) {
+    const values: any[] = [];
+    for (const elem of node.elements) {
+      const value = extractValueFromTypeNode(elem, checker);
+      values.push(value);
+    }
+    return values;
+  }
+  
+  // Handle type literals (object literals in type position)
+  if (ts.isTypeLiteralNode(node)) {
+    const obj: any = {};
+    for (const member of node.members) {
+      if (ts.isPropertySignature(member) && member.name && ts.isIdentifier(member.name)) {
+        const key = member.name.text;
+        if (member.type) {
+          const value = extractValueFromTypeNode(member.type, checker);
+          if (value !== undefined) {
+            obj[key] = value;
+          }
+        }
+      }
+    }
+    return obj;
+  }
+  
+  // Handle array type with literal elements
+  if (ts.isArrayTypeNode(node)) {
+    // For array types like string[], we can't extract a default value
+    return undefined;
+  }
+  
+  // Handle union types (for nullable types)
+  if (ts.isUnionTypeNode(node)) {
+    // Check if one of the types is null
+    for (const type of node.types) {
+      if (type.kind === ts.SyntaxKind.NullKeyword) {
+        return null;
+      }
+      if (type.kind === ts.SyntaxKind.UndefinedKeyword) {
+        return undefined;
+      }
+    }
+  }
+  
+  // Handle direct null/undefined keywords
+  if (node.kind === ts.SyntaxKind.NullKeyword) {
+    return null;
+  }
+  if (node.kind === ts.SyntaxKind.UndefinedKeyword) {
+    return undefined;
+  }
+  
+  return undefined;
 }
 
 /**
