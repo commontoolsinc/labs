@@ -111,7 +111,10 @@ export const objectDefaultsSchema = {
                 }
             },
             required: ["theme", "count"],
-            default: { theme: "dark", count: 10 }
+            default: {
+                theme: "dark",
+                count: 10
+            }
         },
         user: {
             type: "object",
@@ -148,15 +151,15 @@ export const nullDefaultsSchema = {
     type: "object",
     properties: {
         nullable: {
-            oneOf: [
-                { type: "string" },
-                { type: "null" }
-            ],
+            oneOf: [{
+                    type: "null"
+                }, {
+                    type: "string"
+                }],
             default: null
         },
         undefinable: {
-            type: "string",
-            default: undefined
+            type: "string"
         }
     },
     required: ["nullable", "undefinable"]
