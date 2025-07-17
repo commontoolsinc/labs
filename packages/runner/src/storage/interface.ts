@@ -384,12 +384,7 @@ export type StorageTransactionStatus = Result<
 export type IStorageTransactionState =
   | { status: "ready"; journal: ITransactionJournal }
   | { status: "pending"; journal: ITransactionJournal }
-  | { status: "done"; journal: ITransactionJournal }
-  | {
-    status: "failed";
-    journal: ITransactionJournal;
-    reason: StorageTransactionFailed;
-  };
+  | { status: "done"; journal: ITransactionJournal };
 
 /**
  * Representation of a storage transaction, which can be used to query facts and
