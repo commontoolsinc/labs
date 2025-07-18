@@ -421,7 +421,10 @@ export class StorageTransaction implements IStorageTransaction {
     return { ok: reader };
   }
 
-  read(address: IMemorySpaceAddress, options?: IReadOptions): Result<Read, ReadError> {
+  read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<Read, ReadError> {
     const readerResult = this.reader(address.space);
     if (readerResult.error) {
       return { ok: undefined, error: readerResult.error };
@@ -540,7 +543,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.reader(space);
   }
 
-  read(address: IMemorySpaceAddress, options?: IReadOptions): Result<Read, ReadError> {
+  read(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): Result<Read, ReadError> {
     return this.tx.read(address, options);
   }
 
@@ -594,7 +600,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       for (const key of remainingPath) {
         nextValue =
           nextValue[key] =
-            (!Number.isNaN(Number(key)) ? [] : {}) as typeof nextValue;
+            (Number.isInteger(Number(key)) ? [] : {}) as typeof nextValue;
       }
       nextValue[lastKey] = value;
       const parentAddress = { ...address, path: lastValidPath ?? [] };
