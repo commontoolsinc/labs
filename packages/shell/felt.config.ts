@@ -26,6 +26,10 @@ const config: Config = {
       "$API_URL": Deno.env.get("API_URL"),
       "$COMMIT_SHA": Deno.env.get("COMMIT_SHA"),
     },
+    supported: {
+      // Provide polyfills for `using` resource management
+      using: false,
+    },
     tsconfigRaw: {
       compilerOptions: {
         // `useDefineForClassFields` is critical when using Lit
