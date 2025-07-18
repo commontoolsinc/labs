@@ -1,4 +1,4 @@
-import { derive, h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
+import { derive, h, handler, ifElse, str, JSONSchema, NAME, recipe, UI } from "commontools";
 
 const WikiSchema = {
   type: "object",
@@ -10,36 +10,22 @@ const WikiSchema = {
       },
       default: {
         "getting-started":
-          '# Getting Started\n\nWelcome to your wiki! This is your first page.\n\nYou can:\n- Edit this page using the markdown editor\n- Create new pages with the "+ New Page" button\n- Navigate between pages using the sidebar\n- Rename pages by editing the title',
+          '# Getting Started\n\nWelcome to your wiki! This is your first page.\n\nYou can:\n- Edit this page using the markdown editor\n- Create new pages with the "+ New Page" button\n- Navigate between pages using the sidebar\n- Rename pages using the rename button',
       },
     },
     currentPage: {
       type: "string",
       default: "getting-started",
     },
+    showRenameForm: {
+      type: "boolean",
+      default: false,
+    },
   },
-  required: ["pages", "currentPage"],
+  required: ["pages", "currentPage", "showRenameForm"],
 } as const satisfies JSONSchema;
 
 const OutputSchema = WikiSchema;
-
-// Utility functions
-const slugToTitle = (slug: string): string => {
-  return slug
-    .split("-")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-};
-
-const titleToSlug = (title: string): string => {
-  return title
-    .toLowerCase()
-    .trim()
-    .replace(/[^\w\s-]/g, "") // Remove special chars
-    .replace(/\s+/g, "-") // Replace spaces with hyphens
-    .replace(/-+/g, "-") // Replace multiple hyphens with single
-    .replace(/^-|-$/g, ""); // Remove leading/trailing hyphens
-};
 
 // Update page content from editor
 const updatePageContent = handler<
@@ -99,15 +85,53 @@ const updatePageTitle = handler<
   { pages: Record<string, string>; currentPage: string }
 >(
   ({ detail }, state) => {
-    const newTitle = detail?.value ?? "";
-    const newSlug = titleToSlug(newTitle);
+    const newSlug = detail?.value ?? "";
 
-    if (newSlug && newSlug !== state.currentPage && newTitle.trim()) {
+    if (newSlug && newSlug !== state.currentPage && newSlug.trim()) {
       // Move content to new slug
       state.pages[newSlug] = state.pages[state.currentPage];
       delete state.pages[state.currentPage];
       state.currentPage = newSlug;
     }
+  },
+);
+
+// Show rename form
+const showRenameFormHandler = handler<
+  Record<PropertyKey, never>,
+  { showRenameForm: boolean }
+>(
+  (_, state) => {
+    state.showRenameForm = true;
+  },
+);
+
+// Hide rename form
+const hideRenameFormHandler = handler<
+  Record<PropertyKey, never>,
+  { showRenameForm: boolean }
+>(
+  (_, state) => {
+    state.showRenameForm = false;
+  },
+);
+
+// Handle rename submission
+const handleRename = handler<
+  { detail: { value: string } },
+  { pages: Record<string, string>; currentPage: string; showRenameForm: boolean }
+>(
+  ({ detail }, state) => {
+    const newSlug = detail?.value?.trim() ?? "";
+    if (!newSlug) return;
+
+    if (newSlug && newSlug !== state.currentPage) {
+      // Move content to new slug
+      state.pages[newSlug] = state.pages[state.currentPage];
+      delete state.pages[state.currentPage];
+      state.currentPage = newSlug;
+    }
+    state.showRenameForm = false;
   },
 );
 
@@ -125,18 +149,11 @@ const update = handler<
 export default recipe(
   WikiSchema,
   OutputSchema,
-  ({ pages, currentPage }) => {
+  ({ pages, currentPage, showRenameForm }) => {
     const pageKeys = derive(pages, (pages) => Object.keys(pages).sort());
     const currentContent = derive(
       [pages, currentPage],
       ([pages, currentPage]) => (pages as any)[currentPage as any] || "",
-    );
-    const currentTitle = derive(
-      currentPage,
-      (currentPage) =>
-        (currentPage || "").split("-").map((word) =>
-          word.charAt(0).toUpperCase() + word.slice(1)
-        ).join(" "),
     );
     const canDelete = derive(pages, (pages) => Object.keys(pages).length > 1);
 
@@ -147,7 +164,7 @@ export default recipe(
           <ct-resizable-panel-group direction="horizontal">
             {/* Sidebar Panel */}
             <ct-resizable-panel default-size="25" min-size="20" max-size="40">
-              <div style="padding: 1rem; height: 100%; overflow-y: auto; background: #f8fafc; border-right: 1px solid #e2e8f0;">
+              <div style="padding: 1rem; height: 100%; overflw-y: auto; background: #f8fafc; border-right: 1px solid #e2e8f0;">
                 <ct-vstack gap="sm">
                   <h3 style="margin: 0 0 1rem 0; font-size: 1.1rem; color: #374151;">
                     Wiki Pages
@@ -174,10 +191,7 @@ export default recipe(
                             }`,
                         )}
                       >
-                        {derive([slug], ([slug]) =>
-                          (slug || "").split("-").map((word) =>
-                            word.charAt(0).toUpperCase() + word.slice(1)
-                          ).join(" "))}
+                        {slug}
                       </div>
                     ))}
                   </div>
@@ -192,12 +206,15 @@ export default recipe(
             <ct-resizable-panel default-size="75">
               <div style="padding: 1rem; height: 100%; display: flex; flex-direction: column;">
                 <ct-hstack gap="sm" style="margin-bottom: 1rem;">
-                  <ct-input
-                    value={currentTitle}
-                    placeholder="Page title..."
-                    style="flex: 1; font-size: 1.2rem; font-weight: bold;"
-                    onct-input={updatePageTitle({ pages, currentPage })}
-                  />
+                  <h2 style="flex: 1; margin: 0; font-size: 1.5rem; color: #374151;">
+                    {currentPage}
+                  </h2>
+                  <ct-button
+                    onClick={showRenameFormHandler({ showRenameForm })}
+                    style="margin-right: 0.5rem;"
+                  >
+                    Rename
+                  </ct-button>
                   <ct-button
                     variant="destructive"
                     onClick={deletePage({
@@ -211,11 +228,23 @@ export default recipe(
                   </ct-button>
                 </ct-hstack>
 
+                {ifElse(showRenameForm, (
+                  <div style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc;">
+                    <ct-message-input
+                      placeholder={str`Enter new name for "${currentPage}"`}
+                      onSubmit={handleRename({ pages, currentPage, showRenameForm })}
+                      onCancel={hideRenameFormHandler({ showRenameForm })}
+                      submitLabel="Rename"
+                      cancelLabel="Cancel"
+                    />
+                  </div>
+                ), null)}
+
                 <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
-                  <common-code-editor
-                    source={currentContent}
+                  <ct-code-editor
+                    $value={currentContent}
+                    onInput={updatePageContent({ pages, currentPage })}
                     language="text/x-markdown"
-                    onChange={updatePageContent({ pages, currentPage })}
                     style="height: 100%;"
                   />
                 </div>
@@ -228,6 +257,7 @@ export default recipe(
       // Exposed properties
       wiki: pages, // Read access to all pages
       currentPage,
+      showRenameForm,
 
       // Update handler for external use
       update: update({ pages, currentPage }),
