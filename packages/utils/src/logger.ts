@@ -71,8 +71,9 @@ export function getLogLevel(): LogLevel {
 /**
  * Check if a message at the given level should be logged
  */
-function shouldLog(level: LogLevel): boolean {
-  return LOG_LEVELS[level] >= LOG_LEVELS[currentLogLevel];
+function shouldLog(level: LogLevel, loggerLevel?: LogLevel): boolean {
+  const effectiveLevel = loggerLevel ?? currentLogLevel;
+  return LOG_LEVELS[level] >= LOG_LEVELS[effectiveLevel];
 }
 
 /**
@@ -233,6 +234,11 @@ export interface GetLoggerOptions {
    * If not specified (undefined), follows default behavior
    */
   enabled?: boolean;
+  /**
+   * The minimum log level for this logger
+   * If not specified, uses the global log level
+   */
+  level?: LogLevel;
 }
 
 /**
@@ -249,10 +255,13 @@ export function getLogger(options?: GetLoggerOptions): TaggedLogger {
     ? undefined
     : !options.enabled;
 
+  // Set logger-specific level if provided
+  const loggerLevel = options?.level;
+
   const taggedLog: TaggedLogger = (...messages: LogMessage[]) => {
     // Check disabled state - undefined means enabled
     if (taggedLog.disabled === true) return;
-    if (shouldLog("info")) {
+    if (shouldLog("info", loggerLevel)) {
       console.log(
         `%c[INFO][${tag}::${getTimeStamp()}]`,
         LOG_COLORS.taggedInfo,
@@ -264,7 +273,7 @@ export function getLogger(options?: GetLoggerOptions): TaggedLogger {
   taggedLog.debug = (...messages: LogMessage[]) => {
     // Check disabled state first to skip everything including lazy eval
     if (taggedLog.disabled === true) return;
-    if (shouldLog("debug")) {
+    if (shouldLog("debug", loggerLevel)) {
       console.debug(
         `%c[DEBUG][${tag}::${getTimeStamp()}]`,
         LOG_COLORS.taggedDebug,
@@ -275,7 +284,7 @@ export function getLogger(options?: GetLoggerOptions): TaggedLogger {
 
   taggedLog.info = (...messages: LogMessage[]) => {
     if (taggedLog.disabled === true) return;
-    if (shouldLog("info")) {
+    if (shouldLog("info", loggerLevel)) {
       console.log(
         `%c[INFO][${tag}::${getTimeStamp()}]`,
         LOG_COLORS.taggedInfo,
@@ -286,7 +295,7 @@ export function getLogger(options?: GetLoggerOptions): TaggedLogger {
 
   taggedLog.warn = (...messages: LogMessage[]) => {
     if (taggedLog.disabled === true) return;
-    if (shouldLog("warn")) {
+    if (shouldLog("warn", loggerLevel)) {
       console.warn(
         `%c[WARN][${tag}::${getTimeStamp()}]`,
         LOG_COLORS.taggedWarn,
@@ -297,7 +306,7 @@ export function getLogger(options?: GetLoggerOptions): TaggedLogger {
 
   taggedLog.error = (...messages: LogMessage[]) => {
     if (taggedLog.disabled === true) return;
-    if (shouldLog("error")) {
+    if (shouldLog("error", loggerLevel)) {
       console.error(
         `%c[ERROR][${tag}::${getTimeStamp()}]`,
         LOG_COLORS.taggedError,

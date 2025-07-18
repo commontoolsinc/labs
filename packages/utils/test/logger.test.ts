@@ -643,4 +643,65 @@ describe("logger", () => {
       expect(logger.disabled).toBe(true);
     });
   });
+
+  describe("logger-specific log level", () => {
+    it("should respect logger-specific log level", () => {
+      // Set global level to warn
+      setLogLevel("warn");
+
+      // Create logger with debug level
+      const logger = getLogger({ level: "debug" });
+
+      const { calls: debugCalls } = captureConsole("debug", () => {
+        logger.debug("debug message");
+      });
+      const { calls: infoCalls } = captureConsole("log", () => {
+        logger.info("info message");
+      });
+
+      // Both should appear because logger level is debug
+      expect(debugCalls).toHaveLength(1);
+      expect(infoCalls).toHaveLength(1);
+
+      // Create another logger without specific level
+      const defaultLogger = getLogger();
+
+      const { calls: defaultDebugCalls } = captureConsole("debug", () => {
+        defaultLogger.debug("debug from default");
+      });
+      const { calls: defaultInfoCalls } = captureConsole("log", () => {
+        defaultLogger.info("info from default");
+      });
+
+      // These should be filtered by global level (warn)
+      expect(defaultDebugCalls).toHaveLength(0);
+      expect(defaultInfoCalls).toHaveLength(0);
+    });
+
+    it("should override global level with logger-specific level", () => {
+      // Set global level to debug (everything shows)
+      setLogLevel("debug");
+
+      // Create logger with error level (only errors show)
+      const logger = getLogger({ level: "error" });
+
+      const { calls: debugCalls } = captureConsole("debug", () => {
+        logger.debug("should not appear");
+      });
+      const { calls: infoCalls } = captureConsole("log", () => {
+        logger.info("should not appear");
+      });
+      const { calls: warnCalls } = captureConsole("warn", () => {
+        logger.warn("should not appear");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        logger.error("should appear");
+      });
+
+      expect(debugCalls).toHaveLength(0);
+      expect(infoCalls).toHaveLength(0);
+      expect(warnCalls).toHaveLength(0);
+      expect(errorCalls).toHaveLength(1);
+    });
+  });
 });
