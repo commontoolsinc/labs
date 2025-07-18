@@ -458,8 +458,8 @@ export function createSigilLinkFromParsedLink(
 
   // Include schema if requested
   if (options.includeSchema && link.schema) {
-    reference.schema = link.schema;
-    reference.rootSchema = link.rootSchema;
+    reference.schema = sanitizeSchemaForLinks(link.schema);
+    reference.rootSchema = sanitizeSchemaForLinks(link.rootSchema);
   }
 
   // Option overrides link value
@@ -471,43 +471,6 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigil;
-}
-
-export function createSigilLinkFromParsedLinkOld(
-  link: NormalizedLink,
-  base?: Cell | NormalizedLink,
-  overwrite?: "redirect",
-): SigilLink {
-  const sigilLink: SigilLink = {
-    "/": {
-      [LINK_V1_TAG]: {
-        path: link.path as string[],
-        schema: sanitizeSchemaForLinks(link.schema),
-        rootSchema: sanitizeSchemaForLinks(link.rootSchema),
-        ...(overwrite === "redirect" ? { overwrite } : {}),
-      },
-    },
-  };
-
-  // Only add space if different from base
-  if (link.space !== base?.space) {
-    sigilLink["/"][LINK_V1_TAG].space = link.space;
-  }
-
-  // Only add id if different from base
-  const baseId = base
-    ? (isCell(base) ? toURI(base.entityId) : base.id)
-    : undefined;
-  if (link.id !== baseId) {
-    sigilLink["/"][LINK_V1_TAG].id = link.id;
-  }
-
-  // Only add overwrite if it's a redirect
-  if (link.overwrite === "redirect") {
-    sigilLink["/"][LINK_V1_TAG].overwrite = link.overwrite;
-  }
-
-  return sigilLink;
 }
 
 /**
