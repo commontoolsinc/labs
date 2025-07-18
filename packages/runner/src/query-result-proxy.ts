@@ -71,8 +71,6 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   isPrototypeOf: ArrayMethodType.ReadOnly,
   propertyIsEnumerable: ArrayMethodType.ReadOnly,
   valueOf: ArrayMethodType.ReadOnly,
-  isExtensible: ArrayMethodType.ReadOnly,
-  isFrozen: ArrayMethodType.ReadOnly,
   toString: ArrayMethodType.ReadOnly,
   toLocaleString: ArrayMethodType.ReadOnly,
 };
@@ -130,7 +128,10 @@ export function createQueryResultProxy<T>(
         else return value;
       }
 
-      if (Array.isArray(target) && prop in arrayMethods) {
+      if (
+        Array.isArray(target) && prop in arrayMethods &&
+        typeof (target[prop]) === "function"
+      ) {
         const method = Array.prototype[prop as keyof typeof Array.prototype];
         const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods] ??
           // Default to ReadOnly to catch other methods on object (so the "prop
