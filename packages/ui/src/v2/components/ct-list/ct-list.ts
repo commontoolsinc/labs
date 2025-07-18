@@ -2,41 +2,73 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { type Cell, isCell } from "@commontools/runner";
+import "../ct-input/ct-input.ts";
+
+/**
+ * Base interface for list items - all items must have at least a title
+ */
+export interface CtListItem {
+  title: string;
+  done?: boolean;
+  [key: string]: any;
+}
+
+/**
+ * Action configuration for list items
+ */
+export interface CtListAction {
+  type: "remove" | "accept" | "custom";
+  label?: string;
+  event?: string;
+}
 
 /**
  * CTList - A list component that renders items with add/remove functionality
+ * Supports both Cell<T[]> and plain T[] values for reactive data binding
  *
  * @element ct-list
  *
- * @attr {Object} list - List object with title and items array
+ * @attr {T[]|Cell<T[]>} value - Array of list items (supports both plain array and Cell<T[]>)
+ * @attr {string} title - List title
  * @attr {boolean} readonly - Whether the list is read-only
- * @attr {Object} action - Action button config: { type: 'remove'|'accept'|'custom', label?: string, event?: string }
+ * @attr {boolean} editable - Whether individual items can be edited in-place
+ * @attr {CtListAction} action - Action button config
  *
  * @fires ct-add-item - Fired when adding an item with detail: { message }
  * @fires ct-remove-item - Fired when removing an item with detail: { item }
  * @fires ct-accept-item - Fired when accepting an item with detail: { item }
  * @fires ct-action-item - Fired for custom actions with detail: { item }
+ * @fires ct-edit-item - Fired when editing an item with detail: { item, oldItem }
  *
  * @example
- * <ct-list .list="${{title: 'My List', items: [...]}}" .action="${{type: 'accept'}}" @ct-accept-item="${handleAccept}"></ct-list>
+ * <ct-list .value="${items}" title="My List" .action="${{type: 'accept'}}" @ct-accept-item="${handleAccept}"></ct-list>
+ *
+ * @example
+ * <!-- With Cell binding -->
+ * <ct-list .value="${itemsCell}" title="Reactive List" editable></ct-list>
  */
 
-export class CTList extends BaseElement {
+export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
   @property()
-  list: {
-    title: string;
-    items: Array<{ title: string; done?: boolean }>;
-  } = { title: "", items: [] };
+  value: T[] | Cell<T[]> = [];
+
+  @property()
+  override title: string = "";
 
   @property()
   readonly: boolean = false;
 
   @property()
-  action: {
-    type: "remove" | "accept" | "custom";
-    label?: string;
-    event?: string;
-  } | null = { type: "remove" };
+  editable: boolean = false;
+
+  @property()
+  action: CtListAction | null = { type: "remove" };
+
+  // Private state for managing subscriptions and editing
+  private _cellUnsubscribe: (() => void) | null = null;
+  private _editingItems: Map<string, Cell<string>> = new Map();
+  private _nextTempId: number = 1;
 
   static override styles = css`
     :host {
@@ -195,13 +227,134 @@ export class CTList extends BaseElement {
       text-align: center;
       padding: 1rem;
     }
+
+    /* Editing-specific styles */
+    .item-content.editable {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .item-content.editable:hover {
+      background-color: var(--muted);
+      border-radius: 0.25rem;
+      padding: 0.125rem 0.25rem;
+      margin: -0.125rem -0.25rem;
+    }
+
+    .list-item.editing {
+      background-color: var(--muted);
+    }
+
+    .list-item.editing .item-content {
+      flex: 1;
+      margin: -0.25rem 0;
+    }
+
+    .item-action.edit {
+      background-color: #3b82f6;
+      color: white;
+      font-size: 0.6rem;
+    }
+
+    .item-action.edit:hover {
+      background-color: #2563eb;
+    }
+
+    .item-action.cancel {
+      background-color: #6b7280;
+      color: white;
+    }
+
+    .item-action.cancel:hover {
+      background-color: #4b5563;
+    }
   `;
 
-  private handleActionItem(item: { title: string; done?: boolean }) {
+  // Lifecycle methods for Cell subscription management
+  override connectedCallback() {
+    super.connectedCallback();
+    this._setupCellSubscription();
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this._cleanupCellSubscription();
+  }
+
+  override updated(changedProperties: Map<string, any>) {
+    super.updated(changedProperties);
+
+    // If the value property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("value")) {
+      this._cleanupCellSubscription();
+      this._setupCellSubscription();
+    }
+  }
+
+  private _setupCellSubscription(): void {
+    if (isCell(this.value)) {
+      // Subscribe to cell changes using sink() which returns a cleanup function
+      this._cellUnsubscribe = this.value.sink(() => {
+        // Trigger a re-render when the cell value changes
+        this.requestUpdate();
+      });
+    }
+  }
+
+  private _cleanupCellSubscription(): void {
+    if (this._cellUnsubscribe) {
+      this._cellUnsubscribe();
+      this._cellUnsubscribe = null;
+    }
+  }
+
+  private getValue(): T[] {
+    if (isCell(this.value)) {
+      return this.value.get?.() || [];
+    }
+    return this.value || [];
+  }
+
+  private setValue(newValue: T[]): void {
+    if (isCell(this.value)) {
+      const tx = this.value.runtime.edit();
+      this.value.withTx(tx).set(newValue);
+      tx.commit();
+    } else {
+      this.value = newValue;
+      this.requestUpdate();
+    }
+  }
+
+  private addItem(title: string): void {
+    const currentItems = this.getValue();
+    const newItem = { title } as T;
+    const newItems = [...currentItems, newItem];
+    this.setValue(newItems);
+  }
+
+  private removeItem(itemToRemove: T): void {
+    const currentItems = this.getValue();
+    const newItems = currentItems.filter((item) => item !== itemToRemove);
+    this.setValue(newItems);
+  }
+
+  private updateItem(oldItem: T, newItem: T): void {
+    const currentItems = this.getValue();
+    const index = currentItems.indexOf(oldItem);
+    if (index !== -1) {
+      const newItems = [...currentItems];
+      newItems[index] = newItem;
+      this.setValue(newItems);
+    }
+  }
+
+  private handleActionItem(item: T) {
     if (!this.action) return;
 
     switch (this.action.type) {
       case "remove":
+        this.removeItem(item);
         this.emit("ct-remove-item", { item });
         break;
       case "accept":
@@ -220,29 +373,85 @@ export class CTList extends BaseElement {
     const message = formData.get("message") as string;
 
     if (message?.trim()) {
+      this.addItem(message.trim());
       this.emit("ct-add-item", { message: message.trim() });
       form.reset();
     }
   }
 
-  override render() {
-    if (!this.list) {
-      return html`
-        <div class="empty-state">No list data</div>
-      `;
+  private getItemEditId(item: T): string {
+    // Use the item's title as a unique identifier, or create a temporary one
+    return `edit-${item.title.replace(/[^a-zA-Z0-9]/g, "-")}-${this
+      ._nextTempId++}`;
+  }
+
+  private startEditing(item: T): void {
+    if (!this.editable) return;
+
+    const editId = this.getItemEditId(item);
+    // Create a temporary cell for editing this item's title
+    if (isCell(this.value) && this.value.runtime) {
+      // Create a mutable cell for editing
+      const tempCell = this.value.runtime.getCell<string>(
+        this.value.space,
+        { type: "edit", itemTitle: item.title },
+      );
+      // Set initial value
+      const tx = this.value.runtime.edit();
+      tempCell.withTx(tx).set(item.title);
+      tx.commit();
+      this._editingItems.set(editId, tempCell);
     }
+    this.requestUpdate();
+  }
+
+  private finishEditing(item: T, editId: string, newTitle: string): void {
+    if (!this.editable) return;
+
+    const trimmedTitle = newTitle.trim();
+    if (trimmedTitle && trimmedTitle !== item.title) {
+      const updatedItem = { ...item, title: trimmedTitle };
+      this.updateItem(item, updatedItem);
+      this.emit("ct-edit-item", { item: updatedItem, oldItem: item });
+    }
+
+    this._editingItems.delete(editId);
+    this.requestUpdate();
+  }
+
+  private cancelEditing(editId: string): void {
+    this._editingItems.delete(editId);
+    this.requestUpdate();
+  }
+
+  private isItemBeingEdited(item: T): string | null {
+    // Check if any editing cell exists for this item
+    for (const [editId, cell] of this._editingItems) {
+      if (editId.includes(item.title.replace(/[^a-zA-Z0-9]/g, "-"))) {
+        return editId;
+      }
+    }
+    return null;
+  }
+
+  override render() {
+    const items = this.getValue();
 
     return html`
       <div class="list-container">
-        <h2 class="list-title">${this.list.title}</h2>
+        ${this.title
+        ? html`
+          <h2 class="list-title">${this.title}</h2>
+        `
+        : ""}
 
         <div class="list-items">
-          ${this.list.items.length === 0
+          ${items.length === 0
         ? html`
           <div class="empty-state">No items in this list</div>
         `
         : repeat(
-          this.list.items,
+          items,
           (item) => item.title,
           (item) => this.renderItem(item),
         )}
@@ -253,21 +462,73 @@ export class CTList extends BaseElement {
     `;
   }
 
-  private renderItem(item: { title: string; done?: boolean }) {
+  private renderItem(item: T) {
+    const editId = this.isItemBeingEdited(item);
+    const isEditing = editId !== null;
+
     const actionButton = this.action && !this.readonly
       ? this.renderActionButton(item)
       : "";
 
+    // If item is being edited, show ct-input
+    if (isEditing && editId) {
+      const editCell = this._editingItems.get(editId);
+      return html`
+        <div class="list-item editing">
+          <div class="item-bullet"></div>
+          <div class="item-content">
+            <ct-input
+              .value="${editCell}"
+              @ct-submit="${(e: CustomEvent) =>
+          this.finishEditing(item, editId, e.detail.value)}"
+              @ct-blur="${(e: CustomEvent) =>
+          this.finishEditing(item, editId, e.detail.value)}"
+              @keydown="${(e: KeyboardEvent) => {
+          if (e.key === "Escape") {
+            this.cancelEditing(editId);
+          }
+        }}"
+              autofocus
+            ></ct-input>
+          </div>
+          <button
+            class="item-action cancel"
+            @click="${() => this.cancelEditing(editId)}"
+            title="Cancel editing"
+          >
+            ×
+          </button>
+        </div>
+      `;
+    }
+
     return html`
       <div class="list-item">
         <div class="item-bullet"></div>
-        <div class="item-content">${item.title}</div>
-        ${actionButton}
+        <div
+          class="item-content ${this.editable && !this.readonly
+        ? "editable"
+        : ""}"
+          @dblclick="${() => this.startEditing(item)}"
+        >
+          ${item.title}
+        </div>
+        ${this.editable && !this.readonly
+        ? html`
+          <button
+            class="item-action edit"
+            @click="${() => this.startEditing(item)}"
+            title="Edit item"
+          >
+            ✎
+          </button>
+        `
+        : ""} ${actionButton}
       </div>
     `;
   }
 
-  private renderActionButton(item: { title: string; done?: boolean }) {
+  private renderActionButton(item: T) {
     if (!this.action) return "";
 
     const getButtonContent = () => {
