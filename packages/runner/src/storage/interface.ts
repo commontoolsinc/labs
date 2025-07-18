@@ -380,7 +380,11 @@ export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }
   | { status: "pending"; journal: ITransactionJournal }
   | { status: "done"; journal: ITransactionJournal }
-  | { status: "error"; journal: ITransactionJournal; error: StorageTransactionFailed };
+  | {
+    status: "error";
+    journal: ITransactionJournal;
+    error: StorageTransactionFailed;
+  };
 
 /**
  * Representation of a storage transaction, which can be used to query facts and
@@ -396,19 +400,16 @@ export type StorageTransactionStatus =
  */
 export interface IStorageTransaction {
   /**
-   * Describes current status of the transaction. If transaction has failed
-   * or was cancelled result will be an error with a corresponding error variant.
-   * If transaction is being built it will have `open` status, if commit was
-   * called but promise has not resolved yet it will be `pending`. If commit
-   * successfully completed it will be `done`.
-   *
-   * Please note that if storage was updated since transaction was created such
-   * that any of the invariants have changed status will be change to
-   * `IStorageConsistencyError` even though transaction has not being commited.
-   * This allows transactor to cancel and recreate transaction with a current
-   * state without having to build up a whole transaction and commiting it.
+   * Describes current status of the transaction. Returns a union type with
+   * status field indicating the current state:
+   * - `"ready"`: Transaction is being built and ready for operations
+   * - `"pending"`: Commit was called but promise has not resolved yet
+   * - `"done"`: Commit successfully completed
+   * - `"error"`: Transaction has failed or was cancelled, includes error details
+
+   * Each status variant includes a `journal` field with transaction operations.
    */
-  // status(): StorageTransactionStatus;
+  status(): StorageTransactionStatus;
 
   /**
    * Helper that is the same as `reader().read()` but more convenient, as it
@@ -491,21 +492,6 @@ export interface IStorageTransaction {
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
-  /**
-   * Describes current status of the transaction. If transaction has failed
-   * or was cancelled result will be an error with a corresponding error variant.
-   * If transaction is being built it will have `open` status, if commit was
-   * called but promise has not resolved yet it will be `pending`. If commit
-   * successfully completed it will be `done`.
-   *
-   * Please note that if storage was updated since transaction was created such
-   * that any of the invariants have changed status will be change to
-   * `IStorageConsistencyError` even though transaction has not being commited.
-   * This allows transactor to cancel and recreate transaction with a current
-   * state without having to build up a whole transaction and commiting it.
-   */
-  status(): Result<IStorageTransactionProgress, StorageTransactionFailed>;
-
   /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.

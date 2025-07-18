@@ -14,6 +14,7 @@ import type {
   IStorageTransactionInvariant,
   IStorageTransactionLog,
   IStorageTransactionProgress,
+  ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
   IUnsupportedMediaTypeError,
@@ -25,6 +26,7 @@ import type {
   ReadError,
   Result,
   StorageTransactionFailed,
+  StorageTransactionStatus,
   Unit,
   Write,
   WriteError,
@@ -400,6 +402,35 @@ export class StorageTransaction implements IStorageTransaction {
 
   constructor(private runtime: IRuntime) {}
 
+  status(): StorageTransactionStatus {
+    // Create a minimal ITransactionJournal adapter for this.txLog
+    const notImplementedError: InactiveTransactionError = {
+      name: "StorageTransactionCompleteError",
+      message: "Not implemented",
+    };
+    
+    const journal: ITransactionJournal = {
+      activity: () => [],
+      novelty: () => [],
+      history: () => [],
+      reader: () => ({ error: notImplementedError }),
+      writer: () => ({ error: notImplementedError }),
+      close: () => ({ error: notImplementedError }),
+      abort: () => ({ error: notImplementedError }),
+    };
+
+    if (this.currentStatus.open) {
+      return { status: "ready", journal };
+    } else if (this.currentStatus.pending) {
+      return { status: "pending", journal };
+    } else if (this.currentStatus.done) {
+      return { status: "done", journal };
+    } else {
+      // This should not happen in normal flow, but return ready as fallback
+      return { status: "ready", journal };
+    }
+  }
+
   reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
     if (this.currentStatus.open === undefined) {
       const error = new Error(
@@ -518,15 +549,8 @@ export class StorageTransaction implements IStorageTransaction {
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(private tx: IStorageTransaction) {}
 
-  status(): Result<IStorageTransactionProgress, StorageTransactionFailed> {
-    // If the underlying transaction has status, use it; otherwise, return a default
-    // This assumes the underlying transaction is a StorageTransaction from this file
-    // and has currentStatus and txLog, otherwise this will need to be adapted
-    if (typeof (this.tx as any).currentStatus !== "undefined") {
-      return { ok: (this.tx as any).currentStatus };
-    }
-    // Fallback: not available
-    return { ok: { open: (this.tx as any).txLog } };
+  status(): StorageTransactionStatus {
+    return this.tx.status();
   }
 
   log(): IStorageTransactionLog {

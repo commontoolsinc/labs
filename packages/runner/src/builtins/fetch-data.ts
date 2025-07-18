@@ -129,7 +129,8 @@ export function fetchData(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to set the result.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
         resultWithLog.withTx(asyncTx).set(data);
@@ -145,7 +146,8 @@ export function fetchData(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to set the error.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
         errorWithLog.withTx(asyncTx).set(err);

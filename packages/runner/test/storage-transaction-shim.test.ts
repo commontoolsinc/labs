@@ -32,8 +32,7 @@ describe("StorageTransaction", () => {
 
     // Check initial status
     const statusResult = transaction.status();
-    expect(statusResult.ok).toBeDefined();
-    expect(statusResult.ok?.open).toBeDefined();
+    expect(statusResult.status).toBe("ready");
 
     // First write to root path to create a record
     const rootWriteResult = transaction.write({
@@ -110,7 +109,7 @@ describe("StorageTransaction", () => {
 
     // Check final status
     const finalStatusResult = transaction.status();
-    expect(finalStatusResult.ok?.done).toBeDefined();
+    expect(finalStatusResult.status).toBe("done");
   });
 
   it("should handle transaction abort", async () => {
