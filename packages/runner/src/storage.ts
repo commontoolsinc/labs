@@ -463,10 +463,9 @@ export class Storage implements IStorage {
     this.dirtyDocs.add(docKey);
     const docToStoragePromise = this._sendDocValue(doc, labels);
     this.docToStoragePromises.add(docToStoragePromise);
-    docToStoragePromise.finally(() => {
-      this.docToStoragePromises.delete(docToStoragePromise);
-      this.dirtyDocs.delete(docKey);
-    });
+    docToStoragePromise.finally(() =>
+      this.docToStoragePromises.delete(docToStoragePromise)
+    );
   }
 
   private async _sendDocValue(doc: DocImpl<unknown>, labels?: Labels) {
@@ -480,6 +479,8 @@ export class Storage implements IStorage {
       await this.updateFromStoragePromise;
       await this.runtime.idle();
     }
+
+    this.dirtyDocs.delete(`${doc.space}/${toURI(doc.entityId)}`);
 
     const storageProvider = this._getStorageProviderForSpace(doc.space);
 
@@ -532,7 +533,9 @@ export class Storage implements IStorage {
         doc.sourceCell = newSourceCell;
       }
     } finally {
-      // Remove the processing flag
+      // Remove the processing flag. Do this _after_ doc.send(), so _updateDoc,
+      // which is called synchronously during that call is not going to schedule
+      // sending this back to storage.
       this.dirtyDocs.delete(docKey);
 
       // Decrement the counter
