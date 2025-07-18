@@ -383,6 +383,12 @@ export type StorageTransactionStatus =
  */
 export interface IStorageTransaction {
   /**
+   * The transaction journal containing all read and write activities.
+   * Provides access to transaction operations and dependency tracking.
+   */
+  readonly journal: ITransactionJournal;
+
+  /**
    * Describes current status of the transaction. Returns a union type with
    * status field indicating the current state:
    * - `"ready"`: Transaction is being built and ready for operations
@@ -521,19 +527,6 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     value: JSONValue | undefined,
   ): void;
 
-  /**
-   * Returns the transaction journal.
-   *
-   * The journal contains a list of activities (reads and writes) that have been made to the transaction.
-   * It is used to track the dependencies of the transaction.
-   *
-   * If the transaction is aborted, the activity reflects the attempted reads and
-   * writes. If the transaction is committed, the activity reflects the actual reads
-   * and writes.
-   *
-   * @deprecated - Use ITransactionJournal.activity() instead
-   */
-  log(): Iterable<Activity>;
 }
 
 export interface ITransactionReader {

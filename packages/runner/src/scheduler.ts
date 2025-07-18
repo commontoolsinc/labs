@@ -446,7 +446,7 @@ export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
   const log: ReactivityLog = { reads: [], writes: [] };
-  for (const activity of tx.log()) {
+  for (const activity of tx.journal.activity()) {
     if ("read" in activity && activity.read) {
       log.reads.push({
         space: activity.read.space,

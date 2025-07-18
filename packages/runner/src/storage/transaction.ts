@@ -73,6 +73,10 @@ class StorageTransaction implements IStorageTransaction {
     this.#state = state;
   }
 
+  get journal() {
+    return this.#state.journal;
+  }
+
   status(): StorageTransactionStatus {
     return status(this);
   }

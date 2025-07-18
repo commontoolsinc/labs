@@ -570,12 +570,12 @@ export class StorageTransaction implements IStorageTransaction {
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(private tx: IStorageTransaction) {}
 
-  status(): StorageTransactionStatus {
-    return this.tx.status();
+  get journal(): ITransactionJournal {
+    return this.tx.journal;
   }
 
-  log(): Iterable<Activity> {
-    return this.tx.status().journal.activity();
+  status(): StorageTransactionStatus {
+    return this.tx.status();
   }
 
   reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
