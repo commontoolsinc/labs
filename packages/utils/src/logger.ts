@@ -87,7 +87,11 @@ function getTimeStamp(): string {
  * Resolves log messages, evaluating functions if needed
  */
 function resolveMessages(messages: LogMessage[]): unknown[] {
-  return messages.map((msg) => typeof msg === "function" ? msg() : msg);
+  return messages.flatMap((msg) => {
+    const resolved = typeof msg === "function" ? msg() : msg;
+    // flatMap expects arrays - it will flatten array results and wrap non-arrays
+    return Array.isArray(resolved) ? resolved : [resolved];
+  });
 }
 
 /**

@@ -132,6 +132,26 @@ describe("logger", () => {
         "end",
       ]);
     });
+
+    it("should flatten arrays returned by lazy functions", () => {
+      const { calls } = captureConsole("log", () => {
+        log(
+          "prefix",
+          () => ["array", "of", "values"],
+          "suffix",
+        );
+      });
+
+      expect(calls).toHaveLength(1);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual([
+        "prefix",
+        "array",
+        "of",
+        "values",
+        "suffix",
+      ]);
+    });
   });
 
   describe("severity levels", () => {
