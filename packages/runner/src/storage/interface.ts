@@ -56,17 +56,6 @@ export type Read = IAttestation;
  */
 export type Write = IAttestation;
 
-export interface IStorageTransactionInvariant {
-  read?: IStorageInvariant;
-  write?: IStorageInvariant;
-}
-
-export interface IStorageTransactionLog {
-  get(address: IMemorySpaceAddress): IStorageTransactionInvariant;
-  addRead(read: IStorageInvariant): void;
-  addWrite(write: IStorageInvariant): void;
-  [Symbol.iterator](): Iterator<IStorageTransactionInvariant>;
-}
 
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
@@ -371,11 +360,6 @@ export interface IMemoryChange {
   after: JSONValue | undefined;
 }
 
-export type IStorageTransactionProgress = Variant<{
-  open: IStorageTransactionLog;
-  pending: IStorageTransactionLog;
-  done: IStorageTransactionLog;
-}>;
 export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }
   | { status: "pending"; journal: ITransactionJournal }
@@ -539,18 +523,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
-   * Returns the log of the transaction.
+   * Returns the transaction journal.
    *
-   * The log is a list of changes that have been made to the transaction.
+   * The journal contains a list of activities (reads and writes) that have been made to the transaction.
    * It is used to track the dependencies of the transaction.
    *
-   * If the transaction is aborted, the log reflects the attempted reads and
-   * writes. If the transaction is committed, the log reflects the actual reads
+   * If the transaction is aborted, the activity reflects the attempted reads and
+   * writes. If the transaction is committed, the activity reflects the actual reads
    * and writes.
    *
-   * @deprecated
+   * @deprecated - Use ITransactionJournal.activity() instead
    */
-  log(): IStorageTransactionLog;
+  log(): Iterable<Activity>;
 }
 
 export interface ITransactionReader {
@@ -912,7 +896,3 @@ export interface IAttestation {
   readonly value?: JSONValue;
 }
 
-export interface IStorageInvariant {
-  readonly address: IMemorySpaceAddress;
-  readonly value?: JSONValue;
-}

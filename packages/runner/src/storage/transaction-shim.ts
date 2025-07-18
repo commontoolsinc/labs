@@ -1,26 +1,27 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import type {
+  Activity,
   CommitError,
+  IAttestation,
   IExtendedStorageTransaction,
   IInvalidDataURIError,
   IMemorySpaceAddress,
   InactiveTransactionError,
   INotFoundError,
+  IReadActivity,
   IReadOptions,
-  IStorageInvariant,
   IStorageTransaction,
   IStorageTransactionComplete,
   IStorageTransactionInconsistent,
-  IStorageTransactionInvariant,
-  IStorageTransactionLog,
-  IStorageTransactionProgress,
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
   IUnsupportedMediaTypeError,
+  JournalArchive,
   JSONValue,
   MemoryAddressPathComponent,
   MemorySpace,
+  Metadata,
   Read,
   ReaderError,
   ReadError,
@@ -105,25 +106,70 @@ function validateParentPath(
 }
 
 /**
- * Simple implementation of IStorageTransactionLog that tracks read/write operations
+ * Simple implementation of ITransactionJournal for tracking read/write operations
  */
-class StorageTransactionLog implements IStorageTransactionLog {
-  private log: IStorageTransactionInvariant[] = [];
+class TransactionJournal implements ITransactionJournal {
+  private activities: Activity[] = [];
 
-  get(_address: IMemorySpaceAddress): IStorageTransactionInvariant {
-    throw new Error("Not implemented");
+  addRead(address: IMemorySpaceAddress, options?: IReadOptions): void {
+    const readActivity: IReadActivity = {
+      ...address,
+      meta: options?.meta ?? {},
+    };
+    this.activities.push({ read: readActivity });
   }
 
-  addRead(read: IStorageInvariant): void {
-    this.log.push({ read });
+  addWrite(address: IMemorySpaceAddress): void {
+    this.activities.push({ write: address });
   }
 
-  addWrite(write: IStorageInvariant): void {
-    this.log.push({ write });
+  // ITransactionJournal implementation
+  activity(): Iterable<Activity> {
+    return this;
   }
 
-  [Symbol.iterator](): Iterator<IStorageTransactionInvariant> {
-    return this.log[Symbol.iterator]();
+  novelty(): Iterable<IAttestation> {
+    return [];
+  }
+
+  history(): Iterable<IAttestation> {
+    return [];
+  }
+
+  reader(): Result<ITransactionReader, InactiveTransactionError> {
+    const error: InactiveTransactionError = {
+      name: "StorageTransactionCompleteError",
+      message: "Not implemented",
+    };
+    return { error };
+  }
+
+  writer(): Result<ITransactionWriter, InactiveTransactionError> {
+    const error: InactiveTransactionError = {
+      name: "StorageTransactionCompleteError",
+      message: "Not implemented",
+    };
+    return { error };
+  }
+
+  close(): Result<JournalArchive, InactiveTransactionError> {
+    const error: InactiveTransactionError = {
+      name: "StorageTransactionCompleteError",
+      message: "Not implemented",
+    };
+    return { error };
+  }
+
+  abort(): Result<Unit, InactiveTransactionError> {
+    const error: InactiveTransactionError = {
+      name: "StorageTransactionCompleteError",
+      message: "Not implemented",
+    };
+    return { error };
+  }
+
+  [Symbol.iterator](): Iterator<Activity> {
+    return this.activities[Symbol.iterator]();
   }
 }
 
@@ -134,7 +180,7 @@ class TransactionReader implements ITransactionReader {
   constructor(
     protected runtime: IRuntime,
     protected space: MemorySpace,
-    protected log: StorageTransactionLog,
+    protected journal: TransactionJournal,
   ) {}
 
   did() {
@@ -169,11 +215,11 @@ class TransactionReader implements ITransactionReader {
 
         const value = getValueAtPath(json, address.path);
 
-        const read: IStorageInvariant = {
+        const read: Read = {
           address,
           value,
         };
-        this.log.addRead(read);
+        this.journal.addRead(address, options);
 
         return { ok: read };
       } catch (error) {
@@ -224,11 +270,11 @@ class TransactionReader implements ITransactionReader {
       }
       // Read from doc itself
       const value = doc.getAtPath(rest);
-      const read: IStorageInvariant = {
+      const read: Read = {
         address,
         value,
       };
-      this.log.addRead(read);
+      this.journal.addRead(address, options);
       return { ok: read };
     } else if (first === "source") {
       // Only allow path length 1
@@ -246,11 +292,11 @@ class TransactionReader implements ITransactionReader {
         // Convert EntityId to URI string
         value = `of:${JSON.parse(JSON.stringify(sourceCell.entityId))["/"]}`;
       }
-      const read: IStorageInvariant = {
+      const read: Read = {
         address,
         value,
       };
-      this.log.addRead(read);
+      this.journal.addRead(address, options);
       return { ok: read };
     } else {
       const notFoundError: INotFoundError = new Error(
@@ -337,11 +383,11 @@ class TransactionWriter extends TransactionReader
       }
       // Write to doc itself
       doc.setAtPath(rest, value);
-      const write: IStorageInvariant = {
+      const write: Write = {
         address,
         value,
       };
-      this.log.addWrite(write);
+      this.journal.addWrite(address);
       return { ok: write };
     } else if (first === "source") {
       // Only allow path length 1
@@ -375,11 +421,11 @@ class TransactionWriter extends TransactionReader
         return { ok: undefined, error: notFoundError };
       }
       doc.sourceCell = sourceDoc;
-      const write: IStorageInvariant = {
+      const write: Write = {
         address,
         value,
       };
-      this.log.addWrite(write);
+      this.journal.addWrite(address);
       return { ok: write };
     } else {
       const notFoundError: INotFoundError = new Error(
@@ -395,44 +441,21 @@ class TransactionWriter extends TransactionReader
  * Implementation of IStorageTransaction that uses DocImpl and runtime.documentMap
  */
 export class StorageTransaction implements IStorageTransaction {
-  private txLog = new StorageTransactionLog();
-  private currentStatus: IStorageTransactionProgress = { open: this.txLog };
+  private journal = new TransactionJournal();
+  private currentStatus: StorageTransactionStatus;
   private readers = new Map<string, ITransactionReader>();
   private writers = new Map<string, ITransactionWriter>();
 
-  constructor(private runtime: IRuntime) {}
+  constructor(private runtime: IRuntime) {
+    this.currentStatus = { status: "ready", journal: this.journal };
+  }
 
   status(): StorageTransactionStatus {
-    // Create a minimal ITransactionJournal adapter for this.txLog
-    const notImplementedError: InactiveTransactionError = {
-      name: "StorageTransactionCompleteError",
-      message: "Not implemented",
-    };
-    
-    const journal: ITransactionJournal = {
-      activity: () => [],
-      novelty: () => [],
-      history: () => [],
-      reader: () => ({ error: notImplementedError }),
-      writer: () => ({ error: notImplementedError }),
-      close: () => ({ error: notImplementedError }),
-      abort: () => ({ error: notImplementedError }),
-    };
-
-    if (this.currentStatus.open) {
-      return { status: "ready", journal };
-    } else if (this.currentStatus.pending) {
-      return { status: "pending", journal };
-    } else if (this.currentStatus.done) {
-      return { status: "done", journal };
-    } else {
-      // This should not happen in normal flow, but return ready as fallback
-      return { status: "ready", journal };
-    }
+    return this.currentStatus;
   }
 
   reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
-    if (this.currentStatus.open === undefined) {
+    if (this.currentStatus.status !== "ready") {
       const error = new Error(
         "Storage transaction complete",
       ) as IStorageTransactionComplete;
@@ -445,7 +468,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     let reader = this.readers.get(space);
     if (!reader) {
-      reader = new TransactionReader(this.runtime, space, this.txLog);
+      reader = new TransactionReader(this.runtime, space, this.journal);
       this.readers.set(space, reader);
     }
 
@@ -466,7 +489,7 @@ export class StorageTransaction implements IStorageTransaction {
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
-    if (this.currentStatus.open === undefined) {
+    if (this.currentStatus.status !== "ready") {
       const error = new Error(
         "Storage transaction complete",
       ) as IStorageTransactionComplete;
@@ -491,7 +514,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     let writer = this.writers.get(space);
     if (!writer) {
-      writer = new TransactionWriter(this.runtime, space, this.txLog);
+      writer = new TransactionWriter(this.runtime, space, this.journal);
       this.writers.set(space, writer);
     }
 
@@ -515,7 +538,7 @@ export class StorageTransaction implements IStorageTransaction {
   }
 
   abort(reason?: any): Result<any, InactiveTransactionError> {
-    if (this.currentStatus.open === undefined) {
+    if (this.currentStatus.status !== "ready") {
       const error = new Error(
         "Storage transaction complete",
       ) as IStorageTransactionComplete;
@@ -526,13 +549,13 @@ export class StorageTransaction implements IStorageTransaction {
       };
     }
 
-    // Set status to done with the current log to indicate the transaction is complete
-    this.currentStatus = { done: this.txLog };
+    // Set status to done with the current journal to indicate the transaction is complete
+    this.currentStatus = { status: "done", journal: this.currentStatus.journal };
     return { ok: undefined };
   }
 
   commit(): Promise<Result<Unit, CommitError>> {
-    if (this.currentStatus.open === undefined) {
+    if (this.currentStatus.status !== "ready") {
       const error: any = new Error("Transaction already aborted");
       error.name = "StorageTransactionAborted";
       error.reason = "Transaction was aborted";
@@ -541,7 +564,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     // For now, just mark as done since we're only implementing basic read/write
     // In a real implementation, this would send the transaction to upstream storage
-    this.currentStatus = { done: this.txLog };
+    this.currentStatus = { status: "done", journal: this.currentStatus.journal };
     return Promise.resolve({ ok: {} });
   }
 }
@@ -553,11 +576,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.status();
   }
 
-  log(): IStorageTransactionLog {
-    if (typeof (this.tx as any).txLog !== "undefined") {
-      return (this.tx as any).txLog;
+  log(): TransactionJournal {
+    if (typeof (this.tx as any).journal !== "undefined") {
+      return (this.tx as any).journal;
     }
-    throw new Error("Underlying transaction does not expose log");
+    throw new Error("Underlying transaction does not expose transaction journal");
   }
 
   reader(space: MemorySpace): Result<ITransactionReader, ReaderError> {
