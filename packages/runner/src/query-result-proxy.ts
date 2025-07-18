@@ -60,14 +60,19 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   some: ArrayMethodType.ReadOnly,
   sort: ArrayMethodType.ReadWrite,
   splice: ArrayMethodType.ReadWrite,
-  toLocaleString: ArrayMethodType.ReadOnly,
   toReversed: ArrayMethodType.ReadOnly,
   toSorted: ArrayMethodType.ReadOnly,
   toSpliced: ArrayMethodType.ReadOnly,
-  toString: ArrayMethodType.ReadOnly,
   unshift: ArrayMethodType.WriteOnly,
   values: ArrayMethodType.ReadOnly,
   with: ArrayMethodType.ReadOnly,
+
+  hasOwnProperty: ArrayMethodType.ReadOnly,
+  isPrototypeOf: ArrayMethodType.ReadOnly,
+  propertyIsEnumerable: ArrayMethodType.ReadOnly,
+  valueOf: ArrayMethodType.ReadOnly,
+  toString: ArrayMethodType.ReadOnly,
+  toLocaleString: ArrayMethodType.ReadOnly,
 };
 
 export function createQueryResultProxy<T>(
@@ -123,7 +128,11 @@ export function createQueryResultProxy<T>(
         else return value;
       }
 
-      if (Array.isArray(target) && prop in arrayMethods) {
+      if (
+        Array.isArray(target) &&
+        Object.prototype.hasOwnProperty.call(arrayMethods, prop) &&
+        typeof (target[prop as keyof typeof target]) === "function"
+      ) {
         const method = Array.prototype[prop as keyof typeof Array.prototype];
         const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
 
