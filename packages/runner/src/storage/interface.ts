@@ -56,7 +56,6 @@ export type Read = IAttestation;
  */
 export type Write = IAttestation;
 
-
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
 export type Labels = {
@@ -808,32 +807,6 @@ export interface ITransactionJournal {
 
   novelty(space: MemorySpace): Iterable<IAttestation>;
   history(space: MemorySpace): Iterable<IAttestation>;
-
-  reader(
-    space: MemorySpace,
-  ): Result<ITransactionReader, InactiveTransactionError>;
-
-  writer(
-    space: MemorySpace,
-  ): Result<ITransactionWriter, InactiveTransactionError>;
-
-  /**
-   * Closes underlying transaction, making it non-editable going forward. Any
-   * attempts to edit it will fail.
-   */
-  close(): Result<Map<MemorySpace, ITransaction>, InactiveTransactionError>;
-
-  /**
-   * Aborts underlying transaction, making it non-editable going forward. Any
-   * attempts to edit it will fail.
-   */
-  abort(reason?: unknown): Result<Unit, InactiveTransactionError>;
-}
-
-export interface EditableJournal {
-  activity(): Iterable<Activity>;
-  novelty: Iterable<IAttestation>;
-  history(): Iterable<IAttestation>;
 }
 
 export interface ITransaction {
@@ -895,4 +868,3 @@ export interface IAttestation {
   readonly address: IMemoryAddress;
   readonly value?: JSONValue;
 }
-
