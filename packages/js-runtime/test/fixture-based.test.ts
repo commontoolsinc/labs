@@ -100,34 +100,6 @@ const configs: FixtureConfig[] = [
     formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
   },
   {
-    directory: "opaque-refs",
-    describe: "OpaqueRef Transformer",
-    groups: [
-      { pattern: /ternary/, name: "Ternary Transformations" },
-      { pattern: /binary/, name: "Binary Expression Transformations" },
-      {
-        pattern: /function-calls|complex-function/,
-        name: "Function Call Transformations",
-      },
-      { pattern: /property-access/, name: "Property Access and Method Calls" },
-      { pattern: /jsx/, name: "JSX Expression Transformations" },
-      { pattern: /handler/, name: "Handler Transformations" },
-      {
-        pattern: /multiple-refs|same-ref/,
-        name: "Multiple OpaqueRef Operations",
-      },
-    ],
-    formatTestName: (name) => {
-      const formatted = name.replace(/-/g, " ");
-      // Add context based on the fixture name
-      if (name.includes("no-transform")) {
-        return `does not transform ${formatted.replace("no transform ", "")}`;
-      }
-      if (name.includes("nested")) return `handles ${formatted}`;
-      return `transforms ${formatted}`;
-    },
-  },
-  {
     directory: "jsx-expressions",
     describe: "JSX Expression Transformer",
     transformerOptions: { applySchemaTransformer: true },
@@ -152,11 +124,6 @@ const configs: FixtureConfig[] = [
       return `transforms ${formatted}`;
     },
     skip: ["no-directive"], // This one needs special handling with compiler
-  },
-  {
-    directory: "transformations/ifelse",
-    describe: "IfElse Transformer",
-    formatTestName: (name) => `transforms ${name.replace(/-/g, " ")}`,
   },
 ];
 

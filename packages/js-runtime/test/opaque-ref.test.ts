@@ -13,30 +13,29 @@ describe("OpaqueRef Transformer", () => {
   describe("Import Management", () => {
     it("adds derive import when needed", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef } from "commontools";
+import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
-const result = count + 1;
+const el = <div>{count + 1}</div>;
 `;
       const transformed = await transformSource(source, { types });
       expect(transformed).toContain(
-        'import { OpaqueRef, derive } from "commontools"',
+        'import { OpaqueRef, h, derive } from "commontools"',
       );
     });
 
     it("does not duplicate existing imports", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef, derive, ifElse } from "commontools";
+import { OpaqueRef, derive, ifElse, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const isActive: OpaqueRef<boolean> = {} as any;
-const a = count + 1;
-const b = isActive ? 1 : 0;
+const el = <div>{count + 1} {isActive ? 1 : 0}</div>;
 `;
       const transformed = await transformSource(source, { types });
       // Should still have single import statement
       const importMatches = transformed.match(/import.*from "commontools"/g);
       expect(importMatches).toHaveLength(1);
       expect(transformed).toContain(
-        'import { OpaqueRef, derive, ifElse } from "commontools"',
+        'import { OpaqueRef, derive, ifElse, h } from "commontools"',
       );
     });
   });
@@ -44,23 +43,28 @@ const b = isActive ? 1 : 0;
   describe("Error Mode", () => {
     it("reports errors instead of transforming", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef } from "commontools";
+import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
-const result = count + 1;
+const el = <div>{count + 1}</div>;
 `;
 
       await expect(
         transformSource(source, { mode: "error", types }),
-      ).rejects.toThrow(/Binary expression with OpaqueRef should use derive/);
+      ).rejects.toThrow(/JSX expression with OpaqueRef computation should use derive/);
     });
 
     it("reports multiple errors", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef } from "commontools";
+import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
 const isActive: OpaqueRef<boolean> = {} as any;
-const a = count + 1;
-const b = isActive ? 1 : 0;
+const el = (
+  <div>
+    {count + 1}
+    {isActive ? 1 : 0}
+    {count * 2}
+  </div>
+);
 `;
 
       await expect(
@@ -73,9 +77,9 @@ const b = isActive ? 1 : 0;
     it("logs transformation details", async () => {
       const logs: string[] = [];
       const source = `/// <cts-enable />
-import { OpaqueRef, derive } from "commontools";
+import { OpaqueRef, derive, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
-const result = count + 1;
+const el = <div>{count + 1}</div>;
 `;
 
       await transformSource(source, {
@@ -93,9 +97,9 @@ const result = count + 1;
   describe("checkWouldTransform utility", () => {
     it("returns true when transformation is needed", async () => {
       const source = `/// <cts-enable />
-import { OpaqueRef } from "commontools";
+import { OpaqueRef, h } from "commontools";
 const count: OpaqueRef<number> = {} as any;
-const result = count + 1;
+const el = <div>{count + 1}</div>;
 `;
       expect(await checkWouldTransform(source, types)).toBe(true);
     });
@@ -112,47 +116,14 @@ const result = count + 1;
   describe("CTS-Enable Directive", () => {
     it("transformers work correctly when applied by test utility", async () => {
       const source = `
-import { OpaqueRef, derive } from "commontools";
+import { OpaqueRef, derive, h, ifElse } from "commontools";
 const count: OpaqueRef<number> = {} as any;
-const result = count > 5 ? "yes" : "no";
-const sum = count + 1;
+const el = <div>{count > 5 ? "yes" : "no"} {count + 1}</div>;
 `;
       // Test utility applies transformers regardless of directive
       const transformed = await transformSource(source, { types });
       expect(transformed).toContain("commontools_1.derive");
       expect(transformed).toContain("commontools_1.ifElse");
-    });
-
-    it("transforms with /// <cts-enable /> directive", async () => {
-      const source = `/// <cts-enable />
-import { OpaqueRef, derive } from "commontools";
-const count: OpaqueRef<number> = {} as any;
-const result = count + 1;
-`;
-      const envTypes = await getTypeScriptEnvironmentTypes(new StaticCache());
-      const fullTypes = { ...envTypes, commontools: commonToolsTypes };
-      const compiler = new TypeScriptCompiler(fullTypes);
-
-      const program = {
-        main: "/main.ts",
-        files: [
-          {
-            name: "/main.ts",
-            contents: source,
-          },
-          {
-            name: "commontools.d.ts",
-            contents: commonToolsTypes,
-          },
-        ],
-      };
-
-      const compiled = compiler.compile(program, {
-        runtimeModules: ["commontools"],
-      });
-
-      // Should transform when directive is present
-      expect(compiled.js).toContain("commontools_1.derive");
     });
   });
 });
