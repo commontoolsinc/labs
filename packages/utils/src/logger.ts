@@ -25,9 +25,13 @@ let currentLogLevel: LogLevel = "info";
  * Initialize log level from environment variable if available
  */
 if (typeof Deno !== "undefined") {
-  const envLevel = Deno.env.get("LOG_LEVEL");
-  if (envLevel && envLevel in LOG_LEVELS) {
-    currentLogLevel = envLevel as LogLevel;
+  try {
+    const envLevel = Deno.env.get("LOG_LEVEL");
+    if (envLevel && envLevel in LOG_LEVELS) {
+      setLogLevel(envLevel as LogLevel);
+    }
+  } catch {
+    // Ignore permission errors - use default log level
   }
 }
 
