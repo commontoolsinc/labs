@@ -45,10 +45,12 @@ import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
+import { FunctionCache } from "./function-cache.ts";
 
 export class Runner implements IRunner {
   readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
   private allCancels = new Set<Cancel>();
+  private functionCache = new FunctionCache();
 
   constructor(readonly runtime: IRuntime) {}
 
@@ -262,6 +264,9 @@ export class Runner implements IRunner {
           processCell.getAsQueryResult(path as PropertyKey[], tx);
     }
 
+    // Discover and cache all JavaScript functions in the recipe before instantiation
+    this.discoverAndCacheFunctions(recipe);
+
     for (const node of recipe.nodes) {
       this.instantiateNode(
         tx,
@@ -420,6 +425,89 @@ export class Runner implements IRunner {
     this.allCancels.clear();
   }
 
+  /**
+   * Discover and cache JavaScript functions from a recipe.
+   * This recursively traverses the recipe structure to find all JavaScript modules
+   * with string implementations and evaluates them for caching.
+   *
+   * @param recipe The recipe to discover functions from
+   */
+  private discoverAndCacheFunctions(recipe: Recipe): void {
+    for (const node of recipe.nodes) {
+      this.discoverAndCacheFunctionsFromModule(node.module);
+
+      // Also check inputs for nested recipes (e.g., in map operations)
+      if (isRecord(node.inputs)) {
+        this.discoverAndCacheFunctionsFromValue(node.inputs);
+      }
+    }
+  }
+
+  /**
+   * Discover and cache functions from a module.
+   *
+   * @param module The module to process
+   */
+  private discoverAndCacheFunctionsFromModule(module: Module): void {
+    if (!isModule(module)) return;
+
+    switch (module.type) {
+      case "javascript":
+        // Cache JavaScript functions that are already function objects
+        if (
+          typeof module.implementation === "function" &&
+          !this.functionCache.has(module)
+        ) {
+          this.functionCache.set(module, module.implementation);
+        }
+        break;
+
+      case "recipe":
+        // Recursively discover functions in nested recipes
+        if (isRecipe(module.implementation)) {
+          this.discoverAndCacheFunctions(module.implementation);
+        }
+        break;
+
+      case "ref":
+        // Resolve reference and process the referenced module
+        try {
+          const referencedModule = this.runtime.moduleRegistry.getModule(
+            module.implementation as string,
+          );
+          this.discoverAndCacheFunctionsFromModule(referencedModule);
+        } catch (error) {
+          console.warn("Failed to resolve module reference:", error);
+        }
+        break;
+    }
+  }
+
+  /**
+   * Discover and cache functions from a value that might contain recipes.
+   * This handles cases where recipes are passed as inputs (e.g., to map operations).
+   *
+   * @param value The value to search for recipes
+   */
+  private discoverAndCacheFunctionsFromValue(value: JSONValue): void {
+    if (isRecipe(value)) {
+      this.discoverAndCacheFunctions(value);
+    } else if (isModule(value)) {
+      this.discoverAndCacheFunctionsFromModule(value);
+    } else if (isRecord(value)) {
+      // Recursively search in objects and arrays
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          this.discoverAndCacheFunctionsFromValue(item);
+        }
+      } else {
+        for (const key in value) {
+          this.discoverAndCacheFunctionsFromValue(value[key] as JSONValue);
+        }
+      }
+    }
+  }
+
   private instantiateNode(
     tx: IExtendedStorageTransaction,
     module: Module,
@@ -517,11 +605,23 @@ export class Runner implements IRunner {
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
     const writes = findAllWriteRedirectCells(outputs, processCell);
 
-    let fn = (
-      typeof module.implementation === "string"
-        ? this.runtime.harness.getInvocation(module.implementation)
-        : module.implementation
-    ) as (inputs: any) => any;
+    let fn: (inputs: any) => any;
+
+    if (typeof module.implementation === "string") {
+      // Try to get from cache first
+      const cached = this.functionCache.get(module);
+      if (cached) {
+        fn = cached as (inputs: any) => any;
+      } else {
+        // Fall back to evaluating and cache it
+        fn = this.runtime.harness.getInvocation(module.implementation) as (
+          inputs: any,
+        ) => any;
+        this.functionCache.set(module, fn);
+      }
+    } else {
+      fn = module.implementation as (inputs: any) => any;
+    }
 
     if (module.wrapper && module.wrapper in moduleWrappers) {
       fn = moduleWrappers[module.wrapper](fn);

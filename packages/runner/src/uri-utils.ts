@@ -1,3 +1,4 @@
+import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import type { URI } from "./sigil-types.ts";
 
@@ -37,6 +38,8 @@ export function fromURI(uri: URI | string): string {
     return uri;
   } else if (uri.startsWith("of:")) {
     return uri.slice(3);
+  } else if (uri.startsWith("data:")) {
+    return refer(uri).toString();
   } else {
     // TODO(seefeld): Remove this once we want to support any URI
     throw new Error(`Invalid URI: ${uri}`);

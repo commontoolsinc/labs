@@ -199,13 +199,32 @@ export function normalizeAndDiff(
     if (parsedLink.id.startsWith("data:")) {
       // If there is a data link treat it as writing it's contents instead.
 
-      // TODO(seefeld): If the data url had a space different than the
-      // destination, the expectation would be that links inside of it would be
-      // resolved against that space as base. This is currently broken (and
-      // might also be broken for other relative links)
-
       //  Use the tx code to make sure we read it the same way
-      const dataValue = runtime.edit().readValueOrThrow(parsedLink, options);
+      let dataValue: any = runtime.edit().readValueOrThrow({
+        ...parsedLink,
+        path: [],
+      }, options);
+      const path = [...parsedLink.path];
+      for (;;) {
+        if (isAnyCellLink(dataValue)) {
+          const dataLink = parseLink(dataValue, parsedLink);
+          dataValue = createSigilLinkFromParsedLink({
+            ...dataLink,
+            path: [...dataLink.path, ...path],
+          });
+          break;
+        }
+        if (path.length > 0) {
+          if (isRecord(dataValue)) {
+            dataValue = dataValue[path.shift()!];
+          } else {
+            dataValue = undefined;
+            break;
+          }
+        } else {
+          break;
+        }
+      }
       return normalizeAndDiff(runtime, tx, link, dataValue, context, options);
     }
     if (
