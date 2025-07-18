@@ -1,11 +1,9 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell, isCell } from "@commontools/runner";
-import {
-  InputTimingController,
-  type InputTimingOptions,
-} from "../../core/input-timing-controller.ts";
+import { type Cell } from "@commontools/runner";
+import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
+import { createStringCellController } from "../../core/cell-controller.ts";
 
 /**
  * CTInput - Enhanced input field with support for various types, validation patterns, and reactive data binding
@@ -339,8 +337,20 @@ export class CTInput extends BaseElement {
   declare timingDelay: number;
 
   private _input: HTMLInputElement | null = null;
-  private _cellUnsubscribe: (() => void) | null = null;
-  private _inputTiming: InputTimingController;
+  private _cellController = createStringCellController(this, {
+    timing: {
+      strategy: "debounce",
+      delay: 300,
+    },
+    onChange: (newValue: string, oldValue: string) => {
+      this.emit("ct-change", {
+        value: newValue,
+        oldValue,
+        name: this.name,
+        files: this.type === "file" ? this._input?.files : undefined,
+      });
+    },
+  });
 
   constructor() {
     super();
@@ -369,12 +379,6 @@ export class CTInput extends BaseElement {
     this.showValidation = false;
     this.timingStrategy = "debounce";
     this.timingDelay = 300;
-
-    // Initialize input timing controller
-    this._inputTiming = new InputTimingController(this, {
-      strategy: this.timingStrategy,
-      delay: this.timingDelay,
-    });
   }
 
   private get input(): HTMLInputElement | null {
@@ -385,32 +389,12 @@ export class CTInput extends BaseElement {
   }
 
   private getValue(): string {
-    if (isCell(this.value)) {
-      return this.value.get?.() || "";
-    }
-    return this.value || "";
+    return this._cellController.getValue();
   }
 
-  private setValue(newValue: string, files?: FileList | null): void {
-    const oldValue = this.getValue();
-
-    this._inputTiming.schedule(() => {
-      if (isCell(this.value)) {
-        const tx = this.value.runtime.edit();
-        this.value.withTx(tx).set(newValue);
-        tx.commit();
-      } else {
-        this.value = newValue;
-      }
-
-      // Emit the value change event after the value is actually set
-      this.emit("ct-change", {
-        value: newValue,
-        oldValue,
-        name: this.name,
-        files: this.type === "file" ? files : undefined,
-      });
-    });
+  private setValue(newValue: string, _files?: FileList | null): void {
+    // Store files reference for the onChange handler
+    this._cellController.setValue(newValue);
   }
 
   private getPattern(): string {
@@ -470,12 +454,12 @@ export class CTInput extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this._setupCellSubscription();
+    // CellController handles subscription automatically via ReactiveController
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this._cleanupCellSubscription();
+    // CellController handles cleanup automatically via ReactiveController
   }
 
   override updated(changedProperties: Map<string, any>) {
@@ -483,8 +467,7 @@ export class CTInput extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
-      this._cleanupCellSubscription();
-      this._setupCellSubscription();
+      this._cellController.bind(this.value);
     }
 
     // Update timing controller if timing options changed
@@ -492,7 +475,7 @@ export class CTInput extends BaseElement {
       changedProperties.has("timingStrategy") ||
       changedProperties.has("timingDelay")
     ) {
-      this._inputTiming.updateOptions({
+      this._cellController.updateTimingOptions({
         strategy: this.timingStrategy,
         delay: this.timingDelay,
       });
@@ -503,28 +486,20 @@ export class CTInput extends BaseElement {
     // Cache the input element reference
     this._input = this.shadowRoot?.querySelector("input") || null;
 
+    // Bind the initial value to the cell controller
+    this._cellController.bind(this.value);
+
+    // Update timing options to match current properties
+    this._cellController.updateTimingOptions({
+      strategy: this.timingStrategy,
+      delay: this.timingDelay,
+    });
+
     if (this.autofocus) {
       this._input?.focus();
     }
   }
 
-  private _setupCellSubscription(): void {
-    if (isCell(this.value)) {
-      // Subscribe to cell changes using sink() which returns a cleanup function
-      // This ensures the input re-renders when the cell value changes externally
-      this._cellUnsubscribe = this.value.sink(() => {
-        // Trigger a re-render when the cell value changes
-        this.requestUpdate();
-      });
-    }
-  }
-
-  private _cleanupCellSubscription(): void {
-    if (this._cellUnsubscribe) {
-      this._cellUnsubscribe();
-      this._cellUnsubscribe = null;
-    }
-  }
 
   override render() {
     const pattern = this.getPattern();
@@ -595,7 +570,7 @@ export class CTInput extends BaseElement {
   }
 
   private _handleFocus(_event: Event) {
-    this._inputTiming.onFocus();
+    this._cellController.onFocus();
     this.emit("ct-focus", {
       value: this.getValue(),
       name: this.name,
@@ -603,7 +578,7 @@ export class CTInput extends BaseElement {
   }
 
   private _handleBlur(_event: Event) {
-    this._inputTiming.onBlur();
+    this._cellController.onBlur();
     this.emit("ct-blur", {
       value: this.getValue(),
       name: this.name,
