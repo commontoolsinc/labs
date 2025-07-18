@@ -60,14 +60,21 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   some: ArrayMethodType.ReadOnly,
   sort: ArrayMethodType.ReadWrite,
   splice: ArrayMethodType.ReadWrite,
-  toLocaleString: ArrayMethodType.ReadOnly,
   toReversed: ArrayMethodType.ReadOnly,
   toSorted: ArrayMethodType.ReadOnly,
   toSpliced: ArrayMethodType.ReadOnly,
-  toString: ArrayMethodType.ReadOnly,
   unshift: ArrayMethodType.WriteOnly,
   values: ArrayMethodType.ReadOnly,
   with: ArrayMethodType.ReadOnly,
+
+  hasOwnProperty: ArrayMethodType.ReadOnly,
+  isPrototypeOf: ArrayMethodType.ReadOnly,
+  propertyIsEnumerable: ArrayMethodType.ReadOnly,
+  valueOf: ArrayMethodType.ReadOnly,
+  isExtensible: ArrayMethodType.ReadOnly,
+  isFrozen: ArrayMethodType.ReadOnly,
+  toString: ArrayMethodType.ReadOnly,
+  toLocaleString: ArrayMethodType.ReadOnly,
 };
 
 export function createQueryResultProxy<T>(
@@ -125,7 +132,10 @@ export function createQueryResultProxy<T>(
 
       if (Array.isArray(target) && prop in arrayMethods) {
         const method = Array.prototype[prop as keyof typeof Array.prototype];
-        const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
+        const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods] ??
+          // Default to ReadOnly to catch other methods on object (so the "prop
+          // in" is true) but not in the list.
+          ArrayMethodType.ReadOnly;
 
         return isReadWrite === ArrayMethodType.ReadOnly
           ? (...args: any[]) => {
