@@ -357,7 +357,7 @@ function createRegularCell<T>(
   tx?: IExtendedStorageTransaction,
 ): Cell<T> {
   const { space, path, schema, rootSchema } = link;
-  let readOnly: string | undefined;
+  let readOnlyReason: string | undefined;
 
   const self = {
     get: () => validateAndTransform(runtime, tx, link),
@@ -552,10 +552,10 @@ function createRegularCell<T>(
       tx.writeOrThrow({ ...link, path: ["source"] }, sourceLink.id);
     },
     freeze: (reason: string) => {
-      readOnly = reason;
+      readOnlyReason = reason;
       runtime.documentMap.getDocByEntityId(link.space, link.id)?.freeze(reason);
     },
-    isFrozen: () => !!readOnly,
+    isFrozen: () => !!readOnlyReason,
     toJSON: (): LegacyJSONCellLink => // Keep old format for backward compatibility
     ({
       cell: {
