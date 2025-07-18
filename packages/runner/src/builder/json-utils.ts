@@ -20,7 +20,7 @@ import {
 import { getTopFrame } from "./recipe.ts";
 import { deepEqual } from "../path-utils.ts";
 import { IRuntime } from "../runtime.ts";
-import { parseLink } from "../link-utils.ts";
+import { parseLink, sanitizeSchemaForLinks } from "../link-utils.ts";
 
 export function toJSONWithLegacyAliases(
   value: Opaque<any>,
@@ -55,8 +55,12 @@ export function toJSONWithLegacyAliases(
         $alias: {
           ...(isShadowRef(value) ? { cell: value } : {}),
           path: pathToCell as (string | number)[],
-          ...(exported?.schema ? { schema: exported.schema } : {}),
-          ...(exported?.rootSchema ? { rootSchema: exported.rootSchema } : {}),
+          ...(exported?.schema
+            ? { schema: sanitizeSchemaForLinks(exported.schema) }
+            : {}),
+          ...(exported?.rootSchema
+            ? { rootSchema: sanitizeSchemaForLinks(exported.rootSchema) }
+            : {}),
         },
       } satisfies LegacyAlias;
     } else throw new Error(`Cell not found in paths`);
