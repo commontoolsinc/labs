@@ -506,7 +506,7 @@ export class Runner implements IRunner {
     ) as (inputs: any) => any;
 
     if (module.wrapper && module.wrapper in moduleWrappers) {
-      fn = moduleWrappers[module.wrapper](fn);
+      fn = moduleWrappers[module.wrapper](fn, module);
     }
 
     // Check if any of the read cells is a stream alias
@@ -937,6 +937,13 @@ export function mergeObjects<T>(
 }
 
 const moduleWrappers = {
-  handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn.bind(props)(props.$event, props),
+  handler: (fn: (event: any, ...props: any[]) => any, module: Module) => (props: any) => {
+    // Only use proxies if module.proxy is explicitly true
+    if (module.proxy === true) {
+      return fn.bind(props)(props.$event, props);
+    } else {
+      // Direct call without binding
+      return fn(props.$event, props);
+    }
+  },
 };

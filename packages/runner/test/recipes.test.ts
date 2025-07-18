@@ -250,6 +250,7 @@ describe("Recipe Runner", () => {
       ({ amount }, { counter }) => {
         counter.value += amount;
       },
+      { proxy: true },
     );
 
     const incRecipe = recipe<{ counter: { value: number } }>(
@@ -287,7 +288,7 @@ describe("Recipe Runner", () => {
       { amount },
     ) {
       this.counter.value += amount;
-    });
+    }, { proxy: true });
 
     const incRecipe = recipe<{ counter: { value: number } }>(
       "Increment counter",
@@ -325,6 +326,7 @@ describe("Recipe Runner", () => {
       function (this: { counter: { value: number } }, { amount }) {
         this.counter.value += amount;
       },
+      { proxy: true },
     );
 
     const incRecipe = recipe<{ counter: { value: number } }>(
@@ -386,10 +388,13 @@ describe("Recipe Runner", () => {
     const incHandler = handler<
       { amount: number },
       { counter: { value: number }; nested: { a: { b: { c: number } } } }
-    >((event, { counter, nested }) => {
-      counter.value += event.amount;
-      return incLogger({ counter, amount: event.amount, nested: nested.a.b });
-    });
+    >(
+      (event, { counter, nested }) => {
+        counter.value += event.amount;
+        return incLogger({ counter, amount: event.amount, nested: nested.a.b });
+      },
+      { proxy: true },
+    );
 
     const incRecipe = recipe<{
       counter: { value: number };
@@ -803,6 +808,7 @@ describe("Recipe Runner", () => {
         }
         state.result = divisor / dividend;
       },
+      { proxy: true },
     );
 
     const divRecipe = recipe<{ result: number }>(
@@ -984,6 +990,7 @@ describe("Recipe Runner", () => {
           }, 100)
         );
       },
+      { proxy: true },
     );
 
     const slowHandlerRecipe = recipe<{ result: number }>(
@@ -1039,6 +1046,7 @@ describe("Recipe Runner", () => {
           }, 10)
         );
       },
+      { proxy: true },
     );
 
     const slowHandlerRecipe = recipe<{ result: number }>(
@@ -1139,7 +1147,7 @@ describe("Recipe Runner", () => {
       if (title) {
         items.push({ title, items });
       }
-    });
+    }, { proxy: true });
 
     const itemsRecipe = recipe<
       { items: Array<{ title: string; items: any[] }> }

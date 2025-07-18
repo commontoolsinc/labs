@@ -1,6 +1,5 @@
 import {
   Compiler,
-  isProgram,
   JsScript,
   Program,
   ProgramResolver,
@@ -24,6 +23,11 @@ import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
+import {
+  createOpaqueRefTransformer,
+  createSchemaTransformer,
+  createLoggingTransformer,
+} from "./transformer/mod.ts";
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
@@ -220,6 +224,8 @@ export interface TypeScriptCompilerOptions {
   //     Record<string, any>;
   // ```
   //
+  // Show only the transformed TypeScript source code.
+  showTransformed?: boolean;
   // to
   //
   // ```ts
@@ -300,8 +306,41 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       throw new Error("Missing main source.");
     }
 
+    // Check if the main source file has the /// <cts-enable /> directive
+    const hasCtsEnableDirective = (sourceFile: SourceFile): boolean => {
+      const text = sourceFile.getFullText();
+      const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
+
+      for (const comment of tripleSlashDirectives) {
+        const commentText = text.substring(comment.pos, comment.end);
+        if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // Always apply transformers when they're configured
+    // Each transformer will check for the directive on individual files
+    const transformers = {
+      before: [
+        createOpaqueRefTransformer(tsProgram, { showTransformed: inputOptions.showTransformed ?? false }),
+        createSchemaTransformer(tsProgram, { showTransformed: inputOptions.showTransformed ?? false }),
+        createLoggingTransformer(tsProgram, { showTransformed: inputOptions.showTransformed ?? false }),
+      ],
+    };
+    
+    // Log to verify the flag is being passed
+    if (inputOptions.showTransformed) {
+      // Don't log this anymore as we want clean output
+    }
+
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       mainSource,
+      undefined,
+      undefined,
+      undefined,
+      transformers,
     );
     checker.check(diagnostics);
 

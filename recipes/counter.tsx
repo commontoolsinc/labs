@@ -1,40 +1,40 @@
-// deno-lint-ignore-file jsx-no-useless-fragment
-import { derive, h, handler, NAME, recipe, schema, str, UI } from "commontools";
+/// <cts-enable />
+import {
+  Cell,
+  Default,
+  derive,
+  h,
+  handler,
+  NAME,
+  recipe,
+  str,
+  UI,
+} from "commontools";
 
-// Different way to define the same schema, using 'schema' helper function,
-// let's as leave off `as const satisfies JSONSchema`.
-const model = schema({
-  type: "object",
-  properties: {
-    value: { type: "number", default: 0, asCell: true },
-  },
-  default: { value: 0 },
-});
+interface RecipeState {
+  value: Default<number, 0>;
+}
 
-const increment = handler({}, model, (_, state) => {
+const increment = handler((_, state: { value: Cell<number> }) => {
   state.value.set(state.value.get() + 1);
 });
 
-const decrement = handler({}, model, (_, state) => {
+const decrement = handler((_, state: { value: Cell<number> }) => {
   state.value.set(state.value.get() - 1);
 });
 
-export default recipe(model, model, (cell) => {
+export default recipe<RecipeState>("Counter", (state) => {
   return {
-    [NAME]: str`Simple counter: ${derive(cell.value, String)}`,
+    [NAME]: str`Simple counter: ${state.value}`,
     [UI]: (
       <div>
-        <ct-button onClick={decrement(cell)}>-</ct-button>
-        {/* use html fragment to test that it works  */}
-        <>
-          <b>{cell.value}</b>
-        </>
-        <ct-button onClick={increment(cell)}>+</ct-button>
+        <ct-button onClick={decrement(state)}>-</ct-button>
+        <p>
+          next number: {state.value + 1}
+        </p>
+        <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>
     ),
-    value: cell.value,
-    // Expose handlers as streams for CLI access
-    increment: increment(cell),
-    decrement: decrement(cell),
+    value: state.value,
   };
 });

@@ -1,4 +1,5 @@
 import type {
+  CellToOpaque,
   Handler,
   HandlerFactory,
   JSONSchema,
@@ -100,53 +101,78 @@ export function handler<
   eventSchema: E,
   stateSchema: T,
   handler: (event: Schema<E>, props: Schema<T>) => any,
+  options?: { proxy?: boolean },
 ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
 export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
   handler: (event: E, props: T) => any,
+  options?: { proxy?: boolean },
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
+  options?: { proxy?: boolean },
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
   eventSchema:
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
-  stateSchema?: JSONSchema,
-  handler?: (event: E, props: T) => any,
+  stateSchema?: JSONSchema | { proxy?: boolean },
+  handler?: ((event: E, props: T) => any) | { proxy?: boolean },
+  options?: { proxy?: boolean },
 ): HandlerFactory<T, E> {
+  // Handle overloaded signatures
+  let actualEventSchema: JSONSchema | undefined;
+  let actualStateSchema: JSONSchema | undefined;
+  let actualHandler: ((event: E, props: T) => any) | undefined;
+  let actualOptions: { proxy?: boolean } | undefined = options;
+
   if (typeof eventSchema === "function") {
-    handler = eventSchema;
-    eventSchema = stateSchema = undefined;
+    // handler(fn) or handler(fn, options)
+    actualHandler = eventSchema;
+    actualOptions = stateSchema as { proxy?: boolean } | undefined;
+  } else if (typeof stateSchema === "function") {
+    // handler(eventSchema, fn) or handler(eventSchema, fn, options)
+    actualEventSchema = eventSchema;
+    actualHandler = stateSchema as (event: E, props: T) => any;
+    actualOptions = handler as { proxy?: boolean } | undefined;
+  } else if (typeof handler === "function") {
+    // handler(eventSchema, stateSchema, fn, options)
+    actualEventSchema = eventSchema;
+    actualStateSchema = stateSchema as JSONSchema | undefined;
+    actualHandler = handler;
+    actualOptions = options;
+  } else {
+    throw new Error("Invalid handler arguments");
   }
 
-  const schema: JSONSchema | undefined = eventSchema || stateSchema
+  const schema: JSONSchema | undefined = actualEventSchema || actualStateSchema
     ? {
       type: "object",
       properties: {
-        $event: eventSchema ?? {},
-        ...(stateSchema?.properties ?? {}),
+        $event: actualEventSchema ?? {},
+        ...(actualStateSchema?.properties ?? {}),
       },
     }
     : undefined;
 
-  const module: Handler & toJSON & {
-    bind: (inputs: Opaque<T>) => OpaqueRef<E>;
+  const module: Handler<T, E> & toJSON & {
+    bind: (inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<E>;
   } = {
     type: "javascript",
-    implementation: handler,
+    implementation: actualHandler,
     wrapper: "handler",
-    with: (inputs: Opaque<T>) => factory(inputs),
+    with: (inputs: Opaque<CellToOpaque<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
-    bind: (inputs: Opaque<T>) => factory(inputs),
+    bind: (inputs: Opaque<CellToOpaque<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema ? { argumentSchema: schema } : {}),
+    ...(actualOptions?.proxy !== undefined ? { proxy: actualOptions.proxy } : {}),
   };
 
-  const factory = Object.assign((props: Opaque<T>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<CellToOpaque<T>>): OpaqueRef<E> => {
     const stream = opaqueRef();
     stream.set({ $stream: true });
     const node: NodeRef = {

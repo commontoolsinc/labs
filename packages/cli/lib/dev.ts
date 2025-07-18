@@ -56,6 +56,7 @@ export interface ProcessOptions {
   check: boolean;
   output?: string;
   filename?: string;
+  showTransformed?: boolean;
 }
 
 export async function process(
@@ -72,6 +73,7 @@ export async function process(
     noCheck: !options.check,
     noRun: !options.run,
     filename,
+    showTransformed: options.showTransformed,
   });
 
   if (options.output) {
