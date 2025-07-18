@@ -6858,10 +6858,13 @@
   },
   "redirects": {
     "https://esm.sh/@babel/standalone": "https://esm.sh/@babel/standalone@7.27.6",
-    "https://esm.sh/@types/babel__standalone@~7.1.9/index.d.ts": "https://esm.sh/@types/babel__standalone@7.1.9/index.d.ts"
+    "https://esm.sh/@types/babel__standalone@~7.1.9/index.d.ts": "https://esm.sh/@types/babel__standalone@7.1.9/index.d.ts",
+    "https://esm.sh/core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.44.0/proposals/explicit-resource-management"
   },
   "remote": {
-    "https://esm.sh/@babel/standalone@7.27.6": "e9eb3bdd4f4d18158dbe040d6cfbd5b543eade71ea1b92ecede902f5ae34b9b9"
+    "https://esm.sh/@babel/standalone@7.27.6": "e9eb3bdd4f4d18158dbe040d6cfbd5b543eade71ea1b92ecede902f5ae34b9b9",
+    "https://esm.sh/core-js@3.44.0/denonext/proposals/explicit-resource-management.mjs": "4850503a2650ba47368eb95b1aa2565b47bad32efe9738766811f6de75cf51e1",
+    "https://esm.sh/core-js@3.44.0/proposals/explicit-resource-management": "06969d679705ab37fd058cc66a50cd7648f79bf5fd86fb13b29cb93c2667ebc7"
   },
   "workspace": {
     "dependencies": [

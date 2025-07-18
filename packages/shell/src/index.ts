@@ -1,3 +1,4 @@
+import "core-js/proposals/explicit-resource-management";
 import "@commontools/ui/v1";
 import "@commontools/ui/v2";
 import {
@@ -61,7 +62,7 @@ globalThis.addEventListener("navigate-to-charm", (e) => {
   }
   app.setSpace(spaceName);
   app.setActiveCharmId(charmId);
-  
+
   // Update the browser URL to reflect the new location
   // (DefaultCharmList should not use this event, it sets activeCharmId directly)
   const href = getNavigationHref(spaceName, charmId);

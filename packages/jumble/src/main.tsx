@@ -1,3 +1,4 @@
+import "core-js/proposals/explicit-resource-management";
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { Runtime } from "@commontools/runner";
