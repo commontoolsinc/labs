@@ -88,6 +88,7 @@
   },
   "imports": {
     "commontools": "./packages/api/index.ts",
+    "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js/proposals/explicit-resource-management",
     "@astral/astral": "jsr:@astral/astral",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
