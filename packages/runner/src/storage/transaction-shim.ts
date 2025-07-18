@@ -317,7 +317,9 @@ class TransactionWriter extends TransactionReader
       console.error("Path must not be empty for address:", address);
       console.error("Value: ", value);
       console.error("value is object:", isObject(value));
-      console.error("'value' in value:", "value" in value);
+      if (isObject(value)) {
+        console.error("'value' in value:", "value" in value);
+      }
       console.error("value.value:", value?.value);
     }
 
