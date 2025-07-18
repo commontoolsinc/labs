@@ -130,7 +130,7 @@ export function createQueryResultProxy<T>(
 
       if (
         Array.isArray(target) && prop in arrayMethods &&
-        typeof (target[prop]) === "function"
+        typeof (target[prop as keyof typeof target]) === "function"
       ) {
         const method = Array.prototype[prop as keyof typeof Array.prototype];
         const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods] ??
