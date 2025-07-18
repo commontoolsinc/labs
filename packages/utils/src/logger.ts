@@ -61,6 +61,13 @@ function shouldLog(level: LogLevel): boolean {
 }
 
 /**
+ * Get current time in HH:MM:SS.mmm format
+ */
+function getTimeStamp(): string {
+  return new Date().toISOString().slice(11, 23);
+}
+
+/**
  * Resolves log messages, evaluating functions if needed
  */
 function resolveMessages(messages: LogMessage[]): unknown[] {
@@ -81,7 +88,7 @@ export function log(...messages: LogMessage[]): void {
  */
 log.debug = function (...messages: LogMessage[]): void {
   if (shouldLog("debug")) {
-    console.debug(...resolveMessages(messages));
+    console.debug(`[${getTimeStamp()}]`, ...resolveMessages(messages));
   }
 };
 
@@ -90,7 +97,7 @@ log.debug = function (...messages: LogMessage[]): void {
  */
 log.info = function (...messages: LogMessage[]): void {
   if (shouldLog("info")) {
-    console.log(...resolveMessages(messages));
+    console.log(`[${getTimeStamp()}]`, ...resolveMessages(messages));
   }
 };
 
@@ -99,7 +106,7 @@ log.info = function (...messages: LogMessage[]): void {
  */
 log.warn = function (...messages: LogMessage[]): void {
   if (shouldLog("warn")) {
-    console.warn(...resolveMessages(messages));
+    console.warn(`[${getTimeStamp()}]`, ...resolveMessages(messages));
   }
 };
 
@@ -108,7 +115,7 @@ log.warn = function (...messages: LogMessage[]): void {
  */
 log.error = function (...messages: LogMessage[]): void {
   if (shouldLog("error")) {
-    console.error(...resolveMessages(messages));
+    console.error(`[${getTimeStamp()}]`, ...resolveMessages(messages));
   }
 };
 
@@ -221,28 +228,44 @@ export function getLogger(
     // Check disabled state first to skip everything including lazy eval
     if (taggedLog.disabled === true) return;
     if (shouldLog("debug")) {
-      console.debug(`[${tag}]`, ...resolveMessages(messages));
+      console.debug(
+        `[${getTimeStamp()}]`,
+        `[${tag}]`,
+        ...resolveMessages(messages),
+      );
     }
   };
 
   taggedLog.info = (...messages: LogMessage[]) => {
     if (taggedLog.disabled === true) return;
     if (shouldLog("info")) {
-      console.log(`[${tag}]`, ...resolveMessages(messages));
+      console.log(
+        `[${getTimeStamp()}]`,
+        `[${tag}]`,
+        ...resolveMessages(messages),
+      );
     }
   };
 
   taggedLog.warn = (...messages: LogMessage[]) => {
     if (taggedLog.disabled === true) return;
     if (shouldLog("warn")) {
-      console.warn(`[${tag}]`, ...resolveMessages(messages));
+      console.warn(
+        `[${getTimeStamp()}]`,
+        `[${tag}]`,
+        ...resolveMessages(messages),
+      );
     }
   };
 
   taggedLog.error = (...messages: LogMessage[]) => {
     if (taggedLog.disabled === true) return;
     if (shouldLog("error")) {
-      console.error(`[${tag}]`, ...resolveMessages(messages));
+      console.error(
+        `[${getTimeStamp()}]`,
+        `[${tag}]`,
+        ...resolveMessages(messages),
+      );
     }
   };
 

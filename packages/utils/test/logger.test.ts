@@ -11,6 +11,12 @@ describe("logger", () => {
     setLogLevel("info");
   });
 
+  // Helper to match timestamp pattern [HH:MM:SS.mmm]
+  function isTimestamp(value: unknown): boolean {
+    if (typeof value !== "string") return false;
+    return /^\[\d{2}:\d{2}:\d{2}\.\d{3}\]$/.test(value);
+  }
+
   // Helper to capture console output
   function captureConsole<T>(
     method: keyof Console,
@@ -40,7 +46,9 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["hello", "world"]);
+      expect(calls[0]).toHaveLength(3);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["hello", "world"]);
     });
 
     it("should handle multiple arguments", () => {
@@ -49,7 +57,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["a", 1, true, { key: "value" }]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["a", 1, true, { key: "value" }]);
     });
 
     it("should evaluate lazy functions", () => {
@@ -65,7 +74,8 @@ describe("logger", () => {
 
       expect(evaluated).toBe(true);
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["static", "lazy value"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["static", "lazy value"]);
     });
 
     it("should handle mixed static and lazy messages", () => {
@@ -80,7 +90,14 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["start", "lazy1", "middle", "lazy2", "end"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual([
+        "start",
+        "lazy1",
+        "middle",
+        "lazy2",
+        "end",
+      ]);
     });
   });
 
@@ -92,7 +109,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["debug message"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["debug message"]);
     });
 
     it("should log info messages", () => {
@@ -101,7 +119,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["info message"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["info message"]);
     });
 
     it("should log warning messages", () => {
@@ -110,7 +129,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["warning message"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["warning message"]);
     });
 
     it("should log error messages", () => {
@@ -119,7 +139,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["error message"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["error message"]);
     });
 
     it("should default to info level when using log()", () => {
@@ -128,7 +149,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["default message"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["default message"]);
     });
 
     it("should handle lazy evaluation for all levels", () => {
@@ -152,10 +174,14 @@ describe("logger", () => {
         log.error(lazyError);
       });
 
-      expect(debugCalls[0]).toEqual(["lazy debug"]);
-      expect(infoCalls[0]).toEqual(["lazy info"]);
-      expect(warnCalls[0]).toEqual(["lazy warn"]);
-      expect(errorCalls[0]).toEqual(["lazy error"]);
+      expect(isTimestamp(debugCalls[0][0])).toBe(true);
+      expect(debugCalls[0].slice(1)).toEqual(["lazy debug"]);
+      expect(isTimestamp(infoCalls[0][0])).toBe(true);
+      expect(infoCalls[0].slice(1)).toEqual(["lazy info"]);
+      expect(isTimestamp(warnCalls[0][0])).toBe(true);
+      expect(warnCalls[0].slice(1)).toEqual(["lazy warn"]);
+      expect(isTimestamp(errorCalls[0][0])).toBe(true);
+      expect(errorCalls[0].slice(1)).toEqual(["lazy error"]);
     });
   });
 
@@ -267,7 +293,9 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["[math]", "calculation complete"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0][1]).toBe("[math]");
+      expect(calls[0].slice(2)).toEqual(["calculation complete"]);
     });
 
     it("should handle various URL formats", () => {
@@ -288,7 +316,8 @@ describe("logger", () => {
           logger("test");
         });
 
-        expect(calls[0][0]).toBe(`[${expected}]`);
+        expect(isTimestamp(calls[0][0])).toBe(true);
+        expect(calls[0][1]).toBe(`[${expected}]`);
       }
     });
 
@@ -299,7 +328,9 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["[unknown]", "test message"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0][1]).toBe("[unknown]");
+      expect(calls[0].slice(2)).toEqual(["test message"]);
     });
 
     it("should work with all severity levels", () => {
@@ -319,10 +350,14 @@ describe("logger", () => {
         logger.error("error msg");
       });
 
-      expect(debugCalls[0]).toEqual(["[auth]", "debug msg"]);
-      expect(infoCalls[0]).toEqual(["[auth]", "info msg"]);
-      expect(warnCalls[0]).toEqual(["[auth]", "warn msg"]);
-      expect(errorCalls[0]).toEqual(["[auth]", "error msg"]);
+      expect(isTimestamp(debugCalls[0][0])).toBe(true);
+      expect(debugCalls[0].slice(1)).toEqual(["[auth]", "debug msg"]);
+      expect(isTimestamp(infoCalls[0][0])).toBe(true);
+      expect(infoCalls[0].slice(1)).toEqual(["[auth]", "info msg"]);
+      expect(isTimestamp(warnCalls[0][0])).toBe(true);
+      expect(warnCalls[0].slice(1)).toEqual(["[auth]", "warn msg"]);
+      expect(isTimestamp(errorCalls[0][0])).toBe(true);
+      expect(errorCalls[0].slice(1)).toEqual(["[auth]", "error msg"]);
     });
 
     it("should respect severity filtering with tagged loggers", () => {
@@ -338,7 +373,8 @@ describe("logger", () => {
 
       expect(debugCalls).toHaveLength(0);
       expect(warnCalls).toHaveLength(1);
-      expect(warnCalls[0]).toEqual(["[database]", "should appear"]);
+      expect(isTimestamp(warnCalls[0][0])).toBe(true);
+      expect(warnCalls[0].slice(1)).toEqual(["[database]", "should appear"]);
     });
 
     it("should handle lazy evaluation with tags", () => {
@@ -365,7 +401,8 @@ describe("logger", () => {
       });
 
       expect(evaluated).toBe(true);
-      expect(calls[0]).toEqual(["[service]", "error message"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["[service]", "error message"]);
     });
 
     it("should use real import.meta.url", () => {
@@ -376,7 +413,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0][0]).toBe("[logger.test]");
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0][1]).toBe("[logger.test]");
     });
 
     it("should auto-detect caller when no URL provided", () => {
@@ -388,7 +426,8 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       // Should detect this test file
-      expect(calls[0][0]).toBe("[logger.test]");
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0][1]).toBe("[logger.test]");
     });
   });
 
@@ -402,7 +441,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual(["[logger.test]", "should appear"]);
+      expect(isTimestamp(calls[0][0])).toBe(true);
+      expect(calls[0].slice(1)).toEqual(["[logger.test]", "should appear"]);
     });
 
     it("should create disabled logger when enabled: false", () => {
