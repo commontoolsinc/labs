@@ -89,7 +89,8 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  const readTx = tx?.status().ok?.open ? tx : runtime.edit();
+  const txStatus = tx?.status();
+  const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
   link = resolveLinkToValue(readTx, link);
   const target = readTx.readValueOrThrow(link) as any;
 

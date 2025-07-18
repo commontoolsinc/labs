@@ -164,7 +164,8 @@ export function compileAndRun(
           // All this code runside outside the original action, and the
           // transaction above might have closed by the time this is called. If
           // so, we create a new one to set the error.
-          const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+          const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
           // Extract structured errors if this is a CompilerError
           if (err instanceof CompilerError) {
@@ -189,7 +190,8 @@ export function compileAndRun(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to set the status.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
         pendingWithLog.withTx(asyncTx).set(false);
         if (asyncTx !== tx) asyncTx.commit();
       });
@@ -204,7 +206,8 @@ export function compileAndRun(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to start the charm.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
         await runtime.runSynced(result.withTx(asyncTx), recipe, input.get());
         if (asyncTx !== tx) asyncTx.commit();
       }

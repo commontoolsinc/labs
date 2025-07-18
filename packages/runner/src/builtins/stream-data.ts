@@ -181,7 +181,8 @@ export function streamData(
 
         await runtime.idle();
 
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
         pendingWithLog.withTx(asyncTx).set(false);
         resultWithLog.withTx(asyncTx).set(undefined);
         errorWithLog.withTx(asyncTx).set(e);

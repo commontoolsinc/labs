@@ -287,7 +287,7 @@ export class Runner implements IRunner {
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
     this.run(
-      resultCell.tx?.status().ok?.open ? resultCell.tx : undefined,
+      resultCell.tx?.status().status === "ready" ? resultCell.tx : undefined,
       recipe,
       inputs,
       resultCell,

@@ -446,17 +446,21 @@ export function txToReactivityLog(
   tx: IExtendedStorageTransaction,
 ): ReactivityLog {
   const log: ReactivityLog = { reads: [], writes: [] };
-  for (const change of tx.log()) {
-    if ("read" in change) {
+  for (const activity of tx.journal.activity()) {
+    if ("read" in activity && activity.read) {
       log.reads.push({
-        ...change.read!.address,
-        path: change.read!.address.path.slice(1), // Remove the "value" prefix
+        space: activity.read.space,
+        id: activity.read.id,
+        type: activity.read.type,
+        path: activity.read.path.slice(1), // Remove the "value" prefix
       });
     }
-    if ("write" in change) {
+    if ("write" in activity && activity.write) {
       log.writes.push({
-        ...change.write!.address,
-        path: change.write!.address.path.slice(1),
+        space: activity.write.space,
+        id: activity.write.id,
+        type: activity.write.type,
+        path: activity.write.path.slice(1),
       });
     }
   }
