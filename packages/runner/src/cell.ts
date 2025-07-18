@@ -337,7 +337,7 @@ function createStreamCell<T>(
       return () => listeners.delete(callback);
     },
     getRaw: (options?: IReadOptions) =>
-      (tx?.status().ok?.open ? tx : runtime.edit())
+      (tx?.status().status === "ready" ? tx : runtime.edit())
         .readValueOrThrow(link, options),
     getAsNormalizedFullLink: () => link,
     getDoc: () => runtime.documentMap.getDocByEntityId(link.space, link.id),
@@ -524,15 +524,16 @@ function createRegularCell<T>(
     },
     getDoc: () => runtime.documentMap.getDocByEntityId(link.space, link.id),
     getRaw: (options?: IReadOptions) =>
-      (tx?.status().ok?.open ? tx : runtime.edit())
+      (tx?.status().status === "ready" ? tx : runtime.edit())
         .readValueOrThrow(link, options),
     setRaw: (value: any) => {
       if (!tx) throw new Error("Transaction required for setRaw");
       tx.writeValueOrThrow(link, value);
     },
     getSourceCell: (newSchema?: JSONSchema) => {
-      const sourceCellId = (tx?.status().ok?.open ? tx : runtime.edit())
-        .readOrThrow({ ...link, path: ["source"] });
+      const sourceCellId =
+        (tx?.status().status === "ready" ? tx : runtime.edit())
+          .readOrThrow({ ...link, path: ["source"] });
       if (!sourceCellId) return undefined;
       return createCell(runtime, {
         space: link.space,
