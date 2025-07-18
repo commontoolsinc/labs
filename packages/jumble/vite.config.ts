@@ -13,6 +13,9 @@ console.log("Build source maps:", buildSourcemaps);
 // https://vite.dev/config/
 export default defineConfig({
   esbuild: {
+    supported: {
+      using: false
+    },
     tsconfigRaw: {
       compilerOptions: {
         experimentalDecorators: true,

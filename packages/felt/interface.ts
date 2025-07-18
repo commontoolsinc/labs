@@ -39,6 +39,7 @@ export interface ESBuildConfig {
   // global variables in the bundled code.
   define?: Record<string, string | undefined>;
   metafile?: string;
+  supported?: Record<string, boolean>;
   tsconfigRaw: TsconfigRaw;
 }
 
@@ -57,6 +58,7 @@ export class ResolvedConfig {
     minify: boolean;
     metafile?: string;
     define: Record<string, string | undefined>;
+    supported?: Record<string, boolean>;
     tsconfigRaw?: TsconfigRaw;
   };
   cwd: string;
@@ -78,6 +80,7 @@ export class ResolvedConfig {
       metafile: partial?.esbuild?.metafile
         ? join(cwd, partial.esbuild?.metafile)
         : undefined,
+      supported: partial?.esbuild?.supported,
       tsconfigRaw: partial?.esbuild?.tsconfigRaw,
     };
   }

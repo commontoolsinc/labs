@@ -27,6 +27,10 @@ export default {
     define: {
       "$DEBUG": Deno.env.get("DEBUG"),
     },
+    // https://esbuild.github.io/api/#supported
+    supported: {
+      using: false,
+    },
     tsconfigRaw: {
       compilerOptions: {
         useDefineForClassFields: false,
