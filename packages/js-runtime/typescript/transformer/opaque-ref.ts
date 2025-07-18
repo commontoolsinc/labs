@@ -11,9 +11,7 @@ import {
   createIfElseCall,
   transformExpressionWithOpaqueRef,
 } from "./transforms.ts";
-import { conditionalConsole } from "../conditional-console.ts";
 import { 
-  createDebugger, 
   TransformerOptions, 
   TRANSFORMATION_TYPES 
 } from "./debug.ts";
@@ -28,12 +26,6 @@ export interface OpaqueRefTransformerOptions extends TransformerOptions {
    * - 'error': Report errors instead of transforming
    */
   mode?: "transform" | "error";
-
-  /**
-   * Custom logger function.
-   * @deprecated Use debug object instead
-   */
-  logger?: (message: string) => void;
 }
 
 /**
@@ -67,14 +59,8 @@ export function createOpaqueRefTransformer(
   options: OpaqueRefTransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
   const checker = program.getTypeChecker();
-  const { mode = "transform" } = options;
+  const { mode = "transform", logger } = options;
   const errors: TransformationError[] = [];
-  
-  // Create debugger instance
-  const debugLogger = createDebugger('OpaqueRefTransformer', options);
-  
-  // Support legacy logger option
-  const legacyLogger = options.logger || conditionalConsole.log;
 
   return (context) => {
     return (sourceFile) => {
@@ -85,7 +71,9 @@ export function createOpaqueRefTransformer(
       let hasTransformed = false;
 
       const log = (message: string) => {
-        debugLogger.log(message);
+        if (logger) {
+          logger(`[OpaqueRefTransformer] ${message}`);
+        }
       };
 
       const reportError = (
@@ -156,21 +144,12 @@ export function createOpaqueRefTransformer(
               
               const methodExistsOnOpaqueRef = opaqueRefMethods.includes(methodName);
               
-              if (debugLogger.isEnabled()) {
-                debugLogger.logTransformation({
-                  transformerName: 'OpaqueRefTransformer',
-                  fileName: sourceFile.fileName,
-                  location: (() => {
-                    const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-                    return { line, column: character };
-                  })(),
-                  transformationType: TRANSFORMATION_TYPES.OPAQUE_REF.METHOD_CALL,
-                  details: {
-                    methodName,
-                    objectType: checker.typeToString(objectType),
-                    isOpaqueRefMethod: methodExistsOnOpaqueRef
-                  }
-                });
+              if (logger) {
+                const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                logger(`[OpaqueRefTransformer] ${TRANSFORMATION_TYPES.OPAQUE_REF.METHOD_CALL} at ${sourceFile.fileName}:${line}:${character}`);
+                logger(`  methodName: ${methodName}`);
+                logger(`  objectType: ${checker.typeToString(objectType)}`);
+                logger(`  isOpaqueRefMethod: ${methodExistsOnOpaqueRef}`);
               }
               
               // Only apply .get() transformation for array methods on OpaqueRef<Array>
@@ -218,13 +197,9 @@ export function createOpaqueRefTransformer(
             if (functionName === "recipe" && node.typeArguments && node.typeArguments.length >= 1) {
               // Transform recipe<T>(name, fn) to recipe(toSchema<T>(), name, fn)
               // Transform recipe<T,R>(name, fn) to recipe(toSchema<T>(), toSchema<R>(), name, fn)
-              if (debugLogger.isEnabled()) {
-                log(
-                  `Found recipe with type arguments at ${sourceFile.fileName}:${
-                    sourceFile.getLineAndCharacterOfPosition(node.getStart())
-                      .line + 1
-                  }`,
-                );
+              if (logger) {
+                const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                logger(`[OpaqueRefTransformer] Found recipe with type arguments at ${sourceFile.fileName}:${line + 1}`);
               }
 
               const recipeArgs = node.arguments;
@@ -266,13 +241,9 @@ export function createOpaqueRefTransformer(
             // Case 1: handler with explicit type arguments
             else if (functionName === "handler" && node.typeArguments && node.typeArguments.length >= 2) {
               // Transform handler<E,T>(fn) to handler(toSchema<E>(), toSchema<T>(), fn)
-              if (debugLogger.isEnabled()) {
-                log(
-                  `Found handler with type arguments at ${sourceFile.fileName}:${
-                    sourceFile.getLineAndCharacterOfPosition(node.getStart())
-                      .line + 1
-                  }`,
-                );
+              if (logger) {
+                const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                logger(`[OpaqueRefTransformer] Found handler with type arguments at ${sourceFile.fileName}:${line + 1}`);
               }
 
               const [eventType, stateType] = node.typeArguments;
@@ -325,13 +296,9 @@ export function createOpaqueRefTransformer(
                 
                 // Only transform if we have type annotations
                 if (eventParam.type || stateParam.type) {
-                  if (debugLogger.isEnabled()) {
-                    log(
-                      `Found handler with inline type annotations at ${sourceFile.fileName}:${
-                        sourceFile.getLineAndCharacterOfPosition(node.getStart())
-                          .line + 1
-                      }`,
-                    );
+                  if (logger) {
+                    const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                    logger(`[OpaqueRefTransformer] Found handler with inline type annotations at ${sourceFile.fileName}:${line + 1}`);
                   }
 
                   // Create type nodes from the parameter types
@@ -393,9 +360,7 @@ export function createOpaqueRefTransformer(
           const expressionType = checker.getTypeAtLocation(node.expression);
           const expressionTypeString = checker.typeToString(expressionType);
 
-          if (debugLogger.isEnabled()) {
-            log(`Call expression's function type: ${expressionTypeString}`);
-          }
+          log(`Call expression's function type: ${expressionTypeString}`);
 
           // If we're calling a ModuleFactory, HandlerFactory, or RecipeFactory
           // these expect Opaque parameters
@@ -404,11 +369,7 @@ export function createOpaqueRefTransformer(
             expressionTypeString.includes("HandlerFactory<") ||
             expressionTypeString.includes("RecipeFactory<")
           ) {
-            if (debugLogger.isEnabled()) {
-              log(
-                `Calling a factory function that expects Opaque parameters`,
-              );
-            }
+            log(`Calling a factory function that expects Opaque parameters`);
             
             // Special case: Check if we're passing an object literal that reconstructs
             // all properties from a single OpaqueRef source
@@ -474,12 +435,9 @@ export function createOpaqueRefTransformer(
                     [...sourcePropertyNames].every(name => propertyNames.has(name));
                   
                   if (hasAllProperties) {
-                    if (debugLogger.isEnabled()) {
-                      log(
-                        `Simplifying object literal to OpaqueRef source at ${sourceFile.fileName}:${
-                          sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1
-                        }`,
-                      );
+                    if (logger) {
+                      const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+                      logger(`[OpaqueRefTransformer] Simplifying object literal to OpaqueRef source at ${sourceFile.fileName}:${line + 1}`);
                     }
                     
                     hasTransformed = true;
@@ -523,24 +481,14 @@ export function createOpaqueRefTransformer(
                 );
                 const paramTypeString = checker.typeToString(paramType);
 
-                if (debugLogger.isEnabled()) {
-                  log(
-                    `Function ${
-                      getFunctionName(node)
-                    } parameter type: ${paramTypeString}`,
-                  );
-                }
+                log(`Function ${getFunctionName(node)} parameter type: ${paramTypeString}`);
 
                 // If the function expects Opaque or OpaqueRef parameters, don't transform
                 if (
                   paramTypeString.includes("Opaque<") ||
                   paramTypeString.includes("OpaqueRef<")
                 ) {
-                  if (debugLogger.isEnabled()) {
-                    log(
-                      `Function expects Opaque/OpaqueRef parameters, skipping transformation`,
-                    );
-                  }
+                  log(`Function expects Opaque/OpaqueRef parameters, skipping transformation`);
                   return ts.visitEachChild(node, visit, context);
                 }
               }
@@ -552,9 +500,7 @@ export function createOpaqueRefTransformer(
           const callType = checker.getTypeAtLocation(node);
           const callTypeString = checker.typeToString(callType);
 
-          if (debugLogger.isEnabled()) {
-            log(`Call expression type: ${callTypeString}`);
-          }
+          log(`Call expression type: ${callTypeString}`);
 
           // If this call returns a Stream or OpaqueRef, don't transform it
           if (
@@ -562,11 +508,7 @@ export function createOpaqueRefTransformer(
             callTypeString.includes("OpaqueRef<") ||
             callTypeString.includes("ModuleFactory<")
           ) {
-            if (debugLogger.isEnabled()) {
-              log(
-                `Call returns Stream/OpaqueRef/ModuleFactory, skipping transformation`,
-              );
-            }
+            log(`Call returns Stream/OpaqueRef/ModuleFactory, skipping transformation`);
             return ts.visitEachChild(node, visit, context);
           }
 

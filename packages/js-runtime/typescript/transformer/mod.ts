@@ -13,10 +13,7 @@ export { createLoggingTransformer } from "./logging.ts";
 
 // Debug utilities
 export { 
-  type TransformerDebugger, 
   type TransformerOptions,
-  type TransformerDebugInfo,
-  createDebugger,
   TRANSFORMATION_TYPES 
 } from "./debug.ts";
 
@@ -43,3 +40,6 @@ export {
   type TransformationResult,
   transformExpressionWithOpaqueRef,
 } from "./transforms.ts";
+
+// Common utilities
+export { hasCtsEnableDirective } from "./utils.ts";

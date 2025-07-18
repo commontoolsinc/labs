@@ -320,20 +320,20 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       return false;
     };
 
+    // Create logger based on showTransformed option
+    const logger = inputOptions.showTransformed 
+      ? (message: string) => console.log(message)
+      : undefined;
+
     // Always apply transformers when they're configured
     // Each transformer will check for the directive on individual files
     const transformers = {
       before: [
-        createOpaqueRefTransformer(tsProgram, { showTransformed: inputOptions.showTransformed ?? false }),
-        createSchemaTransformer(tsProgram, { showTransformed: inputOptions.showTransformed ?? false }),
-        createLoggingTransformer(tsProgram, { showTransformed: inputOptions.showTransformed ?? false }),
+        createOpaqueRefTransformer(tsProgram, { logger }),
+        createSchemaTransformer(tsProgram, { logger }),
+        createLoggingTransformer(tsProgram, { logger, showTransformed: inputOptions.showTransformed }),
       ],
     };
-    
-    // Log to verify the flag is being passed
-    if (inputOptions.showTransformed) {
-      // Don't log this anymore as we want clean output
-    }
 
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       mainSource,

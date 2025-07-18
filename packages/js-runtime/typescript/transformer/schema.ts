@@ -1,6 +1,7 @@
 import ts from "typescript";
 import { addCommonToolsImport, hasCommonToolsImport, removeCommonToolsImport } from "./imports.ts";
-import { createDebugger, TransformerOptions } from "./debug.ts";
+import { TransformerOptions } from "./debug.ts";
+import { hasCtsEnableDirective } from "./utils.ts";
 
 /**
  * Transformer that converts TypeScript types to JSONSchema objects.
@@ -10,27 +11,13 @@ export function createSchemaTransformer(
   program: ts.Program,
   options: TransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
-  const debugLogger = createDebugger('SchemaTransformer', options);
   const checker = program.getTypeChecker();
+  const logger = options.logger;
 
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
-      // Check if this file has the /// <cts-enable /> directive
-      const hasCtsEnableDirective = (): boolean => {
-        const text = sourceFile.getFullText();
-        const tripleSlashDirectives = ts.getLeadingCommentRanges(text, 0) || [];
-
-        for (const comment of tripleSlashDirectives) {
-          const commentText = text.substring(comment.pos, comment.end);
-          if (/^\/\/\/\s*<cts-enable\s*\/>/m.test(commentText)) {
-            return true;
-          }
-        }
-        return false;
-      };
-
       // Skip transformation if directive is not present
-      if (!hasCtsEnableDirective()) {
+      if (!hasCtsEnableDirective(sourceFile)) {
         return sourceFile;
       }
 
@@ -49,10 +36,8 @@ export function createSchemaTransformer(
           const typeArg = node.typeArguments[0];
           const type = checker.getTypeFromTypeNode(typeArg);
 
-          if (debugLogger.isEnabled() && typeArg) {
-            debugLogger.log(
-              `Found toSchema<${typeArg.getText()}>() call`
-            );
+          if (logger && typeArg) {
+            logger(`[SchemaTransformer] Found toSchema<${typeArg.getText()}>() call`);
           }
 
           // Extract options from the call arguments
@@ -107,27 +92,20 @@ export function createSchemaTransformer(
         result = addCommonToolsImport(result, context.factory, "JSONSchema");
       }
       
-      // Log for debugging the handler-object-literal case
-      if (sourceFile.fileName.includes("handler-object-literal")) {
-        console.log(`[SchemaTransformer] Processing ${sourceFile.fileName}`);
-        console.log(`  - hasTransformedToSchema: ${hasTransformedToSchema}`);
-        console.log(`  - hasCommonToolsImport(result, "toSchema"): ${hasCommonToolsImport(result, "toSchema")}`);
-      }
-      
       // Remove toSchema import if we transformed all its uses
       if (hasCommonToolsImport(result, "toSchema")) {
         // Check if toSchema is still used anywhere in the transformed code
         const stillUsesToSchema = containsToSchemaReference(result);
         
-        if (debugLogger.isEnabled()) {
-          debugLogger.log(`Checking toSchema import removal:`);
-          debugLogger.log(`  - hasCommonToolsImport(toSchema): true`);
-          debugLogger.log(`  - stillUsesToSchema: ${stillUsesToSchema}`);
+        if (logger) {
+          logger(`[SchemaTransformer] Checking toSchema import removal:`);
+          logger(`  - hasCommonToolsImport(toSchema): true`);
+          logger(`  - stillUsesToSchema: ${stillUsesToSchema}`);
         }
         
         if (!stillUsesToSchema) {
-          if (debugLogger.isEnabled()) {
-            debugLogger.log(`Removing toSchema import`);
+          if (logger) {
+            logger(`[SchemaTransformer] Removing toSchema import`);
           }
           result = removeCommonToolsImport(result, context.factory, "toSchema");
         }
@@ -663,13 +641,5 @@ function containsToSchemaReference(sourceFile: ts.SourceFile): boolean {
   };
 
   ts.visitNode(sourceFile, visit);
-  
-  // Debug log for handler-object-literal
-  if (sourceFile.fileName.includes("handler-object-literal")) {
-    console.log(`[containsToSchemaReference] ${sourceFile.fileName}:`);
-    console.log(`  - Total toSchema identifiers found: ${count}`);
-    console.log(`  - Found non-import usage: ${found}`);
-  }
-  
   return found;
 }

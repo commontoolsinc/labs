@@ -183,7 +183,7 @@ export async function transformSource(
 
   // Optionally add schema transformer
   if (applySchemaTransformer) {
-    transformers.push(createSchemaTransformer(program, {}));
+    transformers.push(createSchemaTransformer(program, { logger }));
   }
 
   // Transform the source file
