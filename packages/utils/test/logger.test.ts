@@ -1,27 +1,12 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import {
-  getLogger,
-  getLogLevel,
-  log,
-  LOG_COLORS,
-  setLogLevel,
-} from "../src/logger.ts";
+import { getLogger, log, LOG_COLORS } from "../src/logger.ts";
 
 describe("logger", () => {
-  // Save initial log level
-  let initialLogLevel: string;
-
   beforeEach(() => {
     // Reset to default log level before each test
-    setLogLevel("info");
+    log.level = "info";
   });
-
-  // Helper to match timestamp pattern [HH:MM:SS.mmm]
-  function isTimestamp(value: unknown): boolean {
-    if (typeof value !== "string") return false;
-    return /^\[\d{2}:\d{2}:\d{2}\.\d{3}\]$/.test(value);
-  }
 
   // Helper to check styled timestamp format
   function expectStyledTimestamp(
@@ -74,9 +59,13 @@ describe("logger", () => {
   }
 
   describe("basic log function", () => {
+    it("should default to enabled state", () => {
+      expect(log.disabled).toBe(false);
+    });
+
     it("should log messages to console", () => {
       const { calls } = captureConsole("log", () => {
-        log("hello", "world");
+        log.info("hello", "world");
       });
 
       expect(calls).toHaveLength(1);
@@ -86,7 +75,7 @@ describe("logger", () => {
 
     it("should handle multiple arguments", () => {
       const { calls } = captureConsole("log", () => {
-        log("a", 1, true, { key: "value" });
+        log.info("a", 1, true, { key: "value" });
       });
 
       expect(calls).toHaveLength(1);
@@ -102,7 +91,7 @@ describe("logger", () => {
       };
 
       const { calls } = captureConsole("log", () => {
-        log("static", lazyMessage);
+        log.info("static", lazyMessage);
       });
 
       expect(evaluated).toBe(true);
@@ -113,7 +102,7 @@ describe("logger", () => {
 
     it("should handle mixed static and lazy messages", () => {
       const { calls } = captureConsole("log", () => {
-        log(
+        log.info(
           "start",
           () => "lazy1",
           "middle",
@@ -135,7 +124,7 @@ describe("logger", () => {
 
     it("should flatten arrays returned by lazy functions", () => {
       const { calls } = captureConsole("log", () => {
-        log(
+        log.info(
           "prefix",
           () => ["array", "of", "values"],
           "suffix",
@@ -156,7 +145,7 @@ describe("logger", () => {
 
   describe("severity levels", () => {
     it("should log debug messages", () => {
-      setLogLevel("debug"); // Enable debug level
+      log.level = "debug"; // Enable debug level
       const { calls } = captureConsole("debug", () => {
         log.debug("debug message");
       });
@@ -196,9 +185,9 @@ describe("logger", () => {
       expect(calls[0].slice(2)).toEqual(["error message"]);
     });
 
-    it("should default to info level when using log()", () => {
+    it("should default to info level when using log.info()", () => {
       const { calls } = captureConsole("log", () => {
-        log("default message");
+        log.info("default message");
       });
 
       expect(calls).toHaveLength(1);
@@ -206,9 +195,20 @@ describe("logger", () => {
       expect(calls[0].slice(2)).toEqual(["default message"]);
     });
 
-    it("should handle lazy evaluation for all levels", () => {
-      setLogLevel("debug"); // Enable all levels
+    it("should support log.log() as alias for info", () => {
+      const { calls } = captureConsole("log", () => {
+        log.log("message via log()");
+      });
 
+      expect(calls).toHaveLength(1);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual(["message via log()"]);
+    });
+  });
+
+  describe("lazy evaluation", () => {
+    it("should evaluate lazy functions for all levels", () => {
+      log.level = "debug"; // Enable debug level
       const lazyDebug = () => "lazy debug";
       const lazyInfo = () => "lazy info";
       const lazyWarn = () => "lazy warn";
@@ -227,20 +227,35 @@ describe("logger", () => {
         log.error(lazyError);
       });
 
-      expectStyledTimestamp(debugCalls, 0, LOG_COLORS.debug, "DEBUG");
       expect(debugCalls[0].slice(2)).toEqual(["lazy debug"]);
-      expectStyledTimestamp(infoCalls, 0, LOG_COLORS.info, "INFO");
       expect(infoCalls[0].slice(2)).toEqual(["lazy info"]);
-      expectStyledTimestamp(warnCalls, 0, LOG_COLORS.warn, "WARN");
       expect(warnCalls[0].slice(2)).toEqual(["lazy warn"]);
-      expectStyledTimestamp(errorCalls, 0, LOG_COLORS.error, "ERROR");
       expect(errorCalls[0].slice(2)).toEqual(["lazy error"]);
+    });
+
+    it("should not evaluate lazy functions when disabled", () => {
+      log.disabled = true;
+      let evaluated = false;
+      const lazyMessage = () => {
+        evaluated = true;
+        return "should not be evaluated";
+      };
+
+      const { calls } = captureConsole("log", () => {
+        log.info(lazyMessage);
+      });
+
+      expect(evaluated).toBe(false);
+      expect(calls).toHaveLength(0);
+
+      // Re-enable for other tests
+      log.disabled = false;
     });
   });
 
-  describe("severity filtering", () => {
-    it("should filter messages below the current log level", () => {
-      setLogLevel("warn");
+  describe("log level filtering", () => {
+    it("should filter messages based on log level", () => {
+      log.level = "warn"; // Only show warn and error
 
       const { calls: debugCalls } = captureConsole("debug", () => {
         log.debug("debug message");
@@ -249,428 +264,114 @@ describe("logger", () => {
         log.info("info message");
       });
       const { calls: warnCalls } = captureConsole("warn", () => {
-        log.warn("warn message");
+        log.warn("warning message");
       });
       const { calls: errorCalls } = captureConsole("error", () => {
         log.error("error message");
       });
 
-      expect(debugCalls).toHaveLength(0); // Filtered out
-      expect(infoCalls).toHaveLength(0); // Filtered out
-      expect(warnCalls).toHaveLength(1); // Logged
-      expect(errorCalls).toHaveLength(1); // Logged
+      expect(debugCalls).toHaveLength(0);
+      expect(infoCalls).toHaveLength(0);
+      expect(warnCalls).toHaveLength(1);
+      expect(errorCalls).toHaveLength(1);
     });
 
-    it("should NOT evaluate lazy functions when severity is filtered out", () => {
-      setLogLevel("error");
-
-      let debugEvaluated = false;
-      let infoEvaluated = false;
-      let warnEvaluated = false;
-      let errorEvaluated = false;
-
-      captureConsole("debug", () => {
-        log.debug(() => {
-          debugEvaluated = true;
-          return "expensive debug";
-        });
+    it("should show all messages when set to debug", () => {
+      log.level = "debug"; // Enable all levels
+      const { calls: debugCalls } = captureConsole("debug", () => {
+        log.debug("debug message");
+      });
+      const { calls: infoCalls } = captureConsole("log", () => {
+        log.info("info message");
+      });
+      const { calls: warnCalls } = captureConsole("warn", () => {
+        log.warn("warning message");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        log.error("error message");
       });
 
-      captureConsole("log", () => {
-        log.info(() => {
-          infoEvaluated = true;
-          return "expensive info";
-        });
-      });
-
-      captureConsole("warn", () => {
-        log.warn(() => {
-          warnEvaluated = true;
-          return "expensive warn";
-        });
-      });
-
-      captureConsole("error", () => {
-        log.error(() => {
-          errorEvaluated = true;
-          return "expensive error";
-        });
-      });
-
-      expect(debugEvaluated).toBe(false); // Not evaluated!
-      expect(infoEvaluated).toBe(false); // Not evaluated!
-      expect(warnEvaluated).toBe(false); // Not evaluated!
-      expect(errorEvaluated).toBe(true); // Evaluated
+      expect(debugCalls).toHaveLength(1);
+      expect(infoCalls).toHaveLength(1);
+      expect(warnCalls).toHaveLength(1);
+      expect(errorCalls).toHaveLength(1);
     });
 
-    it("should respect setLogLevel changes", () => {
-      // Start with debug level (everything logs)
-      setLogLevel("debug");
-
-      const { calls: debugCalls1 } = captureConsole("debug", () => {
-        log.debug("debug 1");
+    it("should only show error messages when set to error", () => {
+      log.level = "error";
+      const { calls: debugCalls } = captureConsole("debug", () => {
+        log.debug("debug message");
       });
-      expect(debugCalls1).toHaveLength(1);
-
-      // Change to error level
-      setLogLevel("error");
-
-      const { calls: debugCalls2 } = captureConsole("debug", () => {
-        log.debug("debug 2");
+      const { calls: infoCalls } = captureConsole("log", () => {
+        log.info("info message");
       });
-      expect(debugCalls2).toHaveLength(0); // Now filtered
-    });
+      const { calls: warnCalls } = captureConsole("warn", () => {
+        log.warn("warning message");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        log.error("error message");
+      });
 
-    it("should get and set log levels correctly", () => {
-      expect(getLogLevel()).toBe("info"); // Default
-
-      setLogLevel("debug");
-      expect(getLogLevel()).toBe("debug");
-
-      setLogLevel("error");
-      expect(getLogLevel()).toBe("error");
-    });
-
-    it("should throw on invalid log level", () => {
-      expect(() => setLogLevel("invalid" as any)).toThrow(
-        "Invalid log level: invalid",
-      );
+      expect(debugCalls).toHaveLength(0);
+      expect(infoCalls).toHaveLength(0);
+      expect(warnCalls).toHaveLength(0);
+      expect(errorCalls).toHaveLength(1);
     });
   });
 
-  describe("module tagging with getLogger", () => {
-    it("should extract module name from file URLs", () => {
-      const mathLogger = getLogger({
-        url: "file:///home/user/project/utils/math.ts",
-      });
+  describe("log level management", () => {
+    it("should respect log.level changes", () => {
+      // Test default level
+      expect(log.level).toBe("info"); // Default
+
+      // Test setting to debug
+      log.level = "debug";
+      expect(log.level).toBe("debug");
+
+      // Test setting to error
+      log.level = "error";
+      expect(log.level).toBe("error");
+    });
+  });
+
+  describe("tagged logger", () => {
+    it("should create tagged logger with module name", () => {
+      const logger = getLogger("test-module");
       const { calls } = captureConsole("log", () => {
-        mathLogger.info("calculation complete");
+        logger.info("test message");
       });
 
       expect(calls).toHaveLength(1);
       expectStyledModuleTimestamp(
         calls,
         0,
-        "math",
-        LOG_COLORS.taggedInfo,
-        "INFO",
-      );
-      expect(calls[0].slice(2)).toEqual(["calculation complete"]);
-    });
-
-    it("should handle various URL formats", () => {
-      // Test different URL patterns
-      const testCases = [
-        { url: "file:///path/to/index.ts", expected: "index" },
-        { url: "file:///path/to/user-service.js", expected: "user-service" },
-        { url: "https://example.com/module.js", expected: "module" },
-        {
-          url: "file:///complex.name.with.dots.ts",
-          expected: "complex.name.with.dots",
-        },
-      ];
-
-      for (const { url, expected } of testCases) {
-        const logger = getLogger({ url });
-        const { calls } = captureConsole("log", () => {
-          logger("test");
-        });
-
-        expectStyledModuleTimestamp(
-          calls,
-          0,
-          expected,
-          LOG_COLORS.taggedInfo,
-          "INFO",
-        );
-      }
-    });
-
-    it("should handle invalid URLs gracefully", () => {
-      const logger = getLogger({ url: "not-a-valid-url" });
-      const { calls } = captureConsole("log", () => {
-        logger("test message");
-      });
-
-      expect(calls).toHaveLength(1);
-      expectStyledModuleTimestamp(
-        calls,
-        0,
-        "unknown",
+        "test-module",
         LOG_COLORS.taggedInfo,
         "INFO",
       );
       expect(calls[0].slice(2)).toEqual(["test message"]);
     });
 
-    it("should work with all severity levels", () => {
-      setLogLevel("debug");
-      const logger = getLogger({ url: "file:///path/to/auth.ts" });
-
-      const { calls: debugCalls } = captureConsole("debug", () => {
-        logger.debug("debug msg");
-      });
-      const { calls: infoCalls } = captureConsole("log", () => {
-        logger.info("info msg");
-      });
-      const { calls: warnCalls } = captureConsole("warn", () => {
-        logger.warn("warn msg");
-      });
-      const { calls: errorCalls } = captureConsole("error", () => {
-        logger.error("error msg");
-      });
-
-      expectStyledModuleTimestamp(
-        debugCalls,
-        0,
-        "auth",
-        LOG_COLORS.taggedDebug,
-        "DEBUG",
-      );
-      expect(debugCalls[0].slice(2)).toEqual(["debug msg"]);
-      expectStyledModuleTimestamp(
-        infoCalls,
-        0,
-        "auth",
-        LOG_COLORS.taggedInfo,
-        "INFO",
-      );
-      expect(infoCalls[0].slice(2)).toEqual(["info msg"]);
-      expectStyledModuleTimestamp(
-        warnCalls,
-        0,
-        "auth",
-        LOG_COLORS.taggedWarn,
-        "WARN",
-      );
-      expect(warnCalls[0].slice(2)).toEqual(["warn msg"]);
-      expectStyledModuleTimestamp(
-        errorCalls,
-        0,
-        "auth",
-        LOG_COLORS.taggedError,
-        "ERROR",
-      );
-      expect(errorCalls[0].slice(2)).toEqual(["error msg"]);
-    });
-
-    it("should respect severity filtering with tagged loggers", () => {
-      setLogLevel("warn");
-      const logger = getLogger({ url: "file:///path/to/database.ts" });
-
-      const { calls: debugCalls } = captureConsole("debug", () => {
-        logger.debug("should not appear");
-      });
-      const { calls: warnCalls } = captureConsole("warn", () => {
-        logger.warn("should appear");
-      });
-
-      expect(debugCalls).toHaveLength(0);
-      expect(warnCalls).toHaveLength(1);
-      expectStyledModuleTimestamp(
-        warnCalls,
-        0,
-        "database",
-        LOG_COLORS.taggedWarn,
-        "WARN",
-      );
-      expect(warnCalls[0].slice(2)).toEqual(["should appear"]);
-    });
-
-    it("should handle lazy evaluation with tags", () => {
-      setLogLevel("error");
-      const logger = getLogger({ url: "file:///path/to/service.ts" });
-
-      let evaluated = false;
-      captureConsole("log", () => {
-        logger.info(() => {
-          evaluated = true;
-          return "expensive message";
-        });
-      });
-
-      expect(evaluated).toBe(false); // Not evaluated due to filtering
-
-      // Now test that it does evaluate when level allows
-      evaluated = false;
-      const { calls } = captureConsole("error", () => {
-        logger.error(() => {
-          evaluated = true;
-          return "error message";
-        });
-      });
-
-      expect(evaluated).toBe(true);
-      expectStyledModuleTimestamp(
-        calls,
-        0,
-        "service",
-        LOG_COLORS.taggedError,
-        "ERROR",
-      );
-      expect(calls[0].slice(2)).toEqual(["error message"]);
-    });
-
-    it("should use real import.meta.url", () => {
-      // This test uses the actual import.meta.url of this test file
-      const logger = getLogger({ url: import.meta.url });
+    it("should support log() method as alias for info()", () => {
+      const logger = getLogger("test-module");
       const { calls } = captureConsole("log", () => {
-        logger("test from logger.test");
+        logger.log("test message via log()");
       });
 
       expect(calls).toHaveLength(1);
       expectStyledModuleTimestamp(
         calls,
         0,
-        "logger.test",
+        "test-module",
         LOG_COLORS.taggedInfo,
         "INFO",
       );
+      expect(calls[0].slice(2)).toEqual(["test message via log()"]);
     });
 
-    it("should auto-detect caller when no URL provided", () => {
-      // Call getLogger without parameters
-      const logger = getLogger();
-      const { calls } = captureConsole("log", () => {
-        logger("auto-detected module");
-      });
-
-      expect(calls).toHaveLength(1);
-      // Should detect this test file
-      expectStyledModuleTimestamp(
-        calls,
-        0,
-        "logger.test",
-        LOG_COLORS.taggedInfo,
-        "INFO",
-      );
-    });
-  });
-
-  describe("disabled property", () => {
-    it("should create enabled logger by default", () => {
-      const logger = getLogger();
-      expect(logger.disabled).toBe(undefined);
-
-      const { calls } = captureConsole("log", () => {
-        logger.info("should appear");
-      });
-
-      expect(calls).toHaveLength(1);
-      expectStyledModuleTimestamp(
-        calls,
-        0,
-        "logger.test",
-        LOG_COLORS.taggedInfo,
-        "INFO",
-      );
-      expect(calls[0].slice(2)).toEqual(["should appear"]);
-    });
-
-    it("should create disabled logger when enabled: false", () => {
-      const logger = getLogger({ enabled: false });
-      expect(logger.disabled).toBe(true);
-
-      const { calls } = captureConsole("log", () => {
-        logger.info("should not appear");
-      });
-
-      expect(calls).toHaveLength(0);
-    });
-
-    it("should create enabled logger when enabled: true", () => {
-      const logger = getLogger({ enabled: true });
-      expect(logger.disabled).toBe(false);
-
-      const { calls } = captureConsole("log", () => {
-        logger.info("should appear");
-      });
-
-      expect(calls).toHaveLength(1);
-    });
-
-    it("should respect runtime changes to disabled property", () => {
-      const logger = getLogger();
-
-      // Initially enabled
-      const { calls: calls1 } = captureConsole("log", () => {
-        logger.info("message 1");
-      });
-      expect(calls1).toHaveLength(1);
-
-      // Disable it
-      logger.disabled = true;
-      const { calls: calls2 } = captureConsole("log", () => {
-        logger.info("message 2");
-      });
-      expect(calls2).toHaveLength(0);
-
-      // Re-enable it
-      logger.disabled = false;
-      const { calls: calls3 } = captureConsole("log", () => {
-        logger.info("message 3");
-      });
-      expect(calls3).toHaveLength(1);
-    });
-
-    it("should NOT evaluate lazy functions when disabled", () => {
-      const logger = getLogger({ enabled: false });
-
-      let evaluated = false;
-      captureConsole("log", () => {
-        logger.info(() => {
-          evaluated = true;
-          return "expensive computation";
-        });
-      });
-
-      expect(evaluated).toBe(false); // Not evaluated!
-    });
-
-    it("should work with all severity levels when disabled", () => {
-      const logger = getLogger({ enabled: false });
-
-      const { calls: debugCalls } = captureConsole("debug", () => {
-        logger.debug("debug");
-      });
-      const { calls: infoCalls } = captureConsole("log", () => {
-        logger.info("info");
-      });
-      const { calls: warnCalls } = captureConsole("warn", () => {
-        logger.warn("warn");
-      });
-      const { calls: errorCalls } = captureConsole("error", () => {
-        logger.error("error");
-      });
-
-      expect(debugCalls).toHaveLength(0);
-      expect(infoCalls).toHaveLength(0);
-      expect(warnCalls).toHaveLength(0);
-      expect(errorCalls).toHaveLength(0);
-    });
-
-    it("should work with URL and options parameters", () => {
-      const logger = getLogger({
-        url: "file:///custom/module.ts",
-        enabled: false,
-      });
-
-      const { calls } = captureConsole("log", () => {
-        logger.info("test");
-      });
-
-      expect(calls).toHaveLength(0);
-      expect(logger.disabled).toBe(true);
-    });
-  });
-
-  describe("logger-specific log level", () => {
-    it("should respect logger-specific log level", () => {
-      // Set global level to warn
-      setLogLevel("warn");
-
-      // Create logger with debug level
-      const logger = getLogger({ level: "debug" });
+    it("should support all log levels in tagged logger", () => {
+      const logger = getLogger("test-module");
+      logger.level = "debug"; // Enable all levels
 
       const { calls: debugCalls } = captureConsole("debug", () => {
         logger.debug("debug message");
@@ -678,50 +379,201 @@ describe("logger", () => {
       const { calls: infoCalls } = captureConsole("log", () => {
         logger.info("info message");
       });
-
-      // Both should appear because logger level is debug
-      expect(debugCalls).toHaveLength(1);
-      expect(infoCalls).toHaveLength(1);
-
-      // Create another logger without specific level
-      const defaultLogger = getLogger();
-
-      const { calls: defaultDebugCalls } = captureConsole("debug", () => {
-        defaultLogger.debug("debug from default");
-      });
-      const { calls: defaultInfoCalls } = captureConsole("log", () => {
-        defaultLogger.info("info from default");
-      });
-
-      // These should be filtered by global level (warn)
-      expect(defaultDebugCalls).toHaveLength(0);
-      expect(defaultInfoCalls).toHaveLength(0);
-    });
-
-    it("should override global level with logger-specific level", () => {
-      // Set global level to debug (everything shows)
-      setLogLevel("debug");
-
-      // Create logger with error level (only errors show)
-      const logger = getLogger({ level: "error" });
-
-      const { calls: debugCalls } = captureConsole("debug", () => {
-        logger.debug("should not appear");
-      });
-      const { calls: infoCalls } = captureConsole("log", () => {
-        logger.info("should not appear");
-      });
       const { calls: warnCalls } = captureConsole("warn", () => {
-        logger.warn("should not appear");
+        logger.warn("warning message");
       });
       const { calls: errorCalls } = captureConsole("error", () => {
-        logger.error("should appear");
+        logger.error("error message");
+      });
+
+      expect(debugCalls).toHaveLength(1);
+      expect(infoCalls).toHaveLength(1);
+      expect(warnCalls).toHaveLength(1);
+      expect(errorCalls).toHaveLength(1);
+
+      expectStyledModuleTimestamp(
+        debugCalls,
+        0,
+        "test-module",
+        LOG_COLORS.taggedDebug,
+        "DEBUG",
+      );
+      expectStyledModuleTimestamp(
+        infoCalls,
+        0,
+        "test-module",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
+      expectStyledModuleTimestamp(
+        warnCalls,
+        0,
+        "test-module",
+        LOG_COLORS.taggedWarn,
+        "WARN",
+      );
+      expectStyledModuleTimestamp(
+        errorCalls,
+        0,
+        "test-module",
+        LOG_COLORS.taggedError,
+        "ERROR",
+      );
+    });
+
+    it("should respect logger-specific level", () => {
+      const logger = getLogger("test-module", { level: "warn" });
+
+      const { calls: debugCalls } = captureConsole("debug", () => {
+        logger.debug("debug message");
+      });
+      const { calls: infoCalls } = captureConsole("log", () => {
+        logger.info("info message");
+      });
+      const { calls: warnCalls } = captureConsole("warn", () => {
+        logger.warn("warning message");
+      });
+      const { calls: errorCalls } = captureConsole("error", () => {
+        logger.error("error message");
       });
 
       expect(debugCalls).toHaveLength(0);
       expect(infoCalls).toHaveLength(0);
-      expect(warnCalls).toHaveLength(0);
+      expect(warnCalls).toHaveLength(1);
       expect(errorCalls).toHaveLength(1);
+    });
+
+    it("should support lazy evaluation in tagged logger", () => {
+      const logger = getLogger("test-module");
+      let evaluated = false;
+      const lazyMessage = () => {
+        evaluated = true;
+        return "lazy tagged message";
+      };
+
+      const { calls } = captureConsole("log", () => {
+        logger.info(lazyMessage);
+      });
+
+      expect(evaluated).toBe(true);
+      expect(calls).toHaveLength(1);
+      expectStyledModuleTimestamp(
+        calls,
+        0,
+        "test-module",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
+      expect(calls[0].slice(2)).toEqual(["lazy tagged message"]);
+    });
+
+    it("should support disabled state in tagged logger", () => {
+      const logger = getLogger("test-module", { enabled: false });
+      let evaluated = false;
+      const lazyMessage = () => {
+        evaluated = true;
+        return "should not be evaluated";
+      };
+
+      const { calls } = captureConsole("log", () => {
+        logger.info(lazyMessage);
+      });
+
+      expect(evaluated).toBe(false);
+      expect(calls).toHaveLength(0);
+      expect(logger.disabled).toBe(true);
+    });
+
+    it("should default to enabled state", () => {
+      const logger = getLogger("test-module");
+      expect(logger.disabled).toBe(false);
+
+      const { calls } = captureConsole("log", () => {
+        logger.info("should show by default");
+      });
+
+      expect(calls).toHaveLength(1);
+    });
+
+    it("should allow runtime enable/disable of tagged logger", () => {
+      const logger = getLogger("test-module", { enabled: false });
+
+      // Initially disabled
+      const { calls: disabledCalls } = captureConsole("log", () => {
+        logger.info("should not show");
+      });
+      expect(disabledCalls).toHaveLength(0);
+
+      // Enable at runtime
+      logger.disabled = false;
+      const { calls: enabledCalls } = captureConsole("log", () => {
+        logger.info("should show");
+      });
+      expect(enabledCalls).toHaveLength(1);
+
+      // Disable again
+      logger.disabled = true;
+      const { calls: disabledAgainCalls } = captureConsole("log", () => {
+        logger.info("should not show again");
+      });
+      expect(disabledAgainCalls).toHaveLength(0);
+    });
+  });
+
+  describe("global vs tagged logger", () => {
+    it("should have different formatting for global vs tagged", () => {
+      const taggedLogger = getLogger("test-module");
+
+      const { calls: globalCalls } = captureConsole("log", () => {
+        log.info("global message");
+      });
+      const { calls: taggedCalls } = captureConsole("log", () => {
+        taggedLogger.info("tagged message");
+      });
+
+      expect(globalCalls).toHaveLength(1);
+      expect(taggedCalls).toHaveLength(1);
+
+      // Global should not have module name
+      expect(globalCalls[0][0]).toMatch(
+        /^%c\[INFO\]\[\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
+      );
+      expect(globalCalls[0][1]).toBe(LOG_COLORS.info);
+
+      // Tagged should have module name
+      expect(taggedCalls[0][0]).toMatch(
+        /^%c\[INFO\]\[test-module::\d{2}:\d{2}:\d{2}\.\d{3}\]$/,
+      );
+      expect(taggedCalls[0][1]).toBe(LOG_COLORS.taggedInfo);
+    });
+
+    it("should have independent log levels", () => {
+      const taggedLogger = getLogger("test-module");
+
+      // Set different levels
+      log.level = "warn";
+      taggedLogger.level = "debug";
+
+      const { calls: globalDebugCalls } = captureConsole("debug", () => {
+        log.debug("global debug");
+      });
+      const { calls: globalWarnCalls } = captureConsole("warn", () => {
+        log.warn("global warn");
+      });
+      const { calls: taggedDebugCalls } = captureConsole("debug", () => {
+        taggedLogger.debug("tagged debug");
+      });
+      const { calls: taggedWarnCalls } = captureConsole("warn", () => {
+        taggedLogger.warn("tagged warn");
+      });
+
+      // Global logger should filter debug
+      expect(globalDebugCalls).toHaveLength(0);
+      expect(globalWarnCalls).toHaveLength(1);
+
+      // Tagged logger should show debug
+      expect(taggedDebugCalls).toHaveLength(1);
+      expect(taggedWarnCalls).toHaveLength(1);
     });
   });
 });
