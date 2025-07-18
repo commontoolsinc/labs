@@ -20,10 +20,10 @@ export function toURI(value: unknown): URI {
         throw new Error(`Invalid URI: ${value}`);
       }
       return value as URI;
+    } else {
+      // Add "of:" prefix
+      return `of:${value}`;
     }
-
-    // Add "of:" prefix
-    return `of:${value}`;
   }
 
   throw new Error(`Cannot convert value to URI: ${JSON.stringify(value)}`);

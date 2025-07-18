@@ -417,55 +417,69 @@ describe("StorageTransaction", () => {
     });
   });
 
-  it("should support readValueOrThrow for value, not found, and error cases", () => {
-    const transaction = runtime.edit();
+  describe("readValueOrThrow and writeValueOrThrow", () => {
+    it("should support readValueOrThrow for value, not found, and error cases", () => {
+      const transaction = runtime.edit();
 
-    // Write a value
-    const writeResult = transaction.write({
+      // Write a value
+      const writeResult = transaction.write({
+        space,
+        id: "of:test-entity",
+        type: "application/json",
+        path: ["value"],
+      }, { foo: 123 });
+      expect(writeResult.ok).toBeDefined();
+      expect(writeResult.error).toBeUndefined();
+
+      // Should return the value for an existing path
+      const result = transaction.read({
+        space,
+        id: "of:test-entity",
+        type: "application/json",
+        path: ["value", "foo"],
+      });
+      expect(result.ok?.value).toBe(123);
+
+      // Should return the value for an existing path
+      const value = transaction.readOrThrow({
+        space,
+        id: "of:test-entity",
+        type: "application/json",
+        path: ["value", "foo"],
+      });
+      expect(value).toBe(123);
+
+      // Should return undefined for a non-existent path (NotFoundError)
+      const notFound = transaction.readOrThrow({
+        space,
+        id: "of:test-entity",
+        type: "application/json",
+        path: ["value", "bar"],
+      });
+      expect(notFound).toBeUndefined();
+
+      // Should throw for other errors (e.g., unsupported media type)
+      expect(() =>
+        transaction.readOrThrow({
+          space,
+          id: "of:test-entity",
+          type: "unsupported/type",
+          path: ["value"],
+        })
+      ).toThrow("Unsupported media type");
+    });
+  });
+
+  it("should support writeValueOrThrow into a new document", async () => {
+    const transaction = runtime.edit();
+    transaction.writeValueOrThrow({
       space,
-      id: "of:test-entity",
+      id: "of:test-entity-new",
       type: "application/json",
       path: ["value"],
     }, { foo: 123 });
-    expect(writeResult.ok).toBeDefined();
-    expect(writeResult.error).toBeUndefined();
-
-    // Should return the value for an existing path
-    const result = transaction.read({
-      space,
-      id: "of:test-entity",
-      type: "application/json",
-      path: ["value", "foo"],
-    });
-    expect(result.ok?.value).toBe(123);
-
-    // Should return the value for an existing path
-    const value = transaction.readOrThrow({
-      space,
-      id: "of:test-entity",
-      type: "application/json",
-      path: ["value", "foo"],
-    });
-    expect(value).toBe(123);
-
-    // Should return undefined for a non-existent path (NotFoundError)
-    const notFound = transaction.readOrThrow({
-      space,
-      id: "of:test-entity",
-      type: "application/json",
-      path: ["value", "bar"],
-    });
-    expect(notFound).toBeUndefined();
-
-    // Should throw for other errors (e.g., unsupported media type)
-    expect(() =>
-      transaction.readOrThrow({
-        space,
-        id: "of:test-entity",
-        type: "unsupported/type",
-        path: ["value"],
-      })
-    ).toThrow("Unsupported media type");
+    const result = await transaction.commit();
+    expect(result.ok).toBeDefined();
   });
 });
 

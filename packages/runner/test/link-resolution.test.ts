@@ -61,7 +61,7 @@ describe("link-resolution", () => {
         tx,
       );
       outerCell.setRaw({
-        outer: { $alias: innerCell.key("inner").getAsLegacyCellLink() },
+        outer: innerCell.key("inner").getAsWriteRedirectLink(),
       });
       const binding = { $alias: { path: ["outer"] } };
       const result = followWriteRedirects(tx, binding, outerCell);
@@ -92,10 +92,10 @@ describe("link-resolution", () => {
       );
       cellB.set({});
       cellA.setRaw({
-        alias: { $alias: cellB.key("alias").getAsLegacyCellLink() },
+        alias: cellB.key("alias").getAsWriteRedirectLink(),
       });
       cellB.setRaw({
-        alias: { $alias: cellA.key("alias").getAsLegacyCellLink() },
+        alias: cellA.key("alias").getAsWriteRedirectLink(),
       });
       const binding = { $alias: { path: ["alias"] } };
       expect(() => followWriteRedirects(tx, binding, cellA)).toThrow(
@@ -107,6 +107,8 @@ describe("link-resolution", () => {
       const testCell = runtime.getCell<any>(
         space,
         "should allow aliases in aliased paths 1",
+        undefined,
+        tx,
       );
       testCell.setRaw({
         a: { a: { $alias: { path: ["a", "b"] } }, b: { c: 1 } },

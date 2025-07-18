@@ -166,12 +166,21 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const resultCell = runtime.getCell<
-      { multiplied: { multiplied: number }[] }
-    >(
+    const resultCell = runtime.getCell(
       space,
       "should handle recipes with map nodes",
-      undefined,
+      {
+        type: "object",
+        properties: {
+          multiplied: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { multiplied: { type: "number" } },
+            },
+          },
+        },
+      } as const satisfies JSONSchema,
       tx,
     );
     const result = runtime.run(tx, multipliedArray, {
@@ -180,7 +189,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.getAsQueryResult()).toMatchObject({
+    expect(result.get()).toMatchObject({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
@@ -198,10 +207,15 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const resultCell = runtime.getCell<{ doubled: number[] }>(
+    const resultCell = runtime.getCell(
       space,
       "should handle recipes with map nodes with closures",
-      undefined,
+      {
+        type: "object",
+        properties: {
+          doubled: { type: "array", items: { type: "number" } },
+        },
+      } as const satisfies JSONSchema,
       tx,
     );
     const result = runtime.run(tx, doubleArray, {
@@ -211,7 +225,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.getAsQueryResult()).toMatchObject({
+    expect(result.get()).toMatchObject({
       doubled: [3, 6, 9],
     });
   });
@@ -227,10 +241,13 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const resultCell = runtime.getCell<{ doubled: number[] }>(
+    const resultCell = runtime.getCell(
       space,
       "should handle map nodes with undefined input",
-      undefined,
+      {
+        type: "object",
+        properties: { doubled: { type: "array", items: { type: "number" } } },
+      } as const satisfies JSONSchema,
       tx,
     );
     const result = runtime.run(tx, doubleArray, {
@@ -239,7 +256,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.getAsQueryResult()).toMatchObject({ doubled: [] });
+    expect(result.get()).toMatchObject({ doubled: [] });
   });
 
   it("should execute handlers", async () => {
@@ -486,6 +503,12 @@ describe("Recipe Runner", () => {
       x,
       y,
     }, resultCell);
+
+    expect(runCounts).toMatchObject({
+      multiply: 0,
+      multiplyGenerator: 0,
+      multiplyGenerator2: 0,
+    });
 
     await runtime.idle();
 
@@ -922,8 +945,8 @@ describe("Recipe Runner", () => {
     // Make sure it recovers:
     dividend.send(2);
     await runtime.idle();
-    expect((charm.getRaw() as any).result.$alias.cell).toBe(
-      charm.getSourceCell()?.getDoc(),
+    expect((charm.getRaw() as any).result.$alias.cell).toEqual(
+      JSON.parse(JSON.stringify(charm.getSourceCell()?.getDoc())),
     );
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });

@@ -65,10 +65,6 @@ export function streamData(
         tx,
       );
 
-      pending.getDoc().ephemeral = true;
-      result.getDoc().ephemeral = true;
-      error.getDoc().ephemeral = true;
-
       pending.setSourceCell(parentCell);
       result.setSourceCell(parentCell);
       error.setSourceCell(parentCell);

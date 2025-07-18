@@ -21,7 +21,7 @@ import type { IRuntime, IStorage } from "./runtime.ts";
 import { DocObjectManager, querySchema } from "./storage/query.ts";
 import { deepEqual } from "./path-utils.ts";
 import {
-  getCellLinkOrThrow,
+  getCellOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { isLink } from "./link-utils.ts";
@@ -359,7 +359,7 @@ export class Storage implements IStorage {
         // link. Roundtripping through JSON converts all Cells and Docs to a
         // serializable format.
         if (isQueryResultForDereferencing(value)) {
-          value = getCellLinkOrThrow(value);
+          value = getCellOrThrow(value);
         }
         return JSON.parse(JSON.stringify(value));
       } else if (isRecord(value)) {

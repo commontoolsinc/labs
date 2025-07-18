@@ -32,19 +32,19 @@ import {
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
   isLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
-  parseToLegacyAlias,
 } from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import "./builtins/index.ts";
-import { isCell } from "./cell.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
 
 export class Runner implements IRunner {
   readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
@@ -103,7 +103,7 @@ export class Runner implements IRunner {
 
     let processCell: Cell<ProcessCellData>;
 
-    const sourceCell = resultCell.getSourceCell();
+    const sourceCell = resultCell.withTx(tx).getSourceCell();
     if (sourceCell !== undefined) {
       processCell = sourceCell as Cell<ProcessCellData>;
     } else {
@@ -113,13 +113,18 @@ export class Runner implements IRunner {
         undefined,
         tx,
       );
-      resultCell.getDoc().sourceCell = processCell.getDoc();
+      resultCell.withTx(tx).setSourceCell(processCell);
     }
 
     let recipeId: string | undefined;
 
-    if (!recipeOrModule && processCell.getRaw()?.[TYPE]) {
-      recipeId = processCell.getRaw()[TYPE];
+    if (
+      !recipeOrModule &&
+      processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
+    ) {
+      recipeId = processCell.key(TYPE).getRaw({
+        meta: ignoreReadForScheduling,
+      });
       recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
       if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
     } else if (!recipeOrModule) {
@@ -163,7 +168,11 @@ export class Runner implements IRunner {
     if (this.cancels.has(resultCell.getDoc())) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
-      if (argument === undefined && recipeId === processCell.getRaw()?.[TYPE]) {
+      if (
+        argument === undefined &&
+        recipeId ===
+          processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
+      ) {
         return resultCell;
       }
 
@@ -181,14 +190,19 @@ export class Runner implements IRunner {
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
     if (isLink(argument)) {
-      argument = parseToLegacyAlias(argument) as T;
+      argument = createSigilLinkFromParsedLink(
+        parseLink(argument),
+        { base: processCell, includeSchema: true },
+      ) as T;
     }
 
     // Walk the recipe's schema and extract all default values
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
-    const previousInternal = processCell.getRaw()?.internal;
+    const previousInternal = processCell.key("internal").getRaw({
+      meta: ignoreReadForScheduling,
+    });
     const internal: JSONValue = Object.assign(
       {},
       cellAwareDeepCopy(
@@ -204,16 +218,20 @@ export class Runner implements IRunner {
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
-    if (!processCell.getRaw()?.argument) {
+    if (
+      !processCell.key("argument").getRaw({ meta: ignoreReadForScheduling })
+    ) {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    const recipeChanged = recipeId !== processCell.getRaw()?.[TYPE];
+    const recipeChanged = recipeId !== processCell.key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    });
 
-    processCell.setRaw({
-      ...processCell.getRaw(),
+    processCell.withTx(tx).setRaw({
+      ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: recipeId || "unknown",
-      resultRef: resultCell.getAsLegacyCellLink(),
+      resultRef: resultCell.getAsLink({ base: processCell }),
       internal,
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
@@ -232,7 +250,7 @@ export class Runner implements IRunner {
     if (recipeChanged) {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
-      resultCell.setRaw(
+      resultCell.withTx(tx).setRaw(
         unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }
@@ -560,9 +578,7 @@ export class Runner implements IRunner {
           tx,
         });
 
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).get()
-          : inputsCell.getAsQueryResult([], undefined);
+        const argument = inputsCell.asSchema(module.argumentSchema).get();
         const result = fn(argument);
 
         const postRun = (result: any) => {
@@ -619,9 +635,8 @@ export class Runner implements IRunner {
       let previousResultRecipeAsString: string | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-          : inputsCell.getAsQueryResult([], tx);
+        const argument = inputsCell.asSchema(module.argumentSchema).withTx(tx)
+          .get();
 
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
@@ -648,7 +663,7 @@ export class Runner implements IRunner {
             if (previousResultRecipeAsString === resultRecipeAsString) return;
             previousResultRecipeAsString = resultRecipeAsString;
 
-            const resultDoc = this.run(
+            const resultCell = this.run(
               tx,
               resultRecipe,
               undefined,
@@ -660,15 +675,15 @@ export class Runner implements IRunner {
                   tx,
                 ),
             );
-            addCancel(() => this.stop(resultDoc));
+            addCancel(() => this.stop(resultCell));
 
             if (!previousResultDoc) {
-              previousResultDoc = resultDoc;
+              previousResultDoc = resultCell;
               sendValueToBinding(
                 tx,
                 processCell,
                 outputs,
-                resultDoc.getAsLink(),
+                resultCell.getAsLink({ base: processCell }),
               );
             }
           } else {
@@ -826,7 +841,7 @@ export class Runner implements IRunner {
       tx,
       processCell,
       outputBindings,
-      resultCell.getAsLegacyCellLink(),
+      resultCell.getAsLink({ base: processCell }),
     );
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
