@@ -320,7 +320,9 @@ describe("logger", () => {
 
   describe("module tagging with getLogger", () => {
     it("should extract module name from file URLs", () => {
-      const mathLogger = getLogger("file:///home/user/project/utils/math.ts");
+      const mathLogger = getLogger({
+        url: "file:///home/user/project/utils/math.ts",
+      });
       const { calls } = captureConsole("log", () => {
         mathLogger.info("calculation complete");
       });
@@ -349,7 +351,7 @@ describe("logger", () => {
       ];
 
       for (const { url, expected } of testCases) {
-        const logger = getLogger(url);
+        const logger = getLogger({ url });
         const { calls } = captureConsole("log", () => {
           logger("test");
         });
@@ -365,7 +367,7 @@ describe("logger", () => {
     });
 
     it("should handle invalid URLs gracefully", () => {
-      const logger = getLogger("not-a-valid-url");
+      const logger = getLogger({ url: "not-a-valid-url" });
       const { calls } = captureConsole("log", () => {
         logger("test message");
       });
@@ -383,7 +385,7 @@ describe("logger", () => {
 
     it("should work with all severity levels", () => {
       setLogLevel("debug");
-      const logger = getLogger("file:///path/to/auth.ts");
+      const logger = getLogger({ url: "file:///path/to/auth.ts" });
 
       const { calls: debugCalls } = captureConsole("debug", () => {
         logger.debug("debug msg");
@@ -434,7 +436,7 @@ describe("logger", () => {
 
     it("should respect severity filtering with tagged loggers", () => {
       setLogLevel("warn");
-      const logger = getLogger("file:///path/to/database.ts");
+      const logger = getLogger({ url: "file:///path/to/database.ts" });
 
       const { calls: debugCalls } = captureConsole("debug", () => {
         logger.debug("should not appear");
@@ -457,7 +459,7 @@ describe("logger", () => {
 
     it("should handle lazy evaluation with tags", () => {
       setLogLevel("error");
-      const logger = getLogger("file:///path/to/service.ts");
+      const logger = getLogger({ url: "file:///path/to/service.ts" });
 
       let evaluated = false;
       captureConsole("log", () => {
@@ -491,7 +493,7 @@ describe("logger", () => {
 
     it("should use real import.meta.url", () => {
       // This test uses the actual import.meta.url of this test file
-      const logger = getLogger(import.meta.url);
+      const logger = getLogger({ url: import.meta.url });
       const { calls } = captureConsole("log", () => {
         logger("test from logger.test");
       });
@@ -546,7 +548,7 @@ describe("logger", () => {
     });
 
     it("should create disabled logger when enabled: false", () => {
-      const logger = getLogger(undefined, { enabled: false });
+      const logger = getLogger({ enabled: false });
       expect(logger.disabled).toBe(true);
 
       const { calls } = captureConsole("log", () => {
@@ -557,7 +559,7 @@ describe("logger", () => {
     });
 
     it("should create enabled logger when enabled: true", () => {
-      const logger = getLogger(undefined, { enabled: true });
+      const logger = getLogger({ enabled: true });
       expect(logger.disabled).toBe(false);
 
       const { calls } = captureConsole("log", () => {
@@ -592,7 +594,7 @@ describe("logger", () => {
     });
 
     it("should NOT evaluate lazy functions when disabled", () => {
-      const logger = getLogger(undefined, { enabled: false });
+      const logger = getLogger({ enabled: false });
 
       let evaluated = false;
       captureConsole("log", () => {
@@ -606,7 +608,7 @@ describe("logger", () => {
     });
 
     it("should work with all severity levels when disabled", () => {
-      const logger = getLogger(undefined, { enabled: false });
+      const logger = getLogger({ enabled: false });
 
       const { calls: debugCalls } = captureConsole("debug", () => {
         logger.debug("debug");
@@ -628,7 +630,10 @@ describe("logger", () => {
     });
 
     it("should work with URL and options parameters", () => {
-      const logger = getLogger("file:///custom/module.ts", { enabled: false });
+      const logger = getLogger({
+        url: "file:///custom/module.ts",
+        enabled: false,
+      });
 
       const { calls } = captureConsole("log", () => {
         logger.info("test");

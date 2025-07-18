@@ -225,6 +225,10 @@ function getCallerUrl(): string | undefined {
  */
 export interface GetLoggerOptions {
   /**
+   * The import.meta.url from the calling module (optional - will auto-detect if not provided)
+   */
+  url?: string;
+  /**
    * Whether this logger should be enabled
    * If not specified (undefined), follows default behavior
    */
@@ -233,15 +237,11 @@ export interface GetLoggerOptions {
 
 /**
  * Create a logger tagged with the calling module name
- * @param importMetaUrl - The import.meta.url from the calling module (optional - will auto-detect if not provided)
  * @param options - Options for configuring the logger
  * @returns A logger that prefixes all messages with [moduleName]
  */
-export function getLogger(
-  importMetaUrl?: string,
-  options?: GetLoggerOptions,
-): TaggedLogger {
-  const url = importMetaUrl || getCallerUrl() || "unknown";
+export function getLogger(options?: GetLoggerOptions): TaggedLogger {
+  const url = options?.url || getCallerUrl() || "unknown";
   const tag = extractModuleName(url);
 
   // Set initial disabled state from options
