@@ -25,14 +25,16 @@ import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type LegacyJSONCellLink,
-  LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
   type URI,
 } from "./sigil-types.ts";
 import { areLinksSame, isLink } from "./link-utils.ts";
 import { type IRuntime } from "./runtime.ts";
-import { type NormalizedFullLink } from "./link-utils.ts";
+import {
+  createSigilLinkFromParsedLink,
+  type NormalizedFullLink,
+} from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
@@ -503,7 +505,10 @@ function createRegularCell<T>(
         includeSchema?: boolean;
       },
     ): SigilLink => {
-      return createSigilLink(link, options) as SigilLink;
+      return createSigilLinkFromParsedLink(link, {
+        ...options,
+        overwrite: "this",
+      });
     },
     getAsWriteRedirectLink: (
       options?: {
@@ -512,7 +517,7 @@ function createRegularCell<T>(
         includeSchema?: boolean;
       },
     ): SigilWriteRedirectLink => {
-      return createSigilLink(link, {
+      return createSigilLinkFromParsedLink(link, {
         ...options,
         overwrite: "redirect",
       }) as SigilWriteRedirectLink;
@@ -567,7 +572,7 @@ function createRegularCell<T>(
       return self.get();
     },
     get cellLink(): SigilLink {
-      return createSigilLink(link);
+      return createSigilLinkFromParsedLink(link);
     },
     get space(): MemorySpace {
       return space;
@@ -639,61 +644,6 @@ function subscribeToReferencedDocs<T>(
     cancel();
     if (isCancel(cleanup)) cleanup();
   };
-}
-
-/**
- * Creates a sigil reference (link or alias) with shared logic
- */
-function createSigilLink(
-  link: NormalizedFullLink,
-  options: {
-    base?: Cell<any>;
-    baseSpace?: MemorySpace;
-    includeSchema?: boolean;
-    overwrite?: "redirect" | "this"; // default is "this"
-  } = {},
-): SigilLink {
-  // Create the base structure
-  const sigil: SigilLink = {
-    "/": {
-      [LINK_V1_TAG]: {
-        path: link.path.map((p) => p.toString()),
-      },
-    },
-  };
-
-  const reference = sigil["/"][LINK_V1_TAG];
-
-  // Handle base cell for relative references
-  if (options.base) {
-    const baseLink = options.base.getAsNormalizedFullLink();
-
-    // Only include id if it's different from base
-    if (link.id !== baseLink.id) reference.id = toURI(link.id);
-
-    // Only include space if it's different from base
-    if (link.space && link.space !== baseLink.space) {
-      reference.space = link.space;
-    }
-  } else {
-    reference.id = link.id;
-
-    // Handle baseSpace option - only include space if different from baseSpace
-    if (link.space !== options.baseSpace) reference.space = link.space;
-  }
-
-  // Include schema if requested
-  if (options.includeSchema && link.schema) {
-    reference.schema = link.schema;
-    reference.rootSchema = link.rootSchema;
-  }
-
-  // Include overwrite if present and it's a redirect
-  if (options.overwrite && options.overwrite !== "this") {
-    reference.overwrite = "redirect";
-  }
-
-  return sigil;
 }
 
 /**

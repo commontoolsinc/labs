@@ -192,7 +192,7 @@ export class Runner implements IRunner {
     if (isLink(argument)) {
       argument = createSigilLinkFromParsedLink(
         parseLink(argument),
-        processCell,
+        { base: processCell, includeSchema: true },
       ) as T;
     }
 

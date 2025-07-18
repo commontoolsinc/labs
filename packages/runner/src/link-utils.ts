@@ -413,7 +413,67 @@ export function areNormalizedLinksSame(
     (link1.type ?? "application/json") === (link2.type ?? "application/json");
 }
 
+/**
+ * Creates a sigil reference (link or alias) with shared logic
+ */
 export function createSigilLinkFromParsedLink(
+  link: NormalizedLink,
+  options: {
+    base?: Cell<any> | NormalizedFullLink;
+    baseSpace?: MemorySpace;
+    includeSchema?: boolean;
+    overwrite?: "redirect" | "this"; // default is "this"
+  } = {},
+): SigilLink {
+  // Create the base structure
+  const sigil: SigilLink = {
+    "/": {
+      [LINK_V1_TAG]: {
+        path: link.path.map((p) => p.toString()),
+      },
+    },
+  };
+
+  const reference = sigil["/"][LINK_V1_TAG];
+
+  // Handle base cell for relative references
+  if (options.base) {
+    const baseLink = isCell(options.base)
+      ? options.base.getAsNormalizedFullLink()
+      : options.base;
+
+    // Only include id if it's different from base
+    if (link.id !== baseLink.id) reference.id = toURI(link.id);
+
+    // Only include space if it's different from base
+    if (link.space && link.space !== baseLink.space) {
+      reference.space = link.space;
+    }
+  } else {
+    reference.id = link.id;
+
+    // Handle baseSpace option - only include space if different from baseSpace
+    if (link.space !== options.baseSpace) reference.space = link.space;
+  }
+
+  // Include schema if requested
+  if (options.includeSchema && link.schema) {
+    reference.schema = link.schema;
+    reference.rootSchema = link.rootSchema;
+  }
+
+  // Option overrides link value
+  if (options.overwrite) {
+    if (options.overwrite === "redirect") reference.overwrite = "redirect";
+    // else: "this" is the default
+  } else if (link.overwrite === "redirect") {
+    reference.overwrite = "redirect";
+  }
+
+  return sigil;
+}
+
+export function createSigilLinkFromParsedLinkOld(
   link: NormalizedLink,
   base?: Cell | NormalizedLink,
   overwrite?: "redirect",
@@ -422,8 +482,8 @@ export function createSigilLinkFromParsedLink(
     "/": {
       [LINK_V1_TAG]: {
         path: link.path as string[],
-        schema: link.schema,
-        rootSchema: link.rootSchema,
+        schema: sanitizeSchemaForLinks(link.schema),
+        rootSchema: sanitizeSchemaForLinks(link.rootSchema),
         ...(overwrite === "redirect" ? { overwrite } : {}),
       },
     },
@@ -448,4 +508,50 @@ export function createSigilLinkFromParsedLink(
   }
 
   return sigilLink;
+}
+
+/**
+ * Traverse schema and remove all asCell and asStream flags.
+ */
+export function sanitizeSchemaForLinks(
+  schema: JSONSchema | undefined,
+): JSONSchema | undefined {
+  return recursiveStripAsCellAndStreamFromSchema(schema);
+}
+
+function recursiveStripAsCellAndStreamFromSchema(
+  schema: any,
+): any {
+  // Handle null/undefined/boolean schemas
+  if (
+    schema === null || typeof schema !== "object" || typeof schema === "boolean"
+  ) {
+    return schema;
+  }
+
+  // Create a copy to avoid mutating the original
+  const result = { ...schema };
+
+  // Remove asCell and asStream flags from this level
+  delete (result as any).asCell;
+  delete (result as any).asStream;
+
+  // Recursively process all object properties
+  for (const [key, value] of Object.entries(result)) {
+    if (value && typeof value === "object") {
+      if (Array.isArray(value)) {
+        // Handle arrays
+        (result as any)[key] = value.map((item) =>
+          typeof item === "object" && item !== null
+            ? recursiveStripAsCellAndStreamFromSchema(item)
+            : item
+        );
+      } else {
+        // Handle objects
+        (result as any)[key] = recursiveStripAsCellAndStreamFromSchema(value);
+      }
+    }
+  }
+
+  return result;
 }

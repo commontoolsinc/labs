@@ -10,7 +10,9 @@ import {
   type NormalizedLink,
   parseLink,
   parseLinkOrThrow,
+  sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -495,7 +497,9 @@ describe("link-utils", () => {
         rootSchema: { type: "object" },
       };
 
-      const result = createSigilLinkFromParsedLink(normalizedLink);
+      const result = createSigilLinkFromParsedLink(normalizedLink, {
+        includeSchema: true,
+      });
 
       expect(result).toEqual({
         "/": {
@@ -518,7 +522,9 @@ describe("link-utils", () => {
         space: space,
       };
 
-      const result = createSigilLinkFromParsedLink(normalizedLink, baseCell);
+      const result = createSigilLinkFromParsedLink(normalizedLink, {
+        base: baseCell,
+      });
 
       expect(result["/"][LINK_V1_TAG].space).toBeUndefined();
     });
@@ -531,7 +537,9 @@ describe("link-utils", () => {
         path: ["nested", "value"],
       };
 
-      const result = createSigilLinkFromParsedLink(normalizedLink, baseCell);
+      const result = createSigilLinkFromParsedLink(normalizedLink, {
+        base: baseCell,
+      });
 
       expect(result["/"][LINK_V1_TAG].id).toBe(`of:${baseId}`);
     });
@@ -546,6 +554,158 @@ describe("link-utils", () => {
       const result = createSigilLinkFromParsedLink(normalizedLink);
 
       expect(result["/"][LINK_V1_TAG].overwrite).toBe("redirect");
+    });
+  });
+
+  describe("stripAsCellAndStreamFromSchema", () => {
+    it("should remove asCell and asStream from simple schema", () => {
+      const schema = {
+        type: "object",
+        asCell: true,
+        asStream: false,
+        properties: {
+          name: { type: "string" },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          name: { type: "string" },
+        },
+      });
+    });
+
+    it("should remove asCell and asStream from nested properties", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            asCell: true,
+            properties: {
+              name: { type: "string" },
+              settings: {
+                type: "object",
+                asStream: true,
+                properties: {
+                  theme: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          user: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              settings: {
+                type: "object",
+                properties: {
+                  theme: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    it("should handle arrays of schemas", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "string",
+              asCell: true,
+            },
+          },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "string",
+            },
+          },
+        },
+      });
+    });
+
+    it("should handle anyOf arrays", () => {
+      const schema = {
+        type: "object",
+        anyOf: [
+          { type: "string", asCell: true },
+          { type: "number", asStream: true },
+        ],
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        anyOf: [
+          { type: "string" },
+          { type: "number" },
+        ],
+      });
+    });
+
+    it("should handle additionalProperties", () => {
+      const schema = {
+        type: "object",
+        additionalProperties: {
+          type: "string",
+          asCell: true,
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(schema);
+
+      expect(result).toEqual({
+        type: "object",
+        additionalProperties: {
+          type: "string",
+        },
+      });
+    });
+
+    it("should not mutate the original schema", () => {
+      const originalSchema = {
+        type: "object",
+        asCell: true,
+        properties: {
+          name: { type: "string", asStream: true },
+        },
+      } as const satisfies JSONSchema;
+
+      const result = sanitizeSchemaForLinks(originalSchema);
+
+      // Original should be unchanged
+      expect(originalSchema.asCell).toBe(true);
+      expect(originalSchema.properties.name.asStream).toBe(true);
+
+      // Result should have flags removed
+      expect((result as any).asCell).toBeUndefined();
+      expect((result as any).properties.name.asStream).toBeUndefined();
     });
   });
 });

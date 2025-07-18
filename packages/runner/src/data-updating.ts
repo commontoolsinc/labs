@@ -258,7 +258,7 @@ export function normalizeAndDiff(
         runtime,
         tx,
         link,
-        createSigilLinkFromParsedLink(newEntryLink, link),
+        createSigilLinkFromParsedLink(newEntryLink, { base: link }),
         context,
         options,
       ),
@@ -377,7 +377,10 @@ export function normalizeAndDiff(
           i++
         ) {
           changes.push({
-            location: { ...link, path: [...link.path.slice(0, -1), i.toString()] },
+            location: {
+              ...link,
+              path: [...link.path.slice(0, -1), i.toString()],
+            },
             value: undefined,
           });
         }
