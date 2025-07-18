@@ -7,7 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { toURI } from "../src/uri-utils.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { parseLink, sanitizeSchemaForLinks } from "../src/link-utils.ts";
 import { compactifyPaths, txToReactivityLog } from "../src/scheduler.ts";
 import type {
   IExtendedStorageTransaction,
@@ -316,7 +316,7 @@ describe("Schema Support", () => {
         path: ["current", "label"],
         space,
         schema: current.schema,
-        rootSchema: current.rootSchema,
+        rootSchema: sanitizeSchemaForLinks(current.rootSchema),
         type: "application/json",
       });
 
@@ -343,7 +343,7 @@ describe("Schema Support", () => {
         space,
         type: "application/json",
         schema: omitSchema,
-        rootSchema: schema,
+        rootSchema: sanitizeSchemaForLinks(schema),
       });
       const log = txToReactivityLog(tx2);
       const reads = compactifyPaths(log.reads);
