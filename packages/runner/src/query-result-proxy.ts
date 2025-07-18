@@ -129,14 +129,12 @@ export function createQueryResultProxy<T>(
       }
 
       if (
-        Array.isArray(target) && prop in arrayMethods &&
+        Array.isArray(target) &&
+        Object.prototype.hasOwnProperty.call(arrayMethods, prop) &&
         typeof (target[prop as keyof typeof target]) === "function"
       ) {
         const method = Array.prototype[prop as keyof typeof Array.prototype];
-        const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods] ??
-          // Default to ReadOnly to catch other methods on object (so the "prop
-          // in" is true) but not in the list.
-          ArrayMethodType.ReadOnly;
+        const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
 
         return isReadWrite === ArrayMethodType.ReadOnly
           ? (...args: any[]) => {
