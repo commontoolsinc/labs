@@ -42,17 +42,15 @@ export default recipe(
         <div style="padding: 1rem; max-width: 1200px; margin: 0 auto;">
           <div style="margin-bottom: 1rem;">
             <ct-input
-              value={title}
+              $value={title}
               placeholder="Enter research report title..."
               style="width: 100%; font-size: 1.2rem; font-weight: bold;"
-              onInput={updateTitle({ title })}
             />
           </div>
           <div style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
-            <common-code-editor
-              source={content}
+            <ct-code-editor
+              $value={content}
               language="text/plain"
-              onChange={updateContent({ content })}
               style="min-height: 400px;"
             />
           </div>
