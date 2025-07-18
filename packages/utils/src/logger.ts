@@ -17,6 +17,21 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 };
 
 /**
+ * Colors for each log level
+ */
+export const LOG_COLORS = {
+  debug: "color: #6b7280",
+  info: "color: #6b7280",
+  warn: "color: #eab308",
+  error: "color: #ef4444",
+  // Tagged logger colors
+  taggedDebug: "color: #6b7280; font-weight: 500",
+  taggedInfo: "color: #10b981; font-weight: 500",
+  taggedWarn: "color: #eab308; font-weight: 500",
+  taggedError: "color: #ef4444; font-weight: 500",
+} as const;
+
+/**
  * Current minimum log level - messages below this level are ignored
  */
 let currentLogLevel: LogLevel = "info";
@@ -88,7 +103,11 @@ export function log(...messages: LogMessage[]): void {
  */
 log.debug = function (...messages: LogMessage[]): void {
   if (shouldLog("debug")) {
-    console.debug(`[${getTimeStamp()}]`, ...resolveMessages(messages));
+    console.debug(
+      `%c[DEBUG][${getTimeStamp()}]`,
+      LOG_COLORS.debug,
+      ...resolveMessages(messages),
+    );
   }
 };
 
@@ -97,7 +116,11 @@ log.debug = function (...messages: LogMessage[]): void {
  */
 log.info = function (...messages: LogMessage[]): void {
   if (shouldLog("info")) {
-    console.log(`[${getTimeStamp()}]`, ...resolveMessages(messages));
+    console.log(
+      `%c[INFO][${getTimeStamp()}]`,
+      LOG_COLORS.info,
+      ...resolveMessages(messages),
+    );
   }
 };
 
@@ -106,7 +129,11 @@ log.info = function (...messages: LogMessage[]): void {
  */
 log.warn = function (...messages: LogMessage[]): void {
   if (shouldLog("warn")) {
-    console.warn(`[${getTimeStamp()}]`, ...resolveMessages(messages));
+    console.warn(
+      `%c[WARN][${getTimeStamp()}]`,
+      LOG_COLORS.warn,
+      ...resolveMessages(messages),
+    );
   }
 };
 
@@ -115,7 +142,11 @@ log.warn = function (...messages: LogMessage[]): void {
  */
 log.error = function (...messages: LogMessage[]): void {
   if (shouldLog("error")) {
-    console.error(`[${getTimeStamp()}]`, ...resolveMessages(messages));
+    console.error(
+      `%c[ERROR][${getTimeStamp()}]`,
+      LOG_COLORS.error,
+      ...resolveMessages(messages),
+    );
   }
 };
 
@@ -221,7 +252,13 @@ export function getLogger(
   const taggedLog: TaggedLogger = (...messages: LogMessage[]) => {
     // Check disabled state - undefined means enabled
     if (taggedLog.disabled === true) return;
-    log.info(`[${tag}]`, ...messages);
+    if (shouldLog("info")) {
+      console.log(
+        `%c[INFO][${tag}::${getTimeStamp()}]`,
+        LOG_COLORS.taggedInfo,
+        ...resolveMessages(messages),
+      );
+    }
   };
 
   taggedLog.debug = (...messages: LogMessage[]) => {
@@ -229,8 +266,8 @@ export function getLogger(
     if (taggedLog.disabled === true) return;
     if (shouldLog("debug")) {
       console.debug(
-        `[${getTimeStamp()}]`,
-        `[${tag}]`,
+        `%c[DEBUG][${tag}::${getTimeStamp()}]`,
+        LOG_COLORS.taggedDebug,
         ...resolveMessages(messages),
       );
     }
@@ -240,8 +277,8 @@ export function getLogger(
     if (taggedLog.disabled === true) return;
     if (shouldLog("info")) {
       console.log(
-        `[${getTimeStamp()}]`,
-        `[${tag}]`,
+        `%c[INFO][${tag}::${getTimeStamp()}]`,
+        LOG_COLORS.taggedInfo,
         ...resolveMessages(messages),
       );
     }
@@ -251,8 +288,8 @@ export function getLogger(
     if (taggedLog.disabled === true) return;
     if (shouldLog("warn")) {
       console.warn(
-        `[${getTimeStamp()}]`,
-        `[${tag}]`,
+        `%c[WARN][${tag}::${getTimeStamp()}]`,
+        LOG_COLORS.taggedWarn,
         ...resolveMessages(messages),
       );
     }
@@ -262,8 +299,8 @@ export function getLogger(
     if (taggedLog.disabled === true) return;
     if (shouldLog("error")) {
       console.error(
-        `[${getTimeStamp()}]`,
-        `[${tag}]`,
+        `%c[ERROR][${tag}::${getTimeStamp()}]`,
+        LOG_COLORS.taggedError,
         ...resolveMessages(messages),
       );
     }

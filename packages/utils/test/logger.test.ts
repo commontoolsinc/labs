@@ -1,6 +1,12 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { getLogger, getLogLevel, log, setLogLevel } from "../src/logger.ts";
+import {
+  getLogger,
+  getLogLevel,
+  log,
+  LOG_COLORS,
+  setLogLevel,
+} from "../src/logger.ts";
 
 describe("logger", () => {
   // Save initial log level
@@ -15,6 +21,34 @@ describe("logger", () => {
   function isTimestamp(value: unknown): boolean {
     if (typeof value !== "string") return false;
     return /^\[\d{2}:\d{2}:\d{2}\.\d{3}\]$/.test(value);
+  }
+
+  // Helper to check styled timestamp format
+  function expectStyledTimestamp(
+    calls: unknown[][],
+    index: number,
+    color: string,
+    level: string,
+  ) {
+    expect(calls[index][0]).toMatch(
+      new RegExp(`^%c\\[${level}\\]\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]$`),
+    );
+    expect(calls[index][1]).toBe(color);
+  }
+
+  // Helper to check styled module::timestamp format
+  function expectStyledModuleTimestamp(
+    calls: unknown[][],
+    index: number,
+    module: string,
+    color: string,
+    level: string,
+  ) {
+    const pattern = new RegExp(
+      `^%c\\[${level}\\]\\[${module}::\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]$`,
+    );
+    expect(calls[index][0]).toMatch(pattern);
+    expect(calls[index][1]).toBe(color);
   }
 
   // Helper to capture console output
@@ -46,9 +80,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(calls[0]).toHaveLength(3);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["hello", "world"]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual(["hello", "world"]);
     });
 
     it("should handle multiple arguments", () => {
@@ -57,8 +90,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["a", 1, true, { key: "value" }]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual(["a", 1, true, { key: "value" }]);
     });
 
     it("should evaluate lazy functions", () => {
@@ -74,8 +107,8 @@ describe("logger", () => {
 
       expect(evaluated).toBe(true);
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["static", "lazy value"]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual(["static", "lazy value"]);
     });
 
     it("should handle mixed static and lazy messages", () => {
@@ -90,8 +123,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual([
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual([
         "start",
         "lazy1",
         "middle",
@@ -109,8 +142,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["debug message"]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.debug, "DEBUG");
+      expect(calls[0].slice(2)).toEqual(["debug message"]);
     });
 
     it("should log info messages", () => {
@@ -119,8 +152,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["info message"]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual(["info message"]);
     });
 
     it("should log warning messages", () => {
@@ -129,8 +162,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["warning message"]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.warn, "WARN");
+      expect(calls[0].slice(2)).toEqual(["warning message"]);
     });
 
     it("should log error messages", () => {
@@ -139,8 +172,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["error message"]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.error, "ERROR");
+      expect(calls[0].slice(2)).toEqual(["error message"]);
     });
 
     it("should default to info level when using log()", () => {
@@ -149,8 +182,8 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["default message"]);
+      expectStyledTimestamp(calls, 0, LOG_COLORS.info, "INFO");
+      expect(calls[0].slice(2)).toEqual(["default message"]);
     });
 
     it("should handle lazy evaluation for all levels", () => {
@@ -174,14 +207,14 @@ describe("logger", () => {
         log.error(lazyError);
       });
 
-      expect(isTimestamp(debugCalls[0][0])).toBe(true);
-      expect(debugCalls[0].slice(1)).toEqual(["lazy debug"]);
-      expect(isTimestamp(infoCalls[0][0])).toBe(true);
-      expect(infoCalls[0].slice(1)).toEqual(["lazy info"]);
-      expect(isTimestamp(warnCalls[0][0])).toBe(true);
-      expect(warnCalls[0].slice(1)).toEqual(["lazy warn"]);
-      expect(isTimestamp(errorCalls[0][0])).toBe(true);
-      expect(errorCalls[0].slice(1)).toEqual(["lazy error"]);
+      expectStyledTimestamp(debugCalls, 0, LOG_COLORS.debug, "DEBUG");
+      expect(debugCalls[0].slice(2)).toEqual(["lazy debug"]);
+      expectStyledTimestamp(infoCalls, 0, LOG_COLORS.info, "INFO");
+      expect(infoCalls[0].slice(2)).toEqual(["lazy info"]);
+      expectStyledTimestamp(warnCalls, 0, LOG_COLORS.warn, "WARN");
+      expect(warnCalls[0].slice(2)).toEqual(["lazy warn"]);
+      expectStyledTimestamp(errorCalls, 0, LOG_COLORS.error, "ERROR");
+      expect(errorCalls[0].slice(2)).toEqual(["lazy error"]);
     });
   });
 
@@ -293,8 +326,13 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0][1]).toBe("[math]");
+      expectStyledModuleTimestamp(
+        calls,
+        0,
+        "math",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
       expect(calls[0].slice(2)).toEqual(["calculation complete"]);
     });
 
@@ -316,8 +354,13 @@ describe("logger", () => {
           logger("test");
         });
 
-        expect(isTimestamp(calls[0][0])).toBe(true);
-        expect(calls[0][1]).toBe(`[${expected}]`);
+        expectStyledModuleTimestamp(
+          calls,
+          0,
+          expected,
+          LOG_COLORS.taggedInfo,
+          "INFO",
+        );
       }
     });
 
@@ -328,8 +371,13 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0][1]).toBe("[unknown]");
+      expectStyledModuleTimestamp(
+        calls,
+        0,
+        "unknown",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
       expect(calls[0].slice(2)).toEqual(["test message"]);
     });
 
@@ -350,14 +398,38 @@ describe("logger", () => {
         logger.error("error msg");
       });
 
-      expect(isTimestamp(debugCalls[0][0])).toBe(true);
-      expect(debugCalls[0].slice(1)).toEqual(["[auth]", "debug msg"]);
-      expect(isTimestamp(infoCalls[0][0])).toBe(true);
-      expect(infoCalls[0].slice(1)).toEqual(["[auth]", "info msg"]);
-      expect(isTimestamp(warnCalls[0][0])).toBe(true);
-      expect(warnCalls[0].slice(1)).toEqual(["[auth]", "warn msg"]);
-      expect(isTimestamp(errorCalls[0][0])).toBe(true);
-      expect(errorCalls[0].slice(1)).toEqual(["[auth]", "error msg"]);
+      expectStyledModuleTimestamp(
+        debugCalls,
+        0,
+        "auth",
+        LOG_COLORS.taggedDebug,
+        "DEBUG",
+      );
+      expect(debugCalls[0].slice(2)).toEqual(["debug msg"]);
+      expectStyledModuleTimestamp(
+        infoCalls,
+        0,
+        "auth",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
+      expect(infoCalls[0].slice(2)).toEqual(["info msg"]);
+      expectStyledModuleTimestamp(
+        warnCalls,
+        0,
+        "auth",
+        LOG_COLORS.taggedWarn,
+        "WARN",
+      );
+      expect(warnCalls[0].slice(2)).toEqual(["warn msg"]);
+      expectStyledModuleTimestamp(
+        errorCalls,
+        0,
+        "auth",
+        LOG_COLORS.taggedError,
+        "ERROR",
+      );
+      expect(errorCalls[0].slice(2)).toEqual(["error msg"]);
     });
 
     it("should respect severity filtering with tagged loggers", () => {
@@ -373,8 +445,14 @@ describe("logger", () => {
 
       expect(debugCalls).toHaveLength(0);
       expect(warnCalls).toHaveLength(1);
-      expect(isTimestamp(warnCalls[0][0])).toBe(true);
-      expect(warnCalls[0].slice(1)).toEqual(["[database]", "should appear"]);
+      expectStyledModuleTimestamp(
+        warnCalls,
+        0,
+        "database",
+        LOG_COLORS.taggedWarn,
+        "WARN",
+      );
+      expect(warnCalls[0].slice(2)).toEqual(["should appear"]);
     });
 
     it("should handle lazy evaluation with tags", () => {
@@ -401,8 +479,14 @@ describe("logger", () => {
       });
 
       expect(evaluated).toBe(true);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["[service]", "error message"]);
+      expectStyledModuleTimestamp(
+        calls,
+        0,
+        "service",
+        LOG_COLORS.taggedError,
+        "ERROR",
+      );
+      expect(calls[0].slice(2)).toEqual(["error message"]);
     });
 
     it("should use real import.meta.url", () => {
@@ -413,8 +497,13 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0][1]).toBe("[logger.test]");
+      expectStyledModuleTimestamp(
+        calls,
+        0,
+        "logger.test",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
     });
 
     it("should auto-detect caller when no URL provided", () => {
@@ -426,8 +515,13 @@ describe("logger", () => {
 
       expect(calls).toHaveLength(1);
       // Should detect this test file
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0][1]).toBe("[logger.test]");
+      expectStyledModuleTimestamp(
+        calls,
+        0,
+        "logger.test",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
     });
   });
 
@@ -441,8 +535,14 @@ describe("logger", () => {
       });
 
       expect(calls).toHaveLength(1);
-      expect(isTimestamp(calls[0][0])).toBe(true);
-      expect(calls[0].slice(1)).toEqual(["[logger.test]", "should appear"]);
+      expectStyledModuleTimestamp(
+        calls,
+        0,
+        "logger.test",
+        LOG_COLORS.taggedInfo,
+        "INFO",
+      );
+      expect(calls[0].slice(2)).toEqual(["should appear"]);
     });
 
     it("should create disabled logger when enabled: false", () => {
