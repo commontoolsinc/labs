@@ -82,6 +82,10 @@ export class Storage implements IStorage {
   // They will be removed from here as soon as we call send, but they will
   // still be in the docToStoragePromises until the send returns.
   private dirtyDocs = new Set<string>();
+  // Track active _updateDoc operations to prevent race conditions
+  private activeUpdateFromStorageCount = 0;
+  private updateFromStoragePromise: Promise<void> | undefined;
+  private _updateFromStorageResolver: (() => void) | undefined;
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -184,6 +188,9 @@ export class Storage implements IStorage {
     this.docToStorageSubs.clear();
     this.docToStoragePromises.clear();
     this.dirtyDocs.clear();
+    this.activeUpdateFromStorageCount = 0;
+    this.updateFromStoragePromise = undefined;
+    this._updateFromStorageResolver = undefined;
     this.cancel();
   }
 
@@ -415,22 +422,12 @@ export class Storage implements IStorage {
         JSON.stringify(value),
       ],
     );
-    const storageValue: StorageValue<JSONValue> = {
-      value:
-        (doc.get() === undefined
-          ? undefined
-          : JSON.parse(JSON.stringify(doc.get()))),
-      ...(doc.sourceCell?.entityId !== undefined)
-        ? { source: doc.sourceCell.entityId }
-        : {},
-      ...(labels !== undefined) ? { labels: labels } : {},
-    };
+    const storageValue = Storage._cellLinkToJSON(doc, labels);
     const existingValue = this._getStorageProviderForSpace(doc.space).get<
       JSONValue
     >(
       doc.entityId,
     );
-    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
     // If our value is the same as what storage has, we don't need to do anything.
     if (deepEqual(storageValue, existingValue)) {
       return;
@@ -459,6 +456,7 @@ export class Storage implements IStorage {
     }
 
     // If we're already dirty, we don't need to add a promise
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
     if (this.dirtyDocs.has(docKey)) {
       return;
     }
@@ -472,20 +470,22 @@ export class Storage implements IStorage {
 
   private async _sendDocValue(doc: DocImpl<unknown>, labels?: Labels) {
     await this.runtime.idle();
-    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+
+    // Wait for all _updateDoc operations to complete, then wait for runtime to
+    // be idle again. Since more updates might have come in in the meantime,
+    // wait again. Repeat until the incoming queue is empty and the runtime is
+    // settled.
+    while (this.updateFromStoragePromise) {
+      await this.updateFromStoragePromise;
+      await this.runtime.idle();
+    }
+
+    this.dirtyDocs.delete(`${doc.space}/${toURI(doc.entityId)}`);
+
     const storageProvider = this._getStorageProviderForSpace(doc.space);
-    // We're dirty -- mark clean, then write to storage
-    this.dirtyDocs.delete(docKey);
-    const storageValue: StorageValue<JSONValue> = {
-      value:
-        (doc.get() === undefined
-          ? undefined
-          : JSON.parse(JSON.stringify(doc.get()))),
-      ...(doc.sourceCell?.entityId !== undefined)
-        ? { source: doc.sourceCell.entityId }
-        : {},
-      ...(labels !== undefined) ? { labels: labels } : {},
-    };
+
+    // Create storage value using the helper to ensure consistency
+    const storageValue = Storage._cellLinkToJSON(doc, labels);
 
     await storageProvider.send([{
       entityId: doc.entityId,
@@ -498,23 +498,60 @@ export class Storage implements IStorage {
     doc: DocImpl<JSONValue>,
     storageValue: StorageValue<JSONValue>,
   ) {
-    // Don't update docs while they might be updating.
-    await this.runtime.scheduler.idle();
+    // Mark this doc as being processed
+    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+    this.dirtyDocs.add(docKey);
 
-    if (!deepEqual(storageValue.value, doc.get())) {
-      // values differ
-      const newDocValue = JSON.parse(JSON.stringify(storageValue.value));
-      doc.send(newDocValue);
+    // Increment the counter at the start
+    this.activeUpdateFromStorageCount++;
+
+    // Create or update the promise if this is the first update
+    if (this.activeUpdateFromStorageCount === 1) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      this.updateFromStoragePromise = promise;
+      // Store the resolver to call when count reaches 0
+      this._updateFromStorageResolver = resolve;
     }
-    const newSourceCell = (storageValue.source !== undefined)
-      ? this.runtime.documentMap.getDocByEntityId(
-        doc.space,
-        storageValue.source,
-        false,
-      )
-      : undefined;
-    if (doc.sourceCell !== newSourceCell) {
-      doc.sourceCell = newSourceCell;
+
+    try {
+      // Don't update docs while they might be updating.
+      await this.runtime.idle();
+
+      if (!deepEqual(storageValue.value, doc.get())) {
+        // values differ
+        const newDocValue = JSON.parse(JSON.stringify(storageValue.value));
+        doc.send(newDocValue);
+      }
+      const newSourceCell = (storageValue.source !== undefined)
+        ? this.runtime.documentMap.getDocByEntityId(
+          doc.space,
+          storageValue.source,
+          false,
+        )
+        : undefined;
+      if (doc.sourceCell !== newSourceCell) {
+        doc.sourceCell = newSourceCell;
+      }
+    } finally {
+      // Remove the processing flag. Do this _after_ doc.send(), so _updateDoc,
+      // which is called synchronously during that call is not going to schedule
+      // sending this back to storage.
+      this.dirtyDocs.delete(docKey);
+
+      // Decrement the counter
+      this.activeUpdateFromStorageCount--;
+
+      // If this was the last update, resolve the promise
+      if (
+        this.activeUpdateFromStorageCount === 0 && this.updateFromStoragePromise
+      ) {
+        const resolver = this._updateFromStorageResolver;
+        if (resolver) {
+          resolver();
+        }
+        this.updateFromStoragePromise = undefined;
+        this._updateFromStorageResolver = undefined;
+      }
     }
   }
 
