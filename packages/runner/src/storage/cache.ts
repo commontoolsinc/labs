@@ -879,7 +879,7 @@ export class Replica {
       // facts (or gotten a conflict).
       // Server facts may have newer nursery changes that we want to keep.
       const freshFacts = revisions.filter((revision) =>
-        this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0 === 0
+        (this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0) === 0
       );
 
       // Evict redundant facts which we just merged into `heap` so that reads
