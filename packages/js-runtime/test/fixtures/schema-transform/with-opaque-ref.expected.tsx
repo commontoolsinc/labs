@@ -23,6 +23,6 @@ export default recipe(model, model, (cell) => {
         <p>Value: {commontools_1.derive(cell, _v1 => _v1.value)}</p>
         <p>Doubled: {doubled}</p>
       </div>),
-        value: commontools_1.derive(cell, _v1 => _v1.value),
+        value: cell.value,
     };
 });
