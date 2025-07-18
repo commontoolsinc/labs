@@ -2,9 +2,11 @@ import { SchemaContext } from "../builder/types.ts";
 import type { Entity, Result, Unit } from "@commontools/memory/interface";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../doc-map.ts";
-import { log } from "../log.ts";
+import { getLogger } from "@commontools/utils/logger";
 import { IStorageProvider, StorageValue } from "./interface.ts";
 export type { Result, Unit };
+
+const logger = getLogger({ enabled: false, level: "debug" });
 
 export abstract class BaseStorageProvider implements IStorageProvider {
   protected subscribers = new Map<string, Set<(value: StorageValue) => void>>();
@@ -46,7 +48,7 @@ export abstract class BaseStorageProvider implements IStorageProvider {
   }
 
   protected notifySubscribers(key: string, value: StorageValue): void {
-    log(() => [`notify subscribers ${key} ${JSON.stringify(value)}`]);
+    logger.debug(() => `notify subscribers ${key} ${JSON.stringify(value)}`);
     const listeners = this.subscribers.get(key);
     if (this.waitingForSync.has(key) && listeners && listeners.size > 0) {
       throw new Error(
@@ -64,7 +66,9 @@ export abstract class BaseStorageProvider implements IStorageProvider {
         new Promise((r) => this.waitingForSyncResolvers.set(key, r)),
       );
     }
-    log(() => [`waiting for sync ${key} ${[...this.waitingForSync.keys()]}`]);
+    logger.debug(() =>
+      `waiting for sync ${key} ${[...this.waitingForSync.keys()]}`
+    );
     return this.waitingForSync.get(key)!;
   }
 
