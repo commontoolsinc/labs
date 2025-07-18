@@ -1,10 +1,10 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { BaseView } from "../views/BaseView.ts";
-import { CharmsController } from "@commontools/charm/ops";
+import { BaseView } from "./BaseView.ts";
+import { RuntimeInternals } from "../lib/runtime.ts";
 import { Task } from "@lit/task";
 
-export class XCharmElement extends BaseView {
+export class XCharmView extends BaseView {
   static override styles = css`
     :host {
       display: block;
@@ -12,19 +12,19 @@ export class XCharmElement extends BaseView {
   `;
 
   @property({ attribute: false })
-  cc?: CharmsController;
+  rt?: RuntimeInternals;
 
   @property({ attribute: false })
   charmId?: string;
 
   private _charm = new Task(this, {
-    task: async ([charmId, cc]) => {
-      if (!this.charmId || !this.cc) {
+    task: async ([charmId, rt]) => {
+      if (!charmId || !rt) {
         return;
       }
-      return await cc!.get(charmId!);
+      return await rt.cc().get(charmId!);
     },
-    args: () => [this.charmId, this.cc],
+    args: () => [this.charmId, this.rt],
   });
 
   override render() {
@@ -40,4 +40,4 @@ export class XCharmElement extends BaseView {
   }
 }
 
-globalThis.customElements.define("x-charm", XCharmElement);
+globalThis.customElements.define("x-charm-view", XCharmView);
