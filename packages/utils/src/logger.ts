@@ -1,5 +1,75 @@
 /**
  * Minimal logging library for both Deno and browser environments
+ *
+ * @module
+ * This module provides a flexible logging system with:
+ * - Severity levels (debug, info, warn, error)
+ * - Lazy evaluation for expensive computations
+ * - Module-specific tagging with automatic detection
+ * - Per-logger configuration
+ * - Console styling support
+ *
+ * @example Typical usage - disabled by default with debug level
+ * ```typescript
+ * import { getLogger } from "@commontools/utils/logger";
+ *
+ * // Common pattern: create a debug logger that's disabled by default
+ * // pass in function for lazy evaluation of parameters
+ * const logger = getLogger({ enabled: false, level: "debug" });
+ * logger.debug(() => ["Processing:", data]);
+ * ```
+ *
+ * @example Basic usage
+ * ```typescript
+ * import { log, setLogLevel } from "@commontools/utils/logger";
+ *
+ * // Simple logging (uses info level by default)
+ * log("Application started");
+ *
+ * // Change global log level
+ * setLogLevel("debug");
+ * ```
+ *
+ * @example Module-tagged logging
+ * ```typescript
+ * import { getLogger } from "@commontools/utils/logger";
+ *
+ * // Auto-detects calling module from stack trace - recommended approach
+ * const logger = getLogger();
+ *
+ * // Logs will show: [INFO][your-module::HH:MM:SS.mmm] message
+ * logger.info("Processing user data");
+ * logger.debug("Cache hit for user", userId);
+ * logger.warn("API rate limit approaching");
+ * logger.error("Failed to save user", error);
+ * ```
+ *
+ * @example Lazy evaluation for expensive operations
+ * ```typescript
+ * const logger = getLogger();
+ *
+ * // Function is only called if debug level is active
+ * logger.debug(() => `Computed value: ${expensiveComputation()}`);
+ *
+ * // Works with arrays that get flattened
+ * logger.info(() => ["Processing", count, "items"]);
+ * ```
+ *
+ * @example Per-logger configuration
+ * ```typescript
+ * // Create a debug logger for development
+ * const debugLogger = getLogger({
+ *   level: "debug",  // Show all messages for this logger
+ *   enabled: true    // Explicitly enable
+ * });
+ *
+ * // Create a disabled logger for verbose sections
+ * const verboseLogger = getLogger({ enabled: false });
+ *
+ * // Enable/disable at runtime
+ * verboseLogger.disabled = false; // Now it will log
+ * verboseLogger.info("This will show");
+ * ```
  */
 
 export type LogMessage = unknown | (() => unknown);
