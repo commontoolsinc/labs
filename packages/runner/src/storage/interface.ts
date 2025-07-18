@@ -56,18 +56,6 @@ export type Read = IAttestation;
  */
 export type Write = IAttestation;
 
-export interface IStorageTransactionInvariant {
-  read?: IStorageInvariant;
-  write?: IStorageInvariant;
-}
-
-export interface IStorageTransactionLog {
-  get(address: IMemorySpaceAddress): IStorageTransactionInvariant;
-  addRead(read: IStorageInvariant): void;
-  addWrite(write: IStorageInvariant): void;
-  [Symbol.iterator](): Iterator<IStorageTransactionInvariant>;
-}
-
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
 export type Labels = {
@@ -371,20 +359,15 @@ export interface IMemoryChange {
   after: JSONValue | undefined;
 }
 
-export type IStorageTransactionProgress = Variant<{
-  open: IStorageTransactionLog;
-  pending: IStorageTransactionLog;
-  done: IStorageTransactionLog;
-}>;
-export type StorageTransactionStatus = Result<
-  IStorageTransactionState,
-  StorageTransactionFailed
->;
-
-export type IStorageTransactionState =
+export type StorageTransactionStatus =
   | { status: "ready"; journal: ITransactionJournal }
   | { status: "pending"; journal: ITransactionJournal }
-  | { status: "done"; journal: ITransactionJournal };
+  | { status: "done"; journal: ITransactionJournal }
+  | {
+    status: "error";
+    journal: ITransactionJournal;
+    error: StorageTransactionFailed;
+  };
 
 /**
  * Representation of a storage transaction, which can be used to query facts and
@@ -400,19 +383,22 @@ export type IStorageTransactionState =
  */
 export interface IStorageTransaction {
   /**
-   * Describes current status of the transaction. If transaction has failed
-   * or was cancelled result will be an error with a corresponding error variant.
-   * If transaction is being built it will have `open` status, if commit was
-   * called but promise has not resolved yet it will be `pending`. If commit
-   * successfully completed it will be `done`.
-   *
-   * Please note that if storage was updated since transaction was created such
-   * that any of the invariants have changed status will be change to
-   * `IStorageConsistencyError` even though transaction has not being commited.
-   * This allows transactor to cancel and recreate transaction with a current
-   * state without having to build up a whole transaction and commiting it.
+   * The transaction journal containing all read and write activities.
+   * Provides access to transaction operations and dependency tracking.
    */
-  // status(): StorageTransactionStatus;
+  readonly journal: ITransactionJournal;
+
+  /**
+   * Describes current status of the transaction. Returns a union type with
+   * status field indicating the current state:
+   * - `"ready"`: Transaction is being built and ready for operations
+   * - `"pending"`: Commit was called but promise has not resolved yet
+   * - `"done"`: Commit successfully completed
+   * - `"error"`: Transaction has failed or was cancelled, includes error details
+
+   * Each status variant includes a `journal` field with transaction operations.
+   */
+  status(): StorageTransactionStatus;
 
   /**
    * Helper that is the same as `reader().read()` but more convenient, as it
@@ -496,21 +482,6 @@ export interface IStorageTransaction {
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
   /**
-   * Describes current status of the transaction. If transaction has failed
-   * or was cancelled result will be an error with a corresponding error variant.
-   * If transaction is being built it will have `open` status, if commit was
-   * called but promise has not resolved yet it will be `pending`. If commit
-   * successfully completed it will be `done`.
-   *
-   * Please note that if storage was updated since transaction was created such
-   * that any of the invariants have changed status will be change to
-   * `IStorageConsistencyError` even though transaction has not being commited.
-   * This allows transactor to cancel and recreate transaction with a current
-   * state without having to build up a whole transaction and commiting it.
-   */
-  status(): Result<IStorageTransactionProgress, StorageTransactionFailed>;
-
-  /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
    *
@@ -556,19 +527,6 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     value: JSONValue | undefined,
   ): void;
 
-  /**
-   * Returns the log of the transaction.
-   *
-   * The log is a list of changes that have been made to the transaction.
-   * It is used to track the dependencies of the transaction.
-   *
-   * If the transaction is aborted, the log reflects the attempted reads and
-   * writes. If the transaction is committed, the log reflects the actual reads
-   * and writes.
-   *
-   * @deprecated
-   */
-  log(): IStorageTransactionLog;
 }
 
 export interface ITransactionReader {
@@ -842,32 +800,6 @@ export interface ITransactionJournal {
 
   novelty(space: MemorySpace): Iterable<IAttestation>;
   history(space: MemorySpace): Iterable<IAttestation>;
-
-  reader(
-    space: MemorySpace,
-  ): Result<ITransactionReader, InactiveTransactionError>;
-
-  writer(
-    space: MemorySpace,
-  ): Result<ITransactionWriter, InactiveTransactionError>;
-
-  /**
-   * Closes underlying transaction, making it non-editable going forward. Any
-   * attempts to edit it will fail.
-   */
-  close(): Result<Map<MemorySpace, ITransaction>, InactiveTransactionError>;
-
-  /**
-   * Aborts underlying transaction, making it non-editable going forward. Any
-   * attempts to edit it will fail.
-   */
-  abort(reason?: unknown): Result<Unit, InactiveTransactionError>;
-}
-
-export interface EditableJournal {
-  activity(): Iterable<Activity>;
-  novelty: Iterable<IAttestation>;
-  history(): Iterable<IAttestation>;
 }
 
 export interface ITransaction {
@@ -927,10 +859,5 @@ export interface IReadOnlyAddressError extends Error {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: JSONValue;
-}
-
-export interface IStorageInvariant {
-  readonly address: IMemorySpaceAddress;
   readonly value?: JSONValue;
 }

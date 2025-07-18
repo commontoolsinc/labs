@@ -51,6 +51,9 @@ export async function bundle(inputPath: string, outputPath: string) {
     plugins: [...denoPlugins()],
     entryPoints: [inputPath],
     outfile: outputPath,
+    supported: {
+      using: false,
+    },
     bundle: true,
     format: "esm",
   });

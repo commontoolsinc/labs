@@ -73,6 +73,10 @@ class StorageTransaction implements IStorageTransaction {
     this.#state = state;
   }
 
+  get journal() {
+    return this.#state.journal;
+  }
+
   status(): StorageTransactionStatus {
     return status(this);
   }
@@ -112,9 +116,13 @@ export const status = (
 ): StorageTransactionStatus => {
   const state = use(transaction);
   if (state.status === "done") {
-    return state.result.error ? state.result : { ok: state };
+    if (state.result.error) {
+      return { status: "error", journal: state.journal, error: state.result.error };
+    } else {
+      return { status: "done", journal: state.journal };
+    }
   } else {
-    return { ok: state };
+    return { status: state.status, journal: state.journal };
   }
 };
 

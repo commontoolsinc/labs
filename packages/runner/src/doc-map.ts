@@ -110,78 +110,14 @@ export function getEntityId(value: any): { "/": string } | undefined {
   } else return entityId;
 }
 
-/**
- * A map that holds weak references to its values. Triggers a cleanup of the map
- * when any item was garbage collected, so that the weak references themselves
- * can be garbage collected.
- */
-class CleanableMap<T extends object> {
-  private map = new Map<string, WeakRef<T>>();
-  private cleanupScheduled = false;
-
-  set(key: string, value: T) {
-    this.map.set(key, new WeakRef(value));
-  }
-
-  get(key: string): T | undefined {
-    const ref = this.map.get(key);
-    if (ref) {
-      const value = ref.deref();
-      if (value === undefined) {
-        this.scheduleCleanup();
-      }
-      return value;
-    }
-    return undefined;
-  }
-
-  private scheduleCleanup() {
-    if (!this.cleanupScheduled) {
-      this.cleanupScheduled = true;
-      queueMicrotask(() => {
-        this.cleanup();
-        this.cleanupScheduled = false;
-      });
-    }
-  }
-
-  private cleanup() {
-    for (const [key, ref] of this.map) {
-      if (ref.deref() === undefined) {
-        this.map.delete(key);
-      }
-    }
-  }
-}
-
-/**
- * A map that holds weak references to its values per space.
- */
-class SpaceAwareCleanableMap<T extends object> {
-  private maps = new Map<string, CleanableMap<T>>();
-
-  set(space: string, key: string, value: T) {
-    let map = this.maps.get(space);
-    if (!map) {
-      map = new CleanableMap<T>();
-      this.maps.set(space, map);
-    }
-    map.set(key, value);
-  }
-
-  get(space: string, key: string): T | undefined {
-    return this.maps.get(space)?.get(key);
-  }
-
-  cleanup() {
-    this.maps.clear();
-  }
-}
-
 export class DocumentMap implements IDocumentMap {
-  private entityIdToDocMap = new SpaceAwareCleanableMap<DocImpl<any>>();
+  private entityIdToDocMap = new Map<string, DocImpl<any>>();
 
   constructor(readonly runtime: IRuntime) {}
+
+  private _getDocKey(space: string, entityId: EntityId | string): string {
+    return space + "/" + JSON.stringify(normalizeEntityId(entityId));
+  }
 
   getDocByEntityId<T = any>(
     space: MemorySpace,
@@ -203,7 +139,7 @@ export class DocumentMap implements IDocumentMap {
   ): DocImpl<T> | undefined {
     const normalizedId = normalizeEntityId(entityId);
 
-    let doc = this.entityIdToDocMap.get(space, JSON.stringify(normalizedId));
+    let doc = this.entityIdToDocMap.get(this._getDocKey(space, normalizedId));
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
 
@@ -218,19 +154,19 @@ export class DocumentMap implements IDocumentMap {
     doc: DocImpl<any>,
   ): void {
     // throw if doc already exists
-    if (this.entityIdToDocMap.get(space, JSON.stringify(entityId))) {
+    if (this.entityIdToDocMap.get(this._getDocKey(space, entityId))) {
       throw new Error("Doc already exists");
     }
 
-    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+    this.entityIdToDocMap.set(this._getDocKey(space, entityId), doc);
   }
 
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
-    this.entityIdToDocMap.set(space, JSON.stringify(entityId), doc);
+    this.entityIdToDocMap.set(this._getDocKey(space, entityId), doc);
   }
 
   cleanup(): void {
-    this.entityIdToDocMap.cleanup();
+    this.entityIdToDocMap.clear();
   }
 
   /**

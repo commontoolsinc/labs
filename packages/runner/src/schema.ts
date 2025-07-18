@@ -270,7 +270,7 @@ export function validateAndTransform(
   // from the tx. Once tx.commit() is called, all that data is either available
   // via other transactions or has been rolled back. Either way, we want to
   // reflect that reality.
-  if (!tx?.status().ok?.open) tx = undefined;
+  if (tx?.status().status !== "ready") tx = undefined;
 
   // Reconstruct doc, path, schema, rootSchema from link and runtime
   const schema = link.schema;

@@ -26,8 +26,7 @@ describe("StorageTransaction", () => {
   describe("Basic Lifecycle", () => {
     it("should start with ready status", () => {
       const result = transaction.status();
-      expect(result.ok).toBeDefined();
-      expect(result.ok?.status).toBe("ready");
+      expect(result.status).toBe("ready");
     });
 
     it("should create reader for a space", () => {
@@ -323,10 +322,12 @@ describe("StorageTransaction", () => {
       expect(result.ok).toBeDefined();
 
       const status = transaction.status();
-      expect(status.error).toBeDefined();
-      expect(status.error?.name).toBe("StorageTransactionAborted");
-      if (status.error?.name === "StorageTransactionAborted") {
-        expect(status.error.reason).toBe(reason);
+      expect(status.status).toBe("error");
+      if (status.status === "error") {
+        expect(status.error.name).toBe("StorageTransactionAborted");
+        if (status.error.name === "StorageTransactionAborted") {
+          expect(status.error.reason).toBe(reason);
+        }
       }
     });
 
@@ -374,8 +375,7 @@ describe("StorageTransaction", () => {
       expect(result.ok).toBeDefined();
 
       const status = transaction.status();
-      expect(status.ok).toBeDefined();
-      expect(status.ok?.status).toBe("done");
+      expect(status.status).toBe("done");
     });
 
     it("should commit transaction with changes", async () => {
@@ -418,15 +418,13 @@ describe("StorageTransaction", () => {
 
       // Check status while committing
       const pendingStatus = transaction.status();
-      expect(pendingStatus.ok).toBeDefined();
-      expect(pendingStatus.ok?.status).toBe("pending");
+      expect(pendingStatus.status).toBe("pending");
 
       await commitPromise;
 
       // Check status after commit
       const doneStatus = transaction.status();
-      expect(doneStatus.ok).toBeDefined();
-      expect(doneStatus.ok?.status).toBe("done");
+      expect(doneStatus.status).toBe("done");
     });
 
     it("should fail operations after commit", async () => {
@@ -515,8 +513,10 @@ describe("StorageTransaction", () => {
 
       // Verify transaction status shows failure
       const status = freshTransaction.status();
-      expect(status.error).toBeDefined();
-      expect(status.error?.name).toBe("StorageTransactionInconsistent");
+      expect(status.status).toBe("error");
+      if (status.status === "error") {
+        expect(status.error.name).toBe("StorageTransactionInconsistent");
+      }
     });
   });
 

@@ -158,7 +158,8 @@ export function llm(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to set the result.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
         resultWithLog.withTx(asyncTx).set(text);
@@ -177,7 +178,8 @@ export function llm(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to set the result.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
         resultWithLog.withTx(asyncTx).set(undefined);
@@ -330,7 +332,8 @@ export function generateObject<T extends Record<string, unknown>>(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to set the result.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
         resultWithLog.withTx(asyncTx).set(response.object);
@@ -348,7 +351,8 @@ export function generateObject<T extends Record<string, unknown>>(
         // All this code runside outside the original action, and the
         // transaction above might have closed by the time this is called. If
         // so, we create a new one to set the result.
-        const asyncTx = tx.status().ok?.open ? tx : runtime.edit();
+        const status = tx.status();
+        const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
         resultWithLog.withTx(asyncTx).set({} as any); // FIXME(ja): setting result to undefined causes a storage conflict

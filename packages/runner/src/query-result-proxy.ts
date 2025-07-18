@@ -32,6 +32,7 @@ enum ArrayMethodType {
 const arrayMethods: { [key: string]: ArrayMethodType } = {
   at: ArrayMethodType.ReadOnly,
   concat: ArrayMethodType.ReadOnly,
+  copyWithin: ArrayMethodType.ReadWrite,
   entries: ArrayMethodType.ReadOnly,
   every: ArrayMethodType.ReadOnly,
   fill: ArrayMethodType.WriteOnly,
@@ -40,6 +41,9 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   findIndex: ArrayMethodType.ReadOnly,
   findLast: ArrayMethodType.ReadOnly,
   findLastIndex: ArrayMethodType.ReadOnly,
+  flat: ArrayMethodType.ReadOnly,
+  flatMap: ArrayMethodType.ReadOnly,
+  forEach: ArrayMethodType.ReadOnly,
   includes: ArrayMethodType.ReadOnly,
   indexOf: ArrayMethodType.ReadOnly,
   join: ArrayMethodType.ReadOnly,
@@ -56,11 +60,19 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   some: ArrayMethodType.ReadOnly,
   sort: ArrayMethodType.ReadWrite,
   splice: ArrayMethodType.ReadWrite,
-  toLocaleString: ArrayMethodType.ReadOnly,
-  toString: ArrayMethodType.ReadOnly,
+  toReversed: ArrayMethodType.ReadOnly,
+  toSorted: ArrayMethodType.ReadOnly,
+  toSpliced: ArrayMethodType.ReadOnly,
   unshift: ArrayMethodType.WriteOnly,
   values: ArrayMethodType.ReadOnly,
   with: ArrayMethodType.ReadOnly,
+
+  hasOwnProperty: ArrayMethodType.ReadOnly,
+  isPrototypeOf: ArrayMethodType.ReadOnly,
+  propertyIsEnumerable: ArrayMethodType.ReadOnly,
+  valueOf: ArrayMethodType.ReadOnly,
+  toString: ArrayMethodType.ReadOnly,
+  toLocaleString: ArrayMethodType.ReadOnly,
 };
 
 export function createQueryResultProxy<T>(
@@ -77,7 +89,8 @@ export function createQueryResultProxy<T>(
   }
 
   // Resolve path and follow links to actual value.
-  const readTx = tx?.status().ok?.open ? tx : runtime.edit();
+  const txStatus = tx?.status();
+  const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
   link = resolveLinkToValue(readTx, link);
   const target = readTx.readValueOrThrow(link) as any;
 
@@ -116,7 +129,11 @@ export function createQueryResultProxy<T>(
         else return value;
       }
 
-      if (Array.isArray(target) && prop in arrayMethods) {
+      if (
+        Array.isArray(target) &&
+        Object.prototype.hasOwnProperty.call(arrayMethods, prop) &&
+        typeof (target[prop as keyof typeof target]) === "function"
+      ) {
         const method = Array.prototype[prop as keyof typeof Array.prototype];
         const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
 
