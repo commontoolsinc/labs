@@ -206,10 +206,10 @@ export interface IStorage extends IStorageSubscriptionCapability {
   edit(): IExtendedStorageTransaction;
 
   syncCell<T = any>(
-    cell: DocImpl<T> | Cell<any>,
+    cell: Cell<any>,
     expectedInStorage?: boolean,
     schemaContext?: any,
-  ): Promise<DocImpl<T>> | DocImpl<T>;
+  ): Promise<Cell<T>> | Cell<T>;
   synced(): Promise<void>;
   cancelAll(): Promise<void>;
 

@@ -74,9 +74,9 @@ export class Storage implements IStorage {
   private storageProviders = new Map<string, IStorageProvider>();
 
   // Any doc here is being synced or in the process of spinning up syncing.
-  private loadingPromises = new Map<string, Promise<DocImpl<any>>>();
+  private loadingPromises = new Map<string, Promise<Cell<any>>>();
   // Resolves for the promises above.
-  private loadingResolves = new Map<string, (doc: DocImpl<any>) => void>();
+  private loadingResolves = new Map<string, (doc: Cell<any>) => void>();
 
   // We'll also keep track of the subscriptions for the docs
   // These don't care about schema, and use the id from the entity id
@@ -155,10 +155,10 @@ export class Storage implements IStorage {
    * TODO(seefeld): Should this return a `Cell` instead? Or just an empty promise?
    */
   async syncCell<T = any>(
-    cell: DocImpl<T> | Cell<any>,
+    cell: Cell<any>,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
-  ): Promise<DocImpl<T>> {
+  ): Promise<Cell<T>> {
     // If we aren't overriding the schema context, and we have a schema in the cell, use that
     if (
       schemaContext === undefined && isCell(cell) &&
@@ -172,8 +172,7 @@ export class Storage implements IStorage {
       };
     }
 
-    let doc = cell;
-    if (isCell(cell) || isStream(cell)) doc = cell.getDoc();
+    const doc = cell.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
@@ -182,7 +181,7 @@ export class Storage implements IStorage {
     // If the doc is ephemeral, we don't need to load it from storage. We still
     // add it to the map of known docs, so that we don't try to keep loading
     // it.
-    if (doc.ephemeral) return doc;
+    if (doc.ephemeral) return cell;
 
     const syncKey = Storage._getSyncKey(doc, schemaContext);
     // If the doc/schema pair is already loading, await that promise
@@ -192,7 +191,7 @@ export class Storage implements IStorage {
 
     // Set up a promise, so that we can notify other syncCell callers when our
     // results are ready.
-    const { promise, resolve } = Promise.withResolvers<DocImpl<T>>();
+    const { promise, resolve } = Promise.withResolvers<Cell<T>>();
     this.loadingPromises.set(syncKey, promise);
     this.loadingResolves.set(syncKey, resolve);
 
@@ -212,10 +211,10 @@ export class Storage implements IStorage {
     } else {
       await this._integrateResult(doc, storageProvider, schemaContext);
     }
-    this.loadingResolves.get(syncKey)?.(doc);
+    this.loadingResolves.get(syncKey)?.(cell);
     this.loadingResolves.delete(syncKey);
     this.loadingPromises.delete(syncKey);
-    return doc;
+    return cell;
   }
 
   async synced(): Promise<void> {
@@ -502,7 +501,7 @@ export class Storage implements IStorage {
       );
       // we don't need to await this, since by the time we've resolved our
       // docToStoragePromise, we'll have added the loadingPromise.
-      this.syncCell(linkedDoc);
+      this.syncCell(linkedDoc.asCell());
     }
 
     // If we're already dirty, we don't need to add a promise

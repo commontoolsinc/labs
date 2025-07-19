@@ -179,7 +179,7 @@ declare module "@commontools/api" {
     ): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: T) => Cancel | undefined | void): Cancel;
-    sync(): Promise<void>;
+    sync(): Promise<Cell<T>> | Cell<T>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -491,10 +491,7 @@ function createRegularCell<T>(
       createCell(runtime, link, newTx),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, runtime, link),
-    sync: () =>
-      Promise.resolve(runtime.storage.syncCell(self)) as unknown as Promise<
-        void
-      >,
+    sync: () => runtime.storage.syncCell(self),
     getAsQueryResult: (
       subPath: PropertyKey[] = [],
       newTx?: IExtendedStorageTransaction,
