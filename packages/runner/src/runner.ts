@@ -477,7 +477,7 @@ export class Runner implements IRunner {
           );
           this.discoverAndCacheFunctionsFromModule(referencedModule);
         } catch (error) {
-          console.warn("Failed to resolve module reference:", error);
+          console.warn(`Failed to resolve module reference for implementation "${module.implementation}":`, error);
         }
         break;
     }
