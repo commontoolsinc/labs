@@ -12,13 +12,12 @@ import type {
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
+  IStorageSubscription,
   MemorySpace,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
-import { isDoc } from "./doc.ts";
-import { DocumentMap, type EntityId, getEntityId } from "./doc-map.ts";
+import { DocumentMap, type EntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   type Action,
@@ -31,11 +30,10 @@ import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
 import {
   ExtendedStorageTransaction,
-  StorageTransaction,
+  ShimStorageManager,
 } from "./storage/transaction-shim.ts";
 import {
   type CellLink,
-  isLegacyCellLink,
   isLink,
   isNormalizedFullLink,
   type NormalizedFullLink,
@@ -108,6 +106,7 @@ export interface IRuntime {
   readonly staticCache: StaticCache;
   readonly useStorageManagerTransactions?: boolean;
   readonly storageManager: IStorageManager;
+  readonly shimStorageManager?: ShimStorageManager;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -200,6 +199,12 @@ export interface IScheduler {
   queueEvent(eventRef: NormalizedFullLink, event: any): void;
   addEventHandler(handler: EventHandler, ref: NormalizedFullLink): Cancel;
   runningPromise: Promise<unknown> | undefined;
+  /**
+   * Creates and returns a new storage subscription that can be used to receive storage notifications.
+   *
+   * @returns A new IStorageSubscription instance
+   */
+  createStorageSubscription(): IStorageSubscription;
 }
 
 export interface IStorage {
@@ -330,6 +335,7 @@ export class Runtime implements IRuntime {
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
   readonly useStorageManagerTransactions?: boolean;
+  readonly shimStorageManager?: ShimStorageManager;
 
   constructor(options: RuntimeOptions) {
     this.staticCache = options.staticAssetServerUrl
@@ -362,6 +368,16 @@ export class Runtime implements IRuntime {
     this.recipeManager = new RecipeManager(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
+    this.shimStorageManager = !this.useStorageManagerTransactions
+      ? new ShimStorageManager(this)
+      : undefined;
+
+    const subscription = this.scheduler.createStorageSubscription();
+    if (this.useStorageManagerTransactions) {
+      this.storageManager.subscribe(subscription);
+    } else {
+      this.shimStorageManager!.subscribe(subscription);
+    }
 
     // Register built-in modules with runtime injection
     registerBuiltins(this);
@@ -438,7 +454,7 @@ export class Runtime implements IRuntime {
     // use a shim.
     const transaction = this.useStorageManagerTransactions
       ? this.storageManager.edit()
-      : new StorageTransaction(this);
+      : this.shimStorageManager!.edit();
 
     return new ExtendedStorageTransaction(transaction);
   }
