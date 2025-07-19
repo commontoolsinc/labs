@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference";
+import { refer } from "merkle-reference/json";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
   isModule,
@@ -20,9 +20,8 @@ import {
   pushFrameFromCause,
   recipeFromFrame,
 } from "./builder/recipe.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
-import { type Action, type ReactivityLog } from "./scheduler.ts";
+import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAllWriteRedirectCells,
@@ -40,15 +39,19 @@ import {
 } from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import "./builtins/index.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+  URI,
+} from "./storage/interface.ts";
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
+import "./builtins/index.ts";
 
 export class Runner implements IRunner {
-  readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
+  readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
   private functionCache = new FunctionCache();
 
@@ -100,7 +103,7 @@ export class Runner implements IRunner {
       spell?: SigilLink;
       argument?: T;
       internal?: JSONValue;
-      resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
+      resultRef: SigilLink;
     };
 
     let processCell: Cell<ProcessCellData>;
@@ -167,7 +170,7 @@ export class Runner implements IRunner {
       recipe,
     }, tx);
 
-    if (this.cancels.has(resultCell.getDoc())) {
+    if (this.cancels.has(this.getDocKey(resultCell))) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
       if (
@@ -187,7 +190,7 @@ export class Runner implements IRunner {
 
     // Keep track of subscriptions to cancel them later
     const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(resultCell.getDoc(), cancel);
+    this.cancels.set(this.getDocKey(resultCell), cancel);
     this.allCancels.add(cancel);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
@@ -330,6 +333,11 @@ export class Runner implements IRunner {
       : resultCell;
   }
 
+  private getDocKey(cell: Cell<any>): `${MemorySpace}/${URI}` {
+    const { space, id } = cell.getAsNormalizedFullLink();
+    return `${space}/${id}`;
+  }
+
   private async syncCellsForRunningRecipe(
     resultCell: Cell<any>,
     recipe: Module | Recipe,
@@ -405,12 +413,10 @@ export class Runner implements IRunner {
    *
    * @param resultCell - The result doc or cell to stop.
    */
-  stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
-    const doc = isDoc(resultCell)
-      ? resultCell
-      : (resultCell as Cell<T>).getDoc();
-    this.cancels.get(doc)?.();
-    this.cancels.delete(doc);
+  stop<T>(resultCell: Cell<T>): void {
+    const key = this.getDocKey(resultCell);
+    this.cancels.get(key)?.();
+    this.cancels.delete(key);
   }
 
   stopAll(): void {
@@ -477,7 +483,10 @@ export class Runner implements IRunner {
           );
           this.discoverAndCacheFunctionsFromModule(referencedModule);
         } catch (error) {
-          console.warn(`Failed to resolve module reference for implementation "${module.implementation}":`, error);
+          console.warn(
+            `Failed to resolve module reference for implementation "${module.implementation}":`,
+            error,
+          );
         }
         break;
     }
@@ -946,7 +955,7 @@ export class Runner implements IRunner {
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(this.cancels.get(resultCell.getSourceCell()!.getDoc()));
+    addCancel(this.cancels.get(this.getDocKey(resultCell.getSourceCell()!)));
   }
 }
 
