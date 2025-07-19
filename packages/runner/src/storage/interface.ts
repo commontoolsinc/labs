@@ -70,7 +70,7 @@ export interface StorageValue<T = any> {
   labels?: Labels;
 }
 
-export interface IStorageManager {
+export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
   /**
    * @deprecated
@@ -481,6 +481,8 @@ export interface IStorageTransaction {
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
+  tx: IStorageTransaction;
+
   /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.

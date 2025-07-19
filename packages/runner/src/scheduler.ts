@@ -21,6 +21,8 @@ import {
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageSubscription,
+  IStorageSubscriptionCapability,
   Metadata,
 } from "./storage/interface.ts";
 
@@ -229,6 +231,23 @@ export class Scheduler implements IScheduler {
 
   onError(fn: ErrorHandler): void {
     this.errorHandlers.add(fn);
+  }
+
+  /**
+   * Creates and returns a new storage subscription that can be used to receive storage notifications.
+   *
+   * @returns A new IStorageSubscription instance
+   */
+  createStorageSubscription(): IStorageSubscription {
+    const subscription: IStorageSubscription = {
+      next(notification) {
+        // Default implementation - can be overridden by the caller
+        console.log("Storage notification received:", notification);
+        return { done: false };
+      },
+    };
+
+    return subscription;
   }
 
   private queueExecution(): void {
