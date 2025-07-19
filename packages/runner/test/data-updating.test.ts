@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID, ID_FIELD } from "../src/builder/types.ts";
+import { ID, ID_FIELD, JSONSchema } from "../src/builder/types.ts";
 import {
   addCommonIDfromObjectID,
   applyChangeSet,
@@ -11,13 +11,10 @@ import { Runtime } from "../src/runtime.ts";
 import {
   areLinksSame,
   areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
   isAnyCellLink,
-  isLegacyCellLink,
-  isLegacyDocCellLink,
   parseLink,
 } from "../src/link-utils.ts";
-import type { LegacyDocCellLink } from "../src/sigil-types.ts";
-import { arrayEqual } from "../src/path-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -809,6 +806,292 @@ describe("data-updating", () => {
 
       expect(changes2.length).toBe(0);
     });
+
+    it("should handle data: URI links by writing their contents", () => {
+      // Create a data cell with some content using getImmutableCell
+      // This creates a cell with an actual data: URI that should trigger the data URI handling
+      const dataCell = runtime.getImmutableCell<
+        { message: string; count: number }
+      >(
+        space,
+        { message: "Hello from data", count: 42 },
+        undefined,
+        tx,
+      );
+
+      // Create a target cell to write to
+      const targetCell = runtime.getCell<{ value: any }>(
+        space,
+        "normalizeAndDiff data URI target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ value: "original" });
+
+      const current = targetCell.key("value").getAsNormalizedFullLink();
+
+      // Write the data cell link to the target
+      const changes = normalizeAndDiff(runtime, tx, current, dataCell);
+
+      // Should write the contents of the data cell, not the link itself
+      // The data URI handling writes each property individually
+      expect(changes.length).toBe(3);
+
+      // Find the changes for each property
+      const messageChange = changes.find((c) =>
+        c.location.path.includes("message")
+      );
+      const countChange = changes.find((c) =>
+        c.location.path.includes("count")
+      );
+      const objectChange = changes.find((c) => c.location.path.length === 1);
+
+      expect(messageChange).toBeDefined();
+      expect(messageChange!.value).toBe("Hello from data");
+      expect(countChange).toBeDefined();
+      expect(countChange!.value).toBe(42);
+      expect(objectChange).toBeDefined();
+      expect(objectChange!.value).toEqual({});
+    });
+
+    it("should handle data: URI links with nested paths", () => {
+      // Create a data cell with nested content using getImmutableCell
+      const dataCell = runtime.getImmutableCell<{
+        nested: {
+          deep: {
+            value: string;
+            numbers: number[];
+          };
+        };
+      }>(
+        space,
+        {
+          nested: {
+            deep: {
+              value: "nested value",
+              numbers: [1, 2, 3],
+            },
+          },
+        },
+        undefined,
+        tx,
+      );
+
+      // Create a target cell
+      const targetCell = runtime.getCell<{ result: any }>(
+        space,
+        "normalizeAndDiff data URI nested target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ result: "original" });
+
+      const current = targetCell.key("result").getAsNormalizedFullLink();
+
+      // Create a link to a nested path in the data cell
+      const nestedDataLink = dataCell.key("nested").key("deep").getAsLink();
+
+      // Write the nested data link to the target
+      const changes = normalizeAndDiff(runtime, tx, current, nestedDataLink);
+
+      // Should write the contents at the nested path
+      // The data URI handling writes each property individually
+      expect(changes.length).toBe(6);
+
+      // Find the changes for each property
+      const valueChange = changes.find((c) =>
+        c.location.path.includes("value") &&
+        !c.location.path.includes("numbers")
+      );
+      const numbersArrayChange = changes.find((c) =>
+        c.location.path.length === 2 && c.location.path[1] === "numbers"
+      );
+      const numbersElements = changes.filter((c) =>
+        c.location.path.length === 3 && c.location.path[1] === "numbers"
+      );
+
+      expect(valueChange).toBeDefined();
+      expect(valueChange!.value).toBe("nested value");
+      expect(numbersArrayChange).toBeDefined();
+      expect(numbersArrayChange!.value).toEqual([]);
+      expect(numbersElements).toHaveLength(3);
+      expect(numbersElements[0].value).toBe(1);
+      expect(numbersElements[1].value).toBe(2);
+      expect(numbersElements[2].value).toBe(3);
+    });
+
+    it("should handle data: URI links that resolve to undefined", () => {
+      // Create a data cell with some content using getImmutableCell
+      const dataCell = runtime.getImmutableCell<{ exists: string }>(
+        space,
+        { exists: "this exists" },
+        undefined,
+        tx,
+      );
+
+      // Create a target cell
+      const targetCell = runtime.getCell<{ value: any }>(
+        space,
+        "normalizeAndDiff data URI undefined target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ value: "original" });
+
+      const current = targetCell.key("value").getAsNormalizedFullLink();
+
+      // Create a link to a non-existent path in the data cell
+      // Use getAsLink() directly on the cell and then manually construct the path
+      const dataLink = dataCell.getAsLink();
+      const nonExistentLink = createSigilLinkFromParsedLink({
+        ...parseLink(dataLink),
+        path: ["doesNotExist"],
+      });
+
+      // Write the non-existent data link to the target
+      const changes = normalizeAndDiff(runtime, tx, current, nonExistentLink);
+
+      // Should write undefined since the path doesn't exist
+      expect(changes.length).toBe(1);
+      expect(changes[0].location).toEqual(current);
+      expect(changes[0].value).toBeUndefined();
+    });
+
+    it("should handle data: URI links that contain nested links", () => {
+      // Create a regular cell that will be referenced
+      const referencedCell = runtime.getCell<{ name: string; value: number }>(
+        space,
+        "data URI nested link referenced",
+        undefined,
+        tx,
+      );
+      referencedCell.set({ name: "Referenced Cell", value: 100 });
+
+      // Create a data cell that contains a link to the referenced cell
+      const dataCell = runtime.getImmutableCell<{
+        title: string;
+        reference: any;
+        metadata: { description: string };
+      }>(
+        space,
+        {
+          title: "Data with Link",
+          reference: referencedCell.getAsLink(),
+          metadata: { description: "Contains a nested link" },
+        },
+        undefined,
+        tx,
+      );
+
+      // Create a target cell to write to
+      const targetCell = runtime.getCell<{ result: any }>(
+        space,
+        "normalizeAndDiff data URI nested link target",
+        undefined,
+        tx,
+      );
+      targetCell.set({ result: "original" });
+
+      const current = targetCell.key("result").getAsNormalizedFullLink();
+
+      // Write the data cell link to the target
+      const changes = normalizeAndDiff(runtime, tx, current, dataCell);
+      // Should write the contents of the data cell, resolving nested links
+      expect(changes.length).toBe(5);
+
+      // Find the changes for each property
+      const titleChange = changes.find((c) =>
+        c.location.path.includes("title")
+      );
+      const referenceChange = changes.find((c) =>
+        c.location.path.includes("reference")
+      );
+      const metadataChange = changes.find((c) =>
+        c.location.path.length === 3 &&
+        c.location.path[1] === "metadata" &&
+        c.location.path[2] === "description"
+      );
+      const objectChange = changes.find((c) => c.location.path.length === 1);
+
+      expect(titleChange).toBeDefined();
+      expect(titleChange!.value).toBe("Data with Link");
+      expect(referenceChange).toBeDefined();
+      // The reference should be resolved to the actual cell link
+      expect(isAnyCellLink(referenceChange!.value)).toBe(true);
+      expect(metadataChange).toBeDefined();
+      expect(metadataChange!.value).toEqual("Contains a nested link");
+      expect(objectChange).toBeDefined();
+      expect(objectChange!.value).toEqual({});
+
+      applyChangeSet(tx, changes);
+
+      const value = targetCell.get();
+      expect(value.result).toEqual({
+        title: "Data with Link",
+        reference: { name: "Referenced Cell", value: 100 },
+        metadata: { description: "Contains a nested link" },
+      });
+    });
+  });
+
+  it("should handle data: URI links that contain nested links and references go through it", () => {
+    // Create a regular cell that will be referenced
+    const referencedCell = runtime.getCell(
+      space,
+      "data URI nested link referenced",
+      {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          nested: { type: "object", properties: { value: { type: "number" } } },
+        },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    referencedCell.set({ name: "Referenced Cell", nested: { value: 100 } });
+
+    // Create a data cell that contains a link to the referenced cell
+    const dataCell = runtime.getImmutableCell<{
+      title: string;
+      reference: any;
+      metadata: { description: string };
+    }>(
+      space,
+      {
+        title: "Data with Link",
+        reference: referencedCell.key("nested").getAsLink(),
+        metadata: { description: "Contains a nested link" },
+      },
+      undefined,
+      tx,
+    );
+
+    // Create a target cell to write to
+    const targetCell = runtime.getCell<{ result: any }>(
+      space,
+      "normalizeAndDiff data URI nested link target",
+      undefined,
+      tx,
+    );
+    targetCell.set({ result: "original" });
+
+    const current = targetCell.key("result").getAsNormalizedFullLink();
+
+    // Write the data cell link to the target
+    const changes = normalizeAndDiff(
+      runtime,
+      tx,
+      current,
+      dataCell.key("reference").key("value").getAsLink(),
+    );
+
+    // Should write the contents of the data cell, resolving nested links
+    expect(changes.length).toBe(1);
+
+    applyChangeSet(tx, changes);
+
+    const value = targetCell.get();
+    expect(value.result).toBe(100);
   });
 
   describe("addCommonIDfromObjectID", () => {

@@ -400,6 +400,7 @@ describe("link-utils", () => {
         type: "application/json",
         schema: { type: "number" },
         rootSchema: { type: "object" },
+        overwrite: "redirect",
       });
     });
 
@@ -419,6 +420,7 @@ describe("link-utils", () => {
         space: space,
         schema: undefined,
         rootSchema: undefined,
+        overwrite: "redirect",
       });
     });
 

@@ -346,6 +346,7 @@ export function parseLink(
       type: "application/json",
       schema: alias.schema as JSONSchema | undefined,
       rootSchema: alias.rootSchema as JSONSchema | undefined,
+      overwrite: "redirect",
     };
   }
 
