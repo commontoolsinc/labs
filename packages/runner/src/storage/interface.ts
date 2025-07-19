@@ -33,6 +33,7 @@ export type {
   SchemaContext,
   State,
   Unit,
+  URI,
 };
 
 /**
