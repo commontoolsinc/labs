@@ -488,7 +488,7 @@ describe("StorageTransaction", () => {
   });
 });
 
-describe("DocImpl new features", () => {
+describe("DocImpl shim notifications", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -588,7 +588,7 @@ describe("DocImpl new features", () => {
       const doc = createDoc(value, entityId, space, runtime);
 
       const notifications: any[] = [];
-      runtime.shimStorageManager?.subscribe({
+      runtime.storage.subscribe({
         next(notification: any) {
           notifications.push(notification);
           return { done: false };
@@ -606,7 +606,10 @@ describe("DocImpl new features", () => {
       expect(notifications[0].changes[0].address.id).toBe(
         "of:notification-test-entity",
       );
-      expect(notifications[0].changes[0].address.path).toEqual(["initial"]);
+      expect(notifications[0].changes[0].address.path).toEqual([
+        "value",
+        "initial",
+      ]);
       expect(notifications[0].changes[0].before).toBe("value");
       expect(notifications[0].changes[0].after).toBe("updated");
     });
@@ -618,7 +621,7 @@ describe("DocImpl new features", () => {
       const doc = createDoc(value, entityId, space, runtime);
 
       const notifications: any[] = [];
-      runtime.shimStorageManager?.subscribe({
+      runtime.storage.subscribe({
         next(notification: any) {
           notifications.push(notification);
           return { done: false };
@@ -629,6 +632,7 @@ describe("DocImpl new features", () => {
 
       expect(notifications).toHaveLength(1);
       expect(notifications[0].changes[0].address.path).toEqual([
+        "value",
         "user",
         "name",
       ]);
@@ -643,7 +647,7 @@ describe("DocImpl new features", () => {
       const doc = createDoc(value, entityId, space, runtime);
 
       const notifications: any[] = [];
-      runtime.shimStorageManager?.subscribe({
+      runtime.storage.subscribe({
         next(notification: any) {
           notifications.push(notification);
           return { done: false };
@@ -654,7 +658,7 @@ describe("DocImpl new features", () => {
       doc.setAtPath([], newValue, undefined, tx.tx);
 
       expect(notifications).toHaveLength(1);
-      expect(notifications[0].changes[0].address.path).toEqual([]);
+      expect(notifications[0].changes[0].address.path).toEqual(["value"]);
       expect(notifications[0].changes[0].before).toEqual({ initial: "value" });
       expect(notifications[0].changes[0].after).toEqual(newValue);
     });
@@ -666,7 +670,7 @@ describe("DocImpl new features", () => {
       const doc = createDoc(value, entityId, space, runtime);
 
       const notifications: any[] = [];
-      runtime.shimStorageManager?.subscribe({
+      runtime.storage.subscribe({
         next(notification: any) {
           notifications.push(notification);
           return { done: false };
@@ -686,7 +690,7 @@ describe("DocImpl new features", () => {
       const doc = createDoc(value, entityId, space, runtime);
 
       const notifications: any[] = [];
-      runtime.shimStorageManager?.subscribe({
+      runtime.storage.subscribe({
         next(notification: any) {
           notifications.push(notification);
           return { done: false };
@@ -720,7 +724,7 @@ describe("DocImpl new features", () => {
       });
 
       // Set up storage notifications
-      runtime.shimStorageManager?.subscribe({
+      runtime.storage.subscribe({
         next(notification: any) {
           notifications.push(notification);
           return { done: false };
@@ -734,7 +738,10 @@ describe("DocImpl new features", () => {
       expect(updates).toHaveLength(1);
       expect(notifications).toHaveLength(1);
       expect(updates[0].path).toEqual(["status"]);
-      expect(notifications[0].changes[0].address.path).toEqual(["status"]);
+      expect(notifications[0].changes[0].address.path).toEqual([
+        "value",
+        "status",
+      ]);
 
       cancelUpdates();
     });

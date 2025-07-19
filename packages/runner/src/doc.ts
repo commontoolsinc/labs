@@ -338,12 +338,12 @@ export function createDoc<T>(
         }
 
         // Send notification if shim storage manager is available
-        if (runtime.shimStorageManager) {
+        if (runtime.storage.shim) {
           const change: IMemoryChange = {
             address: {
               id: toURI(entityId),
               type: "application/json",
-              path: path.map(String),
+              path: ["value", ...path.map(String)],
             },
             before: previousValue,
             after: newValue,
@@ -355,7 +355,7 @@ export function createDoc<T>(
             changes: [change],
             source: tx,
           };
-          runtime.shimStorageManager.notifySubscribers(notification);
+          runtime.storage.shimNotifySubscribers(notification);
         }
       }
       return changed;
@@ -405,6 +405,27 @@ export function createDoc<T>(
           }`,
         );
       }
+
+      if (runtime.storage.shim) {
+        const change: IMemoryChange = {
+          address: {
+            id: toURI(entityId),
+            type: "application/json",
+            path: ["source"],
+          },
+          before: JSON.stringify(sourceCell),
+          after: JSON.stringify(cell),
+        };
+
+        const notification: ICommitNotification = {
+          type: "commit",
+          space: space,
+          changes: [change],
+          source: undefined,
+        };
+        runtime.storage.shimNotifySubscribers(notification);
+      }
+
       sourceCell = cell;
 
       // Notify callbacks that there was a change.

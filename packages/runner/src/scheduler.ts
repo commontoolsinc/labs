@@ -101,6 +101,9 @@ export class Scheduler implements IScheduler {
       errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
     }
 
+    // Subscribe to storage notifications
+    this.runtime.storage.subscribe(this.createStorageSubscription());
+
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {
       // Called synchronously when `console` methods are
@@ -238,7 +241,7 @@ export class Scheduler implements IScheduler {
    *
    * @returns A new IStorageSubscription instance
    */
-  createStorageSubscription(): IStorageSubscription {
+  private createStorageSubscription(): IStorageSubscription {
     return {
       next(_notification) {
         // TODO(seefeld): Implement this

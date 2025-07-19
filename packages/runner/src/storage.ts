@@ -11,9 +11,12 @@ import { Cell, isCell, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type EntityId, entityIdStr } from "./doc-map.ts";
 import type {
+  IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
+  IStorageSubscription,
   Labels,
+  StorageNotification,
   StorageValue,
 } from "./storage/interface.ts";
 import { log } from "./log.ts";
@@ -25,7 +28,11 @@ import {
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { isLink } from "./link-utils.ts";
-import { uriToEntityId } from "./storage/transaction-shim.ts";
+import {
+  ExtendedStorageTransaction,
+  ShimStorageManager,
+  uriToEntityId,
+} from "./storage/transaction-shim.ts";
 import { toURI } from "./uri-utils.ts";
 export type { Labels, MemorySpace };
 
@@ -87,16 +94,59 @@ export class Storage implements IStorage {
   private updateFromStoragePromise: Promise<void> | undefined;
   private _updateFromStorageResolver: (() => void) | undefined;
 
+  private shimStorageManager: ShimStorageManager | undefined;
+
   private cancel: Cancel;
   private addCancel: AddCancel;
 
   constructor(
     readonly runtime: IRuntime,
     private readonly storageManager: IStorageManager,
+    private readonly useStorageManagerTransactions: boolean,
   ) {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
+
+    if (!this.useStorageManagerTransactions) {
+      this.shimStorageManager = new ShimStorageManager(this.runtime);
+    }
+  }
+
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IExtendedStorageTransaction {
+    // Use transaction API from storage manager if enabled, otherwise
+    // use a shim.
+    const transaction = this.useStorageManagerTransactions
+      ? this.storageManager.edit()
+      : this.shimStorageManager!.edit();
+
+    return new ExtendedStorageTransaction(transaction);
+  }
+
+  /**
+   * Subscribe to storage notifications.
+   *
+   * @param subscription - The subscription to subscribe to.
+   */
+  subscribe(subscription: IStorageSubscription) {
+    if (this.useStorageManagerTransactions) {
+      this.storageManager.subscribe(subscription);
+    } else {
+      this.shimStorageManager!.subscribe(subscription);
+    }
+  }
+
+  shimNotifySubscribers(notification: StorageNotification) {
+    this.shimStorageManager?.notifySubscribers(notification);
+  }
+
+  get shim(): boolean {
+    return !this.useStorageManagerTransactions;
   }
 
   /**
