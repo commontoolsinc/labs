@@ -1085,7 +1085,6 @@ describe("data-updating", () => {
       dataCell.key("reference").key("value").getAsLink(),
     );
 
-    console.log(changes);
     // Should write the contents of the data cell, resolving nested links
     expect(changes.length).toBe(1);
 
