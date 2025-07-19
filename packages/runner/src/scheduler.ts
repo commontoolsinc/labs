@@ -239,15 +239,12 @@ export class Scheduler implements IScheduler {
    * @returns A new IStorageSubscription instance
    */
   createStorageSubscription(): IStorageSubscription {
-    const subscription: IStorageSubscription = {
-      next(notification) {
-        // Default implementation - can be overridden by the caller
-        console.log("Storage notification received:", notification);
+    return {
+      next(_notification) {
+        // TODO(seefeld): Implement this
         return { done: false };
       },
-    };
-
-    return subscription;
+    } satisfies IStorageSubscription;
   }
 
   private queueExecution(): void {
