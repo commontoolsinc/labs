@@ -69,7 +69,7 @@ describe.skip("Push conflict", () => {
     );
     list.set([]);
     const listDoc = list.getDoc();
-    await storage.syncCell(list);
+    await list.sync();
 
     const source = session.clone();
     source.subscribers.clear();
@@ -133,8 +133,8 @@ describe.skip("Push conflict", () => {
     list.set([]);
     const listDoc = list.getDoc();
 
-    await storage.syncCell(name);
-    await storage.syncCell(list);
+    await name.sync();
+    await list.sync();
 
     const source = session.clone();
     source.subscribers.clear();
@@ -202,8 +202,8 @@ describe.skip("Push conflict", () => {
     list.set([]);
     const listDoc = list.getDoc();
 
-    await storage.syncCell(name);
-    await storage.syncCell(list);
+    await name.sync();
+    await list.sync();
 
     const source = session.clone();
     source.subscribers.clear();

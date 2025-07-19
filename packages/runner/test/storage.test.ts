@@ -48,7 +48,7 @@ describe("Storage", () => {
       const testValue = { data: "test" };
       testCell.send(testValue);
 
-      await runtime.storage.syncCell(testCell);
+      await testCell.sync();
 
       const query = storageManager
         .mount(space)
@@ -78,7 +78,7 @@ describe("Storage", () => {
       };
       testCell.send(testValue);
 
-      await runtime.storage.syncCell(testCell);
+      await testCell.sync();
 
       const entry = storageManager.open(space).get(refCell.entityId!);
       expect(entry?.value).toEqual("hello");
@@ -99,7 +99,7 @@ describe("Storage", () => {
       };
       testCell.send(testValue);
 
-      await runtime.storage.syncCell(testCell);
+      await testCell.sync();
 
       const entry = storageManager.open(space).get(refCell.entityId!);
       expect(entry?.value).toEqual("hello");
@@ -108,7 +108,7 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates", async () => {
-      await runtime.storage.syncCell(testCell);
+      await testCell.sync();
 
       testCell.send("value 1");
       testCell.send("value 2");
@@ -139,7 +139,7 @@ describe("Storage", () => {
       expect(synced).toBe(false);
 
       testCell.send("test");
-      await runtime.storage.syncCell(testCell);
+      await testCell.sync();
       expect(synced).toBe(true);
     });
 
@@ -150,7 +150,7 @@ describe("Storage", () => {
       );
       expect(synced).toBe(false);
 
-      await runtime.storage.syncCell(testCell);
+      await testCell.sync();
       expect(synced).toBe(true);
     });
   });
@@ -165,7 +165,7 @@ describe("Storage", () => {
       );
       ephemeralDoc.set("transient");
       ephemeralDoc.getDoc().ephemeral = true;
-      await runtime.storage.syncCell(ephemeralDoc);
+      await ephemeralDoc.sync();
       const provider = storageManager.open(space);
 
       await provider.sync(ephemeralDoc.entityId!);
@@ -176,10 +176,7 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates with schema", async () => {
-      await runtime.storage.syncCell(testCell, false, {
-        schema: true,
-        rootSchema: true,
-      });
+      await testCell.sync();
 
       testCell.send("value 1");
       testCell.send("value 2");

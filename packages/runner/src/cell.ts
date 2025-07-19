@@ -88,6 +88,9 @@ import { fromURI } from "./uri-utils.ts";
  * @param {function} callback - The callback to be called when the cell changes.
  * @returns {function} - A function to Cleanup the callback.
  *
+ * @method sync Syncs the cell to the storage.
+ * @returns {Promise<void>}
+ *
  * @method getAsQueryResult Returns a query result for the cell.
  * @param {Path} path - The optional path to follow.
  * @param {ReactivityLog} log - Optional reactivity log.
@@ -168,7 +171,6 @@ declare module "@commontools/api" {
     ): Cell<
       T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
-
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -177,6 +179,7 @@ declare module "@commontools/api" {
     ): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: T) => Cancel | undefined | void): Cancel;
+    sync(): Promise<void>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -488,6 +491,10 @@ function createRegularCell<T>(
       createCell(runtime, link, newTx),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, runtime, link),
+    sync: () =>
+      Promise.resolve(runtime.storage.syncCell(self)) as unknown as Promise<
+        void
+      >,
     getAsQueryResult: (
       subPath: PropertyKey[] = [],
       newTx?: IExtendedStorageTransaction,

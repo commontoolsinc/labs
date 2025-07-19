@@ -37,7 +37,7 @@ async function main(
     ],
     AuthSchema,
   );
-  await runtime.storage.syncCell(authCell);
+  await authCell.sync();
   await runtime.storage.synced();
 
   // authCell.set({ token: "wat" });

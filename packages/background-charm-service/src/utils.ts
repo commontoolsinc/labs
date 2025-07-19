@@ -203,7 +203,7 @@ export async function getBGCharms(
     schema: privilegedSchema,
     rootSchema: privilegedSchema,
   };
-  await runtime.storage.syncCell(charmsCell, true, schemaContext);
+  await charmsCell.sync();
   await runtime.storage.synced();
 
   return charmsCell;

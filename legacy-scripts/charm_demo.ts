@@ -46,7 +46,7 @@ async function main() {
 
   // start syncing on this document
   // notice that we call syncCell on a DocImpl
-  runtime.storage.syncCell(charmsDoc);
+  charmsDoc.sync();
 
   // the list of charms
   const charms: Cell<any> = charmsDoc.asCell([], undefined, charmListSchema);
