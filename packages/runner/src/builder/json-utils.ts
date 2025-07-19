@@ -15,6 +15,7 @@ import {
   type Opaque,
   type OpaqueRef,
   type Recipe,
+  type toJSON,
   unsafe_originalRecipe,
 } from "./types.ts";
 import { getTopFrame } from "./recipe.ts";
@@ -107,6 +108,9 @@ export function toJSONWithLegacyAliases(
   }
 
   if (isRecord(value) || isRecipe(value)) {
+    if (isRecipe(value) && typeof (value as toJSON).toJSON === "function") {
+      value = (value as toJSON).toJSON();
+    }
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {
@@ -218,8 +222,9 @@ export function createJsonSchema(
 }
 
 export function moduleToJSON(module: Module) {
+  const { toJSON: _, ...rest } = module as Module & { toJSON: () => any };
   return {
-    ...module,
+    ...rest,
     implementation: typeof module.implementation === "function"
       ? module.implementation.toString()
       : module.implementation,
