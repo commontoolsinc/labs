@@ -13,7 +13,7 @@ export class FunctionCache {
    * @param module The module to use as a cache key
    * @returns The cached function, or undefined if not found
    */
-  get(module: Module): (...args: any[]) => any | undefined {
+  get(module: Module): ((...args: any[]) => any) | undefined {
     const key = this.getKey(module);
     return this.cache.get(key);
   }
