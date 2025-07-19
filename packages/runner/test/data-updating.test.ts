@@ -996,8 +996,6 @@ describe("data-updating", () => {
 
       // Write the data cell link to the target
       const changes = normalizeAndDiff(runtime, tx, current, dataCell);
-
-      console.log(changes);
       // Should write the contents of the data cell, resolving nested links
       expect(changes.length).toBe(5);
 
