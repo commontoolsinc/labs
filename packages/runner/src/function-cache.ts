@@ -6,14 +6,14 @@ import type { Module } from "./builder/types.ts";
  * during recipe execution.
  */
 export class FunctionCache {
-  private cache = new Map<string, Function>();
+  private cache = new Map<string, (...args: any[]) => any>();
 
   /**
    * Get a cached function by its module key.
    * @param module The module to use as a cache key
    * @returns The cached function, or undefined if not found
    */
-  get(module: Module): Function | undefined {
+  get(module: Module): (...args: any[]) => any | undefined {
     const key = this.getKey(module);
     return this.cache.get(key);
   }
@@ -23,7 +23,7 @@ export class FunctionCache {
    * @param module The module to use as a cache key
    * @param fn The function to cache
    */
-  set(module: Module, fn: Function): void {
+  set(module: Module, fn: (...args: any[]) => any): void {
     const key = this.getKey(module);
     this.cache.set(key, fn);
   }
