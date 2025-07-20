@@ -11,7 +11,6 @@ import type { Entity } from "@commontools/memory/interface";
 import * as Fact from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 import { Runtime } from "../src/runtime.ts";
-import { assert } from "node:console";
 
 const signer = await Identity.fromPassphrase("test storage subscription");
 const space = signer.did();
@@ -200,7 +199,7 @@ describe("Storage Subscription", () => {
   describe("revert notifications", () => {
     it("should receive revert notification on conflict", async () => {
       if (runtime.storage.shim) {
-        assert(true, "Revert notifications not supported in shim storage");
+        expect(true, "Revert notifications not supported in shim storage");
         return;
       }
 
@@ -269,7 +268,7 @@ describe("Storage Subscription", () => {
   describe("load notifications", () => {
     it("should receive load notification when data is loaded from cache", async () => {
       if (runtime.storage.shim) {
-        assert(true, "Load notifications not supported in shim storage");
+        expect(true, "Load notifications not supported in shim storage");
         return;
       }
 
@@ -301,7 +300,7 @@ describe("Storage Subscription", () => {
   describe("pull notifications", () => {
     it("should receive pull notification when data is pulled from remote", async () => {
       if (runtime.storage.shim) {
-        assert(true, "Pull notifications not supported in shim storage");
+        expect(true, "Pull notifications not supported in shim storage");
         return;
       }
 
@@ -348,7 +347,7 @@ describe("Storage Subscription", () => {
   describe("integrate notifications", () => {
     it("should receive integrate notification when data is integrated", async () => {
       if (runtime.storage.shim) {
-        assert(true, "Integrate notifications not supported in shim storage");
+        expect(true, "Integrate notifications not supported in shim storage");
         return;
       }
 
@@ -395,7 +394,7 @@ describe("Storage Subscription", () => {
   describe("reset notifications", () => {
     it("should receive reset notification when storage is reset", async () => {
       if (runtime.storage.shim) {
-        assert(true, "Reset notifications not supported in shim storage");
+        expect(true, "Reset notifications not supported in shim storage");
         return;
       }
 
