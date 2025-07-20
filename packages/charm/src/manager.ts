@@ -289,11 +289,7 @@ export class CharmManager {
       ...charmListSchema,
       ifc: { classification: [Classification.Secret] },
     } as const satisfies JSONSchema;
-    const schemaContext = {
-      schema: privilegedSchema,
-      rootSchema: privilegedSchema,
-    };
-    return cell.sync();
+    return cell.asSchema(privilegedSchema).sync();
   }
 
   // copies the recipe for a charm but clones the argument cell
