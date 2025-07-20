@@ -399,7 +399,7 @@ export class Runtime implements IRuntime {
         documentMap: !!this.documentMap,
         harness: !!this.harness,
         runner: !!this.runner,
-        useStorageManagerTransactions: this.useStorageManagerTransactions,
+        useStorageManagerTransactions: !!this.storage.shim,
       });
     }
   }
