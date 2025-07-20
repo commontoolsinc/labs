@@ -271,6 +271,7 @@ export type Cellify<T> =
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+  sync(): Promise<Stream<T>> | Stream<T>;
   getRaw(options?: IReadOptions): any;
   getAsNormalizedFullLink(): NormalizedFullLink;
   getDoc(): DocImpl<any>;
@@ -339,6 +340,9 @@ function createStreamCell<T>(
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
+    // sync: No-op for streams, but maybe eventually it might mean wait for all
+    // events to have been processed
+    sync: () => self,
     getRaw: (options?: IReadOptions) =>
       (tx?.status().status === "ready" ? tx : runtime.edit())
         .readValueOrThrow(link, options),
