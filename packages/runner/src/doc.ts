@@ -413,8 +413,8 @@ export function createDoc<T>(
             type: "application/json",
             path: ["source"],
           },
-          before: JSON.stringify(sourceCell),
-          after: JSON.stringify(cell),
+          before: JSON.stringify(sourceCell?.entityId),
+          after: JSON.stringify(cell?.entityId),
         };
 
         const notification: ICommitNotification = {
