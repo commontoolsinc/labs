@@ -1,12 +1,17 @@
 import { isRecord } from "@commontools/utils/types";
 import { arrayEqual, deepEqual } from "./path-utils.ts";
 import type { JSONValue } from "./builder/types.ts";
-import type { Action } from "./scheduler.ts";
+import type { Action, SpaceAndURI } from "./scheduler.ts";
+import type {
+  IMemorySpaceAddress,
+  MemoryAddressPathComponent,
+} from "./storage/interface.ts";
 
-export type TriggerPaths = string[][];
-export type SortedAndCompactPaths = string[][];
+export type SortedAndCompactPaths = Array<
+  readonly MemoryAddressPathComponent[]
+>;
 
-type Keyable = Record<string, JSONValue | undefined>;
+type Keyable = Record<MemoryAddressPathComponent, JSONValue | undefined>;
 
 /**
  * Sorts and compactifies the paths.
@@ -17,20 +22,59 @@ type Keyable = Record<string, JSONValue | undefined>;
  * @returns The sorted and compactified paths.
  */
 export function sortAndCompactPaths(
-  paths: TriggerPaths,
-): SortedAndCompactPaths {
-  if (paths.length === 0) return [];
+  unsorted: IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  if (unsorted.length === 0) return [];
 
-  const sorted = paths.toSorted((a, b) => comparePaths(a, b));
-  const result = [sorted[0]];
+  const sorted = unsorted.toSorted((a, b) =>
+    a.space === b.space
+      ? a.id === b.id
+        ? a.type === b.type
+          ? comparePaths(a.path, b.path)
+          : a.type < b.type
+          ? -1
+          : 1
+        : a.id < b.id
+        ? -1
+        : 1
+      : a.space < b.space
+      ? -1
+      : 1
+  );
+  const result: IMemorySpaceAddress[] = [sorted[0]];
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
-    if (!startsWith(sorted[i], previous)) {
+    if (
+      sorted[i].space !== previous.space ||
+      sorted[i].id !== previous.id ||
+      sorted[i].type !== previous.type ||
+      // Is the previous path a prefix of the current path?
+      !previous.path.every((value, index) => value === sorted[i].path[index])
+    ) {
       result.push(sorted[i]);
       previous = sorted[i];
     }
   }
   return result;
+}
+
+/**
+ * Converts a list of paths to a map of space/id to paths.
+ *
+ * @param addresses - The paths to convert.
+ * @returns A map of space/id to paths.
+ */
+export function addressesToPathByEntity(
+  addresses: IMemorySpaceAddress[],
+): Map<SpaceAndURI, SortedAndCompactPaths> {
+  const map = new Map<SpaceAndURI, SortedAndCompactPaths>();
+  for (const address of addresses) {
+    if (address.type !== "application/json") continue;
+    const key: SpaceAndURI = `${address.space}/${address.id}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(address.path);
+  }
+  return map;
 }
 
 /**
@@ -49,7 +93,7 @@ export function determineTriggeredActions(
   dependencies: Map<Action, SortedAndCompactPaths>,
   before: JSONValue | undefined,
   after: JSONValue | undefined,
-  startPath: string[] = [],
+  startPath: readonly MemoryAddressPathComponent[] = [],
 ): Action[] {
   const triggeredActions: Action[] = [];
 
@@ -69,7 +113,7 @@ export function determineTriggeredActions(
     // include those that start with that path.
     subscribers = subscribers.map(({ action, paths }) => ({
       action,
-      paths: paths.filter((path) => startsWith(path, startPath)),
+      paths: paths.filter((path) => arraysOverlap(path, startPath)),
     })).filter(({ paths }) => paths.length > 0);
 
     // And prepend path to data, so we don't have to special case this.
@@ -83,7 +127,7 @@ export function determineTriggeredActions(
   subscribers.sort((a, b) => comparePaths(b.paths[0], a.paths[0]));
 
   // Traversal state:
-  let currentPath: string[] = [];
+  let currentPath: readonly MemoryAddressPathComponent[] = [];
 
   // *Values: An array of data values along currentPath
   const beforeValues: (JSONValue | undefined)[] = [before];
@@ -153,11 +197,19 @@ export function determineTriggeredActions(
   return triggeredActions;
 }
 
-function startsWith(path: string[], prefix: string[]): boolean {
-  return prefix.every((value, index) => value === path[index]);
+export function arraysOverlap(
+  a: readonly MemoryAddressPathComponent[],
+  b: readonly MemoryAddressPathComponent[],
+): boolean {
+  return (a.length > b.length)
+    ? b.every((value, index) => value === a[index])
+    : a.every((value, index) => value === b[index]);
 }
 
-function commonPrefixLength(a: string[], b: string[]): number {
+function commonPrefixLength(
+  a: readonly MemoryAddressPathComponent[],
+  b: readonly MemoryAddressPathComponent[],
+): number {
   for (let i = 0; i < a.length && i < b.length; i++) {
     if (a[i] !== b[i]) {
       return i;
@@ -166,7 +218,10 @@ function commonPrefixLength(a: string[], b: string[]): number {
   return Math.min(a.length, b.length);
 }
 
-function comparePaths(a: string[], b: string[]): number {
+function comparePaths(
+  a: readonly MemoryAddressPathComponent[],
+  b: readonly MemoryAddressPathComponent[],
+): number {
   for (let i = 0; i < a.length && i < b.length; i++) {
     if (a[i] !== b[i]) {
       return a[i] < b[i] ? -1 : 1;

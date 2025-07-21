@@ -1,13 +1,129 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  addressesToPathByEntity,
+  arraysOverlap,
   determineTriggeredActions,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
-  type TriggerPaths,
 } from "../src/reactive-dependencies.ts";
-import type { Action } from "../src/scheduler.ts";
+import type { Action, SpaceAndURI } from "../src/scheduler.ts";
 import type { JSONValue } from "../src/builder/types.ts";
+import type {
+  IMemorySpaceAddress,
+  MemoryAddressPathComponent,
+} from "../src/storage/interface.ts";
+import type { MemorySpace } from "@commontools/memory/interface";
+
+// Helper function to create IMemorySpaceAddress for testing
+const createAddress = (
+  path: MemoryAddressPathComponent[],
+  space: MemorySpace = "did:test:space",
+  id: string = "https://example.com/entity",
+  type: string = "application/json",
+): IMemorySpaceAddress => ({
+  space,
+  id: id as `${string}:${string}`, // URI type alias
+  type: type as `${string}/${string}`, // MediaType type alias
+  path,
+});
+
+// Helper to create multiple addresses with the same space/id/type but different paths
+const createAddresses = (
+  paths: MemoryAddressPathComponent[][],
+  space: MemorySpace = "did:test:space",
+  id: string = "https://example.com/entity",
+  type: string = "application/json",
+): IMemorySpaceAddress[] =>
+  paths.map((path) => createAddress(path, space, id, type));
+
+describe("arraysOverlap", () => {
+  it("returns true when arrays are identical", () => {
+    expect(arraysOverlap(["a", "b", "c"], ["a", "b", "c"])).toBe(true);
+    expect(arraysOverlap([], [])).toBe(true);
+    expect(arraysOverlap(["single"], ["single"])).toBe(true);
+  });
+
+  it("returns true when first array is prefix of second", () => {
+    expect(arraysOverlap(["a"], ["a", "b", "c"])).toBe(true);
+    expect(arraysOverlap(["a", "b"], ["a", "b", "c"])).toBe(true);
+    expect(arraysOverlap([], ["a", "b", "c"])).toBe(true); // empty array is prefix of any array
+  });
+
+  it("returns true when second array is prefix of first", () => {
+    expect(arraysOverlap(["a", "b", "c"], ["a"])).toBe(true);
+    expect(arraysOverlap(["a", "b", "c"], ["a", "b"])).toBe(true);
+    expect(arraysOverlap(["a", "b", "c"], [])).toBe(true); // empty array is prefix of any array
+  });
+
+  it("returns false when arrays don't overlap", () => {
+    expect(arraysOverlap(["a", "b"], ["c", "d"])).toBe(false);
+    expect(arraysOverlap(["a", "b"], ["a", "c"])).toBe(false);
+    expect(arraysOverlap(["x"], ["y"])).toBe(false);
+  });
+
+  it("returns false when arrays share common prefix but diverge", () => {
+    expect(arraysOverlap(["a", "b", "c"], ["a", "b", "d"])).toBe(false);
+    expect(arraysOverlap(["users", "123"], ["users", "456"])).toBe(false);
+    expect(arraysOverlap(["path", "to", "x"], ["path", "to", "y"])).toBe(false);
+  });
+
+  it("handles arrays of different lengths correctly", () => {
+    // Shorter array is prefix of longer
+    expect(arraysOverlap(["users"], ["users", "123", "profile", "name"])).toBe(
+      true,
+    );
+    expect(arraysOverlap(["users", "123"], ["users", "123", "profile"])).toBe(
+      true,
+    );
+
+    // Longer array is not prefix of shorter when they differ
+    expect(arraysOverlap(["users", "123", "profile"], ["users", "456"])).toBe(
+      false,
+    );
+  });
+
+  it("works with numeric strings", () => {
+    expect(arraysOverlap(["123"], ["123", "456"])).toBe(true);
+    expect(arraysOverlap(["123", "456"], ["123"])).toBe(true);
+    expect(arraysOverlap(["123"], ["456"])).toBe(false);
+  });
+
+  it("handles edge cases", () => {
+    // One empty array
+    expect(arraysOverlap([], ["a"])).toBe(true);
+    expect(arraysOverlap(["a"], [])).toBe(true);
+
+    // Arrays with undefined or null (if they can occur)
+    expect(arraysOverlap(["a", "b"], ["a", "b", "c"])).toBe(true);
+  });
+
+  it("respects exact string matching", () => {
+    // Different strings that might be similar
+    expect(arraysOverlap(["user"], ["users"])).toBe(false);
+    expect(arraysOverlap(["123"], ["1234"])).toBe(false);
+    expect(arraysOverlap(["User"], ["user"])).toBe(false); // case sensitive
+  });
+
+  it("demonstrates the bug fix scenario", () => {
+    // The bug was that when startPath is longer than some dependency paths,
+    // those dependencies were incorrectly ignored. This test shows the correct behavior.
+    const shortPath = ["users"];
+    const mediumPath = ["users", "123"];
+    const longPath = ["users", "123", "profile"];
+    const startPath = ["users", "123"];
+
+    // All these should overlap with startPath
+    expect(arraysOverlap(shortPath, startPath)).toBe(true); // shortPath is prefix of startPath
+    expect(arraysOverlap(mediumPath, startPath)).toBe(true); // exact match
+    expect(arraysOverlap(longPath, startPath)).toBe(true); // startPath is prefix of longPath
+
+    // The function should work symmetrically
+    expect(arraysOverlap(startPath, shortPath)).toBe(true);
+    expect(arraysOverlap(startPath, mediumPath)).toBe(true);
+    expect(arraysOverlap(startPath, longPath)).toBe(true);
+  });
+});
 
 describe("sortAndCompactPaths", () => {
   it("returns empty array for empty input", () => {
@@ -16,84 +132,434 @@ describe("sortAndCompactPaths", () => {
   });
 
   it("returns single path unchanged", () => {
-    const paths: TriggerPaths = [["a", "b", "c"]];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([["a", "b", "c"]]);
+    const addresses = createAddresses([["a", "b", "c"]]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(addresses);
   });
 
   it("sorts paths lexicographically", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["b", "c"],
       ["a", "z"],
       ["a", "b"],
-      ["c"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
-      ["a", "b"],
-      ["a", "z"],
-      ["b", "c"],
       ["c"],
     ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
+      ["a", "b"],
+      ["a", "z"],
+      ["b", "c"],
+      ["c"],
+    ]));
   });
 
   it("removes paths that are prefixes of other paths", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["a", "b", "c", "d"],
       ["a", "b"],
       ["a", "b", "c"],
       ["x", "y"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
+    ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
       ["a", "b"],
       ["x", "y"],
-    ]);
+    ]));
   });
 
   it("handles complex compactification", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["users", "123", "name"],
       ["users", "123"],
       ["users", "456", "email"],
       ["users", "456"],
       ["posts", "abc", "title"],
       ["posts"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
+    ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
       ["posts"],
       ["users", "123"],
       ["users", "456"],
-    ]);
+    ]));
   });
 
   it("preserves paths with common prefixes but different suffixes", () => {
-    const paths: TriggerPaths = [
-      ["a", "b", "c"],
-      ["a", "b", "d"],
-      ["a", "e"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
+    const addresses = createAddresses([
       ["a", "b", "c"],
       ["a", "b", "d"],
       ["a", "e"],
     ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
+      ["a", "b", "c"],
+      ["a", "b", "d"],
+      ["a", "e"],
+    ]));
   });
 
   it("handles paths with numeric strings correctly", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["2", "b"],
       ["10", "a"],
       ["1", "c"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
-      ["1", "c"],
-      ["10", "a"],
-      ["2", "b"],
     ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
+      ["1", "c"],
+      ["10", "a"],
+      ["2", "b"],
+    ]));
+  });
+
+  it("sorts by space, id, type, then path", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(
+        ["a"],
+        "did:test:space2",
+        "test://entity",
+        "application/json",
+      ),
+      createAddress(
+        ["b"],
+        "did:test:space1",
+        "test://entity",
+        "application/json",
+      ),
+      createAddress(
+        ["c"],
+        "did:test:space1",
+        "test://entity2",
+        "application/json",
+      ),
+      createAddress(
+        ["d"],
+        "did:test:space1",
+        "test://entity1",
+        "application/json",
+      ),
+      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
+      createAddress(
+        ["f"],
+        "did:test:space1",
+        "test://entity1",
+        "application/json",
+      ),
+    ];
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual([
+      createAddress(
+        ["b"],
+        "did:test:space1",
+        "test://entity",
+        "application/json",
+      ),
+      createAddress(
+        ["d"],
+        "did:test:space1",
+        "test://entity1",
+        "application/json",
+      ),
+      createAddress(
+        ["f"],
+        "did:test:space1",
+        "test://entity1",
+        "application/json",
+      ),
+      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
+      createAddress(
+        ["c"],
+        "did:test:space1",
+        "test://entity2",
+        "application/json",
+      ),
+      createAddress(
+        ["a"],
+        "did:test:space2",
+        "test://entity",
+        "application/json",
+      ),
+    ]);
+  });
+
+  it("only compacts paths within same space/id/type", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(
+        ["user"],
+        "did:test:space1",
+        "test://entity",
+        "application/json",
+      ),
+      createAddress(
+        ["user", "name"],
+        "did:test:space1",
+        "test://entity",
+        "application/json",
+      ),
+      createAddress(
+        ["user"],
+        "did:test:space2",
+        "test://entity",
+        "application/json",
+      ),
+      createAddress(
+        ["user", "name"],
+        "did:test:space2",
+        "test://entity",
+        "application/json",
+      ),
+    ];
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual([
+      createAddress(
+        ["user"],
+        "did:test:space1",
+        "test://entity",
+        "application/json",
+      ),
+      createAddress(
+        ["user"],
+        "did:test:space2",
+        "test://entity",
+        "application/json",
+      ),
+    ]);
+  });
+});
+
+describe("addresssesToPathByEntity", () => {
+  it("returns empty map for empty input", () => {
+    const result = addressesToPathByEntity([]);
+    expect(result.size).toBe(0);
+  });
+
+  it("groups paths by space and id", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(
+        ["a"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "application/json",
+      ),
+      createAddress(
+        ["b"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "application/json",
+      ),
+      createAddress(
+        ["c"],
+        "did:test:space1",
+        "https://example.com/entity2",
+        "application/json",
+      ),
+      createAddress(
+        ["d"],
+        "did:test:space2",
+        "https://example.com/entity1",
+        "application/json",
+      ),
+    ];
+
+    const result = addressesToPathByEntity(addresses);
+
+    expect(result.size).toBe(3);
+    expect(
+      result.has("did:test:space1/https://example.com/entity1" as SpaceAndURI),
+    ).toBe(true);
+    expect(
+      result.has("did:test:space1/https://example.com/entity2" as SpaceAndURI),
+    ).toBe(true);
+    expect(
+      result.has("did:test:space2/https://example.com/entity1" as SpaceAndURI),
+    ).toBe(true);
+
+    const space1Entity1 = result.get(
+      "did:test:space1/https://example.com/entity1" as SpaceAndURI,
+    )!;
+    expect(space1Entity1).toHaveLength(2);
+    expect(space1Entity1[0]).toEqual(["a"]);
+    expect(space1Entity1[1]).toEqual(["b"]);
+
+    const space1Entity2 = result.get(
+      "did:test:space1/https://example.com/entity2" as SpaceAndURI,
+    )!;
+    expect(space1Entity2).toHaveLength(1);
+    expect(space1Entity2[0]).toEqual(["c"]);
+
+    const space2Entity1 = result.get(
+      "did:test:space2/https://example.com/entity1" as SpaceAndURI,
+    )!;
+    expect(space2Entity1).toHaveLength(1);
+    expect(space2Entity1[0]).toEqual(["d"]);
+  });
+
+  it("filters out non-JSON types", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(
+        ["a"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "application/json",
+      ),
+      createAddress(
+        ["b"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "text/plain",
+      ),
+      createAddress(
+        ["c"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "application/xml",
+      ),
+      createAddress(
+        ["d"],
+        "did:test:space1",
+        "https://example.com/entity2",
+        "application/json",
+      ),
+    ];
+
+    const result = addressesToPathByEntity(addresses);
+
+    expect(result.size).toBe(2);
+
+    const space1Entity1 = result.get(
+      "did:test:space1/https://example.com/entity1" as SpaceAndURI,
+    )!;
+    expect(space1Entity1).toHaveLength(1);
+    expect(space1Entity1[0]).toEqual(["a"]);
+
+    const space1Entity2 = result.get(
+      "did:test:space1/https://example.com/entity2" as SpaceAndURI,
+    )!;
+    expect(space1Entity2).toHaveLength(1);
+    expect(space1Entity2[0]).toEqual(["d"]);
+  });
+
+  it("preserves order of paths within each entity", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(
+        ["z"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "application/json",
+      ),
+      createAddress(
+        ["a"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "application/json",
+      ),
+      createAddress(
+        ["m"],
+        "did:test:space1",
+        "https://example.com/entity1",
+        "application/json",
+      ),
+    ];
+
+    const result = addressesToPathByEntity(addresses);
+
+    const paths = result.get(
+      "did:test:space1/https://example.com/entity1" as SpaceAndURI,
+    )!;
+    expect(paths).toHaveLength(3);
+    expect(paths[0]).toEqual(["z"]);
+    expect(paths[1]).toEqual(["a"]);
+    expect(paths[2]).toEqual(["m"]);
+  });
+
+  it("handles complex scenario with multiple spaces and entities", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      // Space 1, Entity 1
+      createAddress(
+        ["users", "123"],
+        "did:test:space1",
+        "https://api.example.com/data",
+        "application/json",
+      ),
+      createAddress(
+        ["users", "456"],
+        "did:test:space1",
+        "https://api.example.com/data",
+        "application/json",
+      ),
+      createAddress(
+        ["posts"],
+        "did:test:space1",
+        "https://api.example.com/data",
+        "application/json",
+      ),
+
+      // Space 1, Entity 2
+      createAddress(
+        ["config"],
+        "did:test:space1",
+        "https://api.example.com/settings",
+        "application/json",
+      ),
+      createAddress(
+        ["theme"],
+        "did:test:space1",
+        "https://api.example.com/settings",
+        "text/plain",
+      ), // Filtered out
+
+      // Space 2, Entity 1 (same URI as space1 but different space)
+      createAddress(
+        ["users", "789"],
+        "did:test:space2",
+        "https://api.example.com/data",
+        "application/json",
+      ),
+
+      // Space 2, Entity 3
+      createAddress(
+        ["analytics"],
+        "did:test:space2",
+        "https://api.example.com/metrics",
+        "application/json",
+      ),
+    ];
+
+    const result = addressesToPathByEntity(addresses);
+
+    expect(result.size).toBe(4);
+
+    // Check Space 1, Entity 1
+    const s1e1 = result.get(
+      "did:test:space1/https://api.example.com/data" as SpaceAndURI,
+    )!;
+    expect(s1e1).toHaveLength(3);
+    expect(s1e1).toEqual([
+      ["users", "123"],
+      ["users", "456"],
+      ["posts"],
+    ]);
+
+    // Check Space 1, Entity 2
+    const s1e2 = result.get(
+      "did:test:space1/https://api.example.com/settings" as SpaceAndURI,
+    )!;
+    expect(s1e2).toHaveLength(1);
+    expect(s1e2[0]).toEqual(["config"]);
+
+    // Check Space 2, Entity 1
+    const s2e1 = result.get(
+      "did:test:space2/https://api.example.com/data" as SpaceAndURI,
+    )!;
+    expect(s2e1).toHaveLength(1);
+    expect(s2e1[0]).toEqual(["users", "789"]);
+
+    // Check Space 2, Entity 3
+    const s2e3 = result.get(
+      "did:test:space2/https://api.example.com/metrics" as SpaceAndURI,
+    )!;
+    expect(s2e3).toHaveLength(1);
+    expect(s2e3[0]).toEqual(["analytics"]);
   });
 });
 
@@ -473,6 +939,76 @@ describe("determineTriggeredActions", () => {
       );
       expect(result).toEqual([action1]);
     });
+
+    it("triggers actions with paths shorter than startPath", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const action3 = createAction("action3");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["users"]]], // Shorter than startPath
+        [action2, [["users", "123"]]], // Same length as startPath
+        [action3, [["users", "123", "profile"]]], // Longer than startPath
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        {
+          profile: { name: "Alice" },
+          settings: { theme: "dark" },
+        },
+        {
+          profile: { name: "Alice Updated" }, // Changed
+          settings: { theme: "dark" },
+        },
+        ["users", "123"],
+      );
+
+      // All three actions should trigger because:
+      // - action1 watches ["users"] which is a parent of the startPath
+      // - action2 watches ["users", "123"] which matches the startPath
+      // - action3 watches ["users", "123", "profile"] which changed
+      expect(result).toContain(action1);
+      expect(result).toContain(action2);
+      expect(result).toContain(action3);
+      expect(result).toHaveLength(3);
+    });
+
+    it("handles startPath longer than all dependency paths", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["a"]]],
+        [action2, [["a", "b"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        {
+          a: {
+            b: {
+              c: {
+                d: "old value",
+              },
+            },
+          },
+        },
+        {
+          a: {
+            b: {
+              c: {
+                d: "new value",
+              },
+            },
+          },
+        },
+        ["a", "b", "c", "d"], // StartPath is deeper than any dependency
+      );
+
+      // Both actions should trigger because they watch ancestor paths
+      expect(result).toContain(action1);
+      expect(result).toContain(action2);
+      expect(result).toHaveLength(2);
+    });
   });
 
   describe("edge cases", () => {
@@ -552,6 +1088,435 @@ describe("determineTriggeredActions", () => {
         { flag: true },
       );
       expect(result2).toEqual([]);
+    });
+  });
+
+  describe("literal values", () => {
+    it("triggers when number value changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["count"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { count: 42 },
+        { count: 43 },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when number value stays the same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["count"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { count: 42 },
+        { count: 42 },
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("triggers when string value changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["message"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { message: "hello" },
+        { message: "world" },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when string value stays the same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["message"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { message: "hello" },
+        { message: "hello" },
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles root-level number values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        43,
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when root-level number stays same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        42,
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles root-level string values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        "before",
+        "after",
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when root-level string stays same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        "hello",
+        "hello",
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles root-level boolean values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        true,
+        false,
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles root-level null values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        null,
+        "value",
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles changing from literal to object", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        { value: 42 },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles changing from object to literal", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { value: 42 },
+        42,
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("ignores path dependencies when data is literal", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["field"]]],
+      ]);
+
+      // Since data is literal, path ["field"] doesn't exist
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        43,
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles mixed literal types at nested paths", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const action3 = createAction("action3");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["user", "age"]]],
+        [action2, [["user", "name"]]],
+        [action3, [["user", "active"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { user: { age: 25, name: "Alice", active: true } },
+        { user: { age: 26, name: "Alice", active: false } },
+      );
+      expect(result).toContain(action1); // age changed
+      expect(result).not.toContain(action2); // name stayed same
+      expect(result).toContain(action3); // active changed
+    });
+  });
+
+  describe("array values", () => {
+    it("triggers when array changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["numbers"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { numbers: [1, 2, 3] },
+        { numbers: [1, 2, 3, 4] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when array stays the same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["numbers"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { numbers: [1, 2, 3] },
+        { numbers: [1, 2, 3] },
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("triggers when array element order changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["items"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { items: ["a", "b", "c"] },
+        { items: ["c", "b", "a"] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles root-level array values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        [1, 2, 3],
+        [1, 2, 3, 4],
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when root-level array stays same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        [1, 2, 3],
+        [1, 2, 3],
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("triggers on root-level array element change", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        ["a", "b", "c"],
+        ["a", "x", "c"],
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles specific index dependency on root-level array", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["1"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        ["a", "b", "c"],
+        ["a", "x", "c"],
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles changing from array to non-array", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        [1, 2, 3],
+        "not an array",
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles empty arrays", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["items"]]],
+      ]);
+
+      const result1 = determineTriggeredActions(
+        dependencies,
+        { items: [] },
+        { items: [1] },
+      );
+      expect(result1).toEqual([action1]);
+
+      const result2 = determineTriggeredActions(
+        dependencies,
+        { items: [1] },
+        { items: [] },
+      );
+      expect(result2).toEqual([action1]);
+
+      const result3 = determineTriggeredActions(
+        dependencies,
+        { items: [] },
+        { items: [] },
+      );
+      expect(result3).toEqual([]);
+    });
+
+    it("handles arrays of mixed types", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["mixed"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { mixed: [1, "two", true, null] },
+        { mixed: [1, "two", false, null] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles arrays of objects", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["users"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { users: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }] },
+        { users: [{ id: 1, name: "Alice" }, { id: 2, name: "Charlie" }] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles nested arrays", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["matrix"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { matrix: [[1, 2], [3, 4]] },
+        { matrix: [[1, 2], [3, 5]] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("triggers on specific array index with literal value", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["scores", "2"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { scores: [10, 20, 30, 40] },
+        { scores: [10, 20, 35, 40] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles arrays at multiple levels", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["data", "items"]]],
+        [action2, [["data", "tags"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        {
+          data: {
+            items: [1, 2, 3],
+            tags: ["red", "blue"],
+          },
+        },
+        {
+          data: {
+            items: [1, 2, 3],
+            tags: ["red", "green"],
+          },
+        },
+      );
+      expect(result).toEqual([action2]); // only tags changed
     });
   });
 
@@ -700,7 +1665,10 @@ describe("determineTriggeredActions", () => {
         [unreadCountAction, [["notifications", "unread"]]],
         [notificationItemsAction, [["notifications", "items"]]],
         [settingsAction, [["settings"]]],
-        [analyticsAction, [["analytics", "pageViews"], ["analytics", "sessions"]]],
+        [analyticsAction, [["analytics", "pageViews"], [
+          "analytics",
+          "sessions",
+        ]]],
       ]);
 
       const before = {
@@ -734,28 +1702,28 @@ describe("determineTriggeredActions", () => {
       const after = {
         currentUser: {
           id: "123",
-          name: "Alice",  // Same name
-          preferences: { theme: "dark", language: "en" },  // Theme changed
-          lastLogin: "2024-01-02",  // Changed but not watched
+          name: "Alice", // Same name
+          preferences: { theme: "dark", language: "en" }, // Theme changed
+          lastLogin: "2024-01-02", // Changed but not watched
         },
         posts: {
-          featured: ["post1", "post2"],  // Same featured posts
-          recent: ["post3", "post4", "post5"],  // Added a new recent post
-          drafts: ["draft1"],  // Changed but not watched
+          featured: ["post1", "post2"], // Same featured posts
+          recent: ["post3", "post4", "post5"], // Added a new recent post
+          drafts: ["draft1"], // Changed but not watched
         },
         notifications: {
-          unread: 6,  // Incremented
-          items: [{ id: "n1" }],  // Added new item
-          settings: { email: false, push: false },  // Changed but not watched
+          unread: 6, // Incremented
+          items: [{ id: "n1" }], // Added new item
+          settings: { email: false, push: false }, // Changed but not watched
         },
         settings: {
-          privacy: "public",  // Same
-          autoSave: true,  // Same
+          privacy: "public", // Same
+          autoSave: true, // Same
         },
         analytics: {
-          pageViews: 1250,  // Changed
-          sessions: 50,  // Same
-          bounceRate: 0.25,  // Changed but not watched
+          pageViews: 1250, // Changed
+          sessions: 50, // Same
+          bounceRate: 0.25, // Changed but not watched
         },
       };
 
@@ -782,18 +1750,18 @@ describe("determineTriggeredActions", () => {
 
 // Benchmarks
 Deno.bench("sortAndCompactPaths - small dataset", () => {
-  const paths: TriggerPaths = [
+  const addresses = createAddresses([
     ["user", "name"],
     ["user"],
     ["posts", "0", "title"],
     ["posts"],
     ["settings", "theme"],
-  ];
-  sortAndCompactPaths(paths);
+  ]);
+  sortAndCompactPaths(addresses);
 });
 
 Deno.bench("sortAndCompactPaths - large dataset", () => {
-  const paths: TriggerPaths = [];
+  const paths: MemoryAddressPathComponent[][] = [];
   for (let i = 0; i < 1000; i++) {
     paths.push([`field${i}`]);
     if (i % 10 === 0) {
@@ -801,17 +1769,41 @@ Deno.bench("sortAndCompactPaths - large dataset", () => {
       paths.push([`field${i}`, "nested", "deep"]);
     }
   }
-  sortAndCompactPaths(paths);
+  const addresses = createAddresses(paths);
+  sortAndCompactPaths(addresses);
 });
 
 Deno.bench("sortAndCompactPaths - deeply nested paths", () => {
-  const paths: TriggerPaths = [];
+  const paths: MemoryAddressPathComponent[][] = [];
   for (let i = 0; i < 100; i++) {
     const depth = Math.floor(Math.random() * 10) + 1;
     const path = Array.from({ length: depth }, (_, j) => `level${j}`);
     paths.push(path);
   }
-  sortAndCompactPaths(paths);
+  const addresses = createAddresses(paths);
+  sortAndCompactPaths(addresses);
+});
+
+Deno.bench("sortAndCompactPaths - multiple spaces/ids/types", () => {
+  const addresses: IMemorySpaceAddress[] = [];
+  const spaces = [
+    "did:test:space1",
+    "did:test:space2",
+    "did:test:space3",
+  ] as MemorySpace[];
+  const ids = ["test://entity1", "test://entity2", "test://entity3"];
+  const types = ["application/json", "text/plain", "application/xml"];
+
+  for (let i = 0; i < 100; i++) {
+    const space = spaces[i % 3];
+    const id = ids[Math.floor(i / 3) % 3];
+    const type = types[Math.floor(i / 9) % 3];
+    addresses.push(createAddress([`field${i}`], space, id, type));
+    if (i % 5 === 0) {
+      addresses.push(createAddress([`field${i}`, "nested"], space, id, type));
+    }
+  }
+  sortAndCompactPaths(addresses);
 });
 
 Deno.bench("determineTriggeredActions - simple change", () => {
@@ -819,7 +1811,7 @@ Deno.bench("determineTriggeredActions - simple change", () => {
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [["user", "name"]]],
   ]);
-  
+
   determineTriggeredActions(
     dependencies,
     { user: { name: "Alice", age: 30 } },
@@ -832,7 +1824,7 @@ Deno.bench("determineTriggeredActions - no changes", () => {
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [["user", "name"]]],
   ]);
-  
+
   const data = { user: { name: "Alice", age: 30 } };
   determineTriggeredActions(dependencies, data, data);
 });
@@ -841,11 +1833,11 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
   const dependencies = new Map<Action, SortedAndCompactPaths>();
   const before: Record<string, number> = {};
   const after: Record<string, number> = {};
-  
+
   for (let i = 0; i < 100; i++) {
-    const action = { 
-      schedule: () => {}, 
-      name: `action${i}` 
+    const action = {
+      schedule: () => {},
+      name: `action${i}`,
     } as unknown as Action;
     dependencies.set(action, [[`field${i}`]]);
     before[`field${i}`] = i;
@@ -853,7 +1845,7 @@ Deno.bench("determineTriggeredActions - many dependencies", () => {
   }
   // Change one field
   after.field50 = -1;
-  
+
   determineTriggeredActions(
     dependencies,
     before as JSONValue,
@@ -867,7 +1859,7 @@ Deno.bench("determineTriggeredActions - deep nesting", () => {
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, [deepPath]],
   ]);
-  
+
   // Create deeply nested objects
   const createNested = (value: string) => {
     let result: any = value;
@@ -876,7 +1868,7 @@ Deno.bench("determineTriggeredActions - deep nesting", () => {
     }
     return result;
   };
-  
+
   determineTriggeredActions(
     dependencies,
     createNested("before"),
@@ -893,7 +1885,7 @@ Deno.bench("determineTriggeredActions - multiple paths per action", () => {
   const dependencies = new Map<Action, SortedAndCompactPaths>([
     [action, paths],
   ]);
-  
+
   const before: any = {};
   const after: any = {};
   for (let i = 0; i < 20; i++) {
@@ -901,29 +1893,32 @@ Deno.bench("determineTriggeredActions - multiple paths per action", () => {
     after[`field${i}`] = i;
   }
   after.field10 = "changed";
-  
+
   determineTriggeredActions(dependencies, before, after);
 });
 
 Deno.bench("determineTriggeredActions - complex real-world", () => {
   const dependencies = new Map<Action, SortedAndCompactPaths>();
-  
+
   // Simulate a real app with various watchers
   const actions = [
     { paths: [["currentUser"]], name: "userWatcher" },
     { paths: [["currentUser", "preferences"]], name: "prefsWatcher" },
     { paths: [["posts"]], name: "postsWatcher" },
-    { paths: [["posts", "0"], ["posts", "1"], ["posts", "2"]], name: "topPostsWatcher" },
+    {
+      paths: [["posts", "0"], ["posts", "1"], ["posts", "2"]],
+      name: "topPostsWatcher",
+    },
     { paths: [["notifications", "unread"]], name: "unreadWatcher" },
     { paths: [["ui", "theme"]], name: "themeWatcher" },
     { paths: [["ui", "sidebar", "collapsed"]], name: "sidebarWatcher" },
   ];
-  
+
   for (const { paths, name } of actions) {
     const action = { schedule: () => {}, name } as unknown as Action;
     dependencies.set(action, paths);
   }
-  
+
   const before = {
     currentUser: {
       id: "123",
@@ -941,7 +1936,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
       sidebar: { collapsed: false, width: 250 },
     },
   };
-  
+
   const after = {
     currentUser: {
       id: "123",
@@ -959,7 +1954,7 @@ Deno.bench("determineTriggeredActions - complex real-world", () => {
       sidebar: { collapsed: false, width: 250 },
     },
   };
-  
+
   determineTriggeredActions(
     dependencies,
     before as JSONValue,
