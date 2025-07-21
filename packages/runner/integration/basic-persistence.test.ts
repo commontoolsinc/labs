@@ -36,7 +36,7 @@ async function test() {
 
   const cause = "test-object-" + Date.now();
   const cell1 = runtime1.getCell(identity.did(), cause, schema);
-  await runtime1.storage.syncCell(cell1);
+  await cell1.sync();
 
   const tx = runtime1.edit();
   cell1.withTx(tx).set({ message: "Hello World", count: 42 });
@@ -57,7 +57,7 @@ async function test() {
   });
 
   const cell2 = runtime2.getCell(identity.did(), cause, schema);
-  await runtime2.storage.syncCell(cell2);
+  await cell2.sync();
   await runtime2.storage.synced();
 
   const cell2Contents = JSON.parse(JSON.stringify(cell2.get()));

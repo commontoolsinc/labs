@@ -146,9 +146,7 @@ export class RecipeManager implements IRecipeManager {
     tx?: IExtendedStorageTransaction,
   ) {
     if (this.saveRecipe({ recipeId, space, recipe, recipeMeta }, tx)) {
-      await this.runtime.storage.syncCell(
-        this.getRecipeMetaCell({ recipeId, space }, tx),
-      );
+      await this.getRecipeMetaCell({ recipeId, space }, tx).sync();
     }
   }
 
@@ -178,7 +176,7 @@ export class RecipeManager implements IRecipeManager {
     tx?: IExtendedStorageTransaction,
   ): Promise<Recipe> {
     const metaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
-    await this.runtime.storage.syncCell(metaCell);
+    await metaCell.sync();
     const recipeMeta = metaCell.get();
 
     if (!recipeMeta.src && !recipeMeta.program) {

@@ -88,6 +88,9 @@ import { fromURI } from "./uri-utils.ts";
  * @param {function} callback - The callback to be called when the cell changes.
  * @returns {function} - A function to Cleanup the callback.
  *
+ * @method sync Syncs the cell to the storage.
+ * @returns {Promise<void>}
+ *
  * @method getAsQueryResult Returns a query result for the cell.
  * @param {Path} path - The optional path to follow.
  * @param {ReactivityLog} log - Optional reactivity log.
@@ -168,7 +171,6 @@ declare module "@commontools/api" {
     ): Cell<
       T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
-
     asSchema<S extends JSONSchema = JSONSchema>(
       schema: S,
     ): Cell<Schema<S>>;
@@ -177,6 +179,7 @@ declare module "@commontools/api" {
     ): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
     sink(callback: (value: T) => Cancel | undefined | void): Cancel;
+    sync(): Promise<Cell<T>> | Cell<T>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
       tx?: IExtendedStorageTransaction,
@@ -268,6 +271,7 @@ export type Cellify<T> =
 export interface Stream<T> {
   send(event: T): void;
   sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+  sync(): Promise<Stream<T>> | Stream<T>;
   getRaw(options?: IReadOptions): any;
   getAsNormalizedFullLink(): NormalizedFullLink;
   getDoc(): DocImpl<any>;
@@ -336,6 +340,9 @@ function createStreamCell<T>(
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
+    // sync: No-op for streams, but maybe eventually it might mean wait for all
+    // events to have been processed
+    sync: () => self,
     getRaw: (options?: IReadOptions) =>
       (tx?.status().status === "ready" ? tx : runtime.edit())
         .readValueOrThrow(link, options),
@@ -488,6 +495,7 @@ function createRegularCell<T>(
       createCell(runtime, link, newTx),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, runtime, link),
+    sync: () => runtime.storage.syncCell(self),
     getAsQueryResult: (
       subPath: PropertyKey[] = [],
       newTx?: IExtendedStorageTransaction,

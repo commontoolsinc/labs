@@ -296,7 +296,7 @@ export class Runner implements IRunner {
     recipe: Recipe | Module,
     inputs?: any,
   ) {
-    await this.runtime.storage.syncCell(resultCell);
+    await resultCell.sync();
 
     const synced = await this.syncCellsForRunningRecipe(
       resultCell,
@@ -353,9 +353,7 @@ export class Runner implements IRunner {
       const link = parseLink(value, resultCell);
 
       if (link) {
-        const maybePromise = this.runtime.storage.syncCell(
-          this.runtime.getCellFromLink(link),
-        );
+        const maybePromise = this.runtime.getCellFromLink(link).sync();
         if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (isRecord(value)) {
         for (const key in value) syncAllMentionedCells(value[key]);
@@ -375,7 +373,7 @@ export class Runner implements IRunner {
     });
     if (!sourceCell) return false;
 
-    await this.runtime.storage.syncCell(sourceCell);
+    await sourceCell.sync();
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -398,7 +396,7 @@ export class Runner implements IRunner {
       cells.push(resultCell.asSchema(recipe.resultSchema));
     }
 
-    await Promise.all(cells.map((c) => this.runtime.storage.syncCell(c)));
+    await Promise.all(cells.map((c) => c.sync()));
 
     return true;
   }
