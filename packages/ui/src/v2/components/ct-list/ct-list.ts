@@ -435,12 +435,12 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
         : ""}
 
         <div class="list-items">
-          ${items.length === 0
+          ${items.filter(item => item && item.title).length === 0
         ? html`
           <div class="empty-state">No items in this list</div>
         `
         : repeat(
-          items,
+          items.filter(item => item && item.title),
           (item) => item.title,
           (item) => this.renderItem(item),
         )}
