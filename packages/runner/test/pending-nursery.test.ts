@@ -8,6 +8,10 @@ import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
 import { IRuntime, Runtime } from "../src/runtime.ts";
 import { toURI } from "../src/uri-utils.ts";
+import {
+  IStorageManager,
+  IStorageSubscription,
+} from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -20,7 +24,6 @@ describe("Provider Subscriptions", () => {
   beforeEach(() => {
     memoryDb = Memory.Memory.emulate({ serviceDid: signer.did() });
     sessionProvider = Memory.Provider.create(memoryDb);
-    //Memory.Provider.create(memoryDb);
     const consumer = Consumer.open({
       as: signer,
       session: sessionProvider.session(),
@@ -32,12 +35,15 @@ describe("Provider Subscriptions", () => {
       subscription: Subscription.create(),
     });
 
-    const storageManager = {
+    const storageManager: IStorageManager = {
       id: "some id",
       open: (_space: Consumer.MemorySpace) => {
         return provider;
       },
       edit() {
+        throw new Error("Not implemented");
+      },
+      subscribe(_subscription: IStorageSubscription) {
         throw new Error("Not implemented");
       },
     };
