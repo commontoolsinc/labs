@@ -7,8 +7,9 @@ import type {
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 
-export type TriggerPaths = MemoryAddressPathComponent[][];
-export type SortedAndCompactPaths = MemoryAddressPathComponent[][];
+export type SortedAndCompactPaths = Array<
+  readonly MemoryAddressPathComponent[]
+>;
 
 type Keyable = Record<MemoryAddressPathComponent, JSONValue | undefined>;
 
@@ -59,18 +60,18 @@ export function sortAndCompactPaths(
 /**
  * Converts a list of paths to a map of space/id to paths.
  *
- * @param paths - The paths to convert.
+ * @param addresses - The paths to convert.
  * @returns A map of space/id to paths.
  */
-export function pathsToMapByEntity(
-  paths: IMemorySpaceAddress[],
-): Map<SpaceAndURI, IMemorySpaceAddress[]> {
-  const map = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
-  for (const path of paths) {
-    if (path.type !== "application/json") continue;
-    const key: SpaceAndURI = `${path.space}/${path.id}`;
+export function addresssesToPathByEntity(
+  addresses: IMemorySpaceAddress[],
+): Map<SpaceAndURI, SortedAndCompactPaths> {
+  const map = new Map<SpaceAndURI, SortedAndCompactPaths>();
+  for (const address of addresses) {
+    if (address.type !== "application/json") continue;
+    const key: SpaceAndURI = `${address.space}/${address.id}`;
     if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(path);
+    map.get(key)!.push(address.path);
   }
   return map;
 }
@@ -125,7 +126,7 @@ export function determineTriggeredActions(
   subscribers.sort((a, b) => comparePaths(b.paths[0], a.paths[0]));
 
   // Traversal state:
-  let currentPath: string[] = [];
+  let currentPath: readonly MemoryAddressPathComponent[] = [];
 
   // *Values: An array of data values along currentPath
   const beforeValues: (JSONValue | undefined)[] = [before];
