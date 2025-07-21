@@ -513,9 +513,6 @@ export async function removeCharm(
   const removed = await charms.remove(config.charm);
 
   if (!removed) {
-    throw new ValidationError(
-      `Charm "${config.charm}" not found`,
-      { exitCode: 1 },
-    );
+    throw new Error(`Charm "${config.charm}" not found`);
   }
 }

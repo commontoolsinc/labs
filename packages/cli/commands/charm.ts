@@ -405,17 +405,20 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   /* charm rm */
   .command("rm", "Remove a charm")
   .alias("remove")
-  .usage(spaceUsage)
+  .usage(charmUsage)
   .example(
-    `ct charm rm baed..43mi ${EX_ID} ${EX_COMP}`,
-    `Remove charm "baed..43mi".`,
+    `ct charm rm ${EX_ID} ${EX_COMP_CHARM}`,
+    `Remove charm "${RAW_EX_COMP.charm!}".`,
   )
-  .arguments("<charm:string>")
-  .action(async (options, charmId) => {
-    const spaceConfig = parseSpaceOptions(options);
-    const charmConfig = { ...spaceConfig, charm: charmId };
+  .example(
+    `ct charm rm ${EX_ID} ${EX_URL}`,
+    `Remove charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .action(async (options) => {
+    const charmConfig = parseCharmOptions(options);
     await removeCharm(charmConfig);
-    render(`Removed charm ${charmId}`);
+    render(`Removed charm ${charmConfig.charm}`);
   });
 
 interface CharmCLIOptions {
