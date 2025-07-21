@@ -3,9 +3,14 @@ import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { Identity } from "@commontools/identity";
-import { INotFoundError } from "../src/storage/interface.ts";
 import { getJSONFromDataURI } from "../src/uri-utils.ts";
-import { IMemorySpaceAddress } from "../src/storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  IMemorySpaceAddress,
+  INotFoundError,
+} from "../src/storage/interface.ts";
+import { createDoc } from "../src/doc.ts";
+import { ShimStorageManager } from "../src/storage/transaction-shim.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -480,6 +485,401 @@ describe("StorageTransaction", () => {
     }, { foo: 123 });
     const result = await transaction.commit();
     expect(result.ok).toBeDefined();
+  });
+});
+
+describe("DocImpl shim notifications", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  describe("setAtPath with transaction parameter", () => {
+    it("should accept transaction parameter and work correctly", () => {
+      const entityId = { "/": "transaction-test-entity" };
+      const value = { initial: "value" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      // Test that setAtPath works with transaction parameter
+      const result = doc.setAtPath(["new"], "value", undefined, tx);
+      expect(result).toBe(true);
+      expect(doc.getAtPath(["new"])).toBe("value");
+    });
+
+    it("should handle nested paths with transaction parameter", () => {
+      const entityId = { "/": "nested-transaction-test-entity" };
+      const value = { initial: "value" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      // Test nested path setting with transaction
+      const result = doc.setAtPath(
+        ["nested", "deep", "path"],
+        "deep value",
+        undefined,
+        tx,
+      );
+      expect(result).toBe(true);
+      expect(doc.getAtPath(["nested", "deep", "path"])).toBe("deep value");
+    });
+
+    it("should handle array paths with transaction parameter", () => {
+      const entityId = { "/": "array-transaction-test-entity" };
+      const value = { items: [] };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      // Test array path setting with transaction
+      const result = doc.setAtPath(["items", 0], "first item", undefined, tx);
+      expect(result).toBe(true);
+      expect(doc.getAtPath(["items", 0])).toBe("first item");
+    });
+
+    it("should handle schema validation with transaction parameter", () => {
+      const entityId = { "/": "schema-transaction-test-entity" };
+      const value = { name: "test" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const schema = {
+        type: "string" as const,
+        minLength: 3,
+      };
+
+      // Test with valid schema
+      const result = doc.setAtPath(["name"], "valid name", schema, tx);
+      expect(result).toBe(true);
+      expect(doc.getAtPath(["name"])).toBe("valid name");
+    });
+
+    it("should handle root path setting with transaction parameter", () => {
+      const entityId = { "/": "root-transaction-test-entity" };
+      const value = { initial: "value" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const newValue = { completely: "new value" };
+      const result = doc.setAtPath([], newValue, undefined, tx);
+      expect(result).toBe(true);
+      expect(doc.get()).toEqual(newValue);
+    });
+  });
+
+  describe("storage notifications with shim storage manager", () => {
+    it("should send notifications when shim storage manager is available", () => {
+      const entityId = { "/": "notification-test-entity" };
+      const value = { initial: "value" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const notifications: any[] = [];
+      runtime.storage.subscribe({
+        next(notification: any) {
+          notifications.push(notification);
+          return { done: false };
+        },
+      });
+
+      const previousValue = doc.getAtPath(["initial"]);
+      doc.setAtPath(["initial"], "updated", undefined, tx.tx);
+
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].type).toBe("commit");
+      expect(notifications[0].space).toBe(space);
+      expect(notifications[0].source).toBe(tx.tx);
+      expect(notifications[0].changes).toHaveLength(1);
+      expect(notifications[0].changes[0].address.id).toBe(
+        "of:notification-test-entity",
+      );
+      expect(notifications[0].changes[0].address.path).toEqual([
+        "value",
+        "initial",
+      ]);
+      expect(notifications[0].changes[0].before).toBe("value");
+      expect(notifications[0].changes[0].after).toBe("updated");
+    });
+
+    it("should send notifications for nested path changes", () => {
+      const entityId = { "/": "nested-notification-test-entity" };
+      const value = { user: { name: "John" } };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const notifications: any[] = [];
+      runtime.storage.subscribe({
+        next(notification: any) {
+          notifications.push(notification);
+          return { done: false };
+        },
+      });
+
+      doc.setAtPath(["user", "name"], "Jane", undefined, tx.tx);
+
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].changes[0].address.path).toEqual([
+        "value",
+        "user",
+        "name",
+      ]);
+      expect(notifications[0].changes[0].before).toBe("John");
+      expect(notifications[0].changes[0].after).toBe("Jane");
+    });
+
+    it("should send notifications for root value changes", () => {
+      const entityId = { "/": "root-notification-test-entity" };
+      const value = { initial: "value" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const notifications: any[] = [];
+      runtime.storage.subscribe({
+        next(notification: any) {
+          notifications.push(notification);
+          return { done: false };
+        },
+      });
+
+      const newValue = { completely: "new value" };
+      doc.setAtPath([], newValue, undefined, tx.tx);
+
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].changes[0].address.path).toEqual(["value"]);
+      expect(notifications[0].changes[0].before).toEqual({ initial: "value" });
+      expect(notifications[0].changes[0].after).toEqual(newValue);
+    });
+
+    it("should not send notifications when value doesn't change", () => {
+      const entityId = { "/": "no-change-notification-test-entity" };
+      const value = { name: "test" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const notifications: any[] = [];
+      runtime.storage.subscribe({
+        next(notification: any) {
+          notifications.push(notification);
+          return { done: false };
+        },
+      });
+
+      // Set the same value
+      doc.setAtPath(["name"], "test", undefined, tx.tx);
+
+      expect(notifications).toHaveLength(0);
+    });
+
+    it("should handle multiple notifications in sequence", () => {
+      const entityId = { "/": "multiple-notification-test-entity" };
+      const value = { counter: 0 };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const notifications: any[] = [];
+      runtime.storage.subscribe({
+        next(notification: any) {
+          notifications.push(notification);
+          return { done: false };
+        },
+      });
+
+      doc.setAtPath(["counter"], 1, undefined, tx.tx);
+      doc.setAtPath(["counter"], 2, undefined, tx.tx);
+      doc.setAtPath(["counter"], 3, undefined, tx.tx);
+
+      expect(notifications).toHaveLength(3);
+      expect(notifications[0].changes[0].after).toBe(1);
+      expect(notifications[1].changes[0].after).toBe(2);
+      expect(notifications[2].changes[0].after).toBe(3);
+    });
+  });
+
+  describe("integration with existing functionality", () => {
+    it("should work with updates callbacks and storage notifications", () => {
+      const entityId = { "/": "integration-test-entity" };
+      const value = { status: "initial" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+
+      const updates: Array<{ value: any; path: PropertyKey[] }> = [];
+      const notifications: any[] = [];
+
+      // Set up updates callback
+      const cancelUpdates = doc.updates((value, path) => {
+        updates.push({ value, path });
+      });
+
+      // Set up storage notifications
+      runtime.storage.subscribe({
+        next(notification: any) {
+          notifications.push(notification);
+          return { done: false };
+        },
+      });
+
+      // Make a change
+      doc.setAtPath(["status"], "updated", undefined, tx.tx);
+
+      // Both should be triggered
+      expect(updates).toHaveLength(1);
+      expect(notifications).toHaveLength(1);
+      expect(updates[0].path).toEqual(["status"]);
+      expect(notifications[0].changes[0].address.path).toEqual([
+        "value",
+        "status",
+      ]);
+
+      cancelUpdates();
+    });
+
+    it("should handle frozen documents with transaction parameter", () => {
+      const entityId = { "/": "frozen-transaction-test-entity" };
+      const value = { data: "initial" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+      doc.freeze("test freeze");
+
+      expect(() => {
+        doc.setAtPath(["data"], "new value", undefined, tx.tx);
+      }).toThrow("Cell is read-only: test freeze");
+    });
+
+    it("should work with ephemeral documents", () => {
+      const entityId = { "/": "ephemeral-transaction-test-entity" };
+      const value = { data: "initial" };
+
+      const doc = createDoc(value, entityId, space, runtime);
+      doc.ephemeral = true;
+
+      // Should work normally even when ephemeral
+      const result = doc.setAtPath(["data"], "new value", undefined, tx.tx);
+      expect(result).toBe(true);
+      expect(doc.getAtPath(["data"])).toBe("new value");
+    });
+  });
+});
+
+describe("Subscription Shim", () => {
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let tx: IExtendedStorageTransaction;
+  let shimStorageManager: ShimStorageManager;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    shimStorageManager = new ShimStorageManager(runtime);
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should create a new storage transaction", () => {
+    const transaction = shimStorageManager.edit();
+
+    expect(transaction).toBeDefined();
+    expect(transaction.status().status).toBe("ready");
+  });
+
+  it("should manage subscriptions", () => {
+    const notifications: any[] = [];
+    const subscription = {
+      next(notification: any) {
+        notifications.push(notification);
+        return { done: false };
+      },
+    };
+
+    shimStorageManager.subscribe(subscription);
+
+    // Simulate a notification
+    const testNotification = {
+      type: "commit" as const,
+      space,
+      changes: [],
+    };
+
+    shimStorageManager.notifySubscribers(testNotification);
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toEqual(testNotification);
+  });
+
+  it("should remove subscriptions that return done: true", () => {
+    let callCount = 0;
+    const subscription = {
+      next(notification: any) {
+        callCount++;
+        return { done: true }; // Stop after first call
+      },
+    };
+
+    shimStorageManager.subscribe(subscription);
+
+    // First notification should work
+    shimStorageManager.notifySubscribers({
+      type: "commit",
+      space,
+      changes: [],
+    });
+    expect(callCount).toBe(1);
+
+    // Second notification should not work (subscription removed)
+    shimStorageManager.notifySubscribers({
+      type: "commit",
+      space,
+      changes: [],
+    });
+    expect(callCount).toBe(1); // Should not have increased
+  });
+
+  it("should remove subscriptions that throw errors", () => {
+    let callCount = 0;
+    const subscription = {
+      next(notification: any) {
+        callCount++;
+        throw new Error("Test error");
+      },
+    };
+
+    shimStorageManager.subscribe(subscription);
+
+    // First notification should work but catch the error (and remove subscription)
+    shimStorageManager.notifySubscribers({
+      type: "commit",
+      space,
+      changes: [],
+    });
+    expect(callCount).toBe(1);
+
+    // Second notification should not work (subscription removed)
+    shimStorageManager.notifySubscribers({
+      type: "commit",
+      space,
+      changes: [],
+    });
+    expect(callCount).toBe(1); // Should not have increased
   });
 });
 

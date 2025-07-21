@@ -1586,8 +1586,7 @@ export interface Options {
   settings?: IRemoteStorageProviderSettings;
 }
 
-export class StorageManager
-  implements IStorageManager, IStorageSubscriptionCapability {
+export class StorageManager implements IStorageManager {
   address: URL;
   as: Signer;
   id: string;

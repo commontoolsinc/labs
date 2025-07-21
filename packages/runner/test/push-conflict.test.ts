@@ -8,7 +8,10 @@ import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
-import { IStorageManager } from "../src/storage/interface.ts";
+import {
+  IStorageManager,
+  IStorageSubscription,
+} from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 
 // In the transition to TX we had to remove the current push retry logic
@@ -28,6 +31,9 @@ describe.skip("Push conflict", () => {
         session: consumer,
       }),
     edit() {
+      throw new Error("Not implemented");
+    },
+    subscribe(_subscription: IStorageSubscription) {
       throw new Error("Not implemented");
     },
   };

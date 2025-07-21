@@ -12,13 +12,13 @@ import type {
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
+  IStorageSubscriptionCapability,
   MemorySpace,
+  StorageNotification,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
 import type { DocImpl } from "./doc.ts";
-import { isDoc } from "./doc.ts";
-import { DocumentMap, type EntityId, getEntityId } from "./doc-map.ts";
+import { DocumentMap, type EntityId } from "./doc-map.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   type Action,
@@ -29,13 +29,9 @@ import {
 import type { RuntimeProgram } from "./harness/types.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
-import {
-  ExtendedStorageTransaction,
-  StorageTransaction,
-} from "./storage/transaction-shim.ts";
+import { ShimStorageManager } from "./storage/transaction-shim.ts";
 import {
   type CellLink,
-  isLegacyCellLink,
   isLink,
   isNormalizedFullLink,
   type NormalizedFullLink,
@@ -48,6 +44,8 @@ import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { StaticCache } from "@commontools/static";
+
+const DEFAULT_USE_REAL_TRANSACTIONS = false;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
@@ -108,6 +106,7 @@ export interface IRuntime {
   readonly staticCache: StaticCache;
   readonly useStorageManagerTransactions?: boolean;
   readonly storageManager: IStorageManager;
+  readonly shimStorageManager?: ShimStorageManager;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -202,8 +201,10 @@ export interface IScheduler {
   runningPromise: Promise<unknown> | undefined;
 }
 
-export interface IStorage {
+export interface IStorage extends IStorageSubscriptionCapability {
   readonly runtime: IRuntime;
+  edit(): IExtendedStorageTransaction;
+
   syncCell<T = any>(
     cell: DocImpl<T> | Cell<any>,
     expectedInStorage?: boolean,
@@ -211,6 +212,9 @@ export interface IStorage {
   ): Promise<DocImpl<T>> | DocImpl<T>;
   synced(): Promise<void>;
   cancelAll(): Promise<void>;
+
+  shim: boolean;
+  shimNotifySubscribers(notification: StorageNotification): void;
 }
 
 export interface IRecipeManager {
@@ -329,7 +333,6 @@ export class Runtime implements IRuntime {
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
-  readonly useStorageManagerTransactions?: boolean;
 
   constructor(options: RuntimeOptions) {
     this.staticCache = options.staticAssetServerUrl
@@ -340,8 +343,24 @@ export class Runtime implements IRuntime {
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
     this.id = options.storageManager.id;
-    this.useStorageManagerTransactions =
-      options.useStorageManagerTransactions ?? false;
+
+    if (!options.blobbyServerUrl) {
+      throw new Error("blobbyServerUrl is required");
+    }
+
+    this.storageManager = options.storageManager;
+
+    this.storage = new Storage(
+      this,
+      options.storageManager,
+      options.useStorageManagerTransactions ?? DEFAULT_USE_REAL_TRANSACTIONS,
+    );
+
+    this.documentMap = new DocumentMap(this);
+    this.moduleRegistry = new ModuleRegistry(this);
+    this.recipeManager = new RecipeManager(this);
+    this.runner = new Runner(this);
+    this.cfc = new ContextualFlowControl();
 
     // Create core services with dependencies injected
     this.scheduler = new Scheduler(
@@ -349,19 +368,6 @@ export class Runtime implements IRuntime {
       options.consoleHandler,
       options.errorHandlers,
     );
-
-    if (!options.blobbyServerUrl) {
-      throw new Error("blobbyServerUrl is required");
-    }
-
-    this.storageManager = options.storageManager;
-    this.storage = new Storage(this, options.storageManager);
-
-    this.documentMap = new DocumentMap(this);
-    this.moduleRegistry = new ModuleRegistry(this);
-    this.recipeManager = new RecipeManager(this);
-    this.runner = new Runner(this);
-    this.cfc = new ContextualFlowControl();
 
     // Register built-in modules with runtime injection
     registerBuiltins(this);
@@ -393,7 +399,7 @@ export class Runtime implements IRuntime {
         documentMap: !!this.documentMap,
         harness: !!this.harness,
         runner: !!this.runner,
-        useStorageManagerTransactions: this.useStorageManagerTransactions,
+        useStorageManagerTransactions: !!this.storage.shim,
       });
     }
   }
@@ -434,13 +440,7 @@ export class Runtime implements IRuntime {
    * multiple spaces but writing only to one space.
    */
   edit(): IExtendedStorageTransaction {
-    // Use transaction API from storage manager if enabled, otherwise
-    // use a shim.
-    const transaction = this.useStorageManagerTransactions
-      ? this.storageManager.edit()
-      : new StorageTransaction(this);
-
-    return new ExtendedStorageTransaction(transaction);
+    return this.storage.edit();
   }
 
   // Cell factory methods
