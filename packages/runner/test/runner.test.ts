@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { Recipe } from "../src/builder/types.ts";
+import { NAME, type Recipe } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
 import { Identity } from "@commontools/identity";
@@ -559,13 +559,13 @@ describe("runRecipe", () => {
     expect(result.getAsQueryResult().result).toEqual(50); // 5 * 10
   });
 
-  it("should preserve result state between runs when recipe doesn't change", async () => {
+  it("should preserve NAME between runs", async () => {
     const recipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
       initial: { internal: { counter: 0 } },
       result: {
-        name: "counter",
+        [NAME]: "counter",
         counter: { $alias: { path: ["internal", "counter"] } },
       },
       nodes: [
@@ -590,16 +590,16 @@ describe("runRecipe", () => {
     // First run
     await runtime.runSynced(resultCell, recipe, { value: 1 });
     await runtime.idle();
-    expect(resultCell.get()?.name).toEqual("counter");
+    expect(resultCell.get()?.[NAME]).toEqual("counter");
     expect(resultCell.getAsQueryResult()?.counter).toEqual(1);
 
     // Now change the name
-    resultCell.getAsQueryResult().name = "my counter";
+    resultCell.getAsQueryResult()[NAME] = "my counter";
 
     // Second run with same recipe but different argument
     await runtime.runSynced(resultCell, recipe, { value: 2 });
     await runtime.idle();
-    expect(resultCell.get()?.name).toEqual("my counter");
+    expect(resultCell.get()?.[NAME]).toEqual("my counter");
     expect(resultCell.getAsQueryResult()?.counter).toEqual(2);
   });
 
