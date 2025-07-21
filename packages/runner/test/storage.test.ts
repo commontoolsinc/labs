@@ -153,6 +153,27 @@ describe("Storage", () => {
       await testCell.sync();
       expect(synced).toBe(true);
     });
+
+    it("should wait for a undefined doc to appear with schema and double sync", async () => {
+      let synced = false;
+      const schemaContext = { schema: true, rootSchema: true };
+      storageManager.open(space).sync(testCell.entityId!, true, schemaContext)
+        .then(
+          () => (synced = true),
+        );
+      storageManager.open(space).sync(testCell.entityId!, true, schemaContext)
+        .then(
+          () => (synced = true),
+        );
+      // yield, so that if the second sync returns immediately,
+      // we'll get our callback
+      await Promise.resolve(true);
+
+      expect(synced).toBe(false);
+
+      await testCell.sync();
+      expect(synced).toBe(true);
+    });
   });
 
   describe("ephemeral docs", () => {

@@ -329,17 +329,24 @@ class PullQueue {
 }
 
 // This class helps us maintain a client model of our server side subscriptions
-class SelectorTracker {
+class SelectorTracker<T = Result<Unit, Error>> {
   private refTracker = new MapSet<string, string>();
   private selectors = new Map<string, SchemaPathSelector>();
+  private selectorPromises = new Map<string, Promise<T>>();
 
-  add(doc: FactAddress, selector: SchemaPathSelector | undefined) {
+  add(
+    doc: FactAddress,
+    selector: SchemaPathSelector | undefined,
+    promise: Promise<T>,
+  ) {
     if (selector === undefined) {
       return;
     }
     const selectorRef = refer(JSON.stringify(selector)).toString();
     this.refTracker.add(toKey(doc), selectorRef);
     this.selectors.set(selectorRef, selector);
+    const promiseKey = `${toKey(doc)}?${selectorRef}`;
+    this.selectorPromises.set(promiseKey, promise);
   }
 
   has(doc: FactAddress): boolean {
@@ -360,6 +367,15 @@ class SelectorTracker {
     return selectorRefs.values().map((selectorRef) =>
       this.selectors.get(selectorRef)!
     );
+  }
+
+  getPromise(
+    doc: FactAddress,
+    selector: SchemaPathSelector,
+  ): Promise<T> | undefined {
+    const selectorRef = refer(JSON.stringify(selector)).toString();
+    const promiseKey = `${toKey(doc)}?${selectorRef}`;
+    return this.selectorPromises.get(promiseKey);
   }
 
   /**
@@ -463,7 +479,8 @@ export class Replica {
     public queue: PullQueue = new PullQueue(),
     public pullRetryLimit: number = 100,
     public useSchemaQueries: boolean = false,
-    // Track the selectors used for top level docs
+    // Track the selectors used for top level docs -- we only add to this
+    // once we've gotten our results (so the promise is resolved).
     private selectorTracker: SelectorTracker = new SelectorTracker(),
     private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
@@ -632,7 +649,7 @@ export class Replica {
       this.selectorTracker.add(factAddress, {
         path: [],
         schemaContext: schema,
-      });
+      }, Promise.resolve(result));
     }
 
     if (result.error) {
@@ -1337,6 +1354,8 @@ export class Provider implements IStorageProvider {
   subscribers: Map<string, Set<(value: StorageValue<JSONValue>) => void>> =
     new Map();
   // Tracks server-side subscriptions so we can re-establish them after reconnection
+  // These promises will sometimes be pending, since we also use this to avoid
+  // sending a duplicate subscription.
   private serverSubscriptions = new SelectorTracker();
 
   static open(options: RemoteStorageProviderOptions) {
@@ -1430,16 +1449,24 @@ export class Provider implements IStorageProvider {
     const { the } = this;
     const of = BaseStorageProvider.toEntity(entityId);
     const factAddress = { the, of };
-
-    // Track this server subscription, and don't re-issue it
     if (schemaContext) {
       const selector = { path: [], schemaContext: schemaContext };
-      if (this.serverSubscriptions.hasSelector(factAddress, selector)) {
-        return Promise.resolve({ ok: {} });
+      // We track this server subscription, and don't re-issue it --
+      // we will instead return the existing promise, so we can wait until
+      // we have the response.
+      const existingPromise = this.serverSubscriptions.getPromise(
+        factAddress,
+        selector,
+      );
+      if (existingPromise) {
+        return existingPromise;
       }
-      this.serverSubscriptions.add(factAddress, selector);
+      const promise = this.workspace.load([[factAddress, schemaContext]]);
+      this.serverSubscriptions.add(factAddress, selector, promise);
+      return promise;
+    } else {
+      return this.workspace.load([[factAddress, undefined]]);
     }
-    return this.workspace.load([[factAddress, schemaContext]]);
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
