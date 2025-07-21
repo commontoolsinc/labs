@@ -1,5 +1,5 @@
 // Cell Controller tests temporarily disabled for type checking
-// TODO: Fix mock implementations to match full Cell and ReactiveControllerHost interfaces
+// TODO(@claude): Fix mock implementations to match full Cell and ReactiveControllerHost interfaces
 
 /*
 import { describe, it } from "@std/testing/bdd";
