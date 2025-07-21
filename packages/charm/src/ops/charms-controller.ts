@@ -44,6 +44,18 @@ export class CharmsController {
     return charms.map((charm) => new CharmController(this.#manager, charm));
   }
 
+  async remove(charmId: string): Promise<boolean> {
+    this.disposeCheck();
+    const removed = await this.#manager.remove(charmId);
+    // Empty trash and ensure full synchronization
+    if (removed) {
+      await this.#manager.emptyTrash();
+      await this.#manager.runtime.idle();
+      await this.#manager.synced();
+    }
+    return removed;
+  }
+
   async dispose() {
     this.disposeCheck();
     this.#disposed = true;

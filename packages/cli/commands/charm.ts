@@ -13,6 +13,7 @@ import {
   listCharms,
   MapFormat,
   newCharm,
+  removeCharm,
   saveCharmRecipe,
   setCellValue,
   setCharmRecipe,
@@ -390,7 +391,8 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   )
   .example(
     `ct charm call ${EX_ID} ${EX_COMP_CHARM} setName '{"value":"My Name"}'`,
-    `Call the "setName" handler with arguments on charm "${RAW_EX_COMP.charm!}".`,
+    `Call the "setName" handler with arguments on charm "${RAW_EX_COMP
+      .charm!}".`,
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .arguments("<handler:string> [args:string]")
@@ -399,6 +401,21 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     const args = argsJson ? JSON.parse(argsJson) : await drainStdin();
     await callCharmHandler(charmConfig, handlerName, args);
     render(`Called handler "${handlerName}" on charm ${charmConfig.charm}`);
+  })
+  /* charm rm */
+  .command("rm", "Remove a charm")
+  .alias("remove")
+  .usage(spaceUsage)
+  .example(
+    `ct charm rm baed..43mi ${EX_ID} ${EX_COMP}`,
+    `Remove charm "baed..43mi".`,
+  )
+  .arguments("<charm:string>")
+  .action(async (options, charmId) => {
+    const spaceConfig = parseSpaceOptions(options);
+    const charmConfig = { ...spaceConfig, charm: charmId };
+    await removeCharm(charmConfig);
+    render(`Removed charm ${charmId}`);
   });
 
 interface CharmCLIOptions {
