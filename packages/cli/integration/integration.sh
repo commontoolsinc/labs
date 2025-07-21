@@ -81,11 +81,11 @@ echo "Applying charm input."
 echo '{"value":5}' | ct charm apply $SPACE_ARGS --charm $CHARM_ID
 
 # get, set and then re-get a value from the charm
-echo '{"value":10}' | ct charm set $SPACE_ARGS --charm $CHARM_ID testField
+echo '10' | ct charm set $SPACE_ARGS --charm $CHARM_ID value
 
 # Verify the get returned what we expect
-RESULT=$(ct charm get $SPACE_ARGS --charm $CHARM_ID testField)
-echo '{"value":10}' | jq . > /tmp/expected.json
+RESULT=$(ct charm get $SPACE_ARGS --charm $CHARM_ID value)
+echo '10' | jq . > /tmp/expected.json
 echo "$RESULT" | jq . > /tmp/actual.json
 if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
   error "Get operation did not return expected value. Expected: {\"value\":10}, Got: $RESULT"
