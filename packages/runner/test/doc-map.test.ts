@@ -64,7 +64,7 @@ describe("cell-map", () => {
 
       expect(getEntityId(cell)).toEqual(id);
       expect(getEntityId(cell.getAsQueryResult())).toEqual(id);
-      expect(getEntityId(cell.getAsLegacyCellLink())).toEqual(id);
+      expect(getEntityId(cell.getAsLink())).toEqual(id);
     });
 
     it("should return a different entity ID for reference with paths", () => {
@@ -80,13 +80,13 @@ describe("cell-map", () => {
       expect(getEntityId(c.getAsQueryResult())).toEqual(id);
       expect(getEntityId(c.getAsQueryResult(["foo"]))).not.toEqual(id);
       expect(getEntityId(c.key("foo"))).not.toEqual(id);
-      expect(getEntityId(c.key("foo").getAsLegacyCellLink())).not.toEqual(id);
+      expect(getEntityId(c.key("foo").getAsLink())).not.toEqual(id);
 
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
         getEntityId(c.key("foo")),
       );
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
-        getEntityId(c.key("foo").getAsLegacyCellLink()),
+        getEntityId(c.key("foo").getAsLink()),
       );
     });
   });

@@ -4,7 +4,7 @@ import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type Action, type EventHandler } from "../src/scheduler.ts";
-import { compactifyPaths } from "../src/scheduler.ts";
+import { compactifyPaths, ignoreReadForScheduling } from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -391,6 +391,67 @@ describe("scheduler", () => {
     runtime.scheduler.schedule(inc, { reads: [], writes: [] });
     await runtime.idle();
     expect(runs).toBe(1);
+  });
+
+  it("should not create dependencies when using getRaw with ignoreReadForScheduling", async () => {
+    // Create a source cell that will be read with ignored metadata
+    const sourceCell = runtime.getCell<{ value: number }>(
+      space,
+      "source-cell-for-ignore-test",
+      undefined,
+      tx,
+    );
+    sourceCell.set({ value: 1 });
+
+    // Create a result cell to track action runs (avoiding self-dependencies)
+    const resultCell = runtime.getCell<{ count: number; lastValue: any }>(
+      space,
+      "result-cell-for-ignore-test",
+      undefined,
+      tx,
+    );
+    resultCell.set({ count: 0, lastValue: null });
+
+    let actionRunCount = 0;
+    let lastReadValue: any;
+
+    // Action that ONLY uses ignored reads
+    const ignoredReadAction: Action = (actionTx) => {
+      actionRunCount++;
+
+      // Read with ignoreReadForScheduling - should NOT create dependency
+      lastReadValue = sourceCell.withTx(actionTx).getRaw({
+        meta: ignoreReadForScheduling,
+      });
+
+      // Write to result cell to track that the action ran
+      resultCell.withTx(actionTx).set({
+        count: actionRunCount,
+        lastValue: lastReadValue,
+      });
+    };
+
+    // Run the action initially
+    await runtime.scheduler.run(ignoredReadAction);
+    expect(actionRunCount).toBe(1);
+    expect(lastReadValue).toEqual({ value: 1 });
+    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
+
+    // Change the source cell
+    sourceCell.set({ value: 5 });
+    await runtime.idle();
+
+    // Action should NOT run again because the read was ignored
+    expect(actionRunCount).toBe(1); // Still 1!
+    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } }); // Unchanged
+
+    // Change the source cell again to be extra sure
+    sourceCell.set({ value: 10 });
+    await runtime.idle();
+
+    // Still should not have run
+    expect(actionRunCount).toBe(1);
+    expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
   });
 });
 

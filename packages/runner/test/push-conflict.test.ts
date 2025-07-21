@@ -8,7 +8,10 @@ import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
-import { IStorageManager } from "../src/storage/interface.ts";
+import {
+  IStorageManager,
+  IStorageSubscription,
+} from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 
 // In the transition to TX we had to remove the current push retry logic
@@ -28,6 +31,9 @@ describe.skip("Push conflict", () => {
         session: consumer,
       }),
     edit() {
+      throw new Error("Not implemented");
+    },
+    subscribe(_subscription: IStorageSubscription) {
       throw new Error("Not implemented");
     },
   };
@@ -63,7 +69,7 @@ describe.skip("Push conflict", () => {
     );
     list.set([]);
     const listDoc = list.getDoc();
-    await storage.syncCell(list);
+    await list.sync();
 
     const source = session.clone();
     source.subscribers.clear();
@@ -127,8 +133,8 @@ describe.skip("Push conflict", () => {
     list.set([]);
     const listDoc = list.getDoc();
 
-    await storage.syncCell(name);
-    await storage.syncCell(list);
+    await name.sync();
+    await list.sync();
 
     const source = session.clone();
     source.subscribers.clear();
@@ -196,8 +202,8 @@ describe.skip("Push conflict", () => {
     list.set([]);
     const listDoc = list.getDoc();
 
-    await storage.syncCell(name);
-    await storage.syncCell(list);
+    await name.sync();
+    await list.sync();
 
     const source = session.clone();
     source.subscribers.clear();

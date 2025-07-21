@@ -3,7 +3,7 @@ import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
-  getCellLinkOrThrow,
+  getCellOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { ConsoleEvent } from "./harness/console.ts";
@@ -17,11 +17,13 @@ import type {
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
-  parseLink,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageSubscription,
+  IStorageSubscriptionCapability,
+  Metadata,
 } from "./storage/interface.ts";
 
 // Re-export types that tests expect from scheduler
@@ -39,6 +41,14 @@ export type EventHandler = (event: any) => any;
 export type ReactivityLog = {
   reads: IMemorySpaceAddress[];
   writes: IMemorySpaceAddress[];
+};
+
+const ignoreReadForSchedulingMarker: unique symbol = Symbol(
+  "ignoreReadForSchedulingMarker",
+);
+
+export const ignoreReadForScheduling: Metadata = {
+  [ignoreReadForSchedulingMarker]: true,
 };
 
 type SpaceAndURI = `${MemorySpace}:${URI}`;
@@ -91,6 +101,9 @@ export class Scheduler implements IScheduler {
       errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
     }
 
+    // Subscribe to storage notifications
+    this.runtime.storage.subscribe(this.createStorageSubscription());
+
     // Set up harness event listeners
     this.runtime.harness.addEventListener("console", (e: Event) => {
       // Called synchronously when `console` methods are
@@ -124,7 +137,7 @@ export class Scheduler implements IScheduler {
     // Use runtime to get docs and call .updates
     this.cancels.set(
       action,
-      reads.map((addr) => {
+      reads.filter((addr) => !addr.id.startsWith("data:")).map((addr) => {
         const doc = this.runtime.documentMap.getDocByEntityId(
           addr.space,
           addr.id,
@@ -221,6 +234,20 @@ export class Scheduler implements IScheduler {
 
   onError(fn: ErrorHandler): void {
     this.errorHandlers.add(fn);
+  }
+
+  /**
+   * Creates and returns a new storage subscription that can be used to receive storage notifications.
+   *
+   * @returns A new IStorageSubscription instance
+   */
+  private createStorageSubscription(): IStorageSubscription {
+    return {
+      next(_notification) {
+        // TODO(seefeld): Implement this
+        return { done: false };
+      },
+    } satisfies IStorageSubscription;
   }
 
   private queueExecution(): void {
@@ -448,6 +475,7 @@ export function txToReactivityLog(
   const log: ReactivityLog = { reads: [], writes: [] };
   for (const activity of tx.journal.activity()) {
     if ("read" in activity && activity.read) {
+      if (activity.read.meta?.[ignoreReadForSchedulingMarker]) continue;
       log.reads.push({
         space: activity.read.space,
         id: activity.read.id,
@@ -532,14 +560,21 @@ function getCharmMetadataFromFrame(): {
     return;
   }
   const result: ReturnType<typeof getCharmMetadataFromFrame> = {};
-  const { cell: source } = getCellLinkOrThrow(sourceAsProxy);
-  const spellLink = parseLink(source?.get()?.["spell"]);
-  result.spellId = spellLink?.id;
-  result.recipeId = source?.get()?.[TYPE];
-  const resultDoc = source?.get()?.resultRef?.cell;
-  result.space = resultDoc?.space;
+  const source = getCellOrThrow(sourceAsProxy).asSchema({
+    type: "object",
+    properties: {
+      [TYPE]: { type: "string" },
+      spell: { type: "object", asCell: true },
+      resultRef: { type: "object", asCell: true },
+    },
+  });
+  result.recipeId = source.get()?.[TYPE];
+  const spellCell = source.get()?.spell;
+  result.spellId = spellCell?.getAsNormalizedFullLink().id;
+  const resultCell = source.get()?.resultRef;
+  result.space = source.space;
   result.charmId = JSON.parse(
-    JSON.stringify(resultDoc?.entityId ?? {}),
+    JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;
 }

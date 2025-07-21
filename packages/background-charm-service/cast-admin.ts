@@ -78,7 +78,7 @@ async function castRecipe() {
     );
 
     // Ensure the cell is synced
-    await runtime.storage.syncCell(targetCell, true);
+    await targetCell.sync();
     await runtime.storage.synced();
 
     console.log("Getting cell...");

@@ -1,4 +1,4 @@
-import { refer } from "merkle-reference";
+import { refer } from "merkle-reference/json";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
   isModule,
@@ -20,9 +20,8 @@ import {
   pushFrameFromCause,
   recipeFromFrame,
 } from "./builder/recipe.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
-import { type Action, type ReactivityLog } from "./scheduler.ts";
+import { type Action } from "./scheduler.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   findAllWriteRedirectCells,
@@ -32,23 +31,29 @@ import {
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
+  createSigilLinkFromParsedLink,
   isLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
-  parseToLegacyAlias,
 } from "./link-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import "./builtins/index.ts";
-import { isCell } from "./cell.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
 import type { IRunner, IRuntime } from "./runtime.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+  URI,
+} from "./storage/interface.ts";
+import { ignoreReadForScheduling } from "./scheduler.ts";
+import { FunctionCache } from "./function-cache.ts";
+import "./builtins/index.ts";
 
 export class Runner implements IRunner {
-  readonly cancels = new WeakMap<DocImpl<any>, Cancel>();
+  readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
+  private functionCache = new FunctionCache();
 
   constructor(readonly runtime: IRuntime) {}
 
@@ -98,12 +103,12 @@ export class Runner implements IRunner {
       spell?: SigilLink;
       argument?: T;
       internal?: JSONValue;
-      resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
+      resultRef: SigilLink;
     };
 
     let processCell: Cell<ProcessCellData>;
 
-    const sourceCell = resultCell.getSourceCell();
+    const sourceCell = resultCell.withTx(tx).getSourceCell();
     if (sourceCell !== undefined) {
       processCell = sourceCell as Cell<ProcessCellData>;
     } else {
@@ -113,13 +118,18 @@ export class Runner implements IRunner {
         undefined,
         tx,
       );
-      resultCell.getDoc().sourceCell = processCell.getDoc();
+      resultCell.withTx(tx).setSourceCell(processCell);
     }
 
     let recipeId: string | undefined;
 
-    if (!recipeOrModule && processCell.getRaw()?.[TYPE]) {
-      recipeId = processCell.getRaw()[TYPE];
+    if (
+      !recipeOrModule &&
+      processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
+    ) {
+      recipeId = processCell.key(TYPE).getRaw({
+        meta: ignoreReadForScheduling,
+      });
       recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
       if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
     } else if (!recipeOrModule) {
@@ -160,10 +170,14 @@ export class Runner implements IRunner {
       recipe,
     }, tx);
 
-    if (this.cancels.has(resultCell.getDoc())) {
+    if (this.cancels.has(this.getDocKey(resultCell))) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
-      if (argument === undefined && recipeId === processCell.getRaw()?.[TYPE]) {
+      if (
+        argument === undefined &&
+        recipeId ===
+          processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
+      ) {
         return resultCell;
       }
 
@@ -176,19 +190,24 @@ export class Runner implements IRunner {
 
     // Keep track of subscriptions to cancel them later
     const [cancel, addCancel] = useCancelGroup();
-    this.cancels.set(resultCell.getDoc(), cancel);
+    this.cancels.set(this.getDocKey(resultCell), cancel);
     this.allCancels.add(cancel);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias
     if (isLink(argument)) {
-      argument = parseToLegacyAlias(argument) as T;
+      argument = createSigilLinkFromParsedLink(
+        parseLink(argument),
+        { base: processCell, includeSchema: true },
+      ) as T;
     }
 
     // Walk the recipe's schema and extract all default values
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
 
     // Important to use DeepCopy here, as the resulting object will be modified!
-    const previousInternal = processCell.getRaw()?.internal;
+    const previousInternal = processCell.key("internal").getRaw({
+      meta: ignoreReadForScheduling,
+    });
     const internal: JSONValue = Object.assign(
       {},
       cellAwareDeepCopy(
@@ -204,16 +223,20 @@ export class Runner implements IRunner {
 
     // Still necessary until we consistently use schema for defaults.
     // Only do it on first load.
-    if (!processCell.getRaw()?.argument) {
+    if (
+      !processCell.key("argument").getRaw({ meta: ignoreReadForScheduling })
+    ) {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    const recipeChanged = recipeId !== processCell.getRaw()?.[TYPE];
+    const recipeChanged = recipeId !== processCell.key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    });
 
-    processCell.setRaw({
-      ...processCell.getRaw(),
+    processCell.withTx(tx).setRaw({
+      ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: recipeId || "unknown",
-      resultRef: resultCell.getAsLegacyCellLink(),
+      resultRef: resultCell.getAsLink({ base: processCell }),
       internal,
       ...(recipeId !== undefined) ? { spell: getSpellLink(recipeId) } : {},
     });
@@ -232,7 +255,7 @@ export class Runner implements IRunner {
     if (recipeChanged) {
       // TODO(seefeld): Be smarter about merging in case result changed. But since
       // we don't yet update recipes, this isn't urgent yet.
-      resultCell.setRaw(
+      resultCell.withTx(tx).setRaw(
         unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
       );
     }
@@ -243,6 +266,9 @@ export class Runner implements IRunner {
         (tx: any) => (path: readonly PropertyKey[]) =>
           processCell.getAsQueryResult(path as PropertyKey[], tx);
     }
+
+    // Discover and cache all JavaScript functions in the recipe before instantiation
+    this.discoverAndCacheFunctions(recipe);
 
     for (const node of recipe.nodes) {
       this.instantiateNode(
@@ -270,7 +296,7 @@ export class Runner implements IRunner {
     recipe: Recipe | Module,
     inputs?: any,
   ) {
-    await this.runtime.storage.syncCell(resultCell);
+    await resultCell.sync();
 
     const synced = await this.syncCellsForRunningRecipe(
       resultCell,
@@ -307,6 +333,11 @@ export class Runner implements IRunner {
       : resultCell;
   }
 
+  private getDocKey(cell: Cell<any>): `${MemorySpace}/${URI}` {
+    const { space, id } = cell.getAsNormalizedFullLink();
+    return `${space}/${id}`;
+  }
+
   private async syncCellsForRunningRecipe(
     resultCell: Cell<any>,
     recipe: Module | Recipe,
@@ -322,9 +353,7 @@ export class Runner implements IRunner {
       const link = parseLink(value, resultCell);
 
       if (link) {
-        const maybePromise = this.runtime.storage.syncCell(
-          this.runtime.getCellFromLink(link),
-        );
+        const maybePromise = this.runtime.getCellFromLink(link).sync();
         if (maybePromise instanceof Promise) promises.add(maybePromise);
       } else if (isRecord(value)) {
         for (const key in value) syncAllMentionedCells(value[key]);
@@ -344,7 +373,7 @@ export class Runner implements IRunner {
     });
     if (!sourceCell) return false;
 
-    await this.runtime.storage.syncCell(sourceCell);
+    await sourceCell.sync();
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -367,7 +396,7 @@ export class Runner implements IRunner {
       cells.push(resultCell.asSchema(recipe.resultSchema));
     }
 
-    await Promise.all(cells.map((c) => this.runtime.storage.syncCell(c)));
+    await Promise.all(cells.map((c) => c.sync()));
 
     return true;
   }
@@ -382,12 +411,10 @@ export class Runner implements IRunner {
    *
    * @param resultCell - The result doc or cell to stop.
    */
-  stop<T>(resultCell: DocImpl<T> | Cell<T>): void {
-    const doc = isDoc(resultCell)
-      ? resultCell
-      : (resultCell as Cell<T>).getDoc();
-    this.cancels.get(doc)?.();
-    this.cancels.delete(doc);
+  stop<T>(resultCell: Cell<T>): void {
+    const key = this.getDocKey(resultCell);
+    this.cancels.get(key)?.();
+    this.cancels.delete(key);
   }
 
   stopAll(): void {
@@ -400,6 +427,92 @@ export class Runner implements IRunner {
       }
     }
     this.allCancels.clear();
+  }
+
+  /**
+   * Discover and cache JavaScript functions from a recipe.
+   * This recursively traverses the recipe structure to find all JavaScript modules
+   * with string implementations and evaluates them for caching.
+   *
+   * @param recipe The recipe to discover functions from
+   */
+  private discoverAndCacheFunctions(recipe: Recipe): void {
+    for (const node of recipe.nodes) {
+      this.discoverAndCacheFunctionsFromModule(node.module);
+
+      // Also check inputs for nested recipes (e.g., in map operations)
+      if (isRecord(node.inputs)) {
+        this.discoverAndCacheFunctionsFromValue(node.inputs);
+      }
+    }
+  }
+
+  /**
+   * Discover and cache functions from a module.
+   *
+   * @param module The module to process
+   */
+  private discoverAndCacheFunctionsFromModule(module: Module): void {
+    if (!isModule(module)) return;
+
+    switch (module.type) {
+      case "javascript":
+        // Cache JavaScript functions that are already function objects
+        if (
+          typeof module.implementation === "function" &&
+          !this.functionCache.has(module)
+        ) {
+          this.functionCache.set(module, module.implementation);
+        }
+        break;
+
+      case "recipe":
+        // Recursively discover functions in nested recipes
+        if (isRecipe(module.implementation)) {
+          this.discoverAndCacheFunctions(module.implementation);
+        }
+        break;
+
+      case "ref":
+        // Resolve reference and process the referenced module
+        try {
+          const referencedModule = this.runtime.moduleRegistry.getModule(
+            module.implementation as string,
+          );
+          this.discoverAndCacheFunctionsFromModule(referencedModule);
+        } catch (error) {
+          console.warn(
+            `Failed to resolve module reference for implementation "${module.implementation}":`,
+            error,
+          );
+        }
+        break;
+    }
+  }
+
+  /**
+   * Discover and cache functions from a value that might contain recipes.
+   * This handles cases where recipes are passed as inputs (e.g., to map operations).
+   *
+   * @param value The value to search for recipes
+   */
+  private discoverAndCacheFunctionsFromValue(value: JSONValue): void {
+    if (isRecipe(value)) {
+      this.discoverAndCacheFunctions(value);
+    } else if (isModule(value)) {
+      this.discoverAndCacheFunctionsFromModule(value);
+    } else if (isRecord(value)) {
+      // Recursively search in objects and arrays
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          this.discoverAndCacheFunctionsFromValue(item);
+        }
+      } else {
+        for (const key in value) {
+          this.discoverAndCacheFunctionsFromValue(value[key] as JSONValue);
+        }
+      }
+    }
   }
 
   private instantiateNode(
@@ -499,11 +612,23 @@ export class Runner implements IRunner {
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
     const writes = findAllWriteRedirectCells(outputs, processCell);
 
-    let fn = (
-      typeof module.implementation === "string"
-        ? this.runtime.harness.getInvocation(module.implementation)
-        : module.implementation
-    ) as (inputs: any) => any;
+    let fn: (inputs: any) => any;
+
+    if (typeof module.implementation === "string") {
+      // Try to get from cache first
+      const cached = this.functionCache.get(module);
+      if (cached) {
+        fn = cached as (inputs: any) => any;
+      } else {
+        // Fall back to evaluating and cache it
+        fn = this.runtime.harness.getInvocation(module.implementation) as (
+          inputs: any,
+        ) => any;
+        this.functionCache.set(module, fn);
+      }
+    } else {
+      fn = module.implementation as (inputs: any) => any;
+    }
 
     if (module.wrapper && module.wrapper in moduleWrappers) {
       fn = moduleWrappers[module.wrapper](fn);
@@ -560,9 +685,7 @@ export class Runner implements IRunner {
           tx,
         });
 
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).get()
-          : inputsCell.getAsQueryResult([], undefined);
+        const argument = inputsCell.asSchema(module.argumentSchema).get();
         const result = fn(argument);
 
         const postRun = (result: any) => {
@@ -619,9 +742,8 @@ export class Runner implements IRunner {
       let previousResultRecipeAsString: string | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = module.argumentSchema
-          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
-          : inputsCell.getAsQueryResult([], tx);
+        const argument = inputsCell.asSchema(module.argumentSchema).withTx(tx)
+          .get();
 
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
@@ -648,7 +770,7 @@ export class Runner implements IRunner {
             if (previousResultRecipeAsString === resultRecipeAsString) return;
             previousResultRecipeAsString = resultRecipeAsString;
 
-            const resultDoc = this.run(
+            const resultCell = this.run(
               tx,
               resultRecipe,
               undefined,
@@ -660,15 +782,15 @@ export class Runner implements IRunner {
                   tx,
                 ),
             );
-            addCancel(() => this.stop(resultDoc));
+            addCancel(() => this.stop(resultCell));
 
             if (!previousResultDoc) {
-              previousResultDoc = resultDoc;
+              previousResultDoc = resultCell;
               sendValueToBinding(
                 tx,
                 processCell,
                 outputs,
-                resultDoc.getAsLink(),
+                resultCell.getAsLink({ base: processCell }),
               );
             }
           } else {
@@ -826,12 +948,12 @@ export class Runner implements IRunner {
       tx,
       processCell,
       outputBindings,
-      resultCell.getAsLegacyCellLink(),
+      resultCell.getAsLink({ base: processCell }),
     );
     // TODO(seefeld): Make sure to not cancel after a recipe is elevated to a
     // charm, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(this.cancels.get(resultCell.getSourceCell()!.getDoc()));
+    addCancel(this.cancels.get(this.getDocKey(resultCell.getSourceCell()!)));
   }
 }
 

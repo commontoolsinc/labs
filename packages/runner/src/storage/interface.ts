@@ -33,6 +33,7 @@ export type {
   SchemaContext,
   State,
   Unit,
+  URI,
 };
 
 /**
@@ -70,7 +71,7 @@ export interface StorageValue<T = any> {
   labels?: Labels;
 }
 
-export interface IStorageManager {
+export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
   /**
    * @deprecated
@@ -481,6 +482,8 @@ export interface IStorageTransaction {
 }
 
 export interface IExtendedStorageTransaction extends IStorageTransaction {
+  tx: IStorageTransaction;
+
   /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
@@ -488,7 +491,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param address - Memory address to read from.
    * @returns The read value.
    */
-  readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined;
+  readOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -499,7 +505,10 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * @param address - Memory address to read from.
    * @returns The read value.
    */
-  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined;
+  readValueOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined;
 
   /**
    * Writes a value into a storage at a given address, including creating parent
@@ -526,7 +535,6 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
     address: IMemorySpaceAddress,
     value: JSONValue | undefined,
   ): void;
-
 }
 
 export interface ITransactionReader {

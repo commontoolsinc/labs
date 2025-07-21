@@ -18,6 +18,7 @@ import {
 import { isQueryResultForDereferencing } from "./query-result-proxy.ts";
 import {
   type IExtendedStorageTransaction,
+  type IReadOptions,
   type JSONValue,
 } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
@@ -44,8 +45,16 @@ export function diffAndUpdate(
   link: NormalizedFullLink,
   newValue: unknown,
   context?: unknown,
+  options?: IReadOptions,
 ): boolean {
-  const changes = normalizeAndDiff(runtime, tx, link, newValue, context);
+  const changes = normalizeAndDiff(
+    runtime,
+    tx,
+    link,
+    newValue,
+    context,
+    options,
+  );
   applyChangeSet(tx, changes);
   return changes.length > 0;
 }
@@ -82,6 +91,7 @@ export function normalizeAndDiff(
   link: NormalizedFullLink,
   newValue: unknown,
   context?: unknown,
+  options?: IReadOptions,
 ): ChangeSet {
   const changes: ChangeSet = [];
 
@@ -105,7 +115,7 @@ export function normalizeAndDiff(
       const parent = tx.readValueOrThrow({
         ...link,
         path: link.path.slice(0, -1),
-      });
+      }, options);
       if (Array.isArray(parent)) {
         const base = runtime.getCellFromLink(link, undefined, tx);
         for (const v of parent) {
@@ -114,14 +124,21 @@ export function normalizeAndDiff(
             const siblingId = tx.readValueOrThrow({
               ...sibling,
               path: [...sibling.path, fieldName as string],
-            });
+            }, options);
             if (siblingId === id) {
               // We found a sibling with the same id, so ...
               return [
                 // ... reuse the existing document
-                ...normalizeAndDiff(runtime, tx, link, v, context),
+                ...normalizeAndDiff(runtime, tx, link, v, context, options),
                 // ... and update it to the new value
-                ...normalizeAndDiff(runtime, tx, sibling, rest, context),
+                ...normalizeAndDiff(
+                  runtime,
+                  tx,
+                  sibling,
+                  rest,
+                  context,
+                  options,
+                ),
               ];
             }
           }
@@ -148,7 +165,7 @@ export function normalizeAndDiff(
   }
 
   // Get current value to compare against
-  let currentValue = tx.readValueOrThrow(link);
+  let currentValue = tx.readValueOrThrow(link, options);
 
   // A new alias can overwrite a previous alias. No-op if the same.
   if (isWriteRedirectLink(newValue)) {
@@ -167,10 +184,49 @@ export function normalizeAndDiff(
   if (isWriteRedirectLink(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
     const redirectLink = followWriteRedirects(tx, currentValue, link);
-    return normalizeAndDiff(runtime, tx, redirectLink, newValue, context);
+    return normalizeAndDiff(
+      runtime,
+      tx,
+      redirectLink,
+      newValue,
+      context,
+      options,
+    );
   }
 
   if (isAnyCellLink(newValue)) {
+    const parsedLink = parseLink(newValue, link);
+    if (parsedLink.id.startsWith("data:")) {
+      // If there is a data link treat it as writing it's contents instead.
+
+      //  Use the tx code to make sure we read it the same way
+      let dataValue: any = runtime.edit().readValueOrThrow({
+        ...parsedLink,
+        path: [],
+      }, options);
+      const path = [...parsedLink.path];
+      for (;;) {
+        if (isAnyCellLink(dataValue)) {
+          const dataLink = parseLink(dataValue, parsedLink);
+          dataValue = createSigilLinkFromParsedLink({
+            ...dataLink,
+            path: [...dataLink.path, ...path],
+          });
+          break;
+        }
+        if (path.length > 0) {
+          if (isRecord(dataValue)) {
+            dataValue = dataValue[path.shift()!];
+          } else {
+            dataValue = undefined;
+            break;
+          }
+        } else {
+          break;
+        }
+      }
+      return normalizeAndDiff(runtime, tx, link, dataValue, context, options);
+    }
     if (
       isAnyCellLink(currentValue) &&
       areLinksSame(newValue, currentValue, link)
@@ -196,7 +252,9 @@ export function normalizeAndDiff(
     // array as context, recursively.
     while (
       path.length > 0 &&
-      Array.isArray(tx.readValueOrThrow({ ...link, path: path.slice(0, -1) }))
+      Array.isArray(
+        tx.readValueOrThrow({ ...link, path: path.slice(0, -1) }, options),
+      )
     ) {
       path = path.slice(0, -1);
     }
@@ -219,11 +277,12 @@ export function normalizeAndDiff(
         runtime,
         tx,
         link,
-        createSigilLinkFromParsedLink(newEntryLink),
+        createSigilLinkFromParsedLink(newEntryLink, { base: link }),
         context,
+        options,
       ),
       // And see whether the value of the document itself changed
-      ...normalizeAndDiff(runtime, tx, newEntryLink, rest, context),
+      ...normalizeAndDiff(runtime, tx, newEntryLink, rest, context, options),
     ];
   }
 
@@ -232,7 +291,7 @@ export function normalizeAndDiff(
     console.log("[normalizeAndDiff] Array case - newValue:", newValue);
     console.log("[normalizeAndDiff] Array case - currentValue:", currentValue);
     console.log("[normalizeAndDiff] Array case - link:", link);
-    
+
     // If the current value is not an array, set it to an empty array
     if (!Array.isArray(currentValue)) {
       changes.push({ location: link, value: [] });
@@ -255,6 +314,7 @@ export function normalizeAndDiff(
         },
         newValue[i],
         context,
+        options,
       );
       changes.push(...nestedChanges);
     }
@@ -303,6 +363,7 @@ export function normalizeAndDiff(
         { ...link, path: [...link.path, key], schema: childSchema },
         newValue[key],
         context,
+        options,
       );
       changes.push(...nestedChanges);
     }
@@ -327,32 +388,45 @@ export function normalizeAndDiff(
     console.log("[normalizeAndDiff] Length property case");
     console.log("[normalizeAndDiff] link.path:", link.path);
     console.log("[normalizeAndDiff] newValue:", newValue);
-    
+
     const maybeCurrentArray = tx.readValueOrThrow({
       ...link,
       path: link.path.slice(0, -1),
-    });
+    }, options);
     console.log("[normalizeAndDiff] Parent array:", maybeCurrentArray);
-    
+
     if (Array.isArray(maybeCurrentArray)) {
       const currentLength = maybeCurrentArray.length;
       const newLength = newValue as number;
       console.log("[normalizeAndDiff] currentLength:", currentLength);
       console.log("[normalizeAndDiff] newLength:", newLength);
-      
+
       if (currentLength !== newLength) {
         changes.push({ location: link, value: newLength });
-        console.log("[normalizeAndDiff] Array length changed, need to update elements");
-        console.log("[normalizeAndDiff] Loop from", Math.min(currentLength, newLength), "to", Math.max(currentLength, newLength));
-        
+        console.log(
+          "[normalizeAndDiff] Array length changed, need to update elements",
+        );
+        console.log(
+          "[normalizeAndDiff] Loop from",
+          Math.min(currentLength, newLength),
+          "to",
+          Math.max(currentLength, newLength),
+        );
+
         for (
           let i = Math.min(currentLength, newLength);
           i < Math.max(currentLength, newLength);
           i++
         ) {
-          console.log("[normalizeAndDiff] Adding undefined at path:", [...link.path.slice(0, -1), i.toString()]);
+          console.log("[normalizeAndDiff] Adding undefined at path:", [
+            ...link.path.slice(0, -1),
+            i.toString(),
+          ]);
           changes.push({
-            location: { ...link, path: [...link.path.slice(0, -1), i.toString()] },
+            location: {
+              ...link,
+              path: [...link.path.slice(0, -1), i.toString()],
+            },
             value: undefined,
           });
         }

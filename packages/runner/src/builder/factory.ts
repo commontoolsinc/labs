@@ -1,7 +1,6 @@
 /**
  * Factory function to create builder functions with runtime dependency injection
  */
-import { getCellLinkOrThrow, type Runtime } from "../index.ts";
 import type {
   BuilderFunctionsAndConstants,
   Cell,
@@ -34,6 +33,7 @@ import {
 } from "./built-in.ts";
 import { getRecipeEnvironment } from "./env.ts";
 import type { RuntimeProgram } from "../harness/types.ts";
+import type { IRuntime } from "../runtime.ts";
 
 /**
  * Creates a set of builder functions with the given runtime
@@ -41,7 +41,7 @@ import type { RuntimeProgram } from "../harness/types.ts";
  * @returns An object containing all builder functions
  */
 export const createBuilder = (
-  runtime: Runtime,
+  runtime: IRuntime,
 ): {
   commontools: BuilderFunctionsAndConstants;
   exportsCallback: (exports: Map<any, RuntimeProgram>) => void;

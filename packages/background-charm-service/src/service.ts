@@ -45,7 +45,7 @@ export class BackgroundCharmService {
       bgCause: this.bgCause,
       runtime: this.runtime,
     });
-    await this.runtime.storage.syncCell(this.charmsCell, true);
+    await this.charmsCell.sync();
     await this.runtime.storage.synced();
 
     if (this.isRunning) {

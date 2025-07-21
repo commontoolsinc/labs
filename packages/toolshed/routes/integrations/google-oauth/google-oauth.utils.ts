@@ -155,7 +155,7 @@ export async function getAuthCell(docLink: string) {
     if (!authCell.schema) authCell = authCell.asSchema(AuthSchema);
 
     // make sure the cell is live!
-    await runtime.storage.syncCell(authCell, true);
+    await authCell.sync();
     await runtime.storage.synced();
 
     return authCell;

@@ -33,14 +33,24 @@ export type PullError =
   | QueryError
   | AuthorizationError;
 
+export type PushStateValue = Result<
+  UCAN<Transaction>,
+  PushError & { time: Time }
+>;
+
 export type PushState = Record<
   string,
-  Result<UCAN<Transaction>, PushError & { time: Time }>
+  PushStateValue
+>;
+
+export type PullStateValue = Result<
+  UCAN<Query | SchemaQuery>,
+  PullError & { time: Time }
 >;
 
 export type PullState = Record<
   string,
-  Result<UCAN<Query | SchemaQuery>, PullError & { time: Time }>
+  PullStateValue
 >;
 
 export type SubscriptionState = Record<string, {

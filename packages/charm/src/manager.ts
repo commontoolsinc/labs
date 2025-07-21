@@ -289,11 +289,7 @@ export class CharmManager {
       ...charmListSchema,
       ifc: { classification: [Classification.Secret] },
     } as const satisfies JSONSchema;
-    const schemaContext = {
-      schema: privilegedSchema,
-      rootSchema: privilegedSchema,
-    };
-    return this.runtime.storage.syncCell(cell, false, schemaContext);
+    return cell.asSchema(privilegedSchema).sync();
   }
 
   // copies the recipe for a charm but clones the argument cell
@@ -363,7 +359,7 @@ export class CharmManager {
         charmSchema,
       );}
 
-    await this.runtime.storage.syncCell(charm);
+    await charm.sync();
 
     const recipeId = getRecipeIdFromCharm(charm);
     if (!recipeId) throw new Error("recipeId is required");
@@ -829,7 +825,7 @@ export class CharmManager {
       path,
       schema,
     );
-    await this.runtime.storage.syncCell(cell);
+    await cell.sync();
     return cell;
   }
 
@@ -947,7 +943,7 @@ export class CharmManager {
       [],
       charmSchema,
     );
-    await this.runtime.storage.syncCell(charm);
+    await charm.sync();
     await this.runtime.runSynced(charm, recipe, inputs);
     await this.syncRecipe(charm);
 
@@ -958,13 +954,13 @@ export class CharmManager {
 
   // FIXME(JA): this really really really needs to be revisited
   async syncRecipe(charm: Cell<Charm>) {
-    await this.runtime.storage.syncCell(charm);
+    await charm.sync();
 
     // When we subscribe to a doc, our subscription includes the doc's source,
     // so get that.
     const sourceCell = charm.getSourceCell();
     if (!sourceCell) throw new Error("charm missing source cell");
-    await this.runtime.storage.syncCell(sourceCell);
+    await sourceCell.sync();
 
     const recipeId = sourceCell.get()?.[TYPE];
     if (!recipeId) throw new Error("charm missing recipe ID");
@@ -982,7 +978,7 @@ export class CharmManager {
   }
 
   async sync(entity: Cell<any>, waitForStorage: boolean = false) {
-    await this.runtime.storage.syncCell(entity, waitForStorage);
+    await entity.sync();
   }
 
   // Returns the charm from one of our active charm lists if it is present,

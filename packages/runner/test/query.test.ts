@@ -343,6 +343,8 @@ describe("Query", () => {
     const testCell2 = runtime.getCell<any>(
       space,
       `query test cell 2`,
+      undefined,
+      tx,
     );
     testCell2.setRaw(docValue2);
 

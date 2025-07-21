@@ -199,11 +199,7 @@ export async function getBGCharms(
     ...schema,
     ifc: { classification: ["secret"] },
   } as const satisfies JSONSchema;
-  const schemaContext = {
-    schema: privilegedSchema,
-    rootSchema: privilegedSchema,
-  };
-  await runtime.storage.syncCell(charmsCell, true, schemaContext);
+  await charmsCell.asSchema(privilegedSchema).sync();
   await runtime.storage.synced();
 
   return charmsCell;
