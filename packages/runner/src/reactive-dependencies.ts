@@ -48,7 +48,8 @@ export function sortAndCompactPaths(
       sorted[i].space !== previous.space ||
       sorted[i].id !== previous.id ||
       sorted[i].type !== previous.type ||
-      !startsWith(sorted[i].path, previous.path)
+      // Is the previous path a prefix of the current path?
+      !previous.path.every((value, index) => value === sorted[i].path[index])
     ) {
       result.push(sorted[i]);
       previous = sorted[i];
@@ -112,7 +113,7 @@ export function determineTriggeredActions(
     // include those that start with that path.
     subscribers = subscribers.map(({ action, paths }) => ({
       action,
-      paths: paths.filter((path) => startsWith(path, startPath)),
+      paths: paths.filter((path) => arraysOverlap(path, startPath)),
     })).filter(({ paths }) => paths.length > 0);
 
     // And prepend path to data, so we don't have to special case this.
@@ -196,11 +197,13 @@ export function determineTriggeredActions(
   return triggeredActions;
 }
 
-function startsWith(
-  path: readonly MemoryAddressPathComponent[],
-  prefix: readonly MemoryAddressPathComponent[],
+export function arraysOverlap(
+  a: readonly MemoryAddressPathComponent[],
+  b: readonly MemoryAddressPathComponent[],
 ): boolean {
-  return prefix.every((value, index) => value === path[index]);
+  return (a.length > b.length)
+    ? b.every((value, index) => value === a[index])
+    : a.every((value, index) => value === b[index]);
 }
 
 function commonPrefixLength(

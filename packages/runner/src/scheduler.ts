@@ -23,10 +23,12 @@ import type {
   IMemorySpaceAddress,
   IStorageSubscription,
   MediaType,
+  MemoryAddressPathComponent,
   Metadata,
 } from "./storage/interface.ts";
 import {
   addresssesToPathByEntity,
+  arraysOverlap,
   determineTriggeredActions,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
@@ -153,7 +155,13 @@ export class Scheduler implements IScheduler {
       if (!this.triggers.has(spaceAndURI)) {
         this.triggers.set(spaceAndURI, new Map());
       }
-      this.triggers.get(spaceAndURI)!.set(action, paths);
+      const pathsWithValues = paths.map((path) =>
+        [
+          "value",
+          ...path,
+        ] as readonly MemoryAddressPathComponent[]
+      );
+      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
     }
     this.cancels.set(action, () => {
       for (const spaceAndURI of entities) {
@@ -262,6 +270,7 @@ export class Scheduler implements IScheduler {
                 paths,
                 change.before,
                 change.after,
+                change.address.path,
               );
               for (const action of triggeredActions) {
                 this.dirty.add(
@@ -419,7 +428,7 @@ function topologicalSort(
                   (addr) =>
                     addr.space === write.space &&
                     addr.id === write.id &&
-                    pathAffected(write.path, addr.path),
+                    arraysOverlap(write.path, addr.path),
                 )
             )
           ) {
@@ -450,7 +459,7 @@ function topologicalSort(
               (addr) =>
                 addr.space === write.space &&
                 addr.id === write.id &&
-                pathAffected(write.path, addr.path),
+                arraysOverlap(write.path, addr.path),
             )
           ) {
             graphA.add(actionB);
@@ -523,17 +532,6 @@ export function txToReactivityLog(
     }
   }
   return log;
-}
-
-function pathAffected(
-  changedPath: readonly PropertyKey[],
-  path: readonly PropertyKey[],
-) {
-  return (
-    (changedPath.length <= path.length &&
-      changedPath.every((key, index) => key === path[index])) ||
-    path.every((key, index) => key === changedPath[index])
-  );
 }
 
 function getCharmMetadataFromFrame(): {

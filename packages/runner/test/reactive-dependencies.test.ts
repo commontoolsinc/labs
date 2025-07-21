@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   addresssesToPathByEntity,
+  arraysOverlap,
   determineTriggeredActions,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
@@ -35,6 +36,88 @@ const createAddresses = (
   type: string = "application/json",
 ): IMemorySpaceAddress[] =>
   paths.map((path) => createAddress(path, space, id, type));
+
+describe("arraysOverlap", () => {
+  it("returns true when arrays are identical", () => {
+    expect(arraysOverlap(["a", "b", "c"], ["a", "b", "c"])).toBe(true);
+    expect(arraysOverlap([], [])).toBe(true);
+    expect(arraysOverlap(["single"], ["single"])).toBe(true);
+  });
+
+  it("returns true when first array is prefix of second", () => {
+    expect(arraysOverlap(["a"], ["a", "b", "c"])).toBe(true);
+    expect(arraysOverlap(["a", "b"], ["a", "b", "c"])).toBe(true);
+    expect(arraysOverlap([], ["a", "b", "c"])).toBe(true); // empty array is prefix of any array
+  });
+
+  it("returns true when second array is prefix of first", () => {
+    expect(arraysOverlap(["a", "b", "c"], ["a"])).toBe(true);
+    expect(arraysOverlap(["a", "b", "c"], ["a", "b"])).toBe(true);
+    expect(arraysOverlap(["a", "b", "c"], [])).toBe(true); // empty array is prefix of any array
+  });
+
+  it("returns false when arrays don't overlap", () => {
+    expect(arraysOverlap(["a", "b"], ["c", "d"])).toBe(false);
+    expect(arraysOverlap(["a", "b"], ["a", "c"])).toBe(false);
+    expect(arraysOverlap(["x"], ["y"])).toBe(false);
+  });
+
+  it("returns false when arrays share common prefix but diverge", () => {
+    expect(arraysOverlap(["a", "b", "c"], ["a", "b", "d"])).toBe(false);
+    expect(arraysOverlap(["users", "123"], ["users", "456"])).toBe(false);
+    expect(arraysOverlap(["path", "to", "x"], ["path", "to", "y"])).toBe(false);
+  });
+
+  it("handles arrays of different lengths correctly", () => {
+    // Shorter array is prefix of longer
+    expect(arraysOverlap(["users"], ["users", "123", "profile", "name"])).toBe(true);
+    expect(arraysOverlap(["users", "123"], ["users", "123", "profile"])).toBe(true);
+    
+    // Longer array is not prefix of shorter when they differ
+    expect(arraysOverlap(["users", "123", "profile"], ["users", "456"])).toBe(false);
+  });
+
+  it("works with numeric strings", () => {
+    expect(arraysOverlap(["123"], ["123", "456"])).toBe(true);
+    expect(arraysOverlap(["123", "456"], ["123"])).toBe(true);
+    expect(arraysOverlap(["123"], ["456"])).toBe(false);
+  });
+
+  it("handles edge cases", () => {
+    // One empty array
+    expect(arraysOverlap([], ["a"])).toBe(true);
+    expect(arraysOverlap(["a"], [])).toBe(true);
+    
+    // Arrays with undefined or null (if they can occur)
+    expect(arraysOverlap(["a", "b"], ["a", "b", "c"])).toBe(true);
+  });
+
+  it("respects exact string matching", () => {
+    // Different strings that might be similar
+    expect(arraysOverlap(["user"], ["users"])).toBe(false);
+    expect(arraysOverlap(["123"], ["1234"])).toBe(false);
+    expect(arraysOverlap(["User"], ["user"])).toBe(false); // case sensitive
+  });
+
+  it("demonstrates the bug fix scenario", () => {
+    // The bug was that when startPath is longer than some dependency paths,
+    // those dependencies were incorrectly ignored. This test shows the correct behavior.
+    const shortPath = ["users"];
+    const mediumPath = ["users", "123"];
+    const longPath = ["users", "123", "profile"];
+    const startPath = ["users", "123"];
+
+    // All these should overlap with startPath
+    expect(arraysOverlap(shortPath, startPath)).toBe(true); // shortPath is prefix of startPath
+    expect(arraysOverlap(mediumPath, startPath)).toBe(true); // exact match
+    expect(arraysOverlap(longPath, startPath)).toBe(true); // startPath is prefix of longPath
+
+    // The function should work symmetrically
+    expect(arraysOverlap(startPath, shortPath)).toBe(true);
+    expect(arraysOverlap(startPath, mediumPath)).toBe(true);
+    expect(arraysOverlap(startPath, longPath)).toBe(true);
+  });
+});
 
 describe("sortAndCompactPaths", () => {
   it("returns empty array for empty input", () => {
@@ -849,6 +932,76 @@ describe("determineTriggeredActions", () => {
         ["a"],
       );
       expect(result).toEqual([action1]);
+    });
+
+    it("triggers actions with paths shorter than startPath", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const action3 = createAction("action3");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["users"]]],  // Shorter than startPath
+        [action2, [["users", "123"]]],  // Same length as startPath
+        [action3, [["users", "123", "profile"]]],  // Longer than startPath
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { 
+          profile: { name: "Alice" },
+          settings: { theme: "dark" }
+        },
+        { 
+          profile: { name: "Alice Updated" },  // Changed
+          settings: { theme: "dark" }
+        },
+        ["users", "123"],
+      );
+      
+      // All three actions should trigger because:
+      // - action1 watches ["users"] which is a parent of the startPath
+      // - action2 watches ["users", "123"] which matches the startPath
+      // - action3 watches ["users", "123", "profile"] which changed
+      expect(result).toContain(action1);
+      expect(result).toContain(action2);
+      expect(result).toContain(action3);
+      expect(result).toHaveLength(3);
+    });
+
+    it("handles startPath longer than all dependency paths", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["a"]]],
+        [action2, [["a", "b"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { 
+          a: { 
+            b: { 
+              c: { 
+                d: "old value" 
+              } 
+            } 
+          } 
+        },
+        { 
+          a: { 
+            b: { 
+              c: { 
+                d: "new value" 
+              } 
+            } 
+          } 
+        },
+        ["a", "b", "c", "d"],  // StartPath is deeper than any dependency
+      );
+      
+      // Both actions should trigger because they watch ancestor paths
+      expect(result).toContain(action1);
+      expect(result).toContain(action2);
+      expect(result).toHaveLength(2);
     });
   });
 
