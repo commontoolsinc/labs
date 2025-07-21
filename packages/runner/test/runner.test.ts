@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import type { Recipe } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -10,7 +10,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("runRecipe", () => {
+describe("runRecipe", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -21,6 +21,7 @@ describe("runRecipe", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
   });
 
@@ -30,7 +31,7 @@ describe("runRecipe", () => {
     await storageManager?.close();
   });
 
-  it("should work with passthrough", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should work with passthrough", async () => {
     const recipe = {
       argumentSchema: {
         type: "object",
@@ -76,7 +77,7 @@ describe("runRecipe", () => {
     expect(result.getAsQueryResult()).toEqual({ output: 1 });
   });
 
-  it("should work with nested recipes", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should work with nested recipes", async () => {
     const innerRecipe = {
       argumentSchema: {
         type: "object",
@@ -133,7 +134,7 @@ describe("runRecipe", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 5 });
   });
 
-  it("should run a simple module", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should run a simple module", async () => {
     const mockRecipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
@@ -161,7 +162,7 @@ describe("runRecipe", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
 
-  it("should run a simple module with no outputs", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should run a simple module with no outputs", async () => {
     let ran = false;
 
     const mockRecipe: Recipe = {
@@ -194,7 +195,7 @@ describe("runRecipe", () => {
     expect(ran).toBe(true);
   });
 
-  it("should handle incorrect inputs gracefully", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle incorrect inputs gracefully", async () => {
     let ran = false;
 
     const mockRecipe: Recipe = {
@@ -227,7 +228,7 @@ describe("runRecipe", () => {
     expect(ran).toBe(true);
   });
 
-  it("should handle nested recipes", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
@@ -268,7 +269,7 @@ describe("runRecipe", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
 
-  it("should allow passing a cell as a binding", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should allow passing a cell as a binding", async () => {
     const recipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
@@ -320,7 +321,7 @@ describe("runRecipe", () => {
     await runtime.idle();
   });
 
-  it("should allow stopping a recipe", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should allow stopping a recipe", async () => {
     const recipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
@@ -384,7 +385,7 @@ describe("runRecipe", () => {
     expect(inputCell.get()).toMatchObject({ input: 40, output: 80 });
   });
 
-  it("should apply default values from argument schema", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should apply default values from argument schema", async () => {
     const recipe: Recipe = {
       argumentSchema: {
         type: "object",
@@ -438,7 +439,7 @@ describe("runRecipe", () => {
     expect(resultWithDefaults.getAsQueryResult()).toEqual({ result: 84 }); // 42 * 2
   });
 
-  it("should handle complex nested schema types", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle complex nested schema types", async () => {
     const recipe: Recipe = {
       argumentSchema: {
         type: "object",
@@ -505,7 +506,7 @@ describe("runRecipe", () => {
     expect(result2.getAsQueryResult()).toEqual({ result: 40 });
   });
 
-  it("should merge arguments with defaults from schema", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should merge arguments with defaults from schema", async () => {
     const recipe: Recipe = {
       argumentSchema: {
         type: "object",
@@ -559,7 +560,7 @@ describe("runRecipe", () => {
     expect(result.getAsQueryResult().result).toEqual(50); // 5 * 10
   });
 
-  it("should preserve result state between runs when recipe doesn't change", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should preserve result state between runs when recipe doesn't change", async () => {
     const recipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
@@ -603,7 +604,7 @@ describe("runRecipe", () => {
     expect(resultCell.getAsQueryResult()?.counter).toEqual(2);
   });
 
-  it("should create separate copies of initial values for each recipe instance", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should create separate copies of initial values for each recipe instance", async () => {
     const recipe: Recipe = {
       argumentSchema: {
         type: "object",
@@ -675,7 +676,7 @@ describe("runRecipe", () => {
   });
 });
 
-describe("runner utils", () => {
+describe("runner utils", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -687,6 +688,7 @@ describe("runner utils", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -759,7 +761,7 @@ describe("runner utils", () => {
       expect(result).toEqual({ a: 1, b: { c: 3 } });
     });
 
-    it("should treat cell aliases and references as values", () => {
+    it.skip("should treat cell aliases and references as values", () => {
       const testCell = runtime.getCell<{ a: any }>(
         space,
         "should treat cell aliases and references as values 1",

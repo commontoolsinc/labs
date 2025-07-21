@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
@@ -9,7 +9,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Storage", () => {
+describe("Storage", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -23,6 +23,7 @@ describe("Storage", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
 
     tx = runtime.edit();
@@ -44,7 +45,7 @@ describe("Storage", () => {
   });
 
   describe("persistDoc", () => {
-    it("should persist a doc", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should persist a doc", async () => {
       const testValue = { data: "test" };
       testCell.send(testValue);
 
@@ -63,7 +64,7 @@ describe("Storage", () => {
       expect(fact.is).toEqual({ value: testValue });
     });
 
-    it("should persist a cells and referenced cell references within it", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should persist a cells and referenced cell references within it", async () => {
       const refCell = runtime.getCell<string>(
         space,
         "should persist a cells and referenced cell references within it",
@@ -84,7 +85,7 @@ describe("Storage", () => {
       expect(entry?.value).toEqual("hello");
     });
 
-    it("should persist a cells and referenced cells within it", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should persist a cells and referenced cells within it", async () => {
       const refCell = runtime.getCell<string>(
         space,
         "should persist a cells and referenced cells 1",
@@ -107,7 +108,7 @@ describe("Storage", () => {
   });
 
   describe("doc updates", () => {
-    it("should persist doc updates", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should persist doc updates", async () => {
       await testCell.sync();
 
       testCell.send("value 1");
@@ -130,7 +131,7 @@ describe("Storage", () => {
   });
 
   describe("syncDoc", () => {
-    it("should wait for a doc to appear", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should wait for a doc to appear", async () => {
       let synced = false;
 
       storageManager.open(space).sync(testCell.entityId!, true).then(
@@ -143,7 +144,7 @@ describe("Storage", () => {
       expect(synced).toBe(true);
     });
 
-    it("should wait for a undefined doc to appear", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should wait for a undefined doc to appear", async () => {
       let synced = false;
       storageManager.open(space).sync(testCell.entityId!, true).then(
         () => (synced = true),
@@ -156,7 +157,7 @@ describe("Storage", () => {
   });
 
   describe("ephemeral docs", () => {
-    it("should not be loaded from storage", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should not be loaded from storage", async () => {
       const ephemeralDoc = runtime.getCell<string>(
         space,
         "ephemeral",
@@ -175,7 +176,7 @@ describe("Storage", () => {
   });
 
   describe("doc updates", () => {
-    it("should persist doc updates with schema", async () => {
+    it.skip({ useStorageManagerTransactions: true }, "should persist doc updates with schema", async () => {
       await testCell.sync();
 
       testCell.send("value 1");

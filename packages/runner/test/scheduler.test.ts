@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -11,7 +11,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("scheduler", () => {
+describe("scheduler", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -23,6 +23,7 @@ describe("scheduler", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -33,7 +34,7 @@ describe("scheduler", () => {
     await storageManager?.close();
   });
 
-  it("should run actions when cells change", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should run actions when cells change", async () => {
     let runCount = 0;
     const a = runtime.getCell<number>(
       space,
@@ -71,7 +72,7 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
-  it("schedule shouldn't run immediately", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "schedule shouldn't run immediately", async () => {
     let runCount = 0;
     const a = runtime.getCell<number>(
       space,
@@ -115,7 +116,7 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
-  it("should remove actions", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should remove actions", async () => {
     let runCount = 0;
     const a = runtime.getCell<number>(
       space,
@@ -160,7 +161,7 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
-  it("scheduler should return a cancel function", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "scheduler should return a cancel function", async () => {
     let runCount = 0;
     const a = runtime.getCell<number>(
       space,
@@ -209,7 +210,7 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
-  it("should run actions in topological order", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should run actions in topological order", async () => {
     const runs: string[] = [];
     const a = runtime.getCell<number>(
       space,
@@ -277,7 +278,7 @@ describe("scheduler", () => {
     expect(e.get()).toBe(6);
   });
 
-  it("should stop eventually when encountering infinite loops", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should stop eventually when encountering infinite loops", async () => {
     let maxRuns = 120; // More than the limit in scheduler
     const a = runtime.getCell<number>(
       space,
@@ -347,7 +348,7 @@ describe("scheduler", () => {
     assertSpyCall(stopped, 0, undefined);
   });
 
-  it("should not loop on r/w changes on its own output", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should not loop on r/w changes on its own output", async () => {
     const counter = runtime.getCell<number>(
       space,
       "should not loop on r/w changes on its own output 1",
@@ -393,7 +394,7 @@ describe("scheduler", () => {
     expect(runs).toBe(1);
   });
 
-  it("should not create dependencies when using getRaw with ignoreReadForScheduling", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should not create dependencies when using getRaw with ignoreReadForScheduling", async () => {
     // Create a source cell that will be read with ignored metadata
     const sourceCell = runtime.getCell<{ value: number }>(
       space,
@@ -455,7 +456,7 @@ describe("scheduler", () => {
   });
 });
 
-describe("event handling", () => {
+describe("event handling", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -467,6 +468,7 @@ describe("event handling", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -477,7 +479,7 @@ describe("event handling", () => {
     await storageManager?.close();
   });
 
-  it("should queue and process events", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should queue and process events", async () => {
     const eventCell = runtime.getCell<number>(
       space,
       "should queue and process events 1",
@@ -514,7 +516,7 @@ describe("event handling", () => {
     expect(eventResultCell.get()).toBe(2);
   });
 
-  it("should remove event handlers", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should remove event handlers", async () => {
     const eventCell = runtime.getCell<number>(
       space,
       "should remove event handlers 1",
@@ -549,7 +551,7 @@ describe("event handling", () => {
     expect(eventCell.get()).toBe(1);
   });
 
-  it("should handle events with nested paths", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle events with nested paths", async () => {
     const parentCell = runtime.getCell<{ child: { value: number } }>(
       space,
       "should handle events with nested paths 1",
@@ -577,7 +579,7 @@ describe("event handling", () => {
     expect(eventCount).toBe(1);
   });
 
-  it("should process events in order", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should process events in order", async () => {
     const eventCell = runtime.getCell<number>(
       space,
       "should process events in order 1",
@@ -605,7 +607,7 @@ describe("event handling", () => {
     expect(events).toEqual([1, 2, 3]);
   });
 
-  it("should trigger recomputation of dependent cells", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should trigger recomputation of dependent cells", async () => {
     const eventCell = runtime.getCell<number>(
       space,
       "should trigger recomputation of dependent cells 1",
@@ -660,7 +662,7 @@ describe("event handling", () => {
   });
 });
 
-describe("compactifyPaths", () => {
+describe("compactifyPaths", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -672,6 +674,7 @@ describe("compactifyPaths", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -682,7 +685,7 @@ describe("compactifyPaths", () => {
     await storageManager?.close();
   });
 
-  it("should compactify paths", () => {
+  it.skip({ useStorageManagerTransactions: true }, "should compactify paths", () => {
     const testCell = runtime.getCell<Record<string, any>>(
       space,
       "should compactify paths 1",
@@ -703,7 +706,7 @@ describe("compactifyPaths", () => {
     expect(result).toEqual(expected);
   });
 
-  it("should remove duplicate paths", () => {
+  it.skip({ useStorageManagerTransactions: true }, "should remove duplicate paths", () => {
     const testCell = runtime.getCell<Record<string, any>>(
       space,
       "should remove duplicate paths 1",
@@ -720,7 +723,7 @@ describe("compactifyPaths", () => {
     expect(result).toEqual(expected);
   });
 
-  it("should not compactify across cells", () => {
+  it.skip({ useStorageManagerTransactions: true }, "should not compactify across cells", () => {
     const cellA = runtime.getCell<Record<string, any>>(
       space,
       "should not compactify across cells 1",
@@ -743,7 +746,7 @@ describe("compactifyPaths", () => {
     expect(result).toEqual(paths);
   });
 
-  it("empty paths should trump all other ones", () => {
+  it.skip({ useStorageManagerTransactions: true }, "empty paths should trump all other ones", () => {
     const cellA = runtime.getCell<Record<string, any>>(
       space,
       "should remove duplicate paths 1",
