@@ -1060,5 +1060,5 @@ export function mergeObjects<T>(
 
 const moduleWrappers = {
   handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn.bind(props)(props.$event, props),
+    fn.bind(props)(props.$event, props.$ctx),
 };
