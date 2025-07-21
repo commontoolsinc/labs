@@ -82,7 +82,7 @@ export function determineTriggeredActions(
   // Sort subscribers by last/longest path first.
   subscribers.sort((a, b) => comparePaths(b.paths[0], a.paths[0]));
 
-  // Trabserval state:
+  // Traversal state:
   let currentPath: string[] = [];
 
   // *Values: An array of data values along currentPath
