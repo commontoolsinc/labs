@@ -64,7 +64,7 @@ export function sortAndCompactPaths(
  * @param addresses - The paths to convert.
  * @returns A map of space/id to paths.
  */
-export function addresssesToPathByEntity(
+export function addressesToPathByEntity(
   addresses: IMemorySpaceAddress[],
 ): Map<SpaceAndURI, SortedAndCompactPaths> {
   const map = new Map<SpaceAndURI, SortedAndCompactPaths>();

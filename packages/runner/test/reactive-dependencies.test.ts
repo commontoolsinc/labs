@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  addresssesToPathByEntity,
+  addressesToPathByEntity,
   arraysOverlap,
   determineTriggeredActions,
   sortAndCompactPaths,
@@ -70,11 +70,17 @@ describe("arraysOverlap", () => {
 
   it("handles arrays of different lengths correctly", () => {
     // Shorter array is prefix of longer
-    expect(arraysOverlap(["users"], ["users", "123", "profile", "name"])).toBe(true);
-    expect(arraysOverlap(["users", "123"], ["users", "123", "profile"])).toBe(true);
-    
+    expect(arraysOverlap(["users"], ["users", "123", "profile", "name"])).toBe(
+      true,
+    );
+    expect(arraysOverlap(["users", "123"], ["users", "123", "profile"])).toBe(
+      true,
+    );
+
     // Longer array is not prefix of shorter when they differ
-    expect(arraysOverlap(["users", "123", "profile"], ["users", "456"])).toBe(false);
+    expect(arraysOverlap(["users", "123", "profile"], ["users", "456"])).toBe(
+      false,
+    );
   });
 
   it("works with numeric strings", () => {
@@ -87,7 +93,7 @@ describe("arraysOverlap", () => {
     // One empty array
     expect(arraysOverlap([], ["a"])).toBe(true);
     expect(arraysOverlap(["a"], [])).toBe(true);
-    
+
     // Arrays with undefined or null (if they can occur)
     expect(arraysOverlap(["a", "b"], ["a", "b", "c"])).toBe(true);
   });
@@ -323,7 +329,7 @@ describe("sortAndCompactPaths", () => {
 
 describe("addresssesToPathByEntity", () => {
   it("returns empty map for empty input", () => {
-    const result = addresssesToPathByEntity([]);
+    const result = addressesToPathByEntity([]);
     expect(result.size).toBe(0);
   });
 
@@ -355,7 +361,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addresssesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses);
 
     expect(result.size).toBe(3);
     expect(
@@ -416,7 +422,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addresssesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses);
 
     expect(result.size).toBe(2);
 
@@ -455,7 +461,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addresssesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses);
 
     const paths = result.get(
       "did:test:space1/https://example.com/entity1" as SpaceAndURI,
@@ -519,7 +525,7 @@ describe("addresssesToPathByEntity", () => {
       ),
     ];
 
-    const result = addresssesToPathByEntity(addresses);
+    const result = addressesToPathByEntity(addresses);
 
     expect(result.size).toBe(4);
 
@@ -939,24 +945,24 @@ describe("determineTriggeredActions", () => {
       const action2 = createAction("action2");
       const action3 = createAction("action3");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
-        [action1, [["users"]]],  // Shorter than startPath
-        [action2, [["users", "123"]]],  // Same length as startPath
-        [action3, [["users", "123", "profile"]]],  // Longer than startPath
+        [action1, [["users"]]], // Shorter than startPath
+        [action2, [["users", "123"]]], // Same length as startPath
+        [action3, [["users", "123", "profile"]]], // Longer than startPath
       ]);
 
       const result = determineTriggeredActions(
         dependencies,
-        { 
+        {
           profile: { name: "Alice" },
-          settings: { theme: "dark" }
+          settings: { theme: "dark" },
         },
-        { 
-          profile: { name: "Alice Updated" },  // Changed
-          settings: { theme: "dark" }
+        {
+          profile: { name: "Alice Updated" }, // Changed
+          settings: { theme: "dark" },
         },
         ["users", "123"],
       );
-      
+
       // All three actions should trigger because:
       // - action1 watches ["users"] which is a parent of the startPath
       // - action2 watches ["users", "123"] which matches the startPath
@@ -977,27 +983,27 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        { 
-          a: { 
-            b: { 
-              c: { 
-                d: "old value" 
-              } 
-            } 
-          } 
+        {
+          a: {
+            b: {
+              c: {
+                d: "old value",
+              },
+            },
+          },
         },
-        { 
-          a: { 
-            b: { 
-              c: { 
-                d: "new value" 
-              } 
-            } 
-          } 
+        {
+          a: {
+            b: {
+              c: {
+                d: "new value",
+              },
+            },
+          },
         },
-        ["a", "b", "c", "d"],  // StartPath is deeper than any dependency
+        ["a", "b", "c", "d"], // StartPath is deeper than any dependency
       );
-      
+
       // Both actions should trigger because they watch ancestor paths
       expect(result).toContain(action1);
       expect(result).toContain(action2);
@@ -1497,17 +1503,17 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        { 
-          data: { 
-            items: [1, 2, 3], 
-            tags: ["red", "blue"] 
-          } 
+        {
+          data: {
+            items: [1, 2, 3],
+            tags: ["red", "blue"],
+          },
         },
-        { 
-          data: { 
-            items: [1, 2, 3], 
-            tags: ["red", "green"] 
-          } 
+        {
+          data: {
+            items: [1, 2, 3],
+            tags: ["red", "green"],
+          },
         },
       );
       expect(result).toEqual([action2]); // only tags changed

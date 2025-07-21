@@ -27,7 +27,7 @@ import type {
   Metadata,
 } from "./storage/interface.ts";
 import {
-  addresssesToPathByEntity,
+  addressesToPathByEntity,
   arraysOverlap,
   determineTriggeredActions,
   sortAndCompactPaths,
@@ -147,7 +147,7 @@ export class Scheduler implements IScheduler {
 
   subscribe(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
-    const pathsByEntity = addresssesToPathByEntity(reads);
+    const pathsByEntity = addressesToPathByEntity(reads);
     const entities = new Set<SpaceAndURI>();
 
     for (const [spaceAndURI, paths] of pathsByEntity) {
