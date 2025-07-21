@@ -779,3 +779,190 @@ describe("determineTriggeredActions", () => {
     });
   });
 });
+
+// Benchmarks
+Deno.bench("sortAndCompactPaths - small dataset", () => {
+  const paths: TriggerPaths = [
+    ["user", "name"],
+    ["user"],
+    ["posts", "0", "title"],
+    ["posts"],
+    ["settings", "theme"],
+  ];
+  sortAndCompactPaths(paths);
+});
+
+Deno.bench("sortAndCompactPaths - large dataset", () => {
+  const paths: TriggerPaths = [];
+  for (let i = 0; i < 1000; i++) {
+    paths.push([`field${i}`]);
+    if (i % 10 === 0) {
+      paths.push([`field${i}`, "nested"]);
+      paths.push([`field${i}`, "nested", "deep"]);
+    }
+  }
+  sortAndCompactPaths(paths);
+});
+
+Deno.bench("sortAndCompactPaths - deeply nested paths", () => {
+  const paths: TriggerPaths = [];
+  for (let i = 0; i < 100; i++) {
+    const depth = Math.floor(Math.random() * 10) + 1;
+    const path = Array.from({ length: depth }, (_, j) => `level${j}`);
+    paths.push(path);
+  }
+  sortAndCompactPaths(paths);
+});
+
+Deno.bench("determineTriggeredActions - simple change", () => {
+  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const dependencies = new Map<Action, SortedAndCompactPaths>([
+    [action, [["user", "name"]]],
+  ]);
+  
+  determineTriggeredActions(
+    dependencies,
+    { user: { name: "Alice", age: 30 } },
+    { user: { name: "Bob", age: 30 } },
+  );
+});
+
+Deno.bench("determineTriggeredActions - no changes", () => {
+  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const dependencies = new Map<Action, SortedAndCompactPaths>([
+    [action, [["user", "name"]]],
+  ]);
+  
+  const data = { user: { name: "Alice", age: 30 } };
+  determineTriggeredActions(dependencies, data, data);
+});
+
+Deno.bench("determineTriggeredActions - many dependencies", () => {
+  const dependencies = new Map<Action, SortedAndCompactPaths>();
+  const before: Record<string, number> = {};
+  const after: Record<string, number> = {};
+  
+  for (let i = 0; i < 100; i++) {
+    const action = { 
+      schedule: () => {}, 
+      name: `action${i}` 
+    } as unknown as Action;
+    dependencies.set(action, [[`field${i}`]]);
+    before[`field${i}`] = i;
+    after[`field${i}`] = i;
+  }
+  // Change one field
+  after.field50 = -1;
+  
+  determineTriggeredActions(
+    dependencies,
+    before as JSONValue,
+    after as JSONValue,
+  );
+});
+
+Deno.bench("determineTriggeredActions - deep nesting", () => {
+  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const deepPath = Array.from({ length: 10 }, (_, i) => `level${i}`);
+  const dependencies = new Map<Action, SortedAndCompactPaths>([
+    [action, [deepPath]],
+  ]);
+  
+  // Create deeply nested objects
+  const createNested = (value: string) => {
+    let result: any = value;
+    for (let i = deepPath.length - 1; i >= 0; i--) {
+      result = { [deepPath[i]]: result };
+    }
+    return result;
+  };
+  
+  determineTriggeredActions(
+    dependencies,
+    createNested("before"),
+    createNested("after"),
+  );
+});
+
+Deno.bench("determineTriggeredActions - multiple paths per action", () => {
+  const action = { schedule: () => {}, name: "action" } as unknown as Action;
+  const paths: SortedAndCompactPaths = Array.from(
+    { length: 20 },
+    (_, i) => [`field${i}`],
+  );
+  const dependencies = new Map<Action, SortedAndCompactPaths>([
+    [action, paths],
+  ]);
+  
+  const before: any = {};
+  const after: any = {};
+  for (let i = 0; i < 20; i++) {
+    before[`field${i}`] = i;
+    after[`field${i}`] = i;
+  }
+  after.field10 = "changed";
+  
+  determineTriggeredActions(dependencies, before, after);
+});
+
+Deno.bench("determineTriggeredActions - complex real-world", () => {
+  const dependencies = new Map<Action, SortedAndCompactPaths>();
+  
+  // Simulate a real app with various watchers
+  const actions = [
+    { paths: [["currentUser"]], name: "userWatcher" },
+    { paths: [["currentUser", "preferences"]], name: "prefsWatcher" },
+    { paths: [["posts"]], name: "postsWatcher" },
+    { paths: [["posts", "0"], ["posts", "1"], ["posts", "2"]], name: "topPostsWatcher" },
+    { paths: [["notifications", "unread"]], name: "unreadWatcher" },
+    { paths: [["ui", "theme"]], name: "themeWatcher" },
+    { paths: [["ui", "sidebar", "collapsed"]], name: "sidebarWatcher" },
+  ];
+  
+  for (const { paths, name } of actions) {
+    const action = { schedule: () => {}, name } as unknown as Action;
+    dependencies.set(action, paths);
+  }
+  
+  const before = {
+    currentUser: {
+      id: "123",
+      name: "Alice",
+      preferences: { theme: "light", notifications: true },
+    },
+    posts: [
+      { id: "p1", title: "Post 1", likes: 10 },
+      { id: "p2", title: "Post 2", likes: 20 },
+      { id: "p3", title: "Post 3", likes: 30 },
+    ],
+    notifications: { unread: 5, items: [] },
+    ui: {
+      theme: "light",
+      sidebar: { collapsed: false, width: 250 },
+    },
+  };
+  
+  const after = {
+    currentUser: {
+      id: "123",
+      name: "Alice",
+      preferences: { theme: "dark", notifications: true },
+    },
+    posts: [
+      { id: "p1", title: "Post 1", likes: 11 },
+      { id: "p2", title: "Post 2", likes: 20 },
+      { id: "p3", title: "Post 3", likes: 30 },
+    ],
+    notifications: { unread: 6, items: [{ id: "n1" }] },
+    ui: {
+      theme: "dark",
+      sidebar: { collapsed: false, width: 250 },
+    },
+  };
+  
+  determineTriggeredActions(
+    dependencies,
+    before as JSONValue,
+    after as JSONValue,
+  );
+});
