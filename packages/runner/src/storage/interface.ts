@@ -28,6 +28,7 @@ export type {
   Fact,
   IClaim,
   JSONValue,
+  MediaType,
   MemorySpace,
   Result,
   SchemaContext,

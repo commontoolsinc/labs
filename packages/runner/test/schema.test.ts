@@ -8,7 +8,8 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { toURI } from "../src/uri-utils.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../src/link-utils.ts";
-import { compactifyPaths, txToReactivityLog } from "../src/scheduler.ts";
+import { txToReactivityLog } from "../src/scheduler.ts";
+import { sortAndCompactPaths } from "../src/reactive-dependencies.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -346,7 +347,7 @@ describe("Schema Support", () => {
         rootSchema: sanitizeSchemaForLinks(schema),
       });
       const log = txToReactivityLog(tx2);
-      const reads = compactifyPaths(log.reads);
+      const reads = sortAndCompactPaths(log.reads);
       expect(reads.length).toEqual(3);
       expect(
         reads.map((r: IMemorySpaceAddress) => ({ id: r.id, path: r.path }))
