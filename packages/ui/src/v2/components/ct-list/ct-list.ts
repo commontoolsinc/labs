@@ -3,7 +3,10 @@ import { property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell, isCell } from "@commontools/runner";
-import { createArrayCellController, type ArrayCellController } from "../../core/cell-controller.ts";
+import {
+  type ArrayCellController,
+  createArrayCellController,
+} from "../../core/cell-controller.ts";
 import "../ct-input/ct-input.ts";
 
 /**
@@ -68,7 +71,7 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
 
   // Cell controller for managing array values
   private cellController: ArrayCellController<T>;
-  
+
   // Private state for managing editing
   private _editingItems: Map<string, Cell<string>> = new Map();
   private _nextTempId: number = 1;
@@ -80,7 +83,7 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
       onChange: (newValue, oldValue) => {
         // Trigger any change-related side effects here if needed
         // The controller already handles requestUpdate()
-      }
+      },
     });
   }
 
@@ -435,12 +438,12 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
         : ""}
 
         <div class="list-items">
-          ${items.filter(item => item && item.title).length === 0
+          ${items.filter((item) => item && item.title).length === 0
         ? html`
           <div class="empty-state">No items in this list</div>
         `
         : repeat(
-          items.filter(item => item && item.title),
+          items.filter((item) => item && item.title),
           (item) => item.title,
           (item) => this.renderItem(item),
         )}
