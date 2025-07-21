@@ -17,23 +17,31 @@ import {
 export function traverseValue(
   value: Opaque<any>,
   fn: (value: any) => any,
+  seen: Set<Opaque<any>> = new Set(),
 ): any {
+  if (seen.has(value)) return value;
+  seen.add(value);
+
   // Perform operation, replaces value if non-undefined is returned
   const result = fn(value);
-  if (result !== undefined) value = result;
+  if (result !== undefined) {
+    value = result;
+    seen.add(value);
+  }
 
   // Traverse value
   if (Array.isArray(value)) {
-    return value.map((v) => traverseValue(v, fn));
+    return value.map((v) => traverseValue(v, fn, seen));
   } else if (
-    (!isOpaqueRef(value) &&
-      !canBeOpaqueRef(value) &&
-      !isShadowRef(value) &&
-      isRecord(value)) ||
-    isRecipe(value)
+    !isOpaqueRef(value) &&
+    !canBeOpaqueRef(value) &&
+    !isShadowRef(value) &&
+    (isRecord(value) || isRecipe(value))
   ) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
+      Object.entries(value).map((
+        [key, v],
+      ) => [key, traverseValue(v, fn, seen)]),
     );
   } else return value;
 }
