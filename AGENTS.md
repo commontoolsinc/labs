@@ -34,6 +34,7 @@ Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
 - Export types explicitly using `export type { ... }`.
 - Provide descriptive JSDoc comments on public interfaces.
 - Prefer strong typing with interfaces or types instead of `any`.
+- Use the handler pattern for UI event handling (see [Handler Patterns Guide](.claude/commands/handlers-guide.md)).
 - Update package-level README.md files.
 
 ### Imports
