@@ -323,12 +323,23 @@ export class ArrayCellController<T> extends CellController<T[]> {
    * Add an item to the array
    */
   addItem(item: T): void {
-    const currentArray = this.getValue();
-    this.setValue([...currentArray, item]);
+    if (this.isCell()) {
+      // Use Cell's native push method for efficient array mutation
+      // Must wrap in transaction like other Cell operations
+      const cell = this.getCell()!;
+      const tx = cell.runtime.edit();
+      cell.withTx(tx).push(item);
+      tx.commit();
+    } else {
+      // Fallback for plain arrays
+      const currentArray = this.getValue();
+      this.setValue([...currentArray, item]);
+    }
   }
   
   /**
    * Remove an item from the array
+   * Note: Cell doesn't have native remove/splice methods, so we use filter + setValue
    */
   removeItem(itemToRemove: T): void {
     const currentArray = this.getValue();
@@ -342,9 +353,19 @@ export class ArrayCellController<T> extends CellController<T[]> {
     const currentArray = this.getValue();
     const index = currentArray.indexOf(oldItem);
     if (index !== -1) {
-      const newArray = [...currentArray];
-      newArray[index] = newItem;
-      this.setValue(newArray);
+      if (this.isCell()) {
+        // Use Cell's native key() method for direct element mutation
+        // Must wrap in transaction like other Cell operations
+        const cell = this.getCell()!;
+        const tx = cell.runtime.edit();
+        cell.withTx(tx).key(index).set(newItem);
+        tx.commit();
+      } else {
+        // Fallback for plain arrays
+        const newArray = [...currentArray];
+        newArray[index] = newItem;
+        this.setValue(newArray);
+      }
     }
   }
 }

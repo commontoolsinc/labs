@@ -3,6 +3,7 @@ import { property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell, isCell } from "@commontools/runner";
+import { createArrayCellController, type ArrayCellController } from "../../core/cell-controller.ts";
 import "../ct-input/ct-input.ts";
 
 /**
@@ -65,10 +66,29 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
   @property()
   action: CtListAction | null = { type: "remove" };
 
-  // Private state for managing subscriptions and editing
-  private _cellUnsubscribe: (() => void) | null = null;
+  // Cell controller for managing array values
+  private cellController: ArrayCellController<T>;
+  
+  // Private state for managing editing
   private _editingItems: Map<string, Cell<string>> = new Map();
   private _nextTempId: number = 1;
+
+  constructor() {
+    super();
+    this.cellController = createArrayCellController<T>(this, {
+      timing: { strategy: "immediate" },
+      onChange: (newValue, oldValue) => {
+        // Trigger any change-related side effects here if needed
+        // The controller already handles requestUpdate()
+      }
+    });
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    // Bind to the initial value when connected
+    this.cellController.bind(this.value);
+  }
 
   static override styles = css`
     :host {
@@ -270,82 +290,50 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     }
   `;
 
-  // Lifecycle methods for Cell subscription management
-  override connectedCallback() {
-    super.connectedCallback();
-    this._setupCellSubscription();
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    this._cleanupCellSubscription();
-  }
-
+  // Lifecycle methods for Cell binding management
   override updated(changedProperties: Map<string, any>) {
     super.updated(changedProperties);
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
-      this._cleanupCellSubscription();
-      this._setupCellSubscription();
-    }
-  }
-
-  private _setupCellSubscription(): void {
-    if (isCell(this.value)) {
-      // Subscribe to cell changes using sink() which returns a cleanup function
-      this._cellUnsubscribe = this.value.sink(() => {
-        // Trigger a re-render when the cell value changes
-        this.requestUpdate();
-      });
-    }
-  }
-
-  private _cleanupCellSubscription(): void {
-    if (this._cellUnsubscribe) {
-      this._cellUnsubscribe();
-      this._cellUnsubscribe = null;
+      this.cellController.bind(this.value);
     }
   }
 
   private getValue(): T[] {
-    if (isCell(this.value)) {
-      return this.value.get?.() || [];
-    }
-    return this.value || [];
+    return this.cellController.getValue();
   }
 
   private setValue(newValue: T[]): void {
-    if (isCell(this.value)) {
-      const tx = this.value.runtime.edit();
-      this.value.withTx(tx).set(newValue);
-      tx.commit();
-    } else {
+    this.cellController.setValue(newValue);
+    // For non-Cell values, update the property
+    if (!this.cellController.isCell()) {
       this.value = newValue;
-      this.requestUpdate();
     }
   }
 
   private addItem(title: string): void {
-    const currentItems = this.getValue();
     const newItem = { title } as T;
-    const newItems = [...currentItems, newItem];
-    this.setValue(newItems);
+    this.cellController.addItem(newItem);
+    // For non-Cell values, update the property
+    if (!this.cellController.isCell()) {
+      this.value = this.cellController.getValue();
+    }
   }
 
   private removeItem(itemToRemove: T): void {
-    const currentItems = this.getValue();
-    const newItems = currentItems.filter((item) => item !== itemToRemove);
-    this.setValue(newItems);
+    this.cellController.removeItem(itemToRemove);
+    // For non-Cell values, update the property
+    if (!this.cellController.isCell()) {
+      this.value = this.cellController.getValue();
+    }
   }
 
   private updateItem(oldItem: T, newItem: T): void {
-    const currentItems = this.getValue();
-    const index = currentItems.indexOf(oldItem);
-    if (index !== -1) {
-      const newItems = [...currentItems];
-      newItems[index] = newItem;
-      this.setValue(newItems);
+    this.cellController.updateItem(oldItem, newItem);
+    // For non-Cell values, update the property
+    if (!this.cellController.isCell()) {
+      this.value = this.cellController.getValue();
     }
   }
 
@@ -390,14 +378,15 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
 
     const editId = this.getItemEditId(item);
     // Create a temporary cell for editing this item's title
-    if (isCell(this.value) && this.value.runtime) {
+    const cell = this.cellController.getCell();
+    if (cell && cell.runtime) {
       // Create a mutable cell for editing
-      const tempCell = this.value.runtime.getCell<string>(
-        this.value.space,
+      const tempCell = cell.runtime.getCell<string>(
+        cell.space,
         { type: "edit", itemTitle: item.title },
       );
       // Set initial value
-      const tx = this.value.runtime.edit();
+      const tx = cell.runtime.edit();
       tempCell.withTx(tx).set(item.title);
       tx.commit();
       this._editingItems.set(editId, tempCell);
