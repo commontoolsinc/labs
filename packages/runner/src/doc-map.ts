@@ -3,7 +3,7 @@ import { isRecord } from "@commontools/utils/types";
 import { isOpaqueRef } from "./builder/types.ts";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
-  getCellLinkOrThrow,
+  getCellOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { isCell } from "./cell.ts";
@@ -63,7 +63,7 @@ export function createRef(
 
     if (isQueryResultForDereferencing(obj)) {
       // It'll traverse this and call .toJSON on the doc in the reference.
-      obj = getCellLinkOrThrow(obj);
+      obj = getCellOrThrow(obj);
     }
 
     // If referencing other docs, return their ids (or random as fallback).
@@ -92,9 +92,6 @@ export function getEntityId(value: any): { "/": string } | undefined {
     // Handle URI format with "of:" prefix
     if (value.startsWith("of:")) value = fromURI(value);
     return value.startsWith("{") ? JSON.parse(value) : { "/": value };
-  }
-  if (isRecord(value) && "/" in value) {
-    return JSON.parse(JSON.stringify(value));
   }
 
   const link = parseLink(value);

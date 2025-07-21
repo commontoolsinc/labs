@@ -11,11 +11,9 @@ import { css as createCss } from "@codemirror/lang-css";
 import { html as createHtml } from "@codemirror/lang-html";
 import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { type Cell, isCell } from "@commontools/runner";
-import {
-  InputTimingController,
-  type InputTimingOptions,
-} from "../../core/input-timing-controller.ts";
+import { type Cell } from "@commontools/runner";
+import { type InputTimingOptions } from "../../core/input-timing-controller.ts";
+import { createStringCellController } from "../../core/cell-controller.ts";
 
 /**
  * Supported MIME types for syntax highlighting
@@ -100,9 +98,20 @@ export class CTCodeEditor extends BaseElement {
   private _editorView: EditorView | undefined;
   private _lang = new Compartment();
   private _readonly = new Compartment();
-  private _inputTiming: InputTimingController;
-  private _cellUnsubscribe: (() => void) | null = null;
   private _cleanupFns: Array<() => void> = [];
+  private _cellController = createStringCellController(this, {
+    timing: {
+      strategy: "debounce",
+      delay: 500,
+    },
+    onChange: (newValue: string, oldValue: string) => {
+      this.emit("ct-change", {
+        value: newValue,
+        oldValue,
+        language: this.language,
+      });
+    },
+  });
 
   constructor() {
     super();
@@ -113,45 +122,19 @@ export class CTCodeEditor extends BaseElement {
     this.placeholder = "";
     this.timingStrategy = "debounce";
     this.timingDelay = 500;
-
-    // Initialize input timing controller
-    this._inputTiming = new InputTimingController(this, {
-      strategy: this.timingStrategy,
-      delay: this.timingDelay,
-    });
   }
 
   private getValue(): string {
-    if (isCell(this.value)) {
-      return this.value.get?.() || "";
-    }
-    return this.value || "";
+    return this._cellController.getValue();
   }
 
   private setValue(newValue: string): void {
-    const oldValue = this.getValue();
-
-    this._inputTiming.schedule(() => {
-      if (isCell(this.value)) {
-        const tx = this.value.runtime.edit();
-        this.value.withTx(tx).set(newValue);
-        tx.commit();
-      } else {
-        this.value = newValue;
-      }
-
-      // Emit the value change event after the value is actually set
-      this.emit("ct-change", {
-        value: newValue,
-        oldValue,
-        language: this.language,
-      });
-    });
+    this._cellController.setValue(newValue);
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    this._setupCellSubscription();
+    // CellController handles subscription automatically via ReactiveController
   }
 
   override disconnectedCallback() {
@@ -159,37 +142,49 @@ export class CTCodeEditor extends BaseElement {
     this._cleanup();
   }
 
-  private _setupCellSubscription(): void {
-    if (isCell(this.value)) {
-      // Subscribe to cell changes
-      this._cellUnsubscribe = this.value.sink(() => {
-        // Update editor content when cell value changes externally
-        if (this._editorView) {
-          const newValue = this.getValue();
-          const currentValue = this._editorView.state.doc.toString();
-          if (newValue !== currentValue) {
-            this._editorView.dispatch({
-              changes: {
-                from: 0,
-                to: this._editorView.state.doc.length,
-                insert: newValue,
-              },
-            });
-          }
-        }
-      });
+  private _updateEditorFromCellValue(): void {
+    // Update editor content when cell value changes externally
+    if (this._editorView) {
+      const newValue = this.getValue();
+      const currentValue = this._editorView.state.doc.toString();
+      if (newValue !== currentValue) {
+        this._editorView.dispatch({
+          changes: {
+            from: 0,
+            to: this._editorView.state.doc.length,
+            insert: newValue,
+          },
+        });
+      }
     }
   }
 
-  private _cleanupCellSubscription(): void {
-    if (this._cellUnsubscribe) {
-      this._cellUnsubscribe();
-      this._cellUnsubscribe = null;
+  private _setupCellSyncHandler(): void {
+    // Create a custom Cell sync handler that integrates with the CellController
+    // but provides the special CodeMirror synchronization logic
+    const originalTriggerUpdate = this._cellController["options"].triggerUpdate;
+
+    // Override the CellController's update mechanism to include CodeMirror sync
+    this._cellController["options"].triggerUpdate = false; // Disable default updates
+
+    // Set up our own Cell subscription that calls both update methods
+    if (this._cellController.isCell()) {
+      const cell = this._cellController.getCell();
+      if (cell) {
+        const unsubscribe = cell.sink(() => {
+          // First update the editor content
+          this._updateEditorFromCellValue();
+          // Then trigger component update if originally enabled
+          if (originalTriggerUpdate) {
+            this.requestUpdate();
+          }
+        });
+        this._cleanupFns.push(unsubscribe);
+      }
     }
   }
 
   private _cleanup(): void {
-    this._cleanupCellSubscription();
     this._cleanupFns.forEach((fn) => fn());
     this._cleanupFns = [];
     if (this._editorView) {
@@ -203,22 +198,8 @@ export class CTCodeEditor extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
-      this._cleanupCellSubscription();
-      this._setupCellSubscription();
-      // Update editor content
-      if (this._editorView) {
-        const newValue = this.getValue();
-        const currentValue = this._editorView.state.doc.toString();
-        if (newValue !== currentValue) {
-          this._editorView.dispatch({
-            changes: {
-              from: 0,
-              to: this._editorView.state.doc.length,
-              insert: newValue,
-            },
-          });
-        }
-      }
+      this._cellController.bind(this.value);
+      this._updateEditorFromCellValue();
     }
 
     // Update language
@@ -243,7 +224,7 @@ export class CTCodeEditor extends BaseElement {
       changedProperties.has("timingStrategy") ||
       changedProperties.has("timingDelay")
     ) {
-      this._inputTiming.updateOptions({
+      this._cellController.updateTimingOptions({
         strategy: this.timingStrategy,
         delay: this.timingDelay,
       });
@@ -253,6 +234,18 @@ export class CTCodeEditor extends BaseElement {
   protected override firstUpdated(_changedProperties: PropertyValues): void {
     super.firstUpdated(_changedProperties);
     this._initializeEditor();
+
+    // Bind the initial value to the cell controller
+    this._cellController.bind(this.value);
+
+    // Update timing options to match current properties
+    this._cellController.updateTimingOptions({
+      strategy: this.timingStrategy,
+      delay: this.timingDelay,
+    });
+
+    // Set up custom cell sync handler for CodeMirror
+    this._setupCellSyncHandler();
   }
 
   private _initializeEditor(): void {
@@ -276,12 +269,12 @@ export class CTCodeEditor extends BaseElement {
       // Handle focus/blur events
       EditorView.domEventHandlers({
         focus: () => {
-          this._inputTiming.onFocus();
+          this._cellController.onFocus();
           this.emit("ct-focus");
           return false;
         },
         blur: () => {
-          this._inputTiming.onBlur();
+          this._cellController.onBlur();
           this.emit("ct-blur");
           return false;
         },
@@ -334,3 +327,4 @@ export class CTCodeEditor extends BaseElement {
   }
 }
 
+globalThis.customElements.define("ct-code-editor", CTCodeEditor);

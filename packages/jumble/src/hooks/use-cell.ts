@@ -25,7 +25,7 @@ export function useNamedCell<T>(
 ) {
   const runtime = useRuntime();
   const cell = runtime.getCell<T>(space, cause, schema);
-  runtime.storage.syncCell(cell, true);
+  cell.sync();
 
   const [value, setValue] = useState<T>(cell.get());
 

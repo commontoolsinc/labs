@@ -20,7 +20,12 @@ import { type Cancel } from "./cancel.ts";
 import { Labels, MemorySpace } from "./storage.ts";
 import { arrayEqual } from "./path-utils.ts";
 import { toURI } from "./uri-utils.ts";
-import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+import type {
+  ICommitNotification,
+  IExtendedStorageTransaction,
+  IMemoryChange,
+  IStorageTransaction,
+} from "./storage/interface.ts";
 
 /**
  * Lowest level cell implementation.
@@ -112,14 +117,15 @@ export type DocImpl<T> = {
    *
    * @param path - Path to set.
    * @param newValue - New value.
-   * @param log - Reactivity log.
    * @param schema - JSON Schema to validate against.
+   * @param tx - Optional storage transaction for notifications.
    * @returns Whether the value changed.
    */
   setAtPath(
     path: PropertyKey[],
     newValue: any,
     schema?: JSONSchema,
+    tx?: IStorageTransaction,
   ): boolean;
 
   /**
@@ -299,8 +305,14 @@ export function createDoc<T>(
       path: PropertyKey[],
       newValue: any,
       schema?: JSONSchema,
+      tx?: IStorageTransaction,
     ) => {
       if (readOnly) throw new Error(`Cell is read-only: ${readOnly}`);
+
+      // Get the previous value before setting
+      const previousValue = path.length > 0
+        ? getValueAtPath(value, path)
+        : value;
 
       let changed = false;
       if (path.length > 0) {
@@ -323,6 +335,27 @@ export function createDoc<T>(
         // callbacks can change during the execution of the callbacks.
         for (const callback of [...callbacks]) {
           callback(value as T, path, labels);
+        }
+
+        // Send notification if shim storage manager is available
+        if (runtime.storage.shim) {
+          const change: IMemoryChange = {
+            address: {
+              id: toURI(entityId),
+              type: "application/json",
+              path: ["value", ...path.map(String)],
+            },
+            before: previousValue,
+            after: newValue,
+          };
+
+          const notification: ICommitNotification = {
+            type: "commit",
+            space: space,
+            changes: [change],
+            source: tx,
+          };
+          runtime.storage.shimNotifySubscribers(notification);
         }
       }
       return changed;
@@ -372,6 +405,27 @@ export function createDoc<T>(
           }`,
         );
       }
+
+      if (runtime.storage.shim) {
+        const change: IMemoryChange = {
+          address: {
+            id: toURI(entityId),
+            type: "application/json",
+            path: ["source"],
+          },
+          before: JSON.stringify(sourceCell?.entityId),
+          after: JSON.stringify(cell?.entityId),
+        };
+
+        const notification: ICommitNotification = {
+          type: "commit",
+          space: space,
+          changes: [change],
+          source: undefined,
+        };
+        runtime.storage.shimNotifySubscribers(notification);
+      }
+
       sourceCell = cell;
 
       // Notify callbacks that there was a change.

@@ -8,15 +8,15 @@ Radioactive experiments. Turn back! You will find no API stability here.
 
 There's a frontend, and a backend.
 
-All of the backend code lives within [Toolshed](./toolshed), and is written in
+All of the backend code lives within [Toolshed](./packages/toolshed), and is written in
 Deno2.
 
-All of the user-facing frontend code lives within [Jumble](./jumble), and is
+All of the user-facing frontend code lives within [Jumble](./packages/jumble), and is
 written with React.
 
 ## Running the backend
 
-For a more detailed guide, see [./toolshed/README.md](./toolshed/README.md).
+For a more detailed guide, see [./packages/toolshed/README.md](./packages/toolshed/README.md).
 
 ```bash
 cd ./packages/toolshed
@@ -30,7 +30,7 @@ By default the backend will run at <http://localhost:8000>
 Run the dev server
 
 ```bash
-cd ./jumble
+cd ./packages/jumble
 deno task dev
 ```
 

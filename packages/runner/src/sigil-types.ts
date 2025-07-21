@@ -70,7 +70,7 @@ export type LegacyDocCellLink = {
  */
 export type LegacyAlias = {
   $alias: {
-    cell?: DocImpl<any> | ShadowRef | number;
+    cell?: DocImpl<any> | ShadowRef | number | { "/": string };
     path: readonly PropertyKey[];
     schema?: JSONSchema;
     rootSchema?: JSONSchema;

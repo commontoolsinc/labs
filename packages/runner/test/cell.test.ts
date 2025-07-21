@@ -10,7 +10,6 @@ import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { addCommonIDfromObjectID } from "../src/data-updating.ts";
-import { isLegacyCellLink } from "../src/link-utils.ts";
 import { areLinksSame, isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -152,8 +151,7 @@ describe("Cell", () => {
       tx,
     );
     cell.set({ x: 1, y: 2 });
-    const result = cell.setRaw({ x: 10, y: 20 });
-    expect(result).toBe(true); // setRaw returns boolean from doc.send()
+    cell.setRaw({ x: 10, y: 20 });
     expect(cell.getRaw()).toEqual({ x: 10, y: 20 });
   });
 
@@ -168,8 +166,7 @@ describe("Cell", () => {
 
     expect(cell.getRaw()).toBe(42);
 
-    const result = cell.setRaw(100);
-    expect(result).toBe(true);
+    cell.setRaw(100);
     expect(cell.getRaw()).toBe(100);
   });
 
@@ -184,8 +181,7 @@ describe("Cell", () => {
 
     expect(cell.getRaw()).toEqual([1, 2, 3]);
 
-    const result = cell.setRaw([4, 5, 6]);
-    expect(result).toBe(true);
+    cell.setRaw([4, 5, 6]);
     expect(cell.getRaw()).toEqual([4, 5, 6]);
   });
 
@@ -208,6 +204,40 @@ describe("Cell", () => {
 
     // Verify the document structure is preserved
     expect(c.get()).toEqual({ nested: { value: 100 } });
+  });
+
+  it("should set and get the source cell", () => {
+    // Create two cells
+    const sourceCell = runtime.getCell<{ foo: number }>(
+      space,
+      "source cell for setSourceCell/getSourceCell test",
+      undefined,
+      tx,
+    );
+    sourceCell.set({ foo: 123 });
+
+    const targetCell = runtime.getCell<{ bar: string }>(
+      space,
+      "target cell for setSourceCell/getSourceCell test",
+      undefined,
+      tx,
+    );
+    targetCell.set({ bar: "baz" });
+
+    // Initially, getSourceCell should return undefined
+    expect(targetCell.getSourceCell()).toBeUndefined();
+
+    // Set the source cell
+    targetCell.setSourceCell(sourceCell);
+
+    // Now getSourceCell should return a Cell with the same value as sourceCell
+    const retrievedSource = targetCell.getSourceCell();
+    expect(isCell(retrievedSource)).toBe(true);
+    expect(retrievedSource?.get()).toEqual({ foo: 123 });
+
+    // Changing the source cell's value should be reflected
+    sourceCell.set({ foo: 456 });
+    expect(retrievedSource?.get()).toEqual({ foo: 456 });
   });
 });
 
@@ -252,9 +282,9 @@ describe("Cell utility functions", () => {
       tx,
     );
     c.set({ x: 10 });
-    const ref = c.key("x").getAsLegacyCellLink();
-    expect(isLegacyCellLink(ref)).toBe(true);
-    expect(isLegacyCellLink({})).toBe(false);
+    const ref = c.key("x").getAsLink();
+    expect(isAnyCellLink(ref)).toBe(true);
+    expect(isAnyCellLink({})).toBe(false);
   });
 
   it("should identify a cell proxy", () => {
@@ -369,7 +399,7 @@ describe("createProxy", () => {
       tx,
     );
     c.set({ x: 42 });
-    const ref = c.key("x").getAsLegacyCellLink();
+    const ref = c.key("x").getAsLink();
     const proxy = c.getAsQueryResult();
     proxy.y = ref;
     expect(proxy.y).toBe(42);
@@ -383,7 +413,7 @@ describe("createProxy", () => {
       tx,
     );
     c.set({ x: 42 });
-    const ref = c.key("x").getAsLegacyCellLink();
+    const ref = c.key("x").getAsLink();
     const proxy = c.getAsQueryResult();
     proxy.x = ref;
     expect(proxy.x).toBe(42);
@@ -586,9 +616,9 @@ describe("createProxy", () => {
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
     const log = txToReactivityLog(tx);
-    expect(areLinksSame(log.writes[0], c.key("length").getAsLegacyCellLink()))
+    expect(areLinksSame(log.writes[0], c.key("length").getAsLink()))
       .toBe(true);
-    expect(areLinksSame(log.writes[1], c.key(2).getAsLegacyCellLink())).toBe(
+    expect(areLinksSame(log.writes[1], c.key(2).getAsLink())).toBe(
       true,
     );
     proxy.length = 4;
@@ -1312,8 +1342,8 @@ describe("asCell with schema", () => {
       tx,
     );
     innerCell.set({ value: 42 });
-    const cellRef = innerCell.getAsLegacyCellLink();
-    const aliasRef = { $alias: innerCell.getAsLegacyCellLink() };
+    const cellRef = innerCell.getAsLink();
+    const aliasRef = innerCell.getAsWriteRedirectLink();
 
     // Create a cell that uses all reference types
     const c = runtime.getCell<{
@@ -2203,5 +2233,38 @@ describe("getAsWriteRedirectLink method", () => {
 
     // Should omit space
     expect(alias["/"][LINK_V1_TAG].space).toBeUndefined();
+  });
+});
+
+describe("getImmutableCell", () => {
+  describe("asCell", () => {
+    let storageManager: ReturnType<typeof StorageManager.emulate>;
+    let runtime: Runtime;
+    let tx: IExtendedStorageTransaction;
+
+    beforeEach(() => {
+      storageManager = StorageManager.emulate({ as: signer });
+
+      runtime = new Runtime({
+        blobbyServerUrl: import.meta.url,
+        storageManager,
+      });
+      tx = runtime.edit();
+    });
+
+    afterEach(async () => {
+      await tx.commit();
+      await runtime?.dispose();
+      await storageManager?.close();
+    });
+
+    it("should create a cell with the correct schema", () => {
+      const schema = {
+        type: "object",
+        properties: { value: { type: "number" } },
+      } as const satisfies JSONSchema;
+      const cell = runtime.getImmutableCell(space, { value: 42 }, schema, tx);
+      expect(cell.get()).toEqual({ value: 42 });
+    });
   });
 });

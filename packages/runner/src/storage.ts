@@ -11,9 +11,12 @@ import { Cell, isCell, isStream } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { type EntityId, entityIdStr } from "./doc-map.ts";
 import type {
+  IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
+  IStorageSubscription,
   Labels,
+  StorageNotification,
   StorageValue,
 } from "./storage/interface.ts";
 import { log } from "./log.ts";
@@ -21,11 +24,15 @@ import type { IRuntime, IStorage } from "./runtime.ts";
 import { DocObjectManager, querySchema } from "./storage/query.ts";
 import { deepEqual } from "./path-utils.ts";
 import {
-  getCellLinkOrThrow,
+  getCellOrThrow,
   isQueryResultForDereferencing,
 } from "./query-result-proxy.ts";
 import { isLink } from "./link-utils.ts";
-import { uriToEntityId } from "./storage/transaction-shim.ts";
+import {
+  ExtendedStorageTransaction,
+  ShimStorageManager,
+  uriToEntityId,
+} from "./storage/transaction-shim.ts";
 import { toURI } from "./uri-utils.ts";
 export type { Labels, MemorySpace };
 
@@ -67,9 +74,9 @@ export class Storage implements IStorage {
   private storageProviders = new Map<string, IStorageProvider>();
 
   // Any doc here is being synced or in the process of spinning up syncing.
-  private loadingPromises = new Map<string, Promise<DocImpl<any>>>();
+  private loadingPromises = new Map<string, Promise<Cell<any>>>();
   // Resolves for the promises above.
-  private loadingResolves = new Map<string, (doc: DocImpl<any>) => void>();
+  private loadingResolves = new Map<string, (doc: Cell<any>) => void>();
 
   // We'll also keep track of the subscriptions for the docs
   // These don't care about schema, and use the id from the entity id
@@ -87,16 +94,59 @@ export class Storage implements IStorage {
   private updateFromStoragePromise: Promise<void> | undefined;
   private _updateFromStorageResolver: (() => void) | undefined;
 
+  private shimStorageManager: ShimStorageManager | undefined;
+
   private cancel: Cancel;
   private addCancel: AddCancel;
 
   constructor(
     readonly runtime: IRuntime,
     private readonly storageManager: IStorageManager,
+    private readonly useStorageManagerTransactions: boolean,
   ) {
     const [cancel, addCancel] = useCancelGroup();
     this.cancel = cancel;
     this.addCancel = addCancel;
+
+    if (!this.useStorageManagerTransactions) {
+      this.shimStorageManager = new ShimStorageManager(this.runtime);
+    }
+  }
+
+  /**
+   * Creates a storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IExtendedStorageTransaction {
+    // Use transaction API from storage manager if enabled, otherwise
+    // use a shim.
+    const transaction = this.useStorageManagerTransactions
+      ? this.storageManager.edit()
+      : this.shimStorageManager!.edit();
+
+    return new ExtendedStorageTransaction(transaction);
+  }
+
+  /**
+   * Subscribe to storage notifications.
+   *
+   * @param subscription - The subscription to subscribe to.
+   */
+  subscribe(subscription: IStorageSubscription) {
+    if (this.useStorageManagerTransactions) {
+      this.storageManager.subscribe(subscription);
+    } else {
+      this.shimStorageManager!.subscribe(subscription);
+    }
+  }
+
+  shimNotifySubscribers(notification: StorageNotification) {
+    this.shimStorageManager?.notifySubscribers(notification);
+  }
+
+  get shim(): boolean {
+    return !this.useStorageManagerTransactions;
   }
 
   /**
@@ -105,10 +155,10 @@ export class Storage implements IStorage {
    * TODO(seefeld): Should this return a `Cell` instead? Or just an empty promise?
    */
   async syncCell<T = any>(
-    cell: DocImpl<T> | Cell<any>,
+    cell: Cell<any>,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
-  ): Promise<DocImpl<T>> {
+  ): Promise<Cell<T>> {
     // If we aren't overriding the schema context, and we have a schema in the cell, use that
     if (
       schemaContext === undefined && isCell(cell) &&
@@ -122,8 +172,7 @@ export class Storage implements IStorage {
       };
     }
 
-    let doc = cell;
-    if (isCell(cell) || isStream(cell)) doc = cell.getDoc();
+    const doc = cell.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
     }
@@ -132,7 +181,7 @@ export class Storage implements IStorage {
     // If the doc is ephemeral, we don't need to load it from storage. We still
     // add it to the map of known docs, so that we don't try to keep loading
     // it.
-    if (doc.ephemeral) return doc;
+    if (doc.ephemeral) return cell;
 
     const syncKey = Storage._getSyncKey(doc, schemaContext);
     // If the doc/schema pair is already loading, await that promise
@@ -142,7 +191,7 @@ export class Storage implements IStorage {
 
     // Set up a promise, so that we can notify other syncCell callers when our
     // results are ready.
-    const { promise, resolve } = Promise.withResolvers<DocImpl<T>>();
+    const { promise, resolve } = Promise.withResolvers<Cell<T>>();
     this.loadingPromises.set(syncKey, promise);
     this.loadingResolves.set(syncKey, resolve);
 
@@ -162,10 +211,10 @@ export class Storage implements IStorage {
     } else {
       await this._integrateResult(doc, storageProvider, schemaContext);
     }
-    this.loadingResolves.get(syncKey)?.(doc);
+    this.loadingResolves.get(syncKey)?.(cell);
     this.loadingResolves.delete(syncKey);
     this.loadingPromises.delete(syncKey);
-    return doc;
+    return cell;
   }
 
   async synced(): Promise<void> {
@@ -359,7 +408,7 @@ export class Storage implements IStorage {
         // link. Roundtripping through JSON converts all Cells and Docs to a
         // serializable format.
         if (isQueryResultForDereferencing(value)) {
-          value = getCellLinkOrThrow(value);
+          value = getCellOrThrow(value);
         }
         return JSON.parse(JSON.stringify(value));
       } else if (isRecord(value)) {
@@ -452,7 +501,7 @@ export class Storage implements IStorage {
       );
       // we don't need to await this, since by the time we've resolved our
       // docToStoragePromise, we'll have added the loadingPromise.
-      this.syncCell(linkedDoc);
+      this.syncCell(linkedDoc.asCell());
     }
 
     // If we're already dirty, we don't need to add a promise

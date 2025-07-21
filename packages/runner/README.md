@@ -46,7 +46,7 @@ const runtime = new Runtime({
 // Access services through the runtime
 const cell = runtime.getCell("my-space", "my-cause", schema);
 const doc = runtime.documentMap.getDoc(value, cause, space);
-await runtime.storage.syncCell(cell);
+await cell.sync();
 const recipe = await runtime.recipeManager.loadRecipe(recipeId);
 
 // Wait for all operations to complete
@@ -419,7 +419,7 @@ const runtime = new Runtime({
 
 ```typescript
 // Sync a cell with storage
-await runtime.storage.syncCell(userCell);
+await userCell.sync();
 
 // Sync by entity ID
 const cell = await runtime.storage.syncCellById("my-space", "entity-id");
@@ -614,7 +614,7 @@ replaced with Runtime instance methods:
 // OLD (deprecated):
 import { getCell, idle, storage } from "@commontools/runner";
 const cell = getCell(space, cause, schema);
-await storage.syncCell(cell);
+await cell.sync();
 await idle();
 
 // NEW (current):
@@ -630,7 +630,7 @@ const runtime = new Runtime({
   blobbyServerUrl: import.meta.url,
 });
 const cell = runtime.getCell(space, cause, schema);
-await runtime.storage.syncCell(cell);
+await cell.sync();
 await runtime.idle();
 ```
 

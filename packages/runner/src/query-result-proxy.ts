@@ -7,6 +7,7 @@ import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLinkToValue } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
+import { type Cell, createCell } from "./cell.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
@@ -112,14 +113,7 @@ export function createQueryResultProxy<T>(
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
         if (prop === getCellLink) {
-          return {
-            cell: runtime.documentMap.getDocByEntityId(
-              link.space,
-              link.id,
-              true,
-            ),
-            path: link.path as PropertyKey[],
-          } satisfies LegacyDocCellLink;
+          return createCell(runtime, link, tx, true);
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(link);
         }
@@ -322,13 +316,13 @@ export function makeOpaqueRef(
 }
 
 /**
- * Get cell link or throw if not a cell value proxy.
+ * Get cell or throw if not a cell value proxy.
  *
- * @param {any} value - The value to get the cell link from.
- * @returns {LegacyDocCellLink}
+ * @param {any} value - The value to get the cell from.
+ * @returns {Cell<T>}
  * @throws {Error} If the value is not a cell value proxy.
  */
-export function getCellLinkOrThrow(value: any): LegacyDocCellLink {
+export function getCellOrThrow<T = any>(value: any): Cell<T> {
   if (isQueryResult(value)) return value[getCellLink];
   else throw new Error("Value is not a cell proxy");
 }
@@ -359,7 +353,7 @@ export function isQueryResultForDereferencing(
 }
 
 export type QueryResultInternals = {
-  [getCellLink]: LegacyDocCellLink;
+  [getCellLink]: Cell<unknown>;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;

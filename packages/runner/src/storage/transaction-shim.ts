@@ -10,6 +10,8 @@ import type {
   INotFoundError,
   IReadActivity,
   IReadOptions,
+  IStorageSubscription,
+  IStorageSubscriptionCapability,
   IStorageTransaction,
   IStorageTransactionComplete,
   IStorageTransactionInconsistent,
@@ -25,6 +27,7 @@ import type {
   ReaderError,
   ReadError,
   Result,
+  StorageNotification,
   StorageTransactionFailed,
   StorageTransactionStatus,
   Unit,
@@ -36,6 +39,7 @@ import type { IRuntime } from "../runtime.ts";
 import type { EntityId } from "../doc-map.ts";
 import { getValueAtPath } from "../path-utils.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
+import { ignoreReadForScheduling } from "../scheduler.ts";
 
 /**
  * Convert a URI string to an EntityId object
@@ -302,6 +306,14 @@ class TransactionReader implements ITransactionReader {
  */
 class TransactionWriter extends TransactionReader
   implements ITransactionWriter {
+  constructor(
+    runtime: IRuntime,
+    space: MemorySpace,
+    journal: TransactionJournal,
+    private transaction: IStorageTransaction,
+  ) {
+    super(runtime, space, journal);
+  }
   write(
     address: IMemorySpaceAddress,
     value?: any,
@@ -371,7 +383,12 @@ class TransactionWriter extends TransactionReader
         return { ok: undefined, error: validationError };
       }
       // Write to doc itself
-      doc.setAtPath(rest, value);
+      doc.setAtPath(
+        rest,
+        value,
+        undefined,
+        this.transaction,
+      );
       const write: Write = {
         address,
         value,
@@ -506,7 +523,7 @@ export class StorageTransaction implements IStorageTransaction {
 
     let writer = this.writers.get(space);
     if (!writer) {
-      writer = new TransactionWriter(this.runtime, space, this.journal);
+      writer = new TransactionWriter(this.runtime, space, this.journal, this);
       this.writers.set(space, writer);
     }
 
@@ -563,12 +580,13 @@ export class StorageTransaction implements IStorageTransaction {
       status: "done",
       journal: this.currentStatus.journal,
     };
+
     return Promise.resolve({ ok: {} });
   }
 }
 
 export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
-  constructor(private tx: IStorageTransaction) {}
+  constructor(public tx: IStorageTransaction) {}
 
   get journal(): ITransactionJournal {
     return this.tx.journal;
@@ -589,16 +607,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.tx.read(address, options);
   }
 
-  readOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
-    const readResult = this.tx.read(address);
+  readOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    const readResult = this.tx.read(address, options);
     if (readResult.error && readResult.error.name !== "NotFoundError") {
       throw readResult.error;
     }
     return readResult.ok?.value;
   }
 
-  readValueOrThrow(address: IMemorySpaceAddress): JSONValue | undefined {
-    return this.readOrThrow({ ...address, path: ["value", ...address.path] });
+  readValueOrThrow(
+    address: IMemorySpaceAddress,
+    options?: IReadOptions,
+  ): JSONValue | undefined {
+    return this.readOrThrow(
+      { ...address, path: ["value", ...address.path] },
+      options,
+    );
   }
 
   writer(space: MemorySpace): Result<ITransactionWriter, WriterError> {
@@ -621,7 +648,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // Create parent entries if needed
       const lastValidPath = writeResult.error.path;
       const valueObj = lastValidPath
-        ? this.readValueOrThrow({ ...address, path: lastValidPath })
+        ? this.readValueOrThrow({ ...address, path: lastValidPath }, {
+          meta: ignoreReadForScheduling,
+        })
         : {};
       if (!isRecord(valueObj)) {
         throw new Error(
@@ -665,5 +694,51 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   commit(): Promise<Result<Unit, CommitError>> {
     return this.tx.commit();
+  }
+}
+
+/**
+ * Factory for creating shim storage transactions.
+ * Implements the same interface as IStorageManager.edit() for creating transactions.
+ */
+export class ShimStorageManager implements IStorageSubscriptionCapability {
+  private subscriptions: IStorageSubscription[] = [];
+
+  constructor(private runtime: IRuntime) {}
+
+  /**
+   * Creates a new storage transaction that can be used to read / write data into
+   * locally replicated memory spaces. Transaction allows reading from many
+   * multiple spaces but writing only to one space.
+   */
+  edit(): IStorageTransaction {
+    return new StorageTransaction(this.runtime);
+  }
+
+  /**
+   * Subscribes to the storage manager's notifications.
+   *
+   * For the shim implementation, this is a no-op since shim transactions
+   * don't generate storage notifications.
+   */
+  subscribe(subscription: IStorageSubscription): void {
+    this.subscriptions.push(subscription);
+  }
+
+  /**
+   * Internal method to notify subscribers of storage events.
+   * This is called by transactions when they commit or encounter errors.
+   */
+  notifySubscribers(notification: StorageNotification): void {
+    // Filter out subscriptions that have been cancelled
+    this.subscriptions = this.subscriptions.filter((subscription) => {
+      try {
+        const result = subscription.next(notification);
+        return result?.done !== true;
+      } catch (error) {
+        // If subscription throws an error, remove it
+        return false;
+      }
+    });
   }
 }

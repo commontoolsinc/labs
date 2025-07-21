@@ -126,7 +126,7 @@ export async function getAuthCell(docLink: SigilLink | string) {
 
     const authCell = runtime.getCellFromLink(parsedDocLink);
 
-    await runtime.storage.syncCell(authCell, true);
+    await authCell.sync();
     await runtime.storage.synced();
 
     return authCell;
