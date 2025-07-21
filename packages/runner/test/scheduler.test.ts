@@ -3,8 +3,11 @@ import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Action, type EventHandler } from "../src/scheduler.ts";
-import { ignoreReadForScheduling } from "../src/scheduler.ts";
+import {
+  type Action,
+  type EventHandler,
+  ignoreReadForScheduling,
+} from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
