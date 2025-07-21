@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { ID, ID_FIELD, JSONSchema } from "../src/builder/types.ts";
 import {
@@ -22,7 +22,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("data-updating", () => {
+describe("data-updating", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -34,6 +34,7 @@ describe("data-updating", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -44,7 +45,7 @@ describe("data-updating", () => {
     await storageManager?.close();
   });
 
-  describe("setNestedValue", () => {
+  describe("setNestedValue", (config) => {
     it("should set a value at a path", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,
@@ -193,7 +194,7 @@ describe("data-updating", () => {
     });
   });
 
-  describe("normalizeAndDiff", () => {
+  describe("normalizeAndDiff", (config) => {
     it("should detect simple value changes", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
@@ -1094,7 +1095,7 @@ describe("data-updating", () => {
     expect(value.result).toBe(100);
   });
 
-  describe("addCommonIDfromObjectID", () => {
+  describe("addCommonIDfromObjectID", (config) => {
     it("should handle arrays", () => {
       const obj = { items: [{ id: "item1", name: "First Item" }] };
       addCommonIDfromObjectID(obj);

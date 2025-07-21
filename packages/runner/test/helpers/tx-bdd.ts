@@ -51,6 +51,13 @@ export function describe(name: string, fn: ((config: TxConfig) => void) | (() =>
 }
 
 /**
+ * Enhanced describe.skip that skips the entire test suite
+ */
+(describe as any).skip = function(name: string, fn: ((config: TxConfig) => void) | (() => void)): void {
+  stdDescribe.skip(name, fn as () => void);
+};
+
+/**
  * Standard it function
  */
 export function it(name: string, fn: () => void | Promise<void>) {

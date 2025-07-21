@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach } from "@std/testing/bdd";
+import { describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { handler, lift } from "../src/builder/module.ts";
 import { str } from "../src/builder/built-in.ts";
@@ -24,7 +25,7 @@ const space = signer.did();
 // This doesn't run any actual tests, but ensures types are correct
 function expectType<T, _U extends T>() {}
 
-describe("Schema-to-TS Type Conversion", () => {
+describe("Schema-to-TS Type Conversion", (config) => {
   let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -37,6 +38,7 @@ describe("Schema-to-TS Type Conversion", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
     frame = pushFrame();

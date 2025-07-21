@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { type Cell, isCell, isStream } from "../src/cell.ts";
 import { LegacyDocCellLink } from "../src/sigil-types.ts";
@@ -17,7 +17,7 @@ import type {
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Schema Support", () => {
+describe("Schema Support", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -29,6 +29,7 @@ describe("Schema Support", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
 
     tx = runtime.edit();

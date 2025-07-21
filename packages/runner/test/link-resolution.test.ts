@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { followWriteRedirects } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -10,7 +10,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("link-resolution", () => {
+describe("link-resolution", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -22,6 +22,7 @@ describe("link-resolution", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -32,7 +33,7 @@ describe("link-resolution", () => {
     await storageManager?.close();
   });
 
-  describe("followWriteRedirects", () => {
+  describe("followWriteRedirects", (config) => {
     it("should follow a simple alias", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,

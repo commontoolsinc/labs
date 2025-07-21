@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach } from "@std/testing/bdd";
+import { describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -9,7 +10,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Transaction Shim Simple Tests", () => {
+describe("Transaction Shim Simple Tests", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -20,6 +21,7 @@ describe("Transaction Shim Simple Tests", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     shimStorageManager = new ShimStorageManager(runtime);
     tx = runtime.edit();

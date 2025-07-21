@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -15,7 +15,7 @@ import { ShimStorageManager } from "../src/storage/transaction-shim.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("StorageTransaction", () => {
+describe("StorageTransaction", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -24,6 +24,7 @@ describe("StorageTransaction", () => {
     runtime = new Runtime({
       storageManager,
       blobbyServerUrl: "http://localhost:8080",
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
   });
 
@@ -488,7 +489,7 @@ describe("StorageTransaction", () => {
   });
 });
 
-describe("DocImpl shim notifications", () => {
+describe("DocImpl shim notifications", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -498,6 +499,7 @@ describe("DocImpl shim notifications", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -773,7 +775,7 @@ describe("DocImpl shim notifications", () => {
   });
 });
 
-describe("Subscription Shim", () => {
+describe("Subscription Shim", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -784,6 +786,7 @@ describe("Subscription Shim", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     shimStorageManager = new ShimStorageManager(runtime);
     tx = runtime.edit();
@@ -883,7 +886,7 @@ describe("Subscription Shim", () => {
   });
 });
 
-describe("URI Utils", () => {
+describe("URI Utils", (config) => {
   describe("getJSONFromDataURI", () => {
     it("should parse URI-encoded JSON data URI", () => {
       const testData = { name: "John Doe", age: 30, city: "New York" };
@@ -973,7 +976,7 @@ describe("URI Utils", () => {
   });
 });
 
-describe("root value rewriting", () => {
+describe("root value rewriting", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 
@@ -982,6 +985,7 @@ describe("root value rewriting", () => {
     runtime = new Runtime({
       storageManager,
       blobbyServerUrl: "http://localhost:8080",
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
   });
 
@@ -1061,7 +1065,7 @@ describe("root value rewriting", () => {
   });
 });
 
-describe("data: URI behaviors", () => {
+describe("data: URI behaviors", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -1070,6 +1074,7 @@ describe("data: URI behaviors", () => {
     runtime = new Runtime({
       storageManager,
       blobbyServerUrl: "http://localhost:8080",
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
   });
 
