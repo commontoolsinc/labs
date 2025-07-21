@@ -15,19 +15,18 @@ import {
  * @returns Transformed value
  */
 export function traverseValue(
-  value: Opaque<any>,
+  unprocessedValue: Opaque<any>,
   fn: (value: any) => any,
   seen: Set<Opaque<any>> = new Set(),
 ): any {
-  if (seen.has(value)) return value;
-  seen.add(value);
-
   // Perform operation, replaces value if non-undefined is returned
-  const result = fn(value);
-  if (result !== undefined) {
-    value = result;
-    seen.add(value);
-  }
+  const result = fn(unprocessedValue);
+  const value = result !== undefined ? result : unprocessedValue;
+
+  // Prevent infinite recursion
+  if (seen.has(value) || seen.has(result)) return value;
+  if (isRecord(result)) seen.add(result);
+  else if (isRecord(unprocessedValue)) seen.add(unprocessedValue);
 
   // Traverse value
   if (Array.isArray(value)) {
