@@ -1322,7 +1322,7 @@ class ProviderConnection implements IStorageProvider {
   }
 
   sync(
-    entityId: EntityId,
+    entityId: EntityId | Entity,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ) {
@@ -1442,7 +1442,7 @@ export class Provider implements IStorageProvider {
   }
 
   sync(
-    entityId: EntityId,
+    entityId: EntityId | Entity,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ) {

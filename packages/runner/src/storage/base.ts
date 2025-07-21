@@ -80,7 +80,15 @@ export abstract class BaseStorageProvider implements IStorageProvider {
 
   abstract getReplica(): string | undefined;
 
-  static toEntity(source: EntityId): Entity {
+  static toEntity(source: EntityId | string): Entity {
+    if (typeof source === "string") {
+      if (!source.includes(":")) {
+        throw new TypeError(
+          `💣 Got entity ID that is a string, but not a URI: ${source}`,
+        );
+      }
+      return source as Entity;
+    }
     if (typeof source["/"] === "string") {
       return `of:${source["/"]}`;
     } else if (source.toJSON) {

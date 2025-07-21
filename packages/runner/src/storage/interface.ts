@@ -132,7 +132,7 @@ export interface IStorageProvider {
    * @returns Promise that resolves when the value is synced.
    */
   sync(
-    entityId: EntityId,
+    entityId: EntityId | URI,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ): Promise<Result<Unit, Error>>;
