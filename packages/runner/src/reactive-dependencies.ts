@@ -92,7 +92,7 @@ export function determineTriggeredActions(
   dependencies: Map<Action, SortedAndCompactPaths>,
   before: JSONValue | undefined,
   after: JSONValue | undefined,
-  startPath: MemoryAddressPathComponent[] = [],
+  startPath: readonly MemoryAddressPathComponent[] = [],
 ): Action[] {
   const triggeredActions: Action[] = [];
 

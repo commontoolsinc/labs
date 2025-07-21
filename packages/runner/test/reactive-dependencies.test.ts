@@ -932,6 +932,435 @@ describe("determineTriggeredActions", () => {
     });
   });
 
+  describe("literal values", () => {
+    it("triggers when number value changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["count"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { count: 42 },
+        { count: 43 },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when number value stays the same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["count"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { count: 42 },
+        { count: 42 },
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("triggers when string value changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["message"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { message: "hello" },
+        { message: "world" },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when string value stays the same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["message"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { message: "hello" },
+        { message: "hello" },
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles root-level number values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        43,
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when root-level number stays same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        42,
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles root-level string values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        "before",
+        "after",
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when root-level string stays same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        "hello",
+        "hello",
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles root-level boolean values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        true,
+        false,
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles root-level null values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        null,
+        "value",
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles changing from literal to object", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        { value: 42 },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles changing from object to literal", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { value: 42 },
+        42,
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("ignores path dependencies when data is literal", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["field"]]],
+      ]);
+
+      // Since data is literal, path ["field"] doesn't exist
+      const result = determineTriggeredActions(
+        dependencies,
+        42,
+        43,
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("handles mixed literal types at nested paths", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const action3 = createAction("action3");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["user", "age"]]],
+        [action2, [["user", "name"]]],
+        [action3, [["user", "active"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { user: { age: 25, name: "Alice", active: true } },
+        { user: { age: 26, name: "Alice", active: false } },
+      );
+      expect(result).toContain(action1); // age changed
+      expect(result).not.toContain(action2); // name stayed same
+      expect(result).toContain(action3); // active changed
+    });
+  });
+
+  describe("array values", () => {
+    it("triggers when array changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["numbers"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { numbers: [1, 2, 3] },
+        { numbers: [1, 2, 3, 4] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when array stays the same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["numbers"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { numbers: [1, 2, 3] },
+        { numbers: [1, 2, 3] },
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("triggers when array element order changes", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["items"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { items: ["a", "b", "c"] },
+        { items: ["c", "b", "a"] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles root-level array values", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        [1, 2, 3],
+        [1, 2, 3, 4],
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("does not trigger when root-level array stays same", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        [1, 2, 3],
+        [1, 2, 3],
+      );
+      expect(result).toEqual([]);
+    });
+
+    it("triggers on root-level array element change", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        ["a", "b", "c"],
+        ["a", "x", "c"],
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles specific index dependency on root-level array", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["1"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        ["a", "b", "c"],
+        ["a", "x", "c"],
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles changing from array to non-array", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [[]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        [1, 2, 3],
+        "not an array",
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles empty arrays", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["items"]]],
+      ]);
+
+      const result1 = determineTriggeredActions(
+        dependencies,
+        { items: [] },
+        { items: [1] },
+      );
+      expect(result1).toEqual([action1]);
+
+      const result2 = determineTriggeredActions(
+        dependencies,
+        { items: [1] },
+        { items: [] },
+      );
+      expect(result2).toEqual([action1]);
+
+      const result3 = determineTriggeredActions(
+        dependencies,
+        { items: [] },
+        { items: [] },
+      );
+      expect(result3).toEqual([]);
+    });
+
+    it("handles arrays of mixed types", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["mixed"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { mixed: [1, "two", true, null] },
+        { mixed: [1, "two", false, null] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles arrays of objects", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["users"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { users: [{ id: 1, name: "Alice" }, { id: 2, name: "Bob" }] },
+        { users: [{ id: 1, name: "Alice" }, { id: 2, name: "Charlie" }] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles nested arrays", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["matrix"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { matrix: [[1, 2], [3, 4]] },
+        { matrix: [[1, 2], [3, 5]] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("triggers on specific array index with literal value", () => {
+      const action1 = createAction("action1");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["scores", "2"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { scores: [10, 20, 30, 40] },
+        { scores: [10, 20, 35, 40] },
+      );
+      expect(result).toEqual([action1]);
+    });
+
+    it("handles arrays at multiple levels", () => {
+      const action1 = createAction("action1");
+      const action2 = createAction("action2");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action1, [["data", "items"]]],
+        [action2, [["data", "tags"]]],
+      ]);
+
+      const result = determineTriggeredActions(
+        dependencies,
+        { 
+          data: { 
+            items: [1, 2, 3], 
+            tags: ["red", "blue"] 
+          } 
+        },
+        { 
+          data: { 
+            items: [1, 2, 3], 
+            tags: ["red", "green"] 
+          } 
+        },
+      );
+      expect(result).toEqual([action2]); // only tags changed
+    });
+  });
+
   describe("performance and stress tests", () => {
     it("handles many dependencies efficiently", () => {
       const actions: Action[] = [];
