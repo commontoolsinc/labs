@@ -1,10 +1,13 @@
-import { Identity } from "@commontools/identity";
+import { Identity, KeyStore } from "@commontools/identity";
 import { XRootView } from "../../views/RootView.ts";
-import { Command } from "../commands.ts";
+import { Command } from "./commands.ts";
 import { AppState, AppUpdateEvent } from "./mod.ts";
 
+// Key store key name for user's key
+export const ROOT_KEY = "$ROOT_KEY";
+
 // Interact with application state outside of the application.
-export class AppController extends EventTarget {
+export class App extends EventTarget {
   #element: XRootView;
   identity: any;
   spaceName: any;
@@ -38,5 +41,15 @@ export class AppController extends EventTarget {
 
   apply(command: Command): Promise<void> {
     return this.#element.apply(command);
+  }
+
+  async initializeKeys(): Promise<void> {
+    const ks = await KeyStore.open();
+    this.#element.keyStore = ks;
+    this.#element.requestUpdate("keyStore", undefined);
+    const root = await ks.get(ROOT_KEY);
+    if (root) {
+      await app.setIdentity(root);
+    }
   }
 }

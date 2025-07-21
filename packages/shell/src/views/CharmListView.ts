@@ -1,13 +1,18 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { BaseView } from "../views/BaseView.ts";
-import { CharmController } from "@commontools/charm/ops";
+import { BaseView } from "./BaseView.ts";
 import { getNavigationHref } from "../lib/navigate.ts";
+import { RuntimeInternals } from "../lib/runtime.ts";
+import { CharmController } from "@commontools/charm/ops";
 
-export class XCharmListElement extends BaseView {
+export class XCharmListView extends BaseView {
   static override styles = css`
     :host {
       display: block;
+    }
+
+    a, a:visited {
+      color: var(--primary-font, "#000");
     }
   `;
 
@@ -40,4 +45,4 @@ export class XCharmListElement extends BaseView {
   }
 }
 
-globalThis.customElements.define("x-charm-list", XCharmListElement);
+globalThis.customElements.define("x-charm-list-view", XCharmListView);

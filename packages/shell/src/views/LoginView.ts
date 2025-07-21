@@ -1,8 +1,7 @@
 import { css, html } from "lit";
-import { property, state } from "lit/decorators.js";
+import { state } from "lit/decorators.js";
 
 import { Identity, KeyStore, PassKey } from "@commontools/identity";
-import { ROOT_KEY } from "../lib/app/state.ts";
 
 import { BaseView } from "./BaseView.ts";
 import {
@@ -17,6 +16,7 @@ import {
   saveCredential,
   type StoredCredential,
 } from "../lib/credentials.ts";
+import { ROOT_KEY } from "../lib/app/controller.ts";
 
 type AuthFlow = "register" | "login";
 
@@ -191,6 +191,8 @@ export class XLoginView extends BaseView {
   private storedCredential: StoredCredential | null = getStoredCredential();
   @state()
   private copied = false;
+  @state()
+  private keyStore?: KeyStore;
 
   private availableMethods: AuthMethod[] = [];
 
@@ -198,7 +200,6 @@ export class XLoginView extends BaseView {
     super.connectedCallback();
     this.checkAvailableMethods();
     this.addEventListener(AUTH_EVENT, this.onAuthEvent as EventListener);
-    this.checkExistingAuth();
   }
 
   override disconnectedCallback() {
@@ -228,35 +229,11 @@ export class XLoginView extends BaseView {
     }
   }
 
-  private async getKeyStore(): Promise<KeyStore | null> {
-    try {
-      return await KeyStore.open();
-    } catch (error) {
-      console.error("[LoginView] Failed to open KeyStore:", error);
-      return null;
+  private getKeyStore(): KeyStore {
+    if (this.keyStore) {
+      return this.keyStore; 
     }
-  }
-
-  private async checkExistingAuth() {
-    console.log("[LoginView] Checking for existing authentication");
-    try {
-      const keyStore = await this.getKeyStore();
-      if (!keyStore) return;
-
-      const root = await keyStore.get(ROOT_KEY);
-      if (root) {
-        console.log("[LoginView] Found existing root key:", {
-          did: root.did(),
-          timestamp: new Date().toISOString(),
-        });
-        // Send identity to root
-        this.command({ type: "set-identity", identity: root });
-      } else {
-        console.log("[LoginView] No existing root key found");
-      }
-    } catch (error) {
-      console.error("[LoginView] Failed to check existing auth:", error);
-    }
+    throw new Error("Keystore not set.");
   }
 
   private dispatchAuthEvent(type: AuthEventType, data?: any) {
@@ -314,7 +291,7 @@ export class XLoginView extends BaseView {
       const identity = await passkey.createRootKey();
 
       // Save identity to keyStore
-      const keyStore = await this.getKeyStore();
+      const keyStore = this.getKeyStore();
       if (keyStore) {
         await keyStore.set(ROOT_KEY, identity);
       }
@@ -347,7 +324,7 @@ export class XLoginView extends BaseView {
       const identity = await passkey.createRootKey();
 
       // Save identity to keyStore
-      const keyStore = await this.getKeyStore();
+      const keyStore = this.getKeyStore();
       if (keyStore) {
         await keyStore.set(ROOT_KEY, identity);
       }
@@ -394,7 +371,7 @@ export class XLoginView extends BaseView {
       const identity = await Identity.fromMnemonic(mnemonic);
 
       // Save identity to keyStore
-      const keyStore = await this.getKeyStore();
+      const keyStore = this.getKeyStore();
       if (keyStore) {
         await keyStore.set(ROOT_KEY, identity);
       }
@@ -419,32 +396,6 @@ export class XLoginView extends BaseView {
   private handleClearStoredCredential() {
     clearStoredCredential();
     this.storedCredential = null;
-  }
-
-  private async handleAuth<T>(
-    action: () => Promise<T>,
-  ): Promise<T | undefined> {
-    console.log("[LoginView] Starting auth process:", {
-      flow: this.flow,
-      method: this.method,
-      timestamp: new Date().toISOString(),
-    });
-
-    try {
-      this.error = null;
-      this.isProcessing = true;
-      const result = await action();
-      console.log("[LoginView] Auth action completed successfully");
-      return result;
-    } catch (e) {
-      console.error("[LoginView] Auth error:", e);
-      this.error = e instanceof Error ? e.message : "Authentication failed";
-      this.flow = null;
-      this.method = null;
-      return undefined;
-    } finally {
-      this.isProcessing = false;
-    }
   }
 
   private handleRegister() {

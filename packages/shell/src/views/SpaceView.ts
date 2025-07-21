@@ -1,16 +1,16 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
-import { BaseView } from "../views/BaseView.ts";
-import { CharmsController } from "@commontools/charm/ops";
+import { BaseView } from "./BaseView.ts";
 import { Task } from "@lit/task";
 import * as DefaultRecipe from "../lib/default-recipe.ts";
+import { RuntimeInternals } from "../lib/runtime.ts";
 
-export class XSpaceElement extends BaseView {
+export class XSpaceView extends BaseView {
   static override styles = css`
   `;
 
   @property({ attribute: false })
-  cc?: CharmsController;
+  rt?: RuntimeInternals;
 
   @state()
   showCharmList = false;
@@ -19,15 +19,15 @@ export class XSpaceElement extends BaseView {
   creatingDefaultRecipe = false;
 
   private _charms = new Task(this, {
-    task: async ([cc]) => {
-      if (!cc) return undefined;
+    task: async ([rt]) => {
+      if (!rt) return undefined;
 
       // Ensure charms are synced before checking
-      const manager = cc.manager();
+      const manager = rt.cc().manager();
       await manager.synced();
-      return await cc.getAllCharms();
+      return rt.cc().getAllCharms();
     },
-    args: () => [this.cc],
+    args: () => [this.rt],
   });
 
   async onRequestDefaultRecipe(e: Event) {
@@ -35,14 +35,14 @@ export class XSpaceElement extends BaseView {
     if (this.creatingDefaultRecipe) {
       return;
     }
-    if (!this.cc) {
+    if (!this.rt) {
       throw new Error(
-        "Cannot create default recipe without a charms controller.",
+        "Cannot create default recipe without a runtime.",
       );
     }
     this.creatingDefaultRecipe = true;
     try {
-      await DefaultRecipe.create(this.cc);
+      await DefaultRecipe.create(this.rt.cc());
     } catch (e) {
       console.error(`Could not create default recipe: ${e}`);
     } finally {
@@ -57,7 +57,9 @@ export class XSpaceElement extends BaseView {
   }
 
   override render() {
-    const spaceName = this.cc ? this.cc.manager().getSpaceName() : undefined;
+    const spaceName = this.rt
+      ? this.rt.cc().manager().getSpaceName()
+      : undefined;
     const charms = this._charms.value;
     const defaultRecipe = charms
       ? DefaultRecipe.getDefaultRecipe(charms)
@@ -69,7 +71,10 @@ export class XSpaceElement extends BaseView {
       `
       : this.showCharmList
       ? html`
-        <x-charm-list .charms="${charms}" .spaceName="${spaceName}"></x-charm-list>
+        <x-charm-list-view
+          .charms="${charms}"
+          .spaceName="${spaceName}"
+        ></x-charm-list-view>
       `
       : !defaultRecipe
       ? (this.creatingDefaultRecipe
@@ -88,7 +93,8 @@ export class XSpaceElement extends BaseView {
         `)
       // TBD if we want to use x-charm or ct-render directly here
       : html`
-        <x-charm .charmId="${defaultRecipe.id}" .cc="${this.cc}"></x-charm>
+        <x-charm-view .charmId="${defaultRecipe.id}" .rt="${this
+          .rt}"></x-charm-view>
       `;
 
     return html`
@@ -102,4 +108,4 @@ export class XSpaceElement extends BaseView {
   }
 }
 
-globalThis.customElements.define("x-space", XSpaceElement);
+globalThis.customElements.define("x-space-view", XSpaceView);

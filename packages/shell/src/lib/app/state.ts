@@ -1,5 +1,5 @@
 import { Identity } from "@commontools/identity";
-import { Command } from "../commands.ts";
+import { Command } from "./commands.ts";
 
 // Primary application state.
 export interface AppState {
@@ -12,9 +12,6 @@ export interface AppState {
 export function clone(state: AppState): AppState {
   return Object.assign({}, state);
 }
-
-// Key store key name for user's key
-export const ROOT_KEY = "$ROOT_KEY";
 
 export function applyCommand(
   state: AppState,
