@@ -22,7 +22,6 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageSubscription,
-  IStorageSubscriptionCapability,
   Metadata,
 } from "./storage/interface.ts";
 
@@ -51,7 +50,7 @@ export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
 
-type SpaceAndURI = `${MemorySpace}:${URI}`;
+export type SpaceAndURI = `${MemorySpace}/${URI}`;
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
@@ -117,7 +116,9 @@ export class Scheduler implements IScheduler {
 
   schedule(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
-    reads.forEach((addr) => this.dirty.add(`${addr.space}:${addr.id}`));
+    reads.forEach((addr) =>
+      this.dirty.add(`${addr.space}/${addr.id}/${addr.type}`)
+    );
 
     this.queueExecution();
     this.pending.add(action);
@@ -146,7 +147,7 @@ export class Scheduler implements IScheduler {
         return doc.updates(
           (_newValue: any, changedPath: readonly PropertyKey[]) => {
             if (pathAffected(changedPath, addr.path)) {
-              this.dirty.add(`${addr.space}:${addr.id}`);
+              this.dirty.add(`${addr.space}/${addr.id}/${addr.type}`);
               this.queueExecution();
               this.pending.add(action);
             }
@@ -368,7 +369,9 @@ function topologicalSort(
       // Actions with no dependencies are always relevant. Note that they must
       // be manually added to `pending`, which happens only once on `schedule`.
       relevantActions.add(action);
-    } else if (reads.some((addr) => dirty.has(`${addr.space}:${addr.id}`))) {
+    } else if (
+      reads.some((addr) => dirty.has(`${addr.space}/${addr.id}/${addr.type}`))
+    ) {
       relevantActions.add(action);
     }
   }

@@ -140,7 +140,7 @@ export function createQueryResultProxy<T>(
               createQueryResultProxy(
                 runtime,
                 tx,
-                { ...link, path: [...link.path, index] },
+                { ...link, path: [...link.path, String(index)] },
                 depth + 1,
               )
             );
@@ -160,7 +160,7 @@ export function createQueryResultProxy<T>(
                   runtime,
                   tx,
                   index,
-                  { ...link, path: [...link.path, index] },
+                  { ...link, path: [...link.path, String(index)] },
                 )
               );
             }

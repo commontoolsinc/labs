@@ -741,7 +741,7 @@ export interface IMemorySpaceAddress extends IMemoryAddress {
   space: MemorySpace;
 }
 
-export type MemoryAddressPathComponent = string | number;
+export type MemoryAddressPathComponent = string;
 
 export interface Assert {
   the: MediaType;

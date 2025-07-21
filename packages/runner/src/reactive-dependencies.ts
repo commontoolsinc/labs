@@ -1,12 +1,16 @@
 import { isRecord } from "@commontools/utils/types";
 import { arrayEqual, deepEqual } from "./path-utils.ts";
 import type { JSONValue } from "./builder/types.ts";
-import type { Action } from "./scheduler.ts";
+import type { Action, SpaceAndURI } from "./scheduler.ts";
+import type {
+  IMemorySpaceAddress,
+  MemoryAddressPathComponent,
+} from "./storage/interface.ts";
 
-export type TriggerPaths = string[][];
-export type SortedAndCompactPaths = string[][];
+export type TriggerPaths = MemoryAddressPathComponent[][];
+export type SortedAndCompactPaths = MemoryAddressPathComponent[][];
 
-type Keyable = Record<string, JSONValue | undefined>;
+type Keyable = Record<MemoryAddressPathComponent, JSONValue | undefined>;
 
 /**
  * Sorts and compactifies the paths.
@@ -17,20 +21,58 @@ type Keyable = Record<string, JSONValue | undefined>;
  * @returns The sorted and compactified paths.
  */
 export function sortAndCompactPaths(
-  paths: TriggerPaths,
-): SortedAndCompactPaths {
-  if (paths.length === 0) return [];
+  unsorted: IMemorySpaceAddress[],
+): IMemorySpaceAddress[] {
+  if (unsorted.length === 0) return [];
 
-  const sorted = paths.toSorted((a, b) => comparePaths(a, b));
-  const result = [sorted[0]];
+  const sorted = unsorted.toSorted((a, b) =>
+    a.space === b.space
+      ? a.id === b.id
+        ? a.type === b.type
+          ? comparePaths(a.path, b.path)
+          : a.type < b.type
+          ? -1
+          : 1
+        : a.id < b.id
+        ? -1
+        : 1
+      : a.space < b.space
+      ? -1
+      : 1
+  );
+  const result: IMemorySpaceAddress[] = [sorted[0]];
   let previous = sorted[0];
   for (let i = 1; i < sorted.length; i++) {
-    if (!startsWith(sorted[i], previous)) {
+    if (
+      sorted[i].space !== previous.space ||
+      sorted[i].id !== previous.id ||
+      sorted[i].type !== previous.type ||
+      !startsWith(sorted[i].path, previous.path)
+    ) {
       result.push(sorted[i]);
       previous = sorted[i];
     }
   }
   return result;
+}
+
+/**
+ * Converts a list of paths to a map of space/id to paths.
+ *
+ * @param paths - The paths to convert.
+ * @returns A map of space/id to paths.
+ */
+export function pathsToMapByEntity(
+  paths: IMemorySpaceAddress[],
+): Map<SpaceAndURI, IMemorySpaceAddress[]> {
+  const map = new Map<SpaceAndURI, IMemorySpaceAddress[]>();
+  for (const path of paths) {
+    if (path.type !== "application/json") continue;
+    const key: SpaceAndURI = `${path.space}/${path.id}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(path);
+  }
+  return map;
 }
 
 /**
@@ -49,7 +91,7 @@ export function determineTriggeredActions(
   dependencies: Map<Action, SortedAndCompactPaths>,
   before: JSONValue | undefined,
   after: JSONValue | undefined,
-  startPath: string[] = [],
+  startPath: MemoryAddressPathComponent[] = [],
 ): Action[] {
   const triggeredActions: Action[] = [];
 
@@ -153,11 +195,17 @@ export function determineTriggeredActions(
   return triggeredActions;
 }
 
-function startsWith(path: string[], prefix: string[]): boolean {
+function startsWith(
+  path: readonly MemoryAddressPathComponent[],
+  prefix: readonly MemoryAddressPathComponent[],
+): boolean {
   return prefix.every((value, index) => value === path[index]);
 }
 
-function commonPrefixLength(a: string[], b: string[]): number {
+function commonPrefixLength(
+  a: readonly MemoryAddressPathComponent[],
+  b: readonly MemoryAddressPathComponent[],
+): number {
   for (let i = 0; i < a.length && i < b.length; i++) {
     if (a[i] !== b[i]) {
       return i;
@@ -166,7 +214,10 @@ function commonPrefixLength(a: string[], b: string[]): number {
   return Math.min(a.length, b.length);
 }
 
-function comparePaths(a: string[], b: string[]): number {
+function comparePaths(
+  a: readonly MemoryAddressPathComponent[],
+  b: readonly MemoryAddressPathComponent[],
+): number {
   for (let i = 0; i < a.length && i < b.length; i++) {
     if (a[i] !== b[i]) {
       return a[i] < b[i] ? -1 : 1;

@@ -2,12 +2,39 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   determineTriggeredActions,
+  pathsToMapByEntity,
   sortAndCompactPaths,
   type SortedAndCompactPaths,
   type TriggerPaths,
 } from "../src/reactive-dependencies.ts";
-import type { Action } from "../src/scheduler.ts";
+import type { Action, SpaceAndURI } from "../src/scheduler.ts";
 import type { JSONValue } from "../src/builder/types.ts";
+import type {
+  IMemorySpaceAddress,
+  MemoryAddressPathComponent,
+} from "../src/storage/interface.ts";
+import type { MemorySpace } from "@commontools/memory/interface";
+
+// Helper function to create IMemorySpaceAddress for testing
+const createAddress = (
+  path: MemoryAddressPathComponent[],
+  space: MemorySpace = "did:test:space",
+  id: string = "https://example.com/entity",
+  type: string = "application/json",
+): IMemorySpaceAddress => ({
+  space,
+  id: id as `${string}:${string}`,  // URI type alias
+  type: type as `${string}/${string}`,  // MediaType type alias
+  path,
+});
+
+// Helper to create multiple addresses with the same space/id/type but different paths
+const createAddresses = (
+  paths: MemoryAddressPathComponent[][],
+  space: MemorySpace = "did:test:space",
+  id: string = "https://example.com/entity",
+  type: string = "application/json",
+): IMemorySpaceAddress[] => paths.map(path => createAddress(path, space, id, type));
 
 describe("sortAndCompactPaths", () => {
   it("returns empty array for empty input", () => {
@@ -16,84 +43,235 @@ describe("sortAndCompactPaths", () => {
   });
 
   it("returns single path unchanged", () => {
-    const paths: TriggerPaths = [["a", "b", "c"]];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([["a", "b", "c"]]);
+    const addresses = createAddresses([["a", "b", "c"]]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(addresses);
   });
 
   it("sorts paths lexicographically", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["b", "c"],
       ["a", "z"],
       ["a", "b"],
-      ["c"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
-      ["a", "b"],
-      ["a", "z"],
-      ["b", "c"],
       ["c"],
     ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
+      ["a", "b"],
+      ["a", "z"],
+      ["b", "c"],
+      ["c"],
+    ]));
   });
 
   it("removes paths that are prefixes of other paths", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["a", "b", "c", "d"],
       ["a", "b"],
       ["a", "b", "c"],
       ["x", "y"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
+    ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
       ["a", "b"],
       ["x", "y"],
-    ]);
+    ]));
   });
 
   it("handles complex compactification", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["users", "123", "name"],
       ["users", "123"],
       ["users", "456", "email"],
       ["users", "456"],
       ["posts", "abc", "title"],
       ["posts"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
+    ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
       ["posts"],
       ["users", "123"],
       ["users", "456"],
-    ]);
+    ]));
   });
 
   it("preserves paths with common prefixes but different suffixes", () => {
-    const paths: TriggerPaths = [
-      ["a", "b", "c"],
-      ["a", "b", "d"],
-      ["a", "e"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
+    const addresses = createAddresses([
       ["a", "b", "c"],
       ["a", "b", "d"],
       ["a", "e"],
     ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
+      ["a", "b", "c"],
+      ["a", "b", "d"],
+      ["a", "e"],
+    ]));
   });
 
   it("handles paths with numeric strings correctly", () => {
-    const paths: TriggerPaths = [
+    const addresses = createAddresses([
       ["2", "b"],
       ["10", "a"],
       ["1", "c"],
-    ];
-    const result = sortAndCompactPaths(paths);
-    expect(result).toEqual([
-      ["1", "c"],
-      ["10", "a"],
-      ["2", "b"],
     ]);
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual(createAddresses([
+      ["1", "c"],
+      ["10", "a"],
+      ["2", "b"],
+    ]));
+  });
+
+  it("sorts by space, id, type, then path", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(["a"], "did:test:space2", "test://entity", "application/json"),
+      createAddress(["b"], "did:test:space1", "test://entity", "application/json"),
+      createAddress(["c"], "did:test:space1", "test://entity2", "application/json"),
+      createAddress(["d"], "did:test:space1", "test://entity1", "application/json"),
+      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
+      createAddress(["f"], "did:test:space1", "test://entity1", "application/json"),
+    ];
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual([
+      createAddress(["b"], "did:test:space1", "test://entity", "application/json"),
+      createAddress(["d"], "did:test:space1", "test://entity1", "application/json"),
+      createAddress(["f"], "did:test:space1", "test://entity1", "application/json"),
+      createAddress(["e"], "did:test:space1", "test://entity1", "text/plain"),
+      createAddress(["c"], "did:test:space1", "test://entity2", "application/json"),
+      createAddress(["a"], "did:test:space2", "test://entity", "application/json"),
+    ]);
+  });
+
+  it("only compacts paths within same space/id/type", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(["user"], "did:test:space1", "test://entity", "application/json"),
+      createAddress(["user", "name"], "did:test:space1", "test://entity", "application/json"),
+      createAddress(["user"], "did:test:space2", "test://entity", "application/json"),
+      createAddress(["user", "name"], "did:test:space2", "test://entity", "application/json"),
+    ];
+    const result = sortAndCompactPaths(addresses);
+    expect(result).toEqual([
+      createAddress(["user"], "did:test:space1", "test://entity", "application/json"),
+      createAddress(["user"], "did:test:space2", "test://entity", "application/json"),
+    ]);
+  });
+});
+
+describe("pathsToMapByEntity", () => {
+  it("returns empty map for empty input", () => {
+    const result = pathsToMapByEntity([]);
+    expect(result.size).toBe(0);
+  });
+
+  it("groups paths by space and id", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(["a"], "did:test:space1", "https://example.com/entity1", "application/json"),
+      createAddress(["b"], "did:test:space1", "https://example.com/entity1", "application/json"),
+      createAddress(["c"], "did:test:space1", "https://example.com/entity2", "application/json"),
+      createAddress(["d"], "did:test:space2", "https://example.com/entity1", "application/json"),
+    ];
+    
+    const result = pathsToMapByEntity(addresses);
+    
+    expect(result.size).toBe(3);
+    expect(result.has("did:test:space1/https://example.com/entity1" as SpaceAndURI)).toBe(true);
+    expect(result.has("did:test:space1/https://example.com/entity2" as SpaceAndURI)).toBe(true);
+    expect(result.has("did:test:space2/https://example.com/entity1" as SpaceAndURI)).toBe(true);
+    
+    const space1Entity1 = result.get("did:test:space1/https://example.com/entity1" as SpaceAndURI)!;
+    expect(space1Entity1).toHaveLength(2);
+    expect(space1Entity1[0].path).toEqual(["a"]);
+    expect(space1Entity1[1].path).toEqual(["b"]);
+    
+    const space1Entity2 = result.get("did:test:space1/https://example.com/entity2" as SpaceAndURI)!;
+    expect(space1Entity2).toHaveLength(1);
+    expect(space1Entity2[0].path).toEqual(["c"]);
+    
+    const space2Entity1 = result.get("did:test:space2/https://example.com/entity1" as SpaceAndURI)!;
+    expect(space2Entity1).toHaveLength(1);
+    expect(space2Entity1[0].path).toEqual(["d"]);
+  });
+
+  it("filters out non-JSON types", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(["a"], "did:test:space1", "https://example.com/entity1", "application/json"),
+      createAddress(["b"], "did:test:space1", "https://example.com/entity1", "text/plain"),
+      createAddress(["c"], "did:test:space1", "https://example.com/entity1", "application/xml"),
+      createAddress(["d"], "did:test:space1", "https://example.com/entity2", "application/json"),
+    ];
+    
+    const result = pathsToMapByEntity(addresses);
+    
+    expect(result.size).toBe(2);
+    
+    const space1Entity1 = result.get("did:test:space1/https://example.com/entity1" as SpaceAndURI)!;
+    expect(space1Entity1).toHaveLength(1);
+    expect(space1Entity1[0].path).toEqual(["a"]);
+    expect(space1Entity1[0].type).toBe("application/json");
+    
+    const space1Entity2 = result.get("did:test:space1/https://example.com/entity2" as SpaceAndURI)!;
+    expect(space1Entity2).toHaveLength(1);
+    expect(space1Entity2[0].path).toEqual(["d"]);
+  });
+
+  it("preserves order of paths within each entity", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      createAddress(["z"], "did:test:space1", "https://example.com/entity1", "application/json"),
+      createAddress(["a"], "did:test:space1", "https://example.com/entity1", "application/json"),
+      createAddress(["m"], "did:test:space1", "https://example.com/entity1", "application/json"),
+    ];
+    
+    const result = pathsToMapByEntity(addresses);
+    
+    const paths = result.get("did:test:space1/https://example.com/entity1" as SpaceAndURI)!;
+    expect(paths).toHaveLength(3);
+    expect(paths[0].path).toEqual(["z"]);
+    expect(paths[1].path).toEqual(["a"]);
+    expect(paths[2].path).toEqual(["m"]);
+  });
+
+  it("handles complex scenario with multiple spaces and entities", () => {
+    const addresses: IMemorySpaceAddress[] = [
+      // Space 1, Entity 1
+      createAddress(["users", "123"], "did:test:space1", "https://api.example.com/data", "application/json"),
+      createAddress(["users", "456"], "did:test:space1", "https://api.example.com/data", "application/json"),
+      createAddress(["posts"], "did:test:space1", "https://api.example.com/data", "application/json"),
+      
+      // Space 1, Entity 2  
+      createAddress(["config"], "did:test:space1", "https://api.example.com/settings", "application/json"),
+      createAddress(["theme"], "did:test:space1", "https://api.example.com/settings", "text/plain"), // Filtered out
+      
+      // Space 2, Entity 1 (same URI as space1 but different space)
+      createAddress(["users", "789"], "did:test:space2", "https://api.example.com/data", "application/json"),
+      
+      // Space 2, Entity 3
+      createAddress(["analytics"], "did:test:space2", "https://api.example.com/metrics", "application/json"),
+    ];
+    
+    const result = pathsToMapByEntity(addresses);
+    
+    expect(result.size).toBe(4);
+    
+    // Check Space 1, Entity 1
+    const s1e1 = result.get("did:test:space1/https://api.example.com/data" as SpaceAndURI)!;
+    expect(s1e1).toHaveLength(3);
+    expect(s1e1.map(a => a.path)).toEqual([["users", "123"], ["users", "456"], ["posts"]]);
+    
+    // Check Space 1, Entity 2
+    const s1e2 = result.get("did:test:space1/https://api.example.com/settings" as SpaceAndURI)!;
+    expect(s1e2).toHaveLength(1);
+    expect(s1e2[0].path).toEqual(["config"]);
+    
+    // Check Space 2, Entity 1
+    const s2e1 = result.get("did:test:space2/https://api.example.com/data" as SpaceAndURI)!;
+    expect(s2e1).toHaveLength(1);
+    expect(s2e1[0].path).toEqual(["users", "789"]);
+    
+    // Check Space 2, Entity 3
+    const s2e3 = result.get("did:test:space2/https://api.example.com/metrics" as SpaceAndURI)!;
+    expect(s2e3).toHaveLength(1);
+    expect(s2e3[0].path).toEqual(["analytics"]);
   });
 });
 
@@ -782,18 +960,18 @@ describe("determineTriggeredActions", () => {
 
 // Benchmarks
 Deno.bench("sortAndCompactPaths - small dataset", () => {
-  const paths: TriggerPaths = [
+  const addresses = createAddresses([
     ["user", "name"],
     ["user"],
     ["posts", "0", "title"],
     ["posts"],
     ["settings", "theme"],
-  ];
-  sortAndCompactPaths(paths);
+  ]);
+  sortAndCompactPaths(addresses);
 });
 
 Deno.bench("sortAndCompactPaths - large dataset", () => {
-  const paths: TriggerPaths = [];
+  const paths: MemoryAddressPathComponent[][] = [];
   for (let i = 0; i < 1000; i++) {
     paths.push([`field${i}`]);
     if (i % 10 === 0) {
@@ -801,17 +979,37 @@ Deno.bench("sortAndCompactPaths - large dataset", () => {
       paths.push([`field${i}`, "nested", "deep"]);
     }
   }
-  sortAndCompactPaths(paths);
+  const addresses = createAddresses(paths);
+  sortAndCompactPaths(addresses);
 });
 
 Deno.bench("sortAndCompactPaths - deeply nested paths", () => {
-  const paths: TriggerPaths = [];
+  const paths: MemoryAddressPathComponent[][] = [];
   for (let i = 0; i < 100; i++) {
     const depth = Math.floor(Math.random() * 10) + 1;
     const path = Array.from({ length: depth }, (_, j) => `level${j}`);
     paths.push(path);
   }
-  sortAndCompactPaths(paths);
+  const addresses = createAddresses(paths);
+  sortAndCompactPaths(addresses);
+});
+
+Deno.bench("sortAndCompactPaths - multiple spaces/ids/types", () => {
+  const addresses: IMemorySpaceAddress[] = [];
+  const spaces = ["did:test:space1", "did:test:space2", "did:test:space3"] as MemorySpace[];
+  const ids = ["test://entity1", "test://entity2", "test://entity3"];
+  const types = ["application/json", "text/plain", "application/xml"];
+  
+  for (let i = 0; i < 100; i++) {
+    const space = spaces[i % 3];
+    const id = ids[Math.floor(i / 3) % 3];
+    const type = types[Math.floor(i / 9) % 3];
+    addresses.push(createAddress([`field${i}`], space, id, type));
+    if (i % 5 === 0) {
+      addresses.push(createAddress([`field${i}`, "nested"], space, id, type));
+    }
+  }
+  sortAndCompactPaths(addresses);
 });
 
 Deno.bench("determineTriggeredActions - simple change", () => {
