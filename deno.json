@@ -83,7 +83,8 @@
     "exclude": [
       "packages/jumble/integration/cache/llm-api-cache/",
       "packages/seeder/templates/",
-      "packages/static/assets/"
+      "packages/static/assets/",
+      "packages/js-runtime/test/fixtures"
     ]
   },
   "imports": {

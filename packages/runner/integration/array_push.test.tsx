@@ -41,6 +41,7 @@ export default recipe(
         console.log("Pushing value:", value);
         array.push(value);
       },
+      { proxy: true },
     );
 
     // Return the recipe
