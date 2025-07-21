@@ -16,6 +16,11 @@ The instructions in this document apply to the entire repository.
 
 Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
 
+### CommonTools Development
+
+- **[Handler Patterns Guide](.claude/commands/handlers-guide.md)** - Comprehensive guide to handler usage, TypeScript patterns, and common pitfalls
+- **[CT Binary Usage](.claude/commands/common/ct.md)** - CT command reference and setup
+
 ### Formatting
 
 - Line width is **80 characters**.
@@ -37,8 +42,8 @@ Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
 - Prefer named exports over default exports.
 - Use package names for internal imports.
 - Destructure when importing multiple names from the same module.
-- Import either from `@commontools/builder` (internal API) or
-  `@commontools/builder/interface` (external API), but not both.
+- Import either from `@commontools/api` (internal API) or
+  `@commontools/api/interface` (external API), but not both.
 
 ### Error Handling
 

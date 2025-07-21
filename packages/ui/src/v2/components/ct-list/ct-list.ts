@@ -15,6 +15,14 @@ import "../ct-input/ct-input.ts";
 export interface CtListItem {
   title: string;
   done?: boolean;
+  status?: string;
+  statusBadge?: {
+    text: string;
+    color?: string;
+    icon?: string;
+  };
+  subtaskCount?: number;
+  items?: any[]; // For backward compatibility
   [key: string]: any;
 }
 
@@ -28,6 +36,16 @@ export interface CtListAction {
 }
 
 /**
+ * Context menu action configuration
+ */
+export interface CtListContextAction {
+  label: string;
+  event: string;
+  icon?: string;
+  disabled?: boolean;
+}
+
+/**
  * CTList - A list component that renders items with add/remove functionality
  * Supports both Cell<T[]> and plain T[] values for reactive data binding
  *
@@ -38,12 +56,15 @@ export interface CtListAction {
  * @attr {boolean} readonly - Whether the list is read-only
  * @attr {boolean} editable - Whether individual items can be edited in-place
  * @attr {CtListAction} action - Action button config
+ * @attr {CtListContextAction[]} contextActions - Context menu actions
  *
  * @fires ct-add-item - Fired when adding an item with detail: { message }
  * @fires ct-remove-item - Fired when removing an item with detail: { item }
  * @fires ct-accept-item - Fired when accepting an item with detail: { item }
  * @fires ct-action-item - Fired for custom actions with detail: { item }
  * @fires ct-edit-item - Fired when editing an item with detail: { item, oldItem }
+ * @fires ct-context-action - Fired for context menu actions with detail: { item, action }
+ * @fires ct-view-subtasks - Fired when clicking on subtask badge with detail: { item }
  *
  * @example
  * <ct-list .value="${items}" title="My List" .action="${{type: 'accept'}}" @ct-accept-item="${handleAccept}"></ct-list>
@@ -69,12 +90,16 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
   @property()
   action: CtListAction | null = { type: "remove" };
 
+  @property()
+  contextActions: CtListContextAction[] = [];
+
   // Cell controller for managing array values
   private cellController: ArrayCellController<T>;
 
-  // Private state for managing editing
+  // Private state for managing editing and context menu
   private _editingItems: Map<string, Cell<string>> = new Map();
   private _nextTempId: number = 1;
+  private _activeContextMenu: { item: T; x: number; y: number } | null = null;
 
   constructor() {
     super();
@@ -91,7 +116,30 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     super.connectedCallback();
     // Bind to the initial value when connected
     this.cellController.bind(this.value);
+    // Add global click listener to close context menu
+    document.addEventListener('click', this.handleGlobalClick);
+    document.addEventListener('contextmenu', this.handleGlobalContextMenu);
   }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    // Remove global listeners
+    document.removeEventListener('click', this.handleGlobalClick);
+    document.removeEventListener('contextmenu', this.handleGlobalContextMenu);
+  }
+
+  private handleGlobalClick = () => {
+    this._activeContextMenu = null;
+    this.requestUpdate();
+  };
+
+  private handleGlobalContextMenu = (e: MouseEvent) => {
+    // Allow context menu inside our component, but close it elsewhere
+    if (!this.contains(e.target as Node)) {
+      this._activeContextMenu = null;
+      this.requestUpdate();
+    }
+  };
 
   static override styles = css`
     :host {
@@ -291,6 +339,114 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     .item-action.cancel:hover {
       background-color: #4b5563;
     }
+
+    /* Context menu styles */
+    .context-menu {
+      position: fixed;
+      background: var(--background);
+      border: var(--list-border);
+      border-radius: var(--list-border-radius);
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      z-index: 1000;
+      min-width: 150px;
+      padding: 0.25rem;
+    }
+
+    .context-menu-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      border-radius: 0.25rem;
+      font-size: 0.875rem;
+      color: var(--foreground);
+      transition: background-color 0.1s;
+    }
+
+    .context-menu-item:hover {
+      background-color: var(--muted);
+    }
+
+    .context-menu-item.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .context-menu-item.disabled:hover {
+      background-color: transparent;
+    }
+
+    .context-menu-icon {
+      width: 1rem;
+      height: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Status badge styles */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      white-space: nowrap;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .status-badge.todo {
+      background-color: #fbbf24;
+      color: #92400e;
+    }
+
+    .status-badge.in-progress {
+      background-color: #60a5fa;
+      color: #1e40af;
+    }
+
+    .status-badge.done {
+      background-color: #34d399;
+      color: #065f46;
+    }
+
+    .status-badge.default {
+      background-color: var(--muted);
+      color: var(--muted-foreground);
+    }
+
+    .status-badge-icon {
+      font-size: 0.875rem;
+    }
+
+    /* Subtask count badge styles */
+    .subtask-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      padding: 0.125rem 0.375rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      background-color: #e5e7eb;
+      color: #374151;
+      margin-left: 0.5rem;
+      flex-shrink: 0;
+      cursor: pointer;
+      transition: background-color 0.1s;
+    }
+
+    .subtask-badge:hover {
+      background-color: #d1d5db;
+    }
+
+    .subtask-badge-icon {
+      font-size: 0.75rem;
+    }
   `;
 
   // Lifecycle methods for Cell binding management
@@ -357,6 +513,33 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     }
   }
 
+  private handleItemContextMenu(event: MouseEvent, item: T) {
+    if (this.contextActions.length === 0) return;
+    
+    event.preventDefault();
+    event.stopPropagation();
+    
+    this._activeContextMenu = {
+      item,
+      x: event.clientX,
+      y: event.clientY
+    };
+    this.requestUpdate();
+  }
+
+  private handleContextAction(action: CtListContextAction, item: T) {
+    if (action.disabled) return;
+    
+    this._activeContextMenu = null;
+    this.emit("ct-context-action", { item, action });
+    this.emit(action.event, { item });
+    this.requestUpdate();
+  }
+
+  private handleViewSubtasks(item: T) {
+    this.emit("ct-view-subtasks", { item });
+  }
+
   private handleAddItem(event: Event) {
     event.preventDefault();
     const form = event.target as HTMLFormElement;
@@ -370,16 +553,20 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     }
   }
 
-  private getItemEditId(item: T): string {
-    // Use the item's title as a unique identifier, or create a temporary one
-    return `edit-${item.title.replace(/[^a-zA-Z0-9]/g, "-")}-${this
-      ._nextTempId++}`;
+  private getItemEditId(item: T, index: number): string {
+    // Use index + title for unique identification, avoiding duplicates
+    return `edit-${index}-${item.title.replace(/[^a-zA-Z0-9]/g, "-")}-${Date.now()}`;
   }
 
   private startEditing(item: T): void {
     if (!this.editable) return;
 
-    const editId = this.getItemEditId(item);
+    // Find the index of this item in the current array
+    const items = this.getValue();
+    const itemIndex = items.findIndex(i => i === item);
+    if (itemIndex === -1) return; // Item not found
+    
+    const editId = this.getItemEditId(item, itemIndex);
     // Create a temporary cell for editing this item's title
     const cell = this.cellController.getCell();
     if (cell && cell.runtime) {
@@ -416,10 +603,11 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     this.requestUpdate();
   }
 
-  private isItemBeingEdited(item: T): string | null {
-    // Check if any editing cell exists for this item
+  private isItemBeingEdited(item: T, index: number): string | null {
+    // Check if any editing cell exists for this specific item
+    const expectedPrefix = `edit-${index}-${item.title.replace(/[^a-zA-Z0-9]/g, "-")}`;
     for (const [editId, cell] of this._editingItems) {
-      if (editId.includes(item.title.replace(/[^a-zA-Z0-9]/g, "-"))) {
+      if (editId.startsWith(expectedPrefix)) {
         return editId;
       }
     }
@@ -444,18 +632,20 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
         `
         : repeat(
           items.filter((item) => item && item.title),
-          (item) => item.title,
-          (item) => this.renderItem(item),
+          (item, index) => `${index}-${item.title}`,
+          (item, index) => this.renderItem(item, index),
         )}
         </div>
 
         ${!this.readonly ? this.renderAddItem() : ""}
       </div>
+
+      ${this._activeContextMenu ? this.renderContextMenu() : ""}
     `;
   }
 
-  private renderItem(item: T) {
-    const editId = this.isItemBeingEdited(item);
+  private renderItem(item: T, index: number) {
+    const editId = this.isItemBeingEdited(item, index);
     const isEditing = editId !== null;
 
     const actionButton = this.action && !this.readonly
@@ -495,7 +685,10 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     }
 
     return html`
-      <div class="list-item">
+      <div 
+        class="list-item"
+        @contextmenu="${(e: MouseEvent) => this.handleItemContextMenu(e, item)}"
+      >
         <div class="item-bullet"></div>
         <div
           class="item-content ${this.editable && !this.readonly
@@ -505,6 +698,8 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
         >
           ${item.title}
         </div>
+        ${this.renderSubtaskBadge(item)}
+        ${this.renderStatusBadge(item)}
         ${this.editable && !this.readonly
         ? html`
           <button
@@ -554,6 +749,86 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
         ${getButtonContent()}
       </button>
     `;
+  }
+
+  private renderContextMenu() {
+    if (!this._activeContextMenu) return "";
+
+    const { item, x, y } = this._activeContextMenu;
+
+    return html`
+      <div 
+        class="context-menu" 
+        style="left: ${x}px; top: ${y}px;"
+        @click="${(e: Event) => e.stopPropagation()}"
+      >
+        ${this.contextActions.map(action => html`
+          <div 
+            class="context-menu-item ${action.disabled ? 'disabled' : ''}"
+            @click="${() => this.handleContextAction(action, item)}"
+          >
+            ${action.icon ? html`<span class="context-menu-icon">${action.icon}</span>` : ""}
+            ${action.label}
+          </div>
+        `)}
+      </div>
+    `;
+  }
+
+  private renderStatusBadge(item: T) {
+    if (!item.statusBadge && !item.status) return "";
+
+    // Use explicit statusBadge if provided, otherwise derive from status
+    const badge = item.statusBadge || this.getDefaultStatusBadge(item.status);
+    const cssClass = this.getStatusCssClass(item.status || badge.text);
+
+    return html`
+      <span class="status-badge ${cssClass}">
+        ${badge.icon ? html`<span class="status-badge-icon">${badge.icon}</span>` : ""}
+        ${badge.text}
+      </span>
+    `;
+  }
+
+  private renderSubtaskBadge(item: T) {
+    const subtaskCount = item.subtaskCount || (item.items ? item.items.length : 0);
+    if (subtaskCount === 0) return "";
+
+    return html`
+      <span 
+        class="subtask-badge"
+        @click="${(e: Event) => {
+          e.stopPropagation();
+          this.handleViewSubtasks(item);
+        }}"
+        title="View subtasks"
+      >
+        <span class="subtask-badge-icon">📋</span>
+        ${subtaskCount}
+      </span>
+    `;
+  }
+
+  private getDefaultStatusBadge(status?: string) {
+    switch (status) {
+      case 'todo': 
+        return { text: 'Todo', icon: '📋' };
+      case 'in-progress': 
+        return { text: 'In Progress', icon: '⚡' };
+      case 'done': 
+        return { text: 'Done', icon: '✅' };
+      default: 
+        return { text: status || 'Unknown', icon: '📄' };
+    }
+  }
+
+  private getStatusCssClass(status: string): string {
+    switch (status) {
+      case 'todo': return 'todo';
+      case 'in-progress': return 'in-progress';
+      case 'done': return 'done';
+      default: return 'default';
+    }
   }
 
   private renderAddItem() {

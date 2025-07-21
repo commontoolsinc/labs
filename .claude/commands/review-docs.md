@@ -1,0 +1,1 @@
+- read all the .md files in this repo, read the code to understand what it all means and identify confusions, conflicts, mistakes, assumptions and inconsistencies
