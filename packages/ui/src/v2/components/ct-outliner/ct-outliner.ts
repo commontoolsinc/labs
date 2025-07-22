@@ -10,7 +10,6 @@ import {
 import { type Cell, isCell } from "@commontools/runner";
 
 import type {
-  CharmReference,
   EditingKeyboardContext,
   EditingState,
   KeyboardContext,
@@ -26,6 +25,7 @@ import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import { FocusUtils } from "./focus-utils.ts";
+import { Charm } from "@commontools/charm";
 
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
@@ -51,7 +51,6 @@ import { FocusUtils } from "./focus-utils.ts";
  * // With Cell<Tree> for reactive updates
  * const treeCell = runtime.getCell<Tree>({ type: "tree" });
  * <ct-outliner .value=${treeCell}></ct-outliner>
- *
  */
 
 export const OutlinerEffects = {
@@ -160,6 +159,10 @@ export class CTOutliner extends BaseElement {
       handleNormalEditorKeyDown: (event: KeyboardEvent) =>
         this.handleNormalEditorKeyDown(event),
       getNodeIndex: (node: OutlineTreeNode) => this.getNodeIndex(node),
+      handleCharmLinkClick: (event: MouseEvent) =>
+        this.handleCharmLinkClick(event),
+      encodeCharmForHref: (charm: Charm) => this.encodeCharmForHref(charm),
+      insertMention: (mention: MentionableItem) => this.insertMention(mention),
     };
   }
 
@@ -371,12 +374,22 @@ export class CTOutliner extends BaseElement {
       margin-top: 0.125rem;
     }
 
+    .charm-link {
+      color: var(--ring);
+      text-decoration: none;
+      cursor: pointer;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.2s;
+    }
+
+    .charm-link:hover {
+      border-bottom-color: var(--ring);
+    }
   `;
 
   constructor() {
     super();
     this.readonly = false;
-    this.mentionable = [];
     this.collapsedNodes = new Set<OutlineTreeNode>();
     this.focusedNode = null;
     this.showingMentions = false;
@@ -428,7 +441,6 @@ export class CTOutliner extends BaseElement {
     return this.nodeIndexer.getIndex(node);
   }
 
-
   /**
    * Deep clone a single node and all its children
    */
@@ -436,18 +448,16 @@ export class CTOutliner extends BaseElement {
     const cloned: OutlineTreeNode = {
       body: node.body || "",
       children: [],
-      attachments: node.attachments ? [...node.attachments] : []
+      attachments: node.attachments ? [...node.attachments] : [],
     };
-    
+
     // Clone children if they exist and are valid
     if (node.children && Array.isArray(node.children)) {
-      cloned.children = node.children.map(child => this.deepCloneNode(child));
+      cloned.children = node.children.map((child) => this.deepCloneNode(child));
     }
-    
+
     return cloned;
   }
-
-
 
   // =============================================================================
   // Cell Path Navigation Utilities
@@ -459,7 +469,7 @@ export class CTOutliner extends BaseElement {
   private getNodePath(targetNode: OutlineTreeNode): number[] | null {
     const findPath = (
       node: OutlineTreeNode,
-      currentPath: number[]
+      currentPath: number[],
     ): number[] | null => {
       for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
@@ -506,14 +516,14 @@ export class CTOutliner extends BaseElement {
   private getNodeCell(node: OutlineTreeNode): Cell<OutlineTreeNode> | null {
     const rootCell = this.cellController.getCell();
     const cellPath = this.getNodeCellPath(node);
-    
+
     if (!rootCell || !cellPath) return null;
-    
+
     let targetCell: Cell<any> = rootCell;
     for (const key of cellPath) {
       targetCell = targetCell.key(key);
     }
-    
+
     return targetCell as Cell<OutlineTreeNode>;
   }
 
@@ -532,9 +542,13 @@ export class CTOutliner extends BaseElement {
    * @param node The target node to get a children Cell for
    * @returns Cell<OutlineTreeNode[]> pointing to the node's children, or null if not found
    */
-  private getNodeChildrenCell(node: OutlineTreeNode): Cell<OutlineTreeNode[]> | null {
+  private getNodeChildrenCell(
+    node: OutlineTreeNode,
+  ): Cell<OutlineTreeNode[]> | null {
     const nodeCell = this.getNodeCell(node);
-    return nodeCell ? nodeCell.key("children") as Cell<OutlineTreeNode[]> : null;
+    return nodeCell
+      ? nodeCell.key("children") as Cell<OutlineTreeNode[]>
+      : null;
   }
 
   /**
@@ -542,13 +556,14 @@ export class CTOutliner extends BaseElement {
    * @param node The child node whose parent's children Cell we want
    * @returns Cell<OutlineTreeNode[]> pointing to the parent's children array, or null if not found
    */
-  private getParentChildrenCell(node: OutlineTreeNode): Cell<OutlineTreeNode[]> | null {
+  private getParentChildrenCell(
+    node: OutlineTreeNode,
+  ): Cell<OutlineTreeNode[]> | null {
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) return null;
-    
+
     return this.getNodeChildrenCell(parentNode);
   }
-
 
   /**
    * Execute a Cell transaction with proper error handling and change emission
@@ -559,7 +574,7 @@ export class CTOutliner extends BaseElement {
   private executeTransaction(
     cellOperation: (tx: any) => void,
     fallbackOperation?: () => void,
-    operationName: string = "unknown"
+    operationName: string = "unknown",
   ): void {
     try {
       const rootCell = this.cellController.getCell();
@@ -582,9 +597,6 @@ export class CTOutliner extends BaseElement {
       console.error(`[${operationName}] Transaction failed:`, error);
     }
   }
-
-
-
 
   private getAllNodes(): OutlineTreeNode[] {
     return NodeUtils.getAllNodesExcludingRoot(this.tree);
@@ -667,7 +679,11 @@ export class CTOutliner extends BaseElement {
         }
       } else {
         // Direct mutation fallback
-        TreeOperations.updateNodeBody(this.tree, this.editingNode!, this.editingContent);
+        TreeOperations.updateNodeBody(
+          this.tree,
+          this.editingNode!,
+          this.editingContent,
+        );
       }
     });
 
@@ -806,13 +822,13 @@ export class CTOutliner extends BaseElement {
           if (parentChildrenCell) {
             const currentChildren = parentChildrenCell.get();
             const newChildren = [...currentChildren];
-            
+
             // Insert all new nodes at once
             for (let i = 1; i < lines.length; i++) {
               const newNode = TreeOperations.createNode({ body: lines[i] });
               newChildren.splice(nodeIndex + i, 0, newNode);
             }
-            
+
             parentChildrenCell.withTx(tx).set(newChildren);
           }
         });
@@ -920,7 +936,6 @@ export class CTOutliner extends BaseElement {
   }
 
   private handleKeyDown(event: KeyboardEvent) {
-
     if (this.readonly || this.editingNode) return;
 
     // Ensure we have a focused node before proceeding
@@ -973,9 +988,14 @@ export class CTOutliner extends BaseElement {
       },
       () => {
         // Direct mutation fallback
-        TreeOperations.insertNode(this.tree, parentNode, newNode, nodeIndex + 1);
+        TreeOperations.insertNode(
+          this.tree,
+          parentNode,
+          newNode,
+          nodeIndex + 1,
+        );
       },
-      "createNewNodeAfter"
+      "createNewNodeAfter",
     );
 
     this.focusedNode = newNode;
@@ -1007,7 +1027,7 @@ export class CTOutliner extends BaseElement {
       () => {
         // Direct mutation fallback
         TreeOperations.insertNode(this.tree, node, newNode, 0);
-      }
+      },
     );
 
     this.focusedNode = newNode;
@@ -1060,7 +1080,7 @@ export class CTOutliner extends BaseElement {
       () => {
         // Direct mutation fallback
         TreeOperations.deleteNode(this.tree, node);
-      }
+      },
     );
 
     // Determine new focus using existing logic
@@ -1100,27 +1120,28 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
         (tx) => {
           const parentChildrenCell = this.getNodeChildrenCell(parentNode);
           const siblingChildrenCell = this.getNodeChildrenCell(previousSibling);
-          
+
           if (parentChildrenCell && siblingChildrenCell) {
             // Step 1: Create a deep copy of the node to move
             const nodeCopy = this.deepCloneNode(node);
-            
+
             // Step 2: Remove from current parent
             const currentParentChildren = parentChildrenCell.get();
-            const newParentChildren = currentParentChildren.filter(child => child !== node);
+            const newParentChildren = currentParentChildren.filter((child) =>
+              child !== node
+            );
             parentChildrenCell.withTx(tx).set(newParentChildren);
-            
+
             // Step 3: Add copy to previous sibling's children
             const currentSiblingChildren = siblingChildrenCell.get();
             const newSiblingChildren = [...currentSiblingChildren, nodeCopy];
             siblingChildrenCell.withTx(tx).set(newSiblingChildren);
-            
+
             // Step 4: Update focus to the new copy
             if (this.focusedNode === node) {
               this.focusedNode = nodeCopy;
@@ -1128,11 +1149,10 @@ export class CTOutliner extends BaseElement {
             if (this.editingNode === node) {
               this.editingNode = nodeCopy;
             }
-            
           }
         },
         undefined, // No fallback to avoid mixed mutations
-        "indentNode"
+        "indentNode",
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
@@ -1194,7 +1214,10 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    const grandParentNode = TreeOperations.findParentNode(this.tree.root, parentNode);
+    const grandParentNode = TreeOperations.findParentNode(
+      this.tree.root,
+      parentNode,
+    );
     if (!grandParentNode) {
       console.error("Cannot outdent node: already at root level");
       return;
@@ -1211,28 +1234,31 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
         (tx) => {
           const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-          const grandParentChildrenCell = this.getNodeChildrenCell(grandParentNode);
-          
+          const grandParentChildrenCell = this.getNodeChildrenCell(
+            grandParentNode,
+          );
+
           if (parentChildrenCell && grandParentChildrenCell) {
             // Step 1: Create a deep copy of the node to move
             const nodeCopy = this.deepCloneNode(node);
-            
+
             // Step 2: Remove from current parent
             const currentParentChildren = parentChildrenCell.get();
-            const newParentChildren = currentParentChildren.filter(child => child !== node);
+            const newParentChildren = currentParentChildren.filter((child) =>
+              child !== node
+            );
             parentChildrenCell.withTx(tx).set(newParentChildren);
-            
+
             // Step 3: Add copy to grandparent after parent
             const currentGrandParentChildren = grandParentChildrenCell.get();
             const newGrandParentChildren = [...currentGrandParentChildren];
             newGrandParentChildren.splice(parentIndex + 1, 0, nodeCopy);
             grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
-            
+
             // Step 4: Update focus to the new copy
             if (this.focusedNode === node) {
               this.focusedNode = nodeCopy;
@@ -1240,11 +1266,10 @@ export class CTOutliner extends BaseElement {
             if (this.editingNode === node) {
               this.editingNode = nodeCopy;
             }
-            
           }
         },
         undefined, // No fallback to avoid mixed mutations
-        "outdentNode"
+        "outdentNode",
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
@@ -1308,7 +1333,6 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
         (tx) => {
@@ -1316,19 +1340,18 @@ export class CTOutliner extends BaseElement {
           if (parentChildrenCell) {
             const currentChildren = parentChildrenCell.get();
             const previousNode = currentChildren[childIndex - 1];
-            
+
             // Step 1: Create copies of both nodes that need to swap positions
             const nodeCopy = this.deepCloneNode(node);
             const previousNodeCopy = this.deepCloneNode(previousNode);
-            
-            
+
             // Step 2: Build new children array with swapped positions
             const newChildren = [...currentChildren];
-            newChildren[childIndex - 1] = nodeCopy;      // Put current node in previous position
-            newChildren[childIndex] = previousNodeCopy;  // Put previous node in current position
-            
+            newChildren[childIndex - 1] = nodeCopy; // Put current node in previous position
+            newChildren[childIndex] = previousNodeCopy; // Put previous node in current position
+
             parentChildrenCell.withTx(tx).set(newChildren);
-            
+
             // Step 3: Update focus to the new copy
             if (this.focusedNode === node) {
               this.focusedNode = nodeCopy;
@@ -1336,11 +1359,10 @@ export class CTOutliner extends BaseElement {
             if (this.editingNode === node) {
               this.editingNode = nodeCopy;
             }
-            
           }
         },
         undefined, // No fallback to avoid mixed mutations
-        "moveNodeUp"
+        "moveNodeUp",
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
@@ -1365,7 +1387,6 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
         (tx) => {
@@ -1373,19 +1394,18 @@ export class CTOutliner extends BaseElement {
           if (parentChildrenCell) {
             const currentChildren = parentChildrenCell.get();
             const nextNode = currentChildren[childIndex + 1];
-            
+
             // Step 1: Create copies of both nodes that need to swap positions
             const nodeCopy = this.deepCloneNode(node);
             const nextNodeCopy = this.deepCloneNode(nextNode);
-            
-            
+
             // Step 2: Build new children array with swapped positions
             const newChildren = [...currentChildren];
-            newChildren[childIndex] = nextNodeCopy;      // Put next node in current position
-            newChildren[childIndex + 1] = nodeCopy;      // Put current node in next position
-            
+            newChildren[childIndex] = nextNodeCopy; // Put next node in current position
+            newChildren[childIndex + 1] = nodeCopy; // Put current node in next position
+
             parentChildrenCell.withTx(tx).set(newChildren);
-            
+
             // Step 3: Update focus to the new copy
             if (this.focusedNode === node) {
               this.focusedNode = nodeCopy;
@@ -1393,11 +1413,10 @@ export class CTOutliner extends BaseElement {
             if (this.editingNode === node) {
               this.editingNode = nodeCopy;
             }
-            
           }
         },
         undefined, // No fallback to avoid mixed mutations
-        "moveNodeDown"
+        "moveNodeDown",
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
@@ -1507,7 +1526,7 @@ export class CTOutliner extends BaseElement {
     textarea.focus();
   }
 
-  private encodeCharmForHref(charm: CharmReference): string {
+  private encodeCharmForHref(charm: Charm): string {
     // Try to get a meaningful identifier from the charm first
     if (typeof charm === "string") return charm;
     if (charm.id) return charm.id;
@@ -1571,26 +1590,66 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private decodeCharmFromHref(
-    href: string | null,
-  ): CharmReference | string | null {
+  /**
+   * Decode charm reference from href
+   */
+  private decodeCharmFromHref(href: string | null): Charm | null {
     if (!href) return null;
-
     try {
-      // Decode the URL-encoded charm representation
+      // First try to decode URL encoding
       const decoded = decodeURIComponent(href);
 
-      // Try to parse it back if it looks like JSON
-      if (decoded.startsWith("{") && decoded.endsWith("}")) {
-        return JSON.parse(decoded);
+      // Try to find the original charm reference from mentionable items
+      for (const mention of this.mentionable) {
+        const encodedHref = this.encodeCharmForHref(mention.charm);
+        if (encodedHref === href) {
+          return mention.charm;
+        }
       }
 
-      // Otherwise return the decoded string
-      return decoded;
+      // If decoded content looks like an ID, use it directly
+      if (decoded && typeof decoded === "string") {
+        return { id: decoded };
+      }
+
+      // Fallback: treat href as simple ID
+      return { id: href };
     } catch (error) {
-      // If decoding/parsing fails, return the original href
-      return href;
+      // Fallback: treat href as simple ID
+      return { id: href };
     }
+  }
+
+  /**
+   * Handle click on charm links
+   */
+  private handleCharmLinkClick(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.classList.contains("charm-link")) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const href = target.getAttribute("data-href") ||
+      target.getAttribute("href");
+    const text = target.getAttribute("data-text") || target.textContent;
+
+    if (!href) {
+      return;
+    }
+
+    const charm = this.decodeCharmFromHref(href);
+    if (!charm) {
+      return;
+    }
+
+    // Emit the charm-link-click event
+    this.emit("charm-link-click", {
+      href,
+      text: text || "",
+    });
   }
 
   private handleOutlinerClick(event: MouseEvent) {
@@ -1622,7 +1681,9 @@ export class CTOutliner extends BaseElement {
       const newNode = TreeOperations.createNode({ body: "" });
 
       this.executeTransaction((tx) => {
-        const rootChildrenCell = this.cellController.getCell()?.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        const rootChildrenCell = this.cellController.getCell()?.key("root").key(
+          "children",
+        ) as Cell<OutlineTreeNode[]>;
         if (rootChildrenCell) {
           rootChildrenCell.withTx(tx).set([newNode]);
         }
@@ -1666,12 +1727,12 @@ export class CTOutliner extends BaseElement {
           if (parentChildrenCell) {
             const currentChildren = parentChildrenCell.get();
             const newChildren = [...currentChildren];
-            
+
             // Insert all parsed nodes at once
             parsedTree.root.children.forEach((node, index) => {
               newChildren.splice(nodeIndex + 1 + index, 0, node);
             });
-            
+
             parentChildrenCell.withTx(tx).set(newChildren);
           }
         });
@@ -1682,7 +1743,9 @@ export class CTOutliner extends BaseElement {
     } else if (this.tree.root.children.length === 0) {
       // No nodes exist, replace root children using Cell operations
       this.executeTransaction((tx) => {
-        const rootChildrenCell = this.cellController.getCell()?.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        const rootChildrenCell = this.cellController.getCell()?.key("root").key(
+          "children",
+        ) as Cell<OutlineTreeNode[]>;
         if (rootChildrenCell) {
           rootChildrenCell.withTx(tx).set(parsedTree.root.children);
         }
@@ -1691,7 +1754,9 @@ export class CTOutliner extends BaseElement {
     } else {
       // No focused node but tree has nodes, append to the end using Cell operations
       this.executeTransaction((tx) => {
-        const rootChildrenCell = this.cellController.getCell()?.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        const rootChildrenCell = this.cellController.getCell()?.key("root").key(
+          "children",
+        ) as Cell<OutlineTreeNode[]>;
         if (rootChildrenCell) {
           const currentChildren = rootChildrenCell.get();
           const newChildren = [...currentChildren, ...parsedTree.root.children];
@@ -1739,9 +1804,11 @@ export class CTOutliner extends BaseElement {
 
   private renderNode(node: OutlineTreeNode, level: number): unknown {
     // Defensive check for corrupted nodes
-    if (!node || typeof node !== 'object' || !Array.isArray(node.children)) {
-      console.error('Corrupted node in renderNode:', node);
-      return html`<div class="error">Corrupted node</div>`;
+    if (!node || typeof node !== "object" || !Array.isArray(node.children)) {
+      console.error("Corrupted node in renderNode:", node);
+      return html`
+        <div class="error">Corrupted node</div>
+      `;
     }
 
     const hasChildren = node.children.length > 0;
@@ -1882,7 +1949,7 @@ export class CTOutliner extends BaseElement {
       renderer.link = (href: string, title: string | null, text: string) => {
         // For charm links, we'll add a special class and handle clicks
         const titleAttr = title ? ` title="${title}"` : "";
-        return `<a href="${href}" class="charm-link"${titleAttr}>${text}</a>`;
+        return `<a href="${href}" class="charm-link" data-href="${href}" data-text="${text}"${titleAttr}>${text}</a>`;
       };
 
       const html_content = marked.parse(content, {
@@ -1892,7 +1959,8 @@ export class CTOutliner extends BaseElement {
       });
 
       return html`
-        <span class="markdown-content">${unsafeHTML(html_content)}</span>
+        <span class="markdown-content" @click="${this
+          .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
       `;
     } catch (error) {
       // Fallback to plain text if markdown parsing fails

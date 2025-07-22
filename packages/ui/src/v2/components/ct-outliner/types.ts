@@ -2,24 +2,14 @@
  * Type definitions for the CT Outliner component
  */
 
-/**
- * Represents a reference to a charm object with optional identifying properties
- */
-export interface CharmReference {
-  id?: string;
-  _id?: string;
-  charmId?: string;
-  title?: string;
-  name?: string;
-  [key: string]: unknown;
-}
+import { Charm } from "@commontools/charm";
 
 /**
  * Represents an item that can be mentioned using @ syntax
  */
 export interface MentionableItem {
   name: string;
-  charm: CharmReference;
+  charm: Charm;
 }
 
 /**
@@ -27,7 +17,7 @@ export interface MentionableItem {
  */
 export interface Attachment {
   name: string;
-  charm: CharmReference;
+  charm: Charm;
 }
 
 /**
@@ -89,7 +79,7 @@ export interface OutlineUIState {
  * @description Provides type-safe access to component methods for keyboard commands.
  * This interface defines all the methods that keyboard command handlers need to
  * interact with the outliner component without tight coupling.
- * 
+ *
  * Uses CellController for reactive state management - tree operations automatically
  * trigger updates without manual emitChange() calls.
  */
@@ -114,21 +104,21 @@ export interface OutlinerOperations {
     editingContent: string,
     cursorPosition: number,
   ): void;
-  
+
   // Edit operations
   startEditing(node: Node): void;
   startEditingWithInitialText(node: Node, text: string): void;
   toggleEditMode(node: Node): void;
   finishEditing(): void;
-  
+
   // Node creation
   createNewNodeAfter(node: Node): void;
   createChildNode(node: Node): void;
-  
+
   // UI operations
   requestUpdate(): void;
   getAllVisibleNodes(): Node[];
-  
+
   // Legacy method - CellController handles change events automatically
   emitChange(): void;
 }
@@ -182,7 +172,7 @@ export interface NodeCreationOptions {
 
 /**
  * Result type for operations that can succeed or fail
- * 
+ *
  * @deprecated With CellController, operations handle their own state management
  * and error propagation. This type is kept for backward compatibility only.
  */
