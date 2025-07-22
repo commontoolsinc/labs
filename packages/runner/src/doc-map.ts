@@ -1,5 +1,6 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
+import { URI } from "@commontools/memory/interface";
 import { isOpaqueRef } from "./builder/types.ts";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
@@ -118,19 +119,19 @@ export class DocumentMap implements IDocumentMap {
 
   getDocByEntityId<T = any>(
     space: MemorySpace,
-    entityId: EntityId | string,
+    entityId: EntityId | URI,
     createIfNotFound?: true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T>;
   getDocByEntityId<T = any>(
     space: MemorySpace,
-    entityId: EntityId | string,
+    entityId: EntityId | URI,
     createIfNotFound: false,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
   getDocByEntityId<T = any>(
     space: MemorySpace,
-    entityId: EntityId | string,
+    entityId: EntityId | URI,
     createIfNotFound = true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined {

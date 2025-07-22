@@ -7,7 +7,6 @@ import type { JSONSchema } from "@commontools/runner";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
 import { IRuntime, Runtime } from "../src/runtime.ts";
-import { toURI } from "../src/uri-utils.ts";
 import {
   IStorageManager,
   IStorageSubscription,
@@ -71,14 +70,14 @@ describe("Provider Subscriptions", () => {
       await runtime.storage.syncCell(cell1);
       await runtime.storage.synced();
 
-      const uri = toURI(cell1.entityId);
+      const uri = cell1.getAsNormalizedFullLink().id;
 
       const tx = runtime.edit();
       cell1.withTx(tx).set(1);
       await tx.commit();
       await runtime.storage.synced();
 
-      expect(provider.get(cell1.entityId)).toEqual({ value: 1 });
+      expect(provider.get(uri)).toEqual({ value: 1 });
 
       let s1Count = 0;
 

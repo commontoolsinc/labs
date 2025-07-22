@@ -58,7 +58,6 @@ import type {
   StorageValue,
   URI,
 } from "./interface.ts";
-import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
@@ -1316,25 +1315,25 @@ class ProviderConnection implements IStorageProvider {
   }
 
   sink<T = any>(
-    entityId: EntityId,
+    uri: URI,
     callback: (value: StorageValue<T>) => void,
   ) {
-    return this.provider.sink(entityId, callback);
+    return this.provider.sink(uri, callback);
   }
 
   sync(
-    entityId: EntityId | URI,
+    uri: URI,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ) {
-    return this.provider.sync(entityId, expectedInStorage, schemaContext);
+    return this.provider.sync(uri, expectedInStorage, schemaContext);
   }
 
-  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
-    return this.provider.get(entityId);
+  get<T = any>(uri: URI): StorageValue<T> | undefined {
+    return this.provider.get(uri);
   }
   send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
+    batch: { uri: URI; value: StorageValue<T> }[],
   ) {
     return this.provider.send(batch);
   }
@@ -1415,15 +1414,14 @@ export class Provider implements IStorageProvider {
   }
 
   sink<T = any>(
-    entityId: EntityId,
+    uri: URI,
     callback: (value: StorageValue<T>) => void,
   ): Cancel {
     const { the } = this;
-    const of = BaseStorageProvider.toEntity(entityId);
     // Capture workspace locally, so that if it changes later, our cancel
     // will unsubscribe with the same object.
     const { workspace } = this;
-    const address = { the, of };
+    const address = { the: this.the, of: uri };
     const subscriber = (revision?: Revision<State>) => {
       // If since is -1, this is not a real revision, so don't notify subscribers
       if (revision && revision.since !== -1) {
@@ -1443,13 +1441,12 @@ export class Provider implements IStorageProvider {
   }
 
   sync(
-    entityId: EntityId | URI,
+    uri: URI,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ) {
     const { the } = this;
-    const of = BaseStorageProvider.toEntity(entityId);
-    const factAddress = { the, of };
+    const factAddress = { the, of: uri };
     if (schemaContext) {
       const selector = { path: [], schemaContext: schemaContext };
       // We track this server subscription, and don't re-issue it --
@@ -1470,17 +1467,14 @@ export class Provider implements IStorageProvider {
     }
   }
 
-  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
-    const entity = this.workspace.get({
-      the: this.the,
-      of: BaseStorageProvider.toEntity(entityId),
-    });
+  get<T = any>(uri: URI): StorageValue<T> | undefined {
+    const entity = this.workspace.get({ the: this.the, of: uri });
 
     return entity?.is as StorageValue<T> | undefined;
   }
 
   async send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
+    batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
     Result<
       Unit,
@@ -1496,8 +1490,8 @@ export class Provider implements IStorageProvider {
     const TheLabel = "application/label+json" as const;
 
     const changes = [];
-    for (const { entityId, value } of batch) {
-      const of = BaseStorageProvider.toEntity(entityId);
+    for (const { uri, value } of batch) {
+      const of = uri;
       const content = value.value !== undefined
         ? JSON.stringify({ value: value.value, source: value.source })
         : undefined;
