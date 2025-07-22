@@ -92,16 +92,20 @@ export class CycleTracker<K> {
   constructor() {
     this.partial = new Set<K>();
   }
-  enter(k: K): boolean {
+  include(k: K, context?: unknown): Disposable | null {
     if (this.partial.has(k)) {
-      console.error("Cycle Detected!");
-      return false;
+      console.error(
+        "Cycle Detected!",
+        context == null ? JSON.stringify(k) : JSON.stringify(context),
+      );
+      return null;
     }
     this.partial.add(k);
-    return true;
-  }
-  exit(k: K) {
-    this.partial.delete(k);
+    return {
+      [Symbol.dispose]: () => {
+        this.partial.delete(k);
+      },
+    };
   }
 }
 
@@ -204,22 +208,17 @@ export abstract class BaseObjectTraverser<K, S> {
     if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      if (tracker.enter(doc.value)) {
-        try {
-          return doc.value.map((item, index) =>
-            this.traverseDAG(
-              { ...doc, path: [...doc.path, index.toString()], value: item },
-              tracker,
-              schemaTracker,
-            )
-          ) as Immutable<JSONValue>[];
-        } finally {
-          tracker.exit(doc.value);
-        }
-      } else {
-        console.log("Cycle detected", JSON.stringify(doc));
+      using t = tracker.include(doc.value, doc);
+      if (t === null) {
         return null;
       }
+      return doc.value.map((item, index) =>
+        this.traverseDAG(
+          { ...doc, path: [...doc.path, index.toString()], value: item },
+          tracker,
+          schemaTracker,
+        )
+      ) as Immutable<JSONValue>[];
     } else if (isObject(doc.value)) {
       // First, see if we need special handling
       if (isAnyCellLink(doc.value)) {
@@ -236,31 +235,26 @@ export abstract class BaseObjectTraverser<K, S> {
         }
         return this.traverseDAG(newDoc, tracker, schemaTracker);
       } else {
-        if (tracker.enter(doc.value)) {
-          try {
-            return Object.fromEntries(
-              Object.entries(doc.value).map((
-                [k, value],
-              ) => [
-                k,
-                this.traverseDAG(
-                  {
-                    ...doc,
-                    path: [...doc.path, k],
-                    value: value,
-                  },
-                  tracker,
-                  schemaTracker,
-                ),
-              ]),
-            ) as Immutable<JSONValue>;
-          } finally {
-            tracker.exit(doc.value);
-          }
-        } else {
-          console.log("Cycle detected", JSON.stringify(doc));
+        using t = tracker.include(doc.value, doc);
+        if (t === null) {
           return null;
         }
+        return Object.fromEntries(
+          Object.entries(doc.value).map((
+            [k, value],
+          ) => [
+            k,
+            this.traverseDAG(
+              {
+                ...doc,
+                path: [...doc.path, k],
+                value: value,
+              },
+              tracker,
+              schemaTracker,
+            ),
+          ]),
+        ) as Immutable<JSONValue>;
       }
     } else {
       console.error("Encountered unexpected object: ", doc.value);
@@ -360,75 +354,69 @@ function followPointer<K, S>(
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
 ): [ValueAtPath<K>, SchemaPathSelector | undefined] {
-  if (!tracker.enter(doc.value!)) {
-    console.log("Cycle detected", JSON.stringify(doc));
+  using t = tracker.include(doc.value!, doc);
+  if (t === null) {
     return [{ ...doc, path: [], value: undefined }, selector];
   }
-  try {
-    const link = parseLink(doc.value)!;
-    const target = (link.id !== undefined)
-      ? manager.getTarget(link.id)
-      : doc.doc;
-    let [targetDoc, targetDocRoot] = [doc.doc, doc.docRoot];
-    if (selector !== undefined) {
-      // We'll need to re-root the selector for the target doc
-      // Remove the portions of doc.path from selector.path, limiting schema if needed
-      // Also insert the portions of cellTarget.path, so selector is relative to new target doc
-      // We do this even if the target doc is the same doc, since we want the
-      // selector path to match.
-      selector = narrowSchema(doc.path, selector, link.path as string[]);
-    }
-    if (link.id !== undefined) {
-      // We have a reference to a different cell, so track the dependency
-      // and update our targetDoc and targetDocRoot
-      const valueEntry = manager.load(target);
-      if (valueEntry === null) {
-        return [{ ...doc, path: [], value: undefined }, selector];
-      }
-      if (schemaTracker !== undefined && selector !== undefined) {
-        schemaTracker.add(manager.toKey(target), selector);
-      }
-      // If the object we're pointing to is a retracted fact, just return undefined.
-      // We can't do a better match, but we do want to include the result so we watch this doc
-      if (valueEntry.value === undefined) {
-        return [
-          { doc: target, docRoot: undefined, path: [], value: undefined },
-          selector,
-        ];
-      }
-      // Otherwise, we can continue with the target.
-      // an assertion fact.is will be an object with a value property, and
-      // that's what our schema is relative to.
-      targetDoc = target;
-      const targetObj = valueEntry.value as Immutable<JSONObject>;
-      targetDocRoot = targetObj["value"];
-      // Load any sources (recursively) if they exist and any linked recipes
-      loadSource(
-        manager,
-        valueEntry,
-        new Set<string>(),
-        schemaTracker,
-      );
-    }
-
-    // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
-    // then the provided path from the arguments.
-    return getAtPath(
-      manager,
-      {
-        doc: targetDoc,
-        docRoot: targetDocRoot,
-        path: [],
-        value: targetDocRoot,
-      },
-      [...link.path, ...path] as string[],
-      tracker,
-      schemaTracker,
-      selector,
-    );
-  } finally {
-    tracker.exit(doc.value!);
+  const link = parseLink(doc.value)!;
+  const target = (link.id !== undefined) ? manager.getTarget(link.id) : doc.doc;
+  let [targetDoc, targetDocRoot] = [doc.doc, doc.docRoot];
+  if (selector !== undefined) {
+    // We'll need to re-root the selector for the target doc
+    // Remove the portions of doc.path from selector.path, limiting schema if needed
+    // Also insert the portions of cellTarget.path, so selector is relative to new target doc
+    // We do this even if the target doc is the same doc, since we want the
+    // selector path to match.
+    selector = narrowSchema(doc.path, selector, link.path as string[]);
   }
+  if (link.id !== undefined) {
+    // We have a reference to a different cell, so track the dependency
+    // and update our targetDoc and targetDocRoot
+    const valueEntry = manager.load(target);
+    if (valueEntry === null) {
+      return [{ ...doc, path: [], value: undefined }, selector];
+    }
+    if (schemaTracker !== undefined && selector !== undefined) {
+      schemaTracker.add(manager.toKey(target), selector);
+    }
+    // If the object we're pointing to is a retracted fact, just return undefined.
+    // We can't do a better match, but we do want to include the result so we watch this doc
+    if (valueEntry.value === undefined) {
+      return [
+        { doc: target, docRoot: undefined, path: [], value: undefined },
+        selector,
+      ];
+    }
+    // Otherwise, we can continue with the target.
+    // an assertion fact.is will be an object with a value property, and
+    // that's what our schema is relative to.
+    targetDoc = target;
+    const targetObj = valueEntry.value as Immutable<JSONObject>;
+    targetDocRoot = targetObj["value"];
+    // Load any sources (recursively) if they exist and any linked recipes
+    loadSource(
+      manager,
+      valueEntry,
+      new Set<string>(),
+      schemaTracker,
+    );
+  }
+
+  // We've loaded the linked doc, so walk the path to get to the right part of that doc (or whatever doc that path leads to),
+  // then the provided path from the arguments.
+  return getAtPath(
+    manager,
+    {
+      doc: targetDoc,
+      docRoot: targetDocRoot,
+      path: [],
+      value: targetDocRoot,
+    },
+    [...link.path, ...path] as string[],
+    tracker,
+    schemaTracker,
+    selector,
+  );
 }
 
 // Recursively load the source from the doc ()
@@ -677,19 +665,14 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return this.isValidType(schemaObj, "number") ? doc.value : undefined;
     } else if (Array.isArray(doc.value)) {
       if (this.isValidType(schemaObj, "array")) {
-        if (this.tracker.enter(doc.value)) {
-          try {
-            return this.traverseArrayWithSchema(doc, {
-              schema: schemaObj,
-              rootSchema: schemaContext.rootSchema,
-            });
-          } finally {
-            this.tracker.exit(doc.value);
-          }
-        } else {
-          console.log("Cycle detected", JSON.stringify(doc));
+        using t = this.tracker.include(doc.value, doc);
+        if (t === null) {
           return null;
         }
+        return this.traverseArrayWithSchema(doc, {
+          schema: schemaObj,
+          rootSchema: schemaContext.rootSchema,
+        });
       }
       return undefined;
     } else if (isObject(doc.value)) {
@@ -701,19 +684,14 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         // TODO(@ubik2): it might be technically ok to follow the same pointer more than once, since we might have
         // a different schema the second time, which could prevent an infinite cycle, but for now, just reject these.
       } else if (this.isValidType(schemaObj, "object")) {
-        if (this.tracker.enter(doc.value)) {
-          try {
-            return this.traverseObjectWithSchema(doc, {
-              schema: schemaObj,
-              rootSchema: schemaContext.rootSchema,
-            });
-          } finally {
-            this.tracker.exit(doc.value);
-          }
-        } else {
-          console.log("Cycle detected", JSON.stringify(doc));
+        using t = this.tracker.include(doc.value, doc);
+        if (t === null) {
           return null;
         }
+        return this.traverseObjectWithSchema(doc, {
+          schema: schemaObj,
+          rootSchema: schemaContext.rootSchema,
+        });
       }
     }
   }
@@ -837,16 +815,11 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     // but we may have a pointer cycle of docs, and we've finished resolving
     // the pointer now. To avoid descending into a cycle, track entry to the
     // doc we were called with (not the one we resolved, which may be a pointer).
-    if (this.tracker.enter(doc.value!)) {
-      try {
-        return this.traverseWithSelector(newDoc, newSelector!);
-      } finally {
-        this.tracker.exit(doc.value!);
-      }
-    } else {
-      console.log("Cycle detected", JSON.stringify(doc));
+    using t = this.tracker.include(doc.value!, doc);
+    if (t === null) {
       return null;
     }
+    return this.traverseWithSelector(newDoc, newSelector!);
   }
 }
 
