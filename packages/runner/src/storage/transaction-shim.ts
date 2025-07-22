@@ -9,6 +9,7 @@ import type {
   InactiveTransactionError,
   INotFoundError,
   IReadActivity,
+  IReadOnlyAddressError,
   IReadOptions,
   IStorageSubscription,
   IStorageSubscriptionCapability,
@@ -100,7 +101,11 @@ function validateParentPath(
         }] is not a record`,
       ) as ITypeMismatchError;
       typeError.name = "TypeMismatchError";
-      typeError.address = { id: "of:unknown", type: "application/json", path: path.slice(0, parentIndex + 1) };
+      typeError.address = {
+        id: "of:unknown",
+        type: "application/json",
+        path: path.slice(0, parentIndex + 1),
+      };
       typeError.actualType = parentValue === null ? "null" : typeof parentValue;
       return typeError;
     }
@@ -126,7 +131,11 @@ function validateParentPath(
       }] is not a record`,
     ) as ITypeMismatchError;
     typeError.name = "TypeMismatchError";
-    typeError.address = { id: "of:unknown", type: "application/json", path: path.slice(0, lastIndex) };
+    typeError.address = {
+      id: "of:unknown",
+      type: "application/json",
+      path: path.slice(0, lastIndex),
+    };
     typeError.actualType = parentValue === null ? "null" : typeof parentValue;
     return typeError;
   }
@@ -355,6 +364,7 @@ class TransactionWriter extends TransactionReader
     | InactiveTransactionError
     | IUnsupportedMediaTypeError
     | ITypeMismatchError
+    | IReadOnlyAddressError
   > {
     if (address.type !== "application/json") {
       const error = new Error(
@@ -372,8 +382,8 @@ class TransactionWriter extends TransactionReader
     if (address.id.startsWith("data:")) {
       const error = new Error(
         "Cannot write to data URI",
-      ) as IUnsupportedMediaTypeError;
-      error.name = "UnsupportedMediaTypeError";
+      ) as IReadOnlyAddressError;
+      error.name = "ReadOnlyAddressError";
       return {
         ok: undefined,
         error,
@@ -648,9 +658,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): JSONValue | undefined {
     const readResult = this.tx.read(address, options);
-    if (readResult.error && 
-        readResult.error.name !== "NotFoundError" && 
-        readResult.error.name !== "TypeMismatchError") {
+    if (
+      readResult.error &&
+      readResult.error.name !== "NotFoundError" &&
+      readResult.error.name !== "TypeMismatchError"
+    ) {
       throw readResult.error;
     }
     return readResult.ok?.value;
@@ -682,12 +694,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: JSONValue | undefined,
   ): void {
     const writeResult = this.tx.write(address, value);
-    if (writeResult.error && 
-        (writeResult.error.name === "NotFoundError" || 
-         writeResult.error.name === "TypeMismatchError")) {
+    if (
+      writeResult.error &&
+      (writeResult.error.name === "NotFoundError" ||
+        writeResult.error.name === "TypeMismatchError")
+    ) {
       // Create parent entries if needed
-      const lastValidPath = writeResult.error.name === "NotFoundError" 
-        ? writeResult.error.path 
+      const lastValidPath = writeResult.error.name === "NotFoundError"
+        ? writeResult.error.path
         : undefined;
       const valueObj = lastValidPath
         ? this.readValueOrThrow({ ...address, path: lastValidPath }, {
