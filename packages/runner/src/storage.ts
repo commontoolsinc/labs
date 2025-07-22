@@ -19,7 +19,7 @@ import type {
   StorageValue,
   URI,
 } from "./storage/interface.ts";
-import { log } from "./log.ts";
+import { getLogger } from "@commontools/utils/logger";
 import type { IRuntime, IStorage } from "./runtime.ts";
 import { DocObjectManager, querySchema } from "./storage/query.ts";
 import { deepEqual } from "./path-utils.ts";
@@ -34,6 +34,8 @@ import {
 } from "./storage/transaction-shim.ts";
 import type { EntityId } from "./doc-map.ts";
 export type { Labels, MemorySpace };
+
+const logger = getLogger("storage", { enabled: false, level: "debug" });
 
 /**
  * Storage implementation.
@@ -334,11 +336,13 @@ export class Storage implements IStorage {
       const newDoc = docMap.getDocByEntityId(doc.space, uri, false)!;
       // We don't need to hook up ephemeral docs
       if (newDoc.ephemeral) {
-        console.log(
-          "Found link to ephemeral doc",
-          uri,
-          "from",
-          Storage.toURI(doc.entityId),
+        logger.info(
+          () => [
+            "Found link to ephemeral doc",
+            uri,
+            "from",
+            Storage.toURI(doc.entityId),
+          ],
         );
         continue;
       }
@@ -465,7 +469,7 @@ export class Storage implements IStorage {
     value: StorageValue<JSONValue | undefined>,
     labels: Labels | undefined,
   ) {
-    log(
+    logger.debug(
       () => [
         "got from doc",
         JSON.stringify(doc.entityId),
@@ -591,7 +595,7 @@ export class Storage implements IStorage {
   }
 
   private _subscribeToChanges(doc: DocImpl<any>): void {
-    log(() => ["subscribe to changes", JSON.stringify(doc.entityId)]);
+    logger.debug(() => ["subscribe to changes", JSON.stringify(doc.entityId)]);
 
     const uri = Storage.toURI(doc.entityId);
     const docKey = `${doc.space}/${uri}`;
