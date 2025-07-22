@@ -240,7 +240,6 @@ declare module "@commontools/api" {
     entityId: { "/": string };
     sourceURI: URI;
     path: readonly PropertyKey[];
-    [isCellMarker]: true;
     copyTrap: boolean;
   }
 }
@@ -280,11 +279,7 @@ export interface Stream<T> {
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
   runtime: IRuntime;
-  [isStreamMarker]: true;
 }
-
-const isCellMarker = Symbol("isCell");
-const isStreamMarker = Symbol("isStream");
 
 export function createCell<T>(
   runtime: IRuntime,
@@ -374,10 +369,6 @@ class StreamCell<T> implements Stream<T> {
 
   withTx(_tx?: IExtendedStorageTransaction): Stream<T> {
     return this; // No-op for streams
-  }
-
-  get [isStreamMarker](): true {
-    return true;
   }
 }
 
@@ -709,10 +700,6 @@ class RegularCell<T> implements Cell<T> {
     return this.link.id;
   }
 
-  get [isCellMarker](): true {
-    return true;
-  }
-
   get copyTrap(): boolean {
     throw new Error(
       "Copy trap: Don't copy cells. Create references instead.",
@@ -774,7 +761,7 @@ function subscribeToReferencedDocs<T>(
  * @returns {boolean}
  */
 export function isCell(value: any): value is Cell<any> {
-  return isRecord(value) && value[isCellMarker] === true;
+  return value instanceof RegularCell;
 }
 
 /**
@@ -783,5 +770,5 @@ export function isCell(value: any): value is Cell<any> {
  * @returns True if the value is a Stream
  */
 export function isStream(value: any): value is Stream<any> {
-  return isRecord(value) && value[isStreamMarker] === true;
+  return value instanceof StreamCell;
 }
