@@ -32,18 +32,23 @@ async function cleanup(
 // Benchmark: Cell creation
 Deno.bench("Cell creation - simple schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   for (let i = 0; i < 1000; i++) {
-    const cell = runtime.getCell<number>(space, `bench-cell-${i}`, undefined, tx);
+    const cell = runtime.getCell<number>(
+      space,
+      `bench-cell-${i}`,
+      undefined,
+      tx,
+    );
     cell.set(42);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell creation - with JSON schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -52,18 +57,18 @@ Deno.bench("Cell creation - with JSON schema (1000x)", async () => {
     },
     required: ["name", "age"],
   } as const satisfies JSONSchema;
-  
+
   for (let i = 0; i < 1000; i++) {
     const cell = runtime.getCell(space, `bench-cell-schema-${i}`, schema, tx);
     cell.set({ name: "John", age: 30 });
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell creation - immutable (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   for (let i = 0; i < 1000; i++) {
     runtime.getImmutableCell(
       space,
@@ -72,27 +77,27 @@ Deno.bench("Cell creation - immutable (1000x)", async () => {
       tx,
     );
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Schema-based cell creation benchmarks
 Deno.bench("Cell creation - simple with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = { type: "number" } as const satisfies JSONSchema;
-  
+
   for (let i = 0; i < 1000; i++) {
     const cell = runtime.getCell(space, `bench-cell-schema-${i}`, schema, tx);
     cell.set(42);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell creation - object with nested schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -113,7 +118,7 @@ Deno.bench("Cell creation - object with nested schema (1000x)", async () => {
     },
     required: ["user", "tags"],
   } as const satisfies JSONSchema;
-  
+
   for (let i = 0; i < 1000; i++) {
     const cell = runtime.getCell(space, `bench-nested-schema-${i}`, schema, tx);
     cell.set({
@@ -125,13 +130,13 @@ Deno.bench("Cell creation - object with nested schema (1000x)", async () => {
       tags: ["developer", "typescript"],
     });
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell creation - array with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "array",
     items: {
@@ -143,7 +148,7 @@ Deno.bench("Cell creation - array with schema (1000x)", async () => {
       required: ["id", "name"],
     },
   } as const satisfies JSONSchema;
-  
+
   for (let i = 0; i < 1000; i++) {
     const cell = runtime.getCell(space, `bench-array-schema-${i}`, schema, tx);
     cell.set([
@@ -151,94 +156,94 @@ Deno.bench("Cell creation - array with schema (1000x)", async () => {
       { id: 2, name: "Item 2" },
     ]);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Cell get operations
 Deno.bench("Cell get - simple value schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<number>(space, "bench-get", undefined, tx);
   cell.set(42);
-  
+
   // Measure get operation
   for (let i = 0; i < 1000; i++) {
     cell.get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell get - complex object schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{
     name: string;
     age: number;
     tags: string[];
     nested: { value: number };
   }>(space, "bench-get-complex", undefined, tx);
-  
+
   cell.set({
     name: "test",
     age: 42,
     tags: ["a", "b", "c"],
     nested: { value: 123 },
   });
-  
+
   // Measure get operation
   for (let i = 0; i < 1000; i++) {
     cell.get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell getRaw - complex object schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{
     name: string;
     age: number;
     tags: string[];
     nested: { value: number };
   }>(space, "bench-getRaw", undefined, tx);
-  
+
   cell.set({
     name: "test",
     age: 42,
     tags: ["a", "b", "c"],
     nested: { value: 123 },
   });
-  
+
   // Measure getRaw operation
   for (let i = 0; i < 1000; i++) {
     cell.getRaw();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Schema-based get operations
 Deno.bench("Cell get - simple value with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = { type: "number", minimum: 0 } as const satisfies JSONSchema;
   const cell = runtime.getCell(space, "bench-get-schema", schema, tx);
   cell.set(42);
-  
+
   // Measure get operation
   for (let i = 0; i < 1000; i++) {
     cell.get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell get - complex object with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -258,158 +263,168 @@ Deno.bench("Cell get - complex object with schema (1000x)", async () => {
     },
     required: ["name", "age", "tags", "nested"],
   } as const satisfies JSONSchema;
-  
+
   const cell = runtime.getCell(space, "bench-get-complex-schema", schema, tx);
-  
+
   cell.set({
     name: "test",
     age: 42,
     tags: ["a", "b", "c"],
     nested: { value: 123 },
   });
-  
+
   // Measure get operation
   for (let i = 0; i < 1000; i++) {
     cell.get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Cell set operations
 Deno.bench("Cell set - simple value schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<number>(space, "bench-set", undefined, tx);
-  
+
   // Measure set operation
   for (let i = 0; i < 1000; i++) {
     cell.set(i);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell send - simple value schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<number>(space, "bench-send", undefined, tx);
   cell.set(0);
-  
+
   // Measure send operation
   for (let i = 0; i < 1000; i++) {
     cell.send(i);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell update - partial object update schemaless (1000x)", async () => {
-  const { runtime, storageManager, tx } = setup();
-  
-  const cell = runtime.getCell<{
-    name: string;
-    age: number;
-    tags: string[];
-  }>(space, "bench-update", undefined, tx);
-  
-  cell.set({ name: "test", age: 42, tags: ["a", "b"] });
-  
-  // Measure update operation
-  for (let i = 0; i < 1000; i++) {
-    cell.update({ age: i });
-  }
-  
-  await cleanup(runtime, storageManager, tx);
-});
+Deno.bench(
+  "Cell update - partial object update schemaless (1000x)",
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    const cell = runtime.getCell<{
+      name: string;
+      age: number;
+      tags: string[];
+    }>(space, "bench-update", undefined, tx);
+
+    cell.set({ name: "test", age: 42, tags: ["a", "b"] });
+
+    // Measure update operation
+    for (let i = 0; i < 1000; i++) {
+      cell.update({ age: i });
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
 
 // Schema-based set operations
 Deno.bench("Cell set - simple value with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
-  const schema = { type: "number", minimum: 0, maximum: 1000 } as const satisfies JSONSchema;
+
+  const schema = {
+    type: "number",
+    minimum: 0,
+    maximum: 1000,
+  } as const satisfies JSONSchema;
   const cell = runtime.getCell(space, "bench-set-schema", schema, tx);
-  
+
   // Measure set operation
   for (let i = 0; i < 1000; i++) {
     cell.set(i);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell update - partial object update with schema (1000x)", async () => {
-  const { runtime, storageManager, tx } = setup();
-  
-  const schema = {
-    type: "object",
-    properties: {
-      name: { type: "string" },
-      age: { type: "number", minimum: 0 },
-      tags: {
-        type: "array",
-        items: { type: "string" },
+Deno.bench(
+  "Cell update - partial object update with schema (1000x)",
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        age: { type: "number", minimum: 0 },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+        },
       },
-    },
-    required: ["name", "age", "tags"],
-  } as const satisfies JSONSchema;
-  
-  const cell = runtime.getCell(space, "bench-update-schema", schema, tx);
-  
-  cell.set({ name: "test", age: 42, tags: ["a", "b"] });
-  
-  // Measure update operation
-  for (let i = 0; i < 1000; i++) {
-    cell.update({ age: i });
-  }
-  
-  await cleanup(runtime, storageManager, tx);
-});
+      required: ["name", "age", "tags"],
+    } as const satisfies JSONSchema;
+
+    const cell = runtime.getCell(space, "bench-update-schema", schema, tx);
+
+    cell.set({ name: "test", age: 42, tags: ["a", "b"] });
+
+    // Measure update operation
+    for (let i = 0; i < 1000; i++) {
+      cell.update({ age: i });
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
 
 // Benchmark: Nested cell operations
 Deno.bench("Cell key - nested access schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{
     a: { b: { c: { d: number } } };
   }>(space, "bench-key", undefined, tx);
-  
+
   cell.set({ a: { b: { c: { d: 42 } } } });
-  
+
   // Measure nested key access
   for (let i = 0; i < 1000; i++) {
     cell.key("a").key("b").key("c").key("d").get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell key - array access schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{
     items: Array<{ name: string; value: number }>;
   }>(space, "bench-key-array", undefined, tx);
-  
+
   cell.set({
     items: Array.from({ length: 100 }, (_, i) => ({
       name: `item${i}`,
       value: i,
     })),
   });
-  
+
   // Measure array key access
   for (let i = 0; i < 1000; i++) {
     cell.key("items").key(i % 100).key("value").get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Schema-based nested operations
 Deno.bench("Cell key - nested access with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -435,22 +450,22 @@ Deno.bench("Cell key - nested access with schema (1000x)", async () => {
     },
     required: ["a"],
   } as const satisfies JSONSchema;
-  
+
   const cell = runtime.getCell(space, "bench-key-schema", schema, tx);
-  
+
   cell.set({ a: { b: { c: { d: 42 } } } });
-  
+
   // Measure nested key access
   for (let i = 0; i < 1000; i++) {
     cell.key("a").key("b").key("c").key("d").get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell key - array access with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -468,38 +483,38 @@ Deno.bench("Cell key - array access with schema (1000x)", async () => {
     },
     required: ["items"],
   } as const satisfies JSONSchema;
-  
+
   const cell = runtime.getCell(space, "bench-key-array-schema", schema, tx);
-  
+
   cell.set({
     items: Array.from({ length: 100 }, (_, i) => ({
       name: `item${i}`,
       value: i,
     })),
   });
-  
+
   // Measure array key access
   for (let i = 0; i < 1000; i++) {
     cell.key("items").key(i % 100).key("value").get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Cell derivation
 Deno.bench("Cell asSchema - schema transformation (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{
     id: number;
     metadata: { createdAt: string; type: string };
   }>(space, "bench-asSchema", undefined, tx);
-  
+
   cell.set({
     id: 1,
     metadata: { createdAt: "2025-01-06", type: "user" },
   });
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -508,84 +523,87 @@ Deno.bench("Cell asSchema - schema transformation (1000x)", async () => {
     },
     required: ["id", "metadata"],
   } as const satisfies JSONSchema;
-  
+
   // Measure asSchema transformation
   for (let i = 0; i < 1000; i++) {
     const schemaCell = cell.asSchema(schema);
     schemaCell.get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell withTx - transaction switching (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<number>(space, "bench-withTx", undefined, tx);
   cell.set(42);
-  
+
   const tx2 = runtime.edit();
-  
+
   // Measure withTx operation
   for (let i = 0; i < 1000; i++) {
     const newCell = cell.withTx(i % 2 === 0 ? tx : tx2);
     newCell.get();
   }
-  
+
   await tx2.commit();
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Query result proxy operations
-Deno.bench("Cell getAsQueryResult - proxy creation schemaless (1000x)", async () => {
-  const { runtime, storageManager, tx } = setup();
-  
-  const cell = runtime.getCell<{
-    name: string;
-    age: number;
-    nested: { value: number };
-  }>(space, "bench-proxy", undefined, tx);
-  
-  cell.set({
-    name: "test",
-    age: 42,
-    nested: { value: 123 },
-  });
-  
-  // Measure proxy creation and access
-  for (let i = 0; i < 1000; i++) {
-    const proxy = cell.getAsQueryResult();
-    proxy.name;
-    proxy.nested.value;
-  }
-  
-  await cleanup(runtime, storageManager, tx);
-});
+Deno.bench(
+  "Cell getAsQueryResult - proxy creation schemaless (1000x)",
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    const cell = runtime.getCell<{
+      name: string;
+      age: number;
+      nested: { value: number };
+    }>(space, "bench-proxy", undefined, tx);
+
+    cell.set({
+      name: "test",
+      age: 42,
+      nested: { value: 123 },
+    });
+
+    // Measure proxy creation and access
+    for (let i = 0; i < 1000; i++) {
+      const proxy = cell.getAsQueryResult();
+      proxy.name;
+      proxy.nested.value;
+    }
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
 
 Deno.bench("Cell proxy - property writes schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{
     x: number;
     y: number;
   }>(space, "bench-proxy-write", undefined, tx);
-  
+
   cell.set({ x: 1, y: 2 });
   const proxy = cell.getAsQueryResult();
-  
+
   // Measure proxy writes
   for (let i = 0; i < 1000; i++) {
     proxy.x = i;
     proxy.y = i * 2;
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
-// Schema-based proxy operations
-Deno.bench("Cell getAsQueryResult - proxy creation with schema (1000x)", async () => {
+// Schema-based get operations for complex objects
+Deno.bench("Cell get - complex object with asCell schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -597,33 +615,35 @@ Deno.bench("Cell getAsQueryResult - proxy creation with schema (1000x)", async (
           value: { type: "number" },
         },
         required: ["value"],
+        asCell: true, // This creates a cell reference
       },
     },
     required: ["name", "age", "nested"],
   } as const satisfies JSONSchema;
-  
-  const cell = runtime.getCell(space, "bench-proxy-schema", schema, tx);
-  
+
+  const cell = runtime.getCell(space, "bench-get-asCell-schema", schema, tx);
+
   cell.set({
     name: "test",
     age: 42,
     nested: { value: 123 },
   });
-  
-  // Measure proxy creation and access
+
+  // Measure get with schema that creates cell references
   for (let i = 0; i < 1000; i++) {
-    const proxy = cell.getAsQueryResult();
-    proxy.name;
-    proxy.nested.value;
+    const value = cell.get();
+    value.name;
+    value.age;
+    value.nested.get(); // nested is a Cell due to asCell: true
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Array operations
 Deno.bench("Cell push - array append schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{ items: number[] }>(
     space,
     "bench-push",
@@ -632,18 +652,18 @@ Deno.bench("Cell push - array append schemaless (1000x)", async () => {
   );
   cell.set({ items: [] });
   const arrayCell = cell.key("items");
-  
+
   // Measure push operations
   for (let i = 0; i < 1000; i++) {
     arrayCell.push(i);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell array - map operation schemaless (1000x)", async () => {
+Deno.bench("Cell array - proxy map operation schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{ items: number[] }>(
     space,
     "bench-array-map",
@@ -651,21 +671,21 @@ Deno.bench("Cell array - map operation schemaless (1000x)", async () => {
     tx,
   );
   cell.set({ items: Array.from({ length: 100 }, (_, i) => i) });
-  
+
   const proxy = cell.getAsQueryResult();
-  
-  // Measure array map operation
+
+  // Measure array map operation via proxy
   for (let i = 0; i < 1000; i++) {
     proxy.items.map((x: number) => x * 2);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Schema-based array operations
 Deno.bench("Cell push - array append with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -676,22 +696,22 @@ Deno.bench("Cell push - array append with schema (1000x)", async () => {
     },
     required: ["items"],
   } as const satisfies JSONSchema;
-  
+
   const cell = runtime.getCell(space, "bench-push-schema", schema, tx);
   cell.set({ items: [] });
   const arrayCell = cell.key("items");
-  
+
   // Measure push operations
   for (let i = 0; i < 1000; i++) {
     arrayCell.push(i);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell array - map operation with schema (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -702,24 +722,23 @@ Deno.bench("Cell array - map operation with schema (1000x)", async () => {
     },
     required: ["items"],
   } as const satisfies JSONSchema;
-  
-  const cell = runtime.getCell(space, "bench-array-map-schema", schema, tx);
+
+  const cell = runtime.getCell(space, "bench-array-get-schema", schema, tx);
   cell.set({ items: Array.from({ length: 100 }, (_, i) => i) });
-  
-  const proxy = cell.getAsQueryResult();
-  
-  // Measure array map operation
+
+  // Measure get operation with schema validation
   for (let i = 0; i < 1000; i++) {
-    proxy.items.map((x: number) => x * 2);
+    const value = cell.get();
+    value.items.map((x: number) => x * 2);
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Link operations
 Deno.bench("Cell getAsLink - link generation schemaless (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{ value: number }>(
     space,
     "bench-link",
@@ -727,18 +746,18 @@ Deno.bench("Cell getAsLink - link generation schemaless (1000x)", async () => {
     tx,
   );
   cell.set({ value: 42 });
-  
+
   // Measure link generation
   for (let i = 0; i < 1000; i++) {
     cell.getAsLink();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell getAsLink - with options (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell1 = runtime.getCell<{ value: number }>(
     space,
     "bench-link-1",
@@ -746,7 +765,7 @@ Deno.bench("Cell getAsLink - with options (1000x)", async () => {
     tx,
   );
   cell1.set({ value: 42 });
-  
+
   const cell2 = runtime.getCell<{ other: string }>(
     space,
     "bench-link-2",
@@ -754,89 +773,92 @@ Deno.bench("Cell getAsLink - with options (1000x)", async () => {
     tx,
   );
   cell2.set({ other: "test" });
-  
+
   // Measure link generation with options
   for (let i = 0; i < 1000; i++) {
     cell1.getAsLink({ base: cell2, includeSchema: true });
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Subscription operations
 Deno.bench("Cell sink - subscription execution (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<number>(space, "bench-sink", undefined, tx);
   cell.set(0);
-  
+
   let callCount = 0;
-  
+
   // Setup sink subscription
   const cancel = cell.sink(() => {
     callCount++;
   });
-  
+
   // Measure sink execution with value changes
   for (let i = 0; i < 1000; i++) {
     cell.set(i + 1); // Set different value each time
     await runtime.idle(); // Wait for sink to execute
   }
-  
+
   // Verify sink was called
   if (callCount !== 1001) { // Initial + 1000 updates
     throw new Error(`Expected 1001 sink calls, got ${callCount}`);
   }
-  
+
   // Cleanup subscription
   cancel();
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell sink - subscription execution with schema (1000x)", async () => {
-  const { runtime, storageManager, tx } = setup();
-  
-  const schema = {
-    type: "object",
-    properties: {
-      count: { type: "number", minimum: 0 },
-      timestamp: { type: "number" },
-    },
-    required: ["count", "timestamp"],
-  } as const satisfies JSONSchema;
-  
-  const cell = runtime.getCell(space, "bench-sink-schema", schema, tx);
-  cell.set({ count: 0, timestamp: Date.now() });
-  
-  let callCount = 0;
-  
-  // Setup sink subscription
-  const cancel = cell.sink(() => {
-    callCount++;
-  });
-  
-  // Measure sink execution with value changes
-  for (let i = 0; i < 1000; i++) {
-    cell.set({ count: i + 1, timestamp: Date.now() + i });
-    await runtime.idle(); // Wait for sink to execute
-  }
-  
-  // Verify sink was called
-  if (callCount !== 1001) { // Initial + 1000 updates
-    throw new Error(`Expected 1001 sink calls, got ${callCount}`);
-  }
-  
-  // Cleanup subscription
-  cancel();
-  
-  await cleanup(runtime, storageManager, tx);
-});
+Deno.bench(
+  "Cell sink - subscription execution with schema (1000x)",
+  async () => {
+    const { runtime, storageManager, tx } = setup();
+
+    const schema = {
+      type: "object",
+      properties: {
+        count: { type: "number", minimum: 0 },
+        timestamp: { type: "number" },
+      },
+      required: ["count", "timestamp"],
+    } as const satisfies JSONSchema;
+
+    const cell = runtime.getCell(space, "bench-sink-schema", schema, tx);
+    cell.set({ count: 0, timestamp: Date.now() });
+
+    let callCount = 0;
+
+    // Setup sink subscription
+    const cancel = cell.sink(() => {
+      callCount++;
+    });
+
+    // Measure sink execution with value changes
+    for (let i = 0; i < 1000; i++) {
+      cell.set({ count: i + 1, timestamp: Date.now() + i });
+      await runtime.idle(); // Wait for sink to execute
+    }
+
+    // Verify sink was called
+    if (callCount !== 1001) { // Initial + 1000 updates
+      throw new Error(`Expected 1001 sink calls, got ${callCount}`);
+    }
+
+    // Cleanup subscription
+    cancel();
+
+    await cleanup(runtime, storageManager, tx);
+  },
+);
 
 // Benchmark: Complex nested operations
 Deno.bench("Cell complex - schema with asCell references (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const schema = {
     type: "object",
     properties: {
@@ -860,9 +882,9 @@ Deno.bench("Cell complex - schema with asCell references (1000x)", async () => {
     },
     required: ["id", "metadata", "tags", "settings"],
   } as const satisfies JSONSchema;
-  
+
   const cell = runtime.getCell(space, "bench-asCell-schema", schema, tx);
-  
+
   cell.set({
     id: 1,
     metadata: {
@@ -875,7 +897,7 @@ Deno.bench("Cell complex - schema with asCell references (1000x)", async () => {
       notifications: true,
     },
   });
-  
+
   // Measure access with asCell references
   for (let i = 0; i < 1000; i++) {
     const value = cell.get();
@@ -884,13 +906,13 @@ Deno.bench("Cell complex - schema with asCell references (1000x)", async () => {
     value.tags;
     value.settings.get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell complex - nested cell references (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   // Create inner cells
   const inner1 = runtime.getCell<{ value: number }>(
     space,
@@ -899,7 +921,7 @@ Deno.bench("Cell complex - nested cell references (1000x)", async () => {
     tx,
   );
   inner1.set({ value: 1 });
-  
+
   const inner2 = runtime.getCell<{ value: number }>(
     space,
     "bench-inner-2",
@@ -907,32 +929,32 @@ Deno.bench("Cell complex - nested cell references (1000x)", async () => {
     tx,
   );
   inner2.set({ value: 2 });
-  
+
   // Create outer cell with references
   const outer = runtime.getCell<{
     ref1: any;
     ref2: any;
   }>(space, "bench-outer", undefined, tx);
-  
+
   outer.set({
     ref1: inner1,
     ref2: inner2,
   });
-  
+
   // Measure nested reference access
   for (let i = 0; i < 1000; i++) {
     const proxy = outer.getAsQueryResult();
     proxy.ref1;
     proxy.ref2;
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Schema validation
 Deno.bench("Cell schema - complex validation (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const complexSchema = {
     type: "object",
     properties: {
@@ -959,14 +981,14 @@ Deno.bench("Cell schema - complex validation (1000x)", async () => {
     },
     required: ["id", "user", "tags"],
   } as const satisfies JSONSchema;
-  
+
   const cell = runtime.getCell(
     space,
     "bench-schema-complex",
     complexSchema,
     tx,
   );
-  
+
   // Measure complex object set with schema validation
   for (let i = 0; i < 1000; i++) {
     cell.set({
@@ -983,57 +1005,57 @@ Deno.bench("Cell schema - complex validation (1000x)", async () => {
       },
     });
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Large data structures
 Deno.bench("Cell large - array with 1000 items (1000x get)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell = runtime.getCell<{ items: Array<{ id: number; data: string }> }>(
     space,
     "bench-large-array",
     undefined,
     tx,
   );
-  
+
   // Create large array
   const items = Array.from({ length: 1000 }, (_, i) => ({
     id: i,
     data: `item-${i}`,
   }));
-  
+
   // Measure set operation with large data
   cell.set({ items });
-  
+
   // Measure get operation with large data
   for (let i = 0; i < 1000; i++) {
     cell.get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 Deno.bench("Cell large - deeply nested object (1000x navigation)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   // Create deeply nested structure
   const createNested = (depth: number): any => {
     if (depth === 0) return { value: 42 };
     return { nested: createNested(depth - 1) };
   };
-  
+
   const cell = runtime.getCell<any>(
     space,
     "bench-deep-nested",
     undefined,
     tx,
   );
-  
+
   const deepData = createNested(10); // 10 levels deep
   cell.set(deepData);
-  
+
   // Measure deep navigation
   for (let i = 0; i < 1000; i++) {
     let current = cell;
@@ -1042,34 +1064,36 @@ Deno.bench("Cell large - deeply nested object (1000x navigation)", async () => {
     }
     current.key("value").get();
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Concurrent operations
 Deno.bench("Cell concurrent - multiple cells (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   // Create multiple cells
-  const cells = Array.from({ length: 10 }, (_, i) =>
-    runtime.getCell<number>(space, `bench-concurrent-${i}`, undefined, tx)
+  const cells = Array.from(
+    { length: 10 },
+    (_, i) =>
+      runtime.getCell<number>(space, `bench-concurrent-${i}`, undefined, tx),
   );
-  
+
   // Initialize cells
   cells.forEach((cell, i) => cell.set(i));
-  
+
   // Measure concurrent access
   for (let i = 0; i < 1000; i++) {
     cells.forEach((cell) => cell.get());
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
 
 // Benchmark: Cell equals comparison
 Deno.bench("Cell equals - comparison operations (1000x)", async () => {
   const { runtime, storageManager, tx } = setup();
-  
+
   const cell1 = runtime.getCell<number>(space, "bench-equals-1", undefined, tx);
   const cell2 = runtime.getCell<number>(space, "bench-equals-2", undefined, tx);
   const cell1Same = runtime.getCell<number>(
@@ -1078,15 +1102,15 @@ Deno.bench("Cell equals - comparison operations (1000x)", async () => {
     undefined,
     tx,
   );
-  
+
   cell1.set(42);
   cell2.set(42);
-  
+
   // Measure equals operations
   for (let i = 0; i < 1000; i++) {
     cell1.equals(cell1Same); // Should be true
     cell1.equals(cell2); // Should be false
   }
-  
+
   await cleanup(runtime, storageManager, tx);
 });
