@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
-import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -80,7 +80,9 @@ describe("Storage", () => {
 
       await testCell.sync();
 
-      const entry = storageManager.open(space).get(refCell.entityId!);
+      const entry = storageManager.open(space).get(
+        refCell.getAsNormalizedFullLink().id,
+      );
       expect(entry?.value).toEqual("hello");
     });
 
@@ -101,7 +103,8 @@ describe("Storage", () => {
 
       await testCell.sync();
 
-      const entry = storageManager.open(space).get(refCell.entityId!);
+      const refCellURI = refCell.getAsNormalizedFullLink().id;
+      const entry = storageManager.open(space).get(refCellURI);
       expect(entry?.value).toEqual("hello");
     });
   });
@@ -133,7 +136,8 @@ describe("Storage", () => {
     it("should wait for a doc to appear", async () => {
       let synced = false;
 
-      storageManager.open(space).sync(testCell.entityId!, true).then(
+      const testCellURI = testCell.getAsNormalizedFullLink().id;
+      storageManager.open(space).sync(testCellURI, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -145,7 +149,8 @@ describe("Storage", () => {
 
     it("should wait for a undefined doc to appear", async () => {
       let synced = false;
-      storageManager.open(space).sync(testCell.entityId!, true).then(
+      const testCellURI = testCell.getAsNormalizedFullLink().id;
+      storageManager.open(space).sync(testCellURI, true).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -157,11 +162,12 @@ describe("Storage", () => {
     it("should wait for a undefined doc to appear with schema and double sync", async () => {
       let synced = false;
       const schemaContext = { schema: true, rootSchema: true };
-      storageManager.open(space).sync(testCell.entityId!, true, schemaContext)
+      const testCellURI = testCell.getAsNormalizedFullLink().id;
+      storageManager.open(space).sync(testCellURI, true, schemaContext)
         .then(
           () => (synced = true),
         );
-      storageManager.open(space).sync(testCell.entityId!, true, schemaContext)
+      storageManager.open(space).sync(testCellURI, true, schemaContext)
         .then(
           () => (synced = true),
         );
@@ -178,19 +184,20 @@ describe("Storage", () => {
 
   describe("ephemeral docs", () => {
     it("should not be loaded from storage", async () => {
-      const ephemeralDoc = runtime.getCell<string>(
+      const ephemeralCell = runtime.getCell<string>(
         space,
         "ephemeral",
         undefined,
         tx,
       );
-      ephemeralDoc.set("transient");
-      ephemeralDoc.getDoc().ephemeral = true;
-      await ephemeralDoc.sync();
+      ephemeralCell.set("transient");
+      ephemeralCell.getDoc().ephemeral = true;
+      await ephemeralCell.sync();
       const provider = storageManager.open(space);
 
-      await provider.sync(ephemeralDoc.entityId!);
-      const record = provider.get(ephemeralDoc.entityId!);
+      const ephemeralCellURI = ephemeralCell.getAsNormalizedFullLink().id;
+      await provider.sync(ephemeralCellURI);
+      const record = provider.get(ephemeralCellURI);
       expect(record).toBeUndefined();
     });
   });
