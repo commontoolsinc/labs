@@ -16,8 +16,8 @@ export class XSpaceView extends BaseView {
   @property({ attribute: false })
   rt?: RuntimeInternals;
 
-  @property({ type: Boolean })
-  showCharmList = false;
+  @property()
+  showShellCharmListView = false;
 
   @state()
   creatingDefaultRecipe = false;
@@ -68,7 +68,7 @@ export class XSpaceView extends BaseView {
       ? html`
         <x-spinner></x-spinner>
       `
-      : this.showCharmList
+      : this.showShellCharmListView
       ? html`
         <x-charm-list-view
           .charms="${charms}"

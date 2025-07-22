@@ -12,7 +12,6 @@ export class XBodyView extends BaseView {
     }
   `;
 
-
   @property({ attribute: false })
   rt?: RuntimeInternals;
 
@@ -20,7 +19,7 @@ export class XBodyView extends BaseView {
   activeCharmId?: string;
 
   @property({ type: Boolean })
-  showCharmList = false;
+  showShellCharmListView = false;
 
   override render() {
     const charmView = html`
@@ -28,8 +27,11 @@ export class XBodyView extends BaseView {
         .activeCharmId}"></x-charm-view>
     `;
     const spaceView = html`
-      <x-space-view .rt="${this.rt}" .showCharmList="${this
-        .showCharmList}"></x-space-view>
+      <x-space-view
+        .rt="${this.rt}"
+        .showShellCharmListView="${this
+        .showShellCharmListView}"
+      ></x-space-view>
     `;
     const view = this.activeCharmId ? charmView : spaceView;
     return html`

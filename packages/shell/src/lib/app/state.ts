@@ -7,7 +7,7 @@ export interface AppState {
   spaceName?: string;
   activeCharmId?: string;
   apiUrl: URL;
-  showCharmList?: boolean;
+  showShellCharmListView?: boolean;
 }
 
 export function clone(state: AppState): AppState {
@@ -36,8 +36,8 @@ export function applyCommand(
       next.identity = undefined;
       break;
     }
-    case "toggle-charm-list": {
-      next.showCharmList = !state.showCharmList;
+    case "set-shell-charm-list-view": {
+      next.showShellCharmListView = command.show;
       break;
     }
   }

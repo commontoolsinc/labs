@@ -114,7 +114,7 @@ export class XHeaderView extends BaseView {
   private _conflicts?: InspectorConflicts;
 
   @property({ type: Boolean })
-  showCharmList = false;
+  showShellCharmListView = false;
 
   private _inspectorListener = new Task(this, {
     args: () => [this.rt],
@@ -178,7 +178,8 @@ export class XHeaderView extends BaseView {
     e.preventDefault();
     e.stopPropagation();
     this.dispatchEvent(
-      new CustomEvent("toggle-view", {
+      new CustomEvent("toggle-shell-charm-list-view", {
+        detail: { show: !this.showShellCharmListView },
         bubbles: true,
         composed: true,
       }),
@@ -240,11 +241,11 @@ export class XHeaderView extends BaseView {
             <button
               class="emoji-button"
               @click="${this.handleToggleClick}"
-              title="${this.showCharmList
+              title="${this.showShellCharmListView
             ? "Show Default Recipe"
             : "Show All Charms"}"
             >
-              ${this.showCharmList ? "📋" : "🔍"}
+              ${this.showShellCharmListView ? "📋" : "🔍"}
             </button>
             <x-button
               class="auth-button"
