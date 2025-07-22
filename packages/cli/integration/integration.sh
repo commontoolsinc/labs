@@ -160,7 +160,7 @@ test_json_value "Input flag set" "config" '{"inputConfig":"test"}' "--input"
 test_value "Nested input path" "config/inputConfig" '"inputValue"' '"inputValue"' "--input"
 
 # Check space has new charm with correct inputs and title
-TITLE="Simple counter 2: 5"
+TITLE="Simple counter 2: 10"
 ct charm ls $SPACE_ARGS | grep -q "$CHARM_ID $TITLE <unnamed>"
 if [ $? -ne 0 ]; then
   error "Charm did not appear in list of space charms."
