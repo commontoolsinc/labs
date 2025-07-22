@@ -19,6 +19,7 @@ import {
   setCharmRecipe,
   SpaceConfig,
 } from "../lib/charm.ts";
+import { renderCharm } from "../lib/charm-render.ts";
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
@@ -261,6 +262,36 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
       render(tree);
     } else {
       render("<no view data>");
+    }
+  })
+  /* charm render */
+  .command("render", "Render a charm's UI to HTML")
+  .usage(charmUsage)
+  .example(
+    `ct charm render ${EX_ID} ${EX_COMP_CHARM}`,
+    `Render the UI for charm "${RAW_EX_COMP.charm!}" to HTML.`,
+  )
+  .example(
+    `ct charm render ${EX_ID} ${EX_URL}`,
+    `Render the UI for charm "${RAW_EX_COMP.charm!}" to HTML.`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--json", "Output HTML as JSON")
+  .action(async (options) => {
+    const charmConfig = parseCharmOptions(options);
+    try {
+      const html = await renderCharm(charmConfig);
+      if (options.json) {
+        render({ html }, { json: true });
+      } else {
+        render(html);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("has no UI")) {
+        render("<charm has no UI>");
+      } else {
+        throw error;
+      }
     }
   })
   /* charm link */
