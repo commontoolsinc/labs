@@ -177,8 +177,8 @@ export class CTOutliner extends BaseElement {
           }),
         ).filter((item) => item.path !== null);
 
-        // Clone the tree to create independent copy
-        const clonedTree = JSON.parse(JSON.stringify(currentTree));
+        // Clone the tree to create independent copy, handling potential circular references
+        const clonedTree = this.cloneTreeSafely(currentTree);
 
         // Bind the cloned tree to CellController (this will trigger onChange but offline mode will suppress events)
         this.cellController.bind(clonedTree);
@@ -223,6 +223,7 @@ export class CTOutliner extends BaseElement {
       handleNormalEditorKeyDown: (event: KeyboardEvent) =>
         this.handleNormalEditorKeyDown(event),
       handleReset: () => this.handleReset(),
+      getNodeIndex: (node: OutlineTreeNode) => this.getNodeIndex(node),
     };
   }
 
@@ -599,6 +600,61 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
+   * Safely clone a tree, handling potential circular references
+   */
+  private cloneTreeSafely(tree: Tree): Tree {
+    const seen = new WeakSet();
+    
+    const cloneNode = (node: OutlineTreeNode): OutlineTreeNode => {
+      if (seen.has(node)) {
+        // Handle circular reference by creating a basic node
+        return {
+          body: "[Circular Reference]",
+          children: [],
+          attachments: []
+        };
+      }
+      
+      seen.add(node);
+      
+      const cloned: OutlineTreeNode = {
+        body: node.body || "",
+        children: [],
+        attachments: node.attachments ? [...node.attachments] : []
+      };
+      
+      // Clone children if they exist and are valid
+      if (node.children && Array.isArray(node.children)) {
+        cloned.children = node.children.map(child => cloneNode(child));
+      }
+      
+      return cloned;
+    };
+    
+    return {
+      root: cloneNode(tree.root)
+    };
+  }
+
+  /**
+   * Deep clone a single node and all its children
+   */
+  private deepCloneNode(node: OutlineTreeNode): OutlineTreeNode {
+    const cloned: OutlineTreeNode = {
+      body: node.body || "",
+      children: [],
+      attachments: node.attachments ? [...node.attachments] : []
+    };
+    
+    // Clone children if they exist and are valid
+    if (node.children && Array.isArray(node.children)) {
+      cloned.children = node.children.map(child => this.deepCloneNode(child));
+    }
+    
+    return cloned;
+  }
+
+  /**
    * Get the path to a node as an array of indices from root.children
    */
   private getNodePath(targetNode: OutlineTreeNode): number[] | null {
@@ -652,6 +708,47 @@ export class CTOutliner extends BaseElement {
       return currentNode;
     } catch (error) {
       return null;
+    }
+  }
+
+  /**
+   * Validate and restore focus when node references become invalid due to Cell operations
+   */
+  private validateAndRestoreFocus(): void {
+    if (!this.focusedNode) {
+      // No focus to validate, try to focus first available node
+      const allNodes = this.getAllNodes();
+      if (allNodes.length > 0) {
+        this.focusedNode = allNodes[0];
+      }
+      return;
+    }
+
+    // Check if focused node still exists in the current tree
+    try {
+      const nodeExists = TreeOperations.findNode(this.tree.root, this.focusedNode);
+      if (!nodeExists) {
+        console.warn("Focused node no longer exists in tree, restoring focus");
+        // Try to find a node with the same content
+        const allNodes = this.getAllNodes();
+        const replacement = allNodes.find(node => 
+          node.body === this.focusedNode?.body
+        );
+        
+        if (replacement) {
+          this.focusedNode = replacement;
+        } else if (allNodes.length > 0) {
+          // Fall back to first available node
+          this.focusedNode = allNodes[0];
+        } else {
+          this.focusedNode = null;
+        }
+      }
+    } catch (error) {
+      console.error("Error validating focused node:", error);
+      // Safe fallback
+      const allNodes = this.getAllNodes();
+      this.focusedNode = allNodes.length > 0 ? allNodes[0] : null;
     }
   }
 
@@ -736,6 +833,47 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
+   * Validate Cell structure integrity for debugging
+   */
+  private validateCellStructure(operationName: string): void {
+    if (!this.cellController.getCell()) return;
+
+    try {
+      const rootCell = this.cellController.getCell();
+      if (!rootCell) return;
+
+      // Check for duplicate node references across different Cell paths
+      const allNodes = this.getAllNodes();
+      const nodePathMap = new Map<OutlineTreeNode, string[]>();
+
+      for (const node of allNodes) {
+        const nodePath = this.getNodeCellPath(node);
+        if (nodePath) {
+          if (nodePathMap.has(node)) {
+            console.warn(`[${operationName}] Duplicate node reference detected:`, {
+              node: node.body,
+              existingPath: nodePathMap.get(node),
+              newPath: nodePath
+            });
+          }
+          nodePathMap.set(node, nodePath);
+        }
+      }
+
+      // Validate tree structure consistency
+      const treeNodes = TreeOperations.getAllNodes(this.tree.root);
+      if (treeNodes.length !== allNodes.length) {
+        console.warn(`[${operationName}] Tree node count mismatch:`, {
+          treeCount: treeNodes.length,
+          cellCount: allNodes.length
+        });
+      }
+    } catch (error) {
+      console.error(`[${operationName}] Cell validation failed:`, error);
+    }
+  }
+
+  /**
    * Execute a Cell transaction with proper error handling and change emission
    * If working with a plain object (not a Cell), fall back to direct mutations and emitChange()
    * @param cellOperation Function that performs Cell operations within the transaction
@@ -743,17 +881,23 @@ export class CTOutliner extends BaseElement {
    */
   private executeTransaction(
     cellOperation: (tx: any) => void,
-    fallbackOperation?: () => void
+    fallbackOperation?: () => void,
+    operationName: string = "unknown"
   ): void {
+    // Pre-operation validation
+    this.validateCellStructure(`${operationName}-before`);
+
     try {
       const rootCell = this.cellController.getCell();
       if (rootCell) {
+        console.log(`[${operationName}] Using Cell transaction`);
         // We have a Cell - use transactions
         const tx = rootCell.runtime.edit();
         cellOperation(tx);
         tx.commit();
         // CellController handles change propagation automatically
       } else {
+        console.log(`[${operationName}] Using fallback operation`);
         // We have a plain object - use fallback or execute with null tx
         if (fallbackOperation) {
           fallbackOperation();
@@ -763,8 +907,14 @@ export class CTOutliner extends BaseElement {
         this.emitChange();
       }
     } catch (error) {
-      console.error("Transaction failed:", error);
+      console.error(`[${operationName}] Transaction failed:`, error);
     }
+
+    // Post-operation validation and focus restoration
+    setTimeout(() => {
+      this.validateCellStructure(`${operationName}-after`);
+      this.validateAndRestoreFocus();
+    }, 0);
   }
 
   private handleSave() {
@@ -1230,6 +1380,12 @@ export class CTOutliner extends BaseElement {
 
     if (this.readonly || this.editingNode) return;
 
+    // Ensure we have a focused node before proceeding
+    if (!this.focusedNode) {
+      console.warn("No focused node available for keyboard command");
+      return;
+    }
+
     const context = EventUtils.createKeyboardContext(
       event,
       this,
@@ -1275,7 +1431,8 @@ export class CTOutliner extends BaseElement {
       () => {
         // Direct mutation fallback
         TreeOperations.insertNode(this.tree, parentNode, newNode, nodeIndex + 1);
-      }
+      },
+      "createNewNodeAfter"
     );
 
     this.focusedNode = newNode;
@@ -1397,37 +1554,67 @@ export class CTOutliner extends BaseElement {
 
     const previousSibling = parentNode.children[nodeIndex - 1];
 
-    // Use Cell operations with fallback to TreeOperations
-    this.executeTransaction(
-      (tx) => {
-        // Cell-based operation
-        // Remove from current parent
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-        if (parentChildrenCell) {
-          const currentParentChildren = parentChildrenCell.get();
-          const newParentChildren = [...currentParentChildren];
-          newParentChildren.splice(nodeIndex, 1);
-          parentChildrenCell.withTx(tx).set(newParentChildren);
-        }
-
-        // Add to previous sibling's children
-        const siblingChildrenCell = this.getNodeChildrenCell(previousSibling);
-        if (siblingChildrenCell) {
-          const currentSiblingChildren = siblingChildrenCell.get();
-          const newSiblingChildren = [...currentSiblingChildren, node];
-          siblingChildrenCell.withTx(tx).set(newSiblingChildren);
-        }
-      },
-      () => {
-        // Direct mutation fallback
-        TreeOperations.indentNode(this.tree, node);
-      }
-    );
+    // Use Cell operations when CellController is active
+    const rootCell = this.cellController.getCell();
+    if (rootCell) {
+      console.log(`[indentNode] Attempting Cell-based indent for node:`, node.body);
+      
+      // COPY-DELETE-ADD approach to avoid Cell reference issues
+      this.executeTransaction(
+        (tx) => {
+          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+          const siblingChildrenCell = this.getNodeChildrenCell(previousSibling);
+          
+          if (parentChildrenCell && siblingChildrenCell) {
+            // Step 1: Create a deep copy of the node to move
+            const nodeCopy = this.deepCloneNode(node);
+            console.log(`[indentNode] Created copy of node:`, nodeCopy.body);
+            
+            // Step 2: Remove from current parent
+            const currentParentChildren = parentChildrenCell.get();
+            const newParentChildren = currentParentChildren.filter(child => child !== node);
+            parentChildrenCell.withTx(tx).set(newParentChildren);
+            console.log(`[indentNode] Removed from parent, remaining:`, newParentChildren.map(n => n.body));
+            
+            // Step 3: Add copy to previous sibling's children
+            const currentSiblingChildren = siblingChildrenCell.get();
+            const newSiblingChildren = [...currentSiblingChildren, nodeCopy];
+            siblingChildrenCell.withTx(tx).set(newSiblingChildren);
+            console.log(`[indentNode] Added to sibling:`, newSiblingChildren.map(n => n.body));
+            
+            // Step 4: Update focus to the new copy
+            if (this.focusedNode === node) {
+              this.focusedNode = nodeCopy;
+            }
+            if (this.editingNode === node) {
+              this.editingNode = nodeCopy;
+            }
+            
+          } else {
+            console.error(`[indentNode] Could not get Cell references`);
+          }
+        },
+        undefined, // No fallback to avoid mixed mutations
+        "indentNode"
+      );
+    } else {
+      // Only use TreeOperations when CellController is completely unavailable
+      console.log(`[indentNode] Using TreeOperations fallback`);
+      TreeOperations.indentNode(this.tree, node);
+      this.emitChange();
+    }
 
     // Restore editing state if it was being edited
+    // Note: focus has already been updated to the new copy inside the transaction for Cell operations
     if (wasEditing) {
-      this.editingNode = node;
-      this.editingContent = editingContent;
+      if (rootCell) {
+        // For Cell operations, editingNode was already updated to the copy
+        this.editingContent = editingContent;
+      } else {
+        // For TreeOperations fallback, update to the same node
+        this.editingNode = node;
+        this.editingContent = editingContent;
+      }
     }
 
     this.requestUpdate();
@@ -1485,38 +1672,68 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    // Use Cell operations with fallback to TreeOperations
-    this.executeTransaction(
-      (tx) => {
-        // Cell-based operation
-        // Remove from current parent
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-        if (parentChildrenCell) {
-          const currentParentChildren = parentChildrenCell.get();
-          const newParentChildren = [...currentParentChildren];
-          newParentChildren.splice(nodeIndex, 1);
-          parentChildrenCell.withTx(tx).set(newParentChildren);
-        }
-
-        // Add to grandparent after parent
-        const grandParentChildrenCell = this.getNodeChildrenCell(grandParentNode);
-        if (grandParentChildrenCell) {
-          const currentGrandParentChildren = grandParentChildrenCell.get();
-          const newGrandParentChildren = [...currentGrandParentChildren];
-          newGrandParentChildren.splice(parentIndex + 1, 0, node);
-          grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
-        }
-      },
-      () => {
-        // Direct mutation fallback
-        TreeOperations.outdentNode(this.tree, node);
-      }
-    );
+    // Use Cell operations when CellController is active
+    const rootCell = this.cellController.getCell();
+    if (rootCell) {
+      console.log(`[outdentNode] Attempting Cell-based outdent for node:`, node.body);
+      
+      // COPY-DELETE-ADD approach to avoid Cell reference issues
+      this.executeTransaction(
+        (tx) => {
+          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+          const grandParentChildrenCell = this.getNodeChildrenCell(grandParentNode);
+          
+          if (parentChildrenCell && grandParentChildrenCell) {
+            // Step 1: Create a deep copy of the node to move
+            const nodeCopy = this.deepCloneNode(node);
+            console.log(`[outdentNode] Created copy of node:`, nodeCopy.body);
+            
+            // Step 2: Remove from current parent
+            const currentParentChildren = parentChildrenCell.get();
+            const newParentChildren = currentParentChildren.filter(child => child !== node);
+            parentChildrenCell.withTx(tx).set(newParentChildren);
+            console.log(`[outdentNode] Removed from parent, remaining:`, newParentChildren.map(n => n.body));
+            
+            // Step 3: Add copy to grandparent after parent
+            const currentGrandParentChildren = grandParentChildrenCell.get();
+            const newGrandParentChildren = [...currentGrandParentChildren];
+            newGrandParentChildren.splice(parentIndex + 1, 0, nodeCopy);
+            grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
+            console.log(`[outdentNode] Added to grandparent:`, newGrandParentChildren.map(n => n.body));
+            
+            // Step 4: Update focus to the new copy
+            if (this.focusedNode === node) {
+              this.focusedNode = nodeCopy;
+            }
+            if (this.editingNode === node) {
+              this.editingNode = nodeCopy;
+            }
+            
+          } else {
+            console.error(`[outdentNode] Could not get Cell references`);
+          }
+        },
+        undefined, // No fallback to avoid mixed mutations
+        "outdentNode"
+      );
+    } else {
+      // Only use TreeOperations when CellController is completely unavailable
+      console.log(`[outdentNode] Using TreeOperations fallback`);
+      TreeOperations.outdentNode(this.tree, node);
+      this.emitChange();
+    }
 
     // Restore editing state if it was being edited
+    // Note: focus has already been updated to the new copy inside the transaction for Cell operations
     if (wasEditing) {
-      this.editingNode = node;
-      this.editingContent = editingContent;
+      if (rootCell) {
+        // For Cell operations, editingNode was already updated to the copy
+        this.editingContent = editingContent;
+      } else {
+        // For TreeOperations fallback, update to the same node
+        this.editingNode = node;
+        this.editingContent = editingContent;
+      }
     }
 
     this.requestUpdate();
@@ -1559,26 +1776,31 @@ export class CTOutliner extends BaseElement {
       return; // Cannot move node up: already at first position
     }
 
-    // Use Cell operations with fallback to TreeOperations
-    this.executeTransaction(
-      (tx) => {
-        // Cell-based operation
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-        if (parentChildrenCell) {
-          const currentChildren = parentChildrenCell.get();
-          const newChildren = [...currentChildren];
-          [newChildren[childIndex - 1], newChildren[childIndex]] = [
-            newChildren[childIndex],
-            newChildren[childIndex - 1],
-          ];
-          parentChildrenCell.withTx(tx).set(newChildren);
-        }
-      },
-      () => {
-        // Direct mutation fallback
-        TreeOperations.moveNodeUp(this.tree, node);
-      }
-    );
+    // Use Cell operations when CellController is active
+    const rootCell = this.cellController.getCell();
+    if (rootCell) {
+      // PURE Cell-based operation - no fallback to avoid mixed mutations
+      this.executeTransaction(
+        (tx) => {
+          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+          if (parentChildrenCell) {
+            const currentChildren = parentChildrenCell.get();
+            const newChildren = [...currentChildren];
+            [newChildren[childIndex - 1], newChildren[childIndex]] = [
+              newChildren[childIndex],
+              newChildren[childIndex - 1],
+            ];
+            parentChildrenCell.withTx(tx).set(newChildren);
+          }
+        },
+        undefined, // No fallback to avoid mixed mutations
+        "moveNodeUp"
+      );
+    } else {
+      // Only use TreeOperations when CellController is completely unavailable
+      TreeOperations.moveNodeUp(this.tree, node);
+      this.emitChange();
+    }
 
     this.requestUpdate();
   }
@@ -1594,26 +1816,31 @@ export class CTOutliner extends BaseElement {
       return; // Cannot move node down: already at last position
     }
 
-    // Use Cell operations with fallback to TreeOperations
-    this.executeTransaction(
-      (tx) => {
-        // Cell-based operation
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-        if (parentChildrenCell) {
-          const currentChildren = parentChildrenCell.get();
-          const newChildren = [...currentChildren];
-          [newChildren[childIndex], newChildren[childIndex + 1]] = [
-            newChildren[childIndex + 1],
-            newChildren[childIndex],
-          ];
-          parentChildrenCell.withTx(tx).set(newChildren);
-        }
-      },
-      () => {
-        // Direct mutation fallback
-        TreeOperations.moveNodeDown(this.tree, node);
-      }
-    );
+    // Use Cell operations when CellController is active
+    const rootCell = this.cellController.getCell();
+    if (rootCell) {
+      // PURE Cell-based operation - no fallback to avoid mixed mutations
+      this.executeTransaction(
+        (tx) => {
+          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+          if (parentChildrenCell) {
+            const currentChildren = parentChildrenCell.get();
+            const newChildren = [...currentChildren];
+            [newChildren[childIndex], newChildren[childIndex + 1]] = [
+              newChildren[childIndex + 1],
+              newChildren[childIndex],
+            ];
+            parentChildrenCell.withTx(tx).set(newChildren);
+          }
+        },
+        undefined, // No fallback to avoid mixed mutations
+        "moveNodeDown"
+      );
+    } else {
+      // Only use TreeOperations when CellController is completely unavailable
+      TreeOperations.moveNodeDown(this.tree, node);
+      this.emitChange();
+    }
 
     this.requestUpdate();
   }
@@ -1992,6 +2219,12 @@ export class CTOutliner extends BaseElement {
   }
 
   private renderNode(node: OutlineTreeNode, level: number): unknown {
+    // Defensive check for corrupted nodes
+    if (!node || typeof node !== 'object' || !Array.isArray(node.children)) {
+      console.error('Corrupted node in renderNode:', node);
+      return html`<div class="error">Corrupted node</div>`;
+    }
+
     const hasChildren = node.children.length > 0;
     const isEditing = this.editingNode === node;
     const isFocused = this.focusedNode === node;

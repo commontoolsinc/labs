@@ -123,9 +123,9 @@ describe("CTOutliner Offline Mode", () => {
       const circularNode = outliner.tree.root.children[0];
       (circularNode as any).circular = circularNode;
 
-      // Should not throw and should keep offline mode false
+      // Should not throw and should successfully handle circular references
       outliner.offline = true;
-      expect(outliner.offline).toBe(false);
+      expect(outliner.offline).toBe(true);
     });
   });
 

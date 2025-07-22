@@ -143,12 +143,25 @@ export const TreeOperations = {
 
   /**
    * Get all nodes in the tree in depth-first order
+   * Enhanced with defensive checks for corrupted node objects
    */
   getAllNodes(node: Node): Node[] {
-    const result: Node[] = [node];
-    for (const child of node.children) {
-      result.push(...TreeOperations.getAllNodes(child));
+    if (!node || typeof node !== 'object') {
+      console.warn('Invalid node encountered in getAllNodes:', node);
+      return [];
     }
+
+    const result: Node[] = [node];
+    
+    // Ensure children array exists and is valid
+    if (node.children && Array.isArray(node.children)) {
+      for (const child of node.children) {
+        if (child) {
+          result.push(...TreeOperations.getAllNodes(child));
+        }
+      }
+    }
+    
     return result;
   },
 
@@ -257,20 +270,40 @@ export const TreeOperations = {
 
   /**
    * Get all visible nodes in the tree (respecting collapsed state)
+   * Enhanced with defensive checks for corrupted node objects
    */
   getAllVisibleNodes(node: Node, collapsedNodes: Set<Node>): Node[] {
     const result: Node[] = [];
     const traverse = (currentNode: Node) => {
+      // Defensive check for valid node structure
+      if (!currentNode || typeof currentNode !== 'object') {
+        console.warn('Invalid node encountered in tree traversal:', currentNode);
+        return;
+      }
+
       result.push(currentNode);
-      if (!collapsedNodes.has(currentNode)) {
+      
+      // Ensure children array exists and is valid
+      if (!collapsedNodes.has(currentNode) && 
+          currentNode.children && 
+          Array.isArray(currentNode.children)) {
         for (const child of currentNode.children) {
-          traverse(child);
+          if (child) {
+            traverse(child);
+          }
         }
       }
     };
-    for (const child of node.children) {
-      traverse(child);
+
+    // Ensure root node has valid children array
+    if (node && node.children && Array.isArray(node.children)) {
+      for (const child of node.children) {
+        if (child) {
+          traverse(child);
+        }
+      }
     }
+    
     return result;
   },
 
