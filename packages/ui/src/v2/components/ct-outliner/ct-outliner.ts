@@ -1526,74 +1526,17 @@ export class CTOutliner extends BaseElement {
     textarea.focus();
   }
 
-  private encodeCharmForHref(charm: Charm): string {
-    // Try to get a meaningful identifier from the charm first
-    if (typeof charm === "string") return charm;
-    if (charm.id) return charm.id;
-    if (charm._id) return charm._id;
-    if (charm.charmId) return charm.charmId;
-
-    // Use the same safe stringification function that handles circular references
-    const seen = new WeakSet();
-
-    function stringify(value: any, depth: number = 0): string {
-      // Handle primitives
-      if (value === null) return "null";
-      if (value === undefined) return "undefined";
-      if (typeof value === "string") return value;
-      if (typeof value === "number" || typeof value === "boolean") {
-        return String(value);
-      }
-      if (typeof value === "function") return "[Function]";
-
-      // Handle depth limit (keep it shallow for URLs)
-      if (depth > 2) return "[Deep Object]";
-
-      // Handle circular references
-      if (typeof value === "object" && seen.has(value)) {
-        return "[Circular]";
-      }
-
-      if (typeof value === "object") {
-        seen.add(value);
-
-        // For objects, try to find a meaningful representation
-        if (value.title) return value.title;
-        if (value.name) return value.name;
-        if (value.id) return value.id;
-        if (value._id) return value._id;
-
-        // Fallback to a simple object representation
-        const keys = Object.keys(value).slice(0, 2);
-        if (keys.length === 0) return "[Empty Object]";
-
-        const pairs = keys.map((key) => {
-          try {
-            return `${key}:${stringify(value[key], depth + 1)}`;
-          } catch (e) {
-            return `${key}:[Error]`;
-          }
-        });
-
-        return `{${pairs.join(",")}}`;
-      }
-
-      return "[Unknown]";
-    }
-
-    try {
-      const result = stringify(charm);
-      // Ensure the result is URL-safe by encoding special characters
-      return encodeURIComponent(result);
-    } catch (error) {
-      return "[Stringify Error]";
-    }
+  private encodeCharmForHref(charm: Cell<Charm>): string {
+    const id = charm.entityId;
+    const urlSafe = encodeURIComponent(JSON.stringify(id));
+    return urlSafe;
   }
 
   /**
    * Decode charm reference from href
    */
   private decodeCharmFromHref(href: string | null): Charm | null {
+    debugger
     if (!href) return null;
     try {
       // First try to decode URL encoding
@@ -1649,6 +1592,7 @@ export class CTOutliner extends BaseElement {
     this.emit("charm-link-click", {
       href,
       text: text || "",
+      charm: (charm as any).getAsQueryResultProxy(),
     });
   }
 
