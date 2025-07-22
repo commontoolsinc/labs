@@ -11,6 +11,7 @@ import type {
 } from "../src/storage/interface.ts";
 import { createDoc } from "../src/doc.ts";
 import { ShimStorageManager } from "../src/storage/transaction-shim.ts";
+import { getEntityId } from "../src/doc-map.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -339,7 +340,7 @@ describe("StorageTransaction", () => {
         id: doc1Id,
         type: "application/json",
         path: ["source"],
-      }, doc2Id);
+      }, JSON.stringify(getEntityId(doc2Id)));
       expect(setSource.ok).toBeDefined();
       // Read back the sourceCell
       const readSource = transaction.read({
@@ -349,7 +350,7 @@ describe("StorageTransaction", () => {
         path: ["source"],
       });
       expect(readSource.ok).toBeDefined();
-      expect(readSource.ok?.value).toBe(doc2Id);
+      expect(readSource.ok?.value).toBe(JSON.stringify(getEntityId(doc2Id)));
     });
 
     it("should error if path beyond 'source' is used", () => {
@@ -631,8 +632,12 @@ describe("DocImpl shim notifications", () => {
         "value",
         "initial",
       ]);
-      expect(notifications[0].changes[0].before).toBe("value");
-      expect(notifications[0].changes[0].after).toBe("updated");
+      expect(notifications[0].changes[0].before).toEqual({
+        value: { initial: "value" },
+      });
+      expect(notifications[0].changes[0].after).toEqual({
+        value: { initial: "updated" },
+      });
     });
 
     it("should send notifications for nested path changes", () => {
@@ -659,8 +664,12 @@ describe("DocImpl shim notifications", () => {
         "user",
         "name",
       ]);
-      expect(notifications[0].changes[0].before).toBe("John");
-      expect(notifications[0].changes[0].after).toBe("Jane");
+      expect(notifications[0].changes[0].before).toEqual({
+        value: { user: { name: "John" } },
+      });
+      expect(notifications[0].changes[0].after).toEqual({
+        value: { user: { name: "Jane" } },
+      });
     });
 
     it("should send notifications for root value changes", () => {
@@ -684,8 +693,10 @@ describe("DocImpl shim notifications", () => {
 
       expect(notifications).toHaveLength(1);
       expect(notifications[0].changes[0].address.path).toEqual(["value"]);
-      expect(notifications[0].changes[0].before).toEqual({ initial: "value" });
-      expect(notifications[0].changes[0].after).toEqual(newValue);
+      expect(notifications[0].changes[0].before).toEqual({
+        value: { initial: "value" },
+      });
+      expect(notifications[0].changes[0].after).toEqual({ value: newValue });
     });
 
     it("should not send notifications when value doesn't change", () => {
@@ -731,9 +742,15 @@ describe("DocImpl shim notifications", () => {
       doc.setAtPath(["counter"], 3, undefined, tx.tx);
 
       expect(notifications).toHaveLength(3);
-      expect(notifications[0].changes[0].after).toBe(1);
-      expect(notifications[1].changes[0].after).toBe(2);
-      expect(notifications[2].changes[0].after).toBe(3);
+      expect(notifications[0].changes[0].after).toEqual({
+        value: { counter: 1 },
+      });
+      expect(notifications[1].changes[0].after).toEqual({
+        value: { counter: 2 },
+      });
+      expect(notifications[2].changes[0].after).toEqual({
+        value: { counter: 3 },
+      });
     });
   });
 

@@ -323,8 +323,8 @@ class TransactionReader implements ITransactionReader {
       const sourceCell = doc.sourceCell;
       let value: string | undefined = undefined;
       if (sourceCell) {
-        // Convert EntityId to URI string
-        value = `of:${JSON.parse(JSON.stringify(sourceCell.entityId))["/"]}`;
+        // Convert EntityId to string
+        value = JSON.stringify(sourceCell.entityId);
       }
       const read: Read = {
         address,
@@ -450,19 +450,17 @@ class TransactionWriter extends TransactionReader
         notFoundError.name = "NotFoundError";
         return { ok: undefined, error: notFoundError };
       }
-      // Value must be a URI string (of:...)
-      if (typeof value !== "string" || !value.startsWith("of:")) {
+      // Value must be a JSON EntityId string
+      if (typeof value !== "string" || !value.startsWith('{"/":"')) {
         const notFoundError: INotFoundError = new Error(
-          `Value for 'source' must be a URI string (of:...)`,
+          `Value for 'source' must be a JSON string`,
         ) as INotFoundError;
         notFoundError.name = "NotFoundError";
         return { ok: undefined, error: notFoundError };
       }
-      // Get the source doc in the same space
-      const sourceEntityId = uriToEntityId(value);
       const sourceDoc = this.runtime.documentMap.getDocByEntityId(
         address.space,
-        sourceEntityId,
+        value,
         false,
       );
       if (!sourceDoc) {
