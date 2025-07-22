@@ -205,8 +205,9 @@ describe("StorageTransaction", () => {
       }, "value");
 
       expect(result.error).toBeDefined();
+      expect(result.error!.name).toBe("TypeMismatchError");
       expect(result.error!.message).toContain(
-        "parent path [a] does not exist or is not a record",
+        "parent path [a] is not a record",
       );
     });
 
@@ -277,8 +278,9 @@ describe("StorageTransaction", () => {
       }, "value");
 
       expect(result.error).toBeDefined();
+      expect(result.error!.name).toBe("NotFoundError");
       expect(result.error!.message).toContain(
-        "parent path [missing] does not exist or is not a record",
+        "parent path [missing] does not exist",
       );
     });
 
@@ -302,9 +304,9 @@ describe("StorageTransaction", () => {
       }, "deep value");
 
       expect(result.error).toBeDefined();
-      expect(result.error!.name).toBe("NotFoundError");
-      // Should set path to ["a", "b"] (the last valid parent path)
-      expect((result.error as INotFoundError).path).toEqual(["a", "b"]);
+      expect(result.error!.name).toBe("TypeMismatchError");
+      // TypeMismatchError will indicate that 'c' is not a record
+      expect(result.error!.message).toContain("is not a record");
     });
   });
 
