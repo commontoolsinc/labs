@@ -113,7 +113,7 @@ export class XHeaderView extends BaseView {
   @state()
   private _conflicts?: InspectorConflicts;
 
-  @state()
+  @property({ type: Boolean })
   showCharmList = false;
 
   private _inspectorListener = new Task(this, {
@@ -177,10 +177,8 @@ export class XHeaderView extends BaseView {
   private handleToggleClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    this.showCharmList = !this.showCharmList;
     this.dispatchEvent(
       new CustomEvent("toggle-view", {
-        detail: { showCharmList: this.showCharmList },
         bubbles: true,
         composed: true,
       }),

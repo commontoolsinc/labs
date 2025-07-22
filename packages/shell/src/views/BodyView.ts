@@ -1,5 +1,5 @@
 import { css, html } from "lit";
-import { property, state } from "lit/decorators.js";
+import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 
@@ -12,21 +12,6 @@ export class XBodyView extends BaseView {
     }
   `;
 
-  override connectedCallback() {
-    super.connectedCallback();
-    globalThis.addEventListener("toggle-view", this.handleToggleView);
-  }
-
-  override disconnectedCallback() {
-    globalThis.removeEventListener("toggle-view", this.handleToggleView);
-    super.disconnectedCallback();
-  }
-
-  private handleToggleView = (e: Event) => {
-    const customEvent = e as CustomEvent;
-    this.showCharmList = customEvent.detail.showCharmList;
-    this.requestUpdate();
-  };
 
   @property({ attribute: false })
   rt?: RuntimeInternals;
@@ -34,7 +19,7 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   activeCharmId?: string;
 
-  @state()
+  @property({ type: Boolean })
   showCharmList = false;
 
   override render() {

@@ -39,6 +39,10 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   private keyStore?: KeyStore;
 
+  private handleToggleView = () => {
+    this.command({ type: "toggle-charm-list" });
+  };
+
   override render() {
     const app = (this.app ?? {}) as AppState;
     const unauthenticated = html`
@@ -48,6 +52,7 @@ export class XAppView extends BaseView {
       <x-body-view
         .rt="${this.rt}"
         .activeCharmId="${app.activeCharmId}"
+        .showCharmList="${app.showCharmList ?? false}"
       ></x-body-view>
     `;
 
@@ -60,6 +65,8 @@ export class XAppView extends BaseView {
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
           .charmId="${app.activeCharmId}"
+          .showCharmList="${app.showCharmList ?? false}"
+          @toggle-view="${this.handleToggleView}"
         ></x-header-view>
         <div class="content-area">
           ${content}

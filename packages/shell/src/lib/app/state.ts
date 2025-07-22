@@ -7,6 +7,7 @@ export interface AppState {
   spaceName?: string;
   activeCharmId?: string;
   apiUrl: URL;
+  showCharmList?: boolean;
 }
 
 export function clone(state: AppState): AppState {
@@ -33,6 +34,10 @@ export function applyCommand(
     }
     case "clear-authentication": {
       next.identity = undefined;
+      break;
+    }
+    case "toggle-charm-list": {
+      next.showCharmList = !state.showCharmList;
       break;
     }
   }
