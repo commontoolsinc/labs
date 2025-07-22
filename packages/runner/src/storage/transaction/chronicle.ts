@@ -2,10 +2,12 @@ import type {
   IAttestation,
   IInvalidDataURIError,
   IMemoryAddress,
+  INotFoundError,
   IReadOnlyAddressError,
   ISpaceReplica,
   IStorageTransactionInconsistent,
   ITransaction,
+  ITypeMismatchError,
   IUnsupportedMediaTypeError,
   JSONValue,
   MemorySpace,
@@ -18,8 +20,10 @@ import {
   claim,
   InvalidDataURIError,
   load,
+  NotFound,
   read,
   StateInconsistency,
+  TypeMismatchError,
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
@@ -29,7 +33,12 @@ import * as Edit from "./edit.ts";
 
 export const open = (replica: ISpaceReplica) => new Chronicle(replica);
 
-export { InvalidDataURIError, UnsupportedMediaTypeError };
+export {
+  InvalidDataURIError,
+  NotFound,
+  TypeMismatchError,
+  UnsupportedMediaTypeError,
+};
 
 export class ReadOnlyAddressError extends Error
   implements IReadOnlyAddressError {
@@ -43,7 +52,7 @@ export class ReadOnlyAddressError extends Error
     this.address = address;
   }
 
-  from(space: MemorySpace) {
+  from(_space: MemorySpace) {
     return this;
   }
 }
@@ -96,18 +105,31 @@ export class Chronicle {
     value?: JSONValue,
   ): Result<
     IAttestation,
-    IStorageTransactionInconsistent | ReadOnlyAddressError
+    | IStorageTransactionInconsistent
+    | ReadOnlyAddressError
+    | INotFoundError
+    | ITypeMismatchError
   > {
     // Check if address is inline (data: URI) - these are read-only
     if (Address.isInline(address)) {
       return { error: new ReadOnlyAddressError(address) };
     }
 
+    // Load the fact from replica
+    const state = this.load(address);
+    const loaded = attest(state);
+
     // Validate against current state (replica + any overlapping novelty)
-    const loaded = attest(this.load(address));
     const rebase = this.rebase(loaded);
     if (rebase.error) {
       return rebase;
+    }
+
+    // Check if document exists when trying to write to nested path
+    // Only return NotFound if we're accessing a path on a non-existent document
+    // and there's no novelty write that would have created it
+    if (rebase.ok.value === undefined && address.path.length > 0) {
+      return { error: new NotFound(rebase.ok, address) };
     }
 
     const { error } = write(rebase.ok, address, value);
@@ -120,12 +142,14 @@ export class Chronicle {
 
   read(
     address: IMemoryAddress,
-    options?: { meta?: unknown },
+    _options?: { meta?: unknown },
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
     | IInvalidDataURIError
     | IUnsupportedMediaTypeError
+    | INotFoundError
+    | ITypeMismatchError
   > {
     // Handle data URIs
     if (Address.isInline(address)) {
@@ -146,7 +170,14 @@ export class Chronicle {
 
     // If we have not read nor written into overlapping memory address so
     // we'll read it from the local replica.
-    const loaded = attest(this.load(address));
+    const state = this.load(address);
+
+    // Check if document exists when trying to read from nested path
+    if (state.is === undefined && address.path.length > 0) {
+      return { error: new NotFound(attest(state), address) };
+    }
+
+    const loaded = attest(state);
     const { error, ok: invariant } = read(loaded, address);
     if (error) {
       return { error };
@@ -196,6 +227,25 @@ export class Chronicle {
       const source = attest(loaded);
       const { error, ok: merged } = changes.rebase(source);
       if (error) {
+        // During commit, NotFound and TypeMismatch errors should be treated as inconsistencies
+        // because we're trying to apply changes to something that has changed state
+        if (error.name === "NotFoundError") {
+          return {
+            error: new StateInconsistency({
+              address: changes.address,
+              expected: "document to exist",
+              actual: undefined,
+            }),
+          };
+        } else if (error.name === "TypeMismatchError") {
+          return {
+            error: new StateInconsistency({
+              address: error.address,
+              expected: "object",
+              actual: error.actualType,
+            }),
+          };
+        }
         return { error };
       } //
       // If merged value is `undefined` and loaded fact was retraction
@@ -383,7 +433,10 @@ class Novelty {
    */
   claim(
     invariant: IAttestation,
-  ): Result<IAttestation, IStorageTransactionInconsistent> {
+  ): Result<
+    IAttestation,
+    IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
+  > {
     const candidates = this.edit(invariant.address);
 
     for (const candidate of candidates) {
@@ -475,7 +528,10 @@ class Changes {
 
   rebase(
     source: IAttestation,
-  ): Result<IAttestation, IStorageTransactionInconsistent> {
+  ): Result<
+    IAttestation,
+    IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
+  > {
     let merged = source;
     for (const change of this.#model.values()) {
       if (Address.includes(source.address, change.address)) {

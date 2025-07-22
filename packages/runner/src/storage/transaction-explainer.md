@@ -127,8 +127,21 @@ The system uses Result types extensively with specific errors:
 
 - **TransactionCompleteError** - Operation on finished transaction
 - **WriteIsolationError** - Attempting to write to second space
-- **StateInconsistency** - Read invariant violated
+- **StorageTransactionInconsistent** - Read invariant violated (underlying state
+  changed)
+- **NotFoundError** - Document or path doesn't exist
+- **TypeMismatchError** - Accessing properties on non-objects (e.g., trying to
+  read `string.property`)
 - **ReadOnlyAddressError** - Writing to data: URIs
+
+The distinction between these errors is important:
+
+- **NotFoundError** is transient - the operation would succeed if the
+  document/path existed
+- **TypeMismatchError** is persistent - the operation will always fail unless
+  the data type changes
+- **StorageTransactionInconsistent** indicates retry is needed - the underlying
+  data changed
 
 ## Advanced Features
 

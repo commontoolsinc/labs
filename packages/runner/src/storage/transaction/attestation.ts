@@ -5,6 +5,7 @@ import type {
   INotFoundError,
   ISpaceReplica,
   IStorageTransactionInconsistent,
+  ITypeMismatchError,
   IUnsupportedMediaTypeError,
   JSONValue,
   MemorySpace,
@@ -49,13 +50,16 @@ export class UnsupportedMediaTypeError extends Error
  * Takes `source` attestation, `address` and `value` and produces derived
  * attestation with `value` set to a property that given `address` leads to
  * in the `source`. Fails with inconsitency error if provided `address` leads
- * to a non-object target.
+ * to a non-object target, or NotFound error if the document doesn't exist.
  */
 export const write = (
   source: IAttestation,
   address: IMemoryAddress,
   value: JSONValue | undefined,
-): Result<IAttestation, IStorageTransactionInconsistent> => {
+): Result<
+  IAttestation,
+  IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
+> => {
   const path = address.path.slice(source.address.path.length);
   if (path.length === 0) {
     return { ok: { ...source, value } };
@@ -90,10 +94,12 @@ export const write = (
 
         return { ok: patch };
       } else {
+        // Type mismatch - trying to write property on non-object
         return {
-          error: new WriteInconsistency(
-            { address: { ...address, path }, value },
+          error: new TypeMismatchError(
             address,
+            type,
+            "write",
           ),
         };
       }
@@ -141,7 +147,10 @@ export const write = (
 export const read = (
   source: IAttestation,
   address: IMemoryAddress,
-) => resolve(source, address);
+): Result<
+  IAttestation,
+  IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
+> => resolve(source, address);
 
 /**
  * Takes a source fact {@link State} and derives an attestion describing it's
@@ -187,10 +196,21 @@ export const claim = (
 export const resolve = (
   source: IAttestation,
   address: IMemoryAddress,
-): Result<IAttestation, IStorageTransactionInconsistent> => {
+): Result<
+  IAttestation,
+  IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
+> => {
   const { path } = address;
   let at = source.address.path.length - 1;
   let value = source.value;
+
+  // If the source value is undefined (document doesn't exist), return NotFound
+  if (source.value === undefined && path.length > source.address.path.length) {
+    return {
+      error: new NotFound(source, address),
+    };
+  }
+
   while (++at < path.length) {
     const key = path[at];
     if (typeof value === "object" && value != null) {
@@ -199,14 +219,14 @@ export const resolve = (
         ? undefined
         : (value as Record<string, JSONValue>)[key];
     } else {
+      // Type mismatch - trying to access property on non-object
+      const actualType = value === null ? "null" : typeof value;
       return {
-        error: new ReadInconsistency({
-          address: {
-            ...address,
-            path: path.slice(0, at),
-          },
-          value,
-        }, address),
+        error: new TypeMismatchError(
+          { ...address, path: path.slice(0, at + 1) },
+          actualType,
+          "read",
+        ),
       };
     }
   }
@@ -304,86 +324,59 @@ export const load = (
 
 export class NotFound extends RangeError implements INotFoundError {
   override name = "NotFoundError" as const;
+  declare readonly source: IAttestation;
+  declare readonly address: IMemoryAddress;
 
   constructor(
-    public source: IAttestation,
-    public address: IMemoryAddress,
-    public space?: MemorySpace,
+    source: IAttestation,
+    address: IMemoryAddress,
   ) {
-    const message = [
-      `Can not resolve the "${address.type}" of "${address.id}" at "${
-        address.path.join(".")
-      }"`,
-      space ? ` from "${space}"` : "",
-      `, because encountered following non-object at ${
-        source.address.path.join(".")
-      }:`,
-      source.value === undefined ? source.value : JSON.stringify(source.value),
-    ].join("");
+    let message: string;
+
+    // Document doesn't exist
+    if (source.value === undefined && source.address.path.length === 0) {
+      message = `Document not found: ${address.id}`;
+    } // Path doesn't exist within document
+    else {
+      message = `Cannot access path [${address.path.join(", ")}] - ${
+        source.value === undefined
+          ? "document does not exist"
+          : "path does not exist"
+      }`;
+    }
 
     super(message);
+    this.source = source;
+    this.address = address;
   }
 
   from(space: MemorySpace) {
-    return new NotFound(this.source, this.address, space);
+    // Return the same error instance as it doesn't use space in the message
+    return this;
   }
 }
 
-export class WriteInconsistency extends RangeError
-  implements IStorageTransactionInconsistent {
-  override name = "StorageTransactionInconsistent" as const;
+export class TypeMismatchError extends TypeError implements ITypeMismatchError {
+  override name = "TypeMismatchError" as const;
+  declare readonly address: IMemoryAddress;
+  declare readonly actualType: string;
 
   constructor(
-    public source: IAttestation,
-    public address: IMemoryAddress,
-    public space?: MemorySpace,
+    address: IMemoryAddress,
+    actualType: string,
+    operation: "read" | "write",
   ) {
-    const message = [
-      `Transaction consistency violated: cannot write the "${address.type}" of "${address.id}" at "${
-        address.path.join(".")
-      }"`,
-      space ? ` in space "${space}"` : "",
-      `. Write operation expected an object at path "${
-        source.address.path.join(".")
-      }" but encountered: ${
-        source.value === undefined ? "undefined" : JSON.stringify(source.value)
-      }`,
-    ].join("");
-
+    const message = `Cannot ${operation} property at path [${
+      address.path.join(", ")
+    }] - expected object but found ${actualType}`;
     super(message);
+    this.address = address;
+    this.actualType = actualType;
   }
 
   from(space: MemorySpace) {
-    return new WriteInconsistency(this.source, this.address, space);
-  }
-}
-
-export class ReadInconsistency extends RangeError
-  implements IStorageTransactionInconsistent {
-  override name = "StorageTransactionInconsistent" as const;
-
-  constructor(
-    public source: IAttestation,
-    public address: IMemoryAddress,
-    public space?: MemorySpace,
-  ) {
-    const message = [
-      `Transaction consistency violated: cannot read "${address.type}" of "${address.id}" at "${
-        address.path.join(".")
-      }"`,
-      space ? ` in space "${space}"` : "",
-      `. Read operation expected an object at path "${
-        source.address.path.join(".")
-      }" but encountered: ${
-        source.value === undefined ? "undefined" : JSON.stringify(source.value)
-      }`,
-    ].join("");
-
-    super(message);
-  }
-
-  from(space: MemorySpace) {
-    return new ReadInconsistency(this.source, this.address, space);
+    // Return the same error instance as it doesn't use space in the message
+    return this;
   }
 }
 

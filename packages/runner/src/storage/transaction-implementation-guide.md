@@ -165,19 +165,48 @@ if (writer.did() !== space) {
 
 ### 2. Chronicle-Level Errors
 
-**StateInconsistency**
-(`packages/runner/src/storage/transaction/chronicle.ts:307-316`):
+**StorageTransactionInconsistent**:
 
 - Detected during invariant validation
 - Compares expected vs actual values at overlapping addresses
 - Critical for maintaining consistency guarantees
+- Indicates underlying state changed - retry needed
+
+**NotFoundError**:
+
+- Document or path doesn't exist
+- Returned when writing to nested path of non-existent document
+- Transient error - would succeed if document existed
+
+**TypeMismatchError**:
+
+- Attempting to access properties on non-objects
+- E.g., reading `"string".property` or `null.field`
+- Persistent error - will always fail unless data type changes
 
 **ReadOnlyAddressError**:
 
 - Prevents writes to `data:` URIs
 - Checked early in write path
 
-### 3. Commit Failure Modes
+### 3. Error Handling Strategy
+
+The error types follow a clear strategy:
+
+1. **Transient Errors** (may succeed on retry):
+   - `NotFoundError`: Create the missing document/path
+   - `StorageTransactionInconsistent`: Retry with updated state
+
+2. **Persistent Errors** (will always fail):
+   - `TypeMismatchError`: Data structure incompatibility
+   - `ReadOnlyAddressError`: Immutable addresses
+   - `WriteIsolationError`: Transaction design constraint
+
+3. **State Errors** (transaction unusable):
+   - `TransactionCompleteError`: Already finished
+   - `TransactionAborted`: Explicitly cancelled
+
+### 4. Commit Failure Modes
 
 The commit process (`packages/runner/src/storage/transaction.ts:260-299`) can
 fail at multiple stages:
@@ -191,6 +220,7 @@ fail at multiple stages:
    - Upstream conflicts detected
 
 3. **State update on failure**:
+
    ```typescript
    mutate(transaction, {
      status: "done",
@@ -236,7 +266,20 @@ claim(attestation: IAttestation): Result<IAttestation, IStorageTransactionIncons
 ### 2. Write Merging
 
 Novelty class (`packages/runner/src/storage/transaction/chronicle.ts:383-420`)
-intelligently merges overlapping writes:
+intelligently merges overlapping writes.
+
+**Important**: When writing to a nested path, Chronicle first checks if novelty
+contains a write that would create the document before returning NotFoundError.
+This allows operations like:
+
+```typescript
+// Create document
+tx.write({ id: "doc:1", path: [] }, { items: ["a", "b", "c"] });
+// Modify nested path in same transaction
+tx.write({ id: "doc:1", path: ["items", "1"] }, "B");
+```
+
+The write algorithm:
 
 ```typescript
 claim(invariant: IAttestation): Result<IAttestation, IStorageTransactionInconsistent> {

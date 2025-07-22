@@ -657,6 +657,7 @@ export type CommitError =
 export interface INotFoundError extends Error {
   name: "NotFoundError";
   path?: MemoryAddressPathComponent[];
+  from(space: MemorySpace): INotFoundError;
 }
 
 /**
@@ -682,13 +683,15 @@ export type ReadError =
   | INotFoundError
   | InactiveTransactionError
   | IInvalidDataURIError
-  | IUnsupportedMediaTypeError;
+  | IUnsupportedMediaTypeError
+  | ITypeMismatchError;
 
 export type WriteError =
   | INotFoundError
   | IUnsupportedMediaTypeError
   | InactiveTransactionError
-  | IReadOnlyAddressError;
+  | IReadOnlyAddressError
+  | ITypeMismatchError;
 
 export type ReaderError = InactiveTransactionError;
 
@@ -699,19 +702,6 @@ export type WriterError =
 
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
-}
-export interface INotFoundError extends Error {
-  name: "NotFoundError";
-
-  /**
-   * Source in which address could not be resolved.
-   */
-  source: IAttestation;
-
-  /**
-   * Address that we could not resolve.
-   */
-  address: IMemoryAddress;
 }
 
 /**
@@ -857,6 +847,28 @@ export interface IReadOnlyAddressError extends Error {
   address: IMemoryAddress;
 
   from(space: MemorySpace): IReadOnlyAddressError;
+}
+
+/**
+ * Error returned when attempting to access a property on a non-object value.
+ * This is different from NotFound (document doesn't exist) and Inconsistency
+ * (state changed). This error indicates a type mismatch that would persist
+ * even if the transaction were retried.
+ */
+export interface ITypeMismatchError extends Error {
+  name: "TypeMismatchError";
+
+  /**
+   * The address being accessed.
+   */
+  address: IMemoryAddress;
+
+  /**
+   * The actual type encountered.
+   */
+  actualType: string;
+
+  from(space: MemorySpace): ITypeMismatchError;
 }
 
 /**
