@@ -542,11 +542,6 @@ export class Storage implements IStorage {
     doc: DocImpl<JSONValue>,
     storageValue: StorageValue<JSONValue>,
   ) {
-    const uri = Storage.toURI(doc.entityId);
-    // Mark this doc as being processed
-    const docKey = `${doc.space}/${uri}`;
-    this.dirtyDocs.add(docKey);
-
     // Increment the counter at the start
     this.activeUpdateFromStorageCount++;
 
@@ -578,11 +573,6 @@ export class Storage implements IStorage {
         doc.sourceCell = newSourceCell;
       }
     } finally {
-      // Remove the processing flag. Do this _after_ doc.send(), so _updateDoc,
-      // which is called synchronously during that call is not going to schedule
-      // sending this back to storage.
-      this.dirtyDocs.delete(docKey);
-
       // Decrement the counter
       this.activeUpdateFromStorageCount--;
 

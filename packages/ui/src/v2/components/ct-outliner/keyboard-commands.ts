@@ -15,15 +15,7 @@ export const KeyboardCommands = {
       if (ctx.event.altKey) {
         // Alt+Up moves node up among siblings
         if (ctx.focusedNode) {
-          const result = TreeOperations.moveNodeUp(
-            ctx.component.tree,
-            ctx.focusedNode,
-          );
-          if (result.success) {
-            // Tree is mutated in place, no need to reassign
-            ctx.component.emitChange();
-            ctx.component.requestUpdate();
-          }
+          ctx.component.moveNodeUp(ctx.focusedNode);
         }
       } else {
         if (ctx.currentIndex > 0) {
@@ -42,15 +34,7 @@ export const KeyboardCommands = {
       if (ctx.event.altKey) {
         // Alt+Down moves node down among siblings
         if (ctx.focusedNode) {
-          const result = TreeOperations.moveNodeDown(
-            ctx.component.tree,
-            ctx.focusedNode,
-          );
-          if (result.success) {
-            // Tree is mutated in place, no need to reassign
-            ctx.component.emitChange();
-            ctx.component.requestUpdate();
-          }
+          ctx.component.moveNodeDown(ctx.focusedNode);
         }
       } else {
         if (ctx.currentIndex < ctx.allNodes.length - 1) {

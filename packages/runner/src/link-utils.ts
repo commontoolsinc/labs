@@ -478,13 +478,23 @@ export function createSigilLinkFromParsedLink(
  * Traverse schema and remove all asCell and asStream flags.
  */
 export function sanitizeSchemaForLinks(
+  schema: JSONSchema,
+  options?: { keepStreams?: boolean },
+): JSONSchema;
+export function sanitizeSchemaForLinks(
   schema: JSONSchema | undefined,
+  options?: { keepStreams?: boolean },
+): JSONSchema | undefined;
+export function sanitizeSchemaForLinks(
+  schema: JSONSchema | undefined,
+  options: { keepStreams?: boolean } = {},
 ): JSONSchema | undefined {
-  return recursiveStripAsCellAndStreamFromSchema(schema);
+  return recursiveStripAsCellAndStreamFromSchema(schema, options);
 }
 
 function recursiveStripAsCellAndStreamFromSchema(
   schema: any,
+  options: { keepStreams?: boolean },
 ): any {
   // Handle null/undefined/boolean schemas
   if (
@@ -498,7 +508,7 @@ function recursiveStripAsCellAndStreamFromSchema(
 
   // Remove asCell and asStream flags from this level
   delete (result as any).asCell;
-  delete (result as any).asStream;
+  if (!options.keepStreams) delete (result as any).asStream;
 
   // Recursively process all object properties
   for (const [key, value] of Object.entries(result)) {
@@ -507,12 +517,15 @@ function recursiveStripAsCellAndStreamFromSchema(
         // Handle arrays
         (result as any)[key] = value.map((item) =>
           typeof item === "object" && item !== null
-            ? recursiveStripAsCellAndStreamFromSchema(item)
+            ? recursiveStripAsCellAndStreamFromSchema(item, options)
             : item
         );
       } else {
         // Handle objects
-        (result as any)[key] = recursiveStripAsCellAndStreamFromSchema(value);
+        (result as any)[key] = recursiveStripAsCellAndStreamFromSchema(
+          value,
+          options,
+        );
       }
     }
   }

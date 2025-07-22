@@ -34,6 +34,7 @@ import {
 } from "./json-utils.ts";
 import { setValueAtPath } from "../path-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
+import { sanitizeSchemaForLinks } from "../link-utils.ts";
 
 /** Declare a recipe
  *
@@ -317,8 +318,10 @@ function factoryFromRecipe<T, R>(
   });
 
   const recipe: Recipe & toJSON = {
-    argumentSchema,
-    resultSchema,
+    argumentSchema: sanitizeSchemaForLinks(argumentSchema, {
+      keepStreams: true,
+    }),
+    resultSchema: sanitizeSchemaForLinks(resultSchema, { keepStreams: true }),
     initial,
     result,
     nodes: serializedNodes,

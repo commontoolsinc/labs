@@ -192,7 +192,7 @@ describe("module", () => {
       expect(nodes.size).toBe(1);
       const handlerNode = [...nodes][0];
       expect((handlerNode.module as Module).wrapper).toBe("handler");
-      expect(handlerNode.inputs.elements).toBe(elements);
+      expect(handlerNode.inputs.$ctx.elements).toBe(elements);
     });
 
     it("creates a opaque ref with stream when with is called", () => {

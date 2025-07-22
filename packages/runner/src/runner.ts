@@ -8,6 +8,7 @@ import {
   type JSONSchema,
   type JSONValue,
   type Module,
+  NAME,
   type NodeFactory,
   type Recipe,
   TYPE,
@@ -37,6 +38,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
+import { deepEqual } from "./path-utils.ts";
 import { sendValueToBinding } from "./recipe-binding.ts";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { LINK_V1_TAG, SigilLink } from "./sigil-types.ts";
@@ -250,14 +252,20 @@ export class Runner implements IRunner {
       );
     }
 
-    // Send "query" to results to the result doc only on initial run or if recipe
-    // changed. This preserves user modifications like renamed charms.
-    if (recipeChanged) {
-      // TODO(seefeld): Be smarter about merging in case result changed. But since
-      // we don't yet update recipes, this isn't urgent yet.
-      resultCell.withTx(tx).setRaw(
-        unwrapOneLevelAndBindtoDoc<R, any>(recipe.result as R, processCell),
-      );
+    // Send "query" to results to the result doc only on initial run or if
+    // recipe changed. This preserves user modifications like renamed charms.
+    let result = unwrapOneLevelAndBindtoDoc<R, any>(
+      recipe.result as R,
+      processCell,
+    );
+    const previousResult = resultCell.withTx(tx).getRaw({
+      meta: ignoreReadForScheduling,
+    });
+    if (isRecord(previousResult) && previousResult[NAME]) {
+      result = { ...result, [NAME]: previousResult[NAME] };
+    }
+    if (!deepEqual(result, previousResult)) {
+      resultCell.withTx(tx).setRaw(result);
     }
 
     // [unsafe closures:] For recipes from closures, add a materialize factory
@@ -1060,5 +1068,5 @@ export function mergeObjects<T>(
 
 const moduleWrappers = {
   handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn.bind(props)(props.$event, props),
+    fn.bind(props.$ctx)(props.$event, props.$ctx),
 };

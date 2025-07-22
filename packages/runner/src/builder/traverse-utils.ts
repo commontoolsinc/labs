@@ -15,25 +15,32 @@ import {
  * @returns Transformed value
  */
 export function traverseValue(
-  value: Opaque<any>,
+  unprocessedValue: Opaque<any>,
   fn: (value: any) => any,
+  seen: Set<Opaque<any>> = new Set(),
 ): any {
   // Perform operation, replaces value if non-undefined is returned
-  const result = fn(value);
-  if (result !== undefined) value = result;
+  const result = fn(unprocessedValue);
+  const value = result !== undefined ? result : unprocessedValue;
+
+  // Prevent infinite recursion
+  if (seen.has(value) || seen.has(result)) return value;
+  if (isRecord(result)) seen.add(result);
+  else if (isRecord(unprocessedValue)) seen.add(unprocessedValue);
 
   // Traverse value
   if (Array.isArray(value)) {
-    return value.map((v) => traverseValue(v, fn));
+    return value.map((v) => traverseValue(v, fn, seen));
   } else if (
-    (!isOpaqueRef(value) &&
-      !canBeOpaqueRef(value) &&
-      !isShadowRef(value) &&
-      isRecord(value)) ||
-    isRecipe(value)
+    !isOpaqueRef(value) &&
+    !canBeOpaqueRef(value) &&
+    !isShadowRef(value) &&
+    (isRecord(value) || isRecipe(value))
   ) {
     return Object.fromEntries(
-      Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
+      Object.entries(value).map((
+        [key, v],
+      ) => [key, traverseValue(v, fn, seen)]),
     );
   } else return value;
 }

@@ -127,7 +127,7 @@ export function handler<E, T>(
       type: "object",
       properties: {
         $event: eventSchema ?? {},
-        ...(stateSchema?.properties ?? {}),
+        $ctx: stateSchema ?? {},
       },
     }
     : undefined;
@@ -151,7 +151,7 @@ export function handler<E, T>(
     stream.set({ $stream: true });
     const node: NodeRef = {
       module,
-      inputs: { ...(props as object), $event: stream },
+      inputs: { $ctx: props, $event: stream },
       outputs: {},
       frame: getTopFrame(),
     };

@@ -175,7 +175,7 @@ new objects when necessary.
   ```
 - `charm-link-click`: Fired when clicking charm references
   ```typescript
-  detail: { href: string, text: string, charm: CharmReference }
+  detail: { href: string, text: string, charm: Charm }
   ```
 
 ### Internal Event Flow

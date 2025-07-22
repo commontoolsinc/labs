@@ -437,7 +437,6 @@ export class Replica {
 
   // Track the causes of pending nursery changes
   private pendingNurseryChanges = new MapSet<string, string>();
-  private seenNurseryChanges = new MapSet<string, string>();
 
   constructor(
     /**
@@ -848,7 +847,6 @@ export class Replica {
           toKey(fact),
           fact.cause.toString(),
         );
-        this.seenNurseryChanges.delete(toKey(fact));
       }
 
       // Checkout current state of facts so we can compute
@@ -906,7 +904,6 @@ export class Replica {
 
       for (const fact of freshFacts) {
         this.pendingNurseryChanges.delete(toKey(fact));
-        this.seenNurseryChanges.delete(toKey(fact));
       }
     }
 
@@ -972,10 +969,7 @@ export class Replica {
       const factKey = toKey(revision);
       const factCause = revision.cause.toString();
       if (this.pendingNurseryChanges.hasValue(factKey, factCause)) {
-        this.seenNurseryChanges.add(factKey, factCause);
         this.pendingNurseryChanges.deleteValue(factKey, factCause);
-      }
-      if (this.seenNurseryChanges.hasValue(factKey, factCause)) {
         matches.add(revision);
       }
     }
@@ -990,7 +984,6 @@ export class Replica {
   reset() {
     // Clear nursery tracking
     this.pendingNurseryChanges = new MapSet<string, string>();
-    this.seenNurseryChanges = new MapSet<string, string>();
     // Clear the nursery itself
     this.nursery = new Nursery();
     // Save subscribers before clearing heap
