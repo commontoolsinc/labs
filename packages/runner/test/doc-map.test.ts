@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { createRef, type EntityId, getEntityId } from "../src/doc-map.ts";
 import { refer } from "merkle-reference";
@@ -18,7 +18,7 @@ describe("refer", () => {
   });
 });
 
-describe("cell-map", () => {
+describe("cell-map", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -30,6 +30,7 @@ describe("cell-map", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });

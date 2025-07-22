@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach } from "@std/testing/bdd";
+import { describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -20,7 +21,7 @@ const space = signer.did();
 const signer2 = await Identity.fromPassphrase("test operator 2");
 const space2 = signer2.did();
 
-describe("Cell", () => {
+describe("Cell", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -31,6 +32,7 @@ describe("Cell", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
 
     tx = runtime.edit();
@@ -241,7 +243,7 @@ describe("Cell", () => {
   });
 });
 
-describe("Cell utility functions", () => {
+describe("Cell utility functions", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -252,6 +254,7 @@ describe("Cell utility functions", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -301,7 +304,7 @@ describe("Cell utility functions", () => {
   });
 });
 
-describe("createProxy", () => {
+describe("createProxy", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -312,6 +315,7 @@ describe("createProxy", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -654,7 +658,7 @@ describe("createProxy", () => {
   });
 });
 
-describe("asCell", () => {
+describe("asCell", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -665,6 +669,7 @@ describe("asCell", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -827,7 +832,7 @@ describe("asCell", () => {
   });
 });
 
-describe("asCell with schema", () => {
+describe("asCell with schema", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -838,6 +843,7 @@ describe("asCell with schema", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -1897,7 +1903,7 @@ describe("asCell with schema", () => {
   });
 });
 
-describe("getAsLink method", () => {
+describe("getAsLink method", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -1908,6 +1914,7 @@ describe("getAsLink method", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -2154,7 +2161,7 @@ describe("getAsLink method", () => {
   });
 });
 
-describe("getAsWriteRedirectLink method", () => {
+describe("getAsWriteRedirectLink method", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -2165,6 +2172,7 @@ describe("getAsWriteRedirectLink method", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -2236,7 +2244,7 @@ describe("getAsWriteRedirectLink method", () => {
   });
 });
 
-describe("getImmutableCell", () => {
+describe("getImmutableCell", (config) => {
   describe("asCell", () => {
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
@@ -2248,6 +2256,7 @@ describe("getImmutableCell", () => {
       runtime = new Runtime({
         blobbyServerUrl: import.meta.url,
         storageManager,
+        useStorageManagerTransactions: config.useStorageManagerTransactions,
       });
       tx = runtime.edit();
     });

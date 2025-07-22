@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { Runtime } from "../src/runtime.ts";
 import { type Cell } from "../src/cell.ts";
@@ -9,7 +9,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Storage", () => {
+describe("Storage", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -23,6 +23,7 @@ describe("Storage", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
 
     tx = runtime.edit();
@@ -44,120 +45,144 @@ describe("Storage", () => {
   });
 
   describe("persistDoc", () => {
-    it("should persist a doc", async () => {
-      const testValue = { data: "test" };
-      testCell.send(testValue);
+    it.skip(
+      { useStorageManagerTransactions: true },
+      "should persist a doc",
+      async () => {
+        const testValue = { data: "test" };
+        testCell.send(testValue);
 
-      await testCell.sync();
+        await testCell.sync();
 
-      const query = storageManager
-        .mount(space)
-        .query({
-          select: { _: { "application/json": {} } },
-        });
+        const query = storageManager
+          .mount(space)
+          .query({
+            select: { _: { "application/json": {} } },
+          });
 
-      await query;
+        await query;
 
-      const [fact] = query.facts;
+        const [fact] = query.facts;
 
-      expect(fact.is).toEqual({ value: testValue });
-    });
+        expect(fact.is).toEqual({ value: testValue });
+      },
+    );
 
-    it("should persist a cells and referenced cell references within it", async () => {
-      const refCell = runtime.getCell<string>(
-        space,
-        "should persist a cells and referenced cell references within it",
-        undefined,
-        tx,
-      );
-      refCell.set("hello");
+    it.skip(
+      { useStorageManagerTransactions: true },
+      "should persist a cells and referenced cell references within it",
+      async () => {
+        const refCell = runtime.getCell<string>(
+          space,
+          "should persist a cells and referenced cell references within it",
+          undefined,
+          tx,
+        );
+        refCell.set("hello");
 
-      const testValue = {
-        data: "test",
-        ref: refCell.getAsLink(),
-      };
-      testCell.send(testValue);
+        const testValue = {
+          data: "test",
+          ref: refCell.getAsLink(),
+        };
+        testCell.send(testValue);
 
-      await testCell.sync();
+        await testCell.sync();
 
-      const entry = storageManager.open(space).get(
-        refCell.getAsNormalizedFullLink().id,
-      );
-      expect(entry?.value).toEqual("hello");
-    });
+        const entry = storageManager.open(space).get(
+          refCell.getAsNormalizedFullLink().id,
+        );
+        expect(entry?.value).toEqual("hello");
+      },
+    );
 
-    it("should persist a cells and referenced cells within it", async () => {
-      const refCell = runtime.getCell<string>(
-        space,
-        "should persist a cells and referenced cells 1",
-        undefined,
-        tx,
-      );
-      refCell.set("hello");
+    it.skip(
+      { useStorageManagerTransactions: true },
+      "should persist a cells and referenced cells within it",
+      async () => {
+        const refCell = runtime.getCell<string>(
+          space,
+          "should persist a cells and referenced cells 1",
+          undefined,
+          tx,
+        );
+        refCell.set("hello");
 
-      const testValue = {
-        data: "test",
-        otherDoc: refCell,
-      };
-      testCell.send(testValue);
+        const testValue = {
+          data: "test",
+          otherDoc: refCell,
+        };
+        testCell.send(testValue);
 
-      await testCell.sync();
+        await testCell.sync();
 
-      const refCellURI = refCell.getAsNormalizedFullLink().id;
-      const entry = storageManager.open(space).get(refCellURI);
-      expect(entry?.value).toEqual("hello");
-    });
+        const refCellURI = refCell.getAsNormalizedFullLink().id;
+        const entry = storageManager.open(space).get(refCellURI);
+        expect(entry?.value).toEqual("hello");
+      },
+    );
   });
 
   describe("doc updates", () => {
-    it("should persist doc updates", async () => {
-      await testCell.sync();
+    it.skip(
+      { useStorageManagerTransactions: true },
+      "should persist doc updates",
+      async () => {
+        await testCell.sync();
 
-      testCell.send("value 1");
-      testCell.send("value 2");
+        testCell.send("value 1");
+        testCell.send("value 2");
 
-      await runtime.storage.synced();
+        await runtime.storage.synced();
 
-      const query = storageManager
-        .mount(space)
-        .query({
-          select: { _: { "application/json": {} } },
-        });
+        const query = storageManager
+          .mount(space)
+          .query({
+            select: { _: { "application/json": {} } },
+          });
 
-      await query;
+        await query;
 
-      const [fact] = query.facts;
+        const [fact] = query.facts;
 
-      expect(fact?.is).toEqual({ value: "value 2" });
-    });
+        expect(fact?.is).toEqual({ value: "value 2" });
+      },
+    );
   });
 
   describe("syncDoc", () => {
-    it("should wait for a doc to appear", async () => {
-      let synced = false;
+    it.skip(
+      { useStorageManagerTransactions: true },
+      "should wait for a doc to appear",
+      async () => {
+        let synced = false;
 
-      const testCellURI = testCell.getAsNormalizedFullLink().id;
-      storageManager.open(space).sync(testCellURI, true).then(
-        () => (synced = true),
-      );
-      expect(synced).toBe(false);
+        const testCellURI = testCell.getAsNormalizedFullLink().id;
+        storageManager.open(space).sync(testCellURI, true).then(
+          () => (synced = true),
+        );
+        expect(synced).toBe(false);
 
-      testCell.send("test");
-      await testCell.sync();
-      expect(synced).toBe(true);
-    });
+        testCell.send("test");
+        await testCell.sync();
+        expect(synced).toBe(true);
+      },
+    );
 
-    it("should wait for a undefined doc to appear", async () => {
-      let synced = false;
-      const testCellURI = testCell.getAsNormalizedFullLink().id;
-      storageManager.open(space).sync(testCellURI, true).then(
-        () => (synced = true),
-      );
-      expect(synced).toBe(false);
+    it.skip(
+      { useStorageManagerTransactions: true },
+      "should wait for a undefined doc to appear",
+      async () => {
+        let synced = false;
+        const testCellURI = testCell.getAsNormalizedFullLink().id;
+        storageManager.open(space).sync(testCellURI, true).then(
+          () => (synced = true),
+        );
+        expect(synced).toBe(false);
 
-      await testCell.sync();
-      expect(synced).toBe(true);
-    });
+        await testCell.sync();
+        expect(synced).toBe(true);
+      },
+    );
 
     it("should wait for a undefined doc to appear with schema and double sync", async () => {
       let synced = false;
@@ -203,25 +228,29 @@ describe("Storage", () => {
   });
 
   describe("doc updates", () => {
-    it("should persist doc updates with schema", async () => {
-      await testCell.sync();
+    it.skip(
+      { useStorageManagerTransactions: true },
+      "should persist doc updates with schema",
+      async () => {
+        await testCell.sync();
 
-      testCell.send("value 1");
-      testCell.send("value 2");
+        testCell.send("value 1");
+        testCell.send("value 2");
 
-      await runtime.storage.synced();
+        await runtime.storage.synced();
 
-      const query = storageManager
-        .mount(space)
-        .query({
-          select: { _: { "application/json": {} } },
-        });
+        const query = storageManager
+          .mount(space)
+          .query({
+            select: { _: { "application/json": {} } },
+          });
 
-      await query;
+        await query;
 
-      const [fact] = query.facts;
+        const [fact] = query.facts;
 
-      expect(fact?.is).toEqual({ value: "value 2" });
-    });
+        expect(fact?.is).toEqual({ value: "value 2" });
+      },
+    );
   });
 });

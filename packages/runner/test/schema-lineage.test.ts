@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach } from "@std/testing/bdd";
+import { describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { type Cell, type JSONSchema } from "../src/builder/types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -11,7 +12,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Schema Lineage", () => {
+describe("Schema Lineage", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -25,6 +26,7 @@ describe("Schema Lineage", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
     const { commontools } = createBuilder(runtime);
@@ -248,7 +250,7 @@ describe("Schema Lineage", () => {
   });
 });
 
-describe("Schema propagation end-to-end example", () => {
+describe("Schema propagation end-to-end example", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -262,6 +264,7 @@ describe("Schema propagation end-to-end example", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
     const { commontools } = createBuilder(runtime);

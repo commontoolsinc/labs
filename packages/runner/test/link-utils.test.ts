@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import {
   areLinksSame,
@@ -22,7 +22,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("link-utils", () => {
+describe("link-utils", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -32,6 +32,7 @@ describe("link-utils", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -42,7 +43,7 @@ describe("link-utils", () => {
     await tx.commit();
   });
 
-  describe("isSigilValue", () => {
+  describe("isSigilValue", (config) => {
     it("should identify valid sigil values", () => {
       const validSigil = { "/": { someKey: "someValue" } };
       expect(isSigilValue(validSigil)).toBe(true);
@@ -119,7 +120,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("isLink", () => {
+  describe("isLink", (config) => {
     it("should identify query results as links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
       // Has to be an object, otherwise asQueryResult() returns a literal
@@ -158,7 +159,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("isWriteRedirectLink", () => {
+  describe("isWriteRedirectLink", (config) => {
     it("should identify legacy aliases as write redirect links", () => {
       const legacyAlias = { $alias: { path: ["test"] } };
       expect(isWriteRedirectLink(legacyAlias)).toBe(true);
@@ -188,7 +189,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("isLegacyAlias", () => {
+  describe("isLegacyAlias", (config) => {
     it("should identify legacy aliases", () => {
       const legacyAlias = { $alias: { path: ["test"] } };
       expect(isLegacyAlias(legacyAlias)).toBe(true);
@@ -207,7 +208,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("parseLink", () => {
+  describe("parseLink", (config) => {
     it("should parse cells to normalized links", () => {
       const cell = runtime.getCell(space, "test", undefined, tx);
       cell.set({ value: 42 });
@@ -431,7 +432,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("parseLinkOrThrow", () => {
+  describe("parseLinkOrThrow", (config) => {
     it("should return parsed link for valid links", () => {
       const cell = runtime.getCell(space, "test");
       const result = parseLinkOrThrow(cell);
@@ -447,7 +448,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("areLinksSame", () => {
+  describe("areLinksSame", (config) => {
     it("should return true for identical objects", () => {
       const cell = runtime.getCell(space, "test");
       expect(areLinksSame(cell, cell)).toBe(true);
@@ -489,7 +490,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("createSigilLinkFromParsedLink", () => {
+  describe("createSigilLinkFromParsedLink", (config) => {
     it("should create sigil link from normalized link", () => {
       const normalizedLink: NormalizedLink = {
         id: "of:test",
@@ -559,7 +560,7 @@ describe("link-utils", () => {
     });
   });
 
-  describe("stripAsCellAndStreamFromSchema", () => {
+  describe("stripAsCellAndStreamFromSchema", (config) => {
     it("should remove asCell and asStream from simple schema", () => {
       const schema = {
         type: "object",

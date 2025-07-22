@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -14,7 +14,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("Recipe Runner", () => {
+describe("Recipe Runner", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -32,6 +32,7 @@ describe("Recipe Runner", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
 
     tx = runtime.edit();
@@ -53,7 +54,7 @@ describe("Recipe Runner", () => {
     await storageManager?.close();
   });
 
-  it("should run a simple recipe", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should run a simple recipe", async () => {
     const simpleRecipe = recipe<{ value: number }>(
       "Simple Recipe",
       ({ value }) => {
@@ -77,7 +78,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
   });
 
-  it("should handle nested recipes", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle nested recipes", async () => {
     const innerRecipe = recipe<{ x: number }>("Inner Recipe", ({ x }) => {
       const squared = lift((n: number) => {
         return n * n;
@@ -111,7 +112,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 17 });
   });
 
-  it("should handle recipes with default values", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle recipes with default values", async () => {
     const recipeWithDefaults = recipe<{ a: number; b: number }>(
       "Recipe with Defaults",
       ({ a, b }) => {
@@ -154,7 +155,7 @@ describe("Recipe Runner", () => {
     expect(result2.getAsQueryResult()).toMatchObject({ sum: 30 });
   });
 
-  it("should handle recipes with map nodes", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle recipes with map nodes", async () => {
     const multipliedArray = recipe<{ values: { x: number }[] }>(
       "Multiply numbers",
       ({ values }) => {
@@ -194,7 +195,7 @@ describe("Recipe Runner", () => {
     });
   });
 
-  it("should handle recipes with map nodes with closures", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle recipes with map nodes with closures", async () => {
     const double = lift<{ x: number; factor: number }>(({ x, factor }) =>
       x * factor
     );
@@ -230,7 +231,7 @@ describe("Recipe Runner", () => {
     });
   });
 
-  it("should handle map nodes with undefined input", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle map nodes with undefined input", async () => {
     const double = lift((x: number) => x * 2);
 
     const doubleArray = recipe<{ values?: number[] }>(
@@ -259,7 +260,7 @@ describe("Recipe Runner", () => {
     expect(result.get()).toMatchObject({ doubled: [] });
   });
 
-  it("should execute handlers", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should execute handlers", async () => {
     const incHandler = handler<
       { amount: number },
       { counter: { value: number } }
@@ -294,7 +295,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
-  it("should execute handlers that use bind and this", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should execute handlers that use bind and this", async () => {
     // Switch to `function` so that we can set the type of `this`.
     const incHandler = handler<
       { amount: number },
@@ -336,7 +337,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
-  it("should execute handlers that use bind and this (no types)", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should execute handlers that use bind and this (no types)", async () => {
     // Switch to `function` so that we can set the type of `this`.
     const incHandler = handler(
       function (this: { counter: { value: number } }, { amount }) {
@@ -374,7 +375,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
-  it("should execute recipes returned by handlers", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should execute recipes returned by handlers", async () => {
     const counter = runtime.getCell<{ value: number }>(
       space,
       "should execute recipes returned by handlers 1",
@@ -444,7 +445,7 @@ describe("Recipe Runner", () => {
     ]);
   });
 
-  it("should handle recipes returned by lifted functions", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle recipes returned by lifted functions", async () => {
     const x = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 1",
@@ -539,7 +540,7 @@ describe("Recipe Runner", () => {
     });
   });
 
-  it("should support referenced modules", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should support referenced modules", async () => {
     runtime.moduleRegistry.addModuleByRef(
       "double",
       lift((x: number) => x * 2),
@@ -570,7 +571,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
   });
 
-  it("should handle schema with cell references", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle schema with cell references", async () => {
     const schema = {
       type: "object",
       properties: {
@@ -628,7 +629,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 30 });
   });
 
-  it("should handle nested cell references in schema", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle nested cell references in schema", async () => {
     const schema = {
       type: "object",
       properties: {
@@ -697,7 +698,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 3 });
   });
 
-  it("should handle dynamic cell references with schema", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle dynamic cell references with schema", async () => {
     const schema = {
       type: "object",
       properties: {
@@ -761,7 +762,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toEqual({ result: 12 });
   });
 
-  it("should execute handlers with schemas", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should execute handlers with schemas", async () => {
     const incHandler = handler<{ amount: number }, { counter: number }>(
       { type: "object", properties: { amount: { type: "number" } } },
       {
@@ -807,7 +808,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
   });
 
-  it("failed handlers should be ignored", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "failed handlers should be ignored", async () => {
     let errors = 0;
     let lastError: ErrorWithContext | undefined;
 
@@ -877,7 +878,7 @@ describe("Recipe Runner", () => {
     expect(charm.getAsQueryResult()).toMatchObject({ result: 2 });
   });
 
-  it("failed lifted functions should be ignored", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "failed lifted functions should be ignored", async () => {
     let errors = 0;
     let lastError: ErrorWithContext | undefined;
 
@@ -951,7 +952,7 @@ describe("Recipe Runner", () => {
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });
 
-  it("idle should wait for slow async lifted functions", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "idle should wait for slow async lifted functions", async () => {
     let liftCalled = false;
     let timeoutCalled = false;
 
@@ -991,7 +992,7 @@ describe("Recipe Runner", () => {
     expect(result.get()).toMatchObject({ result: 2 });
   });
 
-  it("idle should wait for slow async handlers", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "idle should wait for slow async handlers", async () => {
     let handlerCalled = false;
     let timeoutCalled = false;
 
@@ -1040,7 +1041,7 @@ describe("Recipe Runner", () => {
     expect(charm.get()).toMatchObject({ result: 10 });
   });
 
-  it("idle should not wait for deliberately async handlers and writes should fail", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "idle should not wait for deliberately async handlers and writes should fail", async () => {
     let handlerCalled = false;
     let timeoutCalled = false;
     let timeoutPromise: Promise<void> | undefined;
@@ -1095,7 +1096,7 @@ describe("Recipe Runner", () => {
     expect(charm.get()?.result).toBe(0); // No change
   });
 
-  it("should create and use a named cell inside a lift", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should create and use a named cell inside a lift", async () => {
     const wrapperRecipe = recipe<{ value: number }>(
       "Wrapper with Named Cell",
       ({ value }) => {
@@ -1153,7 +1154,7 @@ describe("Recipe Runner", () => {
     expect(tx.readValueOrThrow(ref)).toBe(10);
   });
 
-  it("should handle pushing objects that reference their containing array", async () => {
+  it.skip({ useStorageManagerTransactions: true }, "should handle pushing objects that reference their containing array", async () => {
     const addItemHandler = handler<
       { detail: { message: string } },
       { items: Array<{ title: string; items: any[] }> }

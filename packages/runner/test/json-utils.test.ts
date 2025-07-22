@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { createJsonSchema } from "../src/builder/json-utils.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -9,7 +9,7 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("createJsonSchema", () => {
+describe("createJsonSchema", (config) => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
@@ -19,6 +19,7 @@ describe("createJsonSchema", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
   });
 

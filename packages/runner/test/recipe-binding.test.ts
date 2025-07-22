@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import {
   findAllWriteRedirectCells,
@@ -14,7 +14,7 @@ import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("recipe-binding", () => {
+describe("recipe-binding", (config) => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
@@ -26,6 +26,7 @@ describe("recipe-binding", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     tx = runtime.edit();
   });
@@ -36,7 +37,7 @@ describe("recipe-binding", () => {
     await storageManager?.close();
   });
 
-  describe("sendValueToBinding", () => {
+  describe("sendValueToBinding", (config) => {
     it("should send value to a simple binding", () => {
       const testCell = runtime.getCell<{ value: number }>(
         space,
@@ -125,7 +126,7 @@ describe("recipe-binding", () => {
     });
   });
 
-  describe("mapBindingToCell", () => {
+  describe("mapBindingToCell", (config) => {
     it("should map bindings to cell aliases", () => {
       const testCell = runtime.getCell<{ a: number; b: { c: number } }>(
         space,
@@ -158,7 +159,7 @@ describe("recipe-binding", () => {
     });
   });
 
-  describe("findAllWriteRedirectCells", () => {
+  describe("findAllWriteRedirectCells", (config) => {
     it("should find a single legacy alias binding", () => {
       const testCell = runtime.getCell<{ foo: number }>(
         space,

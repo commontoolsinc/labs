@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach } from "@std/testing/bdd";
+import { describe, it } from "./helpers/tx-bdd.ts";
 import { expect } from "@std/expect";
 import { createBuilder } from "../src/builder/factory.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
@@ -10,7 +11,7 @@ import { Identity } from "@commontools/identity";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-describe("OpaqueRef Schema Support", () => {
+describe("OpaqueRef Schema Support", (config) => {
   let frame: Frame;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -27,6 +28,7 @@ describe("OpaqueRef Schema Support", () => {
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
       storageManager,
+      useStorageManagerTransactions: config.useStorageManagerTransactions,
     });
     const { commontools } = createBuilder(runtime);
     ({ recipe, cell } = commontools);
