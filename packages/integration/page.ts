@@ -8,6 +8,7 @@ import {
   Keyboard,
   Page as AstralPage,
   PageEventMap,
+  retryDeadline,
   ScreenshotOptions,
   WaitForSelectorOptions,
 } from "@astral/astral";
@@ -16,6 +17,7 @@ import { Mutable } from "@commontools/utils/types";
 import * as path from "@std/path";
 import { ensureDirSync } from "@std/fs";
 import { ConsoleMethod } from "./console.ts";
+import { query, queryAll } from "./query.ts";
 
 // To handle `console` events from `Page`, logging to outer context:
 //
@@ -210,13 +212,43 @@ export class Page extends EventTarget {
   // Passthru of `@astral/astral`'s `Page#$`
   async $(selector: string): Promise<ElementHandle | null> {
     this.checkIsOk();
-    return await this.page!.$(selector);
+    // return await this.page!.$(selector);
+    // TODO(js): Temporary workaround for upstream https://github.com/lino-levan/astral/pull/166
+    const bindings = this.page!.unsafelyGetCelestialBindings();
+    const rootId = await this.#getRoot();
+    const nodeId = await query(bindings, { nodeId: rootId, selector });
+    if (!nodeId) return null;
+    return new ElementHandle(nodeId, bindings, this.page!);
   }
 
   // Passthru of `@astral/astral`'s `Page#$$`
   async $$(selector: string): Promise<ElementHandle[]> {
     this.checkIsOk();
-    return await this.page!.$$(selector);
+    //return await this.page!.$$(selector);
+    // TODO(js): Temporary workaround for upstream https://github.com/lino-levan/astral/pull/166
+    const bindings = this.page!.unsafelyGetCelestialBindings();
+    const rootId = await this.#getRoot();
+    const nodeIds = await queryAll(bindings, { nodeId: rootId, selector });
+    return nodeIds.map((nodeId) =>
+      new ElementHandle(nodeId, bindings, this.page!)
+    );
+  }
+
+  async #getRoot(): Promise<number> {
+    this.checkIsOk();
+    const bindings = this.page!.unsafelyGetCelestialBindings();
+    const doc = await retryDeadline(
+      (async () => {
+        while (true) {
+          const root = await bindings.DOM.getDocument({
+            depth: 0,
+          });
+          if (root) return root;
+        }
+      })(),
+      this.timeout,
+    );
+    return doc.root.nodeId;
   }
 
   // Passthru of `@astral/astral`'s `Page#close`
