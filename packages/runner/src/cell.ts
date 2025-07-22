@@ -7,12 +7,15 @@ import {
   ID_FIELD,
   isStreamValue,
   type JSONSchema,
+  type OpaqueRef,
   type Schema,
+  toOpaqueRef,
   TYPE,
 } from "./builder/types.ts";
 import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
 import {
   createQueryResultProxy,
+  makeOpaqueRef,
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -241,6 +244,7 @@ declare module "@commontools/api" {
     sourceURI: URI;
     path: readonly PropertyKey[];
     copyTrap: boolean;
+    [toOpaqueRef]: () => OpaqueRef<any>;
   }
 }
 
@@ -355,7 +359,9 @@ class StreamCell<T> implements Stream<T> {
   }
 
   getRaw(options?: IReadOptions): any {
-    return (this.tx?.status().status === "ready" ? this.tx : this.runtime.edit())
+    return (this.tx?.status().status === "ready"
+      ? this.tx
+      : this.runtime.edit())
       .readValueOrThrow(this.link, options);
   }
 
@@ -364,7 +370,10 @@ class StreamCell<T> implements Stream<T> {
   }
 
   getDoc(): DocImpl<any> {
-    return this.runtime.documentMap.getDocByEntityId(this.link.space, this.link.id);
+    return this.runtime.documentMap.getDocByEntityId(
+      this.link.space,
+      this.link.id,
+    );
   }
 
   withTx(_tx?: IExtendedStorageTransaction): Stream<T> {
@@ -374,7 +383,7 @@ class StreamCell<T> implements Stream<T> {
 
 class RegularCell<T> implements Cell<T> {
   private readOnlyReason: string | undefined;
-  
+
   constructor(
     public readonly runtime: IRuntime,
     private readonly link: NormalizedFullLink,
@@ -433,7 +442,8 @@ class RegularCell<T> implements Cell<T> {
       if (this.schema) {
         // Check if schema allows objects
         const allowsObject = this.schema.type === "object" ||
-          (Array.isArray(this.schema.type) && this.schema.type.includes("object")) ||
+          (Array.isArray(this.schema.type) &&
+            this.schema.type.includes("object")) ||
           (this.schema.anyOf &&
             this.schema.anyOf.some((s) =>
               typeof s === "object" && s.type === "object"
@@ -571,7 +581,10 @@ class RegularCell<T> implements Cell<T> {
     return createQueryResultProxy(
       this.runtime,
       tx ?? this.tx ?? this.runtime.edit(),
-      { ...this.link, path: [...this.path, ...subPath.map((p) => p.toString())] as string[] },
+      {
+        ...this.link,
+        path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
+      },
     );
   }
 
@@ -606,11 +619,16 @@ class RegularCell<T> implements Cell<T> {
   }
 
   getDoc(): DocImpl<any> {
-    return this.runtime.documentMap.getDocByEntityId(this.link.space, this.link.id);
+    return this.runtime.documentMap.getDocByEntityId(
+      this.link.space,
+      this.link.id,
+    );
   }
 
   getRaw(options?: IReadOptions): any {
-    return (this.tx?.status().status === "ready" ? this.tx : this.runtime.edit())
+    return (this.tx?.status().status === "ready"
+      ? this.tx
+      : this.runtime.edit())
       .readValueOrThrow(this.link, options);
   }
 
@@ -667,7 +685,8 @@ class RegularCell<T> implements Cell<T> {
 
   freeze(reason: string): void {
     this.readOnlyReason = reason;
-    this.runtime.documentMap.getDocByEntityId(this.link.space, this.link.id)?.freeze(reason);
+    this.runtime.documentMap.getDocByEntityId(this.link.space, this.link.id)
+      ?.freeze(reason);
   }
 
   isFrozen(): boolean {
@@ -678,7 +697,10 @@ class RegularCell<T> implements Cell<T> {
     // Keep old format for backward compatibility
     return {
       cell: {
-        "/": (this.link.id.startsWith("data:") ? this.link.id : fromURI(this.link.id)),
+        "/":
+          (this.link.id.startsWith("data:")
+            ? this.link.id
+            : fromURI(this.link.id)),
       },
       path: this.path as (string | number)[],
     };
@@ -702,8 +724,12 @@ class RegularCell<T> implements Cell<T> {
 
   get copyTrap(): boolean {
     throw new Error(
-      "Copy trap: Don't copy cells. Create references instead.",
+      "Copy trap: Something is trying to traverse a cell.",
     );
+  }
+
+  [toOpaqueRef](): OpaqueRef<any> {
+    return makeOpaqueRef(this.link);
   }
 }
 
