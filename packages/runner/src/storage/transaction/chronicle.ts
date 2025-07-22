@@ -71,13 +71,13 @@ export class Chronicle {
   }
 
   /**
-   * Loads a fact correstate to passed memory address from the underlying
-   * replica. If fact is not found in the replica return unclaimed state
-   * assuming no such fact exists yet.
+   * Loads the fact at the passed memory address from the underlying replica.
+   * If fact is not found in the replica, return unclaimed state assuming no
+   * such fact exists yet.
    */
   load(address: Omit<IMemoryAddress, "path">): State {
     const [the, of] = [address.type, address.id];
-    // If we have not read nor written into overlapping memory address so
+    // If we have not read nor written into overlapping memory address,
     // we'll read it from the local replica.
     return this.#replica.get({ the, of }) ?? unclaimed({ the, of });
   }
@@ -405,7 +405,7 @@ class Novelty {
       }
     }
 
-    // If we did not found any parents we may have some children
+    // If we did not find any parents we may have some children
     // that will be replaced by this invariant
     for (const candidate of candidates) {
       if (Address.includes(candidate.address, invariant.address)) {
@@ -430,7 +430,7 @@ class Novelty {
   }
 
   /**
-   * Returns changes for the fact provided address links to.
+   * Returns changes for the fact at the provided address.
    */
   select(address: IMemoryAddress) {
     return this.#model.get(`${address.id}/${address.type}`);
@@ -453,7 +453,7 @@ class Changes {
       // For exact match or if invariant is parent of requested path
       if (at.join("/").startsWith(path)) {
         const size = invariant.address.path.length;
-        if (candidate?.address?.path?.length ?? -1 < size) {
+        if ((candidate?.address?.path?.length ?? -1) < size) {
           candidate = invariant;
         }
       }
