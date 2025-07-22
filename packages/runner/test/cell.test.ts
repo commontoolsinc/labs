@@ -239,6 +239,69 @@ describe("Cell", () => {
     sourceCell.set({ foo: 456 });
     expect(retrievedSource?.get()).toEqual({ foo: 456 });
   });
+
+  it("should translate circular references into links", () => {
+    const c = runtime.getCell(
+      space,
+      "should translate circular references into links",
+      {
+        type: "object",
+        properties: {
+          x: { type: "number" },
+          y: { type: "number" },
+          z: { $ref: "#" },
+        },
+        required: ["x", "y", "z"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    const data: any = { x: 1, y: 2 };
+    data.z = data;
+    c.set(data);
+
+    const proxy = c.getAsQueryResult();
+    expect(proxy.z).toBe(proxy);
+
+    const value = c.get();
+    expect(value.z.z).toBe(value.z);
+  });
+
+  it("should translate circular references into links across cells", () => {
+    const c = runtime.getCell(
+      space,
+      "should translate circular references into links",
+      {
+        type: "object",
+        properties: {
+          list: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { parent: { $ref: "#" } },
+              asCell: true,
+              required: ["parent"],
+            },
+          },
+        },
+        required: ["list"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+    const outer: any = { list: [inner] };
+    inner.parent = outer;
+    c.set(outer);
+
+    const proxy = c.getAsQueryResult();
+    expect(proxy.list[0].parent).toBe(proxy);
+
+    const { id } = c.getAsNormalizedFullLink();
+    const innerCell = c.get().list[0];
+    const raw = innerCell.getRaw();
+    expect(raw).toMatchObject({
+      parent: { "/": { [LINK_V1_TAG]: { id } } },
+    });
+  });
 });
 
 describe("Cell utility functions", () => {

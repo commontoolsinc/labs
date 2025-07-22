@@ -381,7 +381,7 @@ class StreamCell<T> implements Stream<T> {
   }
 }
 
-class RegularCell<T> implements Cell<T> {
+export class RegularCell<T> implements Cell<T> {
   private readOnlyReason: string | undefined;
 
   constructor(
