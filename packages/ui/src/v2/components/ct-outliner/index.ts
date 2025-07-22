@@ -6,7 +6,6 @@ import { CTOutliner } from "./ct-outliner.ts";
 export { CTOutliner };
 export type {
   Attachment,
-  CharmReference,
   EditingKeyboardContext,
   EditingState,
   KeyboardCommand,
