@@ -36,7 +36,7 @@ export function applyCommand(
       next.identity = undefined;
       break;
     }
-    case "set-shell-charm-list-view": {
+    case "set-show-charm-list-view": {
       next.showShellCharmListView = command.show;
       break;
     }

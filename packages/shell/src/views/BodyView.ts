@@ -18,7 +18,7 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   activeCharmId?: string;
 
-  @property({ type: Boolean })
+  @property()
   showShellCharmListView = false;
 
   override render() {

@@ -113,7 +113,7 @@ export class XHeaderView extends BaseView {
   @state()
   private _conflicts?: InspectorConflicts;
 
-  @property({ type: Boolean })
+  @property()
   showShellCharmListView = false;
 
   private _inspectorListener = new Task(this, {

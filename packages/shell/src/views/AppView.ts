@@ -42,7 +42,7 @@ export class XAppView extends BaseView {
   private handleToggleShellCharmListView = (e: Event) => {
     const customEvent = e as CustomEvent;
     this.command({
-      type: "set-shell-charm-list-view",
+      type: "set-show-charm-list-view",
       show: customEvent.detail.show,
     });
   };
