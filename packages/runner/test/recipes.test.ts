@@ -1218,11 +1218,13 @@ describe("Recipe Runner", () => {
 
   it("should allow sending cells to an event handler", async () => {
     const addToList = handler(
+      // == { charm: Cell<any> }
       {
         type: "object",
         properties: { charm: { type: "object", asCell: true } },
         required: ["charm"],
       },
+      // == { list: Cell<any>[] }
       {
         type: "object",
         properties: {
