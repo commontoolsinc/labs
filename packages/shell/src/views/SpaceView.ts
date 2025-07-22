@@ -7,12 +7,16 @@ import { RuntimeInternals } from "../lib/runtime.ts";
 
 export class XSpaceView extends BaseView {
   static override styles = css`
+    :host {
+      display: block;
+      height: 100%;
+    }
   `;
 
   @property({ attribute: false })
   rt?: RuntimeInternals;
 
-  @state()
+  @property({ type: Boolean })
   showCharmList = false;
 
   @state()
@@ -51,11 +55,6 @@ export class XSpaceView extends BaseView {
     }
   }
 
-  onViewToggle(e: Event) {
-    e.preventDefault();
-    this.showCharmList = !this.showCharmList;
-  }
-
   override render() {
     const spaceName = this.rt
       ? this.rt.cc().manager().getSpaceName()
@@ -74,6 +73,8 @@ export class XSpaceView extends BaseView {
         <x-charm-list-view
           .charms="${charms}"
           .spaceName="${spaceName}"
+          .rt="${this.rt}"
+          @charm-removed="${() => this._charms.run()}"
         ></x-charm-list-view>
       `
       : !defaultRecipe
@@ -99,9 +100,6 @@ export class XSpaceView extends BaseView {
 
     return html`
       <v-box>
-        <button @click="${this.onViewToggle}">${this.showCharmList
-        ? "show default"
-        : "show list"}</button>
         ${inner}
       </v-box>
     `;

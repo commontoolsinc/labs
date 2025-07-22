@@ -41,6 +41,27 @@ export class XHeaderView extends BaseView {
       gap: 0.5rem;
     }
 
+    .right-section {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .emoji-button {
+      background: none;
+      border: none;
+      font-size: 1.25rem;
+      cursor: pointer;
+      padding: 0.25rem;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+      line-height: 1;
+    }
+
+    .emoji-button:hover {
+      opacity: 1;
+    }
+
     #page-title {
       font-size: 1rem;
       font-weight: 600;
@@ -91,6 +112,9 @@ export class XHeaderView extends BaseView {
 
   @state()
   private _conflicts?: InspectorConflicts;
+
+  @state()
+  showCharmList = false;
 
   private _inspectorListener = new Task(this, {
     args: () => [this.rt],
@@ -150,6 +174,19 @@ export class XHeaderView extends BaseView {
     this.command({ type: "clear-authentication" });
   }
 
+  private handleToggleClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.showCharmList = !this.showCharmList;
+    this.dispatchEvent(
+      new CustomEvent("toggle-view", {
+        detail: { showCharmList: this.showCharmList },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
   private getConnectionStatus(): ConnectionStatus {
     if (this._conflicts) {
       return "conflict";
@@ -201,13 +238,24 @@ export class XHeaderView extends BaseView {
         </div>
         ${this.identity
         ? html`
-          <x-button
-            class="auth-button"
-            size="small"
-            @click="${this.handleAuthClick}"
-          >
-            Logout
-          </x-button>
+          <div class="right-section">
+            <button
+              class="emoji-button"
+              @click="${this.handleToggleClick}"
+              title="${this.showCharmList
+            ? "Show Default Recipe"
+            : "Show All Charms"}"
+            >
+              ${this.showCharmList ? "📋" : "🔍"}
+            </button>
+            <x-button
+              class="auth-button"
+              size="small"
+              @click="${this.handleAuthClick}"
+            >
+              Logout
+            </x-button>
+          </div>
         `
         : null}
       </div>
