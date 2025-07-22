@@ -7,7 +7,7 @@
 
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.ts";
-import type { SchemaContext } from "@commontools/memory/interface";
+import type { SchemaContext, URI } from "@commontools/memory/interface";
 
 const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ||
   "http://localhost:8000";
@@ -72,16 +72,16 @@ const storageManager3 = StorageManager.open({
 });
 const provider3 = storageManager3.open(signer.did());
 console.log(`Provider3 (control) connected to memory server`);
-
+const uri: URI = `of:${TEST_DOC_ID}`;
 // Listen for updates on the test-reconnection-counter document
 // Note: this is not the schema subscription, its just a client-side listener
-provider1.sink({ "/": TEST_DOC_ID }, (value) => {
+provider1.sink(uri, (value) => {
   updateCount1++;
   updates1.push(value.value);
   console.log(`Provider1 Update #${updateCount1}:`, value.value);
 });
 
-provider3.sink({ "/": TEST_DOC_ID }, (value) => {
+provider3.sink(uri, (value) => {
   updateCount3++;
   updates3.push(value.value);
   console.log(`Provider3 Update #${updateCount3}:`, value.value);
@@ -89,13 +89,13 @@ provider3.sink({ "/": TEST_DOC_ID }, (value) => {
 
 // Establish server-side subscription with schema
 console.log("Establishing subscriptions...");
-await provider1.sync({ "/": TEST_DOC_ID }, true, testSchema);
-await provider3.sync({ "/": TEST_DOC_ID }, true, testSchema);
+await provider1.sync(uri, true, testSchema);
+await provider3.sync(uri, true, testSchema);
 
 // Send initial value to server
 console.log("Sending initial value...");
 await provider1.send([{
-  entityId: { "/": TEST_DOC_ID },
+  uri,
   value: {
     value: {
       value: 1,
@@ -155,7 +155,7 @@ console.log(`Connected to memory server as second client`);
 
 // Establish server-side subscription with schema
 console.log("Establishing subscription as second client...");
-await provider2.sync({ "/": TEST_DOC_ID }, true, testSchema);
+await provider2.sync(uri, true, testSchema);
 
 // Send test updates and check if subscription still works
 console.log("Sending test updates after disconnection...");
@@ -164,7 +164,7 @@ const intervalId = setInterval(async () => {
   try {
     // Send an update as the second
     const result = await provider2.send([{
-      entityId: { "/": TEST_DOC_ID },
+      uri,
       value: {
         value: {
           value: testValue++,

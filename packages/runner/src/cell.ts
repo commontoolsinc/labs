@@ -7,11 +7,15 @@ import {
   ID_FIELD,
   isStreamValue,
   type JSONSchema,
+  type OpaqueRef,
   type Schema,
+  toOpaqueRef,
+  TYPE,
 } from "./builder/types.ts";
 import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
 import {
   createQueryResultProxy,
+  makeOpaqueRef,
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -239,8 +243,8 @@ declare module "@commontools/api" {
     entityId: { "/": string };
     sourceURI: URI;
     path: readonly PropertyKey[];
-    [isCellMarker]: true;
     copyTrap: boolean;
+    [toOpaqueRef]: () => OpaqueRef<any>;
   }
 }
 
@@ -279,7 +283,6 @@ export interface Stream<T> {
   schema?: JSONSchema;
   rootSchema?: JSONSchema;
   runtime: IRuntime;
-  [isStreamMarker]: true;
 }
 
 export function createCell<T>(
@@ -305,307 +308,429 @@ export function createCell<T>(
   }
 
   if (isStreamValue(value)) {
-    return createStreamCell(
+    return new StreamCell(
       runtime,
       { ...resolvedLink, schema, rootSchema },
       tx,
     ) as unknown as Cell<T>;
   } else {
-    return createRegularCell(runtime, { ...link, schema, rootSchema }, tx);
+    return new RegularCell(runtime, { ...link, schema, rootSchema }, tx);
   }
 }
 
-function createStreamCell<T>(
-  runtime: IRuntime,
-  link: NormalizedFullLink,
-  tx?: IExtendedStorageTransaction,
-): Stream<T> {
-  const listeners = new Set<(event: T) => Cancel | undefined>();
+class StreamCell<T> implements Stream<T> {
+  private listeners = new Set<(event: T) => Cancel | undefined>();
+  private cleanup: Cancel | undefined;
 
-  let cleanup: Cancel | undefined;
+  constructor(
+    public readonly runtime: IRuntime,
+    private readonly link: NormalizedFullLink,
+    private readonly tx?: IExtendedStorageTransaction,
+  ) {}
 
-  const self: Stream<T> = {
-    // Implementing just the subset of Cell<T> that is needed for streams.
-    send: (event: T) => {
-      // Use runtime from doc if available
-      runtime.scheduler.queueEvent(link, event);
+  get schema(): JSONSchema | undefined {
+    return this.link.schema;
+  }
 
-      cleanup?.();
-      const [cancel, addCancel] = useCancelGroup();
-      cleanup = cancel;
+  get rootSchema(): JSONSchema | undefined {
+    return this.link.rootSchema;
+  }
 
-      listeners.forEach((callback) => addCancel(callback(event)));
-    },
-    sink: (callback: (value: T) => Cancel | undefined): Cancel => {
-      listeners.add(callback);
-      return () => listeners.delete(callback);
-    },
-    // sync: No-op for streams, but maybe eventually it might mean wait for all
-    // events to have been processed
-    sync: () => self,
-    getRaw: (options?: IReadOptions) =>
-      (tx?.status().status === "ready" ? tx : runtime.edit())
-        .readValueOrThrow(link, options),
-    getAsNormalizedFullLink: () => link,
-    getDoc: () => runtime.documentMap.getDocByEntityId(link.space, link.id),
-    withTx: (_tx?: IExtendedStorageTransaction) => self, // No-op for streams
-    schema: link.schema,
-    rootSchema: link.rootSchema,
-    [isStreamMarker]: true,
-    runtime,
-  } satisfies Stream<T>;
+  send(event: T): void {
+    // Use runtime from doc if available
+    this.runtime.scheduler.queueEvent(this.link, event);
 
-  return self;
+    this.cleanup?.();
+    const [cancel, addCancel] = useCancelGroup();
+    this.cleanup = cancel;
+
+    this.listeners.forEach((callback) => addCancel(callback(event)));
+  }
+
+  sink(callback: (value: T) => Cancel | undefined): Cancel {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  // sync: No-op for streams, but maybe eventually it might mean wait for all
+  // events to have been processed
+  sync(): Stream<T> {
+    return this;
+  }
+
+  getRaw(options?: IReadOptions): any {
+    return (this.tx?.status().status === "ready"
+      ? this.tx
+      : this.runtime.edit())
+      .readValueOrThrow(this.link, options);
+  }
+
+  getAsNormalizedFullLink(): NormalizedFullLink {
+    return this.link;
+  }
+
+  getDoc(): DocImpl<any> {
+    return this.runtime.documentMap.getDocByEntityId(
+      this.link.space,
+      this.link.id,
+    );
+  }
+
+  withTx(_tx?: IExtendedStorageTransaction): Stream<T> {
+    return this; // No-op for streams
+  }
 }
 
-function createRegularCell<T>(
-  runtime: IRuntime,
-  link: NormalizedFullLink,
-  tx?: IExtendedStorageTransaction,
-): Cell<T> {
-  const { space, path, schema, rootSchema } = link;
-  let readOnlyReason: string | undefined;
+class RegularCell<T> implements Cell<T> {
+  private readOnlyReason: string | undefined;
 
-  const self = {
-    get: () => validateAndTransform(runtime, tx, link),
-    set: (newValue: Cellify<T>) => {
-      if (!tx) throw new Error("Transaction required for set");
-      // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
-      return diffAndUpdate(
-        runtime,
-        tx,
-        resolveLinkToWriteRedirect(tx, link),
-        newValue,
-        getTopFrame()?.cause,
-      );
-    },
-    send: (newValue: Cellify<T>) => self.set(newValue),
-    update: (values: Cellify<Partial<T>>) => {
-      if (!tx) throw new Error("Transaction required for update");
-      if (!isRecord(values)) {
-        throw new Error("Can't update with non-object value");
-      }
-      // Get current value, following aliases and references
-      const resolvedLink = resolveLinkToValue(tx, link);
-      const currentValue = tx.readValueOrThrow(resolvedLink);
+  constructor(
+    public readonly runtime: IRuntime,
+    private readonly link: NormalizedFullLink,
+    public readonly tx: IExtendedStorageTransaction | undefined,
+  ) {}
 
-      // If there's no current value, initialize based on schema
-      if (currentValue === undefined) {
-        if (schema) {
-          // Check if schema allows objects
-          const allowsObject = schema.type === "object" ||
-            (Array.isArray(schema.type) && schema.type.includes("object")) ||
-            (schema.anyOf &&
-              schema.anyOf.some((s) =>
-                typeof s === "object" && s.type === "object"
-              ));
+  get space(): MemorySpace {
+    return this.link.space;
+  }
 
-          if (!allowsObject) {
-            throw new Error(
-              "Cannot update with object value - schema does not allow objects",
-            );
-          }
+  get path(): readonly PropertyKey[] {
+    return this.link.path;
+  }
+
+  get schema(): JSONSchema | undefined {
+    return this.link.schema;
+  }
+
+  get rootSchema(): JSONSchema | undefined {
+    return this.link.rootSchema;
+  }
+
+  get(): T {
+    return validateAndTransform(this.runtime, this.tx, this.link);
+  }
+
+  set(newValue: Cellify<T> | T): void {
+    if (!this.tx) throw new Error("Transaction required for set");
+    // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
+    diffAndUpdate(
+      this.runtime,
+      this.tx,
+      resolveLinkToWriteRedirect(this.tx, this.link),
+      newValue,
+      getTopFrame()?.cause,
+    );
+  }
+
+  send(newValue: Cellify<T> | T): void {
+    this.set(newValue);
+  }
+
+  update<V extends Cellify<Partial<T> | Partial<T>>>(
+    values: V extends object ? V : never,
+  ): void {
+    if (!this.tx) throw new Error("Transaction required for update");
+    if (!isRecord(values)) {
+      throw new Error("Can't update with non-object value");
+    }
+    // Get current value, following aliases and references
+    const resolvedLink = resolveLinkToValue(this.tx, this.link);
+    const currentValue = this.tx.readValueOrThrow(resolvedLink);
+
+    // If there's no current value, initialize based on schema
+    if (currentValue === undefined) {
+      if (this.schema) {
+        // Check if schema allows objects
+        const allowsObject = this.schema.type === "object" ||
+          (Array.isArray(this.schema.type) &&
+            this.schema.type.includes("object")) ||
+          (this.schema.anyOf &&
+            this.schema.anyOf.some((s) =>
+              typeof s === "object" && s.type === "object"
+            ));
+
+        if (!allowsObject) {
+          throw new Error(
+            "Cannot update with object value - schema does not allow objects",
+          );
         }
-        tx.writeValueOrThrow(resolvedLink, {});
       }
+      this.tx.writeValueOrThrow(resolvedLink, {});
+    }
 
-      // Now update each property
-      for (const [key, value] of Object.entries(values)) {
-        // Workaround for type checking, since T can be Cell<> and that's fine.
-        (self.key as any)(key).set(value);
-      }
-    },
-    push: (
-      ...values: Array<
-        | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
-        | Cell
-      >
-    ) => {
-      if (!tx) throw new Error("Transaction required for push");
+    // Now update each property
+    for (const [key, value] of Object.entries(values)) {
+      // Workaround for type checking, since T can be Cell<> and that's fine.
+      (this.key as any)(key).set(value);
+    }
+  }
 
-      // Follow aliases and references, since we want to get to an assumed
-      // existing array.
-      const resolvedLink = resolveLinkToValue(tx, link);
-      const currentValue = tx.readValueOrThrow(resolvedLink);
-      const cause = getTopFrame()?.cause;
+  push(...value: T extends Array<infer U> ? U[] : never): void;
+  push(
+    ...value: Array<
+      | (T extends Array<infer U> ? (Cellify<U> | U | DocImpl<U>) : any)
+      | Cell
+    >
+  ): void;
+  push(
+    ...value: any[]
+  ): void {
+    if (!this.tx) throw new Error("Transaction required for push");
 
-      let array = currentValue as unknown[];
-      if (array !== undefined && !Array.isArray(array)) {
-        throw new Error("Can't push into non-array value");
-      }
+    // Follow aliases and references, since we want to get to an assumed
+    // existing array.
+    const resolvedLink = resolveLinkToValue(this.tx, this.link);
+    const currentValue = this.tx.readValueOrThrow(resolvedLink);
+    const cause = getTopFrame()?.cause;
 
-      // If this is an object and it doesn't have an ID, add one.
-      const valuesToWrite = values.map((value: any) =>
-        (!isLink(value) && isObject(value) &&
-            (value as { [ID]?: unknown })[ID] === undefined && getTopFrame())
-          ? { [ID]: getTopFrame()!.generatedIdCounter++, ...value }
-          : value
-      );
+    let array = currentValue as unknown[];
+    if (array !== undefined && !Array.isArray(array)) {
+      throw new Error("Can't push into non-array value");
+    }
 
-      // If there is no array yet, create it first. We have to do this as a
-      // separate operation, so that in the next steps [ID] is properly anchored
-      // in the array.
-      if (array === undefined) {
-        diffAndUpdate(
-          runtime,
-          tx,
-          resolvedLink,
-          [],
-          cause,
-        );
-        array = Array.isArray(schema?.default) ? schema.default : [];
-      }
+    // If this is an object and it doesn't have an ID, add one.
+    const valuesToWrite = value.map((val: any) =>
+      (!isLink(val) && isObject(val) &&
+          (val as { [ID]?: unknown })[ID] === undefined && getTopFrame())
+        ? { [ID]: getTopFrame()!.generatedIdCounter++, ...val }
+        : val
+    );
 
-      // Append the new values to the array.
+    // If there is no array yet, create it first. We have to do this as a
+    // separate operation, so that in the next steps [ID] is properly anchored
+    // in the array.
+    if (array === undefined) {
       diffAndUpdate(
-        runtime,
-        tx,
+        this.runtime,
+        this.tx,
         resolvedLink,
-        [...array, ...valuesToWrite],
+        [],
         cause,
       );
-    },
-    equals: (other: any) => areLinksSame(self, other),
-    key: <K extends T extends Cell<infer S> ? keyof S : keyof T>(
-      valueKey: K,
-    ): T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]> => {
-      const childSchema = runtime.cfc.getSchemaAtPath(
-        schema,
-        [valueKey.toString()],
-        rootSchema,
-      );
-      return createCell(
-        runtime,
-        {
-          ...link,
-          path: [...path, valueKey.toString()],
-          schema: childSchema,
-        },
-        tx,
-      ) as T extends Cell<infer S> ? Cell<S[K & keyof S]> : Cell<T[K]>;
-    },
+      array = Array.isArray(this.schema?.default) ? this.schema.default : [];
+    }
 
-    asSchema: (newSchema?: JSONSchema) =>
-      createCell(
-        runtime,
-        { ...link, schema: newSchema, rootSchema: newSchema },
-        tx,
-      ),
-    withTx: (newTx?: IExtendedStorageTransaction) =>
-      createCell(runtime, link, newTx),
-    sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, runtime, link),
-    sync: () => runtime.storage.syncCell(self),
-    getAsQueryResult: (
-      subPath: PropertyKey[] = [],
-      newTx?: IExtendedStorageTransaction,
-    ) =>
-      createQueryResultProxy(
-        runtime,
-        newTx ?? tx ?? runtime.edit(),
-        { ...link, path: [...path, ...subPath.map((p) => p.toString())] },
-      ),
-    getAsNormalizedFullLink: () => link,
-    getAsLink: (
-      options?: {
-        base?: Cell<any>;
-        baseSpace?: MemorySpace;
-        includeSchema?: boolean;
+    // Append the new values to the array.
+    diffAndUpdate(
+      this.runtime,
+      this.tx,
+      resolvedLink,
+      [...array, ...valuesToWrite],
+      cause,
+    );
+  }
+
+  equals(other: any): boolean {
+    return areLinksSame(this, other);
+  }
+
+  key<K extends T extends Cell<infer S> ? keyof S : keyof T>(
+    valueKey: K,
+  ): Cell<
+    T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+  > {
+    const childSchema = this.runtime.cfc.getSchemaAtPath(
+      this.schema,
+      [valueKey.toString()],
+      this.rootSchema,
+    );
+    return createCell(
+      this.runtime,
+      {
+        ...this.link,
+        path: [...this.path, valueKey.toString()] as string[],
+        schema: childSchema,
       },
-    ): SigilLink => {
-      return createSigilLinkFromParsedLink(link, {
-        ...options,
-        overwrite: "this",
-      });
-    },
-    getAsWriteRedirectLink: (
-      options?: {
-        base?: Cell<any>;
-        baseSpace?: MemorySpace;
-        includeSchema?: boolean;
+      this.tx,
+    ) as Cell<
+      T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
+    >;
+  }
+
+  asSchema<S extends JSONSchema = JSONSchema>(
+    schema: S,
+  ): Cell<Schema<S>>;
+  asSchema<T>(
+    schema?: JSONSchema,
+  ): Cell<T>;
+  asSchema(schema?: JSONSchema): Cell<any> {
+    return createCell(
+      this.runtime,
+      { ...this.link, schema: schema, rootSchema: schema },
+      this.tx,
+    );
+  }
+
+  withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
+    return createCell(this.runtime, this.link, newTx);
+  }
+
+  sink(callback: (value: T) => Cancel | undefined): Cancel {
+    return subscribeToReferencedDocs(callback, this.runtime, this.link);
+  }
+
+  sync(): Promise<Cell<T>> | Cell<T> {
+    return this.runtime.storage.syncCell(this);
+  }
+
+  getAsQueryResult<Path extends PropertyKey[]>(
+    path?: Readonly<Path>,
+    tx?: IExtendedStorageTransaction,
+  ): QueryResult<DeepKeyLookup<T, Path>> {
+    const subPath = path || [];
+    return createQueryResultProxy(
+      this.runtime,
+      tx ?? this.tx ?? this.runtime.edit(),
+      {
+        ...this.link,
+        path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
       },
-    ): SigilWriteRedirectLink => {
-      return createSigilLinkFromParsedLink(link, {
-        ...options,
-        overwrite: "redirect",
-      }) as SigilWriteRedirectLink;
+    );
+  }
+
+  getAsNormalizedFullLink(): NormalizedFullLink {
+    return this.link;
+  }
+
+  getAsLink(
+    options?: {
+      base?: Cell<any>;
+      baseSpace?: MemorySpace;
+      includeSchema?: boolean;
     },
-    getDoc: () => runtime.documentMap.getDocByEntityId(link.space, link.id),
-    getRaw: (options?: IReadOptions) =>
-      (tx?.status().status === "ready" ? tx : runtime.edit())
-        .readValueOrThrow(link, options),
-    setRaw: (value: any) => {
-      if (!tx) throw new Error("Transaction required for setRaw");
-      tx.writeValueOrThrow(link, value);
+  ): SigilLink {
+    return createSigilLinkFromParsedLink(this.link, {
+      ...options,
+      overwrite: "this",
+    });
+  }
+
+  getAsWriteRedirectLink(
+    options?: {
+      base?: Cell<any>;
+      baseSpace?: MemorySpace;
+      includeSchema?: boolean;
     },
-    getSourceCell: (newSchema?: JSONSchema) => {
-      const sourceCellId =
-        (tx?.status().status === "ready" ? tx : runtime.edit())
-          .readOrThrow({ ...link, path: ["source"] });
-      if (!sourceCellId) return undefined;
-      return createCell(runtime, {
-        space: link.space,
-        path: [],
-        id: toURI(sourceCellId),
-        type: "application/json",
-        schema: newSchema,
-      }, tx) as Cell<any>;
-    },
-    setSourceCell: (sourceCell: Cell<any>) => {
-      if (!tx) throw new Error("Transaction required for setSourceCell");
-      const sourceLink = sourceCell.getAsNormalizedFullLink();
-      if (sourceLink.path.length > 0) {
-        throw new Error("Source cell must have empty path for now");
-      }
-      tx.writeOrThrow({ ...link, path: ["source"] }, sourceLink.id);
-    },
-    freeze: (reason: string) => {
-      readOnlyReason = reason;
-      runtime.documentMap.getDocByEntityId(link.space, link.id)?.freeze(reason);
-    },
-    isFrozen: () => !!readOnlyReason,
-    toJSON: (): LegacyJSONCellLink => // Keep old format for backward compatibility
-    ({
+  ): SigilWriteRedirectLink {
+    return createSigilLinkFromParsedLink(this.link, {
+      ...options,
+      overwrite: "redirect",
+    }) as SigilWriteRedirectLink;
+  }
+
+  getDoc(): DocImpl<any> {
+    return this.runtime.documentMap.getDocByEntityId(
+      this.link.space,
+      this.link.id,
+    );
+  }
+
+  getRaw(options?: IReadOptions): any {
+    return (this.tx?.status().status === "ready"
+      ? this.tx
+      : this.runtime.edit())
+      .readValueOrThrow(this.link, options);
+  }
+
+  setRaw(value: any): void {
+    if (!this.tx) throw new Error("Transaction required for setRaw");
+    this.tx.writeValueOrThrow(this.link, value);
+  }
+
+  getSourceCell<T>(
+    schema?: JSONSchema,
+  ):
+    | Cell<
+      & T
+      // Add default types for TYPE and `argument`. A more specific type in T will
+      // take precedence.
+      & { [TYPE]: string | undefined }
+      & ("argument" extends keyof T ? unknown : { argument: any })
+    >
+    | undefined;
+  getSourceCell<S extends JSONSchema = JSONSchema>(
+    schema: S,
+  ):
+    | Cell<
+      & Schema<S>
+      // Add default types for TYPE and `argument`. A more specific type in
+      // `schema` will take precedence.
+      & { [TYPE]: string | undefined }
+      & ("argument" extends keyof Schema<S> ? unknown
+        : { argument: any })
+    >
+    | undefined;
+  getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
+    const sourceCellId =
+      (this.tx?.status().status === "ready" ? this.tx : this.runtime.edit())
+        .readOrThrow({ ...this.link, path: ["source"] });
+    if (!sourceCellId) return undefined;
+    return createCell(this.runtime, {
+      space: this.link.space,
+      path: [],
+      id: toURI(sourceCellId),
+      type: "application/json",
+      schema: schema,
+    }, this.tx) as Cell<any>;
+  }
+
+  setSourceCell(sourceCell: Cell<any>): void {
+    if (!this.tx) throw new Error("Transaction required for setSourceCell");
+    const sourceLink = sourceCell.getAsNormalizedFullLink();
+    if (sourceLink.path.length > 0) {
+      throw new Error("Source cell must have empty path for now");
+    }
+    this.tx.writeOrThrow({ ...this.link, path: ["source"] }, sourceLink.id);
+  }
+
+  freeze(reason: string): void {
+    this.readOnlyReason = reason;
+    this.runtime.documentMap.getDocByEntityId(this.link.space, this.link.id)
+      ?.freeze(reason);
+  }
+
+  isFrozen(): boolean {
+    return !!this.readOnlyReason;
+  }
+
+  toJSON(): LegacyJSONCellLink {
+    // Keep old format for backward compatibility
+    return {
       cell: {
-        "/": (link.id.startsWith("data:") ? link.id : fromURI(link.id)),
+        "/":
+          (this.link.id.startsWith("data:")
+            ? this.link.id
+            : fromURI(this.link.id)),
       },
-      path: path as (string | number)[],
-    }),
-    get runtime(): IRuntime {
-      return runtime;
-    },
-    get tx(): IExtendedStorageTransaction | undefined {
-      return tx;
-    },
-    get value(): T {
-      return self.get();
-    },
-    get cellLink(): SigilLink {
-      return createSigilLinkFromParsedLink(link);
-    },
-    get space(): MemorySpace {
-      return space;
-    },
-    get entityId(): { "/": string } {
-      return { "/": fromURI(link.id) };
-    },
-    get sourceURI(): URI {
-      return link.id;
-    },
-    get path(): readonly PropertyKey[] {
-      return path;
-    },
-    [isCellMarker]: true,
-    get copyTrap(): boolean {
-      throw new Error(
-        "Copy trap: Don't copy cells. Create references instead.",
-      );
-    },
-    schema,
-    rootSchema,
-  } as Cell<T>;
+      path: this.path as (string | number)[],
+    };
+  }
 
-  return self;
+  get value(): T {
+    return this.get();
+  }
+
+  get cellLink(): SigilLink {
+    return createSigilLinkFromParsedLink(this.link);
+  }
+
+  get entityId(): { "/": string } {
+    return { "/": fromURI(this.link.id) };
+  }
+
+  get sourceURI(): URI {
+    return this.link.id;
+  }
+
+  get copyTrap(): boolean {
+    throw new Error(
+      "Copy trap: Something is trying to traverse a cell.",
+    );
+  }
+
+  [toOpaqueRef](): OpaqueRef<any> {
+    return makeOpaqueRef(this.link);
+  }
 }
 
 function subscribeToReferencedDocs<T>(
@@ -662,10 +787,8 @@ function subscribeToReferencedDocs<T>(
  * @returns {boolean}
  */
 export function isCell(value: any): value is Cell<any> {
-  return isRecord(value) && value[isCellMarker] === true;
+  return value instanceof RegularCell;
 }
-
-const isCellMarker = Symbol("isCell");
 
 /**
  * Type guard to check if a value is a Stream.
@@ -673,7 +796,5 @@ const isCellMarker = Symbol("isCell");
  * @returns True if the value is a Stream
  */
 export function isStream(value: any): value is Stream<any> {
-  return isRecord(value) && value[isStreamMarker] === true;
+  return value instanceof StreamCell;
 }
-
-const isStreamMarker = Symbol("isStream");

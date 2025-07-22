@@ -3,8 +3,11 @@ import { expect } from "@std/expect";
 import { assertSpyCall, assertSpyCalls, spy } from "@std/testing/mock";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Action, type EventHandler } from "../src/scheduler.ts";
-import { compactifyPaths, ignoreReadForScheduling } from "../src/scheduler.ts";
+import {
+  type Action,
+  type EventHandler,
+  ignoreReadForScheduling,
+} from "../src/scheduler.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -657,110 +660,5 @@ describe("event handling", () => {
     expect(eventResultCell.get()).toBe(2);
     expect(actionCount).toBe(3);
     expect(lastEventSeen).toBe(2);
-  });
-});
-
-describe("compactifyPaths", () => {
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let runtime: Runtime;
-  let tx: IExtendedStorageTransaction;
-
-  beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    // Create runtime with the shared storage provider
-    // We need to bypass the URL-based configuration for this test
-    runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
-      storageManager,
-    });
-    tx = runtime.edit();
-  });
-
-  afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
-  });
-
-  it("should compactify paths", () => {
-    const testCell = runtime.getCell<Record<string, any>>(
-      space,
-      "should compactify paths 1",
-      undefined,
-      tx,
-    );
-    testCell.set({});
-    const paths = [
-      testCell.key("a").key("b").getAsNormalizedFullLink(),
-      testCell.key("a").getAsNormalizedFullLink(),
-      testCell.key("c").getAsNormalizedFullLink(),
-    ];
-    const result = compactifyPaths(paths);
-    const expected = [
-      testCell.key("a").getAsNormalizedFullLink(),
-      testCell.key("c").getAsNormalizedFullLink(),
-    ];
-    expect(result).toEqual(expected);
-  });
-
-  it("should remove duplicate paths", () => {
-    const testCell = runtime.getCell<Record<string, any>>(
-      space,
-      "should remove duplicate paths 1",
-      undefined,
-      tx,
-    );
-    testCell.set({});
-    const paths = [
-      testCell.key("a").key("b").getAsNormalizedFullLink(),
-      testCell.key("a").key("b").getAsNormalizedFullLink(),
-    ];
-    const result = compactifyPaths(paths);
-    const expected = [testCell.key("a").key("b").getAsNormalizedFullLink()];
-    expect(result).toEqual(expected);
-  });
-
-  it("should not compactify across cells", () => {
-    const cellA = runtime.getCell<Record<string, any>>(
-      space,
-      "should not compactify across cells 1",
-      undefined,
-      tx,
-    );
-    cellA.set({});
-    const cellB = runtime.getCell<Record<string, any>>(
-      space,
-      "should not compactify across cells 2",
-      undefined,
-      tx,
-    );
-    cellB.set({});
-    const paths = [
-      cellA.key("a").key("b").getAsNormalizedFullLink(),
-      cellB.key("a").key("b").getAsNormalizedFullLink(),
-    ];
-    const result = compactifyPaths(paths);
-    expect(result).toEqual(paths);
-  });
-
-  it("empty paths should trump all other ones", () => {
-    const cellA = runtime.getCell<Record<string, any>>(
-      space,
-      "should remove duplicate paths 1",
-      undefined,
-      tx,
-    );
-    cellA.set({});
-
-    const expectedResult = cellA.getAsNormalizedFullLink();
-    const paths = [
-      cellA.key("a").key("b").getAsNormalizedFullLink(),
-      cellA.key("c").getAsNormalizedFullLink(),
-      cellA.key("d").getAsNormalizedFullLink(),
-      expectedResult,
-    ];
-    const result = compactifyPaths(paths);
-
-    expect(result).toEqual([expectedResult]);
   });
 });

@@ -4,8 +4,7 @@ import { Identity } from "@commontools/identity";
 import { Provider } from "../src/storage/cache.ts";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
-import type { Entity, SchemaContext } from "@commontools/memory/interface";
-import type { EntityId } from "@commontools/runner";
+import type { SchemaContext, URI } from "@commontools/memory/interface";
 import * as Subscription from "../src/storage/subscription.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -51,12 +50,12 @@ describe("Provider Reconnection", () => {
         rootSchema: { type: "object", properties: { age: { type: "number" } } },
       };
 
-      const entityId1: EntityId = { "/": "user-1" };
-      const entityId2: EntityId = { "/": "user-2" };
+      const uri1: URI = "of:user-1";
+      const uri2: URI = "of:user-2";
 
       // Initial sync to establish subscriptions
-      await provider.sync(entityId1, true, schema1);
-      await provider.sync(entityId2, true, schema2);
+      await provider.sync(uri1, true, schema1);
+      await provider.sync(uri2, true, schema2);
 
       // Override the workspace's pull function to track calls
       const pullCalls: Array<[any, any?][]> = [];
@@ -106,8 +105,8 @@ describe("Provider Reconnection", () => {
         rootSchema: { type: "object" },
       };
 
-      await provider.sync({ "/": "good-entity" }, true, schema);
-      await provider.sync({ "/": "bad-entity" }, true, schema);
+      await provider.sync("of:good-entity", true, schema);
+      await provider.sync("of:bad-entity", true, schema);
 
       // Make pull fail
       const originalPull = provider.workspace.pull.bind(provider.workspace);

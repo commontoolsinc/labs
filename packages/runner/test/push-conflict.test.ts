@@ -69,6 +69,7 @@ describe.skip("Push conflict", () => {
     );
     list.set([]);
     const listDoc = list.getDoc();
+    const listURI = list.getAsNormalizedFullLink().id;
     await list.sync();
 
     const source = session.clone();
@@ -85,15 +86,12 @@ describe.skip("Push conflict", () => {
     });
 
     // Update memory without notifying main storage
-    await memory.sync(list.entityId!, true); // Get current value
-    expect(memory.get(list.entityId!)).toEqual({ value: [] });
+    await memory.sync(listURI, true); // Get current value
+    expect(memory.get(listURI)).toEqual({ value: [] });
 
-    await memory.send([{
-      entityId: list.entityId!,
-      value: { value: [1, 2, 3] },
-    }]);
+    await memory.send([{ uri: listURI, value: { value: [1, 2, 3] } }]);
 
-    expect(memory.get(list.entityId!)).toEqual({ value: [1, 2, 3] });
+    expect(memory.get(listURI)).toEqual({ value: [1, 2, 3] });
 
     let retryCalled = false;
     listDoc.retry = [(value) => {
@@ -149,17 +147,15 @@ describe.skip("Push conflict", () => {
       subscription: Subscription.create(),
     });
 
+    const nameURI = name.getAsNormalizedFullLink().id;
+    const listURI = list.getAsNormalizedFullLink().id;
     // Update memory without notifying main storage
-    await memory.sync(name.entityId!, true); // Get current value
-    await memory.sync(list.entityId!, true); // Get current value
-    await memory.send<any>([{
-      entityId: name.entityId!,
-      value: { value: "foo" },
-    }, {
-      entityId: list.entityId!,
-      value: { value: [1, 2, 3] },
-    }]);
-
+    await memory.sync(nameURI, true); // Get current value
+    await memory.sync(listURI, true); // Get current value
+    await memory.send<any>([
+      { uri: nameURI, value: { value: "foo" } },
+      { uri: listURI, value: { value: [1, 2, 3] } },
+    ]);
     let retryCalled = 0;
     listDoc.retry = [(value) => {
       retryCalled++;
@@ -218,16 +214,15 @@ describe.skip("Push conflict", () => {
       subscription: Subscription.create(),
     });
 
+    const nameURI = name.getAsNormalizedFullLink().id;
+    const listURI = list.getAsNormalizedFullLink().id;
     // Update memory without notifying main storage
-    await memory.sync(name.entityId!, true); // Get current value
-    await memory.sync(list.entityId!, true); // Get current value
-    await memory.send<any>([{
-      entityId: name.entityId!,
-      value: { value: "foo" },
-    }, {
-      entityId: list.entityId!,
-      value: { value: [{ n: 1 }, { n: 2 }, { n: 3 }] },
-    }]);
+    await memory.sync(nameURI, true); // Get current value
+    await memory.sync(listURI, true); // Get current value
+    await memory.send<any>([
+      { uri: nameURI, value: { value: "foo" } },
+      { uri: listURI, value: { value: [{ n: 1 }, { n: 2 }, { n: 3 }] } },
+    ]);
 
     let retryCalled = 0;
     listDoc.retry = [(value) => {

@@ -22,9 +22,17 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
   IStorageSubscription,
-  IStorageSubscriptionCapability,
+  MediaType,
+  MemoryAddressPathComponent,
   Metadata,
 } from "./storage/interface.ts";
+import {
+  addressesToPathByEntity,
+  arraysOverlap,
+  determineTriggeredActions,
+  sortAndCompactPaths,
+  type SortedAndCompactPaths,
+} from "./reactive-dependencies.ts";
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -51,7 +59,8 @@ export const ignoreReadForScheduling: Metadata = {
   [ignoreReadForSchedulingMarker]: true,
 };
 
-type SpaceAndURI = `${MemorySpace}:${URI}`;
+export type SpaceAndURI = `${MemorySpace}/${URI}`;
+export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
@@ -59,9 +68,11 @@ export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
   private eventQueue: (() => any)[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
-  private dirty = new Set<SpaceAndURI>();
+  private dirty = new Set<SpaceURIAndType>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
-  private cancels = new WeakMap<Action, Cancel[]>();
+  private cancels = new WeakMap<Action, Cancel>();
+  private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
+
   private idlePromises: (() => void)[] = [];
   private loopCounter = new WeakMap<Action, number>();
   private errorHandlers = new Set<ErrorHandler>();
@@ -117,7 +128,9 @@ export class Scheduler implements IScheduler {
 
   schedule(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
-    reads.forEach((addr) => this.dirty.add(`${addr.space}:${addr.id}`));
+    reads.forEach((addr) =>
+      this.dirty.add(`${addr.space}/${addr.id}/${addr.type}`)
+    );
 
     this.queueExecution();
     this.pending.add(action);
@@ -126,7 +139,7 @@ export class Scheduler implements IScheduler {
   }
 
   unschedule(action: Action): void {
-    this.cancels.get(action)?.forEach((cancel) => cancel());
+    this.cancels.get(action)?.();
     this.cancels.delete(action);
     this.dependencies.delete(action);
     this.pending.delete(action);
@@ -134,26 +147,28 @@ export class Scheduler implements IScheduler {
 
   subscribe(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
-    // Use runtime to get docs and call .updates
-    this.cancels.set(
-      action,
-      reads.filter((addr) => !addr.id.startsWith("data:")).map((addr) => {
-        const doc = this.runtime.documentMap.getDocByEntityId(
-          addr.space,
-          addr.id,
-          true,
-        );
-        return doc.updates(
-          (_newValue: any, changedPath: readonly PropertyKey[]) => {
-            if (pathAffected(changedPath, addr.path)) {
-              this.dirty.add(`${addr.space}:${addr.id}`);
-              this.queueExecution();
-              this.pending.add(action);
-            }
-          },
-        );
-      }),
-    );
+    const pathsByEntity = addressesToPathByEntity(reads);
+    const entities = new Set<SpaceAndURI>();
+
+    for (const [spaceAndURI, paths] of pathsByEntity) {
+      entities.add(spaceAndURI);
+      if (!this.triggers.has(spaceAndURI)) {
+        this.triggers.set(spaceAndURI, new Map());
+      }
+      const pathsWithValues = paths.map((path) =>
+        [
+          "value",
+          ...path,
+        ] as readonly MemoryAddressPathComponent[]
+      );
+      this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
+    }
+    this.cancels.set(action, () => {
+      for (const spaceAndURI of entities) {
+        this.triggers.get(spaceAndURI)?.delete(action);
+      }
+    });
+
     return () => this.unschedule(action);
   }
 
@@ -243,8 +258,30 @@ export class Scheduler implements IScheduler {
    */
   private createStorageSubscription(): IStorageSubscription {
     return {
-      next(_notification) {
-        // TODO(seefeld): Implement this
+      next: (notification) => {
+        const space = notification.space;
+        if ("changes" in notification) {
+          for (const change of notification.changes) {
+            if (change.address.type !== "application/json") continue;
+            const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
+            const paths = this.triggers.get(spaceAndURI);
+            if (paths) {
+              const triggeredActions = determineTriggeredActions(
+                paths,
+                change.before,
+                change.after,
+                change.address.path,
+              );
+              for (const action of triggeredActions) {
+                this.dirty.add(
+                  `${spaceAndURI}/${change.address.type}` as SpaceURIAndType,
+                );
+                this.queueExecution();
+                this.pending.add(action);
+              }
+            }
+          }
+        }
         return { done: false };
       },
     } satisfies IStorageSubscription;
@@ -260,8 +297,8 @@ export class Scheduler implements IScheduler {
     action: Action,
     log: ReactivityLog,
   ): IMemorySpaceAddress[] {
-    const reads = compactifyPaths(log.reads);
-    const writes = compactifyPaths(log.writes);
+    const reads = sortAndCompactPaths(log.reads);
+    const writes = sortAndCompactPaths(log.writes);
     this.dependencies.set(action, { reads, writes });
     return reads;
   }
@@ -320,7 +357,7 @@ export class Scheduler implements IScheduler {
     this.pending.clear();
     this.dirty.clear();
     for (const fn of order) {
-      this.cancels.get(fn)?.forEach((cancel) => cancel());
+      this.cancels.get(fn)?.();
     }
 
     // Now run all functions. This will create new listeners to mark docs dirty
@@ -368,7 +405,9 @@ function topologicalSort(
       // Actions with no dependencies are always relevant. Note that they must
       // be manually added to `pending`, which happens only once on `schedule`.
       relevantActions.add(action);
-    } else if (reads.some((addr) => dirty.has(`${addr.space}:${addr.id}`))) {
+    } else if (
+      reads.some((addr) => dirty.has(`${addr.space}/${addr.id}/${addr.type}`))
+    ) {
       relevantActions.add(action);
     }
   }
@@ -389,7 +428,7 @@ function topologicalSort(
                   (addr) =>
                     addr.space === write.space &&
                     addr.id === write.id &&
-                    pathAffected(write.path, addr.path),
+                    arraysOverlap(write.path, addr.path),
                 )
             )
           ) {
@@ -420,7 +459,7 @@ function topologicalSort(
               (addr) =>
                 addr.space === write.space &&
                 addr.id === write.id &&
-                pathAffected(write.path, addr.path),
+                arraysOverlap(write.path, addr.path),
             )
           ) {
             graphA.add(actionB);
@@ -493,54 +532,6 @@ export function txToReactivityLog(
     }
   }
   return log;
-}
-
-// Remove longer paths already covered by shorter paths
-export function compactifyPaths(
-  entries: IMemorySpaceAddress[],
-): IMemorySpaceAddress[] {
-  // Group by space+id
-  const idToPaths = new Map<
-    SpaceAndURI,
-    { paths: (string[])[]; space: MemorySpace; id: URI }
-  >();
-  for (const entry of entries) {
-    const key = `${entry.space}:${entry.id}` as SpaceAndURI;
-    const paths = idToPaths.get(key)?.paths || [];
-    paths.push(entry.path.map((k: string | number) => k.toString()));
-    idToPaths.set(key, { paths, space: entry.space, id: entry.id });
-  }
-
-  // For each cell, sort the paths by length, then only return those that don't
-  // have a prefix earlier in the list
-  const result: IMemorySpaceAddress[] = [];
-  for (const { paths, space, id } of idToPaths.values()) {
-    paths.sort((a, b) => a.length - b.length);
-    for (let i = 0; i < paths.length; i++) {
-      const earlier = paths.slice(0, i);
-      if (earlier.some((path) => path.every((k, idx) => k === paths[i][idx]))) {
-        continue;
-      }
-      result.push({
-        space: space as any,
-        id: id as any,
-        type: "application/json",
-        path: paths[i],
-      });
-    }
-  }
-  return result;
-}
-
-function pathAffected(
-  changedPath: readonly PropertyKey[],
-  path: readonly PropertyKey[],
-) {
-  return (
-    (changedPath.length <= path.length &&
-      changedPath.every((key, index) => key === path[index])) ||
-    path.every((key, index) => key === changedPath[index])
-  );
 }
 
 function getCharmMetadataFromFrame(): {
