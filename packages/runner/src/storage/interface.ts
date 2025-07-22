@@ -5,7 +5,6 @@ import type {
   AuthorizationError as IAuthorizationError,
   ConflictError as IConflictError,
   ConnectionError as IConnectionError,
-  Entity as URI,
   Fact,
   FactAddress,
   Invariant as IClaim,
@@ -20,6 +19,7 @@ import type {
   The as MediaType,
   TransactionError,
   Unit,
+  URI,
   Variant,
 } from "@commontools/memory/interface";
 
@@ -115,24 +115,24 @@ export interface IStorageProvider {
   /**
    * Send a value to storage.
    *
-   * @param batch - Batch of entity IDs & values to send.
+   * @param batch - Batch of entity uri & values to send.
    * @returns Promise that resolves when the value is sent.
    */
   send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
+    batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<Result<Unit, Error>>;
 
   /**
    * Sync a value from storage. Use `get()` to retrieve the value.
    *
-   * @param entityId - Entity ID to sync.
+   * @param uri - uri of the entity to sync.
    * @param expectedInStorage - Wait for the value, it's assumed to be in
    *   storage eventually.
    * @param schemaContext - The schemaContext that determines what to sync.
    * @returns Promise that resolves when the value is synced.
    */
   sync(
-    entityId: EntityId | URI,
+    uri: URI,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ): Promise<Result<Unit, Error>>;
@@ -140,22 +140,19 @@ export interface IStorageProvider {
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.
    *
-   * @param entityId - Entity ID to get the value for.
+   * @param uri - uri of the entity to get the value for.
    * @returns Value or undefined if the value is not in storage.
    */
-  get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
+  get<T = any>(uri: URI): StorageValue<T> | undefined;
 
   /**
    * Subscribe to storage updates.
    *
-   * @param entityId - Entity ID to subscribe to.
+   * @param uri - uri of the entity to subscribe to.
    * @param callback - Callback function.
    * @returns Cancel function to stop the subscription.
    */
-  sink<T = any>(
-    entityId: EntityId,
-    callback: (value: StorageValue<T>) => void,
-  ): Cancel;
+  sink<T = any>(uri: URI, callback: (value: StorageValue<T>) => void): Cancel;
 
   /**
    * Destroy the storage provider. Used for tests only.
