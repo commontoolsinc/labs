@@ -16,13 +16,9 @@ export type {
   MutableTree,
   Node,
   NodeCreationOptions,
-  NodeDeletionResult,
-  OperationResult,
+  OperationResult, // Deprecated - kept for backward compatibility
   OutlinerOperations,
   Tree,
-  TreeMoveResult,
-  TreeStructureResult,
-  TreeUpdateResult,
 } from "./types.ts";
 export { TreeOperations } from "./tree-operations.ts";
 export { NodeUtils } from "./node-utils.ts";

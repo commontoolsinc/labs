@@ -54,7 +54,7 @@ describe("CTOutliner Offline Mode", () => {
 
       // Value should have been updated
       expect(outliner.value).not.toBe(originalValue);
-      expect(outliner.value.root.children[0].body).toBe("Modified");
+      expect(outliner.tree.root.children[0].body).toBe("Modified");
     });
   });
 

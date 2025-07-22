@@ -89,15 +89,21 @@ export interface OutlineUIState {
  * @description Provides type-safe access to component methods for keyboard commands.
  * This interface defines all the methods that keyboard command handlers need to
  * interact with the outliner component without tight coupling.
+ * 
+ * Uses CellController for reactive state management - tree operations automatically
+ * trigger updates without manual emitChange() calls.
  */
 export interface OutlinerOperations {
-  readonly tree: Tree;
+  readonly tree: Tree; // Access via cellController.getValue() - kept for backward compatibility
   focusedNode: Node | null;
   collapsedNodes: Set<Node>;
 
+  // Tree operations - return void as CellController handles change propagation
   deleteNode(node: Node): void;
   indentNode(node: Node): void;
   outdentNode(node: Node): void;
+  moveNodeUp(node: Node): void;
+  moveNodeDown(node: Node): void;
   indentNodeWithEditState(
     node: Node,
     editingContent: string,
@@ -108,15 +114,23 @@ export interface OutlinerOperations {
     editingContent: string,
     cursorPosition: number,
   ): void;
+  
+  // Edit operations
   startEditing(node: Node): void;
   startEditingWithInitialText(node: Node, text: string): void;
   toggleEditMode(node: Node): void;
   finishEditing(): void;
+  
+  // Node creation
   createNewNodeAfter(node: Node): void;
   createChildNode(node: Node): void;
+  
+  // UI operations
   requestUpdate(): void;
-  emitChange(): void;
   getAllVisibleNodes(): Node[];
+  
+  // Legacy method - CellController handles change events automatically
+  emitChange(): void;
 }
 
 /**
@@ -168,39 +182,12 @@ export interface NodeCreationOptions {
 
 /**
  * Result type for operations that can succeed or fail
+ * 
+ * @deprecated With CellController, operations handle their own state management
+ * and error propagation. This type is kept for backward compatibility only.
  */
 export type OperationResult<T> =
   | { readonly success: true; readonly data: T }
   | { readonly success: false; readonly error: string };
-
-/**
- * Result type for tree update operations
- */
-export type TreeUpdateResult = OperationResult<{
-  readonly tree: Tree;
-  readonly newFocusNode?: Node | null;
-}>;
-
-/**
- * Result type for tree movement operations
- */
-export type TreeMoveResult = OperationResult<{
-  readonly tree: Tree;
-}>;
-
-/**
- * Result type for node deletion operations
- */
-export type NodeDeletionResult = OperationResult<{
-  readonly tree: Tree;
-  readonly newFocusNode: Node | null;
-}>;
-
-/**
- * Result type for tree structure operations (indent/outdent)
- */
-export type TreeStructureResult = OperationResult<{
-  readonly tree: Tree;
-}>;
 
 // LegacyNodeCreationOptions removed
