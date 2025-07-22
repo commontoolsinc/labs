@@ -60,9 +60,11 @@ export async function renderCharm(
       
       // 5a. Set up monitoring for changes
       let updateCount = 0;
-      const unsubscribe = cell.sink((value) => {
+      const unsubscribe = cell.sink(async (value) => {
         if (value?.[UI]) {
           updateCount++;
+          // Wait for all runtime computations to complete
+          await manager.runtime.idle();
           const html = container.innerHTML;
           console.log(`[Update ${updateCount}] UI changed`);
           if (options.onUpdate) {
