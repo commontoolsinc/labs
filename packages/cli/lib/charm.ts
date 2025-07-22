@@ -82,7 +82,7 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
   };
 }
 
-async function loadManager(config: SpaceConfig): Promise<CharmManager> {
+export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
   const spaceName = parseSpace(config.space);
   const session = await makeSession(config);
   const runtime = new Runtime({

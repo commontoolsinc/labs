@@ -1,13 +1,22 @@
 import { render } from "@commontools/html";
-import { UI } from "@commontools/runner";
-import { inspectCharm } from "./charm.ts";
+import { Cell, UI, effect } from "@commontools/runner";
+import { inspectCharm, loadManager } from "./charm.ts";
+import { CharmsController } from "@commontools/charm/ops";
 import type { CharmConfig } from "./charm.ts";
+
+export interface RenderOptions {
+  watch?: boolean;
+  onUpdate?: (html: string) => void;
+}
 
 /**
  * Renders a charm's UI to HTML using JSDOM.
- * This is Phase 1 - static rendering only, no reactivity.
+ * Supports both static and reactive rendering with --watch mode.
  */
-export async function renderCharm(config: CharmConfig): Promise<string> {
+export async function renderCharm(
+  config: CharmConfig,
+  options: RenderOptions = {},
+): Promise<string | (() => void)> {
   // Dynamically import JSDOM to avoid top-level import issues
   const { JSDOM } = await import("npm:jsdom");
   
@@ -26,11 +35,15 @@ export async function renderCharm(config: CharmConfig): Promise<string> {
   globalThis.MutationObserver = window.MutationObserver;
   
   try {
-    // 2. Get charm data using existing inspectCharm function
-    const charmData = await inspectCharm(config);
-    const vnode = charmData.result?.[UI];
+    // 2. Get charm controller to access the Cell
+    const manager = await loadManager(config);
+    const charms = new CharmsController(manager);
+    const charm = await charms.get(config.charm);
+    const cell = charm.getCell();
     
-    if (!vnode) {
+    // Check if charm has UI
+    const staticValue = cell.get();
+    if (!staticValue?.[UI]) {
       throw new Error(`Charm ${config.charm} has no UI`);
     }
     
@@ -40,13 +53,42 @@ export async function renderCharm(config: CharmConfig): Promise<string> {
       throw new Error("Could not find root container");
     }
     
-    // 4. Render the static VNode to the container
-    render(container, vnode);
-    
-    // 5. Return the rendered HTML
-    return container.innerHTML;
+    if (options.watch) {
+      // 4a. Reactive rendering - pass the Cell directly
+      const uiCell = cell.key(UI);
+      const cancel = render(container, uiCell);
+      
+      // 5a. Set up monitoring for changes
+      let updateCount = 0;
+      const unsubscribe = cell.sink((value) => {
+        if (value?.[UI]) {
+          updateCount++;
+          const html = container.innerHTML;
+          console.log(`[Update ${updateCount}] UI changed`);
+          if (options.onUpdate) {
+            options.onUpdate(html);
+          }
+        }
+      });
+      
+      // Return cleanup function
+      return () => {
+        cancel();
+        unsubscribe();
+        window.close();
+      };
+    } else {
+      // 4b. Static rendering - render once with current value
+      const vnode = staticValue[UI];
+      render(container, vnode);
+      
+      // 5b. Return the rendered HTML
+      return container.innerHTML;
+    }
   } finally {
-    // Clean up JSDOM
-    window.close();
+    // Clean up JSDOM only in static mode
+    if (!options.watch) {
+      window.close();
+    }
   }
 }
