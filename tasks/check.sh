@@ -27,6 +27,7 @@ deno check \
   packages/memory \
   packages/runner \
   packages/seeder \
+  packages/shell \
   packages/static/*.ts \
   packages/static/scripts \
   packages/static/test \

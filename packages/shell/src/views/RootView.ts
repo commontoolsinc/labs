@@ -1,19 +1,19 @@
-import { css, html, LitElement } from "lit";
-import { ContextProvider } from "@lit/context";
+import { css, html, LitElement, PropertyValues } from "lit";
 import { applyCommand, AppState } from "../lib/app/mod.ts";
-import { appContext } from "../contexts/app.ts";
 import { SHELL_COMMAND } from "./BaseView.ts";
-import { Command, isCommand } from "../lib/commands.ts";
+import { Command, isCommand } from "../lib/app/commands.ts";
 import { API_URL } from "../lib/env.ts";
 import { AppUpdateEvent } from "../lib/app/events.ts";
-import { WorkQueue } from "../lib/queue.ts";
-import { clone, ROOT_KEY } from "../lib/app/state.ts";
+import { clone } from "../lib/app/state.ts";
 import { KeyStore } from "@commontools/identity";
+import { property, state } from "lit/decorators.js";
+import { Task } from "@lit/task";
+import { RuntimeInternals } from "../lib/runtime.ts";
 
 // The root element for the shell application.
 // Handles processing `Command`s from children elements,
 // updating the `AppState`, and providing changes
-// to children elements subscribing to app state lit context.
+// to children elements.
 export class XRootView extends LitElement {
   static override styles = css`
     :host {
@@ -35,24 +35,51 @@ export class XRootView extends LitElement {
     }
   `;
 
-  // The `@provide` decorator does not seem
-  // to support propagating reactive changes to subscribers.
-  // Directly using the ContextProvider class allows
-  // us to manually apply updates, which consumers respect.
-  private _provider = new ContextProvider(this, {
-    context: appContext,
-    initialValue: {
-      apiUrl: API_URL,
-      spaceName: "common-knowledge", // Default space
+  @state()
+  // Non-private for typing in `updated()` callback
+  _app = { apiUrl: API_URL, spaceName: "common-knowledge" } as AppState;
+
+  @property()
+  keyStore?: KeyStore;
+
+  // The runtime task runs when AppState changes, and determines
+  // if a new RuntimeInternals must be created, like when
+  // identity or space change. This is manually run in `updated()`
+  // because we want to compare to previous values, leaving this
+  // function responsible for cleaning up previous runtimes, and
+  // creating a new one.
+  private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
+    this,
+    {
+      // Do not define `args` -- this is run in "manual mode",
+      // or manually triggered from parsing `AppState` in `updated()`
+      // to determine if we need to dispose or recreate a runtime,
+      // whereas in a task we don't have access to necessary info
+      // like previous app state.
+      task: async ([app]: [AppState | undefined], { signal }) => {
+        const previous = this._rt.value;
+        if (previous) {
+          previous.dispose().catch(console.error);
+        }
+
+        if (!app || !app.spaceName || !app.identity) {
+          return undefined;
+        }
+
+        const rt = await RuntimeInternals.create({
+          identity: app.identity,
+          spaceName: app.spaceName,
+          apiUrl: app.apiUrl,
+        });
+
+        if (signal.aborted) {
+          rt.dispose().catch(console.error);
+          return;
+        }
+        return rt;
+      },
     },
-  });
-
-  #commandQueue: WorkQueue<Command>;
-
-  constructor() {
-    super();
-    this.#commandQueue = new WorkQueue(this.onCommandProcess);
-  }
+  );
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -64,75 +91,69 @@ export class XRootView extends LitElement {
     super.disconnectedCallback();
   }
 
-  onCommand = async (e: Event) => {
+  protected override updated(changedProperties: PropertyValues<this>): void {
+    if (!changedProperties.has("_app")) {
+      return;
+    }
+    const previous = changedProperties.get("_app");
+    const current = this._app;
+
+    // If the first set, or if removed, run
+    const flipState = (!previous && current) ||
+      !current;
+
+    // If host, space, or identity changes, we'll
+    // need to recreate the runtime.
+    const stateChanged = !!previous &&
+      (previous.apiUrl !== current.apiUrl ||
+        previous.spaceName !== current.spaceName ||
+        previous.identity !== current.identity);
+
+    if (flipState || stateChanged) {
+      this._rt.run([current]);
+    }
+  }
+
+  onCommand = (e: Event) => {
     const { detail: command } = e as CustomEvent;
     if (!isCommand(command)) {
       throw new Error(`Received a non-command: ${command}`);
     }
-    await this.apply(command);
+    this.processCommand(command);
   };
 
   apply(command: Command): Promise<void> {
-    return this.#commandQueue.submit(command);
+    this.processCommand(command);
+    this.requestUpdate();
+    return this.updateComplete.then((_) => undefined);
   }
 
   state(): AppState {
-    return clone(this._provider.value);
+    return clone(this._app);
   }
 
-  private onCommandProcess = async (command: Command) => {
-    console.log("[RootView] Processing command:", {
-      type: command.type,
-      hasIdentity: "identity" in command,
-      timestamp: new Date().toISOString(),
-    });
-
+  private processCommand(command: Command) {
     try {
-      // Apply command synchronously
-      const state = applyCommand(this._provider.value, command);
-
-      // Handle command-specific side effects
-      switch (command.type) {
-        case "clear-authentication": {
-          try {
-            const keyStore = await KeyStore.open();
-            await keyStore.clear();
-            console.log("[RootView] Cleared ROOT_KEY from keystore");
-          } catch (error) {
-            console.error(
-              "[RootView] Failed to clear ROOT_KEY from keystore:",
-              error,
-            );
-          }
-          break;
-        }
-        case "set-identity": {
-          console.log("[RootView] Identity set in app state:", {
-            did: state.identity?.did(),
-          });
-          break;
-        }
-      }
-
-      this._provider.setValue(state);
-
+      // Apply command synchronouslyappProvider
+      const state = applyCommand(this._app, command);
+      this._app = state;
       this.dispatchEvent(new AppUpdateEvent(command, { state }));
     } catch (e) {
       const error = e as Error;
-      console.error("[RootView] Command processing error:", {
-        command: command.type,
-        error: error.message,
-      });
       this.dispatchEvent(
         new AppUpdateEvent(command, { error: error as Error }),
       );
       throw new Error(error.message, { cause: error });
     }
-  };
+  }
 
   override render() {
     return html`
-      <x-app-view></x-app-view>
+      <x-app-view
+        .app="${this._app}"
+        .keyStore="${this.keyStore}"
+        .rt="${this._rt.value}"
+      ></x-app-view>
     `;
   }
 }

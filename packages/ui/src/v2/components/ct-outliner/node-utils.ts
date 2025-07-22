@@ -27,6 +27,8 @@ export const NodeUtils = {
 
   /**
    * Create stable index mapping for nodes (for DOM ids)
+   * Enhanced to handle CellController operations that may recreate node objects
+   * and to provide better error handling for corrupted node references
    */
   createNodeIndexer(): {
     getIndex: (node: Node) => number;
@@ -34,17 +36,79 @@ export const NodeUtils = {
     size: () => number;
   } {
     let indexMap = new WeakMap<Node, number>();
+    let fallbackMap = new Map<string, number>();
     let counter = 0;
+
+    // Create a stable key for a node based on its content and structure
+    const createNodeKey = (node: Node): string => {
+      try {
+        // Ensure we can safely access node properties
+        if (!node || typeof node !== 'object') {
+          return `invalid:${counter++}`;
+        }
+        
+        const body = typeof node.body === 'string' ? node.body : 'no-body';
+        const childrenLength = Array.isArray(node.children) ? node.children.length : 0;
+        const attachmentsLength = Array.isArray(node.attachments) ? node.attachments.length : 0;
+        
+        return `${body}:${childrenLength}:${attachmentsLength}`;
+      } catch (error) {
+        console.warn('Failed to create node key:', error);
+        return `error:${counter++}`;
+      }
+    };
+
+    const isValidWeakMapKey = (node: Node): boolean => {
+      try {
+        // Check if the node is a valid object that can be used as a WeakMap key
+        if (!node || typeof node !== 'object') {
+          return false;
+        }
+        
+        // Try to access key properties to ensure the object isn't corrupted
+        const _ = node.body;
+        const __ = node.children;
+        
+        return true;
+      } catch (error) {
+        return false;
+      }
+    };
 
     return {
       getIndex: (node: Node) => {
-        if (!indexMap.has(node)) {
-          indexMap.set(node, counter++);
+        // Validate input node
+        if (!node) {
+          console.warn('Invalid node passed to indexer');
+          return -1;
         }
-        return indexMap.get(node)!;
+
+        // First try WeakMap for optimal performance if node is valid
+        if (isValidWeakMapKey(node)) {
+          try {
+            if (indexMap.has(node)) {
+              return indexMap.get(node)!;
+            }
+
+            // Try to set in WeakMap
+            const newIndex = counter++;
+            indexMap.set(node, newIndex);
+            return newIndex;
+          } catch (error) {
+            console.warn('WeakMap operation failed, falling back to content key:', error);
+          }
+        }
+
+        // Fallback to content-based mapping for nodes that can't be WeakMap keys
+        const nodeKey = createNodeKey(node);
+        if (!fallbackMap.has(nodeKey)) {
+          fallbackMap.set(nodeKey, counter++);
+        }
+        return fallbackMap.get(nodeKey)!;
       },
       clear: () => {
         indexMap = new WeakMap();
+        fallbackMap = new Map();
         counter = 0;
       },
       size: () => counter,

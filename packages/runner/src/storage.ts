@@ -7,9 +7,8 @@ import type {
   SchemaPathSelector,
 } from "@commontools/memory/interface";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
-import { Cell, isCell, isStream } from "./cell.ts";
+import { type Cell, isCell } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
-import { type EntityId, entityIdStr } from "./doc-map.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageManager,
@@ -18,6 +17,7 @@ import type {
   Labels,
   StorageNotification,
   StorageValue,
+  URI,
 } from "./storage/interface.ts";
 import { log } from "./log.ts";
 import type { IRuntime, IStorage } from "./runtime.ts";
@@ -31,9 +31,8 @@ import { isLink } from "./link-utils.ts";
 import {
   ExtendedStorageTransaction,
   ShimStorageManager,
-  uriToEntityId,
 } from "./storage/transaction-shim.ts";
-import { toURI } from "./uri-utils.ts";
+import type { EntityId } from "./doc-map.ts";
 export type { Labels, MemorySpace };
 
 /**
@@ -78,8 +77,9 @@ export class Storage implements IStorage {
   // Resolves for the promises above.
   private loadingResolves = new Map<string, (doc: Cell<any>) => void>();
 
-  // We'll also keep track of the subscriptions for the docs
-  // These don't care about schema, and use the id from the entity id
+  // We'll also keep track of the subscriptions for the docs.
+  // These don't care about schema, and use the combination of the space and
+  // uri as the key.
   private storageToDocSubs = new Map<string, Cancel>();
   private docToStorageSubs = new Map<string, Cancel>();
 
@@ -172,6 +172,13 @@ export class Storage implements IStorage {
       };
     }
 
+    if (!this.shim) {
+      const { space, id } = cell.getAsNormalizedFullLink();
+      const storageProvider = this._getStorageProviderForSpace(space);
+      await storageProvider.sync(id, false, schemaContext);
+      return cell;
+    }
+
     const doc = cell.getDoc();
     if (!isDoc(doc)) {
       throw new Error("Invalid subject: " + JSON.stringify(doc));
@@ -198,12 +205,9 @@ export class Storage implements IStorage {
     // Start loading the doc and save the promise so we don't have more than one
     // caller loading this doc.
     const storageProvider = this._getStorageProviderForSpace(doc.space);
-    const result = await storageProvider.sync(
-      doc.entityId!,
-      false,
-      schemaContext,
-    );
+    const uri = Storage.toURI(doc.entityId);
 
+    const result = await storageProvider.sync(uri, false, schemaContext);
     if (result.error) {
       // This will be a decoupled doc that is not persisted and cannot be edited
       doc.ephemeral = true;
@@ -264,8 +268,8 @@ export class Storage implements IStorage {
       schemaContext: schemaContext,
     };
     const selectorRef = refer(JSON.stringify(selector)).toString();
-    const docId = entityIdStr(doc.entityId);
-    return `${doc.space}/${docId}/application/json:${selectorRef}`;
+    const docId = Storage.toURI(doc.entityId);
+    return `${doc.space}/${docId}/application/json?${selectorRef}`;
   }
 
   // After attempting to load the relevant documents from storage, we can
@@ -274,7 +278,7 @@ export class Storage implements IStorage {
     doc: DocImpl<T>,
     storageProvider: IStorageProvider,
     schemaContext?: SchemaContext,
-  ): Promise<EntityId[]> {
+  ): Promise<URI[]> {
     // Don't update docs while they might be updating.
     await this.runtime.scheduler.idle();
     // Don't update docs while we have pending writes to storage
@@ -282,9 +286,10 @@ export class Storage implements IStorage {
 
     // Run a schema query against our local content, so we can either send
     // the set of linked docs, or load them.
+    const uri = Storage.toURI(doc.entityId);
     const { missing, loaded, selected } = this._queryLocal(
       doc.space,
-      doc.entityId,
+      uri,
       storageProvider,
       schemaContext,
     );
@@ -292,18 +297,18 @@ export class Storage implements IStorage {
     // per-space transaction entry, and may have labels.
     // We'll also ensure we're only dealing with the entity ids that will
     // be managed in our document map.
-    const entityIds = loaded.values().map((valueEntry) => valueEntry.source)
+    const uris = loaded.values().map((valueEntry) => valueEntry.source)
       .filter((docAddr) =>
         docAddr.the === "application/json" && docAddr.of.startsWith("of:")
-      ).map((docAddr) => uriToEntityId(docAddr.of)).toArray();
+      ).map((docAddr) => docAddr.of).toArray();
 
     // It's ok to be missing the primary record (this is the case when we are
     // creating it for the first time).
     if (
       missing.length === 1 &&
-      missing[0].of === `of:${entityIdStr(doc.entityId)}`
+      missing[0].of === uri
     ) {
-      entityIds.push(uriToEntityId(missing[0].of));
+      uris.push(missing[0].of);
       // } else if (missing.length > 1) {
       //   console.debug("missing", missing);
     }
@@ -312,14 +317,11 @@ export class Storage implements IStorage {
     // First, make sure we have all these docs in the runtime document map
     // This should also handle the source docs, since they will be included
     // in our query result.
-    for (const entityId of entityIds) {
-      docMap.getDocByEntityId(doc.space, entityId, true);
+    for (const uri of uris) {
+      docMap.getDocByEntityId(doc.space, uri, true);
     }
     // Any objects that aren't on the server may need to be sent there.
-    const valuesToSend: {
-      entityId: EntityId;
-      value: StorageValue<JSONValue>;
-    }[] = [];
+    const valuesToSend: { uri: URI; value: StorageValue<JSONValue> }[] = [];
     // Now make another pass. At this point, we can leave any docs that aren't
     // in the DocumentMap alone, but set the cell to the DocImpl for the ones
     // that are present.
@@ -327,16 +329,16 @@ export class Storage implements IStorage {
     // does, but I don't think we need to do this anymore.
     // I use the storage provider to get the nursery version if it's more recent.
     // This makes it so if I have local changes, they aren't lost.
-    for (const entityId of entityIds) {
-      const storageValue = storageProvider.get<JSONValue>(entityId);
-      const newDoc = docMap.getDocByEntityId(doc.space, entityId, false)!;
+    for (const uri of uris) {
+      const storageValue = storageProvider.get<JSONValue>(uri);
+      const newDoc = docMap.getDocByEntityId(doc.space, uri, false)!;
       // We don't need to hook up ephemeral docs
       if (newDoc.ephemeral) {
         console.log(
           "Found link to ephemeral doc",
-          entityIdStr(newDoc.entityId),
+          uri,
           "from",
-          entityIdStr(doc.entityId),
+          Storage.toURI(doc.entityId),
         );
         continue;
       }
@@ -372,7 +374,7 @@ export class Storage implements IStorage {
         // The object doesn't exist in storage, but it does in the doc map
         // TODO(@ubik2): investigate labels
         // Copy the value in doc for storage, and add to the set of writes
-        valuesToSend.push({ entityId: entityId, value: docValue });
+        valuesToSend.push({ uri: uri, value: docValue });
       }
 
       // Any updates to these docs should be sent to storage, and any update
@@ -387,7 +389,7 @@ export class Storage implements IStorage {
         return [];
       }
     }
-    return entityIds;
+    return uris;
   }
   // We need to call this for all the docs that will be part of this transaction
   // This goes through the document and converts the DocImpls in CellLink objects
@@ -442,7 +444,7 @@ export class Storage implements IStorage {
   // full traversal when we don't have a schema.
   private _queryLocal(
     space: MemorySpace,
-    entityId: EntityId,
+    uri: URI,
     storageProvider: IStorageProvider,
     schemaContext: SchemaContext = { schema: true, rootSchema: true },
   ) {
@@ -452,8 +454,7 @@ export class Storage implements IStorage {
       this.runtime.documentMap,
       Storage._cellLinkToJSON,
     );
-    const idString = entityIdStr(entityId);
-    const docAddress = manager.toAddress(idString);
+    const docAddress = { of: uri, the: "application/json" };
     const selector = { path: [], schemaContext: schemaContext };
     return querySchema(selector, [], docAddress, manager);
   }
@@ -471,12 +472,11 @@ export class Storage implements IStorage {
         JSON.stringify(value),
       ],
     );
+    const uri = Storage.toURI(doc.entityId);
     const storageValue = Storage._cellLinkToJSON(doc, labels);
     const existingValue = this._getStorageProviderForSpace(doc.space).get<
       JSONValue
-    >(
-      doc.entityId,
-    );
+    >(uri);
     // If our value is the same as what storage has, we don't need to do anything.
     if (deepEqual(storageValue, existingValue)) {
       return;
@@ -485,11 +485,7 @@ export class Storage implements IStorage {
     // Track these promises for our synced call.
     // We may have linked docs that storage doesn't know about
     const storageProvider = this._getStorageProviderForSpace(doc.space);
-    const { missing } = this._queryLocal(
-      doc.space,
-      doc.entityId,
-      storageProvider,
-    );
+    const { missing } = this._queryLocal(doc.space, uri, storageProvider);
     // Any missing docs need to be linked up
     for (const factAddress of missing) {
       // missing docs have been created in our doc map, but storage doesn't
@@ -497,7 +493,7 @@ export class Storage implements IStorage {
       // TODO(@ubik2) I've lost the schema here
       const linkedDoc = this.runtime.documentMap.getDocByEntityId(
         doc.space,
-        uriToEntityId(factAddress.of),
+        factAddress.of,
       );
       // we don't need to await this, since by the time we've resolved our
       // docToStoragePromise, we'll have added the loadingPromise.
@@ -505,7 +501,7 @@ export class Storage implements IStorage {
     }
 
     // If we're already dirty, we don't need to add a promise
-    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
+    const docKey = `${doc.space}/${uri}`;
     if (this.dirtyDocs.has(docKey)) {
       return;
     }
@@ -529,17 +525,16 @@ export class Storage implements IStorage {
       await this.runtime.idle();
     }
 
-    this.dirtyDocs.delete(`${doc.space}/${toURI(doc.entityId)}`);
+    const uri = Storage.toURI(doc.entityId);
+    const docKey = `${doc.space}/${uri}`;
+    this.dirtyDocs.delete(docKey);
 
     const storageProvider = this._getStorageProviderForSpace(doc.space);
 
     // Create storage value using the helper to ensure consistency
     const storageValue = Storage._cellLinkToJSON(doc, labels);
 
-    await storageProvider.send([{
-      entityId: doc.entityId,
-      value: storageValue,
-    }]);
+    await storageProvider.send([{ uri: uri, value: storageValue }]);
   }
 
   // Update the doc with the new value we got in storage.
@@ -547,10 +542,6 @@ export class Storage implements IStorage {
     doc: DocImpl<JSONValue>,
     storageValue: StorageValue<JSONValue>,
   ) {
-    // Mark this doc as being processed
-    const docKey = `${doc.space}/${toURI(doc.entityId)}`;
-    this.dirtyDocs.add(docKey);
-
     // Increment the counter at the start
     this.activeUpdateFromStorageCount++;
 
@@ -582,11 +573,6 @@ export class Storage implements IStorage {
         doc.sourceCell = newSourceCell;
       }
     } finally {
-      // Remove the processing flag. Do this _after_ doc.send(), so _updateDoc,
-      // which is called synchronously during that call is not going to schedule
-      // sending this back to storage.
-      this.dirtyDocs.delete(docKey);
-
       // Decrement the counter
       this.activeUpdateFromStorageCount--;
 
@@ -607,20 +593,21 @@ export class Storage implements IStorage {
   private _subscribeToChanges(doc: DocImpl<any>): void {
     log(() => ["subscribe to changes", JSON.stringify(doc.entityId)]);
 
-    const docId = entityIdStr(doc.entityId);
+    const uri = Storage.toURI(doc.entityId);
+    const docKey = `${doc.space}/${uri}`;
 
     // Clear any existing subscriptions first - we only want one callback
     // and if we call syncCell multiple times, we would end up
     // with multiple subscriptions.
-    if (this.docToStorageSubs.has(docId)) {
+    if (this.docToStorageSubs.has(docKey)) {
       // Cancel any existing subscription
-      this.docToStorageSubs.get(docId)?.();
-      this.docToStorageSubs.delete(docId);
+      this.docToStorageSubs.get(docKey)?.();
+      this.docToStorageSubs.delete(docKey);
     }
-    if (this.storageToDocSubs.has(docId)) {
+    if (this.storageToDocSubs.has(docKey)) {
       // Cancel any existing subscription
-      this.storageToDocSubs.get(docId)?.();
-      this.storageToDocSubs.delete(docId);
+      this.storageToDocSubs.get(docKey)?.();
+      this.storageToDocSubs.delete(docKey);
     }
 
     // Subscribe to doc changes, send updates to storage
@@ -628,17 +615,31 @@ export class Storage implements IStorage {
       this._updateStorage(doc, value, labels)
     );
     this.addCancel(docToStorage);
-    this.docToStorageSubs.set(docId, docToStorage);
+    this.docToStorageSubs.set(docKey, docToStorage);
 
     // This will be called when we get an update from the server,
     // and merge the changes into the heap.
     const storageToDoc = this._getStorageProviderForSpace(doc.space).sink<
       JSONValue
-    >(
-      doc.entityId!,
-      async (storageValue) => await this._updateDoc(doc, storageValue),
-    );
+    >(uri, async (storageValue) => await this._updateDoc(doc, storageValue));
     this.addCancel(storageToDoc);
-    this.storageToDocSubs.set(docId, storageToDoc);
+    this.storageToDocSubs.set(docKey, storageToDoc);
+  }
+
+  static toURI(source: EntityId): URI {
+    if (typeof source["/"] === "string") {
+      return `of:${source["/"]}`;
+    } else if (source.toJSON) {
+      return `of:${source.toJSON()["/"]}`;
+    } else {
+      throw Object.assign(
+        new TypeError(
+          `💣 Got entity ID that is neither merkle reference nor {'/'}`,
+        ),
+        {
+          cause: source,
+        },
+      );
+    }
   }
 }

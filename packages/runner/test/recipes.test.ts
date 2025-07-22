@@ -1216,4 +1216,66 @@ describe("Recipe Runner", (config) => {
     // Now test that we catch infinite recursion
     expect(() => recurse(firstState)).toThrow();
   });
+
+  it("should allow sending cells to an event handler", async () => {
+    const addToList = handler(
+      // == { charm: Cell<any> }
+      {
+        type: "object",
+        properties: { charm: { type: "object", asCell: true } },
+        required: ["charm"],
+      },
+      // == { list: Cell<any>[] }
+      {
+        type: "object",
+        properties: {
+          list: {
+            type: "array",
+            items: { type: "object", asCell: true },
+            asCell: true,
+          },
+        },
+        required: ["list"],
+      },
+      ({ charm }, { list }) => {
+        list.push(charm);
+      },
+    );
+
+    const listRecipe = recipe<{ list: any[] }>(
+      "List Recipe",
+      ({ list }) => {
+        return { list, stream: addToList({ list }) };
+      },
+    );
+
+    const testCell = runtime.getCell<{ value: number }>(
+      space,
+      "should allow sending cells to an event handler",
+      undefined,
+      tx,
+    );
+
+    const charmCell = runtime.getCell(
+      space,
+      "should allow sending cells to an event handler",
+      listRecipe.resultSchema,
+      tx,
+    );
+
+    const charm = runtime.run(tx, listRecipe, { list: [] }, charmCell);
+
+    await runtime.idle();
+
+    charm.key("stream").send({ charm: testCell });
+    await runtime.idle();
+
+    // Add schema so we get the entry as a cell and can compare the two
+    const listCell = charm.key("list").asSchema({
+      type: "array",
+      items: { type: "object", asCell: true },
+    });
+    expect(isCell(listCell.get()[0])).toBe(true);
+    expect(listCell.get()[0].equals(testCell.get())).toBe(true);
+  });
 });

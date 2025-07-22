@@ -140,7 +140,7 @@ export class DocObjectManager extends ClientObjectManager {
       return rv;
     }
     // Next, check the storage provider
-    const storageEntry = this.storageProvider.get<JSONValue>(entityId);
+    const storageEntry = this.storageProvider.get<JSONValue>(doc.of);
     if (storageEntry !== undefined) {
       const valEntryValue: { value: JSONValue; source?: { "/": string } } = {
         value: storageEntry.value,

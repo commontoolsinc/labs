@@ -1,9 +1,9 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
-import { BaseView } from "../views/BaseView.ts";
-import { CharmsController } from "@commontools/charm/ops";
+import { BaseView } from "./BaseView.ts";
+import { RuntimeInternals } from "../lib/runtime.ts";
 
-export class XBodyElement extends BaseView {
+export class XBodyView extends BaseView {
   static override styles = css`
     :host {
       display: block;
@@ -13,17 +13,18 @@ export class XBodyElement extends BaseView {
   `;
 
   @property({ attribute: false })
-  cc?: CharmsController;
+  rt?: RuntimeInternals;
 
   @property({ attribute: false })
   activeCharmId?: string;
 
   override render() {
     const charmView = html`
-      <x-charm .cc="${this.cc}" .charmId="${this.activeCharmId}"></x-charm>
+      <x-charm-view .rt="${this.rt}" .charmId="${this
+        .activeCharmId}"></x-charm-view>
     `;
     const spaceView = html`
-      <x-space .cc="${this.cc}"></x-space>
+      <x-space-view .rt="${this.rt}"></x-space-view>
     `;
     const view = this.activeCharmId ? charmView : spaceView;
     return html`
@@ -32,4 +33,4 @@ export class XBodyElement extends BaseView {
   }
 }
 
-globalThis.customElements.define("x-body", XBodyElement);
+globalThis.customElements.define("x-body-view", XBodyView);
