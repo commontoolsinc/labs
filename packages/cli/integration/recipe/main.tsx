@@ -16,5 +16,11 @@ export const customRecipeExport = recipe(model, model, (cell) => {
       </div>
     ),
     value: cell.value,
+    stringField: cell.stringField,
+    numberField: cell.numberField,
+    booleanField: cell.booleanField,
+    arrayField: cell.arrayField,
+    userData: cell.userData,
+    listField: cell.listField,
   };
 });

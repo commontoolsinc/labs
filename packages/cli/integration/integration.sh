@@ -81,11 +81,11 @@ echo "Applying charm input."
 echo '{"value":5}' | ct charm apply $SPACE_ARGS --charm $CHARM_ID
 
 # get, set and then re-get a value from the charm
-echo '{"value":10}' | ct charm set $SPACE_ARGS --charm $CHARM_ID testField
+echo '10' | ct charm set $SPACE_ARGS --charm $CHARM_ID value
 
 # Verify the get returned what we expect
-RESULT=$(ct charm get $SPACE_ARGS --charm $CHARM_ID testField)
-echo '{"value":10}' | jq . > /tmp/expected.json
+RESULT=$(ct charm get $SPACE_ARGS --charm $CHARM_ID value)
+echo '10' | jq . > /tmp/expected.json
 echo "$RESULT" | jq . > /tmp/actual.json
 if ! diff -q /tmp/expected.json /tmp/actual.json > /dev/null; then
   error "Get operation did not return expected value. Expected: {\"value\":10}, Got: $RESULT"
@@ -160,7 +160,7 @@ test_json_value "Input flag set" "config" '{"inputConfig":"test"}' "--input"
 test_value "Nested input path" "config/inputConfig" '"inputValue"' '"inputValue"' "--input"
 
 # Check space has new charm with correct inputs and title
-TITLE="Simple counter 2: 5"
+TITLE="Simple counter 2: 10"
 ct charm ls $SPACE_ARGS | grep -q "$CHARM_ID $TITLE <unnamed>"
 if [ $? -ne 0 ]; then
   error "Charm did not appear in list of space charms."
