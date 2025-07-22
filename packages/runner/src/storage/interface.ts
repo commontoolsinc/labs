@@ -5,7 +5,6 @@ import type {
   AuthorizationError as IAuthorizationError,
   ConflictError as IConflictError,
   ConnectionError as IConnectionError,
-  Entity as URI,
   Fact,
   FactAddress,
   Invariant as IClaim,
@@ -20,6 +19,7 @@ import type {
   The as MediaType,
   TransactionError,
   Unit,
+  URI,
   Variant,
 } from "@commontools/memory/interface";
 

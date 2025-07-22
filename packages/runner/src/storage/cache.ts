@@ -56,6 +56,7 @@ import type {
   PushError,
   Retract,
   StorageValue,
+  URI,
 } from "./interface.ts";
 import { BaseStorageProvider } from "./base.ts";
 import * as IDB from "./idb.ts";
@@ -1322,7 +1323,7 @@ class ProviderConnection implements IStorageProvider {
   }
 
   sync(
-    entityId: EntityId | Entity,
+    entityId: EntityId | URI,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ) {
@@ -1442,7 +1443,7 @@ export class Provider implements IStorageProvider {
   }
 
   sync(
-    entityId: EntityId | Entity,
+    entityId: EntityId | URI,
     expectedInStorage?: boolean,
     schemaContext?: SchemaContext,
   ) {

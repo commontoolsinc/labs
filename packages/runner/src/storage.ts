@@ -175,11 +175,8 @@ export class Storage implements IStorage {
     if (!this.shim) {
       const { space, id } = cell.getAsNormalizedFullLink();
       const storageProvider = this._getStorageProviderForSpace(space);
-      return storageProvider.sync(
-        id,
-        false,
-        schemaContext,
-      ).then(() => cell);
+      await storageProvider.sync(id, false, schemaContext);
+      return cell;
     }
 
     const doc = cell.getDoc();
