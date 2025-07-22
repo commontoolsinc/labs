@@ -39,8 +39,6 @@ import { FocusUtils } from "./focus-utils.ts";
  * @attr {Tree | Cell<Tree>} value - Tree structure with root node or Cell containing tree
  * @attr {boolean} readonly - Whether the outliner is read-only
  * @attr {Array} mentionable - Array of mentionable items with {name, charm} structure
- * @attr {boolean} offline - Debug mode that suppresses change events and property updates
- * @attr {boolean} showDebugPanel - Controls visibility of the debug panel
  *
  * @fires ct-change - Fired when content changes with detail: { value }
  * @fires charm-link-click - Fired when a charm link is clicked with detail: { href, text, charm }
@@ -54,10 +52,6 @@ import { FocusUtils } from "./focus-utils.ts";
  * const treeCell = runtime.getCell<Tree>({ type: "tree" });
  * <ct-outliner .value=${treeCell}></ct-outliner>
  *
- * // Debug mode for development/testing:
- * <ct-outliner .value=${tree} .offline=${true} .showDebugPanel=${true}></ct-outliner>
- * // Or toggle debug panel with Ctrl/Cmd + Shift + D
- * // Debug panel includes: offline toggle, save/load JSON, and reset to clean state
  */
 
 export const OutlinerEffects = {
@@ -123,8 +117,6 @@ export class CTOutliner extends BaseElement {
     showingMentions: { type: Boolean, state: true },
     mentionQuery: { type: String, state: true },
     selectedMentionIndex: { type: Number, state: true },
-    offline: { type: Boolean, state: true },
-    showDebugPanel: { type: Boolean, state: true },
   };
 
   declare value: Tree | Cell<Tree>;
@@ -145,61 +137,6 @@ export class CTOutliner extends BaseElement {
   declare showingMentions: boolean;
   declare mentionQuery: string;
   declare selectedMentionIndex: number;
-  declare showDebugPanel: boolean;
-
-  private _offline: boolean = false;
-
-  /**
-   * Offline mode property with deep cloning when entering offline mode
-   */
-  get offline(): boolean {
-    return this._offline;
-  }
-
-  set offline(value: boolean) {
-    const wasOffline = this._offline;
-    this._offline = value;
-
-    // When entering offline mode, deep clone the tree to sever all external connections
-    if (!wasOffline && value) {
-      try {
-        // Store current tree for Cell operations tracking
-        const currentTree = this.tree;
-        
-        // Get paths before cloning for reference restoration
-        const focusedNodePath = this.focusedNode
-          ? this.getNodePath(this.focusedNode)
-          : null;
-        const collapsedNodePaths = Array.from(this.collapsedNodes).map(
-          (node) => ({
-            path: this.getNodePath(node),
-            body: node.body,
-          }),
-        ).filter((item) => item.path !== null);
-
-        // Clone the tree to create independent copy, handling potential circular references
-        const clonedTree = this.cloneTreeSafely(currentTree);
-
-        // Bind the cloned tree to CellController (this will trigger onChange but offline mode will suppress events)
-        this.cellController.bind(clonedTree);
-
-        // Update node references after cloning using the stored paths
-        this.focusedNode = focusedNodePath
-          ? this.getNodeByPath(focusedNodePath)
-          : null;
-
-        this.collapsedNodes = new Set(
-          collapsedNodePaths.map((item) => this.getNodeByPath(item.path!))
-            .filter(Boolean) as OutlineTreeNode[],
-        );
-
-        this.requestUpdate();
-      } catch (error) {
-        console.error("Failed to clone tree for offline mode:", error);
-        this._offline = false; // Revert if cloning fails
-      }
-    }
-  }
 
   private editingNode: OutlineTreeNode | null = null;
   private editingContent: string = "";
@@ -222,7 +159,6 @@ export class CTOutliner extends BaseElement {
         this.handleMentionKeyDown(event),
       handleNormalEditorKeyDown: (event: KeyboardEvent) =>
         this.handleNormalEditorKeyDown(event),
-      handleReset: () => this.handleReset(),
       getNodeIndex: (node: OutlineTreeNode) => this.getNodeIndex(node),
     };
   }
@@ -435,108 +371,6 @@ export class CTOutliner extends BaseElement {
       margin-top: 0.125rem;
     }
 
-    /* Debug panel styles */
-    .debug-panel {
-      position: absolute;
-      top: 0;
-      right: 0;
-      background: var(--background);
-      border: 1px solid var(--border);
-      border-radius: 0.25rem;
-      padding: 0.5rem;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      z-index: 1000;
-      font-size: 0.75rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      min-width: 150px;
-    }
-
-    .debug-panel-header {
-      font-weight: 600;
-      margin-bottom: 0.25rem;
-      color: var(--muted-foreground);
-    }
-
-    .debug-toggle {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .debug-toggle input[type="checkbox"] {
-      cursor: pointer;
-    }
-
-    .debug-buttons {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .debug-button {
-      padding: 0.25rem 0.5rem;
-      background: var(--muted);
-      border: 1px solid var(--border);
-      border-radius: 0.25rem;
-      cursor: pointer;
-      font-size: 0.75rem;
-      transition: background-color 0.1s;
-    }
-
-    .debug-button:hover {
-      background: var(--muted-foreground);
-      color: var(--background);
-    }
-
-    .debug-button:active {
-      transform: translateY(1px);
-    }
-
-    .debug-controls {
-      position: absolute;
-      top: 0.25rem;
-      right: 0.25rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      z-index: 999;
-    }
-
-    .debug-toggle-button {
-      width: 1.5rem;
-      height: 1.5rem;
-      background: var(--muted);
-      border: 1px solid var(--border);
-      border-radius: 0.25rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--muted-foreground);
-      transition: all 0.1s;
-    }
-
-    .debug-toggle-button:hover {
-      background: var(--muted-foreground);
-      color: var(--background);
-    }
-
-    .debug-toggle-button.active {
-      background: var(--ring);
-      color: var(--background);
-    }
-
-    .offline-indicator {
-      background: #f59e0b;
-      color: white;
-      padding: 0.125rem 0.5rem;
-      border-radius: 0.25rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-    }
   `;
 
   constructor() {
@@ -548,8 +382,6 @@ export class CTOutliner extends BaseElement {
     this.showingMentions = false;
     this.mentionQuery = "";
     this.selectedMentionIndex = 0;
-    this._offline = false;
-    this.showDebugPanel = false;
 
     // Initialize with empty tree
     this.value = TreeOperations.createEmptyTree();
@@ -558,10 +390,7 @@ export class CTOutliner extends BaseElement {
     this.cellController = createCellController<Tree>(this, {
       timing: { strategy: "immediate" },
       onChange: (newTree, oldTree) => {
-        // Only emit changes when not in offline mode
-        if (!this.offline) {
-          this.emit("ct-change", { value: newTree });
-        }
+        this.emit("ct-change", { value: newTree });
         // Handle focus restoration after tree changes
         this.focusedNode = FocusUtils.findValidFocus(newTree, this.focusedNode);
       },
@@ -599,42 +428,6 @@ export class CTOutliner extends BaseElement {
     return this.nodeIndexer.getIndex(node);
   }
 
-  /**
-   * Safely clone a tree, handling potential circular references
-   */
-  private cloneTreeSafely(tree: Tree): Tree {
-    const seen = new WeakSet();
-    
-    const cloneNode = (node: OutlineTreeNode): OutlineTreeNode => {
-      if (seen.has(node)) {
-        // Handle circular reference by creating a basic node
-        return {
-          body: "[Circular Reference]",
-          children: [],
-          attachments: []
-        };
-      }
-      
-      seen.add(node);
-      
-      const cloned: OutlineTreeNode = {
-        body: node.body || "",
-        children: [],
-        attachments: node.attachments ? [...node.attachments] : []
-      };
-      
-      // Clone children if they exist and are valid
-      if (node.children && Array.isArray(node.children)) {
-        cloned.children = node.children.map(child => cloneNode(child));
-      }
-      
-      return cloned;
-    };
-    
-    return {
-      root: cloneNode(tree.root)
-    };
-  }
 
   /**
    * Deep clone a single node and all its children
@@ -654,21 +447,19 @@ export class CTOutliner extends BaseElement {
     return cloned;
   }
 
+
+
+  // =============================================================================
+  // Cell Path Navigation Utilities
+  // =============================================================================
+
   /**
    * Get the path to a node as an array of indices from root.children
    */
   private getNodePath(targetNode: OutlineTreeNode): number[] | null {
-    // Check if it's a direct child of root
-    for (let i = 0; i < this.tree.root.children.length; i++) {
-      if (this.tree.root.children[i] === targetNode) {
-        return [i];
-      }
-    }
-
-    // Recursively search in children
     const findPath = (
       node: OutlineTreeNode,
-      currentPath: number[],
+      currentPath: number[]
     ): number[] | null => {
       for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
@@ -683,7 +474,6 @@ export class CTOutliner extends BaseElement {
           return result;
         }
       }
-
       return null;
     };
 
@@ -691,80 +481,7 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
-   * Get a node by its path in the current tree
-   */
-  private getNodeByPath(path: number[]): OutlineTreeNode | null {
-    try {
-      let currentNode = this.tree.root;
-
-      for (const index of path) {
-        if (index < currentNode.children.length) {
-          currentNode = currentNode.children[index];
-        } else {
-          return null;
-        }
-      }
-
-      return currentNode;
-    } catch (error) {
-      return null;
-    }
-  }
-
-  /**
-   * Validate and restore focus when node references become invalid due to Cell operations
-   */
-  private validateAndRestoreFocus(): void {
-    if (!this.focusedNode) {
-      // No focus to validate, try to focus first available node
-      const allNodes = this.getAllNodes();
-      if (allNodes.length > 0) {
-        this.focusedNode = allNodes[0];
-      }
-      return;
-    }
-
-    // Check if focused node still exists in the current tree
-    try {
-      const nodeExists = TreeOperations.findNode(this.tree.root, this.focusedNode);
-      if (!nodeExists) {
-        console.warn("Focused node no longer exists in tree, restoring focus");
-        // Try to find a node with the same content
-        const allNodes = this.getAllNodes();
-        const replacement = allNodes.find(node => 
-          node.body === this.focusedNode?.body
-        );
-        
-        if (replacement) {
-          this.focusedNode = replacement;
-        } else if (allNodes.length > 0) {
-          // Fall back to first available node
-          this.focusedNode = allNodes[0];
-        } else {
-          this.focusedNode = null;
-        }
-      }
-    } catch (error) {
-      console.error("Error validating focused node:", error);
-      // Safe fallback
-      const allNodes = this.getAllNodes();
-      this.focusedNode = allNodes.length > 0 ? allNodes[0] : null;
-    }
-  }
-
-  // =============================================================================
-  // Cell Path Navigation Utilities
-  // =============================================================================
-
-  /**
    * Convert a node path (array of indices) to a Cell key path
-   * @param nodePath Array of indices representing path from root.children to target node
-   * @returns Array of string keys for Cell navigation, or null if path is invalid
-   * 
-   * @example
-   * // Node at root.children[0].children[2].children[1]
-   * // nodePath: [0, 2, 1]
-   * // returns: ["root", "children", "0", "children", "2", "children", "1"]
    */
   private getNodeCellPath(node: OutlineTreeNode): string[] | null {
     const nodePath = this.getNodePath(node);
@@ -832,46 +549,6 @@ export class CTOutliner extends BaseElement {
     return this.getNodeChildrenCell(parentNode);
   }
 
-  /**
-   * Validate Cell structure integrity for debugging
-   */
-  private validateCellStructure(operationName: string): void {
-    if (!this.cellController.getCell()) return;
-
-    try {
-      const rootCell = this.cellController.getCell();
-      if (!rootCell) return;
-
-      // Check for duplicate node references across different Cell paths
-      const allNodes = this.getAllNodes();
-      const nodePathMap = new Map<OutlineTreeNode, string[]>();
-
-      for (const node of allNodes) {
-        const nodePath = this.getNodeCellPath(node);
-        if (nodePath) {
-          if (nodePathMap.has(node)) {
-            console.warn(`[${operationName}] Duplicate node reference detected:`, {
-              node: node.body,
-              existingPath: nodePathMap.get(node),
-              newPath: nodePath
-            });
-          }
-          nodePathMap.set(node, nodePath);
-        }
-      }
-
-      // Validate tree structure consistency
-      const treeNodes = TreeOperations.getAllNodes(this.tree.root);
-      if (treeNodes.length !== allNodes.length) {
-        console.warn(`[${operationName}] Tree node count mismatch:`, {
-          treeCount: treeNodes.length,
-          cellCount: allNodes.length
-        });
-      }
-    } catch (error) {
-      console.error(`[${operationName}] Cell validation failed:`, error);
-    }
-  }
 
   /**
    * Execute a Cell transaction with proper error handling and change emission
@@ -884,20 +561,15 @@ export class CTOutliner extends BaseElement {
     fallbackOperation?: () => void,
     operationName: string = "unknown"
   ): void {
-    // Pre-operation validation - temporarily disabled
-    // this.validateCellStructure(`${operationName}-before`);
-
     try {
       const rootCell = this.cellController.getCell();
       if (rootCell) {
-        console.log(`[${operationName}] Using Cell transaction`);
         // We have a Cell - use transactions
         const tx = rootCell.runtime.edit();
         cellOperation(tx);
         tx.commit();
         // CellController handles change propagation automatically
       } else {
-        console.log(`[${operationName}] Using fallback operation`);
         // We have a plain object - use fallback or execute with null tx
         if (fallbackOperation) {
           fallbackOperation();
@@ -909,129 +581,10 @@ export class CTOutliner extends BaseElement {
     } catch (error) {
       console.error(`[${operationName}] Transaction failed:`, error);
     }
-
-    // Post-operation validation and focus restoration
-    // Temporarily disabled to avoid cycle detection during Cell operations
-    setTimeout(() => {
-      // this.validateCellStructure(`${operationName}-after`);
-      // this.validateAndRestoreFocus();
-      console.log(`[${operationName}] Operation completed - validation temporarily disabled`);
-    }, 0);
   }
 
-  private handleSave() {
-    try {
-      const jsonContent = JSON.stringify(this.tree, null, 2);
-      const blob = new Blob([jsonContent], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
 
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `outliner-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
 
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error("Failed to save tree:", error);
-    }
-  }
-
-  private handleLoad() {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".json";
-
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-
-      try {
-        const text = await file.text();
-        const data = JSON.parse(text);
-
-        // Basic validation
-        if (
-          !data || typeof data !== "object" || !data.root ||
-          typeof data.root !== "object"
-        ) {
-          throw new Error("Invalid tree structure");
-        }
-
-        // Ensure root has required properties
-        if (!Array.isArray(data.root.children)) {
-          throw new Error(
-            "Invalid tree structure: root must have children array",
-          );
-        }
-
-        this.tree = data;
-        this.focusedNode = this.tree.root.children[0] || null;
-        this.requestUpdate();
-
-        // In offline mode, don't emit change
-        if (!this.offline) {
-          this.emitChange();
-        }
-      } catch (error) {
-        console.error("Failed to load tree:", error);
-        alert("Failed to load file: " + (error as Error).message);
-      }
-    };
-
-    input.click();
-  }
-
-  private handleReset() {
-    try {
-      // Reset to a clean, usable tree state
-      this.tree = {
-        root: {
-          body: "",
-          children: [
-            {
-              body: "Welcome! Start typing here...",
-              children: [],
-              attachments: [],
-            },
-            {
-              body: "Use Ctrl/Cmd + Shift + D to toggle this debug panel",
-              children: [],
-              attachments: [],
-            },
-          ],
-          attachments: [],
-        },
-      };
-
-      // Reset UI state
-      this.focusedNode = this.tree.root.children[0];
-      this.collapsedNodes = new Set();
-      this.editingNode = null;
-      this.editingContent = "";
-      this.showingMentions = false;
-      this.mentionQuery = "";
-      this.selectedMentionIndex = 0;
-
-      // Clear any indexer state
-      this.nodeIndexer = NodeUtils.createNodeIndexer();
-
-      this.requestUpdate();
-
-      // In offline mode, don't emit change
-      if (!this.offline) {
-        this.emitChange();
-      }
-
-      console.log("Tree reset to default state");
-    } catch (error) {
-      console.error("Failed to reset tree:", error);
-      // Fallback to absolute minimum state
-      this.tree = TreeOperations.createEmptyTree();
-      this.focusedNode = null;
-      this.collapsedNodes = new Set();
-      this.requestUpdate();
-    }
-  }
 
   private getAllNodes(): OutlineTreeNode[] {
     return NodeUtils.getAllNodesExcludingRoot(this.tree);
@@ -1042,10 +595,6 @@ export class CTOutliner extends BaseElement {
   }
 
   emitChange() {
-    if (this.offline) {
-      // In offline mode, don't emit changes
-      return;
-    }
     // Update the value property and let CellController handle change emission
     this.value = this.tree;
   }
@@ -1057,7 +606,7 @@ export class CTOutliner extends BaseElement {
    * @example
    * ```typescript
    * const markdown = outliner.toMarkdown();
-   * console.log(markdown); // "- Item 1\n  - Child item\n- Item 2"
+   * // Returns: "- Item 1\n  - Child item\n- Item 2"
    * ```
    */
   toMarkdown(): string {
@@ -1371,14 +920,6 @@ export class CTOutliner extends BaseElement {
   }
 
   private handleKeyDown(event: KeyboardEvent) {
-    // Check for debug panel toggle (Ctrl/Cmd + Shift + D)
-    if (
-      (event.ctrlKey || event.metaKey) && event.shiftKey && event.key === "D"
-    ) {
-      event.preventDefault();
-      this.showDebugPanel = !this.showDebugPanel;
-      return;
-    }
 
     if (this.readonly || this.editingNode) return;
 
@@ -1559,7 +1100,6 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      console.log(`[indentNode] Attempting Cell-based indent for node:`, node.body);
       
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
@@ -1570,19 +1110,16 @@ export class CTOutliner extends BaseElement {
           if (parentChildrenCell && siblingChildrenCell) {
             // Step 1: Create a deep copy of the node to move
             const nodeCopy = this.deepCloneNode(node);
-            console.log(`[indentNode] Created copy of node:`, nodeCopy.body);
             
             // Step 2: Remove from current parent
             const currentParentChildren = parentChildrenCell.get();
             const newParentChildren = currentParentChildren.filter(child => child !== node);
             parentChildrenCell.withTx(tx).set(newParentChildren);
-            console.log(`[indentNode] Removed from parent, remaining:`, newParentChildren.map(n => n.body));
             
             // Step 3: Add copy to previous sibling's children
             const currentSiblingChildren = siblingChildrenCell.get();
             const newSiblingChildren = [...currentSiblingChildren, nodeCopy];
             siblingChildrenCell.withTx(tx).set(newSiblingChildren);
-            console.log(`[indentNode] Added to sibling:`, newSiblingChildren.map(n => n.body));
             
             // Step 4: Update focus to the new copy
             if (this.focusedNode === node) {
@@ -1592,8 +1129,6 @@ export class CTOutliner extends BaseElement {
               this.editingNode = nodeCopy;
             }
             
-          } else {
-            console.error(`[indentNode] Could not get Cell references`);
           }
         },
         undefined, // No fallback to avoid mixed mutations
@@ -1601,7 +1136,6 @@ export class CTOutliner extends BaseElement {
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
-      console.log(`[indentNode] Using TreeOperations fallback`);
       TreeOperations.indentNode(this.tree, node);
       this.emitChange();
     }
@@ -1677,7 +1211,6 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      console.log(`[outdentNode] Attempting Cell-based outdent for node:`, node.body);
       
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
@@ -1688,20 +1221,17 @@ export class CTOutliner extends BaseElement {
           if (parentChildrenCell && grandParentChildrenCell) {
             // Step 1: Create a deep copy of the node to move
             const nodeCopy = this.deepCloneNode(node);
-            console.log(`[outdentNode] Created copy of node:`, nodeCopy.body);
             
             // Step 2: Remove from current parent
             const currentParentChildren = parentChildrenCell.get();
             const newParentChildren = currentParentChildren.filter(child => child !== node);
             parentChildrenCell.withTx(tx).set(newParentChildren);
-            console.log(`[outdentNode] Removed from parent, remaining:`, newParentChildren.map(n => n.body));
             
             // Step 3: Add copy to grandparent after parent
             const currentGrandParentChildren = grandParentChildrenCell.get();
             const newGrandParentChildren = [...currentGrandParentChildren];
             newGrandParentChildren.splice(parentIndex + 1, 0, nodeCopy);
             grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
-            console.log(`[outdentNode] Added to grandparent:`, newGrandParentChildren.map(n => n.body));
             
             // Step 4: Update focus to the new copy
             if (this.focusedNode === node) {
@@ -1711,8 +1241,6 @@ export class CTOutliner extends BaseElement {
               this.editingNode = nodeCopy;
             }
             
-          } else {
-            console.error(`[outdentNode] Could not get Cell references`);
           }
         },
         undefined, // No fallback to avoid mixed mutations
@@ -1720,7 +1248,6 @@ export class CTOutliner extends BaseElement {
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
-      console.log(`[outdentNode] Using TreeOperations fallback`);
       TreeOperations.outdentNode(this.tree, node);
       this.emitChange();
     }
@@ -1781,7 +1308,6 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      console.log(`[moveNodeUp] Attempting Cell-based move up for node:`, node.body);
       
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
@@ -1795,7 +1321,6 @@ export class CTOutliner extends BaseElement {
             const nodeCopy = this.deepCloneNode(node);
             const previousNodeCopy = this.deepCloneNode(previousNode);
             
-            console.log(`[moveNodeUp] Created copies - node:`, nodeCopy.body, `previous:`, previousNodeCopy.body);
             
             // Step 2: Build new children array with swapped positions
             const newChildren = [...currentChildren];
@@ -1803,7 +1328,6 @@ export class CTOutliner extends BaseElement {
             newChildren[childIndex] = previousNodeCopy;  // Put previous node in current position
             
             parentChildrenCell.withTx(tx).set(newChildren);
-            console.log(`[moveNodeUp] Set new children order:`, newChildren.map(n => n.body));
             
             // Step 3: Update focus to the new copy
             if (this.focusedNode === node) {
@@ -1813,8 +1337,6 @@ export class CTOutliner extends BaseElement {
               this.editingNode = nodeCopy;
             }
             
-          } else {
-            console.error(`[moveNodeUp] Could not get parent children Cell`);
           }
         },
         undefined, // No fallback to avoid mixed mutations
@@ -1822,7 +1344,6 @@ export class CTOutliner extends BaseElement {
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
-      console.log(`[moveNodeUp] Using TreeOperations fallback`);
       TreeOperations.moveNodeUp(this.tree, node);
       this.emitChange();
     }
@@ -1844,7 +1365,6 @@ export class CTOutliner extends BaseElement {
     // Use Cell operations when CellController is active
     const rootCell = this.cellController.getCell();
     if (rootCell) {
-      console.log(`[moveNodeDown] Attempting Cell-based move down for node:`, node.body);
       
       // COPY-DELETE-ADD approach to avoid Cell reference issues
       this.executeTransaction(
@@ -1858,7 +1378,6 @@ export class CTOutliner extends BaseElement {
             const nodeCopy = this.deepCloneNode(node);
             const nextNodeCopy = this.deepCloneNode(nextNode);
             
-            console.log(`[moveNodeDown] Created copies - node:`, nodeCopy.body, `next:`, nextNodeCopy.body);
             
             // Step 2: Build new children array with swapped positions
             const newChildren = [...currentChildren];
@@ -1866,7 +1385,6 @@ export class CTOutliner extends BaseElement {
             newChildren[childIndex + 1] = nodeCopy;      // Put current node in next position
             
             parentChildrenCell.withTx(tx).set(newChildren);
-            console.log(`[moveNodeDown] Set new children order:`, newChildren.map(n => n.body));
             
             // Step 3: Update focus to the new copy
             if (this.focusedNode === node) {
@@ -1876,8 +1394,6 @@ export class CTOutliner extends BaseElement {
               this.editingNode = nodeCopy;
             }
             
-          } else {
-            console.error(`[moveNodeDown] Could not get parent children Cell`);
           }
         },
         undefined, // No fallback to avoid mixed mutations
@@ -1885,7 +1401,6 @@ export class CTOutliner extends BaseElement {
       );
     } else {
       // Only use TreeOperations when CellController is completely unavailable
-      console.log(`[moveNodeDown] Using TreeOperations fallback`);
       TreeOperations.moveNodeDown(this.tree, node);
       this.emitChange();
     }
@@ -2194,50 +1709,6 @@ export class CTOutliner extends BaseElement {
 
     return html`
       <div style="position: relative;">
-        <!-- Debug controls in top-right corner -->
-        <div class="debug-controls">
-          ${this.offline
-        ? html`
-          <div class="offline-indicator">Offline</div>
-        `
-        : ""}
-          <button
-            class="debug-toggle-button ${this.showDebugPanel ? "active" : ""}"
-            @click="${() => this.showDebugPanel = !this.showDebugPanel}"
-            title="Toggle debug panel (Ctrl/Cmd + Shift + D)"
-          >
-            🔧
-          </button>
-        </div>
-
-        ${this.showDebugPanel
-        ? html`
-          <div class="debug-panel">
-            <div class="debug-panel-header">Debug Panel</div>
-
-            <div class="debug-toggle">
-              <input
-                type="checkbox"
-                id="offline-toggle"
-                .checked="${this.offline}"
-                @change="${(e: Event) =>
-            this.offline = (e.target as HTMLInputElement).checked}"
-              />
-              <label for="offline-toggle">Offline Mode</label>
-            </div>
-
-            <div class="debug-buttons">
-              <button class="debug-button" @click="${this
-            .handleSave}">Save</button>
-              <button class="debug-button" @click="${this
-            .handleLoad}">Load</button>
-              <button class="debug-button" @click="${this
-            .handleReset}">Reset</button>
-            </div>
-          </div>
-        `
-        : ""}
-
         <div
           class="outliner"
           @keydown="${this.handleKeyDown}"
