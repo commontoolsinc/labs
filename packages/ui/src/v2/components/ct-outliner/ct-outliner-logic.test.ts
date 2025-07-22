@@ -38,37 +38,34 @@ describe("CTOutliner Logic Tests", () => {
     it("should move nodes up", () => {
       const tree = createTestTree();
       const secondChild = tree.root.children[1];
-      const result = TreeOperations.moveNodeUp(tree, secondChild);
+      
+      // moveNodeUp now modifies tree in place and returns void
+      TreeOperations.moveNodeUp(tree, secondChild);
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.tree.root.children[0].body).toBe("Second item");
-        expect(result.data.tree.root.children[1].body).toBe("First item");
-      }
+      expect(tree.root.children[0].body).toBe("Second item");
+      expect(tree.root.children[1].body).toBe("First item");
     });
 
     it("should move nodes down", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
-      const result = TreeOperations.moveNodeDown(tree, firstChild);
+      
+      // moveNodeDown now modifies tree in place and returns void
+      TreeOperations.moveNodeDown(tree, firstChild);
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.tree.root.children[0].body).toBe("Second item");
-        expect(result.data.tree.root.children[1].body).toBe("First item");
-      }
+      expect(tree.root.children[0].body).toBe("Second item");
+      expect(tree.root.children[1].body).toBe("First item");
     });
 
     it("should delete nodes", () => {
       const tree = createTestTree();
       const child1 = tree.root.children[0];
-      const result = TreeOperations.deleteNode(tree, child1);
+      
+      // deleteNode now modifies tree in place and returns void
+      TreeOperations.deleteNode(tree, child1);
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.tree.root.children).toHaveLength(1);
-        expect(result.data.tree.root.children[0].body).toBe("Second item");
-      }
+      expect(tree.root.children).toHaveLength(1);
+      expect(tree.root.children[0].body).toBe("Second item");
     });
 
     it("should handle transformTree utility", () => {
@@ -88,16 +85,14 @@ describe("CTOutliner Logic Tests", () => {
     it("should indent nodes", () => {
       const tree = createTestTree();
       const secondChild = tree.root.children[1];
-      const result = TreeOperations.indentNode(tree, secondChild);
+      const firstChild = tree.root.children[0];
+      
+      // indentNode now modifies tree in place and returns void
+      TreeOperations.indentNode(tree, secondChild);
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.tree.root.children).toHaveLength(1);
-        expect(result.data.tree.root.children[0].children).toHaveLength(1);
-        expect(result.data.tree.root.children[0].children[0].body).toBe(
-          "Second item",
-        );
-      }
+      expect(tree.root.children).toHaveLength(1);
+      expect(firstChild.children).toHaveLength(1);
+      expect((firstChild.children[0] as Node).body).toBe("Second item");
     });
 
     it("should outdent nodes", () => {
@@ -118,13 +113,12 @@ describe("CTOutliner Logic Tests", () => {
       };
 
       const childNode = tree.root.children[0].children[0];
-      const result = TreeOperations.outdentNode(tree, childNode);
+      
+      // outdentNode now modifies tree in place and returns void
+      TreeOperations.outdentNode(tree, childNode);
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.tree.root.children).toHaveLength(2);
-        expect(result.data.tree.root.children[1].body).toBe("Child");
-      }
+      expect(tree.root.children).toHaveLength(2);
+      expect(tree.root.children[1].body).toBe("Child");
     });
 
     it("should convert to markdown", () => {
@@ -329,40 +323,42 @@ describe("CTOutliner Logic Tests", () => {
       };
 
       const parentNode = tree.root.children[0];
-      const result = TreeOperations.deleteNode(tree, parentNode);
+      
+      // deleteNode now modifies tree in place and returns void
+      TreeOperations.deleteNode(tree, parentNode);
 
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.tree.root.children).toHaveLength(2);
-        expect(result.data.tree.root.children[0].body).toBe("Child 1");
-        expect(result.data.tree.root.children[1].body).toBe("Child 2");
-      }
+      expect(tree.root.children).toHaveLength(2);
+      expect(tree.root.children[0].body).toBe("Child 1");
+      expect(tree.root.children[1].body).toBe("Child 2");
     });
 
     it("should not allow deleting root node", () => {
       const tree = createTestTree();
-      const result = TreeOperations.deleteNode(tree, tree.root);
-
-      expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error).toBe("Cannot delete root node");
-      }
+      
+      // deleteNode now throws errors instead of returning failure results
+      expect(() => {
+        TreeOperations.deleteNode(tree, tree.root);
+      }).toThrow("Cannot delete root node");
     });
 
     it("should not indent first child", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
-      const result = TreeOperations.indentNode(tree, firstChild);
-
-      expect(result.success).toBe(false);
+      
+      // indentNode now throws errors instead of returning failure results
+      expect(() => {
+        TreeOperations.indentNode(tree, firstChild);
+      }).toThrow("Cannot indent first child node");
     });
 
     it("should not outdent root-level nodes", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
-      const result = TreeOperations.outdentNode(tree, firstChild);
-
-      expect(result.success).toBe(false);
+      
+      // outdentNode now throws errors instead of returning failure results
+      expect(() => {
+        TreeOperations.outdentNode(tree, firstChild);
+      }).toThrow("Cannot outdent node: already at root level");
     });
   });
 });
