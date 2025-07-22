@@ -751,22 +751,71 @@ Deno.bench("Cell getAsLink - with options (1000x)", async () => {
 });
 
 // Benchmark: Subscription operations
-Deno.bench("Cell sink - subscription setup (100x)", async () => {
+Deno.bench("Cell sink - subscription execution (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
   
   const cell = runtime.getCell<number>(space, "bench-sink", undefined, tx);
   cell.set(0);
   
-  const cancels: Array<() => void> = [];
+  let callCount = 0;
   
-  // Measure sink subscription setup
+  // Setup sink subscription
+  const cancel = cell.sink(() => {
+    callCount++;
+  });
+  
+  // Measure sink execution with value changes
   for (let i = 0; i < 100; i++) {
-    const cancel = cell.sink(() => {});
-    cancels.push(cancel);
+    cell.set(i + 1); // Set different value each time
+    await runtime.idle(); // Wait for sink to execute
   }
   
-  // Cleanup subscriptions
-  cancels.forEach((cancel) => cancel());
+  // Verify sink was called
+  if (callCount !== 101) { // Initial + 100 updates
+    throw new Error(`Expected 101 sink calls, got ${callCount}`);
+  }
+  
+  // Cleanup subscription
+  cancel();
+  
+  await cleanup(runtime, storageManager, tx);
+});
+
+Deno.bench("Cell sink - subscription execution with schema (100x)", async () => {
+  const { runtime, storageManager, tx } = setup();
+  
+  const schema = {
+    type: "object",
+    properties: {
+      count: { type: "number", minimum: 0 },
+      timestamp: { type: "number" },
+    },
+    required: ["count", "timestamp"],
+  } as const satisfies JSONSchema;
+  
+  const cell = runtime.getCell(space, "bench-sink-schema", schema, tx);
+  cell.set({ count: 0, timestamp: Date.now() });
+  
+  let callCount = 0;
+  
+  // Setup sink subscription
+  const cancel = cell.sink(() => {
+    callCount++;
+  });
+  
+  // Measure sink execution with value changes
+  for (let i = 0; i < 100; i++) {
+    cell.set({ count: i + 1, timestamp: Date.now() + i });
+    await runtime.idle(); // Wait for sink to execute
+  }
+  
+  // Verify sink was called
+  if (callCount !== 101) { // Initial + 100 updates
+    throw new Error(`Expected 101 sink calls, got ${callCount}`);
+  }
+  
+  // Cleanup subscription
+  cancel();
   
   await cleanup(runtime, storageManager, tx);
 });
