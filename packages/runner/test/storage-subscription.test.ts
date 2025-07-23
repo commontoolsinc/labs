@@ -204,16 +204,16 @@ describe("Storage Subscription", () => {
 
       // Now subscribe to notifications
       const subscription = new Subscription();
-      runtime.storage.subscribe(subscription);
+      storageManager.subscribe(subscription);
 
-      // Use Cell interface to perform conflicting write and commit
-      const cell = runtime.getCell<{ version: number }>(
+      // Use storageManager.edit() to perform conflicting write and commit
+      const tx = storageManager.edit();
+      tx.write({
         space,
-        entityId,
-        undefined,
-        tx,
-      );
-      cell.set({ version: 2 });
+        id: entityId,
+        type: "application/json",
+        path: [],
+      }, { version: 2 });
 
       // Check that before commit provider.replica.get returns undefined
       const factAddress = { the: "application/json", of: entityId };
@@ -229,7 +229,7 @@ describe("Storage Subscription", () => {
 
       // The commit should fail and generate a revert notification
       expect(result.ok).toBeFalsy();
-      expect(subscription.reverts.length).toBeGreaterThanOrEqual(1);
+      expect(subscription.reverts.length).toBe(1);
 
       const revert = subscription.reverts[0];
       expect(revert.type).toBe("revert");
@@ -240,7 +240,7 @@ describe("Storage Subscription", () => {
       const changes = [...revert.changes];
       expect(changes.length).toBeGreaterThan(0);
       expect([...changes]).toContainEqual({
-        address: { id: entityId, type: "application/json", path: ["value"] },
+        address: { id: entityId, type: "application/json", path: [] },
         before: { version: 2 },
         after: { version: 1 },
       });
