@@ -156,6 +156,112 @@ describe("Attestation Module", () => {
       expect(result.ok).toBeDefined();
       expect(result.ok?.value).toEqual({ items: ["a", "modified", "c"] });
     });
+
+    it("should allow writing to array with index 0", () => {
+      const source = {
+        address: { id: "test:array-0", type: "application/json", path: [] },
+        value: { items: ["first", "second", "third"] },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:array-0",
+        type: "application/json",
+        path: ["items", "0"],
+      }, "replaced");
+
+      expect(result.ok).toBeDefined();
+      expect(result.ok?.value).toEqual({ items: ["replaced", "second", "third"] });
+    });
+
+    it("should allow writing to array 'length' property", () => {
+      const source = {
+        address: { id: "test:array-length", type: "application/json", path: [] },
+        value: { items: ["a", "b", "c", "d", "e"] },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:array-length",
+        type: "application/json",
+        path: ["items", "length"],
+      }, 3);
+
+      expect(result.ok).toBeDefined();
+      expect(result.ok?.value).toEqual({ items: ["a", "b", "c"] });
+    });
+
+    it("should fail when writing to array with negative index", () => {
+      const source = {
+        address: { id: "test:array-negative", type: "application/json", path: [] },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:array-negative",
+        type: "application/json",
+        path: ["items", "-1"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain("expected object but found array");
+    });
+
+    it("should fail when writing to array with non-integer numeric key", () => {
+      const source = {
+        address: { id: "test:array-float", type: "application/json", path: [] },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:array-float",
+        type: "application/json",
+        path: ["items", "1.5"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain("expected object but found array");
+    });
+
+    it("should fail when writing to array with string key (not 'length')", () => {
+      const source = {
+        address: { id: "test:array-string", type: "application/json", path: [] },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:array-string",
+        type: "application/json",
+        path: ["items", "someProperty"],
+      }, "value");
+
+      expect(result.error).toBeDefined();
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain("expected object but found array");
+    });
+
+    it("should handle writing to large array indices", () => {
+      const source = {
+        address: { id: "test:array-large", type: "application/json", path: [] },
+        value: { items: ["a", "b", "c"] },
+      } as const;
+
+      const result = Attestation.write(source, {
+        id: "test:array-large",
+        type: "application/json",
+        path: ["items", "10"],
+      }, "sparse");
+
+      expect(result.ok).toBeDefined();
+      const resultValue = result.ok?.value as { items: any[] };
+      expect(resultValue.items[10]).toBe("sparse");
+      expect(resultValue.items.length).toBe(11);
+      expect(resultValue.items[3]).toBeUndefined();
+      expect(resultValue.items[9]).toBeUndefined();
+    });
   });
 
   describe("read function", () => {

@@ -77,8 +77,17 @@ export const write = (
     if (error) {
       return { error };
     } else {
-      const type = ok.value === null ? "null" : typeof ok.value;
-      if (type === "object") {
+      const type = ok.value === null
+        ? "null"
+        : Array.isArray(ok.value)
+        ? "array"
+        : typeof ok.value;
+      if (
+        type === "object" ||
+        (type === "array" &&
+          ((Number.isInteger(Number(key)) && Number(key) >= 0) ||
+            key === "length"))
+      ) {
         const target = ok.value as Record<string, JSONValue>;
 
         // If target value is same as desired value this write is a noop
