@@ -656,6 +656,8 @@ export type CommitError =
 
 export interface INotFoundError extends Error {
   name: "NotFoundError";
+  source: IAttestation;
+  address: IMemoryAddress;
   path?: MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }
