@@ -16,6 +16,8 @@ import {
 import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
 import {
   createQueryResultProxy,
+  getCellOrThrow,
+  isQueryResultForDereferencing,
   makeOpaqueRef,
   type QueryResult,
 } from "./query-result-proxy.ts";
@@ -30,6 +32,7 @@ import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type LegacyJSONCellLink,
+  LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
   type URI,
@@ -255,6 +258,13 @@ declare module "@commontools/api" {
     sync(): Promise<Stream<T>> | Stream<T>;
     getRaw(options?: IReadOptions): any;
     getAsNormalizedFullLink(): NormalizedFullLink;
+    getAsLink(
+      options?: {
+        base?: Cell<any>;
+        baseSpace?: MemorySpace;
+        includeSchema?: boolean;
+      },
+    ): SigilLink;
     getDoc(): DocImpl<any>;
     withTx(tx?: IExtendedStorageTransaction): Stream<T>;
     schema?: JSONSchema;
@@ -338,6 +348,8 @@ class StreamCell<T> implements Stream<T> {
   }
 
   send(event: T): void {
+    event = convertCellsToLinks(event) as T;
+
     // Use runtime from doc if available
     this.runtime.scheduler.queueEvent(this.link, event);
 
@@ -365,6 +377,16 @@ class StreamCell<T> implements Stream<T> {
 
   getAsNormalizedFullLink(): NormalizedFullLink {
     return this.link;
+  }
+
+  getAsLink(
+    options?: {
+      base?: Cell<any>;
+      baseSpace?: MemorySpace;
+      includeSchema?: boolean;
+    },
+  ): SigilLink {
+    return createSigilLinkFromParsedLink(this.link, options);
   }
 
   getDoc(): DocImpl<any> {
@@ -784,6 +806,53 @@ function subscribeToReferencedDocs<T>(
     cancel();
     if (isCancel(cleanup)) cleanup();
   };
+}
+
+function convertCellsToLinks(
+  value: readonly any[] | Record<string, any> | any,
+  path: string[] = [],
+  seen: Map<any, string[]> = new Map(),
+): any {
+  if (seen.has(value)) {
+    return {
+      "/": {
+        [LINK_V1_TAG]: { path: seen.get(value) },
+      },
+    };
+  }
+
+  if (isQueryResultForDereferencing(value)) {
+    value = getCellOrThrow(value).getAsLink();
+  } else if (isCell(value) || isStream(value)) {
+    value = value.getAsLink();
+  } else if (isRecord(value) || typeof value === "function") {
+    // Only add here, otherwise they are literals or already cells:
+    seen.set(value, path);
+
+    // Process toJSON if it exists like JSON.stringify does.
+    if ("toJSON" in value && typeof value.toJSON === "function") {
+      value = value.toJSON();
+      if (!isRecord(value)) return value;
+      // Fall through to process, so even if there is a .toJSON on the
+      // result we don't call it again.
+    }
+
+    // Recursively process arrays and objects.
+    if (Array.isArray(value)) {
+      value = value.map((value, index) =>
+        convertCellsToLinks(value, [...path, String(index)], seen)
+      );
+    } else {
+      value = Object.fromEntries(
+        Object.entries(value).map(([key, value]) => [
+          key,
+          convertCellsToLinks(value, [...path, String(key)], seen),
+        ]),
+      );
+    }
+  }
+
+  return value;
 }
 
 /**
