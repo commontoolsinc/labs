@@ -1484,19 +1484,19 @@ export class CTOutliner extends BaseElement {
     if (!this.mentionable || this.mentionable.get().length === 0) return [];
 
     const query = this.mentionQuery.toLowerCase();
-    const matches = []
+    const matches = [];
 
-    const flattened = this.mentionable.get()
+    const flattened = this.mentionable.get();
     for (const mention of flattened) {
-      if (mention[NAME].toLowerCase().includes(query)) {
+      if (mention[NAME]?.toLowerCase()?.includes(query)) {
         matches.push(flattened.indexOf(mention));
       }
     }
 
-    return matches.map(i => this.mentionable.key(i).getAsQueryResult())
+    return matches.map((i) => this.mentionable.key(i).getAsQueryResult());
   }
 
-  private async insertMention(mention: MentionableItem) {
+  private async insertMention(mention: Charm) {
     if (!this.editingNode) return;
 
     const textarea = this.shadowRoot?.querySelector(
@@ -1536,13 +1536,14 @@ export class CTOutliner extends BaseElement {
   private async generateHash(input) {
     const encoder = new TextEncoder();
     const data = encoder.encode(input);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
+    const hashHex = hashArray.map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
     return hashHex;
   }
 
-  private async encodeCharmForHref(charm: Charm): string {
+  private async encodeCharmForHref(charm: Charm) {
     const id = await this.generateHash(charm[NAME]);
     return id;
   }
@@ -1550,10 +1551,10 @@ export class CTOutliner extends BaseElement {
   /**
    * Decode charm reference from href
    */
-  private async decodeCharmFromHref(href: string | null): Charm | null {
+  private async decodeCharmFromHref(href: string | null): Promise<Charm> {
     // Check if hash matches any mentionable charm
-    let match = -1
-    const flattened = this.mentionable.get() || []
+    let match = -1;
+    const flattened = this.mentionable.get() || [];
     for (const mention of flattened) {
       const mentionHash = await this.generateHash(mention[NAME]);
       if (mentionHash === href) {
@@ -1562,7 +1563,7 @@ export class CTOutliner extends BaseElement {
       }
     }
 
-    return this.mentionable.key(match).getAsQueryResult()
+    return this.mentionable.key(match).getAsQueryResult();
   }
 
   /**
