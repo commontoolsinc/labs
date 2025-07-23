@@ -7,6 +7,7 @@ import { getNavigationHref } from "../lib/navigate.ts";
 import { styleMap } from "lit/directives/style-map.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { InspectorConflicts, InspectorUpdateEvent } from "../lib/inspector.ts";
+import "../components/Flex.ts";
 
 type ConnectionStatus =
   | "connecting"
@@ -39,6 +40,20 @@ export class XHeaderView extends BaseView {
       display: flex;
       align-items: center;
       gap: 0.5rem;
+    }
+
+    h-box {
+      gap: 0.5rem;
+    }
+
+    x-button.emoji-button {
+      font-size: 1.25rem;
+      opacity: 0.7;
+      transition: opacity 0.2s;
+    }
+
+    x-button.emoji-button:hover {
+      opacity: 1;
     }
 
     #page-title {
@@ -91,6 +106,9 @@ export class XHeaderView extends BaseView {
 
   @state()
   private _conflicts?: InspectorConflicts;
+
+  @property()
+  showShellCharmListView = false;
 
   private _inspectorListener = new Task(this, {
     args: () => [this.rt],
@@ -150,6 +168,15 @@ export class XHeaderView extends BaseView {
     this.command({ type: "clear-authentication" });
   }
 
+  private handleToggleClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.command({
+      type: "set-show-charm-list-view",
+      show: !this.showShellCharmListView,
+    });
+  }
+
   private getConnectionStatus(): ConnectionStatus {
     if (this._conflicts) {
       return "conflict";
@@ -201,13 +228,25 @@ export class XHeaderView extends BaseView {
         </div>
         ${this.identity
         ? html`
-          <x-button
-            class="auth-button"
-            size="small"
-            @click="${this.handleAuthClick}"
-          >
-            Logout
-          </x-button>
+          <h-box>
+            <x-button
+              class="emoji-button"
+              size="small"
+              @click="${this.handleToggleClick}"
+              title="${this.showShellCharmListView
+            ? "Show Default Recipe"
+            : "Show All Charms"}"
+            >
+              ${this.showShellCharmListView ? "📋" : "🔍"}
+            </x-button>
+            <x-button
+              class="auth-button"
+              size="small"
+              @click="${this.handleAuthClick}"
+            >
+              Logout
+            </x-button>
+          </h-box>
         `
         : null}
       </div>
