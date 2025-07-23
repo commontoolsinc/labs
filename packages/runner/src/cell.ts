@@ -9,6 +9,7 @@ import {
   type JSONSchema,
   type OpaqueRef,
   type Schema,
+  type Stream,
   toOpaqueRef,
   TYPE,
 } from "./builder/types.ts";
@@ -23,7 +24,7 @@ import {
   resolveLinkToValue,
   resolveLinkToWriteRedirect,
 } from "./link-resolution.ts";
-import { txToReactivityLog } from "./scheduler.ts";
+import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
@@ -247,9 +248,22 @@ declare module "@commontools/api" {
     copyTrap: boolean;
     [toOpaqueRef]: () => OpaqueRef<any>;
   }
+
+  interface Stream<T> {
+    send(event: T): void;
+    sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+    sync(): Promise<Stream<T>> | Stream<T>;
+    getRaw(options?: IReadOptions): any;
+    getAsNormalizedFullLink(): NormalizedFullLink;
+    getDoc(): DocImpl<any>;
+    withTx(tx?: IExtendedStorageTransaction): Stream<T>;
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+    runtime: IRuntime;
+  }
 }
 
-export type { Cell } from "@commontools/api";
+export type { Cell, Stream } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
@@ -273,19 +287,6 @@ export type Cellify<T> =
     // Handle primitives
     : T | Cell<T>;
 
-export interface Stream<T> {
-  send(event: T): void;
-  sink(callback: (event: T) => Cancel | undefined | void): Cancel;
-  sync(): Promise<Stream<T>> | Stream<T>;
-  getRaw(options?: IReadOptions): any;
-  getAsNormalizedFullLink(): NormalizedFullLink;
-  getDoc(): DocImpl<any>;
-  withTx(tx?: IExtendedStorageTransaction): Stream<T>;
-  schema?: JSONSchema;
-  rootSchema?: JSONSchema;
-  runtime: IRuntime;
-}
-
 export function createCell<T>(
   runtime: IRuntime,
   link: NormalizedFullLink,
@@ -294,13 +295,12 @@ export function createCell<T>(
 ): Cell<T> {
   let { schema, rootSchema } = link;
 
-  // Resolve the path to check whether it's a stream. We're not logging this
-  // right now. The corner case where during it's lifetime this changes from
-  // non-stream to stream or vice versa will not be detected.
-  const sideTx = runtime.edit();
-  const resolvedLink = noResolve ? link : resolveLinkToValue(sideTx, link);
-  const value = sideTx.readValueOrThrow(resolvedLink);
-  sideTx.commit();
+  // Resolve the path to check whether it's a stream.
+  const readTx = runtime.readTx(tx);
+  const resolvedLink = noResolve ? link : resolveLinkToValue(readTx, link);
+  const value = readTx.readValueOrThrow(resolvedLink, {
+    meta: ignoreReadForScheduling,
+  });
 
   // Use schema from alias if provided and no explicit schema was set
   if (!schema && resolvedLink.schema) {
@@ -360,10 +360,7 @@ class StreamCell<T> implements Stream<T> {
   }
 
   getRaw(options?: IReadOptions): any {
-    return (this.tx?.status().status === "ready"
-      ? this.tx
-      : this.runtime.edit())
-      .readValueOrThrow(this.link, options);
+    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
@@ -627,10 +624,7 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   getRaw(options?: IReadOptions): any {
-    return (this.tx?.status().status === "ready"
-      ? this.tx
-      : this.runtime.edit())
-      .readValueOrThrow(this.link, options);
+    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   setRaw(value: any): void {
@@ -662,9 +656,9 @@ export class RegularCell<T> implements Cell<T> {
     >
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
-    let sourceCellId =
-      (this.tx?.status().status === "ready" ? this.tx : this.runtime.edit())
-        .readOrThrow({ ...this.link, path: ["source"] }) as string | undefined;
+    let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
+      { ...this.link, path: ["source"] },
+    ) as string | undefined;
     if (!sourceCellId || typeof sourceCellId !== "string") {
       return undefined;
     }
