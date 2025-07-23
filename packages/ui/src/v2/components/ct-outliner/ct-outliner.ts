@@ -1480,7 +1480,7 @@ export class CTOutliner extends BaseElement {
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
-  private getFilteredMentions(): MentionableItem[] {
+  private getFilteredMentions(): Charm[] {
     if (!this.mentionable || this.mentionable.get().length === 0) return [];
 
     const query = this.mentionQuery.toLowerCase();
@@ -1533,7 +1533,7 @@ export class CTOutliner extends BaseElement {
     textarea.focus();
   }
 
-  private async generateHash(input) {
+  private async generateHash(input: string) {
     const encoder = new TextEncoder();
     const data = encoder.encode(input);
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -1544,7 +1544,7 @@ export class CTOutliner extends BaseElement {
   }
 
   private async encodeCharmForHref(charm: Charm) {
-    const id = await this.generateHash(charm[NAME]);
+    const id = await this.generateHash(charm[NAME] ?? "");
     return id;
   }
 
@@ -1556,7 +1556,7 @@ export class CTOutliner extends BaseElement {
     let match = -1;
     const flattened = this.mentionable.get() || [];
     for (const mention of flattened) {
-      const mentionHash = await this.generateHash(mention[NAME]);
+      const mentionHash = await this.generateHash(mention[NAME] || "");
       if (mentionHash === href) {
         match = flattened.indexOf(mention);
         break;
