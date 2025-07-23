@@ -671,6 +671,7 @@ export class Replica {
       IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
+    console.log("Loading", entries.map(([address, _schema]) => toKey(address)));
     // First we identify entries that we need to load from the store.
     const need: [FactAddress, SchemaContext?][] = [];
     for (const [address, schema] of entries) {
@@ -817,6 +818,10 @@ export class Replica {
 
   async commit(transaction: ITransaction, source?: IStorageTransaction) {
     const { facts, claims } = transaction;
+    console.log(
+      "Saving",
+      facts.map((fact) => [toKey(fact), JSON.stringify(fact.is, undefined, 2)]),
+    );
     const changes = Differential.create().update(this, facts);
     // Store facts in a nursery so that subsequent changes will be build
     // optimistically assuming that push will succeed.
