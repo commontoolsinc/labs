@@ -39,13 +39,6 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   private keyStore?: KeyStore;
 
-  private handleToggleShellCharmListView = (e: Event) => {
-    const customEvent = e as CustomEvent;
-    this.command({
-      type: "set-show-charm-list-view",
-      show: customEvent.detail.show,
-    });
-  };
 
   override render() {
     const app = (this.app ?? {}) as AppState;
@@ -70,7 +63,6 @@ export class XAppView extends BaseView {
           .keyStore="${this.keyStore}"
           .charmId="${app.activeCharmId}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
-          @toggle-shell-charm-list-view="${this.handleToggleShellCharmListView}"
         ></x-header-view>
         <div class="content-area">
           ${content}

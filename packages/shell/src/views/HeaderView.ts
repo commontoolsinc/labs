@@ -177,13 +177,10 @@ export class XHeaderView extends BaseView {
   private handleToggleClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    this.dispatchEvent(
-      new CustomEvent("toggle-shell-charm-list-view", {
-        detail: { show: !this.showShellCharmListView },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+    this.command({
+      type: "set-show-charm-list-view",
+      show: !this.showShellCharmListView,
+    });
   }
 
   private getConnectionStatus(): ConnectionStatus {
