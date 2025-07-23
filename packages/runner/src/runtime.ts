@@ -47,7 +47,7 @@ import { registerBuiltins } from "./builtins/index.ts";
 import { StaticCache } from "@commontools/static";
 
 const DEFAULT_USE_REAL_TRANSACTIONS = isDeno()
-  ? !!Deno.env.get("USE_REAL_TRANSACTIONS")
+  ? ["1", "true", "on", "yes"].includes(Deno.env.get("USE_REAL_TRANSACTIONS")!)
   : false;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };

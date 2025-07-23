@@ -658,14 +658,22 @@ class RegularCell<T> implements Cell<T> {
     >
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
-    const sourceCellId =
+    let sourceCellId =
       (this.tx?.status().status === "ready" ? this.tx : this.runtime.edit())
-        .readOrThrow({ ...this.link, path: ["source"] });
-    if (!sourceCellId) return undefined;
+        .readOrThrow({ ...this.link, path: ["source"] }) as string | undefined;
+    if (!sourceCellId || typeof sourceCellId !== "string") {
+      return undefined;
+    }
+    if (sourceCellId.startsWith('{"/":')) {
+      sourceCellId = toURI(JSON.parse(sourceCellId));
+    }
+    if (!sourceCellId.startsWith("of:")) {
+      throw new Error("Source cell ID must start with 'of:'");
+    }
     return createCell(this.runtime, {
       space: this.link.space,
       path: [],
-      id: toURI(JSON.parse(sourceCellId as string)),
+      id: toURI(sourceCellId),
       type: "application/json",
       schema: schema,
     }, this.tx) as Cell<any>;

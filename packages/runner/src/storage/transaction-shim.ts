@@ -33,6 +33,7 @@ import type {
   StorageTransactionFailed,
   StorageTransactionStatus,
   Unit,
+  URI,
   Write,
   WriteError,
   WriterError,
@@ -59,6 +60,7 @@ export function uriToEntityId(uri: string): EntityId {
 function validateParentPath(
   value: any,
   path: readonly MemoryAddressPathComponent[],
+  id: URI,
 ): INotFoundError | ITypeMismatchError | null {
   const pathLength = path.length;
 
@@ -80,7 +82,7 @@ function validateParentPath(
         `Cannot access path [${String(path[0])}] - document is not a record`,
       ) as ITypeMismatchError;
       typeError.name = "TypeMismatchError";
-      typeError.address = { id: "of:unknown", type: "application/json", path }; // Address will be filled in by caller
+      typeError.address = { id, type: "application/json", path };
       typeError.actualType = typeof value;
       return typeError;
     }
@@ -102,7 +104,7 @@ function validateParentPath(
       ) as ITypeMismatchError;
       typeError.name = "TypeMismatchError";
       typeError.address = {
-        id: "of:unknown",
+        id,
         type: "application/json",
         path: path.slice(0, parentIndex + 1),
       };
@@ -132,7 +134,7 @@ function validateParentPath(
     ) as ITypeMismatchError;
     typeError.name = "TypeMismatchError";
     typeError.address = {
-      id: "of:unknown",
+      id,
       type: "application/json",
       path: path.slice(0, lastIndex),
     };
@@ -236,11 +238,12 @@ class TransactionReader implements ITransactionReader {
       try {
         const json = getJSONFromDataURI(address.id);
 
-        const validationError = validateParentPath(json, address.path);
+        const validationError = validateParentPath(
+          json,
+          address.path,
+          address.id,
+        );
         if (validationError) {
-          if (validationError.name === "TypeMismatchError") {
-            validationError.address.id = address.id;
-          }
           return { ok: undefined, error: validationError };
         }
 
@@ -295,11 +298,8 @@ class TransactionReader implements ITransactionReader {
     const [first, ...rest] = address.path;
     if (first === "value") {
       // Validate parent path exists and is a record for nested writes/reads
-      const validationError = validateParentPath(doc.get(), rest);
+      const validationError = validateParentPath(doc.get(), rest, address.id);
       if (validationError) {
-        if (validationError.name === "TypeMismatchError") {
-          validationError.address.id = address.id;
-        }
         return { ok: undefined, error: validationError };
       }
       // Read from doc itself
@@ -421,11 +421,12 @@ class TransactionWriter extends TransactionReader
     const [first, ...rest] = address.path;
     if (first === "value") {
       // Validate parent path exists and is a record for nested writes
-      const validationError = validateParentPath(doc.get(), rest);
+      const validationError = validateParentPath(
+        doc.get(),
+        rest,
+        address.id,
+      );
       if (validationError) {
-        if (validationError.name === "TypeMismatchError") {
-          validationError.address.id = address.id;
-        }
         return { ok: undefined, error: validationError };
       }
       // Write to doc itself
