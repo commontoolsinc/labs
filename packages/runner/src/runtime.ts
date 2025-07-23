@@ -116,7 +116,7 @@ export interface IRuntime {
 
   // Storage transaction method
   edit(): IExtendedStorageTransaction;
-  readTX(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
+  readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
 
   // Cell factory methods
   getCell<S extends JSONSchema = JSONSchema>(
@@ -451,7 +451,7 @@ export class Runtime implements IRuntime {
    * Returns the given transaction if it is ready, otherwise creates a new
    * transaction.
    */
-  readTX(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
+  readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
     return tx?.status().status === "ready" ? tx : this.edit();
   }
 

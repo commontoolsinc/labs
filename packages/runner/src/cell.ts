@@ -296,7 +296,7 @@ export function createCell<T>(
   let { schema, rootSchema } = link;
 
   // Resolve the path to check whether it's a stream.
-  const readTx = runtime.readTX(tx);
+  const readTx = runtime.readTx(tx);
   const resolvedLink = noResolve ? link : resolveLinkToValue(readTx, link);
   const value = readTx.readValueOrThrow(resolvedLink, {
     meta: ignoreReadForScheduling,
@@ -360,7 +360,7 @@ class StreamCell<T> implements Stream<T> {
   }
 
   getRaw(options?: IReadOptions): any {
-    return this.runtime.readTX(this.tx).readValueOrThrow(this.link, options);
+    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
@@ -624,7 +624,7 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   getRaw(options?: IReadOptions): any {
-    return this.runtime.readTX(this.tx).readValueOrThrow(this.link, options);
+    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   setRaw(value: any): void {
@@ -656,7 +656,7 @@ export class RegularCell<T> implements Cell<T> {
     >
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
-    let sourceCellId = this.runtime.readTX(this.tx).readOrThrow(
+    let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] },
     ) as string | undefined;
     if (!sourceCellId || typeof sourceCellId !== "string") {
