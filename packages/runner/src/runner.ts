@@ -660,9 +660,8 @@ export class Runner implements IRunner {
 
     if (streamLink) {
       // Register as event handler for the stream
-      const handler = (event: any) => {
+      const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
-        const tx = this.runtime.edit();
         if (event.preventDefault) event.preventDefault();
         const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
@@ -721,7 +720,6 @@ export class Runner implements IRunner {
           }
 
           popFrame(frame);
-          tx.commit();
           return result;
         };
 

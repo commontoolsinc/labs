@@ -38,7 +38,7 @@ import {
 export type { ErrorWithContext };
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
-export type EventHandler = (event: any) => any;
+export type EventHandler = (tx: IExtendedStorageTransaction, event: any) => any;
 
 /**
  * Reactivity log.
@@ -66,7 +66,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
-  private eventQueue: (() => any)[] = [];
+  private eventQueue: ((tx: IExtendedStorageTransaction) => any)[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   private dirty = new Set<SpaceURIAndType>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
@@ -228,7 +228,9 @@ export class Scheduler implements IScheduler {
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
         this.queueExecution();
-        this.eventQueue.push(() => handler(event));
+        this.eventQueue.push((tx: IExtendedStorageTransaction) =>
+          handler(tx, event)
+        );
       }
     }
   }
@@ -334,15 +336,22 @@ export class Scheduler implements IScheduler {
     // Process next event from the event queue. Will mark more docs as dirty.
     const handler = this.eventQueue.shift();
     if (handler) {
+      const finalize = (error?: unknown) => {
+        try {
+          if (error) this.handleError(error as Error, handler);
+        } finally {
+          tx.commit();
+        }
+      };
+      const tx = this.runtime.edit();
+
       try {
         this.runningPromise = Promise.resolve(
-          this.runtime.harness.invoke(handler),
-        ).catch((error) => {
-          this.handleError(error as Error, handler);
-        });
+          this.runtime.harness.invoke(() => handler(tx)),
+        ).then(() => finalize()).catch((error) => finalize(error));
         await this.runningPromise;
       } catch (error) {
-        this.handleError(error as Error, handler);
+        finalize(error);
       }
     }
 
