@@ -192,34 +192,16 @@ export type HandlerFunction = {
     <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: HandlerState<Schema<T>>) => any, options?: {
         proxy?: false;
     }): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
-    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (this: Schema<T>, event: Schema<E>) => any, options: {
-        proxy: true;
-    }): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
-    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (this: HandlerState<Schema<T>>, event: Schema<E>) => any, options?: {
-        proxy?: false;
-    }): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
     <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: T) => any, options: {
         proxy: true;
     }): ModuleFactory<CellToOpaque<T>, E>;
     <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: HandlerState<T>) => any, options?: {
         proxy?: false;
     }): ModuleFactory<CellToOpaque<T>, E>;
-    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (this: T, event: E) => any, options: {
-        proxy: true;
-    }): ModuleFactory<CellToOpaque<T>, E>;
-    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (this: HandlerState<T>, event: E) => any, options?: {
-        proxy?: false;
-    }): ModuleFactory<CellToOpaque<T>, E>;
     <E, T>(handler: (event: E, props: T) => any, options: {
         proxy: true;
     }): ModuleFactory<CellToOpaque<T>, E>;
     <E, T>(handler: (event: E, props: HandlerState<T>) => any, options?: {
-        proxy?: false;
-    }): ModuleFactory<CellToOpaque<T>, E>;
-    <E, T>(handler: (this: T, event: E) => any, options: {
-        proxy: true;
-    }): ModuleFactory<CellToOpaque<T>, E>;
-    <E, T>(handler: (this: HandlerState<T>, event: E) => any, options?: {
         proxy?: false;
     }): ModuleFactory<CellToOpaque<T>, E>;
 };

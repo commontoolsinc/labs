@@ -56,7 +56,6 @@ export {
 export { h } from "@commontools/api";
 export type {
   Cell,
-  CellToOpaque,
   Child,
   CreateCellFunction,
   Handler,
@@ -166,7 +165,6 @@ declare module "@commontools/api" {
     wrapper?: "handler";
     argumentSchema?: JSONSchema;
     resultSchema?: JSONSchema;
-    proxy?: boolean;
   }
 }
 
