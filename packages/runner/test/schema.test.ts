@@ -115,10 +115,8 @@ describe("Schema Support", () => {
       const innerCell = runtime.getCell<{ label: string }>(
         space,
         "should support nested sinks 1",
-        undefined,
-        tx,
       );
-      innerCell.set({ label: "first" });
+      innerCell.withTx(tx).set({ label: "first" });
 
       const cell = runtime.getCell(
         space,
@@ -138,10 +136,13 @@ describe("Schema Support", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      cell.setRaw({
+      cell.withTx(tx).setRaw({
         value: "root",
         current: innerCell.getAsLink(),
       });
+
+      tx.commit();
+      tx = runtime.edit();
 
       const rootValues: string[] = [];
       const currentValues: string[] = [];
@@ -179,9 +180,11 @@ describe("Schema Support", () => {
       // Find the currently selected cell and update it
       const first = cell.key("current").get();
       expect(isCell(first)).toBe(true);
-      expect(first.tx).toBe(tx);
       expect(first.get()).toEqual({ label: "first" });
-      first.set({ label: "first - update" });
+      first.withTx(tx).set({ label: "first - update" });
+
+      tx.commit();
+      tx = runtime.edit();
 
       await runtime.idle();
 
@@ -196,17 +199,28 @@ describe("Schema Support", () => {
         } as const satisfies JSONSchema,
         tx,
       );
-      second.set({ label: "second" });
-      cell.key("current").set(second);
+      second.withTx(tx).set({ label: "second" });
+      cell.withTx(tx).key("current").set(second);
+
+      tx.commit();
+      tx = runtime.edit();
 
       await runtime.idle();
 
       // Now change the first one again, should only change currentByGetValues
-      first.set({ label: "first - updated again" });
+      first.withTx(tx).set({ label: "first - updated again" });
+
+      tx.commit();
+      tx = runtime.edit();
+
       await runtime.idle();
 
       // Now change the second one, should change all but currentByGetValues
-      second.set({ label: "second - update" });
+      second.withTx(tx).set({ label: "second - update" });
+
+      tx.commit();
+      tx = runtime.edit();
+
       await runtime.idle();
 
       expect(currentByGetValues).toEqual([
@@ -257,19 +271,15 @@ describe("Schema Support", () => {
       const initial = runtime.getCell<{ foo: { label: string } }>(
         space,
         "should support nested sinks via asCell with aliases 1",
-        undefined,
-        tx,
       );
-      initial.set({ foo: { label: "first" } });
+      initial.withTx(tx).set({ foo: { label: "first" } });
       const initialEntityId = initial.entityId!;
 
       const linkCell = runtime.getCell<any>(
         space,
         "should support nested sinks via asCell with aliases 2",
-        undefined,
-        tx,
       );
-      linkCell.setRaw(initial.getAsLink());
+      linkCell.withTx(tx).setRaw(initial.getAsLink());
       const linkEntityId = linkCell.entityId!;
 
       const docCell = runtime.getCell<{
@@ -278,13 +288,15 @@ describe("Schema Support", () => {
       }>(
         space,
         "should support nested sinks via asCell with aliases 3",
-        undefined,
-        tx,
       );
-      docCell.setRaw({
+      docCell.withTx(tx).setRaw({
         value: "root",
         current: linkCell.key("foo").getAsWriteRedirectLink(),
       });
+
+      tx.commit();
+      tx = runtime.edit();
+
       const root = docCell.asSchema(schema);
 
       const rootValues: any[] = [];
@@ -333,8 +345,7 @@ describe("Schema Support", () => {
       await runtime.idle();
 
       // Find the currently selected cell and read it
-      const tx2 = runtime.edit();
-      const first = root.key("current").withTx(tx2).get();
+      const first = root.key("current").withTx(tx).get();
       expect(isCell(first)).toBe(true);
       expect(first.get()).toEqual({ label: "first" });
       const { asCell: _ignore, ...omitSchema } = schema.properties.current;
@@ -346,7 +357,7 @@ describe("Schema Support", () => {
         schema: omitSchema,
         rootSchema: sanitizeSchemaForLinks(schema),
       });
-      const log = txToReactivityLog(tx2);
+      const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);
       expect(reads.length).toEqual(3);
       expect(
@@ -359,7 +370,10 @@ describe("Schema Support", () => {
       ].sort((a, b) => a.id.localeCompare(b.id)));
 
       // Then update it
-      initial.set({ foo: { label: "first - update" } });
+      initial.withTx(tx).set({ foo: { label: "first - update" } });
+      tx.commit();
+      tx = runtime.edit();
+
       await runtime.idle();
       expect(first.get()).toEqual({ label: "first - update" });
 
@@ -369,19 +383,24 @@ describe("Schema Support", () => {
       const second = runtime.getCell<{ foo: { label: string } }>(
         space,
         "should support nested sinks via asCell with aliases 4",
-        undefined,
-        tx,
       );
-      second.set({ foo: { label: "second" } });
-      linkCell.setRaw(second.getAsLink());
+      second.withTx(tx).set({ foo: { label: "second" } });
+      linkCell.withTx(tx).setRaw(second.getAsLink());
+
+      tx.commit();
+      tx = runtime.edit();
 
       await runtime.idle();
 
       expect(rootValues).toEqual(["root", "cancelled", "root"]);
 
       // Change unrelated value should update root, but not the other cells
-      root.key("value").set("root - updated");
+      root.withTx(tx).key("value").set("root - updated");
+      tx.commit();
+      tx = runtime.edit();
+
       await runtime.idle();
+
       expect(rootValues).toEqual([
         "root",
         "cancelled",
@@ -391,11 +410,17 @@ describe("Schema Support", () => {
       ]);
 
       // Now change the first one again, should only change currentByGetValues
-      initial.set({ foo: { label: "first - updated again" } });
+      initial.withTx(tx).set({ foo: { label: "first - updated again" } });
+      tx.commit();
+      tx = runtime.edit();
+
       await runtime.idle();
 
       // Now change the second one, should change all but currentByGetValues
-      second.set({ foo: { label: "second - update" } });
+      second.withTx(tx).set({ foo: { label: "second - update" } });
+      tx.commit();
+      tx = runtime.edit();
+
       await runtime.idle();
 
       expect(rootValues).toEqual([
@@ -412,21 +437,24 @@ describe("Schema Support", () => {
       const third = runtime.getCell<{ label: string }>(
         space,
         "should support nested sinks via asCell with aliases 5",
-        undefined,
-        tx,
       );
-      third.set({ label: "third" });
-      docCell.key("current").setRaw(third.getAsWriteRedirectLink());
+      third.withTx(tx).set({ label: "third" });
+      docCell.withTx(tx).key("current").setRaw(third.getAsWriteRedirectLink());
+
+      tx.commit();
+      tx = runtime.edit();
 
       await runtime.idle();
 
       // Now change the first one again, should only change currentByGetValues
-      initial.set({ foo: { label: "first - updated yet again" } });
-      second.set({ foo: { label: "second - updated again" } });
-      third.set({ label: "third - updated" });
-      await runtime.idle();
+      initial.withTx(tx).set({ foo: { label: "first - updated yet again" } });
+      second.withTx(tx).set({ foo: { label: "second - updated again" } });
+      third.withTx(tx).set({ label: "third - updated" });
 
-      await tx2.commit();
+      tx.commit();
+      tx = runtime.edit();
+
+      await runtime.idle();
 
       expect(currentByGetValues).toEqual([
         "first",
