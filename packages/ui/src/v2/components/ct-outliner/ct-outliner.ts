@@ -7,7 +7,7 @@ import {
   type CellController,
   createCellController,
 } from "../../core/cell-controller.ts";
-import { type Cell, isCell } from "@commontools/runner";
+import { type Cell, isCell, NAME } from "@commontools/runner";
 
 import type {
   EditingKeyboardContext,
@@ -120,7 +120,7 @@ export class CTOutliner extends BaseElement {
 
   declare value: Tree | Cell<Tree>;
   declare readonly: boolean;
-  declare mentionable: MentionableItem[];
+  declare mentionable: Cell<Charm[]>;
   // Backward compatibility getter/setter for tree access
   get tree(): Tree {
     return this.cellController.getValue();
@@ -1481,15 +1481,22 @@ export class CTOutliner extends BaseElement {
   }
 
   private getFilteredMentions(): MentionableItem[] {
-    if (!this.mentionable || this.mentionable.length === 0) return [];
+    if (!this.mentionable || this.mentionable.get().length === 0) return [];
 
     const query = this.mentionQuery.toLowerCase();
-    return this.mentionable.filter((item) =>
-      item.name.toLowerCase().includes(query)
-    );
+    const matches = []
+
+    const flattened = this.mentionable.get()
+    for (const mention of flattened) {
+      if (mention[NAME].toLowerCase().includes(query)) {
+        matches.push(flattened.indexOf(mention));
+      }
+    }
+
+    return matches.map(i => this.mentionable.key(i).getAsQueryResult())
   }
 
-  private insertMention(mention: MentionableItem) {
+  private async insertMention(mention: MentionableItem) {
     if (!this.editingNode) return;
 
     const textarea = this.shadowRoot?.querySelector(
@@ -1508,8 +1515,8 @@ export class CTOutliner extends BaseElement {
     const afterMention = this.editingContent.substring(cursorPos);
 
     // Create markdown link with encoded charm reference
-    const charmHref = this.encodeCharmForHref(mention.charm);
-    const mentionText = `[${mention.name}](${charmHref})`;
+    const charmHref = await this.encodeCharmForHref(mention);
+    const mentionText = `[${mention[NAME]}](${charmHref})`;
 
     this.editingContent = beforeMention + mentionText + afterMention;
     textarea.value = this.editingContent;
@@ -1526,47 +1533,42 @@ export class CTOutliner extends BaseElement {
     textarea.focus();
   }
 
-  private encodeCharmForHref(charm: Cell<Charm>): string {
-    const id = charm.entityId;
-    const urlSafe = encodeURIComponent(JSON.stringify(id));
-    return urlSafe;
+  private async generateHash(input) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(input);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(byte => byte.toString(16).padStart(2, '0')).join('');
+    return hashHex;
+  }
+
+  private async encodeCharmForHref(charm: Charm): string {
+    const id = await this.generateHash(charm[NAME]);
+    return id;
   }
 
   /**
    * Decode charm reference from href
    */
-  private decodeCharmFromHref(href: string | null): Charm | null {
-    debugger
-    if (!href) return null;
-    try {
-      // First try to decode URL encoding
-      const decoded = decodeURIComponent(href);
-
-      // Try to find the original charm reference from mentionable items
-      for (const mention of this.mentionable) {
-        const encodedHref = this.encodeCharmForHref(mention.charm);
-        if (encodedHref === href) {
-          return mention.charm;
-        }
+  private async decodeCharmFromHref(href: string | null): Charm | null {
+    // Check if hash matches any mentionable charm
+    let match = -1
+    const flattened = this.mentionable.get() || []
+    for (const mention of flattened) {
+      const mentionHash = await this.generateHash(mention[NAME]);
+      if (mentionHash === href) {
+        match = flattened.indexOf(mention);
+        break;
       }
-
-      // If decoded content looks like an ID, use it directly
-      if (decoded && typeof decoded === "string") {
-        return { id: decoded };
-      }
-
-      // Fallback: treat href as simple ID
-      return { id: href };
-    } catch (error) {
-      // Fallback: treat href as simple ID
-      return { id: href };
     }
+
+    return this.mentionable.key(match).getAsQueryResult()
   }
 
   /**
    * Handle click on charm links
    */
-  private handleCharmLinkClick(event: MouseEvent) {
+  private async handleCharmLinkClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
     if (!target.classList.contains("charm-link")) {
       return;
@@ -1583,7 +1585,7 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    const charm = this.decodeCharmFromHref(href);
+    const charm = await this.decodeCharmFromHref(href);
     if (!charm) {
       return;
     }
@@ -1592,7 +1594,7 @@ export class CTOutliner extends BaseElement {
     this.emit("charm-link-click", {
       href,
       text: text || "",
-      charm: (charm as any).getAsQueryResultProxy(),
+      charm,
     });
   }
 
@@ -1845,10 +1847,7 @@ export class CTOutliner extends BaseElement {
             this.requestUpdate();
           }}"
           >
-            <div class="mention-name">${mention.name}</div>
-            <div class="mention-charm">${this.getCharmDisplayText(
-            mention.charm,
-          )}</div>
+            <div class="mention-name">${mention[NAME]}</div>
           </div>
         `
       )}
