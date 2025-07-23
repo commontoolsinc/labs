@@ -56,6 +56,7 @@ export {
 export { h } from "@commontools/api";
 export type {
   Cell,
+  CellToOpaque,
   Child,
   CreateCellFunction,
   Handler,

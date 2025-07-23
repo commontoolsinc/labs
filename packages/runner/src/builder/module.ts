@@ -133,21 +133,21 @@ export function handler<E, T>(
     }
     : undefined;
 
-  const module: Handler & toJSON & {
-    bind: (inputs: Opaque<T>) => OpaqueRef<E>;
+  const module: Handler<T, E> & toJSON & {
+    bind: (inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<E>;
   } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
-    with: (inputs: Opaque<T>) => factory(inputs),
+    with: (inputs: Opaque<CellToOpaque<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
-    bind: (inputs: Opaque<T>) => factory(inputs),
+    bind: (inputs: Opaque<CellToOpaque<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema ? { argumentSchema: schema } : {}),
   };
 
-  const factory = Object.assign((props: Opaque<T>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<CellToOpaque<T>>): OpaqueRef<E> => {
     const stream = opaqueRef();
     stream.set({ $stream: true });
     const node: NodeRef = {
