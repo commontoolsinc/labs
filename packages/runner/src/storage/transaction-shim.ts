@@ -9,6 +9,7 @@ import type {
   InactiveTransactionError,
   INotFoundError,
   IReadActivity,
+  IReadOnlyAddressError,
   IReadOptions,
   IStorageSubscription,
   IStorageSubscriptionCapability,
@@ -18,6 +19,7 @@ import type {
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
+  ITypeMismatchError,
   IUnsupportedMediaTypeError,
   JSONValue,
   MemoryAddressPathComponent,
@@ -40,6 +42,7 @@ import type { EntityId } from "../doc-map.ts";
 import { getValueAtPath } from "../path-utils.ts";
 import { getJSONFromDataURI } from "../uri-utils.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
+import { error } from "node:console";
 
 /**
  * Convert a URI string to an EntityId object
@@ -57,7 +60,7 @@ export function uriToEntityId(uri: string): EntityId {
 function validateParentPath(
   value: any,
   path: readonly MemoryAddressPathComponent[],
-): INotFoundError | null {
+): INotFoundError | ITypeMismatchError | null {
   const pathLength = path.length;
 
   if (pathLength === 0) {
@@ -66,12 +69,21 @@ function validateParentPath(
 
   // Check if the document itself exists and is an object for first-level writes
   if (pathLength === 1) {
-    if (value === undefined || !isRecord(value)) {
+    if (value === undefined) {
       const pathError: INotFoundError = new Error(
-        `Cannot access path [${String(path[0])}] - document is not a record`,
+        `Cannot access path [${String(path[0])}] - document does not exist`,
       ) as INotFoundError;
       pathError.name = "NotFoundError";
       return pathError;
+    }
+    if (!isRecord(value)) {
+      const typeError: ITypeMismatchError = new Error(
+        `Cannot access path [${String(path[0])}] - document is not a record`,
+      ) as ITypeMismatchError;
+      typeError.name = "TypeMismatchError";
+      typeError.address = { id: "of:unknown", type: "application/json", path }; // Address will be filled in by caller
+      typeError.actualType = typeof value;
+      return typeError;
     }
     return null;
   }
@@ -83,19 +95,29 @@ function validateParentPath(
   let parentIndex = 0;
   for (parentIndex = 0; parentIndex < lastIndex; parentIndex++) {
     if (!isRecord(parentValue)) {
-      parentValue = undefined;
-      break;
+      // Found a non-record in the path
+      const typeError: ITypeMismatchError = new Error(
+        `Cannot access path [${path.join(", ")}] - [${
+          path.slice(0, parentIndex + 1).join(", ")
+        }] is not a record`,
+      ) as ITypeMismatchError;
+      typeError.name = "TypeMismatchError";
+      typeError.address = {
+        id: "of:unknown",
+        type: "application/json",
+        path: path.slice(0, parentIndex + 1),
+      };
+      typeError.actualType = parentValue === null ? "null" : typeof parentValue;
+      return typeError;
     }
     parentValue = parentValue[path[parentIndex] as keyof typeof parentValue];
   }
 
-  if (
-    value === undefined || parentValue === undefined || !isRecord(parentValue)
-  ) {
+  if (value === undefined || parentValue === undefined) {
     const pathError: INotFoundError = new Error(
       `Cannot access path [${path.join(", ")}] - parent path [${
         path.slice(0, lastIndex).join(", ")
-      }] does not exist or is not a record`,
+      }] does not exist`,
     ) as INotFoundError;
     pathError.name = "NotFoundError";
 
@@ -103,6 +125,20 @@ function validateParentPath(
     if (parentIndex > 0) pathError.path = path.slice(0, parentIndex - 1);
 
     return pathError;
+  } else if (!isRecord(parentValue)) {
+    const typeError: ITypeMismatchError = new Error(
+      `Cannot access path [${path.join(", ")}] - parent path [${
+        path.slice(0, lastIndex).join(", ")
+      }] is not a record`,
+    ) as ITypeMismatchError;
+    typeError.name = "TypeMismatchError";
+    typeError.address = {
+      id: "of:unknown",
+      type: "application/json",
+      path: path.slice(0, lastIndex),
+    };
+    typeError.actualType = parentValue === null ? "null" : typeof parentValue;
+    return typeError;
   }
 
   return null;
@@ -203,6 +239,9 @@ class TransactionReader implements ITransactionReader {
 
         const validationError = validateParentPath(json, address.path);
         if (validationError) {
+          if (validationError.name === "TypeMismatchError") {
+            validationError.address.id = address.id;
+          }
           return { ok: undefined, error: validationError };
         }
 
@@ -260,6 +299,9 @@ class TransactionReader implements ITransactionReader {
       // Validate parent path exists and is a record for nested writes/reads
       const validationError = validateParentPath(doc.get(), rest);
       if (validationError) {
+        if (validationError.name === "TypeMismatchError") {
+          validationError.address.id = address.id;
+        }
         return { ok: undefined, error: validationError };
       }
       // Read from doc itself
@@ -283,8 +325,8 @@ class TransactionReader implements ITransactionReader {
       const sourceCell = doc.sourceCell;
       let value: string | undefined = undefined;
       if (sourceCell) {
-        // Convert EntityId to URI string
-        value = `of:${JSON.parse(JSON.stringify(sourceCell.entityId))["/"]}`;
+        // Convert EntityId to string
+        value = JSON.stringify(sourceCell.entityId);
       }
       const read: Read = {
         address,
@@ -323,6 +365,8 @@ class TransactionWriter extends TransactionReader
     | INotFoundError
     | InactiveTransactionError
     | IUnsupportedMediaTypeError
+    | ITypeMismatchError
+    | IReadOnlyAddressError
   > {
     if (address.type !== "application/json") {
       const error = new Error(
@@ -340,8 +384,8 @@ class TransactionWriter extends TransactionReader
     if (address.id.startsWith("data:")) {
       const error = new Error(
         "Cannot write to data URI",
-      ) as IUnsupportedMediaTypeError;
-      error.name = "UnsupportedMediaTypeError";
+      ) as IReadOnlyAddressError;
+      error.name = "ReadOnlyAddressError";
       return {
         ok: undefined,
         error,
@@ -391,6 +435,9 @@ class TransactionWriter extends TransactionReader
       // Validate parent path exists and is a record for nested writes
       const validationError = validateParentPath(doc.get(), rest);
       if (validationError) {
+        if (validationError.name === "TypeMismatchError") {
+          validationError.address.id = address.id;
+        }
         return { ok: undefined, error: validationError };
       }
       // Write to doc itself
@@ -415,19 +462,17 @@ class TransactionWriter extends TransactionReader
         notFoundError.name = "NotFoundError";
         return { ok: undefined, error: notFoundError };
       }
-      // Value must be a URI string (of:...)
-      if (typeof value !== "string" || !value.startsWith("of:")) {
+      // Value must be a JSON EntityId string
+      if (typeof value !== "string" || !value.startsWith('{"/":"')) {
         const notFoundError: INotFoundError = new Error(
-          `Value for 'source' must be a URI string (of:...)`,
+          `Value for 'source' must be a JSON string`,
         ) as INotFoundError;
         notFoundError.name = "NotFoundError";
         return { ok: undefined, error: notFoundError };
       }
-      // Get the source doc in the same space
-      const sourceEntityId = uriToEntityId(value);
       const sourceDoc = this.runtime.documentMap.getDocByEntityId(
         address.space,
-        sourceEntityId,
+        value,
         false,
       );
       if (!sourceDoc) {
@@ -623,7 +668,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): JSONValue | undefined {
     const readResult = this.tx.read(address, options);
-    if (readResult.error && readResult.error.name !== "NotFoundError") {
+    if (
+      readResult.error &&
+      readResult.error.name !== "NotFoundError" &&
+      readResult.error.name !== "TypeMismatchError"
+    ) {
       throw readResult.error;
     }
     return readResult.ok?.value;
@@ -655,14 +704,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     value: JSONValue | undefined,
   ): void {
     const writeResult = this.tx.write(address, value);
-    if (writeResult.error && writeResult.error.name === "NotFoundError") {
-      console.log("[writeOrThrow] NotFoundError retry logic");
+    if (
+      writeResult.error &&
+      (writeResult.error.name === "NotFoundError" ||
+        writeResult.error.name === "TypeMismatchError")
+    ) {
+      console.log("[writeOrThrow] NotFoundError/TypeMismatchError retry logic");
       console.log("[writeOrThrow] address:", address);
       console.log("[writeOrThrow] value:", value);
-      console.log("[writeOrThrow] error.path:", writeResult.error.path);
+      if (writeResult.error.name === "NotFoundError") {
+        console.log("[writeOrThrow] error.path:", writeResult.error.path);
+      }
 
       // Create parent entries if needed
-      const lastValidPath = writeResult.error.path;
+      const lastValidPath = writeResult.error.name === "NotFoundError"
+        ? writeResult.error.path
+        : undefined;
       const valueObj = lastValidPath
         ? this.readValueOrThrow({ ...address, path: lastValidPath }, {
           meta: ignoreReadForScheduling,

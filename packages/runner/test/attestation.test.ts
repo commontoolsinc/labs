@@ -113,9 +113,11 @@ describe("Attestation Module", () => {
       }, "value");
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
-      expect(result.error?.message).toContain("cannot write");
-      expect(result.error?.message).toContain("expected an object");
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot write property");
+      expect(result.error?.message).toContain(
+        "expected object but found string",
+      );
     });
 
     it("should fail when path leads through primitive", () => {
@@ -136,7 +138,7 @@ describe("Attestation Module", () => {
       }, true);
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle array modifications", () => {
@@ -231,9 +233,11 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
-      expect(result.error?.message).toContain("cannot read");
-      expect(result.error?.message).toContain("encountered: 42");
+      expect(result.error?.name).toBe("TypeMismatchError");
+      expect(result.error?.message).toContain("Cannot read property");
+      expect(result.error?.message).toContain(
+        "expected object but found number",
+      );
     });
 
     it("should fail when reading through null", () => {
@@ -249,7 +253,7 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle array access", () => {
@@ -309,7 +313,7 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("NotFoundError");
     });
   });
 
@@ -517,7 +521,7 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle partial source paths", () => {
@@ -553,11 +557,9 @@ describe("Attestation Module", () => {
         const error = new Attestation.NotFound(source, address);
 
         expect(error.name).toBe("NotFoundError");
-        expect(error.message).toContain(
-          'Can not resolve the "application/json" of "test:1"',
+        expect(error.message).toBe(
+          "Cannot access path [data, property] - path does not exist",
         );
-        expect(error.message).toContain("data.property");
-        expect(error.message).toContain("non-object at data");
         expect(error.source).toBe(source);
         expect(error.address).toBe(address);
       });
@@ -576,70 +578,51 @@ describe("Attestation Module", () => {
         const error = new Attestation.NotFound(source, address);
         const withSpace = error.from(space);
 
-        expect(withSpace.space).toBe(space);
-        expect(withSpace.message).toContain(`from "${space}"`);
+        // NotFound error now returns the same instance from .from()
+        expect(withSpace).toBe(error);
+        expect(withSpace.message).toBe(
+          "Cannot access path [property] - path does not exist",
+        );
       });
     });
 
-    describe("WriteInconsistency", () => {
-      it("should create descriptive error message", () => {
-        const source = {
-          address: { id: "test:1", type: "application/json", path: ["data"] },
-          value: 42,
-        } as const;
+    describe("TypeMismatchError", () => {
+      it("should create descriptive error message for write operation", () => {
         const address = {
           id: "test:1",
           type: "application/json",
           path: ["data", "property"],
         } as const;
 
-        const error = new Attestation.WriteInconsistency(source, address);
+        const error = new Attestation.TypeMismatchError(
+          address,
+          "number",
+          "write",
+        );
 
-        expect(error.name).toBe("StorageTransactionInconsistent");
-        expect(error.message).toContain("cannot write");
-        expect(error.message).toContain("data.property");
-        expect(error.message).toContain("expected an object");
-        expect(error.message).toContain("encountered: 42");
+        expect(error.name).toBe("TypeMismatchError");
+        expect(error.message).toContain("Cannot write property");
+        expect(error.message).toContain("[data, property]");
+        expect(error.message).toContain("expected object but found number");
       });
 
-      it("should support space context", () => {
-        const source = {
-          address: { id: "test:1", type: "application/json", path: [] },
-          value: "string",
-        } as const;
-        const address = {
-          id: "test:1",
-          type: "application/json",
-          path: ["property"],
-        } as const;
-
-        const error = new Attestation.WriteInconsistency(source, address);
-        const withSpace = error.from(space);
-
-        expect(withSpace.space).toBe(space);
-        expect(withSpace.message).toContain(`in space "${space}"`);
-      });
-    });
-
-    describe("ReadInconsistency", () => {
-      it("should create descriptive error message", () => {
-        const source = {
-          address: { id: "test:1", type: "application/json", path: ["user"] },
-          value: null,
-        } as const;
+      it("should create descriptive error message for read operation", () => {
         const address = {
           id: "test:1",
           type: "application/json",
           path: ["user", "name"],
         } as const;
 
-        const error = new Attestation.ReadInconsistency(source, address);
+        const error = new Attestation.TypeMismatchError(
+          address,
+          "null",
+          "read",
+        );
 
-        expect(error.name).toBe("StorageTransactionInconsistent");
-        expect(error.message).toContain("cannot read");
-        expect(error.message).toContain("user.name");
-        expect(error.message).toContain("expected an object");
-        expect(error.message).toContain("encountered: null");
+        expect(error.name).toBe("TypeMismatchError");
+        expect(error.message).toContain("Cannot read property");
+        expect(error.message).toContain("[user, name]");
+        expect(error.message).toContain("expected object but found null");
       });
     });
 

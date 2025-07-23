@@ -110,17 +110,11 @@ export function determineTriggeredActions(
 
   if (startPath.length > 0) {
     // If we're starting from a specific path, filter the subscribers to only
-    // include those that start with that path.
+    // include those that can be affected by that path.
     subscribers = subscribers.map(({ action, paths }) => ({
       action,
       paths: paths.filter((path) => arraysOverlap(path, startPath)),
     })).filter(({ paths }) => paths.length > 0);
-
-    // And prepend path to data, so we don't have to special case this.
-    for (const key of startPath.toReversed()) {
-      before = { [key]: before } as JSONValue;
-      after = { [key]: after } as JSONValue;
-    }
   }
 
   // Sort subscribers by last/longest path first.

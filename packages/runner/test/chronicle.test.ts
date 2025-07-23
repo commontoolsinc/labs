@@ -431,7 +431,7 @@ describe("Chronicle", () => {
       }, "value");
 
       expect(writeResult.error).toBeDefined();
-      expect(writeResult.error?.name).toBe("StorageTransactionInconsistent");
+      expect(writeResult.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle reading invalid nested paths", () => {
@@ -452,7 +452,7 @@ describe("Chronicle", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle writing to invalid nested paths", () => {
@@ -473,7 +473,7 @@ describe("Chronicle", () => {
       );
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle deleting properties with undefined", () => {
@@ -954,7 +954,7 @@ describe("Chronicle", () => {
       }, "Alice");
 
       expect(writeResult.error).toBeDefined();
-      expect(writeResult.error?.name).toBe("StorageTransactionInconsistent");
+      expect(writeResult.error?.name).toBe("TypeMismatchError");
     });
 
     it("should fail write when nested data conflicts with non-existent fact", () => {
@@ -967,7 +967,7 @@ describe("Chronicle", () => {
       }, "some value");
 
       expect(writeResult.error).toBeDefined();
-      expect(writeResult.error?.name).toBe("StorageTransactionInconsistent");
+      expect(writeResult.error?.name).toBe("NotFoundError");
     });
 
     it("should fail commit when read invariants change after initial read", async () => {
@@ -1245,7 +1245,8 @@ describe("Chronicle", () => {
           "Cannot write to read-only address",
         );
         expect(result.error!.message).toContain(address.id);
-        expect(result.error!.address).toEqual(address);
+        expect((result.error as Chronicle.ReadOnlyAddressError).address)
+          .toEqual(address);
       });
 
       it("should fail to write to nested path in data URI", () => {
@@ -1260,7 +1261,8 @@ describe("Chronicle", () => {
 
         expect(result.error).toBeDefined();
         expect(result.error!.name).toBe("ReadOnlyAddressError");
-        expect(result.error!.address).toEqual(address);
+        expect((result.error as Chronicle.ReadOnlyAddressError).address)
+          .toEqual(address);
       });
 
       it("should fail to write undefined (delete) to data URI", () => {
@@ -1597,9 +1599,9 @@ describe("Chronicle", () => {
         const result = chronicle.read(address);
 
         expect(result.error).toBeDefined();
-        expect(result.error!.name).toBe("StorageTransactionInconsistent");
-        expect(result.error!.message).toContain("cannot read");
-        expect(result.error!.message).toContain("expected an object");
+        expect(result.error!.name).toBe("TypeMismatchError");
+        expect(result.error!.message).toContain("Cannot read property");
+        expect(result.error!.message).toContain("expected object");
       });
 
       it("should not interfere with regular replica reads", () => {

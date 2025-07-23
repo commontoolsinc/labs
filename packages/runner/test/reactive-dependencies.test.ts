@@ -871,8 +871,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        { name: "Alice" },
-        { name: "Bob" },
+        { user: { name: "Alice" }, post: { title: "Hello" } },
+        { user: { name: "Bob" }, post: { title: "Hello" } },
         ["user"],
       );
       expect(result).toEqual([action1]);
@@ -886,8 +886,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        { c: 1 },
-        { c: 2 },
+        { a: { b: { c: 1 } } },
+        { a: { b: { c: 2 } } },
         ["a", "b"],
       );
       expect(result).toEqual([action1]);
@@ -901,8 +901,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        { title: "Old" },
-        { title: "New" },
+        { post: { title: "Old" }, user: { name: "Alice" } },
+        { post: { title: "New" }, user: { name: "Alice" } },
         ["post"],
       );
       expect(result).toEqual([]);
@@ -918,8 +918,8 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        { profile: { name: "Alice" }, settings: { theme: "dark" } },
-        { profile: { name: "Bob" }, settings: { theme: "dark" } },
+        { users: { "123": { profile: { name: "Alice" }, settings: { theme: "dark" } } } },
+        { users: { "123": { profile: { name: "Bob" }, settings: { theme: "dark" } } } },
         ["users", "123"],
       );
       expect(result).toEqual([action1]);
@@ -934,7 +934,7 @@ describe("determineTriggeredActions", () => {
       const result = determineTriggeredActions(
         dependencies,
         undefined,
-        { b: 1 },
+        { a: { b: 1 } },
         ["a"],
       );
       expect(result).toEqual([action1]);
@@ -953,12 +953,20 @@ describe("determineTriggeredActions", () => {
       const result = determineTriggeredActions(
         dependencies,
         {
-          profile: { name: "Alice" },
-          settings: { theme: "dark" },
+          users: {
+            "123": {
+              profile: { name: "Alice" },
+              settings: { theme: "dark" },
+            },
+          },
         },
         {
-          profile: { name: "Alice Updated" }, // Changed
-          settings: { theme: "dark" },
+          users: {
+            "123": {
+              profile: { name: "Alice Updated" }, // Changed
+              settings: { theme: "dark" },
+            },
+          },
         },
         ["users", "123"],
       );
