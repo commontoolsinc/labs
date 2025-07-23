@@ -7,6 +7,7 @@ import { getNavigationHref } from "../lib/navigate.ts";
 import { styleMap } from "lit/directives/style-map.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { InspectorConflicts, InspectorUpdateEvent } from "../lib/inspector.ts";
+import "../components/Flex.ts";
 
 type ConnectionStatus =
   | "connecting"
@@ -41,24 +42,17 @@ export class XHeaderView extends BaseView {
       gap: 0.5rem;
     }
 
-    .right-section {
-      display: flex;
-      align-items: center;
+    h-box {
       gap: 0.5rem;
     }
 
-    .emoji-button {
-      background: none;
-      border: none;
+    x-button.emoji-button {
       font-size: 1.25rem;
-      cursor: pointer;
-      padding: 0.25rem;
       opacity: 0.7;
       transition: opacity 0.2s;
-      line-height: 1;
     }
 
-    .emoji-button:hover {
+    x-button.emoji-button:hover {
       opacity: 1;
     }
 
@@ -234,16 +228,17 @@ export class XHeaderView extends BaseView {
         </div>
         ${this.identity
         ? html`
-          <div class="right-section">
-            <button
+          <h-box>
+            <x-button
               class="emoji-button"
+              size="small"
               @click="${this.handleToggleClick}"
               title="${this.showShellCharmListView
             ? "Show Default Recipe"
             : "Show All Charms"}"
             >
               ${this.showShellCharmListView ? "📋" : "🔍"}
-            </button>
+            </x-button>
             <x-button
               class="auth-button"
               size="small"
@@ -251,7 +246,7 @@ export class XHeaderView extends BaseView {
             >
               Logout
             </x-button>
-          </div>
+          </h-box>
         `
         : null}
       </div>
