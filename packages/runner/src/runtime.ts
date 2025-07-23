@@ -1,3 +1,4 @@
+import { isDeno } from "@commontools/utils/env";
 import type {
   JSONSchema,
   Module,
@@ -45,7 +46,9 @@ import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { StaticCache } from "@commontools/static";
 
-const DEFAULT_USE_REAL_TRANSACTIONS = false;
+const DEFAULT_USE_REAL_TRANSACTIONS = isDeno()
+  ? ["1", "true", "on", "yes"].includes(Deno.env.get("USE_REAL_TRANSACTIONS")!)
+  : false;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 

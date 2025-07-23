@@ -559,13 +559,13 @@ export interface ITransactionReader {
    *  })
    *  assert(w.ok)
    *
-   *  assert(tx.read({ type, id, path:: ['author'] }).ok === undefined)
-   *  assert(tx.read({ type, id, path:: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type, id, path: ['author'] }).ok === undefined)
+   *  assert(tx.read({ type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
    *  // JS specific getters are not supported
-   *  assert(tx.read({ the, of, at: ['content', 'length'] }).ok.is === undefined)
-   *  assert(tx.read({ the, of, at: ['title'] }).ok.is === "Hello world")
+   *  assert(tx.read({ type, id, path: ['content', 'length'] }).ok?.value === undefined)
+   *  assert(tx.read({ type, id, path: ['title'] }).ok?.value === "Hello world")
    *  // Referencing non-existing facts produces errors
-   *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type: 'bad/mime', id, path: ['author'] }).error.name === 'NotFoundError')
    * ```
    *
    * @param address - Memory address to read from
@@ -656,7 +656,10 @@ export type CommitError =
 
 export interface INotFoundError extends Error {
   name: "NotFoundError";
+  source: IAttestation;
+  address: IMemoryAddress;
   path?: MemoryAddressPathComponent[];
+  from(space: MemorySpace): INotFoundError;
 }
 
 /**
@@ -682,13 +685,15 @@ export type ReadError =
   | INotFoundError
   | InactiveTransactionError
   | IInvalidDataURIError
-  | IUnsupportedMediaTypeError;
+  | IUnsupportedMediaTypeError
+  | ITypeMismatchError;
 
 export type WriteError =
   | INotFoundError
   | IUnsupportedMediaTypeError
   | InactiveTransactionError
-  | IReadOnlyAddressError;
+  | IReadOnlyAddressError
+  | ITypeMismatchError;
 
 export type ReaderError = InactiveTransactionError;
 
@@ -699,19 +704,6 @@ export type WriterError =
 
 export interface IStorageTransactionComplete extends Error {
   name: "StorageTransactionCompleteError";
-}
-export interface INotFoundError extends Error {
-  name: "NotFoundError";
-
-  /**
-   * Source in which address could not be resolved.
-   */
-  source: IAttestation;
-
-  /**
-   * Address that we could not resolve.
-   */
-  address: IMemoryAddress;
 }
 
 /**
@@ -857,6 +849,28 @@ export interface IReadOnlyAddressError extends Error {
   address: IMemoryAddress;
 
   from(space: MemorySpace): IReadOnlyAddressError;
+}
+
+/**
+ * Error returned when attempting to access a property on a non-object value.
+ * This is different from NotFound (document doesn't exist) and Inconsistency
+ * (state changed). This error indicates a type mismatch that would persist
+ * even if the transaction were retried.
+ */
+export interface ITypeMismatchError extends Error {
+  name: "TypeMismatchError";
+
+  /**
+   * The address being accessed.
+   */
+  address: IMemoryAddress;
+
+  /**
+   * The actual type encountered.
+   */
+  actualType: string;
+
+  from(space: MemorySpace): ITypeMismatchError;
 }
 
 /**

@@ -48,7 +48,10 @@ describe("Storage", () => {
       const testValue = { data: "test" };
       testCell.send(testValue);
 
-      await testCell.sync();
+      await tx.commit();
+      tx = runtime.edit();
+
+      if (runtime.storage.shim) await testCell.sync();
 
       const query = storageManager
         .mount(space)
@@ -60,6 +63,7 @@ describe("Storage", () => {
 
       const [fact] = query.facts;
 
+      expect(fact).toBeDefined();
       expect(fact.is).toEqual({ value: testValue });
     });
 
@@ -78,7 +82,12 @@ describe("Storage", () => {
       };
       testCell.send(testValue);
 
-      await testCell.sync();
+      // Commit transaction to persist data
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      if (runtime.storage.shim) await testCell.sync();
 
       const entry = storageManager.open(space).get(
         refCell.getAsNormalizedFullLink().id,
@@ -101,7 +110,12 @@ describe("Storage", () => {
       };
       testCell.send(testValue);
 
-      await testCell.sync();
+      // Commit transaction to persist data
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      if (runtime.storage.shim) await testCell.sync();
 
       const refCellURI = refCell.getAsNormalizedFullLink().id;
       const entry = storageManager.open(space).get(refCellURI);
@@ -111,12 +125,15 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates", async () => {
-      await testCell.sync();
-
       testCell.send("value 1");
       testCell.send("value 2");
 
-      await runtime.storage.synced();
+      // Commit transaction to persist data
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      if (runtime.storage.shim) await testCell.sync();
 
       const query = storageManager
         .mount(space)
@@ -184,6 +201,8 @@ describe("Storage", () => {
 
   describe("ephemeral docs", () => {
     it("should not be loaded from storage", async () => {
+      if (!runtime.storage.shim) return;
+
       const ephemeralCell = runtime.getCell<string>(
         space,
         "ephemeral",
@@ -204,10 +223,14 @@ describe("Storage", () => {
 
   describe("doc updates", () => {
     it("should persist doc updates with schema", async () => {
-      await testCell.sync();
-
       testCell.send("value 1");
       testCell.send("value 2");
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      if (runtime.storage.shim) await testCell.sync();
 
       await runtime.storage.synced();
 

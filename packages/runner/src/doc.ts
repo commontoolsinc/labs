@@ -339,14 +339,21 @@ export function createDoc<T>(
 
         // Send notification if shim storage manager is available
         if (runtime.storage.shim) {
+          let before = previousValue;
+          let after = newValue;
+          for (const key of ["value", ...path.map(String)].reverse()) {
+            before = { [key]: before };
+            after = { [key]: after };
+          }
+
           const change: IMemoryChange = {
             address: {
               id: toURI(entityId),
               type: "application/json",
               path: ["value", ...path.map(String)],
             },
-            before: previousValue,
-            after: newValue,
+            before: before,
+            after: after,
           };
 
           const notification: ICommitNotification = {
@@ -413,8 +420,8 @@ export function createDoc<T>(
             type: "application/json",
             path: ["source"],
           },
-          before: JSON.stringify(sourceCell?.entityId),
-          after: JSON.stringify(cell?.entityId),
+          before: { source: JSON.stringify(sourceCell?.entityId) },
+          after: { source: JSON.stringify(cell?.entityId) },
         };
 
         const notification: ICommitNotification = {
