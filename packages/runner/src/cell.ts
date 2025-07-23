@@ -808,7 +808,7 @@ function subscribeToReferencedDocs<T>(
   };
 }
 
-function convertCellsToLinks(
+export function convertCellsToLinks(
   value: readonly any[] | Record<string, any> | any,
   path: string[] = [],
   seen: Map<any, string[]> = new Map(),
