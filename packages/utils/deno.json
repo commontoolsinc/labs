@@ -8,6 +8,7 @@
     "./defer": "./src/defer.ts",
     "./encoding": "./src/encoding.ts",
     "./env": "./src/env.ts",
+    "./equal-ignoring-symbols": "./src/equal-ignoring-symbols.ts",
     "./sleep": "./src/sleep.ts",
     "./types": "./src/types.ts",
     "./integration": "./src/integration.ts",

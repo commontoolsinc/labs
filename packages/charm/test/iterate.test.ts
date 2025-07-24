@@ -1,5 +1,8 @@
 import { assertEquals } from "@std/assert";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { scrub } from "../src/iterate.ts";
 import { type JSONSchema, Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -28,11 +31,11 @@ describe("scrub function", () => {
   });
 
   it("should return primitive values unchanged", () => {
-    assertEquals(scrub(123), 123);
-    assertEquals(scrub("test"), "test");
-    assertEquals(scrub(true), true);
-    assertEquals(scrub(null), null);
-    assertEquals(scrub(undefined), undefined);
+    expect(scrub(123)).toEqualIgnoringSymbols(123);
+    expect(scrub("test")).toEqualIgnoringSymbols("test");
+    expect(scrub(true)).toEqualIgnoringSymbols(true);
+    expect(scrub(null)).toEqualIgnoringSymbols(null);
+    expect(scrub(undefined)).toEqualIgnoringSymbols(undefined);
   });
 
   it("should scrub arrays recursively", () => {
@@ -42,10 +45,10 @@ describe("scrub function", () => {
     const input = [1, "test", testCell, { a: 1 }];
     const result = scrub(input);
 
-    assertEquals(result[0], 1);
-    assertEquals(result[1], "test");
-    assertEquals(result[2].get(), { test: 123 });
-    assertEquals(result[3], { a: 1 });
+    expect(result[0]).toEqualIgnoringSymbols(1);
+    expect(result[1]).toEqualIgnoringSymbols("test");
+    expect(result[2].get()).toEqualIgnoringSymbols({ test: 123 });
+    expect(result[3]).toEqualIgnoringSymbols({ a: 1 });
   });
 
   it("should handle cells with object schemas that have properties", () => {
@@ -65,17 +68,17 @@ describe("scrub function", () => {
     const result = scrub(cellWithSchema);
 
     // Check that the result has the expected schema properties
-    assertEquals(result.schema?.type, "object");
+    expect(result.schema?.type).toEqualIgnoringSymbols("object");
 
     // The properties object should exist and have exactly name and age
     const resultProperties = result.schema?.properties || {};
-    assertEquals(Object.keys(resultProperties).length, 2);
-    assertEquals("name" in resultProperties, true);
-    assertEquals("age" in resultProperties, true);
-    assertEquals("$UI" in resultProperties, false);
-    assertEquals("streamProp" in resultProperties, false);
+    expect(Object.keys(resultProperties).length).toEqualIgnoringSymbols(2);
+    expect("name" in resultProperties).toEqualIgnoringSymbols(true);
+    expect("age" in resultProperties).toEqualIgnoringSymbols(true);
+    expect("$UI" in resultProperties).toEqualIgnoringSymbols(false);
+    expect("streamProp" in resultProperties).toEqualIgnoringSymbols(false);
 
-    assertEquals(result.get(), { name: "test", age: 30 });
+    expect(result.get()).toEqualIgnoringSymbols({ name: "test", age: 30 });
   });
 
   it("should handle cells with object schemas that have no properties", () => {
@@ -91,7 +94,7 @@ describe("scrub function", () => {
     const result = scrub(cellWithEmptySchema);
 
     // Should return the cell unchanged
-    assertEquals(result.get(), { name: "test" });
+    expect(result.get()).toEqualIgnoringSymbols({ name: "test" });
   });
 
   it("should handle cells with non-object schemas", () => {
@@ -108,7 +111,7 @@ describe("scrub function", () => {
     const result = scrub(cellWithStringSchema);
 
     // For non-object schemas with primitive values, it should return the cell unchanged
-    assertEquals(result.get(), "test value");
+    expect(result.get()).toEqualIgnoringSymbols("test value");
   });
 });
 

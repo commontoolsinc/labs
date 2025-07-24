@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { type Cell, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import "./utils/matchers.ts"; // Import custom matchers
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

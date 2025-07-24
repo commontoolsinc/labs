@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { type Cell, isCell, isStream } from "../src/cell.ts";
 import { LegacyDocCellLink } from "../src/sigil-types.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -14,7 +16,6 @@ import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../src/storage/interface.ts";
-import "./utils/matchers.ts"; // Import custom matchers
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();

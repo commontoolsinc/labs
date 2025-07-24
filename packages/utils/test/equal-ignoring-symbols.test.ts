@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { stripSymbols } from "./matchers.ts";
-import "./matchers.ts"; // Import to register the custom matcher
+import { stripSymbols } from "../src/equal-ignoring-symbols.ts";
+import "../src/equal-ignoring-symbols.ts"; // Import to register the custom matcher
 
 const testSymbol1 = Symbol("test1");
 const testSymbol2 = Symbol("test2");

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { handler, lift } from "../src/builder/module.ts";
 import { str } from "../src/builder/built-in.ts";
 import {
@@ -13,7 +15,6 @@ import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
-import "./utils/matchers.ts"; // Import custom matchers
 
 // This file primarily tests Schema<> & co from commontools/api/index.ts, which
 // gets transitively loaded by the above
