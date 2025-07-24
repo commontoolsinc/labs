@@ -40,9 +40,6 @@
       "dom.asynciterable",
       "esnext"
     ],
-    "types": [
-      "./packages/jumble/src/global.d.ts"
-    ],
     "experimentalDecorators": true
   },
   "exclude": [
@@ -124,6 +121,7 @@
     "typescript": "npm:typescript",
     "vite": "npm:vite@^6.2.1",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.1",
-    "zod": "npm:zod@^3.24.1"
+    "zod": "npm:zod@^3.24.1",
+    "@babel/standalone": "npm:@babel/standalone@^7.28.2"
   }
 }
