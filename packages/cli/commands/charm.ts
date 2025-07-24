@@ -284,15 +284,15 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
   .option("-w,--watch", "Watch for changes and re-render")
   .action(async (options) => {
     const charmConfig = parseCharmOptions(options);
-    
+
     try {
       if (options.watch) {
         console.log("Watching for changes... Press Ctrl+C to exit.\n");
-        
+
         // Initial render
         const charmData = await inspectCharm(charmConfig);
         console.log(`Rendering charm: ${charmData.name || charmConfig.charm}`);
-        
+
         let renderCount = 0;
         const cleanup = await renderCharm(charmConfig, {
           watch: true,
@@ -306,14 +306,14 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
             }
           },
         }) as () => void;
-        
+
         // Handle Ctrl+C gracefully
         Deno.addSignalListener("SIGINT", () => {
           console.log("\nStopping watch mode...");
           cleanup();
           Deno.exit(0);
         });
-        
+
         // Keep the process running
         await new Promise(() => {});
       } else {
