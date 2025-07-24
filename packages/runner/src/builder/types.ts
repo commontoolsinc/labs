@@ -1,4 +1,5 @@
 import { isObject, type Mutable } from "@commontools/utils/types";
+import { toOpaqueRef } from "../back-to-cell.ts";
 
 import type {
   ByRefFunction,
@@ -216,7 +217,6 @@ export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
   return value[toOpaqueRef]();
 }
 
-export const toOpaqueRef = Symbol("toOpaqueRef");
 
 export type ShadowRef = {
   shadowOf: OpaqueRef<any> | ShadowRef;
@@ -315,5 +315,5 @@ export interface BuilderRuntime {
 // Factory function to create builder with runtime
 export type CreateBuilder = (
   runtime: BuilderRuntime,
-  getCellLinkOrThrow?: (value: any) => any,
+  getCellOrThrow?: (value: any) => any,
 ) => BuilderFunctionsAndConstants;

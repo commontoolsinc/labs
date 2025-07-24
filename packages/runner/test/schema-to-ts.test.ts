@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { handler, lift } from "../src/builder/module.ts";
 import { str } from "../src/builder/built-in.ts";
 import {
@@ -551,7 +553,13 @@ describe("Schema-to-TS Type Conversion", () => {
 
     expect(user.name).toBe("John");
     expect(user.age).toBe(30);
-    expect(user.tags).toEqual(["developer", "typescript"]);
-    expect(user.settings.get()).toEqual({ theme: "dark", notifications: true });
+    (expect(user.tags) as any).toEqualIgnoringSymbols([
+      "developer",
+      "typescript",
+    ]);
+    (expect(user.settings.get()) as any).toEqualIgnoringSymbols({
+      theme: "dark",
+      notifications: true,
+    });
   });
 });

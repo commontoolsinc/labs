@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, type JSONSchema } from "../src/builder/types.ts";
@@ -189,7 +191,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({
+    expect(result.get()).toMatchObjectIgnoringSymbols({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
@@ -225,7 +227,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({
+    expect(result.get()).toMatchObjectIgnoringSymbols({
       doubled: [3, 6, 9],
     });
   });
@@ -256,7 +258,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({ doubled: [] });
+    expect(result.get()).toMatchObjectIgnoringSymbols({ doubled: [] });
   });
 
   it("should execute handlers", async () => {
