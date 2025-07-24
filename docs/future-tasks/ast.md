@@ -1,8 +1,7 @@
 # TypeScript AST Transformers Guide
 
-This guide consolidates the TypeScript AST transformer functionality for the
-CommonTools js-runtime package. It covers two main transformers that enable
-reactive programming patterns:
+This guide covers two main transformers that enable reactive programming
+patterns:
 
 1. **OpaqueRef Transformer** - Transforms operations on `OpaqueRef` types to use
    reactive primitives
@@ -37,21 +36,24 @@ const count = cell(0); // count is OpaqueRef<number>
 
 ### Important Scope Limitation
 
-**OpaqueRef transformations only apply within JSX expressions.** Statement-level transformations (like if statements, loops, etc.) are not supported because they require complex control flow analysis and handling of side effects.
+**OpaqueRef transformations only apply within JSX expressions.** Statement-level
+transformations (like if statements, loops, etc.) are not supported because they
+require complex control flow analysis and handling of side effects.
 
 ```typescript
 // ✅ Transformed - JSX expression context
-<div>{count + 1}</div>  // → <div>{derive(count, _v => _v + 1)}</div>
+<div>{count + 1}</div>; // → <div>{derive(count, _v => _v + 1)}</div>
 
 // ❌ Not transformed - statement context
-if (count > 5) {  // Statements with OpaqueRef are not transformed
+if (count > 5) { // Statements with OpaqueRef are not transformed
   console.log("High");
 }
 ```
 
 ### Core Transformation Patterns (JSX Expression Context Only)
 
-The following transformations apply **only within JSX expressions**. OpaqueRef operations in regular TypeScript statements are not transformed.
+The following transformations apply **only within JSX expressions**. OpaqueRef
+operations in regular TypeScript statements are not transformed.
 
 #### 1. Binary Operations in JSX
 
@@ -117,7 +119,8 @@ OpaqueRef, while operations on the value require `derive()`.
 
 #### 4. Direct OpaqueRef References in JSX
 
-Direct OpaqueRef references inside JSX are preserved as-is, allowing the UI framework to handle reactivity:
+Direct OpaqueRef references inside JSX are preserved as-is, allowing the UI
+framework to handle reactivity:
 
 ```typescript
 // Input & Output (no transformation needed)
@@ -212,16 +215,19 @@ const userSchema = {
 
 ### Handler and Recipe Transformations
 
-The schema transformer also converts `handler` and `recipe` calls with type arguments:
+The schema transformer also converts `handler` and `recipe` calls with type
+arguments:
 
 ```typescript
 /// <cts-enable />
-import { handler, recipe, Cell } from "commontools";
+import { Cell, handler, recipe } from "commontools";
 
 // Handler with type arguments
-const myHandler = handler<ClickEvent, { count: Cell<number> }>((event, state) => {
-  state.count.set(state.count.get() + 1);
-});
+const myHandler = handler<ClickEvent, { count: Cell<number> }>(
+  (event, state) => {
+    state.count.set(state.count.get() + 1);
+  },
+);
 
 // Recipe with type argument
 export default recipe<CounterState>("Counter", (state) => {
@@ -229,28 +235,36 @@ export default recipe<CounterState>("Counter", (state) => {
 });
 
 // Transforms to:
-const myHandler = handler({
-  type: "object",
-  additionalProperties: true
-} as const satisfies JSONSchema, {
-  type: "object",
-  properties: {
-    count: { type: "number", asCell: true }
+const myHandler = handler(
+  {
+    type: "object",
+    additionalProperties: true,
+  } as const satisfies JSONSchema,
+  {
+    type: "object",
+    properties: {
+      count: { type: "number", asCell: true },
+    },
+    required: ["count"],
+  } as const satisfies JSONSchema,
+  (event, state) => {
+    state.count.set(state.count.get() + 1);
   },
-  required: ["count"]
-} as const satisfies JSONSchema, (event, state) => {
-  state.count.set(state.count.get() + 1);
-});
+);
 
-export default recipe({
-  type: "object",
-  properties: {
-    count: { type: "number" }
+export default recipe(
+  {
+    type: "object",
+    properties: {
+      count: { type: "number" },
+    },
+    required: ["count"],
+  } as const satisfies JSONSchema,
+  "Counter",
+  (state) => {
+    return { [UI]: <div>Count: {state.count}</div> };
   },
-  required: ["count"]
-} as const satisfies JSONSchema, "Counter", (state) => {
-  return { [UI]: <div>Count: {state.count}</div> };
-});
+);
 ```
 
 ### Schema Options
@@ -324,12 +338,14 @@ const schema = {
 4. Advanced destructuring patterns
 5. Logical operators (&&, ||, !) with short-circuiting
 
-## Semantic Validation
+## FUTURE: Semantic Validation
 
 A critical aspect of the AST system is semantic validation that runs
 **regardless of transformation mode**. This validation ensures recipes follow
 CommonTools patterns correctly and provides helpful error messages for both
 humans and LLMs.
+
+NOTE: this is not yet implemented.
 
 ### Core Validation Rules
 
@@ -488,11 +504,16 @@ const transformer = createOpaqueRefTransformer(program, {
 
 ## Current Transformer Architecture
 
-The OpaqueRef transformer handles both OpaqueRef transformations AND schema transformations for `handler` and `recipe` calls. This is intentional - the OpaqueRef transformer:
+The OpaqueRef transformer handles both OpaqueRef transformations AND schema
+transformations for `handler` and `recipe` calls. This is intentional - the
+OpaqueRef transformer:
 
-1. **Transforms JSX expressions** - Wraps OpaqueRef operations in `derive()` and `ifElse()`
-2. **Transforms handler/recipe calls** - Converts type arguments to schema objects
-3. **Manages imports** - Adds necessary imports for `derive`, `ifElse`, `toSchema`
+1. **Transforms JSX expressions** - Wraps OpaqueRef operations in `derive()` and
+   `ifElse()`
+2. **Transforms handler/recipe calls** - Converts type arguments to schema
+   objects
+3. **Manages imports** - Adds necessary imports for `derive`, `ifElse`,
+   `toSchema`
 
 The separate schema transformer is used for standalone `toSchema<T>()` calls.
 
@@ -508,7 +529,8 @@ The separate schema transformer is used for standalone `toSchema<T>()` calls.
 6. **Always Validate** - Semantic validation runs regardless of transformation
    mode
 7. **Helpful Errors** - Error messages guide users to correct patterns
-8. **Statement vs JSX Context** - Only transform OpaqueRef operations within JSX expressions
+8. **Statement vs JSX Context** - Only transform OpaqueRef operations within JSX
+   expressions
 
 ## Testing Strategy
 
@@ -541,7 +563,7 @@ interface TransformerOptions {
 
 ```typescript
 /// <cts-enable />
-import { cell, derive, ifElse, recipe, toSchema, UI, Cell } from "commontools";
+import { Cell, cell, derive, ifElse, recipe, toSchema, UI } from "commontools";
 
 interface TodoItem {
   id: string;
@@ -559,7 +581,7 @@ export default recipe<TodoState>("TodoList", (state) => {
   // They will fail at runtime if you try to use OpaqueRef directly
   // const activeItems = state.items.filter((item) => !item.completed); // ❌ Not transformed
   // const activeCount = activeItems.length; // ❌ Not transformed
-  
+
   return {
     [UI]: (
       <div>
@@ -569,7 +591,12 @@ export default recipe<TodoState>("TodoList", (state) => {
         <p>Status: {state.filter === "all" ? "All Items" : "Filtered"}</p>
         <div>
           {/* Complex expressions in JSX get wrapped in derive: */}
-          <span>Active: {derive(state.items, items => items.filter(item => !item.completed).length)}</span>
+          <span>
+            Active: {derive(state.items, (items) =>
+              items.filter((item) =>
+                !item.completed
+              ).length)}
+          </span>
         </div>
       </div>
     ),
@@ -579,43 +606,58 @@ export default recipe<TodoState>("TodoList", (state) => {
 });
 
 // After transformation:
-export default recipe({
-  type: "object",
-  properties: {
-    items: {
-      type: "array",
+export default recipe(
+  {
+    type: "object",
+    properties: {
       items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          text: { type: "string" },
-          completed: { type: "boolean" }
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            text: { type: "string" },
+            completed: { type: "boolean" },
+          },
+          required: ["id", "text", "completed"],
         },
-        required: ["id", "text", "completed"]
-      }
+      },
+      filter: {
+        type: "string",
+        enum: ["all", "active", "completed"],
+      },
     },
-    filter: {
-      type: "string",
-      enum: ["all", "active", "completed"]
-    }
-  },
-  required: ["items", "filter"]
-} as const satisfies JSONSchema, "TodoList", (state) => {
-  return {
-    [UI]: (
-      <div>
-        <h1>Todo List</h1>
-        <p>Total: {derive(state.items, _v => _v.length)}</p>
-        <p>Status: {ifElse(derive(state.filter, _v => _v === "all"), "All Items", "Filtered")}</p>
+    required: ["items", "filter"],
+  } as const satisfies JSONSchema,
+  "TodoList",
+  (state) => {
+    return {
+      [UI]: (
         <div>
-          <span>Active: {derive(state.items, items => items.filter(item => !item.completed).length)}</span>
+          <h1>Todo List</h1>
+          <p>Total: {derive(state.items, (_v) => _v.length)}</p>
+          <p>
+            Status: {ifElse(
+              derive(state.filter, (_v) => _v === "all"),
+              "All Items",
+              "Filtered",
+            )}
+          </p>
+          <div>
+            <span>
+              Active: {derive(state.items, (items) =>
+                items.filter((item) =>
+                  !item.completed
+                ).length)}
+            </span>
+          </div>
         </div>
-      </div>
-    ),
-    items: state.items,
-    filter: state.filter,
-  };
-});
+      ),
+      items: state.items,
+      filter: state.filter,
+    };
+  },
+);
 ```
 
 ## Notes on Implementation
