@@ -48,7 +48,7 @@ import { registerBuiltins } from "./builtins/index.ts";
 import { StaticCache } from "@commontools/static";
 
 const DEFAULT_USE_REAL_TRANSACTIONS = isDeno()
-  ? !!Deno.env.get("USE_REAL_TRANSACTIONS")
+  ? ["1", "true", "on", "yes"].includes(Deno.env.get("USE_REAL_TRANSACTIONS")!)
   : false;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
@@ -117,6 +117,7 @@ export interface IRuntime {
 
   // Storage transaction method
   edit(): IExtendedStorageTransaction;
+  readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction;
 
   // Cell factory methods
   getCell<S extends JSONSchema = JSONSchema>(
@@ -449,6 +450,14 @@ export class Runtime implements IRuntime {
    */
   edit(): IExtendedStorageTransaction {
     return this.storage.edit();
+  }
+
+  /**
+   * Returns the given transaction if it is ready, otherwise creates a new
+   * transaction.
+   */
+  readTx(tx?: IExtendedStorageTransaction): IExtendedStorageTransaction {
+    return tx?.status().status === "ready" ? tx : this.edit();
   }
 
   // Cell factory methods

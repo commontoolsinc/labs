@@ -9,12 +9,15 @@ import {
   type JSONSchema,
   type OpaqueRef,
   type Schema,
+  type Stream,
   toOpaqueRef,
   TYPE,
 } from "./builder/types.ts";
 import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
 import {
   createQueryResultProxy,
+  getCellOrThrow,
+  isQueryResultForDereferencing,
   makeOpaqueRef,
   type QueryResult,
 } from "./query-result-proxy.ts";
@@ -23,12 +26,13 @@ import {
   resolveLinkToValue,
   resolveLinkToWriteRedirect,
 } from "./link-resolution.ts";
-import { txToReactivityLog } from "./scheduler.ts";
+import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
 import { toURI } from "./uri-utils.ts";
 import {
   type LegacyJSONCellLink,
+  LINK_V1_TAG,
   type SigilLink,
   type SigilWriteRedirectLink,
   type URI,
@@ -247,9 +251,29 @@ declare module "@commontools/api" {
     copyTrap: boolean;
     [toOpaqueRef]: () => OpaqueRef<any>;
   }
+
+  interface Stream<T> {
+    send(event: T): void;
+    sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+    sync(): Promise<Stream<T>> | Stream<T>;
+    getRaw(options?: IReadOptions): any;
+    getAsNormalizedFullLink(): NormalizedFullLink;
+    getAsLink(
+      options?: {
+        base?: Cell<any>;
+        baseSpace?: MemorySpace;
+        includeSchema?: boolean;
+      },
+    ): SigilLink;
+    getDoc(): DocImpl<any>;
+    withTx(tx?: IExtendedStorageTransaction): Stream<T>;
+    schema?: JSONSchema;
+    rootSchema?: JSONSchema;
+    runtime: IRuntime;
+  }
 }
 
-export type { Cell } from "@commontools/api";
+export type { Cell, Stream } from "@commontools/api";
 
 export type { MemorySpace } from "@commontools/memory/interface";
 
@@ -273,19 +297,6 @@ export type Cellify<T> =
     // Handle primitives
     : T | Cell<T>;
 
-export interface Stream<T> {
-  send(event: T): void;
-  sink(callback: (event: T) => Cancel | undefined | void): Cancel;
-  sync(): Promise<Stream<T>> | Stream<T>;
-  getRaw(options?: IReadOptions): any;
-  getAsNormalizedFullLink(): NormalizedFullLink;
-  getDoc(): DocImpl<any>;
-  withTx(tx?: IExtendedStorageTransaction): Stream<T>;
-  schema?: JSONSchema;
-  rootSchema?: JSONSchema;
-  runtime: IRuntime;
-}
-
 export function createCell<T>(
   runtime: IRuntime,
   link: NormalizedFullLink,
@@ -294,13 +305,12 @@ export function createCell<T>(
 ): Cell<T> {
   let { schema, rootSchema } = link;
 
-  // Resolve the path to check whether it's a stream. We're not logging this
-  // right now. The corner case where during it's lifetime this changes from
-  // non-stream to stream or vice versa will not be detected.
-  const sideTx = runtime.edit();
-  const resolvedLink = noResolve ? link : resolveLinkToValue(sideTx, link);
-  const value = sideTx.readValueOrThrow(resolvedLink);
-  sideTx.commit();
+  // Resolve the path to check whether it's a stream.
+  const readTx = runtime.readTx(tx);
+  const resolvedLink = noResolve ? link : resolveLinkToValue(readTx, link);
+  const value = readTx.readValueOrThrow(resolvedLink, {
+    meta: ignoreReadForScheduling,
+  });
 
   // Use schema from alias if provided and no explicit schema was set
   if (!schema && resolvedLink.schema) {
@@ -338,6 +348,8 @@ class StreamCell<T> implements Stream<T> {
   }
 
   send(event: T): void {
+    event = convertCellsToLinks(event) as T;
+
     // Use runtime from doc if available
     this.runtime.scheduler.queueEvent(this.link, event);
 
@@ -360,14 +372,21 @@ class StreamCell<T> implements Stream<T> {
   }
 
   getRaw(options?: IReadOptions): any {
-    return (this.tx?.status().status === "ready"
-      ? this.tx
-      : this.runtime.edit())
-      .readValueOrThrow(this.link, options);
+    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
     return this.link;
+  }
+
+  getAsLink(
+    options?: {
+      base?: Cell<any>;
+      baseSpace?: MemorySpace;
+      includeSchema?: boolean;
+    },
+  ): SigilLink {
+    return createSigilLinkFromParsedLink(this.link, options);
   }
 
   getDoc(): DocImpl<any> {
@@ -382,7 +401,7 @@ class StreamCell<T> implements Stream<T> {
   }
 }
 
-class RegularCell<T> implements Cell<T> {
+export class RegularCell<T> implements Cell<T> {
   private readOnlyReason: string | undefined;
 
   constructor(
@@ -627,10 +646,7 @@ class RegularCell<T> implements Cell<T> {
   }
 
   getRaw(options?: IReadOptions): any {
-    return (this.tx?.status().status === "ready"
-      ? this.tx
-      : this.runtime.edit())
-      .readValueOrThrow(this.link, options);
+    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   setRaw(value: any): void {
@@ -662,10 +678,18 @@ class RegularCell<T> implements Cell<T> {
     >
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
-    const sourceCellId =
-      (this.tx?.status().status === "ready" ? this.tx : this.runtime.edit())
-        .readOrThrow({ ...this.link, path: ["source"] });
-    if (!sourceCellId) return undefined;
+    let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
+      { ...this.link, path: ["source"] },
+    ) as string | undefined;
+    if (!sourceCellId || typeof sourceCellId !== "string") {
+      return undefined;
+    }
+    if (sourceCellId.startsWith('{"/":')) {
+      sourceCellId = toURI(JSON.parse(sourceCellId));
+    }
+    if (!sourceCellId.startsWith("of:")) {
+      throw new Error("Source cell ID must start with 'of:'");
+    }
     return createCell(this.runtime, {
       space: this.link.space,
       path: [],
@@ -782,6 +806,56 @@ function subscribeToReferencedDocs<T>(
     cancel();
     if (isCancel(cleanup)) cleanup();
   };
+}
+
+export function convertCellsToLinks(
+  value: readonly any[] | Record<string, any> | any,
+  path: string[] = [],
+  seen: Map<any, string[]> = new Map(),
+): any {
+  if (seen.has(value)) {
+    return {
+      "/": {
+        [LINK_V1_TAG]: { path: seen.get(value) },
+      },
+    };
+  }
+
+  if (isQueryResultForDereferencing(value)) {
+    value = getCellOrThrow(value).getAsLink();
+  } else if (isCell(value) || isStream(value)) {
+    value = value.getAsLink();
+  } else if (isRecord(value) || typeof value === "function") {
+    // Only add here, otherwise they are literals or already cells:
+    seen.set(value, path);
+
+    // Process toJSON if it exists like JSON.stringify does.
+    if ("toJSON" in value && typeof value.toJSON === "function") {
+      value = value.toJSON();
+      if (!isRecord(value)) return value;
+      // Fall through to process, so even if there is a .toJSON on the
+      // result we don't call it again.
+    } else if (typeof value === "function") {
+      // Handle functions without toJSON like JSON.stringify does.
+      value = undefined;
+    }
+
+    // Recursively process arrays and objects.
+    if (Array.isArray(value)) {
+      value = value.map((value, index) =>
+        convertCellsToLinks(value, [...path, String(index)], seen)
+      );
+    } else {
+      value = Object.fromEntries(
+        Object.entries(value).map(([key, value]) => [
+          key,
+          convertCellsToLinks(value, [...path, String(key)], seen),
+        ]),
+      );
+    }
+  }
+
+  return value;
 }
 
 /**

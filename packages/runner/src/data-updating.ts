@@ -2,7 +2,7 @@ import { isRecord } from "@commontools/utils/types";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
-import { isCell } from "./cell.ts";
+import { isCell, RegularCell } from "./cell.ts";
 import { followWriteRedirects } from "./link-resolution.ts";
 import {
   areLinksSame,
@@ -92,8 +92,15 @@ export function normalizeAndDiff(
   newValue: unknown,
   context?: unknown,
   options?: IReadOptions,
+  seen: Map<any, NormalizedFullLink> = new Map(),
 ): ChangeSet {
   const changes: ChangeSet = [];
+
+  // When detecting a circular reference on JS objects, turn it into a cell,
+  // which below will be turned into a relative link.
+  if (seen.has(newValue)) {
+    newValue = new RegularCell(runtime, seen.get(newValue)!, tx);
+  }
 
   // ID_FIELD redirects to an existing field and we do something like DOM
   // diffing with it: We look at sibling entries and their value for that field,
@@ -129,7 +136,15 @@ export function normalizeAndDiff(
               // We found a sibling with the same id, so ...
               return [
                 // ... reuse the existing document
-                ...normalizeAndDiff(runtime, tx, link, v, context, options),
+                ...normalizeAndDiff(
+                  runtime,
+                  tx,
+                  link,
+                  v,
+                  context,
+                  options,
+                  seen,
+                ),
                 // ... and update it to the new value
                 ...normalizeAndDiff(
                   runtime,
@@ -138,6 +153,7 @@ export function normalizeAndDiff(
                   rest,
                   context,
                   options,
+                  seen,
                 ),
               ];
             }
@@ -191,6 +207,7 @@ export function normalizeAndDiff(
       newValue,
       context,
       options,
+      seen,
     );
   }
 
@@ -225,7 +242,15 @@ export function normalizeAndDiff(
           break;
         }
       }
-      return normalizeAndDiff(runtime, tx, link, dataValue, context, options);
+      return normalizeAndDiff(
+        runtime,
+        tx,
+        link,
+        dataValue,
+        context,
+        options,
+        seen,
+      );
     }
     if (
       isAnyCellLink(currentValue) &&
@@ -271,6 +296,9 @@ export function normalizeAndDiff(
       path: [],
       type: link.type,
     };
+
+    seen.set(newValue, newEntryLink);
+
     return [
       // If it wasn't already, set the current value to be a doc link to this doc
       ...normalizeAndDiff(
@@ -280,9 +308,18 @@ export function normalizeAndDiff(
         createSigilLinkFromParsedLink(newEntryLink, { base: link }),
         context,
         options,
+        seen,
       ),
       // And see whether the value of the document itself changed
-      ...normalizeAndDiff(runtime, tx, newEntryLink, rest, context, options),
+      ...normalizeAndDiff(
+        runtime,
+        tx,
+        newEntryLink,
+        rest,
+        context,
+        options,
+        seen,
+      ),
     ];
   }
 
@@ -296,6 +333,9 @@ export function normalizeAndDiff(
     if (!Array.isArray(currentValue)) {
       changes.push({ location: link, value: [] });
     }
+
+    // Have to set this before recursing!
+    seen.set(newValue, link);
 
     for (let i = 0; i < newValue.length; i++) {
       const childSchema = runtime.cfc.getSchemaAtPath(
@@ -315,6 +355,7 @@ export function normalizeAndDiff(
         newValue[i],
         context,
         options,
+        seen,
       );
       changes.push(...nestedChanges);
     }
@@ -351,6 +392,9 @@ export function normalizeAndDiff(
       currentValue = {};
     }
 
+    // Have to set this before recursing!
+    seen.set(newValue, link);
+
     for (const key in newValue) {
       const childSchema = runtime.cfc.getSchemaAtPath(
         link.schema,
@@ -364,6 +408,7 @@ export function normalizeAndDiff(
         newValue[key],
         context,
         options,
+        seen,
       );
       changes.push(...nestedChanges);
     }

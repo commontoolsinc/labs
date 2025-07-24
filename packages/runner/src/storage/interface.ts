@@ -559,13 +559,13 @@ export interface ITransactionReader {
    *  })
    *  assert(w.ok)
    *
-   *  assert(tx.read({ type, id, path:: ['author'] }).ok === undefined)
-   *  assert(tx.read({ type, id, path:: ['author', 'address'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type, id, path: ['author'] }).ok === undefined)
+   *  assert(tx.read({ type, id, path: ['author', 'address'] }).error.name === 'NotFoundError')
    *  // JS specific getters are not supported
-   *  assert(tx.read({ the, of, at: ['content', 'length'] }).ok.is === undefined)
-   *  assert(tx.read({ the, of, at: ['title'] }).ok.is === "Hello world")
+   *  assert(tx.read({ type, id, path: ['content', 'length'] }).ok?.value === undefined)
+   *  assert(tx.read({ type, id, path: ['title'] }).ok?.value === "Hello world")
    *  // Referencing non-existing facts produces errors
-   *  assert(tx.read({ the: 'bad/mime' , of, at: ['author'] }).error.name === 'NotFoundError')
+   *  assert(tx.read({ type: 'bad/mime', id, path: ['author'] }).error.name === 'NotFoundError')
    * ```
    *
    * @param address - Memory address to read from
@@ -656,6 +656,8 @@ export type CommitError =
 
 export interface INotFoundError extends Error {
   name: "NotFoundError";
+  source: IAttestation;
+  address: IMemoryAddress;
   path?: MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }

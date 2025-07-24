@@ -12,14 +12,13 @@ The instructions in this document apply to the entire repository.
 - To test a specific package, `cd` into the package directory and run
   `deno task test`.
 
-### `ct`
+### `ct` & Common Tools Framework
 
 Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
 
-### CommonTools Development
+### Recipe Development
 
-- **[Handler Patterns Guide](.claude/commands/handlers-guide.md)** - Comprehensive guide to handler usage, TypeScript patterns, and common pitfalls
-- **[CT Binary Usage](.claude/commands/common/ct.md)** - CT command reference and setup
+Whenever you work on recipes, look in the `recipes` folder provided by the user for the `RECIPES.md` and `COMPONENTS.md` files. These are your bible. You can re-read `.claude/commands/recipe-dev.md` any time to refresh your memory.
 
 ### Formatting
 
@@ -34,7 +33,6 @@ Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
 - Export types explicitly using `export type { ... }`.
 - Provide descriptive JSDoc comments on public interfaces.
 - Prefer strong typing with interfaces or types instead of `any`.
-- Use the handler pattern for UI event handling (see [Handler Patterns Guide](.claude/commands/handlers-guide.md)).
 - Update package-level README.md files.
 
 ### Imports
