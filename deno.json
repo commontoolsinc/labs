@@ -86,7 +86,7 @@
   "imports": {
     "commontools": "./packages/api/index.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js/proposals/explicit-resource-management",
-    "@astral/astral": "jsr:@astral/astral",
+    "@astral/astral": "jsr:@astral/astral@0.5.3",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
@@ -96,7 +96,7 @@
     "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader",
     "@std/assert": "jsr:@std/assert@^1",
     "@std/async": "jsr:@std/async@^1",
-    "@std/cli": "jsr:@std/cli@^1.0.20",
+    "@std/cli": "jsr:@std/cli@^1",
     "@std/crypto": "jsr:@std/crypto@^1",
     "@std/dotenv": "jsr:@std/dotenv@^0.225.3",
     "@std/encoding": "jsr:@std/encoding@^1",

@@ -1,42 +1,56 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@astral/astral@*": "0.5.3",
+    "jsr:@astral/astral@0.5.3": "0.5.3",
     "jsr:@cliffy/command@^1.0.0-rc.7": "1.0.0-rc.8",
     "jsr:@cliffy/flags@1.0.0-rc.8": "1.0.0-rc.8",
     "jsr:@cliffy/internal@1.0.0-rc.8": "1.0.0-rc.8",
     "jsr:@cliffy/table@1.0.0-rc.8": "1.0.0-rc.8",
+    "jsr:@cliffy/table@^1.0.0-rc.7": "1.0.0-rc.8",
     "jsr:@cmd-johnson/oauth2-client@2": "2.0.0",
     "jsr:@db/sqlite@0.12": "0.12.0",
     "jsr:@deno-library/progress@^1.5.1": "1.5.1",
     "jsr:@denosaurs/plug@1": "1.1.0",
     "jsr:@luca/esbuild-deno-loader@*": "0.11.1",
     "jsr:@std/assert@0.217": "0.217.0",
+    "jsr:@std/assert@1": "1.0.13",
+    "jsr:@std/assert@^1.0.13": "1.0.13",
     "jsr:@std/async@1": "1.0.13",
+    "jsr:@std/async@^1.0.13": "1.0.13",
     "jsr:@std/bytes@^1.0.2": "1.0.6",
-    "jsr:@std/cli@1": "1.0.20",
-    "jsr:@std/cli@^1.0.20": "1.0.20",
+    "jsr:@std/cli@1": "1.0.21",
+    "jsr:@std/cli@^1.0.12": "1.0.21",
+    "jsr:@std/cli@^1.0.20": "1.0.21",
     "jsr:@std/crypto@1": "1.0.5",
+    "jsr:@std/data-structures@^1.0.8": "1.0.8",
+    "jsr:@std/dotenv@~0.225.3": "0.225.5",
     "jsr:@std/encoding@1": "1.0.10",
     "jsr:@std/encoding@^1.0.10": "1.0.10",
     "jsr:@std/encoding@^1.0.5": "1.0.10",
+    "jsr:@std/expect@1": "1.0.16",
     "jsr:@std/fmt@1": "1.0.8",
     "jsr:@std/fmt@1.0.3": "1.0.3",
     "jsr:@std/fmt@^1.0.8": "1.0.8",
     "jsr:@std/fmt@~1.0.2": "1.0.8",
     "jsr:@std/fs@1": "1.0.19",
+    "jsr:@std/fs@^1.0.18": "1.0.19",
     "jsr:@std/fs@^1.0.19": "1.0.19",
     "jsr:@std/html@^1.0.4": "1.0.4",
     "jsr:@std/http@1": "1.0.19",
-    "jsr:@std/internal@^1.0.9": "1.0.9",
+    "jsr:@std/internal@^1.0.6": "1.0.10",
+    "jsr:@std/internal@^1.0.7": "1.0.10",
+    "jsr:@std/internal@^1.0.8": "1.0.10",
+    "jsr:@std/internal@^1.0.9": "1.0.10",
     "jsr:@std/io@0.225.0": "0.225.0",
     "jsr:@std/media-types@^1.1.0": "1.1.0",
     "jsr:@std/net@^1.0.4": "1.0.4",
     "jsr:@std/path@0.217": "0.217.0",
     "jsr:@std/path@1": "1.1.1",
     "jsr:@std/path@^1.0.6": "1.1.1",
+    "jsr:@std/path@^1.1.0": "1.1.1",
     "jsr:@std/path@^1.1.1": "1.1.1",
     "jsr:@std/streams@^1.0.10": "1.0.10",
+    "jsr:@std/testing@1": "1.0.14",
     "jsr:@std/text@~1.0.7": "1.0.15",
     "jsr:@zip-js/zip-js@^2.7.52": "2.7.68",
     "npm:@ai-sdk/anthropic@^1.1.6": "1.2.12_zod@3.25.76",
@@ -78,7 +92,7 @@
     "npm:@opentelemetry/exporter-trace-otlp-proto@0.46": "0.46.0_@opentelemetry+api@1.9.0",
     "npm:@opentelemetry/resources@^1.19.0": "1.30.1_@opentelemetry+api@1.9.0",
     "npm:@opentelemetry/sdk-trace-base@^1.19.0": "1.30.1_@opentelemetry+api@1.9.0",
-    "npm:@opentelemetry/semantic-conventions@^1.19.0": "1.28.0",
+    "npm:@opentelemetry/semantic-conventions@^1.19.0": "1.36.0",
     "npm:@radix-ui/react-dialog@^1.1.6": "1.1.14_@types+react@18.3.23_@types+react-dom@18.3.7__@types+react@18.3.23_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@radix-ui/react-visually-hidden@^1.1.2": "1.2.3_@types+react@18.3.23_@types+react-dom@18.3.7__@types+react@18.3.23_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@react-spring/three@^9.7.5": "9.7.5_@react-three+fiber@8.18.0__react@18.3.1__react-dom@18.3.1___react@18.3.1__three@0.173.0__@types+react@18.3.23_react@18.3.1_three@0.173.0_react-dom@18.3.1__react@18.3.1_@types+react@18.3.23",
@@ -102,11 +116,11 @@
     "npm:@uiw/react-codemirror@^4.23.7": "4.24.1_@babel+runtime@7.28.2_@codemirror+state@6.5.2_@codemirror+theme-one-dark@6.1.3_@codemirror+view@6.38.1_codemirror@6.0.2_react@18.3.1_react-dom@18.3.1__react@18.3.1_@codemirror+commands@6.8.1_@codemirror+language@6.11.2",
     "npm:@uiw/react-json-view@2.0.0-alpha.30": "2.0.0-alpha.30_@babel+runtime@7.28.2_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:@use-gesture/react@^10.3.1": "10.3.1_react@18.3.1",
-    "npm:@vercel/otel@^1.10.1": "1.13.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.46.0_@opentelemetry+instrumentation@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.46.0__@opentelemetry+api@1.9.0__@opentelemetry+api-logs@0.46.0_@opentelemetry+sdk-metrics@1.19.0__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0",
+    "npm:@vercel/otel@^1.10.1": "1.13.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.57.2_@opentelemetry+instrumentation@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+sdk-metrics@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0",
     "npm:@vitejs/plugin-react@^4.3.4": "4.7.0_vite@6.3.5__@types+node@22.16.5__picomatch@4.0.3_@babel+core@7.28.0_@types+node@22.16.5",
     "npm:@web/test-runner@*": "0.20.2",
-    "npm:ai@^4.3.10": "4.3.19_zod@3.25.76_react@18.3.1",
-    "npm:ai@^4.3.9": "4.3.19_zod@3.25.76_react@18.3.1",
+    "npm:ai@^4.3.10": "4.3.19_react@18.3.1_zod@3.25.76",
+    "npm:ai@^4.3.9": "4.3.19_react@18.3.1_zod@3.25.76",
     "npm:ajv@^8.17.1": "8.17.1",
     "npm:cmdk@^1.0.4": "1.1.1_react@18.3.1_react-dom@18.3.1__react@18.3.1_@types+react@18.3.23_@types+react-dom@18.3.7__@types+react@18.3.23",
     "npm:codemirror@^6.0.1": "6.0.2",
@@ -149,7 +163,6 @@
     "npm:turndown@^7.1.2": "7.2.0",
     "npm:typescript@*": "5.8.3",
     "npm:typescript@^5.6.2": "5.8.3",
-    "npm:vite@*": "6.3.5_@types+node@22.16.5_picomatch@4.0.3",
     "npm:vite@^6.2.1": "6.3.5_@types+node@22.16.5_picomatch@4.0.3",
     "npm:vitest@^2.1.1": "2.1.9_@types+node@22.16.5_jsdom@26.1.0_vite@5.4.19__@types+node@22.16.5",
     "npm:zod-to-json-schema@^3.24.1": "3.24.6_zod@3.25.76",
@@ -160,7 +173,7 @@
       "integrity": "d6a4628313d8be99aac0f51005c1dc090fa3b4c6b5c8335c26a52d4842aa1276",
       "dependencies": [
         "jsr:@deno-library/progress",
-        "jsr:@std/async",
+        "jsr:@std/async@1",
         "jsr:@std/fs@1",
         "jsr:@std/path@1",
         "jsr:@zip-js/zip-js"
@@ -171,7 +184,7 @@
       "dependencies": [
         "jsr:@cliffy/flags",
         "jsr:@cliffy/internal",
-        "jsr:@cliffy/table",
+        "jsr:@cliffy/table@1.0.0-rc.8",
         "jsr:@std/fmt@~1.0.2",
         "jsr:@std/text"
       ]
@@ -231,20 +244,39 @@
     "@std/assert@0.217.0": {
       "integrity": "c98e279362ca6982d5285c3b89517b757c1e3477ee9f14eb2fdf80a45aaa9642"
     },
+    "@std/assert@1.0.13": {
+      "integrity": "ae0d31e41919b12c656c742b22522c32fb26ed0cba32975cb0de2a273cb68b29",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.6"
+      ]
+    },
     "@std/async@1.0.13": {
       "integrity": "1d76ca5d324aef249908f7f7fe0d39aaf53198e5420604a59ab5c035adc97c96"
     },
     "@std/bytes@1.0.6": {
       "integrity": "f6ac6adbd8ccd99314045f5703e23af0a68d7f7e58364b47d2c7f408aeb5820a"
     },
-    "@std/cli@1.0.20": {
-      "integrity": "a8c384a2c98cec6ec6a2055c273a916e2772485eb784af0db004c5ab8ba52333"
+    "@std/cli@1.0.21": {
+      "integrity": "cd25b050bdf6282e321854e3822bee624f07aca7636a3a76d95f77a3a919ca2a"
     },
     "@std/crypto@1.0.5": {
       "integrity": "0dcfbb319fe0bba1bd3af904ceb4f948cde1b92979ec1614528380ed308a3b40"
     },
+    "@std/data-structures@1.0.8": {
+      "integrity": "2fb7219247e044c8fcd51341788547575653c82ae2c759ff209e0263ba7d9b66"
+    },
+    "@std/dotenv@0.225.5": {
+      "integrity": "9ce6f9d0ec3311f74a32535aa1b8c62ed88b1ab91b7f0815797d77a6f60c922f"
+    },
     "@std/encoding@1.0.10": {
       "integrity": "8783c6384a2d13abd5e9e87a7ae0520a30e9f56aeeaa3bdf910a3eaaf5c811a1"
+    },
+    "@std/expect@1.0.16": {
+      "integrity": "ceeef6dda21f256a5f0f083fcc0eaca175428b523359a9b1d9b3a1df11cc7391",
+      "dependencies": [
+        "jsr:@std/assert@^1.0.13",
+        "jsr:@std/internal@^1.0.7"
+      ]
     },
     "@std/fmt@1.0.3": {
       "integrity": "97765c16aa32245ff4e2204ecf7d8562496a3cb8592340a80e7e554e0bb9149f"
@@ -255,7 +287,7 @@
     "@std/fs@1.0.19": {
       "integrity": "051968c2b1eae4d2ea9f79a08a3845740ef6af10356aff43d3e2ef11ed09fb06",
       "dependencies": [
-        "jsr:@std/internal",
+        "jsr:@std/internal@^1.0.9",
         "jsr:@std/path@^1.1.1"
       ]
     },
@@ -276,8 +308,8 @@
         "jsr:@std/streams"
       ]
     },
-    "@std/internal@1.0.9": {
-      "integrity": "bdfb97f83e4db7a13e8faab26fb1958d1b80cc64366501af78a0aee151696eb8"
+    "@std/internal@1.0.10": {
+      "integrity": "e3be62ce42cab0e177c27698e5d9800122f67b766a0bea6ca4867886cbde8cf7"
     },
     "@std/io@0.225.0": {
       "integrity": "c1db7c5e5a231629b32d64b9a53139445b2ca640d828c26bf23e1c55f8c079b3"
@@ -291,17 +323,28 @@
     "@std/path@0.217.0": {
       "integrity": "1217cc25534bca9a2f672d7fe7c6f356e4027df400c0e85c0ef3e4343bc67d11",
       "dependencies": [
-        "jsr:@std/assert"
+        "jsr:@std/assert@0.217"
       ]
     },
     "@std/path@1.1.1": {
       "integrity": "fe00026bd3a7e6a27f73709b83c607798be40e20c81dde655ce34052fd82ec76",
       "dependencies": [
-        "jsr:@std/internal"
+        "jsr:@std/internal@^1.0.9"
       ]
     },
     "@std/streams@1.0.10": {
       "integrity": "75c0b1431873cd0d8b3d679015220204d36d3c7420d93b60acfc379eb0dc30af"
+    },
+    "@std/testing@1.0.14": {
+      "integrity": "144b3737105b9071cb50c957681f58a1b8ec0f3e5b19ad830f401c5fa931e8f0",
+      "dependencies": [
+        "jsr:@std/assert@^1.0.13",
+        "jsr:@std/async@^1.0.13",
+        "jsr:@std/data-structures",
+        "jsr:@std/fs@^1.0.18",
+        "jsr:@std/internal@^1.0.8",
+        "jsr:@std/path@^1.1.0"
+      ]
     },
     "@std/text@1.0.15": {
       "integrity": "91f5cc1e12779a3d95f1be34e763f9c28a75a078b7360e6fcaef0d8d9b1e3e7f"
@@ -377,12 +420,12 @@
         "json-schema"
       ]
     },
-    "@ai-sdk/react@1.2.12_react@19.1.0_zod@3.25.76": {
+    "@ai-sdk/react@1.2.12_react@18.3.1_zod@3.25.76": {
       "integrity": "sha512-jK1IZZ22evPZoQW3vlkZ7wvjYGYF+tRBKXtrcolduIkQ/m/sOAVcVeVDUDvh1T91xCnWCdUGCPZg2avZ90mv3g==",
       "dependencies": [
         "@ai-sdk/provider-utils",
         "@ai-sdk/ui-utils",
-        "react@19.1.0",
+        "react",
         "swr",
         "throttleit",
         "zod"
@@ -1469,8 +1512,8 @@
         "@opentelemetry/api-logs@0.46.0",
         "@opentelemetry/core@1.19.0_@opentelemetry+api@1.9.0",
         "@opentelemetry/resources@1.19.0_@opentelemetry+api@1.9.0",
-        "@opentelemetry/sdk-logs",
-        "@opentelemetry/sdk-metrics",
+        "@opentelemetry/sdk-logs@0.46.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.46.0",
+        "@opentelemetry/sdk-metrics@1.19.0_@opentelemetry+api@1.9.0",
         "@opentelemetry/sdk-trace-base@1.19.0_@opentelemetry+api@1.9.0"
       ]
     },
@@ -1499,6 +1542,15 @@
         "@opentelemetry/resources@1.19.0_@opentelemetry+api@1.9.0"
       ]
     },
+    "@opentelemetry/sdk-logs@0.57.2_@opentelemetry+api@1.9.0": {
+      "integrity": "sha512-TXFHJ5c+BKggWbdEQ/inpgIzEmS2BGQowLE9UhsMd7YYlUfBQJ4uax0VF/B5NYigdM/75OoJGhAV3upEhK+3gg==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/api-logs@0.57.2",
+        "@opentelemetry/core@1.30.1_@opentelemetry+api@1.9.0",
+        "@opentelemetry/resources@1.30.1_@opentelemetry+api@1.9.0"
+      ]
+    },
     "@opentelemetry/sdk-metrics@1.19.0_@opentelemetry+api@1.9.0": {
       "integrity": "sha512-FiMii40zr0Fmys4F1i8gmuCvbinBnBsDeGBr4FQemOf0iPCLytYQm5AZJ/nn4xSc71IgKBQwTFQRAGJI7JvZ4Q==",
       "dependencies": [
@@ -1506,6 +1558,14 @@
         "@opentelemetry/core@1.19.0_@opentelemetry+api@1.9.0",
         "@opentelemetry/resources@1.19.0_@opentelemetry+api@1.9.0",
         "lodash.merge"
+      ]
+    },
+    "@opentelemetry/sdk-metrics@1.30.1_@opentelemetry+api@1.9.0": {
+      "integrity": "sha512-q9zcZ0Okl8jRgmy7eNW3Ku1XSgg3sDLa5evHZpCwjspw7E8Is4K/haRPDJrBcX3YSn/Y7gUvFnByNYEKQNbNog==",
+      "dependencies": [
+        "@opentelemetry/api",
+        "@opentelemetry/core@1.30.1_@opentelemetry+api@1.9.0",
+        "@opentelemetry/resources@1.30.1_@opentelemetry+api@1.9.0"
       ]
     },
     "@opentelemetry/sdk-trace-base@1.19.0_@opentelemetry+api@1.9.0": {
@@ -1531,6 +1591,9 @@
     },
     "@opentelemetry/semantic-conventions@1.28.0": {
       "integrity": "sha512-lp4qAiMTD4sNWW4DbKLBkfiMZ4jbAboJIGOQr5DvciMRI494OapieI9qiODpOt0XBr1LjIDy1xAGAnVs5supTA=="
+    },
+    "@opentelemetry/semantic-conventions@1.36.0": {
+      "integrity": "sha512-TtxJSRD8Ohxp6bKkhrm27JRHAxPczQA7idtcTOMYI+wQRRrfgqxHv1cFbCApcSnNjtXkmzFozn6jQtFrOmbjPQ=="
     },
     "@protobufjs/aspromise@1.1.2": {
       "integrity": "sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ=="
@@ -1586,7 +1649,7 @@
       "integrity": "sha512-z4eqJvfiNnFMHIIvXP3CY57y2WJs5g2v3X0zm9mEJkrkNv4rDxu+sg9Jh8EkXyeqBkB7SOcboo9dMVqhyrACIg==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1596,7 +1659,7 @@
       "integrity": "sha512-jCi/QKUM2r1Ju5a3J64TH2A5SpKAgh0LpknyqdQ4m6DCV0xJ2HG1xARRwNGPQfi1SLdLWZ1OJz6F4OMBBNiGJA==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1620,7 +1683,7 @@
         "@types/react",
         "@types/react-dom",
         "aria-hidden",
-        "react@18.3.1",
+        "react",
         "react-dom",
         "react-remove-scroll"
       ],
@@ -1639,7 +1702,7 @@
         "@radix-ui/react-use-escape-keydown",
         "@types/react",
         "@types/react-dom",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ],
       "optionalPeers": [
@@ -1651,7 +1714,7 @@
       "integrity": "sha512-fyjAACV62oPV925xFCrH8DR5xWhg9KYtJT4s3u54jxp+L/hbpTY2kIeEFFbFe+a/HCE94zGQMZLIpVTPVZDhaA==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1665,7 +1728,7 @@
         "@radix-ui/react-use-callback-ref",
         "@types/react",
         "@types/react-dom",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ],
       "optionalPeers": [
@@ -1678,7 +1741,7 @@
       "dependencies": [
         "@radix-ui/react-use-layout-effect",
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1691,7 +1754,7 @@
         "@radix-ui/react-use-layout-effect",
         "@types/react",
         "@types/react-dom",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ],
       "optionalPeers": [
@@ -1706,7 +1769,7 @@
         "@radix-ui/react-use-layout-effect",
         "@types/react",
         "@types/react-dom",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ],
       "optionalPeers": [
@@ -1720,7 +1783,7 @@
         "@radix-ui/react-slot",
         "@types/react",
         "@types/react-dom",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ],
       "optionalPeers": [
@@ -1733,7 +1796,7 @@
       "dependencies": [
         "@radix-ui/react-compose-refs",
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1743,7 +1806,7 @@
       "integrity": "sha512-FkBMwD+qbGQeMu1cOHnuGB6x4yzPjho8ap5WtbEJ26umhgqVXbhekKUQO+hZEL1vU92a3wHwdp0HAcqAUF5iDg==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1755,7 +1818,7 @@
         "@radix-ui/react-use-effect-event",
         "@radix-ui/react-use-layout-effect",
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1766,7 +1829,7 @@
       "dependencies": [
         "@radix-ui/react-use-layout-effect",
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1777,7 +1840,7 @@
       "dependencies": [
         "@radix-ui/react-use-callback-ref",
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1787,7 +1850,7 @@
       "integrity": "sha512-RbJRS4UWQFkzHTTwVymMTUv8EqYhOp8dOOviLj2ugtTiXRaRQS7GLGxZTLL1jWhMeoSCf5zmcZkqTl9IiYfXcQ==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react"
@@ -1799,7 +1862,7 @@
         "@radix-ui/react-primitive",
         "@types/react",
         "@types/react-dom",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ],
       "optionalPeers": [
@@ -1812,7 +1875,7 @@
       "dependencies": [
         "@react-spring/shared",
         "@react-spring/types",
-        "react@18.3.1"
+        "react"
       ]
     },
     "@react-spring/core@9.7.5_react@18.3.1": {
@@ -1821,7 +1884,7 @@
         "@react-spring/animated",
         "@react-spring/shared",
         "@react-spring/types",
-        "react@18.3.1"
+        "react"
       ]
     },
     "@react-spring/rafz@9.7.5": {
@@ -1832,7 +1895,7 @@
       "dependencies": [
         "@react-spring/rafz",
         "@react-spring/types",
-        "react@18.3.1"
+        "react"
       ]
     },
     "@react-spring/three@9.7.5_@react-three+fiber@8.18.0__react@18.3.1__react-dom@18.3.1___react@18.3.1__three@0.173.0__@types+react@18.3.23_react@18.3.1_three@0.173.0_react-dom@18.3.1__react@18.3.1_@types+react@18.3.23": {
@@ -1843,7 +1906,7 @@
         "@react-spring/shared",
         "@react-spring/types",
         "@react-three/fiber",
-        "react@18.3.1",
+        "react",
         "three"
       ]
     },
@@ -1857,7 +1920,7 @@
         "@react-spring/core",
         "@react-spring/shared",
         "@react-spring/types",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ]
     },
@@ -1877,7 +1940,7 @@
         "hls.js",
         "maath",
         "meshline",
-        "react@18.3.1",
+        "react",
         "react-composer",
         "react-dom",
         "stats-gl",
@@ -1904,7 +1967,7 @@
         "base64-js",
         "buffer",
         "its-fine",
-        "react@18.3.1",
+        "react",
         "react-dom",
         "react-reconciler",
         "react-use-measure",
@@ -2176,7 +2239,7 @@
         "@sentry/browser",
         "@sentry/core@9.41.0",
         "hoist-non-react-statics",
-        "react@18.3.1"
+        "react"
       ]
     },
     "@sentry/types@8.9.2": {
@@ -2546,19 +2609,13 @@
     "@types/node@22.15.15": {
       "integrity": "sha512-R5muMcZob3/Jjchn5LcO8jdKwSCbzqmPB6ruBxMcf9kbxtniZHP327s6C37iOfuw8mbKK3cAQa7sEl7afLrQ8A==",
       "dependencies": [
-        "undici-types@6.21.0"
+        "undici-types"
       ]
     },
     "@types/node@22.16.5": {
       "integrity": "sha512-bJFoMATwIGaxxx8VJPeM8TonI8t579oRvgAuT8zFugJsJZgzqv0Fu8Mhp68iecjzG7cnN3mO2dJQ5uUM2EFrgQ==",
       "dependencies": [
-        "undici-types@6.21.0"
-      ]
-    },
-    "@types/node@24.1.0": {
-      "integrity": "sha512-ut5FthK5moxFKH2T1CUOC6ctR67rQRvvHdFLCD2Ql6KXmMuCrjsSsRI9UsLCm9M18BMwClv4pn327UvB7eeO1w==",
-      "dependencies": [
-        "undici-types@7.8.0"
+        "undici-types"
       ]
     },
     "@types/offscreencanvas@2019.7.3": {
@@ -2699,7 +2756,7 @@
         "@codemirror/view",
         "@uiw/codemirror-extensions-basic-setup",
         "codemirror",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ]
     },
@@ -2707,7 +2764,7 @@
       "integrity": "sha512-ufvvirUQcITU9s4R12b7hn/t7ngLCYp1KbBxE+eAD35o3Ey+uxfKvgWmIwGFhV3hFXXxMJ8SHQKwl/ywNCHsDA==",
       "dependencies": [
         "@babel/runtime",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ]
     },
@@ -2728,18 +2785,18 @@
       "integrity": "sha512-Yy19y6O2GJq8f7CHf7L0nxL8bf4PZCPaVOCgJrusOeFHY1LvHgYXnmnXg6N5iwAnbgbZCDjo60SiM6IPJi9C5g==",
       "dependencies": [
         "@use-gesture/core",
-        "react@18.3.1"
+        "react"
       ]
     },
-    "@vercel/otel@1.13.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.46.0_@opentelemetry+instrumentation@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.46.0__@opentelemetry+api@1.9.0__@opentelemetry+api-logs@0.46.0_@opentelemetry+sdk-metrics@1.19.0__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0": {
+    "@vercel/otel@1.13.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.57.2_@opentelemetry+instrumentation@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+sdk-metrics@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0": {
       "integrity": "sha512-esRkt470Y2jRK1B1g7S1vkt4Csu44gp83Zpu8rIyPoqy2BKgk4z7ik1uSMswzi45UogLHFl6yR5TauDurBQi4Q==",
       "dependencies": [
         "@opentelemetry/api",
-        "@opentelemetry/api-logs@0.46.0",
+        "@opentelemetry/api-logs@0.57.2",
         "@opentelemetry/instrumentation",
         "@opentelemetry/resources@1.30.1_@opentelemetry+api@1.9.0",
-        "@opentelemetry/sdk-logs",
-        "@opentelemetry/sdk-metrics",
+        "@opentelemetry/sdk-logs@0.57.2_@opentelemetry+api@1.9.0",
+        "@opentelemetry/sdk-metrics@1.30.1_@opentelemetry+api@1.9.0",
         "@opentelemetry/sdk-trace-base@1.30.1_@opentelemetry+api@1.9.0"
       ]
     },
@@ -2995,7 +3052,7 @@
     "agent-base@7.1.4": {
       "integrity": "sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ=="
     },
-    "ai@4.3.19_zod@3.25.76": {
+    "ai@4.3.19_react@18.3.1_zod@3.25.76": {
       "integrity": "sha512-dIE2bfNpqHN3r6IINp9znguYdhIOheKW2LDigAMrgt/upT3B8eBGPSCblENvaZGoq+hxaN9fSMzjWpbqloP+7Q==",
       "dependencies": [
         "@ai-sdk/provider",
@@ -3004,23 +3061,11 @@
         "@ai-sdk/ui-utils",
         "@opentelemetry/api",
         "jsondiffpatch",
-        "zod"
-      ]
-    },
-    "ai@4.3.19_zod@3.25.76_react@18.3.1": {
-      "integrity": "sha512-dIE2bfNpqHN3r6IINp9znguYdhIOheKW2LDigAMrgt/upT3B8eBGPSCblENvaZGoq+hxaN9fSMzjWpbqloP+7Q==",
-      "dependencies": [
-        "@ai-sdk/provider",
-        "@ai-sdk/provider-utils",
-        "@ai-sdk/react",
-        "@ai-sdk/ui-utils",
-        "@opentelemetry/api",
-        "jsondiffpatch",
-        "react@18.3.1",
+        "react",
         "zod"
       ],
       "optionalPeers": [
-        "react@18.3.1"
+        "react"
       ]
     },
     "ajv@8.17.1": {
@@ -3323,7 +3368,7 @@
         "@radix-ui/react-dialog",
         "@radix-ui/react-id",
         "@radix-ui/react-primitive",
-        "react@18.3.1",
+        "react",
         "react-dom"
       ]
     },
@@ -3620,7 +3665,7 @@
       "integrity": "sha512-azaJQLTshEOZVhksgU136izJWJyZ4Clx6xQ6Vctzk1gOdPPAUbTa/JYDwZJ8rh97QxnjpyeftXl99eRlYr3vNA==",
       "dependencies": [
         "flairup",
-        "react@18.3.1"
+        "react"
       ]
     },
     "emoji-regex@8.0.0": {
@@ -3974,14 +4019,6 @@
         "json-bigint"
       ]
     },
-    "gcp-metadata@6.1.1": {
-      "integrity": "sha512-a4tiq7E0/5fTjxPAaH4jpjkSv/uCaU2p5KC6HVGrvl0cDjA8iBZv4vv1gyzlmK0ZUKqwpOyQMKzZQe3lTit77A==",
-      "dependencies": [
-        "gaxios",
-        "google-logging-utils",
-        "json-bigint"
-      ]
-    },
     "generic-pool@3.9.0": {
       "integrity": "sha512-hymDOu5B53XvN4QT9dBmZxPX4CWhBPPLguTZ9MMFeFa/Kg0xWVfylOVNlJji/E7yTZWFd/q9GO5TxDLq156D7g=="
     },
@@ -4071,13 +4108,10 @@
         "base64-js",
         "ecdsa-sig-formatter",
         "gaxios",
-        "gcp-metadata@6.1.1",
+        "gcp-metadata",
         "gtoken",
         "jws"
       ]
-    },
-    "google-logging-utils@0.0.2": {
-      "integrity": "sha512-NEgUnEcBiP5HrPzufUkBzJOD/Sxsco3rLNo1F1TNf7ieU8ryUzBhqba8r756CjLX7rn3fHl6iLEwPYuqpoKgQQ=="
     },
     "gopd@1.2.0": {
       "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg=="
@@ -4414,7 +4448,7 @@
       "integrity": "sha512-fXtDA0X0t0eBYAGLVM5YsgJGsJ5jEmqZEPrGbzdf5awjv0xE7nqv3TVnvtUF060Tkes15DbDAKW/I48vsb6SyA==",
       "dependencies": [
         "@types/react-reconciler@0.28.9_@types+react@18.3.23",
-        "react@18.3.1"
+        "react"
       ]
     },
     "jackspeak@4.1.1": {
@@ -5413,7 +5447,7 @@
         "@protobufjs/path",
         "@protobufjs/pool",
         "@protobufjs/utf8",
-        "@types/node@24.1.0",
+        "@types/node@22.16.5",
         "long"
       ],
       "scripts": true
@@ -5483,14 +5517,14 @@
       "integrity": "sha512-1uWd07EME6XZvMfapwZmc7NgCZqDemcvicRi3wMJzXsQLvZ3L7fTHVyPy1bZdnWXM4iPjYuNE+uJ41MLKeTtnA==",
       "dependencies": [
         "prop-types",
-        "react@18.3.1"
+        "react"
       ]
     },
     "react-dom@18.3.1_react@18.3.1": {
       "integrity": "sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==",
       "dependencies": [
         "loose-envify",
-        "react@18.3.1",
+        "react",
         "scheduler@0.23.2"
       ]
     },
@@ -5500,13 +5534,13 @@
         "attr-accept",
         "file-selector",
         "prop-types",
-        "react@18.3.1"
+        "react"
       ]
     },
     "react-icons@5.5.0_react@18.3.1": {
       "integrity": "sha512-MEFcXdkP3dLo8uumGI5xN3lDFNsRtrjbOEKDLD7yv76v4wpnEq2Lt2qeHaQOr34I/wPN3s3+N08WkQ+CW37Xiw==",
       "dependencies": [
-        "react@18.3.1"
+        "react"
       ]
     },
     "react-is@16.13.1": {
@@ -5522,7 +5556,7 @@
         "hast-util-to-jsx-runtime",
         "html-url-attributes",
         "mdast-util-to-hast",
-        "react@18.3.1",
+        "react",
         "remark-parse",
         "remark-rehype",
         "unified",
@@ -5534,7 +5568,7 @@
       "integrity": "sha512-HmMDKciQjYmBRGuuhIaKA1ba/7a+UsM5FzOZsMO2JYHt9Jh8reCb7j1eDC95NOyUlKM9KRyvdx0flBuDvYSBoA==",
       "dependencies": [
         "loose-envify",
-        "react@18.3.1",
+        "react",
         "scheduler@0.21.0"
       ]
     },
@@ -5545,7 +5579,7 @@
       "integrity": "sha512-9r+yi9+mgU33AKcj6IbT9oRCO78WriSj6t/cF8DWBZJ9aOGPOTEDvdUDz1FwKim7QXWwmHqtdHnRJfhAxEG46Q==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1",
+        "react",
         "react-style-singleton",
         "tslib"
       ],
@@ -5557,7 +5591,7 @@
       "integrity": "sha512-HpMh8+oahmIdOuS5aFKKY6Pyog+FNaZV/XyJOq7b4YFwsFHe5yYfdbIalI4k3vU2nSDql7YskmUseHsRrJqIPA==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1",
+        "react",
         "react-remove-scroll-bar",
         "react-style-singleton",
         "tslib",
@@ -5571,7 +5605,7 @@
     "react-router-dom@7.7.1_react@18.3.1_react-dom@18.3.1__react@18.3.1": {
       "integrity": "sha512-bavdk2BA5r3MYalGKZ01u8PGuDBloQmzpBZVhDLrOOv1N943Wq6dcM9GhB3x8b7AbqPMEezauv4PeGkAJfy7FQ==",
       "dependencies": [
-        "react@18.3.1",
+        "react",
         "react-dom",
         "react-router"
       ]
@@ -5580,7 +5614,7 @@
       "integrity": "sha512-jVKHXoWRIsD/qS6lvGveckwb862EekvapdHJN/cGmzw40KnJH5gg53ujOJ4qX6EKIK9LSBfFed/xiQ5yeXNrUA==",
       "dependencies": [
         "cookie",
-        "react@18.3.1",
+        "react",
         "react-dom",
         "set-cookie-parser"
       ],
@@ -5593,7 +5627,7 @@
       "dependencies": [
         "@types/react",
         "get-nonce",
-        "react@18.3.1",
+        "react",
         "tslib"
       ],
       "optionalPeers": [
@@ -5603,7 +5637,7 @@
     "react-use-measure@2.1.7_react@18.3.1_react-dom@18.3.1__react@18.3.1": {
       "integrity": "sha512-KrvcAo13I/60HpwGO5jpW7E9DfusKyLPLvuHlUyP5zqnmAPhNc6qTRjUQrdTADl0lpPpDVU2/Gg51UlOGHXbdg==",
       "dependencies": [
-        "react@18.3.1",
+        "react",
         "react-dom"
       ],
       "optionalPeers": [
@@ -5615,9 +5649,6 @@
       "dependencies": [
         "loose-envify"
       ]
-    },
-    "react@19.1.0": {
-      "integrity": "sha512-FS+XFBNvn3GTAWq26joslQgWNoFu08F4kl0J4CgdNKADkdSGXQyTCnKteIAJy96Br6YbpEU1LSzV5dYtjMkMDg=="
     },
     "readdirp@4.1.2": {
       "integrity": "sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg=="
@@ -5698,7 +5729,7 @@
     "rich-textarea@0.26.5_react@18.3.1": {
       "integrity": "sha512-bZMODm+sxzwfzTWWfbXc/B03FyRcvDSYIan8kKrRq/semxS0nqv1929zAbso7wxlVKbak6Q6khfGhJuzGPhD/w==",
       "dependencies": [
-        "react@18.3.1"
+        "react"
       ]
     },
     "rimraf@6.0.1": {
@@ -5900,7 +5931,7 @@
         "is-hotkey",
         "is-plain-object",
         "lodash",
-        "react@18.3.1",
+        "react",
         "react-dom",
         "scroll-into-view-if-needed",
         "slate",
@@ -6076,15 +6107,15 @@
     "suspend-react@0.1.3_react@18.3.1": {
       "integrity": "sha512-aqldKgX9aZqpoDp3e8/BZ8Dm7x1pJl+qI3ZKxDN0i/IQTWUwBx/ManmlVJ3wowqbno6c2bmiIfs+Um6LbsjJyQ==",
       "dependencies": [
-        "react@18.3.1"
+        "react"
       ]
     },
-    "swr@2.3.4_react@19.1.0": {
+    "swr@2.3.4_react@18.3.1": {
       "integrity": "sha512-bYd2lrhc+VarcpkgWclcUi92wYCpOgMws9Sd1hG1ntAu0NEy+14CbotuFjshBU2kt9rYj9TSmDcybpxpeTU1fg==",
       "dependencies": [
         "dequal",
-        "react@19.1.0",
-        "use-sync-external-store@1.5.0_react@19.1.0"
+        "react",
+        "use-sync-external-store"
       ]
     },
     "symbol-tree@3.2.4": {
@@ -6330,9 +6361,6 @@
     "undici-types@6.21.0": {
       "integrity": "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="
     },
-    "undici-types@7.8.0": {
-      "integrity": "sha512-9UJ2xGDvQ43tYyVMpuHlsgApydB8ZKfVYTsLDhXkFL/6gfkp+U8xTGdh8pMJv1SpZna0zxG1DwsKZsreLbXBxw=="
-    },
     "unified@11.0.5": {
       "integrity": "sha512-xKvGhPWw3k84Qjh8bI3ZeJjqnyadK+GEFtazSfZv/rKeTkTjOJho6mFqh2SM96iIcZokxiOpg78GazTSg8+KHA==",
       "dependencies": [
@@ -6394,7 +6422,7 @@
       "integrity": "sha512-jQL3lRnocaFtu3V00JToYz/4QkNWswxijDaCVNZRiRTO3HQDLsdu1ZtmIUvV4yPp+rvWm5j0y0TG/S61cuijTg==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1",
+        "react",
         "tslib"
       ],
       "optionalPeers": [
@@ -6406,7 +6434,7 @@
       "dependencies": [
         "@types/react",
         "detect-node-es",
-        "react@18.3.1",
+        "react",
         "tslib"
       ],
       "optionalPeers": [
@@ -6416,13 +6444,7 @@
     "use-sync-external-store@1.5.0_react@18.3.1": {
       "integrity": "sha512-Rb46I4cGGVBmjamjphe8L/UnvJD+uPPtTkNvX5mZgqdbavhI4EbgIWJiIHXJ8bc/i9EQGPRh4DwEURJ552Do0A==",
       "dependencies": [
-        "react@18.3.1"
-      ]
-    },
-    "use-sync-external-store@1.5.0_react@19.1.0": {
-      "integrity": "sha512-Rb46I4cGGVBmjamjphe8L/UnvJD+uPPtTkNvX5mZgqdbavhI4EbgIWJiIHXJ8bc/i9EQGPRh4DwEURJ552Do0A==",
-      "dependencies": [
-        "react@19.1.0"
+        "react"
       ]
     },
     "util-deprecate@1.0.2": {
@@ -6701,33 +6723,33 @@
     "zustand@3.7.2_react@18.3.1": {
       "integrity": "sha512-PIJDIZKtokhof+9+60cpockVOq05sJzHCriyvaLBmEJixseQ1a5Kdov6fWZfWOu5SK9c+FhH1jU0tntLxRJYMA==",
       "dependencies": [
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
-        "react@18.3.1"
+        "react"
       ]
     },
     "zustand@4.5.7_@types+react@18.3.23_react@18.3.1": {
       "integrity": "sha512-CHOUy7mu3lbD6o6LJLfllpjkzhHXSBlX8B9+qPddUsIfeF5S/UZ5q0kmCsnRqT1UHFQZchNFDDzMbQsuesHWlw==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1",
-        "use-sync-external-store@1.5.0_react@18.3.1"
+        "react",
+        "use-sync-external-store"
       ],
       "optionalPeers": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ]
     },
     "zustand@5.0.6_@types+react@18.3.23_react@18.3.1": {
       "integrity": "sha512-ihAqNeUVhe0MAD+X8M5UzqyZ9k3FFZLBTtqo6JLPwV53cbRB/mJwBI0PxcIgqhBBHlEs8G45OTDTMq3gNcLq3A==",
       "dependencies": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ],
       "optionalPeers": [
         "@types/react",
-        "react@18.3.1"
+        "react"
       ]
     },
     "zwitch@2.0.4": {
@@ -6743,12 +6765,12 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@astral/astral@*",
+      "jsr:@astral/astral@0.5.3",
       "jsr:@cmd-johnson/oauth2-client@2",
       "jsr:@luca/esbuild-deno-loader@*",
       "jsr:@std/assert@1",
       "jsr:@std/async@1",
-      "jsr:@std/cli@^1.0.20",
+      "jsr:@std/cli@1",
       "jsr:@std/crypto@1",
       "jsr:@std/dotenv@~0.225.3",
       "jsr:@std/encoding@1",
