@@ -3035,7 +3035,9 @@ describe("toCell and toOpaqueRef hooks", () => {
         },
       } as const satisfies JSONSchema;
 
-      const c = runtime.getCell<{ emptyObj: {}; emptyArr: any[] }>(
+      const c = runtime.getCell<
+        { emptyObj: Record<string, never>; emptyArr: any[] }
+      >(
         space,
         "hook-edge-empty",
         schema,
