@@ -18,13 +18,20 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   activeCharmId?: string;
 
+  @property()
+  showShellCharmListView = false;
+
   override render() {
     const charmView = html`
       <x-charm-view .rt="${this.rt}" .charmId="${this
         .activeCharmId}"></x-charm-view>
     `;
     const spaceView = html`
-      <x-space-view .rt="${this.rt}"></x-space-view>
+      <x-space-view
+        .rt="${this.rt}"
+        .showShellCharmListView="${this
+        .showShellCharmListView}"
+      ></x-space-view>
     `;
     const view = this.activeCharmId ? charmView : spaceView;
     return html`

@@ -90,8 +90,8 @@ describe("Storage Subscription", () => {
         space,
         id: entityId,
         type: "application/json",
-        path: ["value"],
-      }, value);
+        path: [],
+      }, { value });
 
       await tx.commit();
 
@@ -101,14 +101,8 @@ describe("Storage Subscription", () => {
       expect(commit.space).toBe(space);
       expect(commit.source).toBe(tx.tx);
 
-      expect([...commit.changes]).toContainEqual({
-        address: {
-          id: entityId,
-          type: "application/json",
-          path: ["value"],
-        },
-        after: value,
-        before: undefined,
+      expect([...commit.changes].map((c) => c.after)).toContainEqual({
+        value,
       });
     });
 
@@ -135,14 +129,8 @@ describe("Storage Subscription", () => {
       expect(commit.space).toBe(space);
       expect(commit.source).toBe(tx.tx);
 
-      expect([...commit.changes]).toContainEqual({
-        address: {
-          id: cell.getAsNormalizedFullLink().id,
-          type: "application/json",
-          path: ["value"],
-        },
-        before: undefined,
-        after: { test: "data" },
+      expect([...commit.changes].map((c) => c.after)).toContainEqual({
+        value: { test: "data" },
       });
     });
 
@@ -181,18 +169,12 @@ describe("Storage Subscription", () => {
       expect(commit2.source).toBe(tx.tx);
 
       // Both should have the same changes
-      const expectedChange = {
-        address: {
-          id: cell.getAsNormalizedFullLink().id,
-          type: "application/json",
-          path: ["value"],
-        },
-        after: { value: 42 },
-        before: undefined,
-      };
-
-      expect([...commit1.changes]).toContainEqual(expectedChange);
-      expect([...commit2.changes]).toContainEqual(expectedChange);
+      expect([...commit1.changes].map((c) => c.after)).toContainEqual({
+        value: { value: 42 },
+      });
+      expect([...commit2.changes].map((c) => c.after)).toContainEqual({
+        value: { value: 42 },
+      });
     });
   });
 
@@ -310,7 +292,7 @@ describe("Storage Subscription", () => {
       const fact = Fact.assert({
         the: "application/json",
         of: entityId,
-        is: { data: "to be pulled" },
+        is: { value: { data: "to be pulled" } },
       });
 
       await memory.transact({ changes: Changes.from([fact]) });
@@ -332,14 +314,8 @@ describe("Storage Subscription", () => {
       expect(pull.type).toBe("pull");
       expect(pull.space).toBe(space);
 
-      expect([...pull.changes]).toContainEqual({
-        address: {
-          id: entityId,
-          type: "application/json",
-          path: ["value"],
-        },
-        before: undefined,
-        after: { data: "to be pulled" },
+      expect([...pull.changes].map((c) => c.after)).toContainEqual({
+        value: { data: "to be pulled" },
       });
     });
   });
@@ -552,9 +528,9 @@ describe("Storage Subscription", () => {
       expect(commit.space).toBe(space);
       expect([...commit.changes].length).toBeGreaterThanOrEqual(1);
       const change = [...commit.changes][0];
-      expect(change.address.path).toEqual(["source"]);
-      expect(change.after).toEqual(JSON.stringify(cell.entityId));
-      expect(change.before).toBeUndefined();
+      // The actual value contains the full document where source field has the JSON string
+      expect(change.after).toEqual({ source: JSON.stringify(cell.entityId) });
+      expect((change.before as any)?.source).toBeUndefined();
     });
   });
 });

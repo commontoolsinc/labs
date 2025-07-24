@@ -239,6 +239,72 @@ describe("Cell", () => {
     sourceCell.set({ foo: 456 });
     expect(retrievedSource?.get()).toEqual({ foo: 456 });
   });
+
+  it("should translate circular references into links", () => {
+    const c = runtime.getCell(
+      space,
+      "should translate circular references into links",
+      {
+        type: "object",
+        properties: {
+          x: { type: "number" },
+          y: { type: "number" },
+          z: { $ref: "#" },
+        },
+        required: ["x", "y", "z"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    const data: any = { x: 1, y: 2 };
+    data.z = data;
+    c.set(data);
+
+    const proxy = c.getAsQueryResult();
+    expect(proxy.z).toBe(proxy);
+
+    const value = c.get();
+    expect(value.z.z).toBe(value.z);
+
+    const raw = c.getRaw();
+    expect(raw.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
+  });
+
+  it("should translate circular references into links across cells", () => {
+    const c = runtime.getCell(
+      space,
+      "should translate circular references into links",
+      {
+        type: "object",
+        properties: {
+          list: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { parent: { $ref: "#" } },
+              asCell: true,
+              required: ["parent"],
+            },
+          },
+        },
+        required: ["list"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    const inner: any = { [ID]: 1 }; // ID will turn this into a separate cell
+    const outer: any = { list: [inner] };
+    inner.parent = outer;
+    c.set(outer);
+
+    const proxy = c.getAsQueryResult();
+    expect(proxy.list[0].parent).toBe(proxy);
+
+    const { id } = c.getAsNormalizedFullLink();
+    const innerCell = c.get().list[0];
+    const raw = innerCell.getRaw();
+    expect(raw).toMatchObject({
+      parent: { "/": { [LINK_V1_TAG]: { id } } },
+    });
+  });
 });
 
 describe("Cell utility functions", () => {
@@ -654,6 +720,117 @@ describe("createProxy", () => {
   });
 });
 
+describe("Proxy", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+
+    runtime = new Runtime({
+      blobbyServerUrl: import.meta.url,
+      storageManager,
+    });
+    tx = runtime.edit();
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("should return a Sendable for stream aliases", async () => {
+    const c = runtime.getCell<{ stream: { $stream: true } }>(
+      space,
+      "should return a Sendable for stream aliases",
+      undefined,
+      tx,
+    );
+    c.setRaw({ stream: { $stream: true } });
+    const streamCell = c.key("stream");
+
+    expect(streamCell).toHaveProperty("send");
+    expect(streamCell).not.toHaveProperty("get");
+    expect(streamCell).not.toHaveProperty("set");
+    expect(streamCell).not.toHaveProperty("key");
+
+    let lastEventSeen: any = null;
+    let eventCount = 0;
+
+    runtime.scheduler.addEventHandler(
+      (event: any) => {
+        eventCount++;
+        lastEventSeen = event;
+      },
+      streamCell.getAsNormalizedFullLink(),
+    );
+
+    streamCell.send({ $stream: true });
+    await runtime.idle();
+
+    expect(c.get()).toStrictEqual({ stream: { $stream: true } });
+    expect(eventCount).toBe(1);
+    expect(lastEventSeen).toEqual({ $stream: true });
+  });
+
+  it("should convert cells and proxies to links when sending events", async () => {
+    const c = runtime.getCell<any>(
+      space,
+      "should convert cells and proxies to links when sending events",
+    );
+    c.withTx(tx).setRaw({ stream: { $stream: true } });
+    tx.commit();
+    tx = runtime.edit();
+
+    const streamCell = c.key("stream");
+
+    let lastEventSeen: any = null;
+    let eventCount = 0;
+
+    runtime.scheduler.addEventHandler(
+      (event: any) => {
+        eventCount++;
+        lastEventSeen = event;
+      },
+      streamCell.getAsNormalizedFullLink(),
+    );
+
+    const c2 = runtime.getCell(
+      space,
+      "should convert cells and proxies to links when sending events: payload",
+      {
+        type: "object",
+        properties: { x: { type: "number" }, y: { type: "number" } },
+        required: ["x", "y"],
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    c2.withTx(tx).set({ x: 1, y: 2 });
+    tx.commit();
+    tx = runtime.edit();
+
+    // Create event, with cell, query result and circular reference.
+    const event: any = { a: c2, b: c2.getAsQueryResult() };
+    event.c = event;
+
+    streamCell.send(event);
+
+    await runtime.idle();
+
+    expect(eventCount).toBe(1);
+    const { id } = c2.getAsNormalizedFullLink();
+    expect(lastEventSeen).toEqual(
+      {
+        a: { "/": { [LINK_V1_TAG]: { id, path: [], space } } },
+        b: { "/": { [LINK_V1_TAG]: { id, path: [], space } } },
+        c: { "/": { [LINK_V1_TAG]: { path: [] } } },
+      },
+    );
+  });
+});
+
 describe("asCell", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -723,40 +900,6 @@ describe("asCell", () => {
 
     nestedCell.set(100);
     expect(simpleCell.get()).toEqual({ a: { b: { c: 100 } } });
-  });
-
-  it("should return a Sendable for stream aliases", async () => {
-    const c = runtime.getCell<{ stream: { $stream: true } }>(
-      space,
-      "should return a Sendable for stream aliases",
-      undefined,
-      tx,
-    );
-    c.setRaw({ stream: { $stream: true } });
-    const streamCell = c.key("stream");
-
-    expect(streamCell).toHaveProperty("send");
-    expect(streamCell).not.toHaveProperty("get");
-    expect(streamCell).not.toHaveProperty("set");
-    expect(streamCell).not.toHaveProperty("key");
-
-    let lastEventSeen: any = null;
-    let eventCount = 0;
-
-    runtime.scheduler.addEventHandler(
-      (event: any) => {
-        eventCount++;
-        lastEventSeen = event;
-      },
-      streamCell.getAsNormalizedFullLink(),
-    );
-
-    streamCell.send({ $stream: true });
-    await runtime.idle();
-
-    expect(c.get()).toStrictEqual({ stream: { $stream: true } });
-    expect(eventCount).toBe(1);
-    expect(lastEventSeen).toEqual({ $stream: true });
   });
 
   it("should call sink only when the cell changes on the subpath", async () => {

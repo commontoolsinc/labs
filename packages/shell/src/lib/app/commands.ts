@@ -4,7 +4,8 @@ export type Command =
   | { type: "set-active-charm-id"; charmId: string }
   | { type: "set-identity"; identity: Identity }
   | { type: "set-space"; spaceName: string }
-  | { type: "clear-authentication" };
+  | { type: "clear-authentication" }
+  | { type: "set-show-charm-list-view"; show: boolean };
 
 export function isCommand(value: unknown): value is Command {
   if (
@@ -27,6 +28,9 @@ export function isCommand(value: unknown): value is Command {
     }
     case "clear-authentication": {
       return true;
+    }
+    case "set-show-charm-list-view": {
+      return "show" in value && typeof value.show === "boolean";
     }
   }
   return false;

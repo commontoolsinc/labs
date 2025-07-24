@@ -2,6 +2,7 @@ import { isObject } from "@commontools/utils/types";
 import {
   type Cancel,
   type Cell,
+  convertCellsToLinks,
   effect,
   isCell,
   isStream,
@@ -383,7 +384,7 @@ export function serializableEvent<T>(event: Event): T {
     eventObject.detail = (event as CustomEvent).detail;
   }
 
-  return JSON.parse(JSON.stringify(eventObject)) as T;
+  return convertCellsToLinks(eventObject) as T;
 }
 
 let sanitizeEvent: EventSanitizer<unknown> = serializableEvent;

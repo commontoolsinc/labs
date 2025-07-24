@@ -632,7 +632,7 @@ describe("Journal", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle writing to invalid nested paths", () => {
@@ -653,7 +653,7 @@ describe("Journal", () => {
       );
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("TypeMismatchError");
     });
 
     it("should handle deleting properties with undefined", () => {
