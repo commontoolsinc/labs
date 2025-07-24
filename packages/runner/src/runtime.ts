@@ -16,6 +16,7 @@ import type {
   IStorageSubscriptionCapability,
   MemorySpace,
   StorageNotification,
+  URI,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
 import type { DocImpl } from "./doc.ts";
@@ -262,17 +263,21 @@ export interface IDocumentMap {
   readonly runtime: IRuntime;
   getDocByEntityId<T = any>(
     space: MemorySpace,
-    entityId: EntityId | string,
+    entityId: EntityId | URI | string,
     createIfNotFound?: true,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T>;
   getDocByEntityId<T = any>(
     space: MemorySpace,
-    entityId: EntityId | string,
+    entityId: EntityId | URI | string,
     createIfNotFound: false,
     sourceIfCreated?: DocImpl<any>,
   ): DocImpl<T> | undefined;
-  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: MemorySpace): void;
+  registerDoc<T>(
+    entityId: EntityId | URI,
+    doc: DocImpl<T>,
+    space: MemorySpace,
+  ): void;
   getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T>;
   cleanup(): void;
 }

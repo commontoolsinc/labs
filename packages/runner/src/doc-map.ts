@@ -113,7 +113,7 @@ export class DocumentMap implements IDocumentMap {
 
   constructor(readonly runtime: IRuntime) {}
 
-  private _getDocKey(space: string, entityId: EntityId | string): string {
+  private _getDocKey(space: string, entityId: EntityId | URI | string): string {
     return space + "/" + JSON.stringify(normalizeEntityId(entityId));
   }
 
@@ -148,7 +148,7 @@ export class DocumentMap implements IDocumentMap {
 
   setDocByEntityId(
     space: string,
-    entityId: EntityId,
+    entityId: EntityId | URI | string,
     doc: DocImpl<any>,
   ): void {
     // throw if doc already exists
@@ -159,7 +159,11 @@ export class DocumentMap implements IDocumentMap {
     this.entityIdToDocMap.set(this._getDocKey(space, entityId), doc);
   }
 
-  registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
+  registerDoc<T>(
+    entityId: EntityId | URI | string,
+    doc: DocImpl<T>,
+    space: string,
+  ): void {
     this.entityIdToDocMap.set(this._getDocKey(space, entityId), doc);
   }
 
@@ -200,7 +204,7 @@ export class DocumentMap implements IDocumentMap {
   }
 }
 
-function normalizeEntityId(entityId: EntityId | string): EntityId {
+function normalizeEntityId(entityId: EntityId | URI | string): EntityId {
   if (typeof entityId === "string") {
     if (entityId.startsWith("of:")) {
       return { "/": fromURI(entityId) };

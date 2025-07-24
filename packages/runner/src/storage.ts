@@ -1,6 +1,7 @@
 import { refer } from "merkle-reference";
 import { Immutable, isRecord } from "@commontools/utils/types";
 import type {
+  FactAddress,
   JSONValue,
   MemorySpace,
   SchemaContext,
@@ -209,7 +210,9 @@ export class Storage implements IStorage {
     const storageProvider = this._getStorageProviderForSpace(doc.space);
     const uri = Storage.toURI(doc.entityId);
 
+    console.log("Awaiting storageProvider.sync on", uri);
     const result = await storageProvider.sync(uri, false, schemaContext);
+    console.log("Done awaiting storageProvider.sync on", uri);
     if (result.error) {
       // This will be a decoupled doc that is not persisted and cannot be edited
       doc.ephemeral = true;
@@ -387,6 +390,7 @@ export class Storage implements IStorage {
     }
     if (valuesToSend.length > 0) {
       // Don't worry about redundant sends, since the provider handles that.
+      console.log("Calling send in _integrateResult");
       const result = await storageProvider.send(valuesToSend);
       if (result.error) {
         console.warn("Failed to write objects");
@@ -486,10 +490,21 @@ export class Storage implements IStorage {
       return;
     }
 
+    // If we're already dirty, we don't need to add a promise
+    const docKey = `${doc.space}/${uri}`;
+    if (this.dirtyDocs.has(docKey)) {
+      return;
+    }
+    this.dirtyDocs.add(docKey);
+
     // Track these promises for our synced call.
     // We may have linked docs that storage doesn't know about
     const storageProvider = this._getStorageProviderForSpace(doc.space);
-    const { missing } = this._queryLocal(doc.space, uri, storageProvider);
+    const { missing, loaded } = this._queryLocal(
+      doc.space,
+      uri,
+      storageProvider,
+    );
     // Any missing docs need to be linked up
     for (const factAddress of missing) {
       // missing docs have been created in our doc map, but storage doesn't
@@ -499,25 +514,31 @@ export class Storage implements IStorage {
         doc.space,
         factAddress.of,
       );
-      // we don't need to await this, since by the time we've resolved our
+      console.log("calling sync cell on missing doc", factAddress.of);
+      // We do need to call syncCell, because we may have pushed a new cell
+      // without calling syncCell (e.g. map will create these cells).
+      // I can modify the DocImpl class to automatically relay the doc updates
+      // to storage, but I also need to have storage update the docs.
+      // We don't need to await this, since by the time we've resolved our
       // docToStoragePromise, we'll have added the loadingPromise.
+      // Not awaiting means that the cache may need to pull before push,
+      // and that can re-order writes.
       this.syncCell(linkedDoc.asCell());
     }
+    const docAddrs = [...missing, ...loaded.values().map((sv) => sv.source)];
 
-    // If we're already dirty, we don't need to add a promise
-    const docKey = `${doc.space}/${uri}`;
-    if (this.dirtyDocs.has(docKey)) {
-      return;
-    }
-    this.dirtyDocs.add(docKey);
-    const docToStoragePromise = this._sendDocValue(doc, labels);
+    const docToStoragePromise = this._sendDocValue(doc, docAddrs, labels);
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
       this.docToStoragePromises.delete(docToStoragePromise)
     );
   }
 
-  private async _sendDocValue(doc: DocImpl<unknown>, labels?: Labels) {
+  private async _sendDocValue(
+    doc: DocImpl<unknown>,
+    docAddrs: FactAddress[],
+    labels?: Labels,
+  ) {
     await this.runtime.idle();
 
     // Wait for all _updateDoc operations to complete, then wait for runtime to
@@ -531,14 +552,35 @@ export class Storage implements IStorage {
 
     const uri = Storage.toURI(doc.entityId);
     const docKey = `${doc.space}/${uri}`;
+    // We remove the main doc from the dirty list, but not the others
+    // They can handle that in their own sync
     this.dirtyDocs.delete(docKey);
 
     const storageProvider = this._getStorageProviderForSpace(doc.space);
 
-    // Create storage value using the helper to ensure consistency
-    const storageValue = Storage._cellLinkToJSON(doc, labels);
-
-    await storageProvider.send([{ uri: uri, value: storageValue }]);
+    const docsToSend = [];
+    for (const docAddr of docAddrs) {
+      const linkedDoc = this.runtime.documentMap.getDocByEntityId(
+        doc.space,
+        docAddr.of,
+        false,
+      );
+      // if we don't have a local doc, the server's version should be fine
+      if (linkedDoc === undefined) {
+        continue;
+      }
+      // The main doc can tell us about the labels applied based on the schema,
+      // but we aren't carrying that through queryLocal, so we don't know for
+      // other docs.
+      // Also, the doc itself could be associated with multiple schemas.
+      // This is just the one that we used when we wrote this value to the doc.
+      const linkedLabels = linkedDoc === doc ? labels : undefined;
+      // Create storage value using the helper to ensure consistency
+      const linkedValue = Storage._cellLinkToJSON(linkedDoc, linkedLabels);
+      docsToSend.push({ uri: docAddr.of, value: linkedValue });
+    }
+    console.log("Calling send in _sendDocValue");
+    await storageProvider.send(docsToSend);
   }
 
   // Update the doc with the new value we got in storage.
