@@ -636,7 +636,6 @@ export default recipe(
     },
     required: ["items", "filter"],
   } as const satisfies JSONSchema,
-  "TodoList",
   (state) => {
     return {
       [UI]: (
