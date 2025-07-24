@@ -1,7 +1,11 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
-import { type JSONSchema, type JSONValue } from "./builder/types.ts";
-import { createCell, isCell } from "./cell.ts";
+import {
+  type JSONSchema,
+  type JSONValue,
+  toOpaqueRef,
+} from "./builder/types.ts";
+import { createCell, isCell, isStream } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import {
   readMaybeLink,
@@ -12,7 +16,12 @@ import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type IMemorySpaceAddress } from "./storage/interface.ts";
-import { createQueryResultProxy } from "./query-result-proxy.ts";
+import {
+  createQueryResultProxy,
+  getCellLink,
+  isQueryResultForDereferencing,
+  makeOpaqueRef,
+} from "./query-result-proxy.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -210,7 +219,7 @@ function processDefaultValue(
       }
     }
 
-    return result;
+    return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
 
   // Handle array type defaults
@@ -218,7 +227,7 @@ function processDefaultValue(
     resolvedSchema?.type === "array" && Array.isArray(defaultValue) &&
     resolvedSchema.items
   ) {
-    return defaultValue.map((item, i) =>
+    const result = defaultValue.map((item, i) =>
       processDefaultValue(
         runtime,
         tx,
@@ -230,10 +239,11 @@ function processDefaultValue(
         item,
       )
     );
+    return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
 
   // For primitive types, return as is
-  return defaultValue;
+  return annotateWithBackToCellSymbols(defaultValue, runtime, link, tx);
 }
 
 function mergeDefaults(
@@ -255,6 +265,23 @@ function mergeDefaults(
   } else result.default = defaultValue;
 
   return result;
+}
+
+function annotateWithBackToCellSymbols(
+  value: any,
+  runtime: IRuntime,
+  link: NormalizedFullLink,
+  tx: IExtendedStorageTransaction | undefined,
+) {
+  if (
+    isRecord(value) && !isCell(value) && !isStream(value) &&
+    !isQueryResultForDereferencing(value)
+  ) {
+    value[getCellLink] = () => createCell(runtime, link, tx, true);
+    value[toOpaqueRef] = () => makeOpaqueRef(link);
+  }
+  // TODO(seefeld): Freeze the value to make it immutable.
+  return value;
 }
 
 export function validateAndTransform(
@@ -395,7 +422,7 @@ export function validateAndTransform(
       resolvedSchema.default,
     );
     seen.push([seenKey, result]);
-    return result;
+    return result; // processDefaultValue already annotates with back to cell
   }
 
   // TODO(seefeld): The behavior when one of the options is very permissive (e.g. no type
@@ -504,7 +531,7 @@ export function validateAndTransform(
       }
       log?.reads.push(...extraReads);
       seen.push([seenKey, merged]);
-      return merged;
+      return annotateWithBackToCellSymbols(merged, runtime, link, tx);
     } else {
       // For primitive types, try each option that matches the type
       const candidates = options
@@ -539,7 +566,14 @@ export function validateAndTransform(
           log,
           seen,
         );
-      } else return candidates[0].result;
+      } else {
+        return annotateWithBackToCellSymbols(
+          candidates[0].result,
+          runtime,
+          link,
+          tx,
+        );
+      }
     }
   }
 
@@ -604,14 +638,14 @@ export function validateAndTransform(
       }
     }
 
-    return result;
+    return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
 
   if (resolvedSchema.type === "array") {
     if (!Array.isArray(value)) {
       const result: any[] = [];
       seen.push([seenKey, result]);
-      return result;
+      return annotateWithBackToCellSymbols(result, runtime, link, tx);
     }
     const result: any[] = [];
     seen.push([seenKey, result]);
@@ -631,7 +665,7 @@ export function validateAndTransform(
         seen,
       );
     }
-    return result;
+    return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
 
   // For primitive types, return as is
@@ -643,10 +677,10 @@ export function validateAndTransform(
       resolvedSchema.default,
     );
     seen.push([seenKey, result]);
-    return result;
+    return result; // processDefaultValue already annotates with back to cell
   }
 
   // Add the current value to seen before returning
   seen.push([seenKey, value]);
-  return value;
+  return annotateWithBackToCellSymbols(value, runtime, link, tx);
 }

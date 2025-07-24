@@ -693,7 +693,9 @@ export class Runner implements IRunner {
           tx,
         });
 
-        const argument = inputsCell.asSchema(module.argumentSchema).get();
+        const argument = module.argumentSchema
+          ? inputsCell.asSchema(module.argumentSchema).get()
+          : inputsCell.getAsQueryResult([], tx);
         const result = fn(argument);
 
         const postRun = (result: any) => {
@@ -750,8 +752,9 @@ export class Runner implements IRunner {
       let previousResultRecipeAsString: string | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = inputsCell.asSchema(module.argumentSchema).withTx(tx)
-          .get();
+        const argument = module.argumentSchema
+          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
+          : inputsCell.getAsQueryResult([], tx);
 
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },

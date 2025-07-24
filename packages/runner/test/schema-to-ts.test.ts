@@ -13,6 +13,7 @@ import { Cell, Runtime } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import "./utils/matchers.ts"; // Import custom matchers
 
 // This file primarily tests Schema<> & co from commontools/api/index.ts, which
 // gets transitively loaded by the above
@@ -551,7 +552,13 @@ describe("Schema-to-TS Type Conversion", () => {
 
     expect(user.name).toBe("John");
     expect(user.age).toBe(30);
-    expect(user.tags).toEqual(["developer", "typescript"]);
-    expect(user.settings.get()).toEqual({ theme: "dark", notifications: true });
+    (expect(user.tags) as any).toEqualIgnoringSymbols([
+      "developer",
+      "typescript",
+    ]);
+    (expect(user.settings.get()) as any).toEqualIgnoringSymbols({
+      theme: "dark",
+      notifications: true,
+    });
   });
 });

@@ -96,7 +96,8 @@ export class CycleTracker<K> {
     if (this.partial.has(k)) {
       console.error(
         "Cycle Detected!",
-        context == null ? JSON.stringify(k) : JSON.stringify(context),
+        k,
+        context,
       );
       return null;
     }

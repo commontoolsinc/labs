@@ -7,6 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import "./utils/matchers.ts"; // Import custom matchers
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -70,10 +71,14 @@ describe("Schema Lineage", () => {
         }),
       );
 
-      // Access the cell without providing a schema
-      // (Type script type is just to avoid compiler errors)
-      const cell: Cell<{ count: number; label: string }> = sourceCell
-        .asSchema();
+      // Access the cell without providing a schema (Type script type is just to
+      // avoid compiler errors, we're testing the underlying cell loading)
+      const cell = runtime.getCell<{ count: number; label: string }>(
+        space,
+        "schema-lineage-source", // same id as above
+        undefined,
+        tx,
+      );
 
       // The cell should have picked up the schema from the alias
       expect(cell.schema).toBeDefined();
@@ -177,8 +182,14 @@ describe("Schema Lineage", () => {
         includeSchema: true,
       }));
 
-      // Access the cell without providing a schema
-      const cell = finalCell.asSchema();
+      // Access the cell without providing a schema (Type script type is just to
+      // avoid compiler errors, we're testing the underlying cell loading)
+      const cell = runtime.getCell<number>(
+        space,
+        "final-alias", // same id as above
+        undefined,
+        tx,
+      );
 
       // The cell should have picked up the schema from the alias chain
       expect(cell.schema).toBeDefined();
@@ -334,6 +345,6 @@ describe("Schema propagation end-to-end example", () => {
       properties: { name: { type: "string" } },
       additionalProperties: false,
     });
-    expect(cValue.props.value.get()).toEqual({ name: "hello" });
+    expect(cValue.props.value.get()).toEqualIgnoringSymbols({ name: "hello" });
   });
 });

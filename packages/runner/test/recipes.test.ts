@@ -10,6 +10,7 @@ import { isCell } from "../src/cell.ts";
 import { resolveLinks } from "../src/link-resolution.ts";
 import { isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import "./utils/matchers.ts"; // Import custom matchers
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -189,7 +190,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({
+    expect(result.get()).toMatchObjectIgnoringSymbols({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
@@ -225,7 +226,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({
+    expect(result.get()).toMatchObjectIgnoringSymbols({
       doubled: [3, 6, 9],
     });
   });
@@ -256,7 +257,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({ doubled: [] });
+    expect(result.get()).toMatchObjectIgnoringSymbols({ doubled: [] });
   });
 
   it("should execute handlers", async () => {

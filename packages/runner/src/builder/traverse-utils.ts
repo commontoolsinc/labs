@@ -29,18 +29,22 @@ export function traverseValue(
   else if (isRecord(unprocessedValue)) seen.add(unprocessedValue);
 
   // Traverse value
-  if (Array.isArray(value)) {
-    return value.map((v) => traverseValue(v, fn, seen));
-  } else if (
+  if (
     !isOpaqueRef(value) &&
     !canBeOpaqueRef(value) &&
     !isShadowRef(value) &&
     (isRecord(value) || isRecipe(value))
   ) {
-    return Object.fromEntries(
-      Object.entries(value).map((
-        [key, v],
-      ) => [key, traverseValue(v, fn, seen)]),
-    );
-  } else return value;
+    if (Array.isArray(value)) {
+      return (value as Array<any>).map((v) => traverseValue(v, fn, seen));
+    } else {
+      return Object.fromEntries(
+        Object.entries(value).map((
+          [key, v],
+        ) => [key, traverseValue(v, fn, seen)]),
+      );
+    }
+  } else {
+    return value;
+  }
 }

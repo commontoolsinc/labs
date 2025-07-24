@@ -272,8 +272,10 @@ export function followLinks(
       // Detect cycles (at this point these are all references that point to something)
       if (visits.seen.some((r) => areNormalizedLinksSame(r, result))) {
         throw new Error(
-          `Reference cycle detected ${result.id}/[${result.path.join(", ")}] ${
-            visits.seen.map((r) => `${r.id}/[${r.path.join(", ")}]`).join(", ")
+          `Reference cycle detected ${result.id}/[${
+            result.path.join(", ")
+          }]\n\n  ${
+            visits.seen.map((r) => `${r.id}/[${r.path.join(", ")}]`).join("\n ")
           }`,
         );
       }

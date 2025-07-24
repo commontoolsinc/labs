@@ -574,15 +574,15 @@ export class RegularCell<T> implements Cell<T> {
     schema?: JSONSchema,
   ): Cell<T>;
   asSchema(schema?: JSONSchema): Cell<any> {
-    return createCell(
+    return new RegularCell(
       this.runtime,
       { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
-    );
+    ) as Cell<any>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    return createCell(this.runtime, this.link, newTx);
+    return new RegularCell(this.runtime, this.link, newTx);
   }
 
   sink(callback: (value: T) => Cancel | undefined): Cancel {

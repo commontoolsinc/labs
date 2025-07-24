@@ -6,6 +6,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import "./utils/matchers.ts"; // Import custom matchers
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -86,11 +87,11 @@ describe("Nested Cell Array", () => {
 
     // Normal array: items are plain objects
     expect(isCell(normalItems[0])).toBe(false);
-    expect(normalItems[0]).toEqual(testData);
+    expect(normalItems[0]).toEqualIgnoringSymbols(testData);
 
     // Cell array: items are cells containing objects
     expect(isCell(cellItems[0])).toBe(true);
-    expect(cellItems[0].get()).toEqual(testData);
+    expect(cellItems[0].get()).toEqualIgnoringSymbols(testData);
 
     // cellItems[0].get() should NOT be a cell
     expect(isCell(cellItems[0].get())).toBe(false);
