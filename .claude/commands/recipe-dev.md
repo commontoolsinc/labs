@@ -28,6 +28,10 @@ This script guides Claude through recipe development with the `ct` utility after
 
 ### STEP 2: Recipe Development Workflows
 
+Before working on recipes it is recommended to search for `COMPONENTS.md` and `RECIPES.md` files in the `recipes` folder provided by the user.
+
+Read `HANDLERS.md` when confused about event handler errors.
+
 #### Workflow A: Modifying Existing Recipes
 
 **Get recipe source:**
