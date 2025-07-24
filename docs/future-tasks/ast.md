@@ -358,11 +358,11 @@ All JSX event handlers (onFoo attributes) must be bound to Streams:
 <button onClick={(e) => console.log(e)}>Click</button>
 
 // ❌ Invalid - unbound handler
-<button onClick={handleClick}>Click</button>
+<button onClick={updater}>Click</button>
 
 // ✅ Valid - bound handler (Stream)
-<button onClick={events.click}>Click</button>
-<button onClick={handlers.submit}>Submit</button>
+<button onClick={updater(item)}>Click</button>
+<button onClick={submit({item, cart})}>Submit</button>
 ```
 
 **Error Message Example:**
@@ -370,7 +370,7 @@ All JSX event handlers (onFoo attributes) must be bound to Streams:
 ```
 Error: JSX event handler 'onClick' must be bound to a Stream.
 Found: Arrow function expression
-Expected: A Stream reference (e.g., events.click or handlers.submit)
+Expected: A bound handler.
 
 To fix:
 1. Define a handler using handler() or subscribe()
@@ -378,13 +378,11 @@ To fix:
 3. Reference that Stream in the JSX
 
 Example:
-  const handlers = {
-    click: handler(clickSchema, stateSchema, (event, state) => {
-      // handle click
-    })
-  };
+  const inc = handler((_, counter: Cell<Counter>) => {
+      counter.value.set(counter.value.get() + 1)
+    });
   
-  <button onClick={handlers.click}>Click</button>
+  <button onClick={inc(counter)}>Click</button>
 ```
 
 #### 2. Non-Transformable Pattern Detection
@@ -416,9 +414,18 @@ Suggested refactor:
   });
 ```
 
+Note: for future improvements, perhaps arrow functions can be defined inline and
+automatically upgraded.
+
 #### 3. Reactive Pattern Validation
 
-Ensure reactive patterns are used correctly:
+At runtime we can detect some invalid statements while compiling recipes, such
+as `item.status = 'initializing';` in a recipe body.
+
+> Can't read value during recipe creation.
+
+By validating the AST we can ensure reactive patterns are used correctly, and
+provide better guidance:
 
 ```typescript
 // ❌ Invalid - mutating OpaqueRef directly
