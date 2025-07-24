@@ -19,6 +19,7 @@ import {
   setCharmRecipe,
   SpaceConfig,
 } from "../lib/charm.ts";
+import { renderCharm } from "../lib/charm-render.ts";
 import { render } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
@@ -261,6 +262,74 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
       render(tree);
     } else {
       render("<no view data>");
+    }
+  })
+  /* charm render */
+  .command("render", "Render a charm's UI to HTML")
+  .usage(charmUsage)
+  .example(
+    `ct charm render ${EX_ID} ${EX_COMP_CHARM}`,
+    `Render the UI for charm "${RAW_EX_COMP.charm!}" to HTML.`,
+  )
+  .example(
+    `ct charm render ${EX_ID} ${EX_URL}`,
+    `Render the UI for charm "${RAW_EX_COMP.charm!}" to HTML.`,
+  )
+  .example(
+    `ct charm render ${EX_ID} ${EX_COMP_CHARM} --watch`,
+    `Watch and re-render charm "${RAW_EX_COMP.charm!}" when UI changes.`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .option("--json", "Output HTML as JSON")
+  .option("-w,--watch", "Watch for changes and re-render")
+  .action(async (options) => {
+    const charmConfig = parseCharmOptions(options);
+
+    try {
+      if (options.watch) {
+        console.log("Watching for changes... Press Ctrl+C to exit.\n");
+
+        // Initial render
+        const charmData = await inspectCharm(charmConfig);
+        console.log(`Rendering charm: ${charmData.name || charmConfig.charm}`);
+
+        let renderCount = 0;
+        const cleanup = await renderCharm(charmConfig, {
+          watch: true,
+          onUpdate: (html) => {
+            renderCount++;
+            console.log(`\n--- Render #${renderCount} ---`);
+            if (options.json) {
+              render({ html, renderCount }, { json: true });
+            } else {
+              render(html);
+            }
+          },
+        }) as () => void;
+
+        // Handle Ctrl+C gracefully
+        Deno.addSignalListener("SIGINT", () => {
+          console.log("\nStopping watch mode...");
+          cleanup();
+          Deno.exit(0);
+        });
+
+        // Keep the process running
+        await new Promise(() => {});
+      } else {
+        const html = await renderCharm(charmConfig) as string;
+        if (options.json) {
+          render({ html }, { json: true });
+        } else {
+          render(html);
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("has no UI")) {
+        render("<charm has no UI>");
+      } else {
+        throw error;
+      }
     }
   })
   /* charm link */
