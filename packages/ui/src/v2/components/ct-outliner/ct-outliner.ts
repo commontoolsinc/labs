@@ -385,6 +385,27 @@ export class CTOutliner extends BaseElement {
     .charm-link:hover {
       border-bottom-color: var(--ring);
     }
+
+    /* Checkbox styles */
+    .checkbox-content {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.5rem;
+    }
+
+    .node-checkbox {
+      margin: 0;
+      cursor: pointer;
+      width: 1rem;
+      height: 1rem;
+      flex-shrink: 0;
+      accent-color: var(--ring);
+    }
+
+    /* Hide bullet when checkbox is present */
+    .node-content:has(.checkbox-content) .bullet {
+      display: none;
+    }
   `;
 
   constructor() {
@@ -1599,6 +1620,61 @@ export class CTOutliner extends BaseElement {
     });
   }
 
+  /**
+   * Handle checkbox click to toggle state
+   */
+  private handleCheckboxClick(node: OutlineTreeNode) {
+    this.toggleNodeCheckbox(node);
+  }
+
+  /**
+   * Toggle checkbox state on a node using proper Cell transactions
+   */
+  toggleNodeCheckbox(node: OutlineTreeNode) {
+    this.executeTransaction(
+      (tx) => {
+        if (tx) {
+          // Cell-based operation
+          const nodeBodyCell = this.getNodeBodyCell(node);
+          if (nodeBodyCell) {
+            const currentBody = nodeBodyCell.get();
+            
+            // Apply checkbox toggle logic using current Cell content (not stale node)
+            let newBody: string;
+            const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentBody);
+            const isChecked = /^\s*\[x\]\s*/.test(currentBody);
+            
+            if (hasCheckbox) {
+              // Toggle existing checkbox
+              if (isChecked) {
+                // Checked -> Unchecked (normalize to [ ])
+                newBody = currentBody.replace(/^\s*\[x\]\s*/, '[ ] ');
+              } else {
+                // Unchecked -> Checked
+                newBody = currentBody.replace(/^\s*\[[ ]?\]\s*/, '[x] ');
+              }
+            } else {
+              // Add checkbox if none exists
+              newBody = '[ ] ' + currentBody;
+            }
+            
+            nodeBodyCell.withTx(tx).set(newBody);
+          }
+        } else {
+          // Direct mutation fallback
+          TreeOperations.toggleCheckbox(this.tree, node);
+        }
+      },
+      () => {
+        // Fallback operation
+        TreeOperations.toggleCheckbox(this.tree, node);
+      },
+      "toggleNodeCheckbox"
+    );
+    
+    this.requestUpdate();
+  }
+
   private handleOutlinerClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
 
@@ -1801,7 +1877,7 @@ export class CTOutliner extends BaseElement {
           ></textarea>
           ${this.showingMentions ? this.renderMentionsDropdown() : ""}
         `
-        : this.renderMarkdownContent(node.body)}
+        : this.renderMarkdownContent(node.body, node)}
           </div>
         </div>
 
@@ -1875,12 +1951,16 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private renderMarkdownContent(content: string): unknown {
+  private renderMarkdownContent(content: string, node: OutlineTreeNode): unknown {
     if (!content.trim()) {
       return html`
         <span class="placeholder">Empty</span>
       `;
     }
+
+    // Check for checkbox at the beginning
+    const checkboxState = TreeOperations.getCheckboxState(node);
+    const contentWithoutCheckbox = TreeOperations.getBodyWithoutCheckbox(node);
 
     try {
       // Configure marked for inline content (no paragraphs)
@@ -1896,11 +1976,31 @@ export class CTOutliner extends BaseElement {
         return `<a href="${href}" class="charm-link" data-href="${href}" data-text="${text}"${titleAttr}>${text}</a>`;
       };
 
-      const html_content = marked.parse(content, {
+      const html_content = marked.parse(contentWithoutCheckbox, {
         renderer,
         breaks: false,
         gfm: true,
       });
+
+      if (checkboxState !== null) {
+        const isChecked = checkboxState === 'checked';
+        return html`
+          <span class="checkbox-content">
+            <input 
+              type="checkbox" 
+              class="node-checkbox" 
+              ?checked=${isChecked}
+              @click="${(e: MouseEvent) => {
+                e.stopPropagation();
+                e.preventDefault();
+                this.handleCheckboxClick(node);
+              }}"
+            />
+            <span class="markdown-content" @click="${this
+              .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
+          </span>
+        `;
+      }
 
       return html`
         <span class="markdown-content" @click="${this

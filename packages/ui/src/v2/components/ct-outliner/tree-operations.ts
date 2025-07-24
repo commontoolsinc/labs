@@ -501,4 +501,60 @@ export const TreeOperations = {
 
     return null;
   },
+
+  /**
+   * Check if a node has a checkbox prefix
+   */
+  hasCheckbox(node: Node): boolean {
+    return /^\s*\[[ x]?\]\s*/.test(node.body);
+  },
+
+  /**
+   * Check if a node's checkbox is checked
+   */
+  isCheckboxChecked(node: Node): boolean {
+    return /^\s*\[x\]\s*/.test(node.body);
+  },
+
+  /**
+   * Toggle the checkbox state of a node
+   * Cycles: unchecked ([] or [ ]) → checked ([x]) → unchecked ([ ])
+   */
+  toggleCheckbox(tree: Tree, targetNode: Node): void {
+    const mutableNode = targetNode as MutableNode;
+    
+    if (TreeOperations.hasCheckbox(targetNode)) {
+      // Toggle existing checkbox
+      if (TreeOperations.isCheckboxChecked(targetNode)) {
+        // Checked -> Unchecked (normalize to [ ])
+        mutableNode.body = mutableNode.body.replace(/^\s*\[x\]\s*/, '[ ] ');
+      } else {
+        // Unchecked -> Checked
+        mutableNode.body = mutableNode.body.replace(/^\s*\[[ ]?\]\s*/, '[x] ');
+      }
+    } else {
+      // Add checkbox if none exists
+      mutableNode.body = '[ ] ' + mutableNode.body;
+    }
+  },
+
+  /**
+   * Get the body text without the checkbox prefix
+   */
+  getBodyWithoutCheckbox(node: Node): string {
+    return node.body.replace(/^\s*\[[ x]?\]\s*/, '');
+  },
+
+  /**
+   * Extract checkbox state from node body
+   * Returns: 'checked', 'unchecked', or null if no checkbox
+   */
+  getCheckboxState(node: Node): 'checked' | 'unchecked' | null {
+    if (TreeOperations.isCheckboxChecked(node)) {
+      return 'checked';
+    } else if (TreeOperations.hasCheckbox(node)) {
+      return 'unchecked';
+    }
+    return null;
+  },
 };
