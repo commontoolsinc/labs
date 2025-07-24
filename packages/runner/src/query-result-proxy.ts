@@ -1,7 +1,8 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
-import { type Frame, type OpaqueRef, toOpaqueRef } from "./builder/types.ts";
+import { type Frame, type OpaqueRef } from "./builder/types.ts";
+import { toCell, toOpaqueRef } from "./back-to-cell.ts";
 import { opaqueRef } from "./builder/opaque-ref.ts";
 import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { diffAndUpdate } from "./data-updating.ts";
@@ -112,7 +113,7 @@ export function createQueryResultProxy<T>(
   const proxy = new Proxy(target as object, {
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
-        if (prop === getCellLink) {
+        if (prop === toCell) {
           return () => createCell(runtime, link, tx, true);
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(link);
@@ -232,7 +233,7 @@ export function createQueryResultProxy<T>(
     set: (target, prop, value) => {
       if (typeof prop === "symbol") return false;
 
-      if (isQueryResult(value)) value = value[getCellLink]();
+      if (isQueryResult(value)) value = value[toCell]();
 
       if (!tx) {
         throw new Error(
@@ -323,7 +324,7 @@ export function makeOpaqueRef(
  * @throws {Error} If the value is not a cell value proxy.
  */
 export function getCellOrThrow<T = any>(value: any): Cell<T> {
-  if (isQueryResult(value)) return value[getCellLink]();
+  if (isQueryResult(value)) return value[toCell]();
   else throw new Error("Value is not a cell proxy");
 }
 
@@ -334,10 +335,9 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @returns {boolean}
  */
 export function isQueryResult(value: any): value is QueryResult<any> {
-  return isRecord(value) && typeof value[getCellLink] === "function";
+  return isRecord(value) && typeof value[toCell] === "function";
 }
 
-export const getCellLink = Symbol("getCellLink");
 
 /**
  * Check if value is a cell value proxy. Return as type that allows
@@ -353,7 +353,7 @@ export function isQueryResultForDereferencing(
 }
 
 export type QueryResultInternals = {
-  [getCellLink]: () => Cell<unknown>;
+  [toCell]: () => Cell<unknown>;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;

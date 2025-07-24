@@ -10,9 +10,9 @@ import {
   type OpaqueRef,
   type Schema,
   type Stream,
-  toOpaqueRef,
   TYPE,
 } from "./builder/types.ts";
+import { toOpaqueRef } from "./back-to-cell.ts";
 import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
 import {
   createQueryResultProxy,

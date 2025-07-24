@@ -10,9 +10,9 @@ import {
   type Recipe,
   type SchemaWithoutCell,
   type ShadowRef,
-  toOpaqueRef,
   type UnsafeBinding,
 } from "./types.ts";
+import { toOpaqueRef } from "../back-to-cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { hasValueAtPath, setValueAtPath } from "../path-utils.ts";
 import { getTopFrame, recipe } from "./recipe.ts";

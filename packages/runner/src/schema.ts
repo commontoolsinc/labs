@@ -3,7 +3,6 @@ import { ContextualFlowControl } from "./cfc.ts";
 import {
   type JSONSchema,
   type JSONValue,
-  toOpaqueRef,
 } from "./builder/types.ts";
 import { createCell, isCell, isStream } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
@@ -18,10 +17,10 @@ import { type NormalizedFullLink } from "./link-utils.ts";
 import { type IMemorySpaceAddress } from "./storage/interface.ts";
 import {
   createQueryResultProxy,
-  getCellLink,
   isQueryResultForDereferencing,
   makeOpaqueRef,
 } from "./query-result-proxy.ts";
+import { toCell, toOpaqueRef } from "./back-to-cell.ts";
 
 /**
  * Schemas are mostly a subset of JSONSchema.
@@ -277,7 +276,7 @@ function annotateWithBackToCellSymbols(
     isRecord(value) && !isCell(value) && !isStream(value) &&
     !isQueryResultForDereferencing(value)
   ) {
-    value[getCellLink] = () => createCell(runtime, link, tx, true);
+    value[toCell] = () => createCell(runtime, link, tx, true);
     value[toOpaqueRef] = () => makeOpaqueRef(link);
   }
   // TODO(seefeld): Freeze the value to make it immutable.

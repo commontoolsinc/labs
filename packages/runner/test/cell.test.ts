@@ -4,8 +4,9 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { isCell } from "../src/cell.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { getCellLink, isQueryResult } from "../src/query-result-proxy.ts";
-import { ID, JSONSchema, toOpaqueRef } from "../src/builder/types.ts";
+import { isQueryResult } from "../src/query-result-proxy.ts";
+import { toCell, toOpaqueRef } from "../src/back-to-cell.ts";
+import { ID, JSONSchema } from "../src/builder/types.ts";
 import { popFrame, pushFrame } from "../src/builder/recipe.ts";
 import { Runtime } from "../src/runtime.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
@@ -2422,7 +2423,7 @@ describe("getImmutableCell", () => {
   });
 });
 
-describe("getCellLink and toOpaqueRef hooks", () => {
+describe("toCell and toOpaqueRef hooks", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
@@ -2444,7 +2445,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
   });
 
   describe("Basic hook functionality", () => {
-    it("should add getCellLink and toOpaqueRef symbols to objects returned from Cell.get()", () => {
+    it("should add toCell and toOpaqueRef symbols to objects returned from Cell.get()", () => {
       const schema = {
         type: "object",
         properties: {
@@ -2461,9 +2462,9 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ value: 42 });
 
       const result = c.get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
-      expect(typeof (result as any)[getCellLink]).toBe("function");
+      expect(typeof (result as any)[toCell]).toBe("function");
       expect(typeof (result as any)[toOpaqueRef]).toBe("function");
     });
 
@@ -2482,7 +2483,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set([1, 2, 3]);
 
       const result = c.get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
     });
 
@@ -2495,7 +2496,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       );
       numberCell.set(42);
       const numberResult = numberCell.get();
-      expect(getCellLink in Object(numberResult)).toBe(false);
+      expect(toCell in Object(numberResult)).toBe(false);
       expect(toOpaqueRef in Object(numberResult)).toBe(false);
 
       const stringCell = runtime.getCell<string>(
@@ -2506,7 +2507,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       );
       stringCell.set("hello");
       const stringResult = stringCell.get();
-      expect(getCellLink in Object(stringResult)).toBe(false);
+      expect(toCell in Object(stringResult)).toBe(false);
       expect(toOpaqueRef in Object(stringResult)).toBe(false);
 
       const boolCell = runtime.getCell<boolean>(
@@ -2517,7 +2518,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       );
       boolCell.set(true);
       const boolResult = boolCell.get();
-      expect(getCellLink in Object(boolResult)).toBe(false);
+      expect(toCell in Object(boolResult)).toBe(false);
       expect(toOpaqueRef in Object(boolResult)).toBe(false);
     });
 
@@ -2547,14 +2548,14 @@ describe("getCellLink and toOpaqueRef hooks", () => {
 
       const result = c.get();
       // The outer object gets hooks
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
 
       // When a cell is stored in another cell, it's dereferenced to its value
       // The value itself doesn't have hooks (no schema on inner cell)
       expect(isCell(result.cell)).toBe(false);
       expect(result.cell).toEqual({ inner: 42 });
-      expect(getCellLink in result.cell).toBe(false);
+      expect(toCell in result.cell).toBe(false);
       expect(toOpaqueRef in result.cell).toBe(false);
     });
 
@@ -2570,12 +2571,12 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       const proxy = c.getAsQueryResult();
       expect(isQueryResult(proxy)).toBe(true);
       // Query results don't have the hooks because they're proxies, not plain objects
-      expect(getCellLink in proxy).toBe(false);
+      expect(toCell in proxy).toBe(false);
       expect(toOpaqueRef in proxy).toBe(false);
     });
   });
 
-  describe("getCellLink behavior", () => {
+  describe("toCell behavior", () => {
     it("should return a cell pointing to the original data", () => {
       const schema = {
         type: "object",
@@ -2593,7 +2594,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ value: 42 });
 
       const result = c.get();
-      const linkedCell = (result as any)[getCellLink]();
+      const linkedCell = (result as any)[toCell]();
 
       expect(isCell(linkedCell)).toBe(true);
       // The linked cell returns the same result with hooks
@@ -2630,7 +2631,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ a: { b: { c: 42 } } });
 
       const nestedValue = c.key("a").key("b").get();
-      const linkedCell = (nestedValue as any)[getCellLink]();
+      const linkedCell = (nestedValue as any)[toCell]();
 
       expect(isCell(linkedCell)).toBe(true);
       const linkedResult = linkedCell.get();
@@ -2655,7 +2656,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ value: 42 });
 
       const result = c.get();
-      const linkedCell = (result as any)[getCellLink]();
+      const linkedCell = (result as any)[toCell]();
 
       linkedCell.set({ value: 100 });
       const updatedResult = c.get();
@@ -2687,7 +2688,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ items: [{ name: "first" }, { name: "second" }] });
 
       const itemValue = c.key("items").key(0).get();
-      const linkedCell = (itemValue as any)[getCellLink]();
+      const linkedCell = (itemValue as any)[toCell]();
 
       expect(isCell(linkedCell)).toBe(true);
       const linkedResult = linkedCell.get();
@@ -2778,7 +2779,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
 
       // Should be a proxy, not have hooks
       expect(isQueryResult(argument)).toBe(true);
-      expect(getCellLink in argument).toBe(false);
+      expect(toCell in argument).toBe(false);
       expect(toOpaqueRef in argument).toBe(false);
       expect(argument.value).toBe(42);
     });
@@ -2803,7 +2804,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       const argument = inputCell.asSchema(schema).get();
 
       // Should have hooks
-      expect(getCellLink in argument).toBe(true);
+      expect(toCell in argument).toBe(true);
       expect(toOpaqueRef in argument).toBe(true);
       expect(argument.value).toBe(42);
     });
@@ -2826,8 +2827,8 @@ describe("getCellLink and toOpaqueRef hooks", () => {
 
       const argument = inputCell.asSchema(schema).get();
 
-      // Recipe code can use getCellLink to get back to the cell
-      const cellFromHook = (argument as any)[getCellLink]();
+      // Recipe code can use toCell to get back to the cell
+      const cellFromHook = (argument as any)[toCell]();
       expect(isCell(cellFromHook)).toBe(true);
       const cellResult = cellFromHook.get();
       expect(cellResult.data).toBe("test");
@@ -2886,7 +2887,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ name: "John", age: 30 });
 
       const result = c.get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
     });
 
@@ -2908,7 +2909,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
 
       const result = c.get();
       expect(result.value).toBe(100);
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
     });
 
@@ -2937,13 +2938,13 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ regular: "test", cellProp: { value: 42 } });
 
       const result = c.asSchema(schema).get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
 
       // cellProp should be a cell, not have hooks
       expect(isCell(result.cellProp)).toBe(true);
-      // Cells themselves have toOpaqueRef (part of Cell interface) but not getCellLink
-      expect(getCellLink in result.cellProp).toBe(false);
+      // Cells themselves have toOpaqueRef (part of Cell interface) but not toCell
+      expect(toCell in result.cellProp).toBe(false);
       expect(toOpaqueRef in result.cellProp).toBe(true);
     });
 
@@ -2965,7 +2966,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ known: "test", extra1: 10, extra2: 20 });
 
       const result = c.asSchema(schema).get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
       expect(result.extra1).toBe(10);
       expect(result.extra2).toBe(20);
@@ -2989,13 +2990,13 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set([{ value: 1 }, { value: 2 }]);
 
       const result = c.asSchema(schema).get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
 
       // Each item should also have hooks
-      expect(getCellLink in result[0]).toBe(true);
+      expect(toCell in result[0]).toBe(true);
       expect(toOpaqueRef in result[0]).toBe(true);
-      expect(getCellLink in result[1]).toBe(true);
+      expect(toCell in result[1]).toBe(true);
       expect(toOpaqueRef in result[1]).toBe(true);
     });
   });
@@ -3019,7 +3020,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ nullable: null });
 
       const result = c.get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
       expect(result.nullable).toBe(null);
       expect(result.optional).toBeUndefined();
@@ -3043,13 +3044,13 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set({ emptyObj: {}, emptyArr: [] });
 
       const result = c.get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
 
       // Empty objects and arrays should also have hooks
-      expect(getCellLink in result.emptyObj).toBe(true);
+      expect(toCell in result.emptyObj).toBe(true);
       expect(toOpaqueRef in result.emptyObj).toBe(true);
-      expect(getCellLink in result.emptyArr).toBe(true);
+      expect(toCell in result.emptyArr).toBe(true);
       expect(toOpaqueRef in result.emptyArr).toBe(true);
     });
 
@@ -3095,13 +3096,13 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       const result = c.get();
 
       // Each level should have hooks
-      expect(getCellLink in result).toBe(true);
-      expect(getCellLink in result.level1).toBe(true);
-      expect(getCellLink in result.level1.level2).toBe(true);
-      expect(getCellLink in result.level1.level2.level3).toBe(true);
+      expect(toCell in result).toBe(true);
+      expect(toCell in result.level1).toBe(true);
+      expect(toCell in result.level1.level2).toBe(true);
+      expect(toCell in result.level1.level2.level3).toBe(true);
 
       // Can navigate to deep cells
-      const deepCell = (result.level1.level2.level3 as any)[getCellLink]();
+      const deepCell = (result.level1.level2.level3 as any)[toCell]();
       expect(isCell(deepCell)).toBe(true);
       expect(deepCell.get().value).toBe(42);
     });
@@ -3127,7 +3128,7 @@ describe("getCellLink and toOpaqueRef hooks", () => {
       c.set(data);
 
       const result = c.get();
-      expect(getCellLink in result).toBe(true);
+      expect(toCell in result).toBe(true);
       expect(toOpaqueRef in result).toBe(true);
       expect(result.name).toBe("circular");
       // With circular references, the self reference points back to the same data

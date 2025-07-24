@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { expectWithSymbolMatchers, stripSymbols } from "./matchers.ts";
+import { stripSymbols } from "./matchers.ts";
 import "./matchers.ts"; // Import to register the custom matcher
 
 const testSymbol1 = Symbol("test1");
