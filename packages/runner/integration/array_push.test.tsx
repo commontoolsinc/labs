@@ -9,6 +9,8 @@ import {
   UI,
 } from "commontools";
 
+const ARRAY_LENGTH=1;
+
 // dummy input schema
 const InputSchema = {
   type: "object",
@@ -21,7 +23,13 @@ const OutputSchema = {
   properties: {
     my_array: {
       type: "array",
-      items: { type: "number" },
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          value: { type: "number" },
+        },
+      },
       default: [],
       asCell: true,
     },
@@ -34,14 +42,41 @@ export default recipe(
   InputSchema,
   OutputSchema,
   () => {
-    const my_array = cell<number[]>([]);
+    const my_array = cell<{ name: string; value: number }[]>([]);
 
-    const pushHandler = handler(
-      ({ value }: { value: number }, { array }: { array: number[] }) => {
-        console.log("Pushing value:", value);
-        array.push(value);
+    // BATCH VERSION - causes "Path must not be empty" errors
+    const pushHandler = handler({}, {
+      type: "object",
+      properties: {
+        array: {
+          type: "array",
+          asCell: true,
+          items: {
+            type: "object",
+            properties: { name: { type: "string" }, value: { type: "number" } },
+          },
+        },
       },
-    );
+      required: ["array"],
+    }, (_, { array }) => {
+      console.log("[pushHandler] Pushing all items at once");
+      const itemsToAdd = Array.from({ length: ARRAY_LENGTH }, (_, i) => ({
+        name: `Item ${i}`,
+        value: i,
+      }));
+      console.log("[pushHandler] Before push - array:", array);
+      console.log("[pushHandler] Items to add:", itemsToAdd);
+      array.push(...itemsToAdd);
+      //      array.push(itemsToAdd[0]);
+      console.log("[pushHandler] After push - array.get():", array.get());
+    });
+
+    // const pushHandler = handler(
+    //   ({ value }: { value: number }, { array }: { array: { name: string; value: number }[] }) => {
+    //     console.log("Pushing value:", value);
+    //     array.push({ name: `Item ${value}`, value: value });
+    //   },
+    // );
 
     // Return the recipe
     return {
@@ -52,9 +87,7 @@ export default recipe(
           <p>Array length: {derive(my_array, (arr) => arr.length)}</p>
           <p>
             <ul>
-            Current values: {my_array.map((e) => (
-              <li>{e}</li>
-            ))}
+              Current values: {my_array.map((e) => <li>{e.name}</li>)}
             </ul>
           </p>
         </div>
