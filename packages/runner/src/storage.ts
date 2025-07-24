@@ -388,7 +388,6 @@ export class Storage implements IStorage {
     }
     if (valuesToSend.length > 0) {
       // Don't worry about redundant sends, since the provider handles that.
-      console.log("Calling send in _integrateResult");
       const result = await storageProvider.send(valuesToSend);
       if (result.error) {
         console.warn("Failed to write objects");
