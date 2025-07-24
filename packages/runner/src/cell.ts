@@ -693,7 +693,7 @@ export class RegularCell<T> implements Cell<T> {
     return createCell(this.runtime, {
       space: this.link.space,
       path: [],
-      id: toURI(JSON.parse(sourceCellId as string)),
+      id: toURI(sourceCellId),
       type: "application/json",
       schema: schema,
     }, this.tx) as Cell<any>;

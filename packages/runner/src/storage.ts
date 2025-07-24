@@ -210,9 +210,7 @@ export class Storage implements IStorage {
     const storageProvider = this._getStorageProviderForSpace(doc.space);
     const uri = Storage.toURI(doc.entityId);
 
-    console.log("Awaiting storageProvider.sync on", uri);
     const result = await storageProvider.sync(uri, false, schemaContext);
-    console.log("Done awaiting storageProvider.sync on", uri);
     if (result.error) {
       // This will be a decoupled doc that is not persisted and cannot be edited
       doc.ephemeral = true;
@@ -579,7 +577,6 @@ export class Storage implements IStorage {
       const linkedValue = Storage._cellLinkToJSON(linkedDoc, linkedLabels);
       docsToSend.push({ uri: docAddr.of, value: linkedValue });
     }
-    console.log("Calling send in _sendDocValue");
     await storageProvider.send(docsToSend);
   }
 

@@ -7,7 +7,7 @@
   },
   "tasks": {
     "bundle": "../../scripts/bundle.ts src/index.ts",
-    "test": "deno test --allow-env --allow-ffi --allow-read --trace-leaks"
+    "test": "deno test --allow-env --allow-ffi --allow-read"
   },
   "imports": {
     "@shoelace-style/shoelace": "npm:@shoelace-style/shoelace@^2.19.1",
