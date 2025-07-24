@@ -109,7 +109,7 @@
     "@vercel/otel": "npm:@vercel/otel@^1.10.1",
     "@web/test-runner": "npm:@web/test-runner",
     "ai": "npm:ai@^4.3.9",
-    "esbuild": "npm:esbuild",
+    "esbuild": "npm:esbuild@~0.23.1",
     "jsdom": "npm:jsdom",
     "lit": "npm:lit@^3.3.0",
     "merkle-reference": "npm:merkle-reference@^2.2.0",
