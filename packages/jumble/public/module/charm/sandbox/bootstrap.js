@@ -1,7 +1,7 @@
 // Import React immediately
 import * as React from "react"
 import * as ReactDOM from "react-dom/client"
-import * as Babel from "https://esm.sh/@babel/standalone"
+import * as Babel from "@babel/standalone";
 
 // Make React available globally
 window.React = React
