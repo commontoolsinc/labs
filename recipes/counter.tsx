@@ -17,7 +17,7 @@ interface RecipeState {
   value: Default<number, 0>;
 }
 
-const increment = handler((_, state: { value: Cell<number> }) => {
+const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
   state.value.set(state.value.get() + 1);
 });
 
