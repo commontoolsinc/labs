@@ -1,5 +1,6 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
+import type { JSONSchema } from "./builder/types.ts";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 import {
   type CellLink,
@@ -10,6 +11,7 @@ import type {
   IExtendedStorageTransaction,
   MemoryAddressPathComponent,
 } from "./storage/interface.ts";
+import { ContextualFlowControl } from "./cfc.ts";
 
 const logger = getLogger("link-resolution");
 
@@ -70,15 +72,14 @@ export function resolveLink(
 
   const remainingPath = [...link.path];
   const traversedPath: MemoryAddressPathComponent[] = [];
-  let result: NormalizedFullLink = { ...link, path: traversedPath };
+  let last: NormalizedFullLink = link;
 
   let iteration = 0;
 
   while (true) {
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
       logger.warn(`Link resolution iteration limit reached`);
-      result = emptyResolvedFullLink;
-      break;
+      return emptyResolvedFullLink; // = return link to empty document
     }
 
     if (lastNode === "top" && remainingPath.length === 0) {
@@ -88,25 +89,53 @@ export function resolveLink(
     // Detect cycles. Only have to do this at top of path, since link folloowing
     // will always go through this at least once.
     if (traversedPath.length === 0) {
-      const key = JSON.stringify([result.space, result.id, remainingPath]);
+      const key = JSON.stringify([last.space, last.id, remainingPath]);
       if (seen.has(key)) {
         logger.warn(`Link cycle detected ${key}`);
-        result = emptyResolvedFullLink;
-        break; // = return link to empty document
+        return emptyResolvedFullLink; // = return link to empty document
       }
       seen.add(key);
     }
 
     const onlyRedirects = remainingPath.length === 0 &&
       lastNode === "writeRedirect"; // For "value", follow all
-    const nextLink = readMaybeLink(tx, result, onlyRedirects);
+    const nextLink = readMaybeLink(
+      tx,
+      { ...last, path: traversedPath },
+      onlyRedirects,
+    );
     if (nextLink !== undefined) {
+      // Schemas on link overwrite the current schema. We have to adjust it for
+      // the deeper remaining path we're accessing. If after that, the schema is
+      // empty (or more specifically "any"), we keep the current schema.
+      // TODO(ubik2,seefeld): This should really be a schema intersection.
+      let linkSchema = nextLink.schema;
+      if (linkSchema !== undefined && remainingPath.length > 0) {
+        const cfc = new ContextualFlowControl();
+        linkSchema = cfc.getSchemaAtPath(
+          linkSchema,
+          remainingPath,
+          nextLink.rootSchema,
+        );
+      }
+      if (linkSchema !== undefined) {
+        last = { ...nextLink, schema: linkSchema };
+      } else if (last.schema !== undefined) {
+        last = {
+          ...nextLink,
+          schema: last.schema,
+          rootSchema: last.rootSchema,
+        };
+      } else {
+        last = nextLink;
+      }
+
       // We have to start walking the the destination from the top, as it might
       // contain links in the middle, so we prepend it's path to the remaining
       // path and reset the current path to empty.
       remainingPath.unshift(...nextLink.path);
       traversedPath.length = 0;
-      result = { ...nextLink, path: traversedPath };
+      // Note: we already updated 'last' above with the proper schema handling
       continue; // = continue following links at same remainingPath
     }
 
@@ -117,7 +146,11 @@ export function resolveLink(
     traversedPath.push(remainingPath.shift()!);
   }
 
-  return result as ResolvedFullLink;
+  const result = { ...last, path: traversedPath } satisfies NormalizedFullLink;
+
+  // The casting is a workaround for the branding, we don't actually want to add
+  // the symbol to the result.
+  return result as unknown as ResolvedFullLink;
 }
 
 /**
@@ -158,9 +191,9 @@ export function readMaybeLink(
   }
 }
 
-const emptyResolvedFullLink: NormalizedFullLink = {
+const emptyResolvedFullLink: ResolvedFullLink = {
   space: "did:null:null",
   id: "data:application/json,",
   path: [],
   type: "application/json",
-};
+} satisfies NormalizedFullLink as unknown as ResolvedFullLink;
