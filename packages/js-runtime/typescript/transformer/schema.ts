@@ -37,7 +37,13 @@ export function createSchemaTransformer(
           const type = checker.getTypeFromTypeNode(typeArg);
 
           if (logger && typeArg) {
-            logger(`[SchemaTransformer] Found toSchema<${typeArg.getText()}>() call`);
+            let typeText = 'unknown';
+            try {
+              typeText = typeArg.getText();
+            } catch {
+              // getText() fails on synthetic nodes without source file context
+            }
+            logger(`[SchemaTransformer] Found toSchema<${typeText}>() call`);
           }
 
           // Extract options from the call arguments
