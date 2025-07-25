@@ -9,7 +9,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
-import { resolveLinks } from "../src/link-resolution.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 import { isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -1139,7 +1139,7 @@ describe("Recipe Runner", () => {
     expect(wrapperCell.get()).toBe(5);
 
     // Follow all the links until we get to the doc holding the value
-    const ref = resolveLinks(
+    const ref = resolveLink(
       tx,
       wrapperCell.getAsNormalizedFullLink(),
     );

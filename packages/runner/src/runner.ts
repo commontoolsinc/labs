@@ -29,7 +29,7 @@ import {
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
-import { followWriteRedirects } from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -648,7 +648,11 @@ export class Runner implements IRunner {
       for (const key in inputs) {
         let value = inputs[key];
         while (isWriteRedirectLink(value)) {
-          const maybeStreamLink = followWriteRedirects(tx, value, processCell);
+          const maybeStreamLink = resolveLink(
+            tx,
+            parseLink(value, processCell),
+            "writeRedirect",
+          );
           value = tx.readValueOrThrow(maybeStreamLink);
         }
         if (isStreamValue(value)) {

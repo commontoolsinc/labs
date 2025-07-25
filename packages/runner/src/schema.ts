@@ -6,11 +6,7 @@ import {
 } from "./builder/types.ts";
 import { createCell, isCell, isStream } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
-import {
-  readMaybeLink,
-  resolveLinks,
-  resolveLinkToWriteRedirect,
-} from "./link-resolution.ts";
+import { readMaybeLink, resolveLink } from "./link-resolution.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -306,7 +302,7 @@ export function validateAndTransform(
   // Follow aliases, etc. to last element on path + just aliases on that last one
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
-  const resolvedLink = resolveLinkToWriteRedirect(tx ?? runtime.edit(), link);
+  const resolvedLink = resolveLink(tx ?? runtime.edit(), link, "writeRedirect");
 
   // Use schema from alias if provided and no explicit schema was set
   if (!resolvedSchema && resolvedLink.schema) {
@@ -409,7 +405,7 @@ export function validateAndTransform(
   // and `path` will still point to the parent, as in e.g. the `anyOf` case
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
-  const ref = resolveLinks(tx ?? runtime.edit(), link);
+  const ref = resolveLink(tx ?? runtime.edit(), link);
   let value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available

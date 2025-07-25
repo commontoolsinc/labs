@@ -22,10 +22,7 @@ import {
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import {
-  resolveLinkToValue,
-  resolveLinkToWriteRedirect,
-} from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
@@ -307,7 +304,7 @@ export function createCell<T>(
 
   // Resolve the path to check whether it's a stream.
   const readTx = runtime.readTx(tx);
-  const resolvedLink = noResolve ? link : resolveLinkToValue(readTx, link);
+  const resolvedLink = noResolve ? link : resolveLink(readTx, link);
   const value = readTx.readValueOrThrow(resolvedLink, {
     meta: ignoreReadForScheduling,
   });
@@ -436,7 +433,7 @@ export class RegularCell<T> implements Cell<T> {
     diffAndUpdate(
       this.runtime,
       this.tx,
-      resolveLinkToWriteRedirect(this.tx, this.link),
+      resolveLink(this.tx, this.link, "writeRedirect"),
       newValue,
       getTopFrame()?.cause,
     );
@@ -454,7 +451,7 @@ export class RegularCell<T> implements Cell<T> {
       throw new Error("Can't update with non-object value");
     }
     // Get current value, following aliases and references
-    const resolvedLink = resolveLinkToValue(this.tx, this.link);
+    const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
     // If there's no current value, initialize based on schema
@@ -499,7 +496,7 @@ export class RegularCell<T> implements Cell<T> {
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
-    const resolvedLink = resolveLinkToValue(this.tx, this.link);
+    const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
     const cause = getTopFrame()?.cause;
 
