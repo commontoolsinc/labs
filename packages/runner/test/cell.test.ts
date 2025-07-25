@@ -752,6 +752,10 @@ describe("Proxy", () => {
       tx,
     );
     c.setRaw({ stream: { $stream: true } });
+    tx.commit();
+
+    tx = runtime.edit();
+
     const streamCell = c.key("stream");
 
     expect(streamCell).toHaveProperty("send");
@@ -763,7 +767,7 @@ describe("Proxy", () => {
     let eventCount = 0;
 
     runtime.scheduler.addEventHandler(
-      (event: any) => {
+      (_tx: IExtendedStorageTransaction, event: any) => {
         eventCount++;
         lastEventSeen = event;
       },
@@ -793,7 +797,7 @@ describe("Proxy", () => {
     let eventCount = 0;
 
     runtime.scheduler.addEventHandler(
-      (event: any) => {
+      (_tx: IExtendedStorageTransaction, event: any) => {
         eventCount++;
         lastEventSeen = event;
       },

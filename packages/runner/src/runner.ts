@@ -231,10 +231,6 @@ export class Runner implements IRunner {
       argument = mergeObjects<T>(argument as any, defaults);
     }
 
-    const recipeChanged = recipeId !== processCell.key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    });
-
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
       [TYPE]: recipeId || "unknown",
@@ -320,11 +316,13 @@ export class Runner implements IRunner {
     // TODO(seefeld): There is currently likely a race condition with the
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
+    const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
+    const tx = givenTx || this.runtime.edit();
     this.run(
-      resultCell.tx?.status().status === "ready" ? resultCell.tx : undefined,
+      tx,
       recipe,
       inputs,
-      resultCell,
+      resultCell.withTx(tx),
     );
 
     // If a new recipe was specified, make sure to sync any new cells
@@ -333,7 +331,23 @@ export class Runner implements IRunner {
     // finishing the computation. Should be fixed by changing conflict resolution
     // for derived values to be based on what they are derived from.
     if (recipe || !synced) {
-      await this.syncCellsForRunningRecipe(resultCell, recipe);
+      await this.syncCellsForRunningRecipe(resultCell.withTx(tx), recipe);
+    }
+
+    if (!givenTx) {
+      const { error } = await tx.commit();
+      if (error) {
+        console.error(
+          "Error committing transaction:",
+          error,
+          JSON.stringify((error as any).transaction?.args, null, 2),
+        );
+        console.error(`resultCell: ${resultCell.getAsNormalizedFullLink().id}`);
+        console.error(
+          `processCell: ${resultCell.getSourceCell()?.getAsNormalizedFullLink().id}`,
+        );
+        throw error;
+      }
     }
 
     return recipe?.resultSchema

@@ -658,7 +658,7 @@ export interface INotFoundError extends Error {
   name: "NotFoundError";
   source: IAttestation;
   address: IMemoryAddress;
-  path?: MemoryAddressPathComponent[];
+  path?: readonly MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }
 

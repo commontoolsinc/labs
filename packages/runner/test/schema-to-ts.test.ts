@@ -532,6 +532,8 @@ describe("Schema-to-TS Type Conversion", () => {
       tx,
     );
     settingsCell.set({ theme: "dark", notifications: true });
+    tx.commit();
+    tx = runtime.edit();
 
     // This is just to verify the type works at runtime
     // We're not actually testing the Schema type itself, just that it's compatible
@@ -548,6 +550,7 @@ describe("Schema-to-TS Type Conversion", () => {
       space,
       userData,
       schema,
+      tx,
     );
     const user = userCell.get();
 
