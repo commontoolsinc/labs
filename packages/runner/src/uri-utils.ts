@@ -92,5 +92,5 @@ export function getJSONFromDataURI(uri: URI | string): any {
 
   const decodedData = isBase64 ? atob(data) : decodeURIComponent(data);
 
-  return JSON.parse(decodedData);
+  return decodedData.length > 0 ? JSON.parse(decodedData) : undefined;
 }

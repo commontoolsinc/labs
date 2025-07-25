@@ -4,9 +4,8 @@ import { getTopFrame } from "./builder/recipe.ts";
 import { type Frame, type OpaqueRef } from "./builder/types.ts";
 import { toCell, toOpaqueRef } from "./back-to-cell.ts";
 import { opaqueRef } from "./builder/opaque-ref.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLinkToValue } from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { type IRuntime } from "./runtime.ts";
@@ -93,7 +92,7 @@ export function createQueryResultProxy<T>(
   // Resolve path and follow links to actual value.
   const txStatus = tx?.status();
   const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
-  link = resolveLinkToValue(readTx, link);
+  link = resolveLink(readTx, link);
   const target = readTx.readValueOrThrow(link) as any;
 
   if (!isRecord(target)) return target;

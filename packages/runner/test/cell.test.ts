@@ -266,7 +266,7 @@ describe("Cell", () => {
     expect(proxy.z).toBe(proxy);
 
     const value = c.get();
-    expect(value.z.z).toBe(value.z);
+    expect(value.z.z.z).toBe(value.z.z);
 
     const raw = c.getRaw();
     expect(raw.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
