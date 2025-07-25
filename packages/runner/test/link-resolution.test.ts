@@ -4,7 +4,7 @@ import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 import { type JSONSchema } from "../src/builder/types.ts";
-import { followWriteRedirects, resolveLink } from "../src/link-resolution.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 import { Runtime } from "../src/runtime.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
