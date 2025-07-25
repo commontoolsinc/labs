@@ -15,7 +15,7 @@ const API_URL = (() => {
   return url.substr(-1) === "/" ? url : `${url}/`;
 })();
 const FRONTEND_URL = (() => {
-  const url = Deno.env.get("FRONTEND_URL") ?? API_URL;
+  const url = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173";
   return url.substr(-1) === "/" ? url : `${url}/`;
 })();
 const HEADLESS = !!Deno.env.get("HEADLESS");
