@@ -9,6 +9,7 @@ import {
   ID,
   NAME,
   recipe,
+  str,
   UI,
 } from "commontools";
 import { DOMParser, type Element } from "dom-parser";
@@ -178,7 +179,7 @@ export default recipe<{ settings: Settings }>(
     console.log("feed items", items.length);
 
     return {
-      [NAME]: `RSS/Atom Feed Importer ${settings.feedUrl}`,
+      [NAME]: str`RSS/Atom Feed Importer ${settings.feedUrl}`,
       [UI]: (
         <div style="display: flex; gap: 10px; flex-direction: column; padding: 25px;">
           <h2 style="font-size: 20px; font-weight: bold;">
