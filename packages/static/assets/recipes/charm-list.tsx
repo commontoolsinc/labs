@@ -8,14 +8,16 @@ import {
   UI,
   handler,
   navigateTo,
+
 } from "commontools";
+
 
 const CharmsListInputSchema = {
   type: "object",
   properties: {
     allCharms: {
       type: "array",
-      items: {},
+      items: { asCell: true },
       default: [],
     },
   },
@@ -44,6 +46,28 @@ const visit = handler<{}, { charm: any }>((_, state) => {
   return navigateTo(state.charm);
 });
 
+
+const removeCharm = handler({}, {
+  type: "object",
+  properties: {
+    charm: { type: "object", asCell: true },
+    allCharms: { type: "array", items: { type: "object", asCell: true}, asCell: true }
+  },
+  required: ["charm", "allCharms"],
+}, (_, state) => {
+  const charmName = state.charm.get()[NAME]
+  const index = state.allCharms.get().findIndex((c: any) => c.get()[NAME] === charmName);
+
+
+  const charmListCopy = [...state.allCharms.get()]
+  console.log('charmListCopy before', charmListCopy)
+  if (index !== -1) {
+    charmListCopy.splice(index, 1);
+    console.log('charmListCopy after', charmListCopy)
+    state.allCharms.set(charmListCopy);
+  }
+});
+
 export default recipe(
   CharmsListInputSchema,
   CharmsListOutputSchema,
@@ -65,12 +89,21 @@ export default recipe(
                   <span style="font-weight: 500;">
                     {charm[NAME] || "Untitled Charm"}
                   </span>
-                  <ct-button 
-                    size="sm"
-                    onClick={visit({ charm })}
-                  >
-                    Visit
-                  </ct-button>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <ct-button 
+                      size="sm"
+                      onClick={visit({ charm })}
+                    >
+                      Visit
+                    </ct-button>
+                    <ct-button 
+                      size="sm"
+                      variant="destructive"
+                      onClick={removeCharm({ charm,  allCharms })}
+                    >
+                      Remove
+                    </ct-button>
+                  </div>
                 </div>
               )),
             )}
