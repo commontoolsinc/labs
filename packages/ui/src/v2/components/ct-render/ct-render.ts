@@ -73,9 +73,17 @@ export class CTRender extends BaseElement {
     this._log("loading recipe:", recipeId);
 
     // Load and run the recipe
-    const recipe = await this.cell.runtime.recipeManager.loadRecipe(recipeId);
+    const recipe = await this.cell.runtime.recipeManager.loadRecipe(
+      recipeId,
+      this.cell.space,
+    );
     await this.cell.runtime.runSynced(this.cell, recipe);
     await this.cell.runtime.idle();
+
+    // Check if this is an iframe recipe (now that recipe is loaded)
+    if (getIframeRecipe(this.cell, this.cell.runtime).iframe) {
+      throw new Error("Cannot render IFrame recipe.");
+    }
 
     // Render the UI output
     if (!this._renderContainer) {
@@ -116,10 +124,6 @@ export class CTRender extends BaseElement {
       const recipeId = getRecipeIdFromCharm(this.cell);
       if (!recipeId) {
         throw new Error("No recipe ID found in charm");
-      }
-
-      if (getIframeRecipe(this.cell, this.cell.runtime).iframe) {
-        throw new Error("Cannot render IFrame recipe.");
       }
 
       // Load and render the recipe
