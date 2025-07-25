@@ -46,7 +46,7 @@ export default recipe<State>("ComplexMixed", (state) => {
         <h3>Array Predicates</h3>
         <p>All active: {state.items.every(i => i.active) ? "Yes" : "No"}</p>
         <p>Any active: {state.items.some(i => i.active) ? "Yes" : "No"}</p>
-        <p>Has expensive (>100): {state.items.some(i => i.price > 100) ? "Yes" : "No"}</p>
+        <p>Has expensive (gt 100): {state.items.some(i => i.price > 100) ? "Yes" : "No"}</p>
         
         <h3>Object Operations</h3>
         <div data-item-count={state.items.length}

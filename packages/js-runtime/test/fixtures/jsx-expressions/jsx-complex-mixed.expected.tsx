@@ -75,7 +75,7 @@ export default recipe({
         <h3>Array Predicates</h3>
         <p>All active: {commontools_1.ifElse(state.items.every(i => i.active), "Yes", "No")}</p>
         <p>Any active: {commontools_1.ifElse(state.items.some(i => i.active), "Yes", "No")}</p>
-        <p>Has expensive (>100): {commontools_1.ifElse(state.items.some(i => i.price > 100), "Yes", "No")}</p>
+        <p>Has expensive (gt 100): {commontools_1.ifElse(state.items.some(i => i.price > 100), "Yes", "No")}</p>
         
         <h3>Object Operations</h3>
         <div data-item-count={commontools_1.derive(state.items, _v1 => _v1.length)} data-has-filter={commontools_1.derive(state.filter, _v1 => _v1.length > 0)} data-discount={state.discount}>
