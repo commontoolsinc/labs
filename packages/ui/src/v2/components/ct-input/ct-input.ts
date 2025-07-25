@@ -500,7 +500,6 @@ export class CTInput extends BaseElement {
     }
   }
 
-
   override render() {
     const pattern = this.getPattern();
     const inputMode = this.getInputMode();

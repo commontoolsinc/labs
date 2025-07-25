@@ -119,7 +119,8 @@ export interface OutlinerOperations {
   requestUpdate(): void;
   getAllVisibleNodes(): Node[];
 
-  // Checkbox operations
+  // Checkbox operations  
+  setNodeCheckbox(node: Node, isChecked: boolean): void;
   toggleNodeCheckbox(node: Node): void;
 
   // Legacy method - CellController handles change events automatically
