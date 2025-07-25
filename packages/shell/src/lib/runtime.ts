@@ -39,8 +39,9 @@ export class RuntimeInternals extends EventTarget {
   private constructor(cc: CharmsController) {
     super();
     this.#cc = cc;
+    const runtimeId = this.#cc.manager().runtime.id;
     this.#inspector = new Inspector.Channel(
-      this.#cc.manager().runtime.id,
+      runtimeId,
       this.#onInspectorUpdate,
     );
   }

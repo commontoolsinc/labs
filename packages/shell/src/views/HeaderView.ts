@@ -42,18 +42,28 @@ export class XHeaderView extends BaseView {
       gap: 0.5rem;
     }
 
-    h-box {
-      gap: 0.5rem;
+    .button-group {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .button-group x-button {
+      flex: none;
     }
 
     x-button.emoji-button {
-      font-size: 1.25rem;
       opacity: 0.7;
       transition: opacity 0.2s;
+      font-size: 1rem;
     }
 
     x-button.emoji-button:hover {
       opacity: 1;
+    }
+
+    x-button.auth-button {
+      font-size: 1rem;
     }
 
     #page-title {
@@ -109,6 +119,9 @@ export class XHeaderView extends BaseView {
 
   @property()
   showShellCharmListView = false;
+
+  @property()
+  showInspectorView = false;
 
   private _inspectorListener = new Task(this, {
     args: () => [this.rt],
@@ -177,6 +190,15 @@ export class XHeaderView extends BaseView {
     });
   }
 
+  private handleInspectorToggleClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.command({
+      type: "set-show-inspector-view",
+      show: !this.showInspectorView,
+    });
+  }
+
   private getConnectionStatus(): ConnectionStatus {
     if (this._conflicts) {
       return "conflict";
@@ -228,7 +250,7 @@ export class XHeaderView extends BaseView {
         </div>
         ${this.identity
         ? html`
-          <h-box>
+          <div class="button-group">
             <x-button
               class="emoji-button"
               size="small"
@@ -240,13 +262,23 @@ export class XHeaderView extends BaseView {
               ${this.showShellCharmListView ? "📋" : "🔍"}
             </x-button>
             <x-button
+              class="emoji-button"
+              size="small"
+              @click="${this.handleInspectorToggleClick}"
+              title="${this.showInspectorView
+            ? "Hide Inspector"
+            : "Show Inspector"}"
+            >
+              ${this.showInspectorView ? "🔧" : "🛠️"}
+            </x-button>
+            <x-button
               class="auth-button"
               size="small"
               @click="${this.handleAuthClick}"
             >
               Logout
             </x-button>
-          </h-box>
+          </div>
         `
         : null}
       </div>

@@ -5,7 +5,8 @@ export type Command =
   | { type: "set-identity"; identity: Identity }
   | { type: "set-space"; spaceName: string }
   | { type: "clear-authentication" }
-  | { type: "set-show-charm-list-view"; show: boolean };
+  | { type: "set-show-charm-list-view"; show: boolean }
+  | { type: "set-show-inspector-view"; show: boolean };
 
 export function isCommand(value: unknown): value is Command {
   if (
@@ -30,6 +31,9 @@ export function isCommand(value: unknown): value is Command {
       return true;
     }
     case "set-show-charm-list-view": {
+      return "show" in value && typeof value.show === "boolean";
+    }
+    case "set-show-inspector-view": {
       return "show" in value && typeof value.show === "boolean";
     }
   }
