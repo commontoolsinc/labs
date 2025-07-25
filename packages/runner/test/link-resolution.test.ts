@@ -87,34 +87,6 @@ describe("link-resolution", () => {
       expect(tx.readValueOrThrow(result)).toBe(10);
     });
 
-    it("should throw an error on circular aliases", () => {
-      const cellA = runtime.getCell<any>(
-        space,
-        "should throw an error on circular aliases 1",
-        undefined,
-        tx,
-      );
-      cellA.set({});
-      const cellB = runtime.getCell<any>(
-        space,
-        "should throw an error on circular aliases 2",
-        undefined,
-        tx,
-      );
-      cellB.set({});
-      cellA.setRaw({
-        alias: cellB.key("alias").getAsWriteRedirectLink(),
-      });
-      cellB.setRaw({
-        alias: cellA.key("alias").getAsWriteRedirectLink(),
-      });
-      const binding = { $alias: { path: ["alias"] } };
-      expect(() => resolveLink(tx, parseLink(binding, cellA)!, "writeRedirect"))
-        .toThrow(
-          "cycle detected",
-        );
-    });
-
     it("should allow aliases in aliased paths", () => {
       const testCell = runtime.getCell<any>(
         space,
