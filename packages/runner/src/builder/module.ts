@@ -108,6 +108,10 @@ export function handler<E, T>(
   handler: (event: E, props: T) => any,
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
+  handler: (Event: E, props: T) => any,
+  options: { proxy: true }
+): HandlerFactory<T, E>;
+export function handler<E, T>(
   handler: (event: E, props: T) => any,
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
@@ -115,7 +119,7 @@ export function handler<E, T>(
     | JSONSchema
     | ((event: E, props: T) => any)
     | undefined,
-  stateSchema?: JSONSchema,
+  stateSchema?: JSONSchema | { proxy: true },
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
   if (typeof eventSchema === "function") {
@@ -128,7 +132,7 @@ export function handler<E, T>(
       type: "object",
       properties: {
         $event: eventSchema ?? {},
-        $ctx: stateSchema ?? {},
+        $ctx: (stateSchema ?? {}) as JSONSchema,
       },
     }
     : undefined;

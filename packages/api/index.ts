@@ -339,10 +339,11 @@ export type HandlerState<T> = T extends Cell<any> ? T
 
 export type HandlerFunction = {
   // With schemas
+
   <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(
     eventSchema: E,
     stateSchema: T,
-    handler: (event: Schema<E>, props: HandlerState<Schema<T>>) => any,
+    handler: (event: Schema<E>, props: Schema<T>) => any,
   ): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
 
   // With inferred types
@@ -354,8 +355,14 @@ export type HandlerFunction = {
 
   // Without schemas
   <E, T>(
+    handler: (event: E, props: T) => any,
+    options: { proxy: true }
+  ): ModuleFactory<Opaque<T>, E>;
+
+  <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
   ): ModuleFactory<CellToOpaque<T>, E>;
+
 };
 
 export type DeriveFunction = <In, Out>(
@@ -484,7 +491,7 @@ export const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
 };
 
 // Helper type to transform Cell<T> to Opaque<T> in handler inputs
-export type CellToOpaque<T> = 
+export type CellToOpaque<T> =
   T extends Cell<infer U> ? Opaque<U>
   : T extends object ? { [K in keyof T]: CellToOpaque<T[K]> }
   : T;
