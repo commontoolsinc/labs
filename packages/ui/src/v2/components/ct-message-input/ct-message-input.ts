@@ -123,8 +123,7 @@ export class CTMessageInput extends BaseElement {
           .placeholder="${this.placeholder}"
           .value="${this.value}"
           ?disabled="${this.disabled}"
-          @keydown="${this._handleKeyDown}"
-          @ct-input="${this._handleInput}"
+          @ct-change="${this._handleInput}"
           part="input"
         ></ct-input>
         <ct-button

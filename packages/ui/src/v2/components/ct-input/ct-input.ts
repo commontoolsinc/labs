@@ -500,7 +500,6 @@ export class CTInput extends BaseElement {
     }
   }
 
-
   override render() {
     const pattern = this.getPattern();
     const inputMode = this.getInputMode();
@@ -547,6 +546,7 @@ export class CTInput extends BaseElement {
 
   private _handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
+    const oldValue = this.getValue();
 
     // For file inputs, we can't set the value programmatically
     if (this.type !== "file") {
@@ -555,10 +555,19 @@ export class CTInput extends BaseElement {
       // For file inputs, still emit the event with files
       this.setValue("", input.files);
     }
+
+    // Emit ct-input event directly for non-cell interop
+    this.emit("ct-input", {
+      value: this.type === "file" ? "" : input.value,
+      oldValue,
+      name: this.name,
+      files: this.type === "file" ? input.files : undefined,
+    });
   }
 
   private _handleChange(event: Event) {
     const input = event.target as HTMLInputElement;
+    const oldValue = this.getValue();
 
     // Change events use the same setValue logic as input events
     // The timing controller will determine when to actually emit
@@ -567,6 +576,15 @@ export class CTInput extends BaseElement {
     } else {
       this.setValue("", input.files);
     }
+
+    // Emit ct-change event directly for non-cell interop
+    // This ensures the event is emitted regardless of timing strategy
+    this.emit("ct-change", {
+      value: this.type === "file" ? "" : input.value,
+      oldValue,
+      name: this.name,
+      files: this.type === "file" ? input.files : undefined,
+    });
   }
 
   private _handleFocus(_event: Event) {
