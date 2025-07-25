@@ -170,12 +170,18 @@ describe("Attestation Module", () => {
       }, "replaced");
 
       expect(result.ok).toBeDefined();
-      expect(result.ok?.value).toEqual({ items: ["replaced", "second", "third"] });
+      expect(result.ok?.value).toEqual({
+        items: ["replaced", "second", "third"],
+      });
     });
 
     it("should allow writing to array 'length' property", () => {
       const source = {
-        address: { id: "test:array-length", type: "application/json", path: [] },
+        address: {
+          id: "test:array-length",
+          type: "application/json",
+          path: [],
+        },
         value: { items: ["a", "b", "c", "d", "e"] },
       } as const;
 
@@ -191,7 +197,11 @@ describe("Attestation Module", () => {
 
     it("should fail when writing to array with negative index", () => {
       const source = {
-        address: { id: "test:array-negative", type: "application/json", path: [] },
+        address: {
+          id: "test:array-negative",
+          type: "application/json",
+          path: [],
+        },
         value: { items: ["a", "b", "c"] },
       } as const;
 
@@ -204,7 +214,9 @@ describe("Attestation Module", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("TypeMismatchError");
       expect(result.error?.message).toContain("Cannot write property");
-      expect(result.error?.message).toContain("expected object but found array");
+      expect(result.error?.message).toContain(
+        "expected object but found array",
+      );
     });
 
     it("should fail when writing to array with non-integer numeric key", () => {
@@ -222,12 +234,18 @@ describe("Attestation Module", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("TypeMismatchError");
       expect(result.error?.message).toContain("Cannot write property");
-      expect(result.error?.message).toContain("expected object but found array");
+      expect(result.error?.message).toContain(
+        "expected object but found array",
+      );
     });
 
     it("should fail when writing to array with string key (not 'length')", () => {
       const source = {
-        address: { id: "test:array-string", type: "application/json", path: [] },
+        address: {
+          id: "test:array-string",
+          type: "application/json",
+          path: [],
+        },
         value: { items: ["a", "b", "c"] },
       } as const;
 
@@ -240,7 +258,9 @@ describe("Attestation Module", () => {
       expect(result.error).toBeDefined();
       expect(result.error?.name).toBe("TypeMismatchError");
       expect(result.error?.message).toContain("Cannot write property");
-      expect(result.error?.message).toContain("expected object but found array");
+      expect(result.error?.message).toContain(
+        "expected object but found array",
+      );
     });
 
     it("should handle writing to large array indices", () => {
@@ -378,7 +398,7 @@ describe("Attestation Module", () => {
       expect(result.ok?.value).toBe("second");
     });
 
-    it("should return undefined for array.length access", () => {
+    it("should return array length for array.length access", () => {
       const source = {
         address: { id: "test:8", type: "application/json", path: [] },
         value: { items: ["a", "b", "c"] },
@@ -391,7 +411,7 @@ describe("Attestation Module", () => {
       });
 
       expect(result.ok).toBeDefined();
-      expect(result.ok?.value).toBeUndefined();
+      expect(result.ok?.value).toBe(3);
     });
 
     it("should read from undefined source", () => {

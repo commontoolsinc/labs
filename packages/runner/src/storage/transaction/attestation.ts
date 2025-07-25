@@ -1,3 +1,4 @@
+import { isRecord } from "@commontools/utils/types";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -8,6 +9,7 @@ import type {
   ITypeMismatchError,
   IUnsupportedMediaTypeError,
   JSONValue,
+  MemoryAddressPathComponent,
   MemorySpace,
   Result,
   State,
@@ -199,8 +201,8 @@ export const claim = (
 /**
  * Attempts to resolve given `address` from the `source` attestation. Function
  * succeeds with derived attestation that will have provided `address` or fails
- * with inconsistency error if resolving an address encounters non-object along
- * the resolution path.
+ * with a not found error if the path doesn't exist, or a type mismatch error if
+ * resolving an address encounters non-object along the resolution path.
  */
 export const resolve = (
   source: IAttestation,
@@ -216,18 +218,32 @@ export const resolve = (
   // If the source value is undefined (document doesn't exist), return NotFound
   if (source.value === undefined && path.length > source.address.path.length) {
     return {
-      error: new NotFound(source, address),
+      error: new NotFound(
+        source,
+        address,
+        // Last valid path component is assumed to be the one that points to
+        // `undefined`. If the path was empty this means the document doesn't
+        // exist at all. If it isn't empty, we're assuming the parent is
+        // correct, but that depends on the validity of the source attestation.
+        source.address.path.length > 0
+          ? source.address.path.slice(0, -1)
+          : undefined,
+      ),
     };
   }
 
   while (++at < path.length) {
     const key = path[at];
-    if (typeof value === "object" && value != null) {
-      // We do not support array.length as that is JS specific getter.
-      value = Array.isArray(value) && key === "length"
-        ? undefined
-        : (value as Record<string, JSONValue>)[key];
+    if (isRecord(value)) {
+      value = value[key] as JSONValue;
     } else {
+      // If the value is undefined, the path doesn't exist, but we can still
+      // write onto it. Return error with last valid path component.
+      if (value === undefined) {
+        return {
+          error: new NotFound(source, address, path.slice(0, at)),
+        };
+      }
       // Type mismatch - trying to access property on non-object
       const actualType = value === null ? "null" : typeof value;
       return {
@@ -335,10 +351,12 @@ export class NotFound extends RangeError implements INotFoundError {
   override name = "NotFoundError" as const;
   declare readonly source: IAttestation;
   declare readonly address: IMemoryAddress;
+  declare readonly path: readonly MemoryAddressPathComponent[] | undefined;
 
   constructor(
     source: IAttestation,
     address: IMemoryAddress,
+    path?: readonly MemoryAddressPathComponent[],
   ) {
     let message: string;
 
@@ -357,6 +375,7 @@ export class NotFound extends RangeError implements INotFoundError {
     super(message);
     this.source = source;
     this.address = address;
+    this.path = path;
   }
 
   from(space: MemorySpace) {
