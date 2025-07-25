@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, UI, NAME, str, handler, h, Cell, ifElse, derive, toSchema, JSONSchema } from "commontools";
+import { recipe, UI, NAME, str, handler, h, Cell, ifElse, derive, JSONSchema } from "commontools";
 interface RecipeState {
     value: number;
 }

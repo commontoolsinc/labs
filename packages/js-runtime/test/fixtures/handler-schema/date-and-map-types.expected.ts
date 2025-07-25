@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, toSchema, JSONSchema } from "commontools";
+import { handler, JSONSchema } from "commontools";
 interface TimedEvent {
     timestamp: Date;
     data: Map<string, number>;

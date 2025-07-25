@@ -1,9 +1,4 @@
-import {
-  Compiler,
-  JsScript,
-  Program,
-  ProgramResolver,
-} from "../interface.ts";
+import { Compiler, JsScript, Program, ProgramResolver } from "../interface.ts";
 import type {
   CompilerHost,
   CompilerOptions,
@@ -24,9 +19,9 @@ import { parseSourceMap } from "../source-map.ts";
 import { resolveProgram } from "./resolver.ts";
 import { Checker } from "./diagnostics/mod.ts";
 import {
+  createLoggingTransformer,
   createOpaqueRefTransformer,
   createSchemaTransformer,
-  createLoggingTransformer,
 } from "./transformer/mod.ts";
 
 const DEBUG_VIRTUAL_FS = false;
@@ -226,6 +221,7 @@ export interface TypeScriptCompilerOptions {
   //
   // Show only the transformed TypeScript source code.
   showTransformed?: boolean;
+  debugLoggingTransformers?: boolean;
   // to
   //
   // ```ts
@@ -320,20 +316,51 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       return false;
     };
 
+    // Check if any source file has the CommonTools directive
+    const sourceFiles = tsProgram.getSourceFiles();
+    let hasCtsDirective = false;
+
+    for (const sourceFile of sourceFiles) {
+      if (hasCtsEnableDirective(sourceFile)) {
+        hasCtsDirective = true;
+        break;
+      }
+    }
+
     // Create logger based on showTransformed option
-    const logger = inputOptions.showTransformed 
+    const transformerLogger = inputOptions.debugLoggingTransformers
       ? (message: string) => console.log(message)
       : undefined;
 
-    // Always apply transformers when they're configured
-    // Each transformer will check for the directive on individual files
-    const transformers = {
-      before: [
-        createOpaqueRefTransformer(tsProgram, { logger }),
-        createSchemaTransformer(tsProgram, { logger }),
-        createLoggingTransformer(tsProgram, { logger, showTransformed: inputOptions.showTransformed }),
-      ],
-    };
+    // Build transformers list based on CTS directive and options
+    const beforeTransformers: ts.TransformerFactory<ts.SourceFile>[] = [];
+
+    if (hasCtsDirective) {
+      // Add OpaqueRef and Schema transformers
+      beforeTransformers.push(
+        createOpaqueRefTransformer(tsProgram, { logger: transformerLogger }),
+        createSchemaTransformer(tsProgram, { logger: transformerLogger }),
+      );
+
+      // Only add logging transformer if showTransformed is true
+      if (inputOptions.showTransformed) {
+        beforeTransformers.push(
+          createLoggingTransformer(tsProgram, {
+            logger: (source) => console.log(source),
+            showTransformed: true,
+          }),
+        );
+      }
+    } else if (inputOptions.showTransformed) {
+      // Warn if user requested transformed output but no CTS directive
+      console.warn(
+        "Warning: --show-transformed was specified but no /// <cts-enable /> directive found in the main source file",
+      );
+    }
+
+    const transformers = beforeTransformers.length > 0
+      ? { before: beforeTransformers }
+      : undefined;
 
     const { diagnostics, emittedFiles, emitSkipped } = tsProgram.emit(
       mainSource,

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { cell, derive, h, recipe, UI, toSchema, JSONSchema } from "commontools";
+import { cell, derive, h, recipe, UI, JSONSchema } from "commontools";
 interface Problem {
     price: number;
     discount: number;

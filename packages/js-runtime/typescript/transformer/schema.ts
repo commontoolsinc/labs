@@ -1,7 +1,6 @@
 import ts from "typescript";
 import { addCommonToolsImport, hasCommonToolsImport, removeCommonToolsImport } from "./imports.ts";
 import { TransformerOptions } from "./debug.ts";
-import { hasCtsEnableDirective } from "./utils.ts";
 
 /**
  * Transformer that converts TypeScript types to JSONSchema objects.
@@ -16,13 +15,7 @@ export function createSchemaTransformer(
 
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
-      // Skip transformation if directive is not present
-      if (!hasCtsEnableDirective(sourceFile)) {
-        return sourceFile;
-      }
-
       let needsJSONSchemaImport = false;
-      let hasTransformedToSchema = false;
 
       const visit: ts.Visitor = (node) => {
         // Look for toSchema<T>() calls
@@ -84,7 +77,6 @@ export function createSchemaTransformer(
             needsJSONSchemaImport = true;
           }
 
-          hasTransformedToSchema = true;
           return satisfiesExpression;
         }
 
@@ -98,23 +90,13 @@ export function createSchemaTransformer(
         result = addCommonToolsImport(result, context.factory, "JSONSchema");
       }
       
-      // Remove toSchema import if we transformed all its uses
+      // Always remove toSchema import since it doesn't exist at runtime
+      // The SchemaTransformer should have transformed all toSchema calls
       if (hasCommonToolsImport(result, "toSchema")) {
-        // Check if toSchema is still used anywhere in the transformed code
-        const stillUsesToSchema = containsToSchemaReference(result);
-        
         if (logger) {
-          logger(`[SchemaTransformer] Checking toSchema import removal:`);
-          logger(`  - hasCommonToolsImport(toSchema): true`);
-          logger(`  - stillUsesToSchema: ${stillUsesToSchema}`);
+          logger(`[SchemaTransformer] Removing toSchema import (not available at runtime)`);
         }
-        
-        if (!stillUsesToSchema) {
-          if (logger) {
-            logger(`[SchemaTransformer] Removing toSchema import`);
-          }
-          result = removeCommonToolsImport(result, context.factory, "toSchema");
-        }
+        result = removeCommonToolsImport(result, context.factory, "toSchema");
       }
       
       return result;
@@ -615,37 +597,3 @@ function extractValueFromTypeNode(
   return undefined;
 }
 
-/**
- * Check if the source file contains any remaining references to toSchema
- * after transformation.
- */
-function containsToSchemaReference(sourceFile: ts.SourceFile): boolean {
-  let found = false;
-  let count = 0;
-
-  const visit: ts.Visitor = (node) => {
-    if (found) return node;
-
-    // Check for toSchema identifier references
-    if (ts.isIdentifier(node) && node.text === "toSchema") {
-      count++;
-      // Make sure it's not part of an import declaration
-      let parent = node.parent;
-      while (parent) {
-        if (ts.isImportDeclaration(parent)) {
-          // This is part of an import, not a usage
-          return node;
-        }
-        parent = parent.parent;
-      }
-      // Found a usage of toSchema outside of imports
-      found = true;
-      return node;
-    }
-
-    return ts.visitEachChild(node, visit, undefined);
-  };
-
-  ts.visitNode(sourceFile, visit);
-  return found;
-}

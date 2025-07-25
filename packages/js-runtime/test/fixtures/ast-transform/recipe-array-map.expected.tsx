@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, derive, h, handler, NAME, recipe, str, UI, toSchema, JSONSchema } from "commontools";
+import { Cell, derive, h, handler, NAME, recipe, str, UI, JSONSchema } from "commontools";
 const adder = handler({
     type: "object",
     additionalProperties: true

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, handler, recipe, toSchema, JSONSchema } from "commontools";
+import { Cell, handler, recipe, JSONSchema } from "commontools";
 interface State {
     value: Cell<number>;
     name: Cell<string>;

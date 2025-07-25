@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI, derive, toSchema, JSONSchema } from "commontools";
+import { h, recipe, UI, derive, JSONSchema } from "commontools";
 interface State {
     firstName: string;
     lastName: string;

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI, ifElse, toSchema, JSONSchema } from "commontools";
+import { h, recipe, UI, ifElse, JSONSchema } from "commontools";
 interface State {
     isActive: boolean;
     count: number;

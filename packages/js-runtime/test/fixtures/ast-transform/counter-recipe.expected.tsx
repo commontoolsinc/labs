@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, h, handler, NAME, recipe, str, UI, derive, toSchema, JSONSchema } from "commontools";
+import { Cell, Default, h, handler, NAME, recipe, str, UI, derive, JSONSchema } from "commontools";
 interface CounterState {
     value: Cell<number>;
 }
