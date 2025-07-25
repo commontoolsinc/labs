@@ -13,14 +13,10 @@ import "./components/index.ts";
 import "./views/index.ts";
 import { App } from "./lib/app/controller.ts";
 import { getNavigationHref } from "./lib/navigate.ts";
-
+import "./globals.ts";
 console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
 console.log(`COMMIT_SHA=${COMMIT_SHA}`);
-
-declare global {
-  var app: App;
-}
 
 const root = document.querySelector("x-root-view");
 if (!root) throw new Error("No root view found.");

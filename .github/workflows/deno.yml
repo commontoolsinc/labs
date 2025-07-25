@@ -458,11 +458,56 @@ jobs:
           TOOLSHED_API_URL=http://localhost:8000/ \
           deno task start --tag smol --no-verify --no-report --name ${{ github.run_id }}
 
+  shell-integration-test:
+    name: "Shell Integration Tests"
+    runs-on: ubuntu-latest
+    needs: ["build-binaries"]
+    environment: ci
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 📥 Download built binaries
+        uses: actions/download-artifact@v4
+
+      - name: 🚀 Start Toolshed server for testing
+        run: |
+          chmod +x ./common-binaries/toolshed
+          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          CACHE_DIR=${GITHUB_WORKSPACE}/packages/jumble/integration/cache \
+          ./common-binaries/toolshed &
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor for browser tests
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: 🧪 Run end-to-end shell integration tests
+        working-directory: packages/shell
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          FRONTEND_URL=http://localhost:8000/shell/ \
+          deno task integration
+
   # Automatic deployment to staging (toolshed)
   deploy-toolshed:
     name: "Deploy to Toolshed (Staging)"
     if: github.ref == 'refs/heads/main'
-    needs: ["integration-test"]
+    needs: ["integration-test", "cli-integration-test", "seeder-integration-test", "shell-integration-test"]
     runs-on: ubuntu-latest
     environment: toolshed
     steps:

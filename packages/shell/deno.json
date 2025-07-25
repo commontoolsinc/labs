@@ -6,7 +6,8 @@
     "serve": "deno run -A ../felt/cli.ts serve .",
     "dev": "API_URL=https://toolshed.saga-castor.ts.net deno run -A ../felt/cli.ts dev .",
     "dev-local": "API_URL=http://localhost:8000 deno run -A ../felt/cli.ts dev .",
-    "test": "deno run build"
+    "test": "deno run build",
+    "integration": "deno test -A ./integration/*.test.ts"
   },
   "exports": "./src/index.ts",
   "imports": {
