@@ -269,6 +269,7 @@ describe("Recipe Runner", () => {
       ({ amount }, { counter }) => {
         counter.value += amount;
       },
+      { proxy: true },
     );
 
     const incRecipe = recipe<{ counter: { value: number } }>(
@@ -296,85 +297,6 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
-  it("should execute handlers that use bind and this", async () => {
-    // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler<
-      { amount: number },
-      { counter: { value: number } }
-    >(function (
-      this: { counter: { value: number } },
-      { amount },
-    ) {
-      this.counter.value += amount;
-    });
-
-    const incRecipe = recipe<{ counter: { value: number } }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler.bind({ counter }) };
-      },
-    );
-
-    const resultCell = runtime.getCell<
-      { counter: { value: number }; stream: any }
-    >(
-      space,
-      "should execute handlers that use bind and this",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, incRecipe, {
-      counter: { value: 0 },
-    }, resultCell);
-
-    await runtime.idle();
-
-    result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
-
-    result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
-  });
-
-  it("should execute handlers that use bind and this (no types)", async () => {
-    // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler(
-      function (this: { counter: { value: number } }, { amount }) {
-        this.counter.value += amount;
-      },
-    );
-
-    const incRecipe = recipe<{ counter: { value: number } }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler.bind({ counter }) };
-      },
-    );
-
-    const resultCell = runtime.getCell<
-      { counter: { value: number }; stream: any }
-    >(
-      space,
-      "should execute handlers that use bind and this (no types)",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, incRecipe, {
-      counter: { value: 0 },
-    }, resultCell);
-
-    await runtime.idle();
-
-    result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
-
-    result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
-  });
 
   it("should execute recipes returned by handlers", async () => {
     const counter = runtime.getCell<{ value: number }>(
@@ -405,10 +327,13 @@ describe("Recipe Runner", () => {
     const incHandler = handler<
       { amount: number },
       { counter: { value: number }; nested: { a: { b: { c: number } } } }
-    >((event, { counter, nested }) => {
-      counter.value += event.amount;
-      return incLogger({ counter, amount: event.amount, nested: nested.a.b });
-    });
+    >(
+      (event, { counter, nested }) => {
+        counter.value += event.amount;
+        return incLogger({ counter, amount: event.amount, nested: nested.a.b });
+      },
+      { proxy: true },
+    );
 
     const incRecipe = recipe<{
       counter: { value: number };
@@ -828,6 +753,7 @@ describe("Recipe Runner", () => {
         }
         state.result = divisor / dividend;
       },
+      { proxy: true },
     );
 
     const divRecipe = recipe<{ result: number }>(
@@ -1009,6 +935,7 @@ describe("Recipe Runner", () => {
           }, 100)
         );
       },
+      { proxy: true },
     );
 
     const slowHandlerRecipe = recipe<{ result: number }>(
@@ -1064,6 +991,7 @@ describe("Recipe Runner", () => {
           }, 10)
         );
       },
+      { proxy: true },
     );
 
     const slowHandlerRecipe = recipe<{ result: number }>(
@@ -1164,7 +1092,7 @@ describe("Recipe Runner", () => {
       if (title) {
         items.push({ title, items });
       }
-    });
+    }, { proxy: true });
 
     const itemsRecipe = recipe<
       { items: Array<{ title: string; items: any[] }> }

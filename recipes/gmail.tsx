@@ -1,6 +1,8 @@
+/// <cts-enable />
 import {
   Cell,
   cell,
+  Default,
   derive,
   getRecipeEnvironment,
   h,
@@ -16,43 +18,24 @@ import {
 } from "commontools";
 import TurndownService from "turndown";
 
-const Classification = {
-  Unclassified: "unclassified",
-  Confidential: "confidential",
-  Secret: "secret",
-  TopSecret: "topsecret",
-} as const;
-
-const ClassificationSecret = "secret";
+type CFC<T, C extends string> = T;
+type Secret<T> = CFC<T, "secret">;
+type Confidential<T> = CFC<T, "confidential">;
 
 // This is used by the various Google tokens created with tokenToAuthData
-export const AuthSchema = {
-  type: "object",
-  properties: {
-    token: {
-      type: "string",
-      default: "",
-      ifc: { classification: [ClassificationSecret] },
-    },
-    tokenType: { type: "string", default: "" },
-    scope: { type: "array", items: { type: "string" }, default: [] },
-    expiresIn: { type: "number", default: 0 },
-    expiresAt: { type: "number", default: 0 },
-    refreshToken: {
-      type: "string",
-      default: "",
-      ifc: { classification: [ClassificationSecret] },
-    },
-    user: {
-      type: "object",
-      properties: {
-        email: { type: "string", default: "" },
-        name: { type: "string", default: "" },
-        picture: { type: "string", default: "" },
-      },
-    },
-  },
-} as const satisfies JSONSchema;
+type Auth = {
+  token: Default<Secret<string>, "">;
+  tokenType: Default<string, "">;
+  scope: Default<string[], []>;
+  expiresIn: Default<number, 0>;
+  expiresAt: Default<number, 0>;
+  refreshToken: Default<Secret<string>, "">;
+  user: Default<{
+    email: string;
+    name: string;
+    picture: string;
+  }, { email: ""; name: ""; picture: "" }>;
+};
 
 // Initialize turndown service
 const turndown = new TurndownService({
@@ -72,132 +55,48 @@ turndown.addRule("removeStyleTags", {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const EmailProperties = {
-  id: {
-    type: "string",
-    title: "Email ID",
-    description: "Unique identifier for the email",
-  },
-  threadId: {
-    type: "string",
-    title: "Thread ID",
-    description: "Identifier for the email thread",
-  },
-  labelIds: {
-    type: "array",
-    items: { type: "string" },
-    title: "Labels",
-    description: "Gmail labels assigned to the email",
-  },
-  snippet: {
-    type: "string",
-    title: "Snippet",
-    description: "Brief preview of the email content",
-  },
-  subject: {
-    type: "string",
-    title: "Subject",
-    description: "Email subject line",
-  },
-  from: {
-    type: "string",
-    title: "From",
-    description: "Sender's email address",
-  },
-  date: {
-    type: "string",
-    title: "Date",
-    description: "Date and time when the email was sent",
-  },
-  to: { type: "string", title: "To", description: "Recipient's email address" },
-  plainText: {
-    type: "string",
-    title: "Plain Text Content",
-    description: "Email content in plain text format (often empty)",
-  },
-  htmlContent: {
-    type: "string",
-    title: "HTML Content",
-    description: "Email content in HTML format",
-  },
-  markdownContent: {
-    type: "string",
-    title: "Markdown Content",
-    description:
-      "Email content converted to Markdown format. Often best for processing email contents.",
-  },
-} as const;
+type Email = {
+  // Unique identifier for the email
+  id: string;
+  // Identifier for the email thread
+  threadId: string;
+  // Labels assigned to the email
+  labelIds: Default<string[], []>;
+  // Brief preview of the email content
+  snippet: string;
+  // Email subject line
+  subject: string;
+  // Sender's email address
+  from: string;
+  // Date and time when the email was sent
+  date: string;
+  // Recipient's email address
+  to: string;
+  // Email content in plain text format (often empty)
+  plainText: string;
+  // Email content in HTML format
+  htmlContent: string;
+  // Email content converted to Markdown format. Often best for processing email contents.
+  markdownContent: string;
+};
 
-const EmailSchema = {
-  type: "object",
-  properties: EmailProperties,
-  required: Object.keys(EmailProperties),
-  ifc: { classification: [Classification.Confidential] },
-} as const satisfies JSONSchema;
-type Email = Mutable<Schema<typeof EmailSchema>>;
+type Settings = {
+  // Gmail filter query to use for fetching emails
+  gmailFilterQuery: Default<string, "in:INBOX">;
+  // Maximum number of emails to fetch
+  limit: Default<number, 100>;
+  // Gmail history ID for incremental sync
+  historyId: Default<string, "">;
+};
 
-type Auth = Schema<typeof AuthSchema>;
-
-const GmailImporterInputs = {
-  type: "object",
-  properties: {
-    settings: {
-      type: "object",
-      properties: {
-        gmailFilterQuery: {
-          type: "string",
-          description: "gmail filter query",
-          default: "in:INBOX",
-        },
-        limit: {
-          type: "number",
-          description: "number of emails to import",
-          default: 100,
-        },
-        historyId: {
-          type: "string",
-          description: "Gmail history ID for incremental sync",
-          default: "",
-        },
-      },
-      required: ["gmailFilterQuery", "limit", "historyId"],
-    },
-    auth: AuthSchema,
+const updateLimit = handler<
+  { detail: { value: string } },
+  { limit: Cell<number> }
+>(
+  ({ detail }, state) => {
+    state.limit.set(parseInt(detail?.value ?? "100") || 0);
   },
-  required: ["settings", "auth"],
-  description: "Gmail Importer",
-} as const satisfies JSONSchema;
-
-const ResultSchema = {
-  type: "object",
-  properties: {
-    emails: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: EmailProperties,
-      },
-    },
-    googleUpdater: { asStream: true, type: "object", properties: {} },
-  },
-} as const satisfies JSONSchema;
-
-const updateLimit = handler({
-  type: "object",
-  properties: {
-    detail: {
-      type: "object",
-      properties: { value: { type: "string" } },
-      required: ["value"],
-    },
-  },
-}, {
-  type: "object",
-  properties: { limit: { type: "number", asCell: true } },
-  required: ["limit"],
-}, ({ detail }, state) => {
-  state.limit.set(parseInt(detail?.value ?? "100") || 0);
-});
+);
 
 interface GmailClientConfig {
   // How many times the client will retry after an HTTP failure
@@ -473,17 +372,15 @@ Accept: application/json
   }
 }
 
-const googleUpdater = handler(
-  {},
-  {
-    type: "object",
-    properties: {
-      emails: { type: "array", items: EmailSchema, default: [], asCell: true },
-      auth: { ...AuthSchema, asCell: true },
-      settings: { ...GmailImporterInputs.properties.settings, asCell: true },
-    },
-    required: ["emails", "auth", "settings"],
-  } as const satisfies JSONSchema,
+const googleUpdater = handler<unknown, {
+  emails: Cell<Email[]>;
+  auth: Cell<Auth>;
+  settings: Cell<{
+    gmailFilterQuery: string;
+    limit: number;
+    historyId: string;
+  }>;
+}>(
   async (_event, state) => {
     console.log("googleUpdater!");
 
@@ -886,9 +783,9 @@ export async function process(
 
         if (emails.length > 0) {
           console.log(`Adding ${emails.length} new emails`);
-          emails.forEach((email) => {
-            email[ID] = email.id;
-          });
+          // emails.forEach((email) => {
+          //   email[ID] = email.id;
+          // });
           allNewEmails.push(...emails);
         }
       } catch (error: any) {
@@ -912,18 +809,17 @@ export async function process(
 
 const updateGmailFilterQuery = handler<
   { detail: { value: string } },
-  { gmailFilterQuery: string }
+  { gmailFilterQuery: Cell<string> }
 >(
   ({ detail }, state) => {
-    state.gmailFilterQuery = detail?.value ?? "in:INBOX";
+    state.gmailFilterQuery.set(detail?.value ?? "in:INBOX");
   },
 );
 
-export default recipe(
-  GmailImporterInputs,
-  ResultSchema,
+export default recipe<{ settings: Settings; auth: Auth }>(
+  "gmail",
   ({ settings, auth }) => {
-    const emails = cell<Email[]>([]);
+    const emails = cell<Confidential<Email[]>>([]);
 
     derive(emails, (emails) => {
       console.log("emails", emails.length);
@@ -967,7 +863,7 @@ export default recipe(
                   })}
                 />
               </div>
-              <button
+              <ct-button
                 type="button"
                 onClick={googleUpdater({
                   emails,
@@ -976,7 +872,7 @@ export default recipe(
                 })}
               >
                 Fetch Emails
-              </button>
+              </ct-button>
             </common-vstack>
           </common-hstack>
           <common-google-oauth

@@ -28,7 +28,7 @@ export type Opaque<T> = OpaqueRef<T> | (T extends Array<infer U> ? Array<Opaque<
     [K in keyof T]: Opaque<T[K]>;
 } : T);
 export interface OpaqueRefMethods<T> {
-    get(): OpaqueRef<T>;
+    get(): T;
     set(value: Opaque<T> | T): void;
     key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
     setDefault(value: Opaque<T> | T): void;
@@ -47,12 +47,12 @@ export type toJSON = {
     toJSON(): unknown;
 };
 export type Handler<T = any, R = any> = Module & {
-    with: (inputs: Opaque<T>) => OpaqueRef<R>;
+    with: (inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<R>;
 };
 export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & (Module | Handler | Recipe) & toJSON;
 export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Recipe & toJSON;
 export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Module & toJSON;
-export type HandlerFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Handler<T, R> & toJSON;
+export type HandlerFactory<T, R> = ((inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<R>) & Handler<T, R> & toJSON;
 export type JSONValue = null | boolean | number | string | JSONArray | JSONObject & IDFields;
 export interface JSONArray extends ArrayLike<JSONValue> {
 }
@@ -182,10 +182,16 @@ export type LiftFunction = {
     <T>(implementation: (input: T) => any): ModuleFactory<T, ReturnType<typeof implementation>>;
     <T extends (...args: any[]) => any>(implementation: T): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 };
+export type HandlerState<T> = T extends Cell<any> ? T : T extends Stream<any> ? T : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>> : T extends object ? {
+    readonly [K in keyof T]: HandlerState<T[K]>;
+} : T;
 export type HandlerFunction = {
-    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: Schema<T>) => any): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
-    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: T) => any): ModuleFactory<T, E>;
-    <E, T>(handler: (event: E, props: T) => any): ModuleFactory<T, E>;
+    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: Schema<T>) => any): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
+    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<CellToOpaque<T>, E>;
+    <E, T>(handler: (event: E, props: T) => any, options: {
+        proxy: true;
+    }): ModuleFactory<Opaque<T>, E>;
+    <E, T>(handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<CellToOpaque<T>, E>;
 };
 export type DeriveFunction = <In, Out>(input: Opaque<In>, f: (input: In) => Out | Promise<Out>) => OpaqueRef<Out>;
 export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
@@ -220,6 +226,7 @@ export type CreateCellFunction = {
     <T>(schema?: JSONSchema, name?: string, value?: T): Cell<T>;
     <S extends JSONSchema = JSONSchema>(schema: S, name?: string, value?: Schema<S>): Cell<Schema<S>>;
 };
+export type Default<T, V extends T = T> = T;
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
 export type ByRefFunction = <T, R>(ref: string) => ModuleFactory<T, R>;
@@ -257,6 +264,10 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[] : T ext
     -readonly [P in keyof T]: Mutable<T[P]>;
 }) : T;
 export declare const schema: <T extends JSONSchema>(schema: T) => T;
+export declare const toSchema: <T>(options?: Partial<JSONSchema>) => JSONSchema;
+export type CellToOpaque<T> = T extends Cell<infer U> ? Opaque<U> : T extends object ? {
+    [K in keyof T]: CellToOpaque<T[K]>;
+} : T;
 export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : T extends {
     asCell: true;
 } ? Cell<Schema<Omit<T, "asCell">, Root, Depth>> : T extends {
