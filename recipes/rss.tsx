@@ -1,106 +1,54 @@
+/// <cts-enable />
+
 import {
-  h,
   type Cell,
   cell,
-  derive,
+  Default,
+  h,
   handler,
   ID,
-  type JSONSchema,
   NAME,
   recipe,
-  type Schema,
   str,
   UI,
 } from "commontools";
 import { DOMParser, type Element } from "dom-parser";
 
-const FeedItemProperties = {
-  id: { type: "string" },
-  title: { type: "string" },
-  link: { type: "string" },
-  description: { type: "string" },
-  pubDate: { type: "string" },
-  author: { type: "string" },
-  content: { type: "string" },
-} as const;
+interface Settings {
+  feedUrl: Default<string, "">;
+  limit: Default<number, 100>;
+}
 
-const FeedItemSchema = {
-  type: "object",
-  properties: FeedItemProperties,
-  required: Object.keys(FeedItemProperties),
-} as const satisfies JSONSchema;
-type FeedItem = Schema<typeof FeedItemSchema>;
+type FeedItem = {
+  id: string;
+  title: string;
+  link: string;
+  description: string;
+  pubDate: string;
+  author: string;
+  content: string;
+};
 
-const RSSImporterInputs = {
-  type: "object",
-  properties: {
-    settings: {
-      type: "object",
-      properties: {
-        feedUrl: {
-          type: "string",
-          description: "RSS/Atom feed URL",
-          default: "",
-        },
-        limit: {
-          type: "number",
-          description: "number of items to import",
-          default: 100,
-        },
-      },
-      required: ["feedUrl", "limit"],
-    },
-  },
-  required: ["settings"],
-  description: "RSS/Atom Feed Importer",
-} as const satisfies JSONSchema;
-
-const ResultSchema = {
-  type: "object",
-  properties: {
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: FeedItemProperties,
-      },
-    },
-    rssUpdater: { asStream: true, type: "object", properties: {} },
-  },
-} as const satisfies JSONSchema;
-
-const updateLimit = handler({
-  type: "object",
-  properties: {
-    detail: {
-      type: "object",
-      properties: { value: { type: "string" } },
-      required: ["value"],
-    },
-  },
-}, {
-  type: "object",
-  properties: { limit: { type: "number", asCell: true } },
-  required: ["limit"],
-}, ({ detail }, state) => {
-  state.limit.set(parseInt(detail?.value ?? "100") || 0);
+const updateLimit = handler<
+  { detail: { value: string } },
+  { limit: Cell<number> }
+>(({ detail }, { limit }) => {
+  limit.set(parseInt(detail?.value ?? "100") || 0);
 });
 
 const updateFeedUrl = handler<
   { detail: { value: string } },
-  { feedUrl: string }
+  { feedUrl: Cell<string> }
 >(
-  ({ detail }, state) => {
-    state.feedUrl = detail?.value ?? "";
+  ({ detail }, { feedUrl }) => {
+    feedUrl.set(detail?.value ?? "");
   },
 );
 
 async function fetchRSSFeed(
   feedUrl: string,
   maxResults: number = 100,
-  state: {
-    items: Cell<FeedItem[]>;
-  },
+  currentItems: Cell<FeedItem[]>,
 ) {
   const response = await fetch(feedUrl);
   const text = await response.text();
@@ -123,7 +71,7 @@ async function fetchRSSFeed(
     return el?.getAttribute(attrName) || "";
   };
 
-  const items: FeedItem[] = [];
+  const retreivedItems: FeedItem[] = [];
 
   // Check if it's an Atom feed
   const isAtom = doc.querySelector("feed") !== null;
@@ -139,7 +87,7 @@ async function fetchRSSFeed(
       const id = getTextContent(entry, "id") || Math.random().toString(36);
 
       // Skip if we already have this item
-      if (state.items.get().some((item) => item.id === id)) {
+      if (currentItems.get().some((item) => item.id === id)) {
         continue;
       }
 
@@ -161,7 +109,7 @@ async function fetchRSSFeed(
       const pubDate = getTextContent(entry, "published") ||
         getTextContent(entry, "updated");
 
-      items.push({
+      retreivedItems.push({
         id,
         title: getTextContent(entry, "title"),
         link,
@@ -182,11 +130,11 @@ async function fetchRSSFeed(
         getTextContent(item, "link") ||
         Math.random().toString(36);
 
-      if (state.items.get().some((existingItem) => existingItem.id === id)) {
+      if (currentItems.get().some((existingItem) => existingItem.id === id)) {
         continue;
       }
 
-      items.push({
+      retreivedItems.push({
         id,
         title: getTextContent(item, "title"),
         link: getTextContent(item, "link"),
@@ -199,60 +147,43 @@ async function fetchRSSFeed(
     }
   }
 
-  if (items.length > 0) {
-    items.forEach((item) => {
-      item[ID] = item.id;
+  if (retreivedItems.length > 0) {
+    retreivedItems.forEach((item) => {
+      (item as any)[ID] = item.id; // FIXME(ja): how to do this better?
     });
-    state.items.push(...items);
+    currentItems.push(...retreivedItems);
   }
 }
 
-const feedUpdater = handler(
-  {},
-  {
-    type: "object",
-    properties: {
-      items: {
-        type: "array",
-        items: FeedItemSchema,
-        default: [],
-        asCell: true,
-      },
-      settings: RSSImporterInputs.properties.settings,
-    },
-    required: ["items", "settings"],
-  } as const satisfies JSONSchema,
-  async (_event, state) => {
-    if (!state.settings.feedUrl) {
-      console.warn("no feed URL provided");
-      return;
-    }
+const feedUpdater = handler<unknown, {
+  items: Cell<FeedItem[]>;
+  settings: Settings;
+}>(async (_event, { settings, items }) => {
+  if (!settings.feedUrl) {
+    console.warn("no feed URL provided");
+    return;
+  }
 
-    return await fetchRSSFeed(
-      state.settings.feedUrl,
-      state.settings.limit,
-      state,
-    );
-  },
-);
+  return await fetchRSSFeed(
+    settings.feedUrl,
+    settings.limit,
+    items,
+  );
+});
 
-export default recipe(
-  RSSImporterInputs,
-  ResultSchema,
-  (state) => {
-    const { settings } = state;
+export default recipe<{ settings: Settings }>(
+  "rss importer",
+  ({ settings }) => {
     const items = cell<FeedItem[]>([]);
 
-    derive(items, (items) => {
-      console.log("feed items", items.length);
-    });
+    console.log("feed items", items.length);
 
     return {
       [NAME]: str`RSS/Atom Feed Importer ${settings.feedUrl}`,
       [UI]: (
         <div style="display: flex; gap: 10px; flex-direction: column; padding: 25px;">
           <h2 style="font-size: 20px; font-weight: bold;">
-            Feed Items: {derive(items, (items) => items.length)}
+            Feed Items: {items.length}
           </h2>
 
           <common-hstack gap="sm">
@@ -263,9 +194,7 @@ export default recipe(
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.limit}
                   placeholder="number of items to import"
-                  oncommon-input={updateLimit({
-                    limit: settings.limit,
-                  })}
+                  oncommon-input={updateLimit({ limit: settings.limit })}
                 />
               </div>
 
@@ -275,12 +204,10 @@ export default recipe(
                   customStyle="border: 1px solid black; padding: 15px 10px; border-radius: 25px; min-width: 650px;"
                   value={settings.feedUrl}
                   placeholder="https://example.com/feed.xml or https://example.com/atom.xml"
-                  oncommon-input={updateFeedUrl({
-                    feedUrl: settings.feedUrl,
-                  })}
+                  oncommon-input={updateFeedUrl({ feedUrl: settings.feedUrl })}
                 />
               </div>
-              <common-updater $state={state} integration="rss" />
+              <common-updater $state={settings} integration="rss" />
             </common-vstack>
           </common-hstack>
           <div>
