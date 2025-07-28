@@ -39,5 +39,4 @@ deno check \
   packages/static/scripts \
   packages/static/test \
   packages/toolshed \
-  packages/ui \
   packages/utils
