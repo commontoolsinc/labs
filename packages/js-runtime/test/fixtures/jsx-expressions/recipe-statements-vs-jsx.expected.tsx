@@ -70,7 +70,7 @@ export default recipe({
           <br />
           Doubled: {commontools_1.derive(state.value, _v1 => _v1 * 2)}
           <br />
-          Status: {commontools_1.ifElse(state.value > 10, "High", "Low")}
+          Status: {commontools_1.ifElse(commontools_1.derive(state.value, _v1 => _v1 > 10), "High", "Low")}
         </p>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),
@@ -84,3 +84,4 @@ export default recipe({
         }
     };
 });
+

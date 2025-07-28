@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, handler, toSchema, h, UI, NAME, str, Cell } from "commontools";
+import { recipe, handler, toSchema, h, UI, NAME, str, Cell, derive } from "commontools";
 
 // Define types using TypeScript interfaces
 interface TodoItem {

@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { Cell, Default, h, handler, NAME, recipe, str, UI, derive, JSONSchema } from "commontools";
+import { Cell, Default, h, handler, NAME, recipe, str, UI, ifElse, derive, JSONSchema } from "commontools";
 interface CounterState {
     value: Cell<number>;
 }
@@ -53,10 +53,11 @@ export default recipe({
         [UI]: (<div>
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
-          <li>next number: {commontools_1.derive(state.value, _v1 => _v1 + 1)}</li>
+          <li>next number: {commontools_1.ifElse(state.value, commontools_1.derive(state.value, _v1 => _v1 + 1), "unknown")}</li>
         </ul>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),
         value: state.value,
     };
 });
+

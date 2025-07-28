@@ -3,7 +3,7 @@ import { Cell, handler, recipe } from "commontools";
 
 interface State {
   value: Cell<number>;
-  name: Cell<string>;
+  name?: Cell<string>;
 }
 
 const myHandler = handler((_, state: State) => {
