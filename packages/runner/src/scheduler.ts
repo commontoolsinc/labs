@@ -36,7 +36,7 @@ import {
 } from "./reactive-dependencies.ts";
 
 const logger = getLogger("scheduler", {
-  enabled: true,
+  enabled: false,
   level: "debug",
 });
 

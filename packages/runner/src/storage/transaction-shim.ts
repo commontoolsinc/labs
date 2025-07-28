@@ -46,7 +46,7 @@ import { getJSONFromDataURI } from "../uri-utils.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 
 const logger = getLogger("extended-storage-transaction", {
-  enabled: true,
+  enabled: false,
   level: "debug",
 });
 
