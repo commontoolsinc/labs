@@ -135,19 +135,19 @@ export class Runner implements IRunner {
 
     let recipeId: string | undefined;
 
-    if (
-      !recipeOrModule &&
-      processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
-    ) {
-      recipeId = processCell.key(TYPE).getRaw({
-        meta: ignoreReadForScheduling,
-      });
+    const previousRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    });
+
+    if (!recipeOrModule && previousRecipeId) {
+      recipeId = previousRecipeId;
       recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
       if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
     } else if (!recipeOrModule) {
       console.warn(
         "No recipe provided and no recipe found in process doc. Not running.",
       );
+      if (!providedTx) tx.commit();
       return resultCell;
     }
 
@@ -182,18 +182,42 @@ export class Runner implements IRunner {
       recipe,
     }, tx);
 
+    // If the bindings are a cell, doc or doc link, convert them to an alias
+    if (isLink(argument)) {
+      argument = createSigilLinkFromParsedLink(
+        parseLink(argument),
+        { base: processCell, includeSchema: true, overwrite: "redirect" },
+      ) as T;
+    }
+
     if (this.cancels.has(this.getDocKey(resultCell))) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
       if (
         argument === undefined &&
-        recipeId ===
-          processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
+        recipeId === previousRecipeId
       ) {
+        if (!providedTx) tx.commit();
         return resultCell;
       }
 
-      // TODO(seefeld): If recipe is the same, but argument is different, just update the argument without stopping
+      if (previousRecipeId === recipeId) {
+        console.log("updating argument", argument);
+        // If the recipe is the same, but argument is different, just update the
+        // argument without stopping
+        diffAndUpdate(
+          this.runtime,
+          tx,
+          processCell.key("argument").getAsNormalizedFullLink(),
+          argument,
+          processCell.getAsNormalizedFullLink(),
+        );
+        if (!providedTx) tx.commit();
+        return resultCell;
+      }
+
+      // TODO(seefeld): If recipe is the same, but argument is different, just
+      // update the argument without stopping
 
       // Otherwise stop execution of the old recipe. TODO: Await, but this will
       // make all this async.
@@ -204,14 +228,6 @@ export class Runner implements IRunner {
     const [cancel, addCancel] = useCancelGroup();
     this.cancels.set(this.getDocKey(resultCell), cancel);
     this.allCancels.add(cancel);
-
-    // If the bindings are a cell, doc or doc link, convert them to an alias
-    if (isLink(argument)) {
-      argument = createSigilLinkFromParsedLink(
-        parseLink(argument),
-        { base: processCell, includeSchema: true },
-      ) as T;
-    }
 
     // Walk the recipe's schema and extract all default values
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
@@ -334,6 +350,7 @@ export class Runner implements IRunner {
       inputs,
       resultCell.withTx(tx),
     );
+    const txPromise = givenTx ? undefined : tx.commit();
 
     // If a new recipe was specified, make sure to sync any new cells
     // TODO(seefeld): Possible race condition here with lifted functions running
@@ -344,8 +361,8 @@ export class Runner implements IRunner {
       await this.syncCellsForRunningRecipe(resultCell.withTx(tx), recipe);
     }
 
-    if (!givenTx) {
-      const { error } = await tx.commit();
+    if (txPromise) {
+      const { error } = await txPromise;
       if (error) {
         console.error(
           "Error committing transaction:",
