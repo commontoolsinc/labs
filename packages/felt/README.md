@@ -35,8 +35,8 @@ export default {
       compilerOptions: {
         useDefineForClassFields: false,
         experimentalDecorators: true,
-      }
-    }
+      },
+    },
   },
 };
 ```
