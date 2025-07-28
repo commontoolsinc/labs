@@ -19,3 +19,4 @@ dist/
 .claude/settings.local.json
 claude-research.key
 *.key
+.page-agent-config.json
