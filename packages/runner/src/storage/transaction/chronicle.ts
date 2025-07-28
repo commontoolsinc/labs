@@ -2,6 +2,7 @@ import type {
   IAttestation,
   IInvalidDataURIError,
   IMemoryAddress,
+  INotFoundError,
   IReadOnlyAddressError,
   ISpaceReplica,
   IStorageTransactionInconsistent,
@@ -86,7 +87,7 @@ export class Chronicle {
    * Takes an invariant and applies all the changes that were written to this
    * chonicle that fall under the given source.
    */
-  rebase(source: IAttestation) {
+  rebase(source: IAttestation): Result<IAttestation, IStorageTransactionInconsistent> {
     const changes = this.#novelty.select(source.address);
     return changes ? changes.rebase(source) : { ok: source };
   }
@@ -124,6 +125,7 @@ export class Chronicle {
   ): Result<
     IAttestation,
     | IStorageTransactionInconsistent
+    | INotFoundError
     | IInvalidDataURIError
     | IUnsupportedMediaTypeError
   > {
@@ -170,7 +172,7 @@ export class Chronicle {
   /**
    * Attempts to derives transaction that can be commited to an underlying
    * replica. Function fails with {@link IStorageTransactionInconsistent} if
-   * this contains somer read invariant that no longer holds, that is same
+   * this contains some read invariant that no longer holds, that is same
    * read produces different result.
    */
   commit(): Result<

@@ -481,7 +481,7 @@ describe("StorageTransaction", () => {
       space,
       id: "of:test-entity-new",
       type: "application/json",
-      path: ["value"],
+      path: [],
     }, { foo: 123 });
     const result = await transaction.commit();
     expect(result.ok).toBeDefined();

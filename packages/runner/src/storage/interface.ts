@@ -656,10 +656,6 @@ export type CommitError =
   | InactiveTransactionError
   | StorageTransactionRejected;
 
-export interface INotFoundError extends Error {
-  name: "NotFoundError";
-  path?: MemoryAddressPathComponent[];
-}
 
 /**
  * Error returned when the media type is not supported by the storage transaction.
@@ -688,6 +684,7 @@ export type ReadError =
 
 export type WriteError =
   | INotFoundError
+  | IStorageTransactionInconsistent
   | IUnsupportedMediaTypeError
   | InactiveTransactionError
   | IReadOnlyAddressError;
@@ -714,6 +711,13 @@ export interface INotFoundError extends Error {
    * Address that we could not resolve.
    */
   address: IMemoryAddress;
+
+  /**
+   * @deprecated Use `address.path` instead. This property exists for backward compatibility.
+   */
+  path?: MemoryAddressPathComponent[];
+
+  from(space: MemorySpace): INotFoundError;
 }
 
 /**

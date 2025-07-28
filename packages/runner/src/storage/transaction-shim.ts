@@ -42,6 +42,60 @@ import { getJSONFromDataURI } from "../uri-utils.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 
 /**
+ * NotFoundError implementation for transaction-shim
+ */
+class NotFoundError extends RangeError implements INotFoundError {
+  override readonly name = "NotFoundError" as const;
+  public readonly source: IAttestation;
+  public readonly address: IMemorySpaceAddress;
+  private readonly space?: MemorySpace;
+
+  constructor(
+    message: string,
+    id: string,
+    path: readonly MemoryAddressPathComponent[] = [],
+    value?: JSONValue,
+    space?: MemorySpace,
+  ) {
+    super(message);
+    this.space = space;
+    // Ensure id has a valid URI format for type compatibility
+    const uri = id.includes(":") ? id as `${string}:${string}` : `of:${id}` as `${string}:${string}`;
+    this.address = {
+      id: uri,
+      type: "application/json",
+      path: [...path], // Convert readonly to mutable array
+      space: space || "" as MemorySpace,
+    };
+    this.source = {
+      address: {
+        id: uri,
+        type: "application/json",
+        path: [],
+      },
+      value,
+    };
+  }
+
+  /**
+   * @deprecated Use `address.path` instead. This property exists for backward compatibility.
+   */
+  get path(): MemoryAddressPathComponent[] {
+    return [...this.address.path];
+  }
+
+  from(space: MemorySpace): INotFoundError {
+    return new NotFoundError(
+      this.message,
+      this.address.id,
+      [...this.address.path], // Convert to mutable array
+      this.source.value,
+      space,
+    );
+  }
+}
+
+/**
  * Convert a URI string to an EntityId object
  */
 export function uriToEntityId(uri: string): EntityId {
@@ -57,6 +111,7 @@ export function uriToEntityId(uri: string): EntityId {
 function validateParentPath(
   value: any,
   path: readonly MemoryAddressPathComponent[],
+  id: string,
 ): INotFoundError | null {
   const pathLength = path.length;
 
@@ -67,11 +122,12 @@ function validateParentPath(
   // Check if the document itself exists and is an object for first-level writes
   if (pathLength === 1) {
     if (value === undefined || !isRecord(value)) {
-      const pathError: INotFoundError = new Error(
+      return new NotFoundError(
         `Cannot access path [${String(path[0])}] - document is not a record`,
-      ) as INotFoundError;
-      pathError.name = "NotFoundError";
-      return pathError;
+        id,
+        [...path],
+        value,
+      );
     }
     return null;
   }
@@ -92,17 +148,15 @@ function validateParentPath(
   if (
     value === undefined || parentValue === undefined || !isRecord(parentValue)
   ) {
-    const pathError: INotFoundError = new Error(
+    const errorPath = (parentIndex > 0) ? path.slice(0, parentIndex - 1) : [];
+    return new NotFoundError(
       `Cannot access path [${path.join(", ")}] - parent path [${
         path.slice(0, lastIndex).join(", ")
       }] does not exist or is not a record`,
-    ) as INotFoundError;
-    pathError.name = "NotFoundError";
-
-    // Set pathError.path to last valid parent path component
-    if (parentIndex > 0) pathError.path = path.slice(0, parentIndex - 1);
-
-    return pathError;
+      id,
+      errorPath,
+      value,
+    );
   }
 
   return null;
@@ -201,7 +255,7 @@ class TransactionReader implements ITransactionReader {
       try {
         const json = getJSONFromDataURI(address.id);
 
-        const validationError = validateParentPath(json, address.path);
+        const validationError = validateParentPath(json, address.path, address.id);
         if (validationError) {
           return { ok: undefined, error: validationError };
         }
@@ -239,25 +293,31 @@ class TransactionReader implements ITransactionReader {
     );
 
     if (!doc) {
-      const notFoundError: INotFoundError = new Error(
+      const notFoundError = new NotFoundError(
         `Document not found: ${address.id}`,
-      ) as INotFoundError;
-      notFoundError.name = "NotFoundError";
+        address.id,
+        [],
+        undefined,
+        address.space,
+      );
       return { ok: undefined, error: notFoundError };
     }
 
     // Path-based logic
     if (!address.path.length) {
-      const notFoundError: INotFoundError = new Error(
+      const notFoundError = new NotFoundError(
         `Path must not be empty`,
-      ) as INotFoundError;
-      notFoundError.name = "NotFoundError";
+        address.id,
+        [],
+        undefined,
+        address.space,
+      );
       return { ok: undefined, error: notFoundError };
     }
     const [first, ...rest] = address.path;
     if (first === "value") {
       // Validate parent path exists and is a record for nested writes/reads
-      const validationError = validateParentPath(doc.get(), rest);
+      const validationError = validateParentPath(doc.get(), rest, address.id);
       if (validationError) {
         return { ok: undefined, error: validationError };
       }
@@ -272,10 +332,13 @@ class TransactionReader implements ITransactionReader {
     } else if (first === "source") {
       // Only allow path length 1
       if (rest.length > 0) {
-        const notFoundError: INotFoundError = new Error(
+        const notFoundError = new NotFoundError(
           `Path beyond 'source' is not allowed`,
-        ) as INotFoundError;
-        notFoundError.name = "NotFoundError";
+          address.id,
+          [...address.path],
+          undefined,
+          address.space,
+        );
         return { ok: undefined, error: notFoundError };
       }
       // Return the URI of the sourceCell if it exists
@@ -292,10 +355,13 @@ class TransactionReader implements ITransactionReader {
       this.journal.addRead(address, options);
       return { ok: read };
     } else {
-      const notFoundError: INotFoundError = new Error(
+      const notFoundError = new NotFoundError(
         `Invalid first path element: ${String(first)}`,
-      ) as INotFoundError;
-      notFoundError.name = "NotFoundError";
+        address.id,
+        [...address.path],
+        undefined,
+        address.space,
+      );
       return { ok: undefined, error: notFoundError };
     }
   }
@@ -369,16 +435,19 @@ class TransactionWriter extends TransactionReader
 
     // Path-based logic
     if (!address.path.length) {
-      const notFoundError: INotFoundError = new Error(
+      const notFoundError = new NotFoundError(
         `Path must not be empty`,
-      ) as INotFoundError;
-      notFoundError.name = "NotFoundError";
+        address.id,
+        [],
+        undefined,
+        address.space,
+      );
       return { ok: undefined, error: notFoundError };
     }
     const [first, ...rest] = address.path;
     if (first === "value") {
       // Validate parent path exists and is a record for nested writes
-      const validationError = validateParentPath(doc.get(), rest);
+      const validationError = validateParentPath(doc.get(), rest, address.id);
       if (validationError) {
         return { ok: undefined, error: validationError };
       }
@@ -398,18 +467,24 @@ class TransactionWriter extends TransactionReader
     } else if (first === "source") {
       // Only allow path length 1
       if (rest.length > 0) {
-        const notFoundError: INotFoundError = new Error(
+        const notFoundError = new NotFoundError(
           `Path beyond 'source' is not allowed`,
-        ) as INotFoundError;
-        notFoundError.name = "NotFoundError";
+          address.id,
+          [...address.path],
+          undefined,
+          address.space,
+        );
         return { ok: undefined, error: notFoundError };
       }
       // Value must be a URI string (of:...)
       if (typeof value !== "string" || !value.startsWith("of:")) {
-        const notFoundError: INotFoundError = new Error(
+        const notFoundError = new NotFoundError(
           `Value for 'source' must be a URI string (of:...)`,
-        ) as INotFoundError;
-        notFoundError.name = "NotFoundError";
+          address.id,
+          [...address.path],
+          value,
+          address.space,
+        );
         return { ok: undefined, error: notFoundError };
       }
       // Get the source doc in the same space
@@ -420,10 +495,13 @@ class TransactionWriter extends TransactionReader
         false,
       );
       if (!sourceDoc) {
-        const notFoundError: INotFoundError = new Error(
+        const notFoundError = new NotFoundError(
           `Source document not found: ${value}`,
-        ) as INotFoundError;
-        notFoundError.name = "NotFoundError";
+          address.id,
+          [...address.path],
+          value,
+          address.space,
+        );
         return { ok: undefined, error: notFoundError };
       }
       doc.sourceCell = sourceDoc;
@@ -434,10 +512,13 @@ class TransactionWriter extends TransactionReader
       this.journal.addWrite(address);
       return { ok: write };
     } else {
-      const notFoundError: INotFoundError = new Error(
+      const notFoundError = new NotFoundError(
         `Invalid first path element: ${String(first)}`,
-      ) as INotFoundError;
-      notFoundError.name = "NotFoundError";
+        address.id,
+        [...address.path],
+        undefined,
+        address.space,
+      );
       return { ok: undefined, error: notFoundError };
     }
   }
@@ -646,7 +727,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     const writeResult = this.tx.write(address, value);
     if (writeResult.error && writeResult.error.name === "NotFoundError") {
       // Create parent entries if needed
-      const lastValidPath = writeResult.error.path;
+      const lastValidPath = (writeResult.error as INotFoundError).path;
       const valueObj = lastValidPath
         ? this.readValueOrThrow({ ...address, path: lastValidPath }, {
           meta: ignoreReadForScheduling,

@@ -609,7 +609,7 @@ describe("StorageTransaction", () => {
 
       const result = transaction.read(nestedAddress);
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("NotFoundError");
     });
 
     it("should handle writing to invalid nested paths", () => {

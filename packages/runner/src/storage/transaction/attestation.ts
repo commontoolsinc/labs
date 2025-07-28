@@ -7,6 +7,7 @@ import type {
   IStorageTransactionInconsistent,
   IUnsupportedMediaTypeError,
   JSONValue,
+  MemoryAddressPathComponent,
   MemorySpace,
   Result,
   State,
@@ -48,7 +49,7 @@ export class UnsupportedMediaTypeError extends Error
 /**
  * Takes `source` attestation, `address` and `value` and produces derived
  * attestation with `value` set to a property that given `address` leads to
- * in the `source`. Fails with inconsitency error if provided `address` leads
+ * in the `source`. Fails with WriteInconsistency error if provided `address` leads
  * to a non-object target.
  */
 export const write = (
@@ -71,7 +72,10 @@ export const write = (
     const { ok, error } = resolve(patch, { ...address, path });
 
     if (error) {
-      return { error };
+      // Convert NotFound error to WriteInconsistency for write operations
+      return {
+        error: new WriteInconsistency(error.source, error.address),
+      };
     } else {
       const type = ok.value === null ? "null" : typeof ok.value;
       if (type === "object") {
@@ -104,7 +108,7 @@ export const write = (
 /**
  * Reads requested `address` from the provided `source` attestation and either
  * succeeds with derived {@link IAttestation} with the given `address` or fails
- * with inconsistency error if resolving an `address` encounters a non-object
+ * with NotFound error if resolving an `address` encounters a non-object
  * along the path. Note it will succeed with `undefined` if last component of
  * the path does not exist on the object. Below are some examples illustrating
  * read behavior
@@ -141,7 +145,7 @@ export const write = (
 export const read = (
   source: IAttestation,
   address: IMemoryAddress,
-) => resolve(source, address);
+): Result<IAttestation, INotFoundError> => resolve(source, address);
 
 /**
  * Takes a source fact {@link State} and derives an attestion describing it's
@@ -178,16 +182,17 @@ export const claim = (
   }
 };
 
+
 /**
  * Attempts to resolve given `address` from the `source` attestation. Function
  * succeeds with derived attestation that will have provided `address` or fails
- * with inconsistency error if resolving an address encounters non-object along
+ * with NotFound error if resolving an address encounters non-object along
  * the resolution path.
  */
 export const resolve = (
   source: IAttestation,
   address: IMemoryAddress,
-): Result<IAttestation, IStorageTransactionInconsistent> => {
+): Result<IAttestation, INotFoundError> => {
   const { path } = address;
   let at = source.address.path.length - 1;
   let value = source.value;
@@ -200,7 +205,7 @@ export const resolve = (
         : (value as Record<string, JSONValue>)[key];
     } else {
       return {
-        error: new ReadInconsistency({
+        error: new NotFound({
           address: {
             ...address,
             path: path.slice(0, at),
@@ -322,6 +327,13 @@ export class NotFound extends RangeError implements INotFoundError {
     ].join("");
 
     super(message);
+  }
+
+  /**
+   * @deprecated Use `address.path` instead. This property exists for backward compatibility.
+   */
+  get path(): MemoryAddressPathComponent[] {
+    return [...this.source.address.path];
   }
 
   from(space: MemorySpace) {

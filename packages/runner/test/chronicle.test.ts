@@ -452,7 +452,7 @@ describe("Chronicle", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("NotFoundError");
     });
 
     it("should handle writing to invalid nested paths", () => {
@@ -1597,9 +1597,9 @@ describe("Chronicle", () => {
         const result = chronicle.read(address);
 
         expect(result.error).toBeDefined();
-        expect(result.error!.name).toBe("StorageTransactionInconsistent");
-        expect(result.error!.message).toContain("cannot read");
-        expect(result.error!.message).toContain("expected an object");
+        expect(result.error!.name).toBe("NotFoundError");
+        expect(result.error!.message).toContain("Can not resolve");
+        expect(result.error!.message).toContain("non-object");
       });
 
       it("should not interfere with regular replica reads", () => {

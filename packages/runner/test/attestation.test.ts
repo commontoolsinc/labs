@@ -231,9 +231,9 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
-      expect(result.error?.message).toContain("cannot read");
-      expect(result.error?.message).toContain("encountered: 42");
+      expect(result.error?.name).toBe("NotFoundError");
+      expect(result.error?.message).toContain("Can not resolve");
+      expect(result.error?.message).toContain("42");
     });
 
     it("should fail when reading through null", () => {
@@ -249,7 +249,7 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("NotFoundError");
     });
 
     it("should handle array access", () => {
@@ -309,7 +309,7 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("NotFoundError");
     });
   });
 
@@ -517,7 +517,7 @@ describe("Attestation Module", () => {
       });
 
       expect(result.error).toBeDefined();
-      expect(result.error?.name).toBe("StorageTransactionInconsistent");
+      expect(result.error?.name).toBe("NotFoundError");
     });
 
     it("should handle partial source paths", () => {
