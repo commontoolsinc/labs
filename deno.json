@@ -42,8 +42,7 @@
     ],
     "types": [
       "./packages/jumble/src/global.d.ts"
-    ],
-    "experimentalDecorators": true
+    ]
   },
   "exclude": [
     "packages/jumble/.vite/deps/",
