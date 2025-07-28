@@ -948,7 +948,17 @@ export class Replica {
    * state returns it otherwise returns recent state.
    */
   get(entry: FactAddress): State | undefined {
-    return this.nursery.get(entry) ?? this.heap.get(entry);
+    const nurseryState = this.nursery.get(entry);
+    if (nurseryState) return nurseryState;
+
+    const heapState = this.heap.get(entry);
+    if (heapState) {
+      // Remove `since` field from the state so that it can be used as a cause
+      const { since: _since, ...state } = heapState;
+      return state;
+    }
+
+    return undefined;
   }
 
   /**
