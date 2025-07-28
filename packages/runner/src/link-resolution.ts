@@ -1,187 +1,156 @@
 import { isRecord } from "@commontools/utils/types";
-import { ContextualFlowControl } from "./cfc.ts";
-import { type Cell } from "./cell.ts";
+import { getLogger } from "@commontools/utils/logger";
+import type { JSONSchema } from "./builder/types.ts";
+import { LINK_V1_TAG } from "./sigil-types.ts";
 import {
-  type LegacyAlias,
-  LINK_V1_TAG,
-  type SigilWriteRedirectLink,
-  type URI,
-} from "./sigil-types.ts";
-import {
-  areNormalizedLinksSame,
   type CellLink,
-  isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
-  IMemorySpaceAddress,
+  MemoryAddressPathComponent,
 } from "./storage/interface.ts";
-import type { MemorySpace } from "@commontools/memory/interface";
+import { ContextualFlowControl } from "./cfc.ts";
+
+const logger = getLogger("link-resolution");
+
+export type LastNode = "value" | "writeRedirect" | "top";
 
 /**
- * Track visited cell links and memoize results during path resolution
- * and link following to prevent redundant work.
+ * A resolved link is a link that has been resolved to a document that no longer
+ * has any links between the top and the value at `link.path`.
  */
-interface Visits {
-  /** Tracks visited cell links to detect cycles */
-  seen: IMemorySpaceAddress[];
-  /** Cache for resolvePath results */
-  resolvePathCache: Map<string, IMemorySpaceAddress>;
-  /** Cache for followLinks results */
-  followLinksCache: Map<string, IMemorySpaceAddress>;
-}
+declare const resolvedFullLinkBrand: unique symbol;
+export type ResolvedFullLink = NormalizedFullLink & {
+  // type-script only marker, doesn't appear in actual data
+  [resolvedFullLinkBrand]: true;
+};
+
+const MAX_PATH_RESOLUTION_LENGTH = 1000;
 
 /**
- * Creates a new visits tracking object.
+ * Resolves a document path with support for links inside documents.
+ *
+ * It returns a `ResolvedFullLink` that points to a document that no longer has
+ * any links between the top and the value at `link.path`. When a cycle is
+ * detected, a warning is logged and a static link to `undefined` returned.
+ *
+ * `lastNode` controls whether to follow links on the last path segment. By
+ * default all links are followed, but if `lastNode` is `LastNode.WriteRedirect`
+ * only write redirects are followed and if `lastNode` is `LastNode.Top` no
+ * links are followed at all.
+ *
+ * Links can point to another (document, path) pair, and may appear either at
+ * leaf nodes or in the middle of a document. This resolver transparently
+ * follows such links and detects cycles.
+ *
+ * A cycle is detected if the exact (document, path) pair is visited more than
+ * once. This detects cycles like:
+ * - A/foo → A/foo
+ * - A → B → C → A
+ *
+ * But there are cycles that can lead to growing paths, e.g.
+ * - A → A/foo
+ * - A → B, B → A/foo
+ *
+ * These are difficult to detect, since there are many legitimate cases for the
+ * same link to be followed several times, so instead we just have an upper
+ * bound of 1000 iterations, and log a warning.
+ *
+ * @param tx - The storage transaction to read from.
+ * @param link - The link to read.
+ * @param lastNode - The last node in the path.
+ * @returns The resolved link.
  */
-export function createVisits(): Visits {
-  return {
-    seen: [],
-    resolvePathCache: new Map(),
-    followLinksCache: new Map(),
-  };
-}
-
-/**
- * Creates a cache key for a doc and path combination.
- */
-function createPathCacheKey<T>(
-  address: IMemorySpaceAddress,
-  aliases: boolean = false,
-): string {
-  return JSON.stringify([
-    address.space,
-    address.id,
-    address.path,
-    address.type,
-    aliases,
-  ]);
-}
-
-/**
- * Helper to create an IMemoryAddress from a URI and path
- */
-function createMemoryAddress(
-  uri: URI,
-  path: PropertyKey[],
-  space: MemorySpace,
-): IMemorySpaceAddress {
-  // Add the 'value' path prefix for entity data
-  const actualPath = path.length === 0 ? ["value"] : ["value", ...path];
-  return {
-    id: uri,
-    space,
-    path: actualPath.map((p) => p.toString()),
-    type: "application/json",
-  };
-}
-
-export function resolveLinkToValue<T>(
-  tx: IExtendedStorageTransaction,
-  address: IMemorySpaceAddress,
-): NormalizedFullLink {
-  const visits = createVisits();
-  const link = resolvePath(tx, address, visits);
-  return followLinks(tx, link, visits);
-}
-
-export function resolveLinkToWriteRedirect<T>(
-  tx: IExtendedStorageTransaction,
-  address: IMemorySpaceAddress,
-): NormalizedFullLink {
-  const visits = createVisits();
-  const link = resolvePath(tx, address, visits);
-  return followLinks(tx, link, visits, true);
-}
-
-export function resolveLinks(
-  tx: IExtendedStorageTransaction,
-  link: IMemorySpaceAddress,
-): NormalizedFullLink {
-  const visits = createVisits();
-  return followLinks(tx, link, visits);
-}
-
-function resolvePath<T>(
+export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
-  visits: Visits = createVisits(),
-): NormalizedFullLink {
-  // Follow aliases, doc links, etc. in path, so that we end up on the right
-  // doc, meaning the one that contains the value we want to access without any
-  // redirects in between.
-  //
-  // If the path points to a redirect itself, we don't want to follow it: Other
-  // functions like followLinks will do that. We just want to skip the interim ones.
-  //
-  // All taken links are logged, but not the final one.
-  //
-  // Let's look at a few examples:
-  //
-  // Doc: { link }, path: [] --> no change
-  // Doc: { link }, path: ["foo"] --> follow link, path: ["foo"]
-  // Doc: { foo: { link } }, path: ["foo"] --> no change
-  // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
+  lastNode: LastNode = "value",
+): ResolvedFullLink {
+  const seen = new Set<string>();
 
-  // Check if we already resolved this exact path
-  const fullPathKey = createPathCacheKey(link);
-  const exactMatch = visits.resolvePathCache.get(fullPathKey);
-  if (exactMatch) {
-    return exactMatch;
-  }
+  const remainingPath = [...link.path];
+  const traversedPath: MemoryAddressPathComponent[] = [];
+  let last: NormalizedFullLink = link;
 
-  // To resolve the path, we need to start at the empty path and traverse in
-  let keys = [...link.path];
-  link = { ...link, path: [] };
+  let iteration = 0;
 
-  // Try to find a cached result for a shorter path
-  // Look for the longest matching prefix path in the cache
-  for (let i = link.path.length - 1; i >= 0; i--) {
-    const prefixKey = createPathCacheKey({
-      ...link,
-      path: link.path.slice(0, i),
-    });
-    const prefixMatch = visits.resolvePathCache.get(prefixKey);
-
-    if (prefixMatch) {
-      keys = [...link.path.slice(i)];
-      link = { ...prefixMatch };
-      break;
+  while (true) {
+    if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
+      logger.warn(`Link resolution iteration limit reached`);
+      return emptyResolvedFullLink; // = return link to empty document
     }
-  }
 
-  const origSchema = { schema: link.schema, rootSchema: link.rootSchema };
-  const cfc = new ContextualFlowControl();
-
-  while (keys.length) {
-    // First follow all the aliases and links, _before_ accessing the key.
-    link = { ...followLinks(tx, link, visits) };
-
-    // Now access the key.
-    const key = keys.shift()!;
-
-    link.path = [...link.path, key];
-    if (
-      link.schema === undefined && origSchema.schema !== undefined &&
-      keys.length === 0
-    ) {
-      // Since path is childPath, restore schema
-      link.schema = origSchema.schema;
-      link.rootSchema = origSchema.rootSchema;
-    } else {
-      link.schema = cfc.getSchemaAtPath(
-        link.schema,
-        [key.toString()],
-        link.rootSchema,
-      );
+    if (lastNode === "top" && remainingPath.length === 0) {
+      break; // = return before following links on last path segment
     }
+
+    // Detect cycles. Only have to do this at top of path, since link folloowing
+    // will always go through this at least once.
+    if (traversedPath.length === 0) {
+      const key = JSON.stringify([last.space, last.id, remainingPath]);
+      if (seen.has(key)) {
+        logger.warn(`Link cycle detected ${key}`);
+        return emptyResolvedFullLink; // = return link to empty document
+      }
+      seen.add(key);
+    }
+
+    const onlyRedirects = remainingPath.length === 0 &&
+      lastNode === "writeRedirect"; // For "value", follow all
+    const nextLink = readMaybeLink(
+      tx,
+      { ...last, path: traversedPath },
+      onlyRedirects,
+    );
+    if (nextLink !== undefined) {
+      // Schemas on link overwrite the current schema. We have to adjust it for
+      // the deeper remaining path we're accessing. If after that, the schema is
+      // empty (or more specifically "any"), we keep the current schema.
+      // TODO(ubik2,seefeld): This should really be a schema intersection.
+      let linkSchema = nextLink.schema;
+      if (linkSchema !== undefined && remainingPath.length > 0) {
+        const cfc = new ContextualFlowControl();
+        linkSchema = cfc.getSchemaAtPath(
+          linkSchema,
+          remainingPath,
+          nextLink.rootSchema,
+        );
+      }
+      if (linkSchema !== undefined) {
+        last = { ...nextLink, schema: linkSchema };
+      } else if (last.schema !== undefined) {
+        last = {
+          ...nextLink,
+          schema: last.schema,
+          rootSchema: last.rootSchema,
+        };
+      } else {
+        last = nextLink;
+      }
+
+      // We have to start walking the the destination from the top, as it might
+      // contain links in the middle, so we prepend it's path to the remaining
+      // path and reset the current path to empty.
+      remainingPath.unshift(...nextLink.path);
+      traversedPath.length = 0;
+      // Note: we already updated 'last' above with the proper schema handling
+      continue; // = continue following links at same remainingPath
+    }
+
+    if (remainingPath.length === 0) {
+      break; // = both the "value" and "writeRedirect" cases
+    }
+
+    traversedPath.push(remainingPath.shift()!);
   }
 
-  // Cache the final result
-  visits.resolvePathCache.set(fullPathKey, link);
-  return link;
+  const result = { ...last, path: traversedPath } satisfies NormalizedFullLink;
+
+  // The casting is a workaround for the branding, we don't actually want to add
+  // the symbol to the result.
+  return result as unknown as ResolvedFullLink;
 }
 
 /**
@@ -222,85 +191,9 @@ export function readMaybeLink(
   }
 }
 
-// Follows links and returns the last one, which is pointing to a value. It'll
-// log all taken links, so not the returned one, and thus nothing if the ref
-// already pointed to a value.
-export function followLinks(
-  tx: IExtendedStorageTransaction,
-  link: NormalizedFullLink,
-  visits: Visits,
-  onlyWriteRedirects = false,
-): NormalizedFullLink {
-  // Check if we already followed these links
-  const cacheKey = createPathCacheKey(link, onlyWriteRedirects);
-  const cached = visits.followLinksCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  let nextLink: NormalizedFullLink | undefined;
-  let result: NormalizedFullLink = link;
-
-  do {
-    const resolvedLink = resolvePath(tx, result, visits);
-
-    // Add schema back if we didn't get a new one
-    if (!resolvedLink.schema && result.schema) {
-      result = {
-        ...resolvedLink,
-        schema: result.schema,
-        rootSchema: result.rootSchema,
-      };
-    } else {
-      result = resolvedLink;
-    }
-
-    nextLink = readMaybeLink(tx, result, onlyWriteRedirects);
-
-    if (nextLink !== undefined) {
-      // Add schema back if we didn't get a new one
-      if (!nextLink.schema && result.schema) {
-        nextLink = {
-          ...nextLink,
-          schema: result.schema,
-          rootSchema: result.rootSchema,
-        };
-      }
-
-      result = nextLink;
-
-      // Detect cycles (at this point these are all references that point to something)
-      if (visits.seen.some((r) => areNormalizedLinksSame(r, result))) {
-        throw new Error(
-          `Reference cycle detected ${result.id}/[${
-            result.path.join(", ")
-          }]\n\n  ${
-            visits.seen.map((r) => `${r.id}/[${r.path.join(", ")}]`).join("\n ")
-          }`,
-        );
-      }
-      visits.seen.push(result);
-    }
-  } while (nextLink);
-
-  // Cache the result
-  visits.followLinksCache.set(cacheKey, result);
-  return result;
-}
-
-// Follows aliases and returns cell reference describing the last alias.
-// Only logs interim aliases, not the first one, and not the non-alias value.
-export function followWriteRedirects<T = any>(
-  tx: IExtendedStorageTransaction,
-  writeRedirect: LegacyAlias | SigilWriteRedirectLink,
-  base: Cell<T> | NormalizedFullLink,
-): NormalizedFullLink {
-  if (isWriteRedirectLink(writeRedirect)) {
-    const link = parseLink(writeRedirect, base);
-    return followLinks(tx, link, createVisits(), true);
-  } else {
-    throw new Error(
-      `Write redirect expected: ${JSON.stringify(writeRedirect)}`,
-    );
-  }
-}
+const emptyResolvedFullLink: ResolvedFullLink = {
+  space: "did:null:null",
+  id: "data:application/json,",
+  path: [],
+  type: "application/json",
+} satisfies NormalizedFullLink as unknown as ResolvedFullLink;

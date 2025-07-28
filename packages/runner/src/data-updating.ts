@@ -3,7 +3,7 @@ import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { isCell, RegularCell } from "./cell.ts";
-import { followWriteRedirects } from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
@@ -199,7 +199,11 @@ export function normalizeAndDiff(
   // Handle alias in current value (at this point: if newValue is not an alias)
   if (isWriteRedirectLink(currentValue)) {
     // Log reads of the alias, so that changing aliases cause refreshes
-    const redirectLink = followWriteRedirects(tx, currentValue, link);
+    const redirectLink = resolveLink(
+      tx,
+      parseLink(currentValue, link),
+      "writeRedirect",
+    );
     return normalizeAndDiff(
       runtime,
       tx,

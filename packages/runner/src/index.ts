@@ -36,7 +36,7 @@ export {
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
-export { followWriteRedirects } from "./link-resolution.ts";
+export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
   isLegacyCellLink,
