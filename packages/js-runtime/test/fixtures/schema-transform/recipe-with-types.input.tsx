@@ -71,7 +71,6 @@ const toggleTodo = handler(
   }
 );
 
-// Recipe with derived values
 export default recipe(inputSchema, outputSchema, ({ todos }) => {
   const completedCount = derive(todos, (todos: TodoItem[]) => 
     todos.filter((t: TodoItem) => t.completed).length
