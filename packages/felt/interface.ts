@@ -41,6 +41,8 @@ export interface ESBuildConfig {
   metafile?: string;
   supported?: Record<string, boolean>;
   tsconfigRaw: TsconfigRaw;
+  // https://esbuild.github.io/api/#log-override
+  logOverride?: Record<string, "silent" | "verbose" | "debug" | "info" | "warning" | "error">;
 }
 
 export class ResolvedConfig {
@@ -60,6 +62,7 @@ export class ResolvedConfig {
     define: Record<string, string | undefined>;
     supported?: Record<string, boolean>;
     tsconfigRaw?: TsconfigRaw;
+    logOverride?: Record<string, "silent" | "verbose" | "debug" | "info" | "warning" | "error">;
   };
   cwd: string;
   constructor(partial: Config, cwd = Deno.cwd()) {
@@ -82,6 +85,7 @@ export class ResolvedConfig {
         : undefined,
       supported: partial?.esbuild?.supported,
       tsconfigRaw: partial?.esbuild?.tsconfigRaw,
+      logOverride: partial?.esbuild?.logOverride,
     };
   }
 }

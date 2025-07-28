@@ -42,6 +42,7 @@ export class Builder extends EventTarget {
       // does, and no browsers currently support (any form of) decorators,
       // and if we're bundling, we're probably running in a browser.
       tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
+      logOverride: this.manifest.esbuild.logOverride,
     };
 
     if (this.manifest.esbuild.metafile) {

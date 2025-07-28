@@ -38,6 +38,9 @@ const config: Config = {
         experimentalDecorators: true,
       },
     },
+    logOverride: {
+      "direct-eval": "silent",
+    },
   },
 };
 export default config;
