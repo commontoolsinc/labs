@@ -3,6 +3,19 @@ import { denoPlugins } from "@luca/esbuild-deno-loader";
 import { debounce } from "@std/async/debounce";
 import { ResolvedConfig } from "./interface.ts";
 
+function formatFileSize(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unitIndex = 0;
+  
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+  
+  return `${size.toFixed(1)} ${units[unitIndex]}`;
+}
+
 export class Builder extends EventTarget {
   constructor(public manifest: ResolvedConfig) {
     super();
@@ -24,9 +37,11 @@ export class Builder extends EventTarget {
   }
 
   async build() {
-    console.log("Building...");
+    const startTime = performance.now();
+    console.log(`Building ${this.manifest.entry}...`);
 
-    const config: Partial<Parameters<typeof esbuild.build>[0]> = {
+    try {
+      const config: Partial<Parameters<typeof esbuild.build>[0]> = {
       define: resolveDefines(this.manifest),
       sourcemap: this.manifest.esbuild.sourcemap,
       minify: this.manifest.esbuild.minify,
@@ -52,6 +67,15 @@ export class Builder extends EventTarget {
     const result = await esbuild.build(config);
     esbuild.stop();
 
+    // Calculate build time
+    const buildTime = Math.round(performance.now() - startTime);
+    
+    // Get output file size
+    const fileInfo = await Deno.stat(this.manifest.out);
+    const fileSize = formatFileSize(fileInfo.size);
+    
+    console.log(`✓ Built ${this.manifest.out} (${fileSize}) in ${buildTime}ms`);
+
     if (this.manifest.esbuild.metafile && result.metafile) {
       await Deno.writeTextFile(
         this.manifest.esbuild.metafile,
@@ -61,6 +85,11 @@ export class Builder extends EventTarget {
       console.log(await esbuild.analyzeMetafile(result.metafile));
     }
     this.dispatchEvent(new CustomEvent("build"));
+    } catch (error) {
+      const buildTime = Math.round(performance.now() - startTime);
+      console.error(`✗ Build failed after ${buildTime}ms`);
+      throw error;
+    }
   }
 }
 
