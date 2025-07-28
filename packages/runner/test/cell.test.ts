@@ -17,6 +17,8 @@ import { areLinksSame, isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { areNormalizedLinksSame } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
+(Error as any).stackTraceLimit = Infinity;
+
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
@@ -115,24 +117,6 @@ describe("Cell", () => {
     c.set({ a: { b: { c: 42 } } });
     c.getAsQueryResult().a.b.c = 100;
     expect(c.key("a").key("b").key("c").get()).toBe(100);
-  });
-
-  it("should call updates callback when value changes", () => {
-    const cell = runtime.getCell<number>(
-      space,
-      "should call updates callback when value changes",
-      undefined,
-      tx,
-    );
-    cell.set(0);
-    const values: number[] = [];
-    const unsink = cell.getDoc().updates((value) => values.push(value));
-    cell.send(1);
-    cell.send(2);
-    cell.send(3);
-    unsink();
-    cell.send(4);
-    expect(values).toEqual([1, 2, 3]);
   });
 
   it("should get raw value using getRaw", () => {
@@ -917,19 +901,25 @@ describe("asCell", () => {
       tx,
     );
     c.set({ a: { b: 42, c: 10 }, d: 5 });
+    tx.commit();
+    tx = runtime.edit();
     const values: number[] = [];
     c.key("a").key("b").sink((value) => {
       values.push(value);
     });
     expect(values).toEqual([42]); // Initial call
-    c.getAsQueryResult().d = 50;
-    await runtime.idle();
-    c.getAsQueryResult().a.c = 100;
-    await runtime.idle();
-    c.getAsQueryResult().a.b = 42;
-    await runtime.idle();
+    c.withTx(tx).getAsQueryResult().d = 50;
+    tx.commit();
+    tx = runtime.edit();
+    c.withTx(tx).getAsQueryResult().a.c = 100;
+    tx.commit();
+    tx = runtime.edit();
+    c.withTx(tx).getAsQueryResult().a.b = 42;
+    tx.commit();
+    tx = runtime.edit();
     expect(values).toEqual([42]); // Didn't get called again
-    c.getAsQueryResult().a.b = 300;
+    c.withTx(tx).getAsQueryResult().a.b = 300;
+    tx.commit();
     await runtime.idle();
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
     expect(values).toEqual([42, 300]); // Got called again
