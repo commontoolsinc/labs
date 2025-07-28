@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import { refer } from "merkle-reference/json";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
@@ -51,6 +52,8 @@ import type {
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
 import "./builtins/index.ts";
+
+const logger = getLogger("runner");
 
 export class Runner implements IRunner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -122,6 +125,13 @@ export class Runner implements IRunner {
       );
       resultCell.withTx(tx).setSourceCell(processCell);
     }
+
+    logger.debug(() => [
+      `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
+      `processCell: ${
+        resultCell.withTx(tx).getSourceCell()?.getAsNormalizedFullLink().id
+      }`,
+    ]);
 
     let recipeId: string | undefined;
 
@@ -341,10 +351,6 @@ export class Runner implements IRunner {
           "Error committing transaction:",
           error,
           JSON.stringify((error as any).transaction?.args, null, 2),
-        );
-        console.error(`resultCell: ${resultCell.getAsNormalizedFullLink().id}`);
-        console.error(
-          `processCell: ${resultCell.getSourceCell()?.getAsNormalizedFullLink().id}`,
         );
         throw error;
       }
@@ -881,7 +887,6 @@ export class Runner implements IRunner {
       processCell,
     );
 
-    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
     const inputsCell = this.runtime.getImmutableCell(
       processCell.space,
       mappedInputBindings,
@@ -923,25 +928,8 @@ export class Runner implements IRunner {
     recipe: Recipe,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
-    const inputsCell = this.runtime.getCell(
-      processCell.space,
-      { immutable: inputs },
-      undefined,
-      tx,
-    );
-    inputsCell.setRaw(inputs);
-    const reads = findAllWriteRedirectCells(inputs, processCell);
 
-    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllWriteRedirectCells(outputs, processCell);
-
-    const action: Action = (tx: IExtendedStorageTransaction) => {
-      const inputsProxy = inputsCell.getAsQueryResult([], tx);
-      sendValueToBinding(tx, processCell, outputBindings, inputsProxy);
-    };
-
-    addCancel(this.runtime.scheduler.schedule(action, { reads, writes }));
+    sendValueToBinding(tx, processCell, outputBindings, inputs);
   }
 
   private instantiateRecipeNode(

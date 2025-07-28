@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
@@ -33,6 +34,11 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
+
+const logger = getLogger("scheduler", {
+  enabled: true,
+  level: "debug",
+});
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
@@ -128,6 +134,7 @@ export class Scheduler implements IScheduler {
 
   schedule(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
+    logger.debug(() => ["Scheduling action:", action, reads]);
     reads.forEach((addr) =>
       this.dirty.add(`${addr.space}/${addr.id}/${addr.type}`)
     );
@@ -148,6 +155,7 @@ export class Scheduler implements IScheduler {
   subscribe(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
     const pathsByEntity = addressesToPathByEntity(reads);
+    logger.debug(() => ["Subscribing for action:", action, pathsByEntity]);
     const entities = new Set<SpaceAndURI>();
 
     for (const [spaceAndURI, paths] of pathsByEntity) {
@@ -264,6 +272,7 @@ export class Scheduler implements IScheduler {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
+            logger.debug(() => ["Received change:", change]);
             if (change.address.type !== "application/json") continue;
             const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
             const paths = this.triggers.get(spaceAndURI);
@@ -275,6 +284,14 @@ export class Scheduler implements IScheduler {
                 change.address.path,
               );
               for (const action of triggeredActions) {
+                logger.debug(
+                  () => [
+                    `Triggered action for ${spaceAndURI}/${
+                      change.address.path.join("/")
+                    }`,
+                    action,
+                  ],
+                );
                 this.dirty.add(
                   `${spaceAndURI}/${change.address.type}` as SpaceURIAndType,
                 );
