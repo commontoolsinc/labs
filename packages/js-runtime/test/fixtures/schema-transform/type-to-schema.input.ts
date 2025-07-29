@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, handler, toSchema, Cell, Stream } from "commontools";
+import { recipe, NAME, handler, toSchema, Cell, Stream } from "commontools";
 
 // Define types using TypeScript - more compact!
 interface UpdaterInput {
@@ -54,4 +54,10 @@ interface User {
 
 const userSchema = toSchema<User>({
   description: "A user in the system",
+});
+
+export default recipe("test", (state) => {
+  return {
+    [NAME]: "test",
+  };
 });
