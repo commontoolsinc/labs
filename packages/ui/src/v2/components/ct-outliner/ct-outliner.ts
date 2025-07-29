@@ -1656,7 +1656,7 @@ export class CTOutliner extends BaseElement {
   private handleCheckboxChange(node: OutlineTreeNode, event: Event) {
     const checkbox = event.target as HTMLInputElement;
     const isChecked = checkbox.checked;
-    
+
     // Update the node's body to match the checkbox state
     this.setNodeCheckbox(node, isChecked);
   }
@@ -1672,29 +1672,29 @@ export class CTOutliner extends BaseElement {
           const nodeBodyCell = this.getNodeBodyCell(node);
           if (nodeBodyCell) {
             const currentBody = nodeBodyCell.get();
-            
+
             // Set checkbox to the specified state
             let newBody: string;
             const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentBody);
-            
+
             if (hasCheckbox) {
               // Update existing checkbox
               if (isChecked) {
                 // Set to checked
-                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, '[x] ');
+                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[x] ");
               } else {
                 // Set to unchecked (normalize to [ ])
-                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, '[ ] ');
+                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[ ] ");
               }
             } else {
               // Add checkbox if none exists
               if (isChecked) {
-                newBody = '[x] ' + currentBody;
+                newBody = "[x] " + currentBody;
               } else {
-                newBody = '[ ] ' + currentBody;
+                newBody = "[ ] " + currentBody;
               }
             }
-            
+
             nodeBodyCell.withTx(tx).set(newBody);
           }
         } else {
@@ -1703,15 +1703,21 @@ export class CTOutliner extends BaseElement {
           const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(mutableNode.body);
           if (hasCheckbox) {
             if (isChecked) {
-              mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[x] ');
+              mutableNode.body = mutableNode.body.replace(
+                /^\s*\[[ x]?\]\s*/,
+                "[x] ",
+              );
             } else {
-              mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[ ] ');
+              mutableNode.body = mutableNode.body.replace(
+                /^\s*\[[ x]?\]\s*/,
+                "[ ] ",
+              );
             }
           } else {
             if (isChecked) {
-              mutableNode.body = '[x] ' + mutableNode.body;
+              mutableNode.body = "[x] " + mutableNode.body;
             } else {
-              mutableNode.body = '[ ] ' + mutableNode.body;
+              mutableNode.body = "[ ] " + mutableNode.body;
             }
           }
         }
@@ -1722,21 +1728,27 @@ export class CTOutliner extends BaseElement {
         const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(mutableNode.body);
         if (hasCheckbox) {
           if (isChecked) {
-            mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[x] ');
+            mutableNode.body = mutableNode.body.replace(
+              /^\s*\[[ x]?\]\s*/,
+              "[x] ",
+            );
           } else {
-            mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[ ] ');
+            mutableNode.body = mutableNode.body.replace(
+              /^\s*\[[ x]?\]\s*/,
+              "[ ] ",
+            );
           }
         } else {
           if (isChecked) {
-            mutableNode.body = '[x] ' + mutableNode.body;
+            mutableNode.body = "[x] " + mutableNode.body;
           } else {
-            mutableNode.body = '[ ] ' + mutableNode.body;
+            mutableNode.body = "[ ] " + mutableNode.body;
           }
         }
       },
-      "setNodeCheckbox"
+      "setNodeCheckbox",
     );
-    
+
     this.requestUpdate();
   }
 
@@ -1750,12 +1762,16 @@ export class CTOutliner extends BaseElement {
     if (nodeBodyCell) {
       // Use current Cell value (not potentially stale node.body)
       const currentBody = nodeBodyCell.get();
-      currentState = TreeOperations.isCheckboxChecked({ body: currentBody, children: [], attachments: [] });
+      currentState = TreeOperations.isCheckboxChecked({
+        body: currentBody,
+        children: [],
+        attachments: [],
+      });
     } else {
       // Fallback to reading from node directly
       currentState = TreeOperations.isCheckboxChecked(node);
     }
-    
+
     this.setNodeCheckbox(node, !currentState);
   }
 
@@ -1965,9 +1981,7 @@ export class CTOutliner extends BaseElement {
           </div>
         </div>
 
-        ${this.renderAttachments(node)}
-
-        ${hasChildren && !isCollapsed
+        ${this.renderAttachments(node)} ${hasChildren && !isCollapsed
         ? html`
           <div class="children">
             ${this.renderNodes(node.children, level + 1)}
@@ -2037,7 +2051,10 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private renderMarkdownContent(content: string, node: OutlineTreeNode): unknown {
+  private renderMarkdownContent(
+    content: string,
+    node: OutlineTreeNode,
+  ): unknown {
     if (!content.trim()) {
       return html`
         <span class="placeholder">Empty</span>
@@ -2069,20 +2086,20 @@ export class CTOutliner extends BaseElement {
       });
 
       if (checkboxState !== null) {
-        const isChecked = checkboxState === 'checked';
+        const isChecked = checkboxState === "checked";
         return html`
           <span class="checkbox-content">
-            <input 
-              type="checkbox" 
-              class="node-checkbox" 
-              ?checked=${isChecked}
+            <input
+              type="checkbox"
+              class="node-checkbox"
+              ?checked="${isChecked}"
               @change="${(e: Event) => {
-                e.stopPropagation();
-                this.handleCheckboxChange(node, e);
-              }}"
+            e.stopPropagation();
+            this.handleCheckboxChange(node, e);
+          }}"
             />
             <span class="markdown-content" @click="${this
-              .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
+            .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
           </span>
         `;
       }
@@ -2100,6 +2117,37 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
+   * Get the path through the tree structure to reach a specific node
+   * @param targetNode The node to find the path to
+   * @returns Array representing the path through the tree structure, e.g. ['root', 'children', 0, 'children', 0]
+   */
+  private getTreeStructurePath(
+    targetNode: OutlineTreeNode,
+  ): (string | number)[] | null {
+    const findStructurePath = (
+      node: OutlineTreeNode,
+      currentPath: (string | number)[],
+    ): (string | number)[] | null => {
+      for (let i = 0; i < node.children.length; i++) {
+        const child = node.children[i];
+        const childPath = [...currentPath, "children", i];
+
+        if (child === targetNode) {
+          return childPath;
+        }
+
+        const result = findStructurePath(child, childPath);
+        if (result) {
+          return result;
+        }
+      }
+      return null;
+    };
+
+    return findStructurePath(this.tree.root, ["root"]);
+  }
+
+  /**
    * Render attachments for a node using ct-render
    */
   private renderAttachments(node: OutlineTreeNode): unknown {
@@ -2107,53 +2155,40 @@ export class CTOutliner extends BaseElement {
       return "";
     }
 
-    // Filter attachments to only renderable ones
-    const renderableAttachments = node.attachments.filter((attachment) => {
-      try {
-        // Check if the charm is actually a Cell (despite the type annotation)
-        // This follows the pattern described in the plan
-        const charm = attachment.charm as any;
-        
-        // Check if it's a valid cell
-        if (!isCell(charm)) {
-          return false;
-        }
-        
-        // Check if it has a recipe that can be rendered
-        const recipeId = getRecipeIdFromCharm(charm);
-        return !!recipeId;
-      } catch (error) {
-        // If any error occurs during validation, don't render this attachment
-        console.warn("Error validating attachment for rendering:", error);
-        return false;
-      }
-    });
-
-    if (renderableAttachments.length === 0) {
+    if (!isCell(this.value)) {
       return "";
     }
 
+    const path = this.getTreeStructurePath(node);
+
+    if (!path) {
+      return "";
+    }
+
+    const tree: Cell<Tree> = this.value;
+
+    const attachmentCells = node.attachments.map((_, index) => {
+      // Build the path to this specific attachment
+      const attachmentPath = [...path, "attachments", index];
+
+      // Apply the path to get the cell for this attachment
+      let attachmentCell: Cell<any> = tree;
+      for (const key of attachmentPath) {
+        attachmentCell = attachmentCell.key(key);
+      }
+
+      return attachmentCell;
+    });
+
     return html`
       <div class="attachments">
-        ${renderableAttachments.map((attachment) => {
-          try {
-            // Treat attachment.charm as a Cell (despite typing)
-            const charmCell = attachment.charm as any;
-            return html`
-              <div class="attachment">
-                <ct-render .cell=${charmCell}></ct-render>
-              </div>
-            `;
-          } catch (error) {
-            // Fallback for individual attachment errors
-            console.error("Error rendering attachment:", error);
-            return html`
-              <div class="attachment-error">
-                Failed to render attachment: ${attachment.name}
-              </div>
-            `;
-          }
-        })}
+        ${attachmentCells.map((attachment) => {
+        return html`
+          <div class="attachment">
+            <ct-render .cell="${attachment}"></ct-render>
+          </div>
+        `;
+      })}
       </div>
     `;
   }
