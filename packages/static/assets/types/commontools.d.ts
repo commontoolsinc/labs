@@ -265,7 +265,7 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[] : T ext
 }) : T;
 export declare const schema: <T extends JSONSchema>(schema: T) => T;
 export declare const toSchema: <T>(options?: Partial<JSONSchema>) => JSONSchema;
-export type CellToOpaque<T> = T extends Cell<infer U> ? Opaque<U> : T extends object ? {
+export type CellToOpaque<T> = T extends Cell<infer U> ? Opaque<U> : T extends Array<infer U> ? CellToOpaque<U>[] : T extends object ? {
     [K in keyof T]: CellToOpaque<T[K]>;
 } : T;
 export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : T extends {

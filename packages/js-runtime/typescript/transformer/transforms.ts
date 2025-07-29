@@ -105,6 +105,14 @@ export function createIfElseCall(
   );
 }
 
+function getSimpleName(ref: ts.Expression): string | undefined {
+  // If we only have one token, we can use it as the param name
+  if (ref.getLastToken() === undefined) {
+    return ref.getText();
+  }
+  return undefined;
+}
+
 /**
  * Transforms an expression containing OpaqueRef values.
  * Handles binary expressions and call expressions.
@@ -133,7 +141,7 @@ export function transformExpressionWithOpaqueRef(
       // This is more readable, performant, and maintains backwards compatibility
       // Step 1: Extract the single OpaqueRef and assign a parameter name
       const ref = opaqueRefs[0];
-      const paramName = "_v1";
+      const paramName = getSimpleName(ref) ?? "_v1";
 
       // Step 2: Replace the OpaqueRef with the parameter in the expression
       // Example: state.count + 1 becomes _v1 + 1
@@ -153,14 +161,14 @@ export function transformExpressionWithOpaqueRef(
         [factory.createParameterDeclaration(
           undefined,
           undefined,
-          factory.createIdentifier(paramName),  // Single parameter: _v1
+          factory.createIdentifier(paramName), // Single parameter: _v1
           undefined,
           undefined,
           undefined,
         )],
         undefined,
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-        lambdaBody,  // The transformed expression
+        lambdaBody, // The transformed expression
       );
 
       // Step 4: Create the derive identifier
@@ -178,7 +186,7 @@ export function transformExpressionWithOpaqueRef(
       return factory.createCallExpression(
         deriveIdentifier,
         undefined,
-        [ref, arrowFunction],  // Note: ref directly, not an object
+        [ref, arrowFunction], // Note: ref directly, not an object
       );
     } else {
       // Multiple OpaqueRefs: use object form
@@ -188,7 +196,7 @@ export function transformExpressionWithOpaqueRef(
       //   {state_items: state.items, state_filter: state.filter},
       //   ({state_items: _v1, state_filter: _v2}) => _v1.filter(i => i.name.includes(_v2)).length
       // )
-      
+
       // Step 1: Deduplicate OpaqueRefs (same ref might appear multiple times)
       // For example, if state.count appears 3 times, we only want one parameter
       const uniqueRefs = new Map<string, ts.Expression>();
@@ -243,7 +251,10 @@ export function transformExpressionWithOpaqueRef(
         }
       });
 
-      const refObject = factory.createObjectLiteralExpression(refProperties, false);
+      const refObject = factory.createObjectLiteralExpression(
+        refProperties,
+        false,
+      );
 
       // Step 4: Create object pattern for parameters - this will destructure in the arrow function
       // Maps the property names to our parameter names (_v1, _v2, etc.)
@@ -271,7 +282,9 @@ export function transformExpressionWithOpaqueRef(
         );
       });
 
-      const paramObjectPattern = factory.createObjectBindingPattern(paramProperties);
+      const paramObjectPattern = factory.createObjectBindingPattern(
+        paramProperties,
+      );
 
       // Step 5: Create the arrow function with object destructuring
       // ({state_items: _v1, state_filter: _v2}) => expression
@@ -281,14 +294,14 @@ export function transformExpressionWithOpaqueRef(
         [factory.createParameterDeclaration(
           undefined,
           undefined,
-          paramObjectPattern,  // The destructuring pattern we created
+          paramObjectPattern, // The destructuring pattern we created
           undefined,
           undefined,
           undefined,
         )],
         undefined,
         factory.createToken(ts.SyntaxKind.EqualsGreaterThanToken),
-        lambdaBody,  // The expression with refs replaced by _v1, _v2, etc.
+        lambdaBody, // The expression with refs replaced by _v1, _v2, etc.
       );
 
       // Step 6: Create the derive() call
@@ -305,7 +318,7 @@ export function transformExpressionWithOpaqueRef(
       return factory.createCallExpression(
         deriveIdentifier,
         undefined,
-        [refObject, arrowFunction],  // Note: refObject first, not a single ref
+        [refObject, arrowFunction], // Note: refObject first, not a single ref
       );
     }
   }
@@ -326,7 +339,7 @@ export function transformExpressionWithOpaqueRef(
     opaqueRefs.forEach((ref) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
-        const paramName = `_v${uniqueRefs.size + 1}`;
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
@@ -490,7 +503,7 @@ export function transformExpressionWithOpaqueRef(
     opaqueRefs.forEach((ref) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
-        const paramName = `_v${uniqueRefs.size + 1}`;
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
@@ -630,9 +643,6 @@ export function transformExpressionWithOpaqueRef(
 
   // Handle binary expressions (e.g., cell.value + 1, cell.value * 2)
   if (ts.isBinaryExpression(expression)) {
-    // Get unique variable name
-    const varName = "_v";
-
     // Get all OpaqueRef identifiers in the expression
     const opaqueRefs = collectOpaqueRefs(expression, checker);
 
@@ -647,7 +657,7 @@ export function transformExpressionWithOpaqueRef(
     opaqueRefs.forEach((ref) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
-        const paramName = `_v${uniqueRefs.size + 1}`;
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
@@ -862,20 +872,22 @@ export function addGetCallsToOpaqueRefs(
   return visit(node);
 }
 
+// TODO(@ubik2): Align these types with the TransformationType in debug.ts
+export type TransformationTypeString =
+  | "ternary"
+  | "jsx"
+  | "binary"
+  | "call"
+  | "element-access"
+  | "template";
+
 /**
  * Result of a transformation check.
  */
 export interface TransformationResult {
   transformed: boolean;
   node: ts.Node;
-  type:
-    | "ternary"
-    | "jsx"
-    | "binary"
-    | "call"
-    | "element-access"
-    | "template"
-    | null;
+  type: TransformationTypeString | null;
   error?: string;
 }
 
@@ -938,7 +950,7 @@ export function checkTransformation(
           type: null,
         };
       }
-      
+
       // Also skip if this is a method call (e.g., array.map)
       if (ts.isPropertyAccessExpression(node.expression.expression)) {
         // This is a method call, it should be handled at the CallExpression level

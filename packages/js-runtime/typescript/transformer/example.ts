@@ -1,4 +1,5 @@
-import { transformSource } from "./test-utils.ts";
+import { transformSource } from "../../test/test-utils.ts";
+// This code only exists as an example. It's not actually used.
 
 // Example source code with OpaqueRef patterns
 const exampleSource = `
@@ -57,7 +58,7 @@ console.log(exampleSource);
 
 console.log("\n=== TRANSFORM MODE ===");
 try {
-  const transformed = transformSource(exampleSource, {
+  const transformed = await transformSource(exampleSource, {
     mode: "transform",
     types: { "commontools.d.ts": commonToolsTypes },
   });
@@ -68,7 +69,7 @@ try {
 
 console.log("\n=== ERROR MODE ===");
 try {
-  transformSource(exampleSource, {
+  await transformSource(exampleSource, {
     mode: "error",
     types: { "commontools.d.ts": commonToolsTypes },
   });

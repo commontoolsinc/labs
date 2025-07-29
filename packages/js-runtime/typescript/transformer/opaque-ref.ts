@@ -9,12 +9,10 @@ import {
   addGetCallsToOpaqueRefs,
   checkTransformation,
   createIfElseCall,
+  TransformationTypeString,
   transformExpressionWithOpaqueRef,
 } from "./transforms.ts";
-import { 
-  TransformerOptions, 
-  TRANSFORMATION_TYPES 
-} from "./debug.ts";
+import { TRANSFORMATION_TYPES, TransformerOptions } from "./debug.ts";
 
 /**
  * Options for the OpaqueRef transformer.
@@ -36,14 +34,7 @@ export interface TransformationError {
   line: number;
   column: number;
   message: string;
-  type:
-    | "ternary"
-    | "jsx"
-    | "binary"
-    | "call"
-    | "element-access"
-    | "template"
-    | "spread";
+  type: TransformationTypeString;
 }
 
 /**
@@ -61,10 +52,20 @@ export function createOpaqueRefTransformer(
   const checker = program.getTypeChecker();
   const { mode = "transform", logger } = options;
   const errors: TransformationError[] = [];
+  // Methods explicitly defined on OpaqueRefMethods interface
+  // These methods should NOT be transformed with .get()
+  const opaqueRefMethods = [
+    "get",
+    "set",
+    "key",
+    "setDefault",
+    "setName",
+    "setSchema",
+    "map",
+  ];
 
   return (context) => {
     return (sourceFile) => {
-
       let needsIfElseImport = false;
       let needsDeriveImport = false;
       let needsToSchemaImport = false;
@@ -78,13 +79,7 @@ export function createOpaqueRefTransformer(
 
       const reportError = (
         node: ts.Node,
-        type:
-          | "ternary"
-          | "jsx"
-          | "binary"
-          | "call"
-          | "element-access"
-          | "template",
+        type: TransformationTypeString,
         message: string,
       ) => {
         const { line, character } = sourceFile.getLineAndCharacterOfPosition(
@@ -130,35 +125,48 @@ export function createOpaqueRefTransformer(
           // Check if this is a method call on an OpaqueRef (e.g., values.map(...))
           if (ts.isPropertyAccessExpression(node.expression)) {
             const methodName = node.expression.name.text;
-            // Skip if this is already a .get() call
-            if (methodName === "get") {
-              // Just visit children normally
-              return ts.visitEachChild(node, visit, context);
-            }
-            
-            const objectType = checker.getTypeAtLocation(node.expression.expression);
+            const objectType = checker.getTypeAtLocation(
+              node.expression.expression,
+            );
             if (isOpaqueRefType(objectType, checker)) {
               // Methods explicitly defined on OpaqueRefMethods interface
               // These methods should NOT be transformed with .get()
-              const opaqueRefMethods = ["get", "set", "key", "setDefault", "setName", "setSchema", "map"];
-              
-              const methodExistsOnOpaqueRef = opaqueRefMethods.includes(methodName);
-              
-              
+              const opaqueRefMethods = [
+                "get",
+                "set",
+                "key",
+                "setDefault",
+                "setName",
+                "setSchema",
+                "map",
+              ];
+
+              const methodExistsOnOpaqueRef = opaqueRefMethods.includes(
+                methodName,
+              );
+
               if (logger) {
-                const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-                logger(`[OpaqueRefTransformer] ${TRANSFORMATION_TYPES.OPAQUE_REF.METHOD_CALL} at ${sourceFile.fileName}:${line}:${character}`);
+                const { line, character } = sourceFile
+                  .getLineAndCharacterOfPosition(node.getStart());
+                logger(
+                  `[OpaqueRefTransformer] ${TRANSFORMATION_TYPES.OPAQUE_REF.METHOD_CALL} at ${sourceFile.fileName}:${line}:${character}`,
+                );
                 logger(`  methodName: ${methodName}`);
                 logger(`  objectType: ${checker.typeToString(objectType)}`);
                 logger(`  isOpaqueRefMethod: ${methodExistsOnOpaqueRef}`);
               }
-              
+
               // Only apply .get() transformation for array methods on OpaqueRef<Array>
               // when the OpaqueRef is a simple identifier (not a property access)
-              if (!methodExistsOnOpaqueRef && ts.isIdentifier(node.expression.expression)) {
+              if (
+                !methodExistsOnOpaqueRef &&
+                ts.isIdentifier(node.expression.expression)
+              ) {
                 // Check if this is an array type
                 const typeString = checker.typeToString(objectType);
-                if (typeString.includes("[]") || typeString.includes("Array<")) {
+                if (
+                  typeString.includes("[]") || typeString.includes("Array<")
+                ) {
                   // This is an array method on an OpaqueRef<Array>, add .get() before the method
                   const objectWithGet = context.factory.createCallExpression(
                     context.factory.createPropertyAccessExpression(
@@ -168,7 +176,7 @@ export function createOpaqueRefTransformer(
                     undefined,
                     [],
                   );
-                  
+
                   const newMethodCall = context.factory.createCallExpression(
                     context.factory.createPropertyAccessExpression(
                       objectWithGet,
@@ -176,9 +184,11 @@ export function createOpaqueRefTransformer(
                     ),
                     node.typeArguments,
                     // Visit arguments to handle any nested transformations
-                    node.arguments.map(arg => ts.visitNode(arg, visit) as ts.Expression),
+                    node.arguments.map((arg) =>
+                      ts.visitNode(arg, visit) as ts.Expression
+                    ),
                   );
-                  
+
                   return newMethodCall;
                 }
               } else if (methodExistsOnOpaqueRef) {
@@ -190,17 +200,26 @@ export function createOpaqueRefTransformer(
               // to be handled by the general transformation logic
             }
           }
-          
+
           // Special case: handler and recipe with type arguments or inline type annotations
           const functionName = getFunctionName(node);
           if (functionName === "handler" || functionName === "recipe") {
             // Handle recipe with type arguments
-            if (functionName === "recipe" && node.typeArguments && node.typeArguments.length >= 1) {
+            if (
+              functionName === "recipe" && node.typeArguments &&
+              node.typeArguments.length >= 1
+            ) {
               // Transform recipe<T>(name, fn) to recipe(toSchema<T>(), name, fn)
               // Transform recipe<T,R>(name, fn) to recipe(toSchema<T>(), toSchema<R>(), name, fn)
               if (logger) {
-                const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-                logger(`[OpaqueRefTransformer] Found recipe with type arguments at ${sourceFile.fileName}:${line + 1}`);
+                const { line } = sourceFile.getLineAndCharacterOfPosition(
+                  node.getStart(),
+                );
+                logger(
+                  `[OpaqueRefTransformer] Found recipe with type arguments at ${sourceFile.fileName}:${
+                    line + 1
+                  }`,
+                );
               }
 
               const recipeArgs = node.arguments;
@@ -238,13 +257,21 @@ export function createOpaqueRefTransformer(
 
               hasTransformed = true;
               return ts.visitEachChild(newRecipeCall, visit, context);
-            }
-            // Case 1: handler with explicit type arguments
-            else if (functionName === "handler" && node.typeArguments && node.typeArguments.length >= 2) {
+            } // Case 1: handler with explicit type arguments
+            else if (
+              functionName === "handler" && node.typeArguments &&
+              node.typeArguments.length >= 2
+            ) {
               // Transform handler<E,T>(fn) to handler(toSchema<E>(), toSchema<T>(), fn)
               if (logger) {
-                const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-                logger(`[OpaqueRefTransformer] Found handler with type arguments at ${sourceFile.fileName}:${line + 1}`);
+                const { line } = sourceFile.getLineAndCharacterOfPosition(
+                  node.getStart(),
+                );
+                logger(
+                  `[OpaqueRefTransformer] Found handler with type arguments at ${sourceFile.fileName}:${
+                    line + 1
+                  }`,
+                );
               }
 
               const [eventType, stateType] = node.typeArguments;
@@ -277,49 +304,58 @@ export function createOpaqueRefTransformer(
 
               hasTransformed = true;
               return ts.visitEachChild(newHandlerCall, visit, context);
-            }
-            // Case 2: handler without type arguments but with inline parameter types
+            } // Case 2: handler without type arguments but with inline parameter types
             else if (
               node.arguments.length === 1 &&
               (ts.isFunctionExpression(node.arguments[0]) ||
                 ts.isArrowFunction(node.arguments[0]))
             ) {
-              const handlerFn = node.arguments[0] as ts.FunctionExpression | ts.ArrowFunction;
-              
+              const handlerFn = node.arguments[0] as
+                | ts.FunctionExpression
+                | ts.ArrowFunction;
+
               // Check if the function has parameter type annotations
               if (handlerFn.parameters.length >= 2) {
                 const eventParam = handlerFn.parameters[0];
                 const stateParam = handlerFn.parameters[1];
-                
-                // Get the types of the parameters
-                const eventType = checker.getTypeAtLocation(eventParam);
-                const stateType = checker.getTypeAtLocation(stateParam);
-                
+
                 // Only transform if we have type annotations
                 if (eventParam.type || stateParam.type) {
                   if (logger) {
-                    const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-                    logger(`[OpaqueRefTransformer] Found handler with inline type annotations at ${sourceFile.fileName}:${line + 1}`);
+                    const { line } = sourceFile.getLineAndCharacterOfPosition(
+                      node.getStart(),
+                    );
+                    logger(
+                      `[OpaqueRefTransformer] Found handler with inline type annotations at ${sourceFile.fileName}:${
+                        line + 1
+                      }`,
+                    );
                   }
 
                   // Create type nodes from the parameter types
-                  const eventTypeNode = eventParam.type || 
-                    context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
-                  const stateTypeNode = stateParam.type || 
-                    context.factory.createKeywordTypeNode(ts.SyntaxKind.UnknownKeyword);
+                  const eventTypeNode = eventParam.type ||
+                    context.factory.createKeywordTypeNode(
+                      ts.SyntaxKind.UnknownKeyword,
+                    );
+                  const stateTypeNode = stateParam.type ||
+                    context.factory.createKeywordTypeNode(
+                      ts.SyntaxKind.UnknownKeyword,
+                    );
 
                   // Create toSchema calls
-                  const toSchemaEventCall = context.factory.createCallExpression(
-                    context.factory.createIdentifier("toSchema"),
-                    [eventTypeNode],
-                    [],
-                  );
+                  const toSchemaEventCall = context.factory
+                    .createCallExpression(
+                      context.factory.createIdentifier("toSchema"),
+                      [eventTypeNode],
+                      [],
+                    );
 
-                  const toSchemaStateCall = context.factory.createCallExpression(
-                    context.factory.createIdentifier("toSchema"),
-                    [stateTypeNode],
-                    [],
-                  );
+                  const toSchemaStateCall = context.factory
+                    .createCallExpression(
+                      context.factory.createIdentifier("toSchema"),
+                      [stateTypeNode],
+                      [],
+                    );
 
                   // Create new handler call with schema arguments
                   const newHandlerCall = context.factory.createCallExpression(
@@ -355,13 +391,11 @@ export function createOpaqueRefTransformer(
             // Just visit children normally for builder function calls
             return ts.visitEachChild(node, visit, context);
           }
-          
 
           // Check if this is a call to a ModuleFactory/HandlerFactory/RecipeFactory
           // These are functions returned by lift, handler, recipe, etc.
           const expressionType = checker.getTypeAtLocation(node.expression);
           const expressionTypeString = checker.typeToString(expressionType);
-          
 
           log(`Call expression's function type: ${expressionTypeString}`);
 
@@ -373,35 +407,48 @@ export function createOpaqueRefTransformer(
             expressionTypeString.includes("RecipeFactory<")
           ) {
             log(`Calling a factory function that expects Opaque parameters`);
-            
+
             // Special case: Check if we're passing an object literal that reconstructs
             // all properties from a single OpaqueRef source
-            if (node.arguments.length === 1 && ts.isObjectLiteralExpression(node.arguments[0])) {
+            if (
+              node.arguments.length === 1 &&
+              ts.isObjectLiteralExpression(node.arguments[0])
+            ) {
               const objectLiteral = node.arguments[0];
               const properties = objectLiteral.properties;
-              
+
               // Track the source OpaqueRef for all properties
               let commonSource: ts.Expression | null = null;
               let allFromSameSource = true;
               const propertyNames = new Set<string>();
-              
+
               for (const prop of properties) {
-                if (ts.isPropertyAssignment(prop) && ts.isPropertyAccessExpression(prop.initializer)) {
+                if (
+                  ts.isPropertyAssignment(prop) &&
+                  ts.isPropertyAccessExpression(prop.initializer)
+                ) {
                   const propAccess = prop.initializer;
-                  
+
                   // Check if this property access is from an OpaqueRef
-                  const objType = checker.getTypeAtLocation(propAccess.expression);
+                  const objType = checker.getTypeAtLocation(
+                    propAccess.expression,
+                  );
                   if (isOpaqueRefType(objType, checker)) {
                     if (commonSource === null) {
                       commonSource = propAccess.expression;
-                    } else if (propAccess.expression.getText() !== commonSource.getText()) {
+                    } else if (
+                      propAccess.expression.getText() !== commonSource.getText()
+                    ) {
                       // Different sources, can't simplify
                       allFromSameSource = false;
                       break;
                     }
-                    
+
                     // Check that the property name matches
-                    if (ts.isIdentifier(prop.name) && prop.name.text === propAccess.name.text) {
+                    if (
+                      ts.isIdentifier(prop.name) &&
+                      prop.name.text === propAccess.name.text
+                    ) {
                       propertyNames.add(prop.name.text);
                     } else {
                       // Property name doesn't match the access, can't simplify
@@ -419,30 +466,39 @@ export function createOpaqueRefTransformer(
                   break;
                 }
               }
-              
+
               // If all properties come from the same OpaqueRef source
               if (allFromSameSource && commonSource) {
                 // Get the type of the OpaqueRef source to check if we have all properties
                 const sourceType = checker.getTypeAtLocation(commonSource);
                 const typeArguments = (sourceType as any).resolvedTypeArguments;
-                
+
                 if (typeArguments && typeArguments.length > 0) {
                   const innerType = typeArguments[0];
                   const sourceProperties = innerType.getProperties();
                   const sourcePropertyNames = new Set<string>(
-                    sourceProperties.map((p: ts.Symbol) => p.getName())
+                    sourceProperties.map((p: ts.Symbol) => p.getName()),
                   );
-                  
+
                   // Only transform if we have ALL properties from the source
-                  const hasAllProperties = sourcePropertyNames.size === propertyNames.size &&
-                    [...sourcePropertyNames].every(name => propertyNames.has(name));
-                  
+                  const hasAllProperties =
+                    sourcePropertyNames.size === propertyNames.size &&
+                    [...sourcePropertyNames].every((name) =>
+                      propertyNames.has(name)
+                    );
+
                   if (hasAllProperties) {
                     if (logger) {
-                      const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
-                      logger(`[OpaqueRefTransformer] Simplifying object literal to OpaqueRef source at ${sourceFile.fileName}:${line + 1}`);
+                      const { line } = sourceFile.getLineAndCharacterOfPosition(
+                        node.getStart(),
+                      );
+                      logger(
+                        `[OpaqueRefTransformer] Simplifying object literal to OpaqueRef source at ${sourceFile.fileName}:${
+                          line + 1
+                        }`,
+                      );
                     }
-                    
+
                     hasTransformed = true;
                     return context.factory.updateCallExpression(
                       node,
@@ -454,22 +510,26 @@ export function createOpaqueRefTransformer(
                 }
               }
             }
-            
+
             return ts.visitEachChild(node, visit, context);
           }
 
           // Check if the function expects OpaqueRef parameters
           // If it does, we don't need to transform the arguments
           // BUT: Skip this check for method calls on OpaqueRef objects
-          const isMethodCallOnOpaqueRef = ts.isPropertyAccessExpression(node.expression) && 
-            isOpaqueRefType(checker.getTypeAtLocation(node.expression.expression), checker);
-          
+          const isMethodCallOnOpaqueRef =
+            ts.isPropertyAccessExpression(node.expression) &&
+            isOpaqueRefType(
+              checker.getTypeAtLocation(node.expression.expression),
+              checker,
+            );
+
           const functionSymbol = checker.getSymbolAtLocation(node.expression);
-          
+
           // Debug for reduce
-          
+
           // IMPORTANT: Skip parameter checking for methods called ON OpaqueRef objects
-          // 
+          //
           // When you call a method on OpaqueRef<T[]> (like state.values.reduce(...)):
           // - TypeScript reports that reduce expects OpaqueRef<T> parameters
           // - But in reality, the method operates on the underlying array and receives regular T values
@@ -481,7 +541,6 @@ export function createOpaqueRefTransformer(
           // - But actually reduce gets (number, number) => number when it runs
           // - So we skip this check for methods on OpaqueRef to allow proper transformation
           if (functionSymbol && !isMethodCallOnOpaqueRef) {
-            
             const functionType = checker.getTypeOfSymbolAtLocation(
               functionSymbol,
               node.expression,
@@ -504,17 +563,20 @@ export function createOpaqueRefTransformer(
                 );
                 const paramTypeString = checker.typeToString(paramType);
 
-                log(`Function ${getFunctionName(node)} parameter type: ${paramTypeString}`);
-                
-                
-                // Debug for reduce  
+                log(
+                  `Function ${
+                    getFunctionName(node)
+                  } parameter type: ${paramTypeString}`,
+                );
 
                 // If the function expects Opaque or OpaqueRef parameters, don't transform
                 if (
                   paramTypeString.includes("Opaque<") ||
                   paramTypeString.includes("OpaqueRef<")
                 ) {
-                  log(`Function expects Opaque/OpaqueRef parameters, skipping transformation`);
+                  log(
+                    `Function expects Opaque/OpaqueRef parameters, skipping transformation`,
+                  );
                   return ts.visitEachChild(node, visit, context);
                 }
               }
@@ -525,18 +587,19 @@ export function createOpaqueRefTransformer(
           // If it returns a Stream or OpaqueRef, we shouldn't transform it
           const callType = checker.getTypeAtLocation(node);
           const callTypeString = checker.typeToString(callType);
-          
 
           log(`Call expression type: ${callTypeString}`);
-          
 
-          // If this call returns a Stream or OpaqueRef, don't transform it
+          // If this call returns a Stream, OpaqueRef, or ModuleFactory don't
+          // transform it
           if (
             callTypeString.includes("Stream<") ||
             callTypeString.includes("OpaqueRef<") ||
             callTypeString.includes("ModuleFactory<")
           ) {
-            log(`Call returns Stream/OpaqueRef/ModuleFactory, skipping transformation`);
+            log(
+              `Call returns Stream/OpaqueRef/ModuleFactory, skipping transformation`,
+            );
             return ts.visitEachChild(node, visit, context);
           }
 
@@ -545,7 +608,7 @@ export function createOpaqueRefTransformer(
           // Only transform if we're inside a JSX expression
           const hasOpaqueRef = containsOpaqueRef(node, checker);
           const isInJsx = isInsideJsxExpression(node);
-          
+
           if (hasOpaqueRef && isInJsx) {
             // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
@@ -613,7 +676,10 @@ export function createOpaqueRefTransformer(
 
         // Handle element access (array indexing)
         // Only transform if we're inside a JSX expression
-        if (ts.isElementAccessExpression(node) && node.argumentExpression && isInsideJsxExpression(node)) {
+        if (
+          ts.isElementAccessExpression(node) && node.argumentExpression &&
+          isInsideJsxExpression(node)
+        ) {
           if (containsOpaqueRef(node.argumentExpression, checker)) {
             log(
               `Found element access transformation at ${sourceFile.fileName}:${
@@ -776,15 +842,7 @@ export function createOpaqueRefTransformer(
                         for (const property of properties) {
                           const propName = property.getName();
                           // Skip internal OpaqueRef methods
-                          if (
-                            propName === "get" || propName === "set" ||
-                            propName === "key" || propName === "map" ||
-                            propName === "setDefault" ||
-                            propName === "setName" ||
-                            propName === "setSchema" ||
-                            propName === "equals" || propName === "update" ||
-                            propName === "push" || propName === "send"
-                          ) {
+                          if (opaqueRefMethods.includes(propName)) {
                             continue;
                           }
 
@@ -843,9 +901,12 @@ export function createOpaqueRefTransformer(
             node.condition,
             visit,
           ) as ts.Expression;
-          
+
           // Transform condition if it contains OpaqueRef (e.g., state.value + 1)
-          if (!isSimpleOpaqueRefAccess(node.condition, checker) && containsOpaqueRef(node.condition, checker)) {
+          if (
+            !isSimpleOpaqueRefAccess(node.condition, checker) &&
+            containsOpaqueRef(node.condition, checker)
+          ) {
             visitedCondition = transformExpressionWithOpaqueRef(
               node.condition,
               checker,
@@ -857,7 +918,7 @@ export function createOpaqueRefTransformer(
               needsDeriveImport = true;
             }
           }
-          
+
           // Transform whenTrue and whenFalse branches if they contain OpaqueRef
           let visitedWhenTrue = ts.visitNode(
             node.whenTrue,
@@ -869,7 +930,10 @@ export function createOpaqueRefTransformer(
           ) as ts.Expression;
 
           // Check if branches need transformation
-          if (!isSimpleOpaqueRefAccess(node.whenTrue, checker) && containsOpaqueRef(node.whenTrue, checker)) {
+          if (
+            !isSimpleOpaqueRefAccess(node.whenTrue, checker) &&
+            containsOpaqueRef(node.whenTrue, checker)
+          ) {
             visitedWhenTrue = transformExpressionWithOpaqueRef(
               node.whenTrue,
               checker,
@@ -881,8 +945,11 @@ export function createOpaqueRefTransformer(
               needsDeriveImport = true;
             }
           }
-          
-          if (!isSimpleOpaqueRefAccess(node.whenFalse, checker) && containsOpaqueRef(node.whenFalse, checker)) {
+
+          if (
+            !isSimpleOpaqueRefAccess(node.whenFalse, checker) &&
+            containsOpaqueRef(node.whenFalse, checker)
+          ) {
             visitedWhenFalse = transformExpressionWithOpaqueRef(
               node.whenFalse,
               checker,
@@ -938,7 +1005,7 @@ export function createOpaqueRefTransformer(
         }
 
         // For other node types, check transformation first
-        
+
         const result = checkTransformation(node, checker);
 
         if (result.transformed) {
@@ -971,6 +1038,10 @@ export function createOpaqueRefTransformer(
               case "template":
                 message = "Template literal with OpaqueRef should use .get()";
                 break;
+              case "ternary":
+                message =
+                  "Ternary operator with OpaqueRef condition should use ifElse()";
+                break;
             }
             reportError(node, result.type!, message);
             return ts.visitEachChild(node, visit, context);
@@ -982,7 +1053,6 @@ export function createOpaqueRefTransformer(
           switch (result.type) {
             case "jsx": {
               const jsxNode = node as ts.JsxExpression;
-              
 
               // Check if this JSX expression is in an event handler attribute
               const parent = jsxNode.parent;
@@ -1013,7 +1083,6 @@ export function createOpaqueRefTransformer(
               }
               break;
             }
-
           }
         }
 
@@ -1042,7 +1111,6 @@ export function createOpaqueRefTransformer(
         if (needsToSchemaImport) {
           result = addCommonToolsImport(result, context.factory, "toSchema");
         }
-
       }
 
       return result;
