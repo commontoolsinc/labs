@@ -668,7 +668,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): Result<Read, ReadError> {
     const result = this.tx.read(address, options);
-    //    logResult("read", result, address, options);
+    logResult("read", result, address, options);
     return result;
   }
 
@@ -677,7 +677,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IReadOptions,
   ): JSONValue | undefined {
     const readResult = this.tx.read(address, options);
-    //logResult("readOrThrow, initial", readResult, address, options);
+    logResult("readOrThrow, initial", readResult, address, options);
     if (
       readResult.error &&
       readResult.error.name !== "NotFoundError" &&
