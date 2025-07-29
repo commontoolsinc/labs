@@ -7,7 +7,7 @@ import {
   isObject,
   isString,
 } from "../../utils/src/types.ts";
-import { Logger } from "../../utils/src/logger.ts";
+import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type {
   JSONObject,
@@ -20,7 +20,7 @@ import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import type { URI } from "./sigil-types.ts";
 import { fromURI } from "./uri-utils.ts";
 
-const logger = new Logger("traverse");
+const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
 export type SchemaPathSelector = {
   path: readonly string[];
