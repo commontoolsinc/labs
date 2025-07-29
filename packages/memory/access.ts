@@ -7,7 +7,7 @@ import {
   Reference,
   Signer,
 } from "./interface.ts";
-import { refer } from "merkle-reference/json";
+import { refer } from "merkle-reference";
 import { unauthorized } from "./error.ts";
 import { type DID } from "@commontools/identity";
 import { fromDID } from "./util.ts";
