@@ -195,7 +195,9 @@ export const setupIframe = (runtime: Runtime) =>
           const type = context.key(key).schema?.type ??
             currentValueType ?? typeof value;
           if (type === "object" && isObject(value)) {
-            context.key(key).update(value);
+            const tx = context.runtime.edit();
+            context.withTx(tx).key(key).update(value);
+            tx.commit();
           } else if (
             (type === "array" && Array.isArray(value)) ||
             (type === "integer" && typeof value === "number") ||
