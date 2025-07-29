@@ -1,68 +1,36 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commontools/identity";
-import * as Memory from "@commontools/memory";
-import * as Consumer from "@commontools/memory/consumer";
 import type { JSONSchema } from "@commontools/runner";
-import { Provider } from "../src/storage/cache.ts";
-import * as Subscription from "../src/storage/subscription.ts";
-import { IRuntime, Runtime } from "../src/runtime.ts";
-import {
-  IStorageManager,
-  IStorageSubscription,
-} from "../src/storage/interface.ts";
+import { Runtime } from "../src/runtime.ts";
+import { type Provider, StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+const space = signer.did();
 
 describe("Provider Subscriptions", () => {
-  let memoryDb: Memory.Memory.Memory;
-  let sessionProvider: Memory.Provider.Provider<Memory.Protocol>;
+  let runtime: Runtime;
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
   let provider: Provider;
-  let runtime: IRuntime;
 
   beforeEach(() => {
-    memoryDb = Memory.Memory.emulate({ serviceDid: signer.did() });
-    sessionProvider = Memory.Provider.create(memoryDb);
-    const consumer = Consumer.open({
-      as: signer,
-      session: sessionProvider.session(),
-    });
-
-    provider = Provider.open({
-      space: signer.did(),
-      session: consumer,
-      subscription: Subscription.create(),
-    });
-
-    const storageManager: IStorageManager = {
-      id: "some id",
-      open: (_space: Consumer.MemorySpace) => {
-        return provider;
-      },
-      edit() {
-        throw new Error("Not implemented");
-      },
-      subscribe(_subscription: IStorageSubscription) {
-        throw new Error("Not implemented");
-      },
-    };
+    storageManager = StorageManager.emulate({ as: signer });
 
     runtime = new Runtime({
       blobbyServerUrl: import.meta.url,
-      storageManager: storageManager,
+      storageManager,
     });
+
+    provider = storageManager.open(space) as Provider;
   });
 
   afterEach(async () => {
     await runtime?.dispose();
-    await provider?.destroy();
-    await sessionProvider?.close();
-    await memoryDb.close();
+    await storageManager?.close();
   });
 
   describe("pending nursery changes don't trigger subscription", () => {
     it("should not make subscription callbacks for pending nursery changes", async () => {
-      const space = signer.did();
       const schema = { "type": "number" } as const satisfies JSONSchema;
 
       // Initial sync to establish subscriptions for both users

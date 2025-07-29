@@ -100,6 +100,7 @@ describe("cell-map", () => {
         tx,
       );
       c.set({ value: 42 });
+      tx.commit();
 
       // Use Cell API to retrieve by entity ID
       const retrievedCell = runtime.getCellFromEntityId<{ value: number }>(

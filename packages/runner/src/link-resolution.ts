@@ -1,6 +1,5 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
-import type { JSONSchema } from "./builder/types.ts";
 import { LINK_V1_TAG } from "./sigil-types.ts";
 import {
   type CellLink,
@@ -193,7 +192,7 @@ export function readMaybeLink(
 
 const emptyResolvedFullLink: ResolvedFullLink = {
   space: "did:null:null",
-  id: "data:application/json,",
+  id: "data:application/json,{}",
   path: [],
   type: "application/json",
 } satisfies NormalizedFullLink as unknown as ResolvedFullLink;

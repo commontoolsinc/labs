@@ -142,6 +142,8 @@ describe("link-resolution", () => {
       sourceCell.setRaw({
         link: targetCell.getAsLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       // When resolving a link to a cell that has a schema,
       // the resolved link should point to the target cell with its schema
@@ -183,6 +185,8 @@ describe("link-resolution", () => {
       sourceCell.setRaw({
         link: targetCell.key("user").getAsLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       // The resolved link should have the adjusted schema for the user object
       const linkValue = sourceCell.key("link").get();
@@ -222,6 +226,8 @@ describe("link-resolution", () => {
       sourceCell.setRaw({
         alias: targetCell.getAsWriteRedirectLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       // Resolve with writeRedirect mode
       const linkValue = sourceCell.key("alias").get();
@@ -247,6 +253,8 @@ describe("link-resolution", () => {
         tx,
       );
       sourceCell.set({ link: targetCell });
+      tx.commit();
+      tx = runtime.edit();
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
@@ -286,6 +294,8 @@ describe("link-resolution", () => {
         linkData["/"]["link@1"].rootSchema = rootSchema;
       }
       sourceCell.setRaw({ link: linkData });
+      tx.commit();
+      tx = runtime.edit();
 
       const link = parseLink(sourceCell.get().link, sourceCell)!;
       const resolved = resolveLink(tx, link);
@@ -339,6 +349,8 @@ describe("link-resolution", () => {
       );
       // Link to cell2
       cell3.set({ ref: cell2 });
+      tx.commit();
+      tx = runtime.edit();
 
       // Following through cell3 -> cell2 -> cell1.nested
       // We need to resolve step by step since getAsNormalizedFullLink doesn't preserve schema
@@ -395,6 +407,8 @@ describe("link-resolution", () => {
       sourceCell.setRaw({
         link: targetCell.key("items").key(0).getAsLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
@@ -443,6 +457,8 @@ describe("link-resolution", () => {
         tx,
       );
       sourceCell.set({ ref: linkCell });
+      tx.commit();
+      tx = runtime.edit();
 
       // Following the chain should preserve the destination schema
       const linkValue = sourceCell.key("ref").get();
@@ -471,6 +487,8 @@ describe("link-resolution", () => {
       sourceCell.setRaw({
         link: targetCell.getAsLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
@@ -532,6 +550,8 @@ describe("link-resolution", () => {
         link: targetCell.key("level1").key("level2").key("level3").key(0)
           .getAsLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
@@ -572,6 +592,8 @@ describe("link-resolution", () => {
       sourceCell.setRaw({
         link: targetCell.getAsLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       const linkValue = sourceCell.key("link").get();
       const parsedLink = parseLink(linkValue, sourceCell)!;
@@ -615,6 +637,8 @@ describe("link-resolution", () => {
         name: "test",
         ref: targetCell.getAsLink({ includeSchema: true }),
       });
+      tx.commit();
+      tx = runtime.edit();
 
       // Resolving the ref should give us the target schema
       const linkValue = sourceCell.key("ref").get();
@@ -938,7 +962,7 @@ describe("link-resolution", () => {
 
         // This creates: A -> A/foo -> A/foo/foo -> A/foo/foo/foo -> ...
         // The iteration limit should catch this and return the empty document
-        expect(resolved.id).toBe("data:application/json,");
+        expect(resolved.id).toBe("data:application/json,{}");
         expect(resolved.space).toBe("did:null:null");
       } finally {
         // Clean up the timeout if it was set
@@ -994,7 +1018,7 @@ describe("link-resolution", () => {
         cellA.getAsNormalizedFullLink(),
         "value",
       );
-      expect(resolved.id).toBe("data:application/json,");
+      expect(resolved.id).toBe("data:application/json,{}");
       expect(resolved.space).toBe("did:null:null");
     });
 
