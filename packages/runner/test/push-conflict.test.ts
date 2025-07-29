@@ -36,6 +36,9 @@ describe.skip("Push conflict", () => {
     subscribe(_subscription: IStorageSubscription) {
       throw new Error("Not implemented");
     },
+    synced() {
+      return Promise.resolve();
+    },
   };
 
   beforeEach(() => {
