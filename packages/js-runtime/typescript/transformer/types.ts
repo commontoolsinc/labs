@@ -180,6 +180,100 @@ export function containsOpaqueRef(
 }
 
 /**
+ * Helper function to check if an identifier is a function parameter
+ * that we should skip (i.e., callback parameters, not recipe/handler parameters)
+ * 
+ * First attempts to use TypeScript's symbol API for accurate resolution,
+ * falls back to AST traversal if needed.
+ */
+function isFunctionParameter(node: ts.Identifier, checker: ts.TypeChecker): boolean {
+  // Try using TypeScript's symbol API first
+  const symbol = checker.getSymbolAtLocation(node);
+  if (symbol) {
+    const declarations = symbol.getDeclarations();
+    if (declarations && declarations.length > 0) {
+      // Check if any declaration is a parameter
+      const isParam = declarations.some(decl => ts.isParameter(decl));
+      if (isParam) {
+        // Now check if this is a recipe/handler parameter we should NOT skip
+        for (const decl of declarations) {
+          if (ts.isParameter(decl)) {
+            // Find the containing function
+            let parent = decl.parent;
+            if (ts.isFunctionExpression(parent) || 
+                ts.isArrowFunction(parent) || 
+                ts.isFunctionDeclaration(parent) ||
+                ts.isMethodDeclaration(parent)) {
+              // Check if this function is passed to recipe/handler/lift
+              let callExpr: ts.Node = parent;
+              while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
+                callExpr = callExpr.parent;
+              }
+              if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
+                const funcName = callExpr.parent.expression.getText();
+                if (funcName.includes('recipe') || funcName.includes('handler') || funcName.includes('lift')) {
+                  return false;
+                }
+              }
+            }
+            return true;
+          }
+        }
+      }
+    }
+  }
+  
+  // Fallback to AST traversal (original implementation)
+  // First check if the identifier itself is in a parameter position
+  const parent = node.parent;
+  if (ts.isParameter(parent) && parent.name === node) {
+    return true;
+  }
+  
+  // For identifiers used in function bodies, we need to check if they
+  // reference a parameter of the containing function
+  let current: ts.Node = node;
+  let containingFunction: ts.FunctionLikeDeclaration | undefined;
+  
+  // Find the containing function
+  while (current.parent) {
+    current = current.parent;
+    if (ts.isFunctionExpression(current) || 
+        ts.isArrowFunction(current) || 
+        ts.isFunctionDeclaration(current) ||
+        ts.isMethodDeclaration(current)) {
+      containingFunction = current as ts.FunctionLikeDeclaration;
+      break;
+    }
+  }
+  
+  if (containingFunction && containingFunction.parameters) {
+    // Check if this identifier matches any parameter name
+    for (const param of containingFunction.parameters) {
+      if (param.name && ts.isIdentifier(param.name) && param.name.text === node.text) {
+        // Special case: Don't skip parameters from recipe/handler functions
+        // We DO want to transform state.value, state.items, cell.value, etc.
+        // Check if this is a recipe or handler function by looking at the call expression
+        let callExpr: ts.Node = containingFunction;
+        while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
+          callExpr = callExpr.parent;
+        }
+        if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
+          const funcName = callExpr.parent.expression.getText();
+          if (funcName.includes('recipe') || funcName.includes('handler') || funcName.includes('lift')) {
+            return false;
+          }
+        }
+        
+        return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+/**
  * Collects all OpaqueRef expressions in a node.
  */
 export function collectOpaqueRefs(
@@ -196,6 +290,16 @@ export function collectOpaqueRefs(
 
     // For property access expressions, check if the result is an OpaqueRef
     if (ts.isPropertyAccessExpression(n) && ts.isExpression(n)) {
+      // Don't collect property access on function parameters as OpaqueRef dependencies
+      // Example: state.items.filter(i => i.active)
+      // - For i.active: n.expression is 'i' (a callback parameter) → don't collect i.active
+      // - For state.items: n.expression is 'state' (a recipe parameter) → do collect state.items
+      // This prevents trying to create derive({state_items: state.items, i_active: i.active}, ...)
+      // which would fail because 'i' only exists inside the callback, not in outer scope
+      if (ts.isIdentifier(n.expression) && isFunctionParameter(n.expression, checker)) {
+        return; // Don't add this property access to the OpaqueRef list
+      }
+      
       // Check if the result of the property access is an OpaqueRef
       const type = checker.getTypeAtLocation(n);
       if (isOpaqueRefType(type, checker)) {
@@ -210,6 +314,15 @@ export function collectOpaqueRefs(
       const parent = n.parent;
       if (ts.isPropertyAccessExpression(parent) && parent.name === n) {
         // This is the property name in a property access (e.g., 'count' in 'state.count')
+        return;
+      }
+
+      // Don't collect function parameters as OpaqueRef dependencies
+      // Example: state.items.filter(i => i) or array.map((item, index) => index)
+      // - 'i' and 'index' are function parameters → don't collect them
+      // - 'state' is a recipe parameter → do collect it (if it's an OpaqueRef)
+      // This prevents treating callback parameters as reactive dependencies
+      if (isFunctionParameter(n, checker)) {
         return;
       }
 

@@ -144,6 +144,7 @@ export function createOpaqueRefTransformer(
               
               const methodExistsOnOpaqueRef = opaqueRefMethods.includes(methodName);
               
+              
               if (logger) {
                 const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
                 logger(`[OpaqueRefTransformer] ${TRANSFORMATION_TYPES.OPAQUE_REF.METHOD_CALL} at ${sourceFile.fileName}:${line}:${character}`);
@@ -354,11 +355,13 @@ export function createOpaqueRefTransformer(
             // Just visit children normally for builder function calls
             return ts.visitEachChild(node, visit, context);
           }
+          
 
           // Check if this is a call to a ModuleFactory/HandlerFactory/RecipeFactory
           // These are functions returned by lift, handler, recipe, etc.
           const expressionType = checker.getTypeAtLocation(node.expression);
           const expressionTypeString = checker.typeToString(expressionType);
+          
 
           log(`Call expression's function type: ${expressionTypeString}`);
 
@@ -457,8 +460,28 @@ export function createOpaqueRefTransformer(
 
           // Check if the function expects OpaqueRef parameters
           // If it does, we don't need to transform the arguments
+          // BUT: Skip this check for method calls on OpaqueRef objects
+          const isMethodCallOnOpaqueRef = ts.isPropertyAccessExpression(node.expression) && 
+            isOpaqueRefType(checker.getTypeAtLocation(node.expression.expression), checker);
+          
           const functionSymbol = checker.getSymbolAtLocation(node.expression);
-          if (functionSymbol) {
+          
+          // Debug for reduce
+          
+          // IMPORTANT: Skip parameter checking for methods called ON OpaqueRef objects
+          // 
+          // When you call a method on OpaqueRef<T[]> (like state.values.reduce(...)):
+          // - TypeScript reports that reduce expects OpaqueRef<T> parameters
+          // - But in reality, the method operates on the underlying array and receives regular T values
+          // - If we check these misleading parameter types, we'll return early and skip the JSX transformation
+          // - This would prevent wrapping the expression in derive(), causing runtime errors
+          //
+          // Example: state.values.reduce((a, b) => a + b)
+          // - TypeScript says reduce expects (OpaqueRef<number>, OpaqueRef<number>) => OpaqueRef<number>
+          // - But actually reduce gets (number, number) => number when it runs
+          // - So we skip this check for methods on OpaqueRef to allow proper transformation
+          if (functionSymbol && !isMethodCallOnOpaqueRef) {
+            
             const functionType = checker.getTypeOfSymbolAtLocation(
               functionSymbol,
               node.expression,
@@ -482,6 +505,9 @@ export function createOpaqueRefTransformer(
                 const paramTypeString = checker.typeToString(paramType);
 
                 log(`Function ${getFunctionName(node)} parameter type: ${paramTypeString}`);
+                
+                
+                // Debug for reduce  
 
                 // If the function expects Opaque or OpaqueRef parameters, don't transform
                 if (
@@ -499,8 +525,10 @@ export function createOpaqueRefTransformer(
           // If it returns a Stream or OpaqueRef, we shouldn't transform it
           const callType = checker.getTypeAtLocation(node);
           const callTypeString = checker.typeToString(callType);
+          
 
           log(`Call expression type: ${callTypeString}`);
+          
 
           // If this call returns a Stream or OpaqueRef, don't transform it
           if (
@@ -515,7 +543,10 @@ export function createOpaqueRefTransformer(
           // Check if the entire call expression contains OpaqueRef values
           // This handles both arguments and method calls on OpaqueRef objects
           // Only transform if we're inside a JSX expression
-          if (containsOpaqueRef(node, checker) && isInsideJsxExpression(node)) {
+          const hasOpaqueRef = containsOpaqueRef(node, checker);
+          const isInJsx = isInsideJsxExpression(node);
+          
+          if (hasOpaqueRef && isInJsx) {
             // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
 
@@ -907,6 +938,7 @@ export function createOpaqueRefTransformer(
         }
 
         // For other node types, check transformation first
+        
         const result = checkTransformation(node, checker);
 
         if (result.transformed) {
@@ -950,6 +982,7 @@ export function createOpaqueRefTransformer(
           switch (result.type) {
             case "jsx": {
               const jsxNode = node as ts.JsxExpression;
+              
 
               // Check if this JSX expression is in an event handler attribute
               const parent = jsxNode.parent;

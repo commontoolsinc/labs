@@ -52,15 +52,15 @@ export default recipe({
         [UI]: (<div>
         <h3>Array Operations</h3>
         <p>Total items: {commontools_1.derive(state.items, _v1 => _v1.length)}</p>
-        <p>Filtered count: {commontools_1.derive(state.items, _v1 => _v1.filter(i => i.name.includes(state.filter)).length)}</p>
+        <p>Filtered count: {commontools_1.derive({ state_items: state.items, state_filter: state.filter }, ({ state_items: _v1, state_filter: _v2 }) => _v1.filter(i => i.name.includes(_v2)).length)}</p>
         
         <h3>Array with Complex Expressions</h3>
         <ul>
           {state.items.map(item => (<li key={item.id}>
               <span>{item.name}</span>
               <span> - Original: ${item.price}</span>
-              <span> - Discounted: ${commontools_1.derive({ item_price: item.price, state_discount: state.discount }, ({ item_price: _v1, state_discount: _v2 }) => (_v1 * (1 - _v2)).toFixed(2))}</span>
-              <span> - With tax: ${commontools_1.derive({ item_price: item.price, state_discount: state.discount, state_taxRate: state.taxRate }, ({ item_price: _v1, state_discount: _v2, state_taxRate: _v3 }) => (_v1 * (1 - _v2) * (1 + _v3)).toFixed(2))}</span>
+              <span> - Discounted: ${commontools_1.derive(state.discount, _v1 => (item.price * (1 - _v1)).toFixed(2))}</span>
+              <span> - With tax: ${commontools_1.derive({ state_discount: state.discount, state_taxRate: state.taxRate }, ({ state_discount: _v1, state_taxRate: _v2 }) => (item.price * (1 - _v1) * (1 + _v2)).toFixed(2))}</span>
             </li>))}
         </ul>
         
@@ -73,9 +73,9 @@ export default recipe({
         <p>Tax percent: {commontools_1.derive(state.taxRate, _v1 => _v1 * 100)}%</p>
         
         <h3>Array Predicates</h3>
-        <p>All active: {commontools_1.ifElse(commontools_1.derive({ state_items: state.items, i, i_active: i.active }, ({ state_items: _v1, i: _v2, i_active: _v3 }) => _v1.every(_v2 => _v3)), "Yes", "No")}</p>
-        <p>Any active: {commontools_1.ifElse(commontools_1.derive({ state_items: state.items, i, i_active: i.active }, ({ state_items: _v1, i: _v2, i_active: _v3 }) => _v1.some(_v2 => _v3)), "Yes", "No")}</p>
-        <p>Has expensive (gt 100): {commontools_1.ifElse(commontools_1.derive({ state_items: state.items, i, i_price: i.price }, ({ state_items: _v1, i: _v2, i_price: _v3 }) => _v1.some(_v2 => _v3 > 100)), "Yes", "No")}</p>
+        <p>All active: {commontools_1.ifElse(commontools_1.derive(state.items, _v1 => _v1.every(i => i.active)), "Yes", "No")}</p>
+        <p>Any active: {commontools_1.ifElse(commontools_1.derive(state.items, _v1 => _v1.some(i => i.active)), "Yes", "No")}</p>
+        <p>Has expensive (gt 100): {commontools_1.ifElse(commontools_1.derive(state.items, _v1 => _v1.some(i => i.price > 100)), "Yes", "No")}</p>
         
         <h3>Object Operations</h3>
         <div data-item-count={commontools_1.derive(state.items, _v1 => _v1.length)} data-has-filter={commontools_1.derive(state.filter, _v1 => _v1.length > 0)} data-discount={state.discount}>
