@@ -7,6 +7,7 @@ import {
   isObject,
   isString,
 } from "../../utils/src/types.ts";
+import { getLogger } from "../../utils/src/logger.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type {
   JSONObject,
@@ -18,6 +19,8 @@ import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import type { URI } from "./sigil-types.ts";
 import { fromURI } from "./uri-utils.ts";
+
+const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -94,11 +97,11 @@ export class CycleTracker<K> {
   }
   include(k: K, context?: unknown): Disposable | null {
     if (this.partial.has(k)) {
-      console.error(
+      logger.warn(() => [
         "Cycle Detected!",
         k,
         context,
-      );
+      ]);
       return null;
     }
     this.partial.add(k);
@@ -258,7 +261,7 @@ export abstract class BaseObjectTraverser<K, S> {
         ) as Immutable<JSONValue>;
       }
     } else {
-      console.error("Encountered unexpected object: ", doc.value);
+      logger.error(() => ["Encountered unexpected object: ", doc.value]);
       return null;
     }
   }
@@ -511,7 +514,7 @@ function narrowSchema(
   let docPathIndex = 0;
   while (docPathIndex < docPath.length && docPathIndex < selector.path.length) {
     if (docPath[docPathIndex] !== selector.path[docPathIndex]) {
-      console.warn("Mismatched paths", docPath, selector.path);
+      logger.warn(() => ["Mismatched paths", docPath, selector.path]);
       return MinimalSchemaSelector;
     }
     docPathIndex++;
@@ -626,48 +629,45 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   static resolveSchemaRef(
     schemaContext: Readonly<SchemaContext>,
   ): Readonly<SchemaContext> | undefined {
-    if (!isObject(schemaContext.schema) || !("$ref" in schemaContext.schema)) {
+    if (
+      !isObject(schemaContext.schema) || !("$ref" in schemaContext.schema) ||
+      schemaContext.schema["$ref"] === undefined
+    ) {
       // We shouldn't have called this function, but just return it as-is
       return schemaContext;
     }
     if (schemaContext.rootSchema === undefined) {
-      console.warn(
-        "Unsupported $ref without root schema: ",
-        schemaContext.schema["$ref"],
-      );
+      logger.warn(() => ["Unsupported $ref without root schema: ", schemaRef]);
       return undefined;
     }
-    if (schemaContext.schema["$ref"] === "#") {
+    const schemaRef = schemaContext.schema["$ref"];
+    if (schemaRef === "#") {
       return {
         schema: schemaContext.rootSchema,
         rootSchema: schemaContext.rootSchema,
       };
     } else if (
-      schemaContext.schema["$ref"]?.startsWith("#/definitions/") ||
-      schemaContext.schema["$ref"]?.startsWith("#/$defs/")
+      schemaRef.startsWith("#/definitions/") || schemaRef.startsWith("#/$defs/")
     ) {
-      const pathToDef = schemaContext.schema["$ref"].split("/");
+      const pathToDef = schemaRef.split("/");
       let schemaCursor = schemaContext.rootSchema;
+      // start at 1, since the 0 element is "#"
       for (let i = 1; i < pathToDef.length; i++) {
         if (!isObject(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
-          console.warn(
-            "Unresolved $ref in schema: ",
-            schemaContext.schema["$ref"],
-          );
+          logger.warn(() => ["Unresolved $ref in schema: ", schemaRef]);
           return undefined;
         }
         schemaCursor =
-          (schemaCursor as Record<string, JSONSchema | boolean>)[pathToDef[i]];
+          (schemaCursor as Readonly<Record<string, JSONSchema | boolean>>)[
+            pathToDef[i]
+          ];
       }
       return {
         schema: schemaCursor,
         rootSchema: schemaContext.rootSchema,
       };
     } else {
-      console.warn(
-        "Unsupported $ref in schema: ",
-        schemaContext.schema["$ref"],
-      );
+      logger.warn(() => ["Unsupported $ref in schema: ", schemaRef]);
       return undefined;
     }
   }
@@ -684,7 +684,9 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       // This value rejects all objects - just return
       return undefined;
     } else if (typeof schemaContext.schema !== "object") {
-      console.warn("Invalid schema is not an object", schemaContext.schema);
+      logger.warn(
+        () => ["Invalid schema is not an object", schemaContext.schema],
+      );
       return undefined;
     }
     if ("$ref" in schemaContext.schema) {
