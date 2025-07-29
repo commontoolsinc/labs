@@ -1,4 +1,11 @@
 import ts from "typescript";
+import { getLogger } from "@commontools/utils/logger";
+
+// Create a debug logger for type checking - disabled by default
+const logger = getLogger("transformer-types", {
+  enabled: false,
+  level: "debug",
+});
 
 /**
  * Checks if a TypeScript type is an OpaqueRef type.
@@ -8,32 +15,36 @@ export function isOpaqueRefType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): boolean {
-  // Debug logging
-  const debugType = false; // Set to true to debug type checking
-  if (debugType) {
-    console.log(
-      `[isOpaqueRefType] Checking type: ${checker.typeToString(type)}`,
-    );
-    console.log(`[isOpaqueRefType] Type flags: ${type.flags}`);
+  // Debug logging with lazy evaluation
+  logger.debug(() =>
+    `[isOpaqueRefType] Checking type: ${checker.typeToString(type)}`
+  );
+  logger.debug(() => `[isOpaqueRefType] Type flags: ${type.flags}`);
+
+  logger.debug(() => {
     if (type.aliasSymbol) {
-      console.log(
-        `[isOpaqueRefType] Alias symbol: ${type.aliasSymbol.getName()}`,
-      );
+      return [`[isOpaqueRefType] Alias symbol: ${type.aliasSymbol.getName()}`];
     }
-    // Additional debug info
+    return [];
+  });
+
+  // Additional debug info
+  logger.debug(() => {
     const symbol = type.getSymbol();
     if (symbol) {
-      console.log(`[isOpaqueRefType] Symbol name: ${symbol.getName()}`);
+      const messages = [`[isOpaqueRefType] Symbol name: ${symbol.getName()}`];
       const declarations = symbol.getDeclarations();
       if (declarations && declarations.length > 0) {
-        console.log(
+        messages.push(
           `[isOpaqueRefType] Symbol declared in: ${
             declarations[0].getSourceFile().fileName
           }`,
         );
       }
+      return messages;
     }
-  }
+    return [];
+  });
 
   // Handle union types (e.g., OpaqueRef<T> | undefined)
   if (type.flags & ts.TypeFlags.Union) {
@@ -103,7 +114,6 @@ export function containsOpaqueRef(
   checker: ts.TypeChecker,
 ): boolean {
   let found = false;
-  const debugContains = false; // Enable debug logging
 
   const visit = (n: ts.Node): void => {
     if (found) return;
@@ -111,17 +121,13 @@ export function containsOpaqueRef(
     // For property access expressions, check if the result is an OpaqueRef
     if (ts.isPropertyAccessExpression(n)) {
       const type = checker.getTypeAtLocation(n);
-      if (debugContains) {
-        console.log(
-          `[containsOpaqueRef] Checking PropertyAccess: ${n.getText()}`,
-        );
-      }
+      logger.debug(() =>
+        `[containsOpaqueRef] Checking PropertyAccess: ${n.getText()}`
+      );
       if (isOpaqueRefType(type, checker)) {
-        if (debugContains) {
-          console.log(
-            `[containsOpaqueRef] Found OpaqueRef in PropertyAccess: ${n.getText()}`,
-          );
-        }
+        logger.debug(() =>
+          `[containsOpaqueRef] Found OpaqueRef in PropertyAccess: ${n.getText()}`
+        );
         found = true;
         return;
       }
@@ -150,15 +156,13 @@ export function containsOpaqueRef(
       }
 
       const type = checker.getTypeAtLocation(n);
-      if (debugContains) {
-        console.log(`[containsOpaqueRef] Checking Identifier: ${n.getText()}`);
-      }
+      logger.debug(() =>
+        `[containsOpaqueRef] Checking Identifier: ${n.getText()}`
+      );
       if (isOpaqueRefType(type, checker)) {
-        if (debugContains) {
-          console.log(
-            `[containsOpaqueRef] Found OpaqueRef in Identifier: ${n.getText()}`,
-          );
-        }
+        logger.debug(() =>
+          `[containsOpaqueRef] Found OpaqueRef in Identifier: ${n.getText()}`
+        );
         found = true;
         return;
       }
@@ -167,43 +171,44 @@ export function containsOpaqueRef(
     ts.forEachChild(n, visit);
   };
 
-  if (debugContains) {
-    console.log(
-      `[containsOpaqueRef] Starting check for node: ${node.getText()}`,
-    );
-  }
+  logger.debug(() =>
+    `[containsOpaqueRef] Starting check for node: ${node.getText()}`
+  );
   visit(node);
-  if (debugContains) {
-    console.log(`[containsOpaqueRef] Result: ${found}`);
-  }
+  logger.debug(() => `[containsOpaqueRef] Result: ${found}`);
   return found;
 }
 
 /**
  * Helper function to check if an identifier is a function parameter
  * that we should skip (i.e., callback parameters, not recipe/handler parameters)
- * 
+ *
  * First attempts to use TypeScript's symbol API for accurate resolution,
  * falls back to AST traversal if needed.
  */
-function isFunctionParameter(node: ts.Identifier, checker: ts.TypeChecker): boolean {
+function isFunctionParameter(
+  node: ts.Identifier,
+  checker: ts.TypeChecker,
+): boolean {
   // Try using TypeScript's symbol API first
   const symbol = checker.getSymbolAtLocation(node);
   if (symbol) {
     const declarations = symbol.getDeclarations();
     if (declarations && declarations.length > 0) {
       // Check if any declaration is a parameter
-      const isParam = declarations.some(decl => ts.isParameter(decl));
+      const isParam = declarations.some((decl) => ts.isParameter(decl));
       if (isParam) {
         // Now check if this is a recipe/handler parameter we should NOT skip
         for (const decl of declarations) {
           if (ts.isParameter(decl)) {
             // Find the containing function
             const parent = decl.parent;
-            if (ts.isFunctionExpression(parent) || 
-                ts.isArrowFunction(parent) || 
-                ts.isFunctionDeclaration(parent) ||
-                ts.isMethodDeclaration(parent)) {
+            if (
+              ts.isFunctionExpression(parent) ||
+              ts.isArrowFunction(parent) ||
+              ts.isFunctionDeclaration(parent) ||
+              ts.isMethodDeclaration(parent)
+            ) {
               // Check if this function is passed to recipe/handler/lift
               let callExpr: ts.Node = parent;
               while (callExpr.parent && !ts.isCallExpression(callExpr.parent)) {
@@ -211,7 +216,10 @@ function isFunctionParameter(node: ts.Identifier, checker: ts.TypeChecker): bool
               }
               if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
                 const funcName = callExpr.parent.expression.getText();
-                if (funcName.includes('recipe') || funcName.includes('handler') || funcName.includes('lift')) {
+                if (
+                  funcName.includes("recipe") || funcName.includes("handler") ||
+                  funcName.includes("lift")
+                ) {
                   return false;
                 }
               }
@@ -222,35 +230,40 @@ function isFunctionParameter(node: ts.Identifier, checker: ts.TypeChecker): bool
       }
     }
   }
-  
+
   // Fallback to AST traversal (original implementation)
   // First check if the identifier itself is in a parameter position
   const parent = node.parent;
   if (ts.isParameter(parent) && parent.name === node) {
     return true;
   }
-  
+
   // For identifiers used in function bodies, we need to check if they
   // reference a parameter of the containing function
   let current: ts.Node = node;
   let containingFunction: ts.FunctionLikeDeclaration | undefined;
-  
+
   // Find the containing function
   while (current.parent) {
     current = current.parent;
-    if (ts.isFunctionExpression(current) || 
-        ts.isArrowFunction(current) || 
-        ts.isFunctionDeclaration(current) ||
-        ts.isMethodDeclaration(current)) {
+    if (
+      ts.isFunctionExpression(current) ||
+      ts.isArrowFunction(current) ||
+      ts.isFunctionDeclaration(current) ||
+      ts.isMethodDeclaration(current)
+    ) {
       containingFunction = current as ts.FunctionLikeDeclaration;
       break;
     }
   }
-  
+
   if (containingFunction && containingFunction.parameters) {
     // Check if this identifier matches any parameter name
     for (const param of containingFunction.parameters) {
-      if (param.name && ts.isIdentifier(param.name) && param.name.text === node.text) {
+      if (
+        param.name && ts.isIdentifier(param.name) &&
+        param.name.text === node.text
+      ) {
         // Special case: Don't skip parameters from recipe/handler functions
         // We DO want to transform state.value, state.items, cell.value, etc.
         // Check if this is a recipe or handler function by looking at the call expression
@@ -260,16 +273,19 @@ function isFunctionParameter(node: ts.Identifier, checker: ts.TypeChecker): bool
         }
         if (callExpr.parent && ts.isCallExpression(callExpr.parent)) {
           const funcName = callExpr.parent.expression.getText();
-          if (funcName.includes('recipe') || funcName.includes('handler') || funcName.includes('lift')) {
+          if (
+            funcName.includes("recipe") || funcName.includes("handler") ||
+            funcName.includes("lift")
+          ) {
             return false;
           }
         }
-        
+
         return true;
       }
     }
   }
-  
+
   return false;
 }
 
@@ -296,10 +312,13 @@ export function collectOpaqueRefs(
       // - For state.items: n.expression is 'state' (a recipe parameter) → do collect state.items
       // This prevents trying to create derive({state_items: state.items, i_active: i.active}, ...)
       // which would fail because 'i' only exists inside the callback, not in outer scope
-      if (ts.isIdentifier(n.expression) && isFunctionParameter(n.expression, checker)) {
+      if (
+        ts.isIdentifier(n.expression) &&
+        isFunctionParameter(n.expression, checker)
+      ) {
         return; // Don't add this property access to the OpaqueRef list
       }
-      
+
       // Check if the result of the property access is an OpaqueRef
       const type = checker.getTypeAtLocation(n);
       if (isOpaqueRefType(type, checker)) {

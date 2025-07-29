@@ -2,8 +2,7 @@
  * Base options for all transformers
  */
 export interface TransformerOptions {
-  /** Optional logger function for debugging output */
-  logger?: (message: string) => void;
+  // Currently no shared options
 }
 
 /**

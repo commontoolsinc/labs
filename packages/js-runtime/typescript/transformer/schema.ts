@@ -1,10 +1,16 @@
 import ts from "typescript";
+import { getLogger } from "@commontools/utils/logger";
 import {
   addCommonToolsImport,
   hasCommonToolsImport,
   removeCommonToolsImport,
 } from "./imports.ts";
-import { TransformerOptions } from "./debug.ts";
+
+// Create logger for Schema transformer
+const logger = getLogger("schema-transformer", {
+  enabled: false,
+  level: "debug",
+});
 
 /**
  * Transformer that converts TypeScript types to JSONSchema objects.
@@ -12,10 +18,8 @@ import { TransformerOptions } from "./debug.ts";
  */
 export function createSchemaTransformer(
   program: ts.Program,
-  options: TransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
   const checker = program.getTypeChecker();
-  const logger = options.logger;
 
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
@@ -33,15 +37,18 @@ export function createSchemaTransformer(
           const typeArg = node.typeArguments[0];
           const type = checker.getTypeFromTypeNode(typeArg);
 
-          if (logger && typeArg) {
-            let typeText = "unknown";
-            try {
-              typeText = typeArg.getText();
-            } catch {
-              // getText() fails on synthetic nodes without source file context
+          logger.debug(() => {
+            if (typeArg) {
+              let typeText = "unknown";
+              try {
+                typeText = typeArg.getText();
+              } catch {
+                // getText() fails on synthetic nodes without source file context
+              }
+              return `[SchemaTransformer] Found toSchema<${typeText}>() call`;
             }
-            logger(`[SchemaTransformer] Found toSchema<${typeText}>() call`);
-          }
+            return "[SchemaTransformer] Found toSchema call";
+          });
 
           // Extract options from the call arguments
           const options = node.arguments[0];
@@ -97,11 +104,9 @@ export function createSchemaTransformer(
       // Always remove toSchema import since it doesn't exist at runtime
       // The SchemaTransformer should have transformed all toSchema calls
       if (hasCommonToolsImport(result, "toSchema")) {
-        if (logger) {
-          logger(
-            `[SchemaTransformer] Removing toSchema import (not available at runtime)`,
-          );
-        }
+        logger.debug(() =>
+          `[SchemaTransformer] Removing toSchema import (not available at runtime)`
+        );
         result = removeCommonToolsImport(result, context.factory, "toSchema");
       }
 

@@ -1,4 +1,5 @@
 import ts from "typescript";
+import { getLogger } from "@commontools/utils/logger";
 import {
   containsOpaqueRef,
   isOpaqueRefType,
@@ -14,10 +15,16 @@ import {
 } from "./transforms.ts";
 import { TRANSFORMATION_TYPES, TransformerOptions } from "./debug.ts";
 
+// Create logger for OpaqueRef transformer
+const logger = getLogger("opaque-ref-transformer", {
+  enabled: false,
+  level: "debug",
+});
+
 /**
  * Options for the OpaqueRef transformer.
  */
-export interface OpaqueRefTransformerOptions extends TransformerOptions {
+export interface OpaqueRefTransformerOptions {
   /**
    * Mode of operation:
    * - 'transform': Transform the code (default)
@@ -50,7 +57,7 @@ export function createOpaqueRefTransformer(
   options: OpaqueRefTransformerOptions = {},
 ): ts.TransformerFactory<ts.SourceFile> {
   const checker = program.getTypeChecker();
-  const { mode = "transform", logger } = options;
+  const { mode = "transform" } = options;
   const errors: TransformationError[] = [];
   // Methods explicitly defined on OpaqueRefMethods interface
   // These methods should NOT be transformed with .get()
@@ -70,12 +77,6 @@ export function createOpaqueRefTransformer(
       let needsDeriveImport = false;
       let needsToSchemaImport = false;
       let hasTransformed = false;
-
-      const log = (message: string) => {
-        if (logger) {
-          logger(`[OpaqueRefTransformer] ${message}`);
-        }
-      };
 
       const reportError = (
         node: ts.Node,
@@ -145,16 +146,16 @@ export function createOpaqueRefTransformer(
                 methodName,
               );
 
-              if (logger) {
+              logger.debug(() => {
                 const { line, character } = sourceFile
                   .getLineAndCharacterOfPosition(node.getStart());
-                logger(
+                return [
                   `[OpaqueRefTransformer] ${TRANSFORMATION_TYPES.OPAQUE_REF.METHOD_CALL} at ${sourceFile.fileName}:${line}:${character}`,
-                );
-                logger(`  methodName: ${methodName}`);
-                logger(`  objectType: ${checker.typeToString(objectType)}`);
-                logger(`  isOpaqueRefMethod: ${methodExistsOnOpaqueRef}`);
-              }
+                  `  methodName: ${methodName}`,
+                  `  objectType: ${checker.typeToString(objectType)}`,
+                  `  isOpaqueRefMethod: ${methodExistsOnOpaqueRef}`,
+                ].join("\n");
+              });
 
               // Only apply .get() transformation for array methods on OpaqueRef<Array>
               // when the OpaqueRef is a simple identifier (not a property access)
@@ -211,16 +212,14 @@ export function createOpaqueRefTransformer(
             ) {
               // Transform recipe<T>(name, fn) to recipe(toSchema<T>(), name, fn)
               // Transform recipe<T,R>(name, fn) to recipe(toSchema<T>(), toSchema<R>(), name, fn)
-              if (logger) {
+              logger.debug(() => {
                 const { line } = sourceFile.getLineAndCharacterOfPosition(
                   node.getStart(),
                 );
-                logger(
-                  `[OpaqueRefTransformer] Found recipe with type arguments at ${sourceFile.fileName}:${
-                    line + 1
-                  }`,
-                );
-              }
+                return `[OpaqueRefTransformer] Found recipe with type arguments at ${sourceFile.fileName}:${
+                  line + 1
+                }`;
+              });
 
               const recipeArgs = node.arguments;
               const schemaArgs: ts.Expression[] = [];
@@ -263,16 +262,14 @@ export function createOpaqueRefTransformer(
               node.typeArguments.length >= 2
             ) {
               // Transform handler<E,T>(fn) to handler(toSchema<E>(), toSchema<T>(), fn)
-              if (logger) {
+              logger.debug(() => {
                 const { line } = sourceFile.getLineAndCharacterOfPosition(
                   node.getStart(),
                 );
-                logger(
-                  `[OpaqueRefTransformer] Found handler with type arguments at ${sourceFile.fileName}:${
-                    line + 1
-                  }`,
-                );
-              }
+                return `[OpaqueRefTransformer] Found handler with type arguments at ${sourceFile.fileName}:${
+                  line + 1
+                }`;
+              });
 
               const [eventType, stateType] = node.typeArguments;
               const handlerArgs = node.arguments;
@@ -321,16 +318,14 @@ export function createOpaqueRefTransformer(
 
                 // Only transform if we have type annotations
                 if (eventParam.type || stateParam.type) {
-                  if (logger) {
+                  logger.debug(() => {
                     const { line } = sourceFile.getLineAndCharacterOfPosition(
                       node.getStart(),
                     );
-                    logger(
-                      `[OpaqueRefTransformer] Found handler with inline type annotations at ${sourceFile.fileName}:${
-                        line + 1
-                      }`,
-                    );
-                  }
+                    return `[OpaqueRefTransformer] Found handler with inline type annotations at ${sourceFile.fileName}:${
+                      line + 1
+                    }`;
+                  });
 
                   // Create type nodes from the parameter types
                   const eventTypeNode = eventParam.type ||
@@ -397,7 +392,9 @@ export function createOpaqueRefTransformer(
           const expressionType = checker.getTypeAtLocation(node.expression);
           const expressionTypeString = checker.typeToString(expressionType);
 
-          log(`Call expression's function type: ${expressionTypeString}`);
+          logger.debug(() =>
+            `[OpaqueRefTransformer] Call expression's function type: ${expressionTypeString}`
+          );
 
           // If we're calling a ModuleFactory, HandlerFactory, or RecipeFactory
           // these expect Opaque parameters
@@ -406,7 +403,9 @@ export function createOpaqueRefTransformer(
             expressionTypeString.includes("HandlerFactory<") ||
             expressionTypeString.includes("RecipeFactory<")
           ) {
-            log(`Calling a factory function that expects Opaque parameters`);
+            logger.debug(() =>
+              `[OpaqueRefTransformer] Calling a factory function that expects Opaque parameters`
+            );
 
             // Special case: Check if we're passing an object literal that reconstructs
             // all properties from a single OpaqueRef source
@@ -488,16 +487,14 @@ export function createOpaqueRefTransformer(
                     );
 
                   if (hasAllProperties) {
-                    if (logger) {
+                    logger.debug(() => {
                       const { line } = sourceFile.getLineAndCharacterOfPosition(
                         node.getStart(),
                       );
-                      logger(
-                        `[OpaqueRefTransformer] Simplifying object literal to OpaqueRef source at ${sourceFile.fileName}:${
-                          line + 1
-                        }`,
-                      );
-                    }
+                      return `[OpaqueRefTransformer] Simplifying object literal to OpaqueRef source at ${sourceFile.fileName}:${
+                        line + 1
+                      }`;
+                    });
 
                     hasTransformed = true;
                     return context.factory.updateCallExpression(
@@ -563,10 +560,10 @@ export function createOpaqueRefTransformer(
                 );
                 const paramTypeString = checker.typeToString(paramType);
 
-                log(
-                  `Function ${
+                logger.debug(() =>
+                  `[OpaqueRefTransformer] Function ${
                     getFunctionName(node)
-                  } parameter type: ${paramTypeString}`,
+                  } parameter type: ${paramTypeString}`
                 );
 
                 // If the function expects Opaque or OpaqueRef parameters, don't transform
@@ -574,8 +571,8 @@ export function createOpaqueRefTransformer(
                   paramTypeString.includes("Opaque<") ||
                   paramTypeString.includes("OpaqueRef<")
                 ) {
-                  log(
-                    `Function expects Opaque/OpaqueRef parameters, skipping transformation`,
+                  logger.debug(() =>
+                    `[OpaqueRefTransformer] Function expects Opaque/OpaqueRef parameters, skipping transformation`
                   );
                   return ts.visitEachChild(node, visit, context);
                 }
@@ -588,7 +585,9 @@ export function createOpaqueRefTransformer(
           const callType = checker.getTypeAtLocation(node);
           const callTypeString = checker.typeToString(callType);
 
-          log(`Call expression type: ${callTypeString}`);
+          logger.debug(() =>
+            `[OpaqueRefTransformer] Call expression type: ${callTypeString}`
+          );
 
           // If this call returns a Stream, OpaqueRef, or ModuleFactory don't
           // transform it
@@ -597,8 +596,8 @@ export function createOpaqueRefTransformer(
             callTypeString.includes("OpaqueRef<") ||
             callTypeString.includes("ModuleFactory<")
           ) {
-            log(
-              `Call returns Stream/OpaqueRef/ModuleFactory, skipping transformation`,
+            logger.debug(() =>
+              `[OpaqueRefTransformer] Call returns Stream/OpaqueRef/ModuleFactory, skipping transformation`
             );
             return ts.visitEachChild(node, visit, context);
           }
@@ -681,11 +680,11 @@ export function createOpaqueRefTransformer(
           isInsideJsxExpression(node)
         ) {
           if (containsOpaqueRef(node.argumentExpression, checker)) {
-            log(
-              `Found element access transformation at ${sourceFile.fileName}:${
+            logger.debug(() =>
+              `[OpaqueRefTransformer] Found element access transformation at ${sourceFile.fileName}:${
                 sourceFile.getLineAndCharacterOfPosition(node.getStart()).line +
                 1
-              }`,
+              }`
             );
             hasTransformed = true;
             const transformedArgument = addGetCallsToOpaqueRefs(
@@ -724,11 +723,11 @@ export function createOpaqueRefTransformer(
             ts.isTemplateExpression(template) &&
             containsOpaqueRef(template, checker)
           ) {
-            log(
-              `Found tagged template expression transformation at ${sourceFile.fileName}:${
+            logger.debug(() =>
+              `[OpaqueRefTransformer] Found tagged template expression transformation at ${sourceFile.fileName}:${
                 sourceFile.getLineAndCharacterOfPosition(node.getStart()).line +
                 1
-              }`,
+              }`
             );
             hasTransformed = true;
 
@@ -760,11 +759,11 @@ export function createOpaqueRefTransformer(
         if (ts.isTemplateExpression(node) && isInsideJsxExpression(node)) {
           // Check if any template span contains OpaqueRef
           if (containsOpaqueRef(node, checker)) {
-            log(
-              `Found template expression transformation at ${sourceFile.fileName}:${
+            logger.debug(() =>
+              `[OpaqueRefTransformer] Found template expression transformation at ${sourceFile.fileName}:${
                 sourceFile.getLineAndCharacterOfPosition(node.getStart()).line +
                 1
-              }`,
+              }`
             );
             hasTransformed = true;
 
@@ -803,11 +802,11 @@ export function createOpaqueRefTransformer(
           }
 
           if (needsTransformation) {
-            log(
-              `Found object spread transformation at ${sourceFile.fileName}:${
+            logger.debug(() =>
+              `[OpaqueRefTransformer] Found object spread transformation at ${sourceFile.fileName}:${
                 sourceFile.getLineAndCharacterOfPosition(node.getStart()).line +
                 1
-              }`,
+              }`
             );
             hasTransformed = true;
 
@@ -977,11 +976,11 @@ export function createOpaqueRefTransformer(
             conditionIsOpaqueRef || conditionContainsOpaqueRef ||
             visitedCondition !== node.condition
           ) {
-            log(
-              `Found ternary transformation at ${sourceFile.fileName}:${
+            logger.debug(() =>
+              `[OpaqueRefTransformer] Found ternary transformation at ${sourceFile.fileName}:${
                 sourceFile.getLineAndCharacterOfPosition(node.getStart()).line +
                 1
-              }`,
+              }`
             );
 
             if (mode === "error") {
@@ -1009,10 +1008,10 @@ export function createOpaqueRefTransformer(
         const result = checkTransformation(node, checker);
 
         if (result.transformed) {
-          log(
-            `Found ${result.type} transformation at ${sourceFile.fileName}:${
+          logger.debug(() =>
+            `[OpaqueRefTransformer] Found ${result.type} transformation at ${sourceFile.fileName}:${
               sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1
-            }`,
+            }`
           );
 
           if (mode === "error") {
