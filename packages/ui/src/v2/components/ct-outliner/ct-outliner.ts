@@ -7,7 +7,7 @@ import {
   type CellController,
   createCellController,
 } from "../../core/cell-controller.ts";
-import { type Cell, isCell, NAME } from "@commontools/runner";
+import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
 
 import type {
   EditingKeyboardContext,
@@ -25,7 +25,7 @@ import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import { FocusUtils } from "./focus-utils.ts";
-import { Charm, getRecipeIdFromCharm } from "@commontools/charm";
+import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
 import "../ct-render/ct-render.ts";
 
 /**
@@ -2159,33 +2159,46 @@ export class CTOutliner extends BaseElement {
       return "";
     }
 
-    const path = this.getTreeStructurePath(node);
-
-    if (!path) {
-      return "";
-    }
-
     const tree: Cell<Tree> = this.value;
+    const runtime = tree.runtime;
+    const space = tree.space;
 
-    const attachmentCells = node.attachments.map((_, index) => {
-      // Build the path to this specific attachment
-      const attachmentPath = [...path, "attachments", index];
+    // Create proper charm cell references from attachment charm objects
+    const charmCells = node.attachments.map((attachment) => {
+      try {
+        // Extract entity ID from the charm object
+        const entityId = getEntityId(attachment);
 
-      // Apply the path to get the cell for this attachment
-      let attachmentCell: Cell<any> = tree;
-      for (const key of attachmentPath) {
-        attachmentCell = attachmentCell.key(key);
+        if (!entityId) {
+          console.warn("No entity ID found for attachment charm:", attachment);
+          return null;
+        }
+
+        // Create a proper charm cell reference using the runtime
+        const charmCell = runtime.getCellFromEntityId<Charm>(
+          space,
+          entityId,
+          [],
+          charmSchema,
+        );
+
+        return charmCell;
+      } catch (error) {
+        console.error(
+          "Error creating charm cell for attachment:",
+          error,
+          attachment,
+        );
+        return null;
       }
-
-      return attachmentCell;
-    });
+    }).filter((cell): cell is Cell<Charm> => cell !== null);
 
     return html`
       <div class="attachments">
-        ${attachmentCells.map((attachment) => {
+        ${charmCells.map((charmCell) => {
         return html`
           <div class="attachment">
-            <ct-render .cell="${attachment}"></ct-render>
+            <ct-render .cell="${charmCell}"></ct-render>
           </div>
         `;
       })}
