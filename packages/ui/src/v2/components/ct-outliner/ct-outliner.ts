@@ -25,7 +25,8 @@ import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import { FocusUtils } from "./focus-utils.ts";
-import { Charm } from "@commontools/charm";
+import { Charm, getRecipeIdFromCharm } from "@commontools/charm";
+import "../ct-render/ct-render.ts";
 
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
@@ -405,6 +406,35 @@ export class CTOutliner extends BaseElement {
     /* Hide bullet when checkbox is present */
     .node-content:has(.checkbox-content) .bullet {
       display: none;
+    }
+
+    /* Attachment styles */
+    .attachments {
+      margin-top: 0.5rem;
+      margin-left: 1rem;
+      border-left: 2px solid var(--border);
+      padding-left: 0.75rem;
+    }
+
+    .attachment {
+      margin-bottom: 0.5rem;
+      border-radius: 0.25rem;
+      background-color: var(--muted);
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+    }
+
+    .attachment:last-child {
+      margin-bottom: 0;
+    }
+
+    .attachment-error {
+      color: var(--muted-foreground);
+      font-style: italic;
+      padding: 0.25rem;
+      background-color: var(--background);
+      border: 1px dashed var(--border);
+      border-radius: 0.25rem;
     }
   `;
 
@@ -1935,6 +1965,8 @@ export class CTOutliner extends BaseElement {
           </div>
         </div>
 
+        ${this.renderAttachments(node)}
+
         ${hasChildren && !isCollapsed
         ? html`
           <div class="children">
@@ -2065,6 +2097,65 @@ export class CTOutliner extends BaseElement {
         <span>${content}</span>
       `;
     }
+  }
+
+  /**
+   * Render attachments for a node using ct-render
+   */
+  private renderAttachments(node: OutlineTreeNode): unknown {
+    if (!node.attachments || node.attachments.length === 0) {
+      return "";
+    }
+
+    // Filter attachments to only renderable ones
+    const renderableAttachments = node.attachments.filter((attachment) => {
+      try {
+        // Check if the charm is actually a Cell (despite the type annotation)
+        // This follows the pattern described in the plan
+        const charm = attachment.charm as any;
+        
+        // Check if it's a valid cell
+        if (!isCell(charm)) {
+          return false;
+        }
+        
+        // Check if it has a recipe that can be rendered
+        const recipeId = getRecipeIdFromCharm(charm);
+        return !!recipeId;
+      } catch (error) {
+        // If any error occurs during validation, don't render this attachment
+        console.warn("Error validating attachment for rendering:", error);
+        return false;
+      }
+    });
+
+    if (renderableAttachments.length === 0) {
+      return "";
+    }
+
+    return html`
+      <div class="attachments">
+        ${renderableAttachments.map((attachment) => {
+          try {
+            // Treat attachment.charm as a Cell (despite typing)
+            const charmCell = attachment.charm as any;
+            return html`
+              <div class="attachment">
+                <ct-render .cell=${charmCell}></ct-render>
+              </div>
+            `;
+          } catch (error) {
+            // Fallback for individual attachment errors
+            console.error("Error rendering attachment:", error);
+            return html`
+              <div class="attachment-error">
+                Failed to render attachment: ${attachment.name}
+              </div>
+            `;
+          }
+        })}
+      </div>
+    `;
   }
 }
 
