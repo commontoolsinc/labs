@@ -89,7 +89,7 @@ describe.skip("Push conflict", () => {
     });
 
     // Update memory without notifying main storage
-    await memory.sync(listURI, true); // Get current value
+    await memory.sync(listURI); // Get current value
     expect(memory.get(listURI)).toEqual({ value: [] });
 
     await memory.send([{ uri: listURI, value: { value: [1, 2, 3] } }]);
@@ -153,8 +153,8 @@ describe.skip("Push conflict", () => {
     const nameURI = name.getAsNormalizedFullLink().id;
     const listURI = list.getAsNormalizedFullLink().id;
     // Update memory without notifying main storage
-    await memory.sync(nameURI, true); // Get current value
-    await memory.sync(listURI, true); // Get current value
+    await memory.sync(nameURI); // Get current value
+    await memory.sync(listURI); // Get current value
     await memory.send<any>([
       { uri: nameURI, value: { value: "foo" } },
       { uri: listURI, value: { value: [1, 2, 3] } },
@@ -220,8 +220,8 @@ describe.skip("Push conflict", () => {
     const nameURI = name.getAsNormalizedFullLink().id;
     const listURI = list.getAsNormalizedFullLink().id;
     // Update memory without notifying main storage
-    await memory.sync(nameURI, true); // Get current value
-    await memory.sync(listURI, true); // Get current value
+    await memory.sync(nameURI); // Get current value
+    await memory.sync(listURI); // Get current value
     await memory.send<any>([
       { uri: nameURI, value: { value: "foo" } },
       { uri: listURI, value: { value: [{ n: 1 }, { n: 2 }, { n: 3 }] } },

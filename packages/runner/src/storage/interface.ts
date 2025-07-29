@@ -13,7 +13,7 @@ import type {
   QueryError as IQueryError,
   Result,
   Retraction,
-  SchemaContext,
+  SchemaPathSelector,
   Signer,
   State,
   The as MediaType,
@@ -31,7 +31,7 @@ export type {
   MediaType,
   MemorySpace,
   Result,
-  SchemaContext,
+  SchemaPathSelector,
   State,
   Unit,
   URI,
@@ -135,15 +135,12 @@ export interface IStorageProvider {
    * Sync a value from storage. Use `get()` to retrieve the value.
    *
    * @param uri - uri of the entity to sync.
-   * @param expectedInStorage - Wait for the value, it's assumed to be in
-   *   storage eventually.
-   * @param schemaContext - The schemaContext that determines what to sync.
+   * @param selector - The SchemaPathSelector with the path and schemaContext that determines what to sync.
    * @returns Promise that resolves when the value is synced.
    */
   sync(
     uri: URI,
-    expectedInStorage?: boolean,
-    schemaContext?: SchemaContext,
+    selector?: SchemaPathSelector,
   ): Promise<Result<Unit, Error>>;
 
   /**
