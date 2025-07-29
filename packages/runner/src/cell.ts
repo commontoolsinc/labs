@@ -648,6 +648,12 @@ export class RegularCell<T> implements Cell<T> {
 
   setRaw(value: any): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
+    try {
+      value = JSON.parse(JSON.stringify(value));
+    } catch (e) {
+      console.error("Can't set raw value, it's not JSON serializable", e);
+      return;
+    }
     this.tx.writeValueOrThrow(this.link, value);
   }
 
