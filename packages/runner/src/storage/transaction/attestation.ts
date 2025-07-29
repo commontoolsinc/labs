@@ -51,7 +51,7 @@ export class UnsupportedMediaTypeError extends Error
 /**
  * Takes `source` attestation, `address` and `value` and produces derived
  * attestation with `value` set to a property that given `address` leads to
- * in the `source`. Fails with inconsitency error if provided `address` leads
+ * in the `source`. Fails with type mismatch error if provided `address` leads
  * to a non-object target, or NotFound error if the document doesn't exist.
  */
 export const write = (
@@ -62,10 +62,10 @@ export const write = (
   IAttestation,
   IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
 > => {
-  const path = address.path.slice(source.address.path.length);
-  if (path.length === 0) {
+  if (address.path.length === source.address.path.length) {
     return { ok: { ...source, value } };
   } else {
+    const path = [...address.path];
     const key = path.pop()!;
     const patch = {
       ...source,
