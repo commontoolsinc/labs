@@ -192,7 +192,7 @@ export class Chronicle {
       if (
         error.name === "NotFoundError" || error.name === "TypeMismatchError"
       ) {
-        const claim = this.#history.claim(loaded);
+        this.#history.claim(loaded);
       }
       return { error };
     } else {
