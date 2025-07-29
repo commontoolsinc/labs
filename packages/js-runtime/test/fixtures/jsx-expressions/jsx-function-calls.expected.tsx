@@ -67,7 +67,7 @@ export default recipe({
         <p>Parse Float: {commontools_1.derive(state.float, _v1 => parseFloat(_v1))}</p>
         
         <h3>Array Method Calls</h3>
-        <p>Sum: {state.values.reduce((a, b) => a + b, 0)}</p>
+        <p>Sum: {commontools_1.derive(state.values, _v1 => _v1.reduce((a, b) => a + b, 0))}</p>
         <p>Max value: {commontools_1.derive(state.values, _v1 => Math.max(..._v1))}</p>
         <p>Joined: {commontools_1.derive(state.values, _v1 => _v1.join(", "))}</p>
         
