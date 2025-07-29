@@ -15,6 +15,7 @@ import {
   StorageInspectorState,
   StorageInspectorUpdateEvent,
 } from "./storage-inspector.ts";
+import { setupIframe } from "./iframe-ctx.ts";
 
 async function createSession(
   root: Identity,
@@ -156,6 +157,9 @@ export class RuntimeInternals extends EventTarget {
       },
     });
 
+    // Set up iframe context handler
+    setupIframe(runtime);
+
     charmManager = new CharmManager(session, runtime);
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
@@ -230,6 +234,9 @@ export async function createCharmsController(
       navigateToCharm(charmManager.getSpaceName(), id);
     },
   });
+
+  // Set up iframe context handler
+  setupIframe(runtime);
 
   charmManager = new CharmManager(session, runtime);
   await charmManager.synced();
