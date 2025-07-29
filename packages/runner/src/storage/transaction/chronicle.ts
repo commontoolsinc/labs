@@ -514,11 +514,8 @@ class Changes {
   get(at: IMemoryAddress["path"]): IAttestation | undefined {
     let candidate: undefined | IAttestation = undefined;
     for (const invariant of this.#model.values()) {
-      // Check if invariant's path is a prefix of requested path
-      const path = invariant.address.path.join("/");
-
       // For exact match or if invariant is parent of requested path
-      if (at.join("/").startsWith(path)) {
+      if (invariant.address.path.every((p, i) => p === at[i])) {
         const size = invariant.address.path.length;
         if ((candidate?.address?.path?.length ?? -1) < size) {
           candidate = invariant;
@@ -530,10 +527,10 @@ class Changes {
   }
 
   put(invariant: IAttestation) {
-    this.#model.set(invariant.address.path.join("/"), invariant);
+    this.#model.set(JSON.stringify(invariant.address.path), invariant);
   }
   delete(invariant: IAttestation) {
-    this.#model.delete(invariant.address.path.join("/"));
+    this.#model.delete(JSON.stringify(invariant.address.path));
   }
 
   /**

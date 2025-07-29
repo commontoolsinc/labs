@@ -1,5 +1,6 @@
 import { FactAddress } from "@commontools/memory";
 import { IMemoryChange, IMergedChanges, State } from "./interface.ts";
+import * as Address from "./transaction/address.ts";
 
 export const create = () => new Changes();
 
@@ -97,9 +98,7 @@ class Changes implements IMergedChanges {
   }
 
   add(change: IMemoryChange) {
-    const key = `/${change.address.type}/${change.address.id}/${
-      change.address.path.join("/")
-    }`;
+    const key = Address.toString(change.address);
 
     if (!this.#model.has(key)) {
       this.#model.set(key, change);
