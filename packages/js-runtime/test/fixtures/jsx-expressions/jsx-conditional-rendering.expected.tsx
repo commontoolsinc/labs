@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { h, recipe, UI, ifElse, JSONSchema } from "commontools";
+import { h, recipe, UI, ifElse, derive, JSONSchema } from "commontools";
 interface State {
     isActive: boolean;
     count: number;
@@ -39,18 +39,18 @@ export default recipe({
         <span>{commontools_1.ifElse(state.hasPermission, "Authorized", "Denied")}</span>
         
         <h3>Ternary with Comparisons</h3>
-        <span>{commontools_1.ifElse(state.count > 10, "High", "Low")}</span>
-        <span>{commontools_1.ifElse(state.score >= 90, "A", commontools_1.ifElse(state.score >= 80, "B", "C"))}</span>
-        <span>{commontools_1.ifElse(state.count === 0, "Empty", commontools_1.ifElse(state.count === 1, "Single", "Multiple"))}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.count, _v1 => _v1 > 10), "High", "Low")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.score, _v1 => _v1 >= 90), "A", state.score >= 80 ? "B" : "C")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.count, _v1 => _v1 === 0), "Empty", state.count === 1 ? "Single" : "Multiple")}</span>
         
         <h3>Nested Ternary</h3>
-        <span>{commontools_1.ifElse(state.isActive, commontools_1.ifElse(state.isPremium, "Premium Active", "Regular Active"), "Inactive")}</span>
-        <span>{commontools_1.ifElse(state.userType === "admin", "Admin", commontools_1.ifElse(state.userType === "user", "User", "Guest"))}</span>
+        <span>{commontools_1.ifElse(state.isActive, state.isPremium ? "Premium Active" : "Regular Active", "Inactive")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.userType, _v1 => _v1 === "admin"), "Admin", state.userType === "user" ? "User" : "Guest")}</span>
         
         <h3>Complex Conditions</h3>
-        <span>{commontools_1.ifElse(state.isActive && state.hasPermission, "Full Access", "Limited Access")}</span>
-        <span>{commontools_1.ifElse(state.count > 0 && state.count < 10, "In Range", "Out of Range")}</span>
-        <span>{commontools_1.ifElse(state.isPremium || state.score > 100, "Premium Features", "Basic Features")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive({ state_isActive: state.isActive, state_hasPermission: state.hasPermission }, ({ state_isActive: _v1, state_hasPermission: _v2 }) => _v1 && _v2), "Full Access", "Limited Access")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive(state.count, _v1 => _v1 > 0 && _v1 < 10), "In Range", "Out of Range")}</span>
+        <span>{commontools_1.ifElse(commontools_1.derive({ state_isPremium: state.isPremium, state_score: state.score }, ({ state_isPremium: _v1, state_score: _v2 }) => _v1 || _v2 > 100), "Premium Features", "Basic Features")}</span>
         
         <h3>IfElse Component</h3>
         {ifElse(state.isActive, <div>User is active with {state.count} items</div>, <div>User is inactive</div>)}
@@ -61,3 +61,4 @@ export default recipe({
       </div>),
     };
 });
+

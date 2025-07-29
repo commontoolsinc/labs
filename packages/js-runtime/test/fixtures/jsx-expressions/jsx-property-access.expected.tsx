@@ -166,7 +166,8 @@ export default recipe({
         <h3>Complex Property Chains</h3>
         <p>{commontools_1.derive({ state_user_name: state.user.name, state_user_profile_location: state.user.profile.location }, ({ state_user_name: _v1, state_user_profile_location: _v2 }) => _v1 + " from " + _v2)}</p>
         <p>Font size + 2: {commontools_1.derive(state.config.theme.fontSize, _v1 => _v1 + 2)}px</p>
-        <p>Has beta and dark mode: {commontools_1.ifElse(state.config.features.beta && state.config.features.darkMode, "Yes", "No")}</p>
+        <p>Has beta and dark mode: {commontools_1.ifElse(commontools_1.derive({ state_config_features_beta: state.config.features.beta, state_config_features_darkMode: state.config.features.darkMode }, ({ state_config_features_beta: _v1, state_config_features_darkMode: _v2 }) => _v1 && _v2), "Yes", "No")}</p>
       </div>),
     };
 });
+

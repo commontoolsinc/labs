@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, handler, toSchema, h, UI, NAME, str, Cell } from "commontools";
+import { recipe, handler, toSchema, h, UI, NAME, str, Cell, derive } from "commontools";
 
 // Define types using TypeScript interfaces
 interface TodoItem {
@@ -63,7 +63,7 @@ const toggleTodo = handler(
   inputSchema,
   (event: ToggleTodoEvent, state: TodoInput) => {
     const todos = state.todos.get();
-    const todo = todos.find(t => t.id === event.id);
+    const todo = todos.find((t: any) => t.id === event.id);
     if (todo) {
       todo.completed = !todo.completed;
       state.todos.set(todos);
@@ -71,21 +71,20 @@ const toggleTodo = handler(
   }
 );
 
-// Recipe with derived values
 export default recipe(inputSchema, outputSchema, ({ todos }) => {
-  const completedCount = derive(todos, todos => 
-    todos.filter(t => t.completed).length
+  const completedCount = derive(todos, (todos: TodoItem[]) => 
+    todos.filter((t: TodoItem) => t.completed).length
   );
   
-  const pendingCount = derive(todos, todos => 
-    todos.filter(t => !t.completed).length
+  const pendingCount = derive(todos, (todos: TodoItem[]) => 
+    todos.filter((t: TodoItem) => !t.completed).length
   );
 
   return {
     [NAME]: str`Todo List (${pendingCount} pending)`,
     [UI]: (
       <div>
-        <form onSubmit={e => {
+        <form onSubmit={(e: any) => {
           e.preventDefault();
           const input = e.target.text;
           if (input.value) {
@@ -98,7 +97,7 @@ export default recipe(inputSchema, outputSchema, ({ todos }) => {
         </form>
         
         <ul>
-          {todos.map(todo => (
+          {todos.map((todo: TodoItem) => (
             <li key={todo.id}>
               <label>
                 <input

@@ -855,18 +855,61 @@ export function createOpaqueRefTransformer(
           );
 
           // First, visit all children to transform them
-          const visitedCondition = ts.visitNode(
+          let visitedCondition = ts.visitNode(
             node.condition,
             visit,
           ) as ts.Expression;
-          const visitedWhenTrue = ts.visitNode(
+          
+          // Transform condition if it contains OpaqueRef (e.g., state.value + 1)
+          if (!isSimpleOpaqueRefAccess(node.condition, checker) && containsOpaqueRef(node.condition, checker)) {
+            visitedCondition = transformExpressionWithOpaqueRef(
+              node.condition,
+              checker,
+              context.factory,
+              sourceFile,
+              context,
+            );
+            if (!hasCommonToolsImport(sourceFile, "derive")) {
+              needsDeriveImport = true;
+            }
+          }
+          
+          // Transform whenTrue and whenFalse branches if they contain OpaqueRef
+          let visitedWhenTrue = ts.visitNode(
             node.whenTrue,
             visit,
           ) as ts.Expression;
-          const visitedWhenFalse = ts.visitNode(
+          let visitedWhenFalse = ts.visitNode(
             node.whenFalse,
             visit,
           ) as ts.Expression;
+
+          // Check if branches need transformation
+          if (!isSimpleOpaqueRefAccess(node.whenTrue, checker) && containsOpaqueRef(node.whenTrue, checker)) {
+            visitedWhenTrue = transformExpressionWithOpaqueRef(
+              node.whenTrue,
+              checker,
+              context.factory,
+              sourceFile,
+              context,
+            );
+            if (!hasCommonToolsImport(sourceFile, "derive")) {
+              needsDeriveImport = true;
+            }
+          }
+          
+          if (!isSimpleOpaqueRefAccess(node.whenFalse, checker) && containsOpaqueRef(node.whenFalse, checker)) {
+            visitedWhenFalse = transformExpressionWithOpaqueRef(
+              node.whenFalse,
+              checker,
+              context.factory,
+              sourceFile,
+              context,
+            );
+            if (!hasCommonToolsImport(sourceFile, "derive")) {
+              needsDeriveImport = true;
+            }
+          }
 
           // Create updated node with transformed children
           const updatedNode = context.factory.updateConditionalExpression(

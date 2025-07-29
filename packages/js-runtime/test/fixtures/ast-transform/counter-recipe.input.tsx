@@ -24,7 +24,7 @@ export default recipe<RecipeState>("Counter", (state) => {
       <div>
         <ct-button onClick={decrement(state)}>-</ct-button>
         <ul>
-          <li>next number: {state.value + 1}</li>
+          <li>next number: {state.value ? state.value + 1 : "unknown"}</li>
         </ul>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>
