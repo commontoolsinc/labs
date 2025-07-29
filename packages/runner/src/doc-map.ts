@@ -22,7 +22,7 @@ export function entityIdStr(entityId: EntityId) {
   if (typeof slashVal === "string") {
     return slashVal;
   } else {
-    return entityId.toJSON!()["/"];
+    return JSON.parse(JSON.stringify(entityId))["/"];
   }
 }
 

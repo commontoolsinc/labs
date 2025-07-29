@@ -129,6 +129,18 @@ export function createOpaqueRefTransformer(
               node.expression.expression,
             );
             if (isOpaqueRefType(objectType, checker)) {
+              // Methods explicitly defined on OpaqueRefMethods interface
+              // These methods should NOT be transformed with .get()
+              const opaqueRefMethods = [
+                "get",
+                "set",
+                "key",
+                "setDefault",
+                "setName",
+                "setSchema",
+                "map",
+              ];
+
               const methodExistsOnOpaqueRef = opaqueRefMethods.includes(
                 methodName,
               );
@@ -504,8 +516,31 @@ export function createOpaqueRefTransformer(
 
           // Check if the function expects OpaqueRef parameters
           // If it does, we don't need to transform the arguments
+          // BUT: Skip this check for method calls on OpaqueRef objects
+          const isMethodCallOnOpaqueRef =
+            ts.isPropertyAccessExpression(node.expression) &&
+            isOpaqueRefType(
+              checker.getTypeAtLocation(node.expression.expression),
+              checker,
+            );
+
           const functionSymbol = checker.getSymbolAtLocation(node.expression);
-          if (functionSymbol) {
+
+          // Debug for reduce
+
+          // IMPORTANT: Skip parameter checking for methods called ON OpaqueRef objects
+          //
+          // When you call a method on OpaqueRef<T[]> (like state.values.reduce(...)):
+          // - TypeScript reports that reduce expects OpaqueRef<T> parameters
+          // - But in reality, the method operates on the underlying array and receives regular T values
+          // - If we check these misleading parameter types, we'll return early and skip the JSX transformation
+          // - This would prevent wrapping the expression in derive(), causing runtime errors
+          //
+          // Example: state.values.reduce((a, b) => a + b)
+          // - TypeScript says reduce expects (OpaqueRef<number>, OpaqueRef<number>) => OpaqueRef<number>
+          // - But actually reduce gets (number, number) => number when it runs
+          // - So we skip this check for methods on OpaqueRef to allow proper transformation
+          if (functionSymbol && !isMethodCallOnOpaqueRef) {
             const functionType = checker.getTypeOfSymbolAtLocation(
               functionSymbol,
               node.expression,
@@ -571,7 +606,10 @@ export function createOpaqueRefTransformer(
           // Check if the entire call expression contains OpaqueRef values
           // This handles both arguments and method calls on OpaqueRef objects
           // Only transform if we're inside a JSX expression
-          if (containsOpaqueRef(node, checker) && isInsideJsxExpression(node)) {
+          const hasOpaqueRef = containsOpaqueRef(node, checker);
+          const isInJsx = isInsideJsxExpression(node);
+
+          if (hasOpaqueRef && isInJsx) {
             // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);
             hasTransformed = true;
 
@@ -967,6 +1005,7 @@ export function createOpaqueRefTransformer(
         }
 
         // For other node types, check transformation first
+
         const result = checkTransformation(node, checker);
 
         if (result.transformed) {

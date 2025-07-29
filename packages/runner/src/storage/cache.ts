@@ -378,6 +378,10 @@ class SelectorTracker<T = Result<Unit, Error>> {
     return this.selectorPromises.get(promiseKey);
   }
 
+  getAllPromises(): Iterable<Promise<T>> {
+    return this.selectorPromises.values();
+  }
+
   /**
    * Return all tracked subscriptions as an array of {factAddress, selector} pairs
    */
@@ -478,6 +482,9 @@ export class Replica {
     public queue: PullQueue = new PullQueue(),
     public pullRetryLimit: number = 100,
     public useSchemaQueries: boolean = false,
+    // Promises for commits that are in flight
+    public commitPromises: Set<Consumer.TransactionResult<MemorySpace>> =
+      new Set(),
     // Track the selectors used for top level docs -- we only add to this
     // once we've gotten our results (so the promise is resolved).
     private selectorTracker: SelectorTracker = new SelectorTracker(),
@@ -834,9 +841,12 @@ export class Replica {
     );
 
     // These push transaction that will commit desired state to a remote.
-    const result = await this.remote.transact({
+    const commitPromise = this.remote.transact({
       changes: getChanges([...claims, ...facts] as Statement[]),
     });
+    this.commitPromises.add(commitPromise);
+    const result = await commitPromise;
+    this.commitPromises.delete(commitPromise);
 
     // If transaction fails we delete facts from the nursery so that new
     // changes will not build upon rejected state. If there are other inflight
@@ -948,7 +958,17 @@ export class Replica {
    * state returns it otherwise returns recent state.
    */
   get(entry: FactAddress): State | undefined {
-    return this.nursery.get(entry) ?? this.heap.get(entry);
+    const nurseryState = this.nursery.get(entry);
+    if (nurseryState) return nurseryState;
+
+    const heapState = this.heap.get(entry);
+    if (heapState) {
+      // Remove `since` field from the state so that it can be used as a cause
+      const { since: _since, ...state } = heapState;
+      return state;
+    }
+
+    return undefined;
   }
 
   /**
@@ -1322,6 +1342,10 @@ class ProviderConnection implements IStorageProvider {
     return this.provider.sync(uri, expectedInStorage, schemaContext);
   }
 
+  synced() {
+    return this.provider.synced();
+  }
+
   get<T = any>(uri: URI): StorageValue<T> | undefined {
     return this.provider.get(uri);
   }
@@ -1458,6 +1482,13 @@ export class Provider implements IStorageProvider {
     } else {
       return this.workspace.load([[factAddress, undefined]]);
     }
+  }
+
+  synced() {
+    return Promise.all([
+      Promise.all(this.serverSubscriptions.getAllPromises()),
+      Promise.all(this.workspace.commitPromises),
+    ]) as unknown as Promise<void>;
   }
 
   get<T = any>(uri: URI): StorageValue<T> | undefined {
@@ -1679,6 +1710,20 @@ export class StorageManager implements IStorageManager {
    */
   subscribe(subscription: IStorageSubscription): void {
     this.#subscription.subscribe(subscription);
+  }
+
+  /**
+   * Wait for all pending syncs to complete + the microtask queue to flush, so
+   * that they are also all processed.
+   *
+   * @returns Promise that resolves when all pending syncs are complete.
+   */
+  synced(): Promise<void> {
+    const { resolve, promise } = Promise.withResolvers<void>();
+    Promise.all(
+      this.#providers.values().map((provider) => provider.synced()),
+    ).finally(() => setTimeout(() => resolve(), 0));
+    return promise;
   }
 }
 

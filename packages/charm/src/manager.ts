@@ -1020,7 +1020,7 @@ export class CharmManager {
 
     // Navigate to the target path
     const targetKey = targetPath.pop();
-    if (!targetKey) {
+    if (targetKey === undefined) {
       throw new Error("Target path cannot be empty");
     }
 

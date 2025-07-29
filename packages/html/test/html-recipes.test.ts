@@ -71,6 +71,7 @@ describe("recipes with HTML", () => {
       { value: 5 },
       runtime.getCell(space, "simple-ui-result", undefined, tx),
     );
+    tx.commit();
 
     await runtime.idle();
     const resultValue = result.get();
@@ -119,6 +120,7 @@ describe("recipes with HTML", () => {
       },
       runtime.getCell(space, "todo-list-result", undefined, tx),
     ) as Cell<{ [UI]: VNode }>;
+    tx.commit();
 
     await runtime.idle();
 
@@ -162,6 +164,7 @@ describe("recipes with HTML", () => {
       },
       runtime.getCell(space, "nested-todo-result", undefined, tx),
     ) as Cell<{ [UI]: VNode }>;
+    tx.commit();
 
     await runtime.idle();
 
@@ -184,6 +187,7 @@ describe("recipes with HTML", () => {
       { name: "world" },
       runtime.getCell(space, "str-recipe-result", undefined, tx),
     ) as Cell<{ [UI]: VNode }>;
+    tx.commit();
 
     await runtime.idle();
 
@@ -226,6 +230,7 @@ describe("recipes with HTML", () => {
       data,
       runtime.getCell(space, "nested-map-result", undefined, tx),
     ) as Cell<{ [UI]: VNode }>;
+    tx.commit();
 
     await runtime.idle();
 

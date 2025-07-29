@@ -52,6 +52,10 @@ class MockStorageManager implements IStorageManager {
     return Transaction.create(this);
   }
 
+  synced() {
+    return Promise.resolve();
+  }
+
   subscribe() {}
 }
 

@@ -110,7 +110,7 @@ export function createQueryResultProxy<T>(
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(target as object, {
-    get: (target, prop, receiver) => {
+    get: (_, prop, receiver) => {
       if (typeof prop === "symbol") {
         if (prop === toCell) {
           return () => createCell(runtime, link, tx, true);
@@ -118,8 +118,11 @@ export function createQueryResultProxy<T>(
           return () => makeOpaqueRef(link);
         }
 
-        const value = Reflect.get(target, prop, receiver);
-        if (typeof value === "function") return value.bind(receiver);
+        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+        const current = readTx.readValueOrThrow(link) as typeof target;
+
+        const value = Reflect.get(current, prop, current);
+        if (typeof value === "function") return value.bind(current);
         else return value;
       }
 
@@ -136,18 +139,39 @@ export function createQueryResultProxy<T>(
             // This will also mark each element read in the log. Almost all
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
-            const copy = target.map((_, index) =>
-              createQueryResultProxy(
+            const readTx = (tx?.status().status === "ready")
+              ? tx
+              : runtime.edit();
+            const length = readTx.readValueOrThrow({
+              ...link,
+              path: [...link.path, "length"],
+            }) as number;
+
+            if (typeof length !== "number") {
+              throw new Error(
+                `Array length is not a number for ${prop} operation`,
+              );
+            }
+
+            const copy = new Array(length);
+            for (let i = 0; i < length; i++) {
+              copy[i] = createQueryResultProxy(
                 runtime,
                 tx,
-                { ...link, path: [...link.path, String(index)] },
+                { ...link, path: [...link.path, String(i)] },
                 depth + 1,
-              )
-            );
+              );
+            }
 
             return method.apply(copy, args);
           }
           : (...args: any[]) => {
+            if (!tx) {
+              throw new Error(
+                "Transaction required for changing query result proxy",
+              );
+            }
+
             // Operate on a copy so we can diff. For write-only methods like
             // push, don't proxy the other members so we don't log reads.
             // Wraps values in a proxy that remembers the original index and
@@ -186,17 +210,23 @@ export function createQueryResultProxy<T>(
 
             // Turn any newly added elements into cells. And if there was a
             // change at all, update the cell.
-            if (!tx) {
-              throw new Error(
-                "Transaction required for changing query result proxy",
-              );
-            }
             diffAndUpdate(runtime, tx, link, copy, {
               parent: { id: link.id, space: link.space },
               method: prop,
               call: new Error().stack,
               context: getTopFrame()?.cause ?? "unknown",
             });
+
+            // Update target from store
+            const newValue = tx.readValueOrThrow(link) as typeof target;
+
+            if (!Array.isArray(newValue)) {
+              throw new Error(
+                `Array is not an array anymore after ${prop} operation, it's now ${typeof newValue}`,
+              );
+            }
+
+            target.splice(0, target.length, ...newValue);
 
             if (Array.isArray(result)) {
               const cause = {
@@ -229,7 +259,7 @@ export function createQueryResultProxy<T>(
         depth + 1,
       );
     },
-    set: (target, prop, value) => {
+    set: (_, prop, value) => {
       if (typeof prop === "symbol") return false;
 
       if (isQueryResult(value)) value = value[toCell]();
@@ -336,7 +366,6 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
 export function isQueryResult(value: any): value is QueryResult<any> {
   return isRecord(value) && typeof value[toCell] === "function";
 }
-
 
 /**
  * Check if value is a cell value proxy. Return as type that allows

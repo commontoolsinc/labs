@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
 import { TYPE } from "./builder/types.ts";
@@ -34,11 +35,16 @@ import {
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
 
+const logger = getLogger("scheduler", {
+  enabled: false,
+  level: "debug",
+});
+
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 
 export type Action = (tx: IExtendedStorageTransaction) => any;
-export type EventHandler = (event: any) => any;
+export type EventHandler = (tx: IExtendedStorageTransaction, event: any) => any;
 
 /**
  * Reactivity log.
@@ -66,7 +72,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
-  private eventQueue: (() => any)[] = [];
+  private eventQueue: ((tx: IExtendedStorageTransaction) => any)[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   private dirty = new Set<SpaceURIAndType>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
@@ -128,6 +134,7 @@ export class Scheduler implements IScheduler {
 
   schedule(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
+    logger.debug(() => ["Scheduling action:", action, reads]);
     reads.forEach((addr) =>
       this.dirty.add(`${addr.space}/${addr.id}/${addr.type}`)
     );
@@ -148,6 +155,7 @@ export class Scheduler implements IScheduler {
   subscribe(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
     const pathsByEntity = addressesToPathByEntity(reads);
+    logger.debug(() => ["Subscribing for action:", action, pathsByEntity]);
     const entities = new Set<SpaceAndURI>();
 
     for (const [spaceAndURI, paths] of pathsByEntity) {
@@ -228,7 +236,9 @@ export class Scheduler implements IScheduler {
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
         this.queueExecution();
-        this.eventQueue.push(() => handler(event));
+        this.eventQueue.push((tx: IExtendedStorageTransaction) =>
+          handler(tx, event)
+        );
       }
     }
   }
@@ -262,6 +272,7 @@ export class Scheduler implements IScheduler {
         const space = notification.space;
         if ("changes" in notification) {
           for (const change of notification.changes) {
+            logger.debug(() => ["Received change:", change]);
             if (change.address.type !== "application/json") continue;
             const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
             const paths = this.triggers.get(spaceAndURI);
@@ -273,6 +284,14 @@ export class Scheduler implements IScheduler {
                 change.address.path,
               );
               for (const action of triggeredActions) {
+                logger.debug(
+                  () => [
+                    `Triggered action for ${spaceAndURI}/${
+                      change.address.path.join("/")
+                    }`,
+                    action,
+                  ],
+                );
                 this.dirty.add(
                   `${spaceAndURI}/${change.address.type}` as SpaceURIAndType,
                 );
@@ -334,15 +353,22 @@ export class Scheduler implements IScheduler {
     // Process next event from the event queue. Will mark more docs as dirty.
     const handler = this.eventQueue.shift();
     if (handler) {
+      const finalize = (error?: unknown) => {
+        try {
+          if (error) this.handleError(error as Error, handler);
+        } finally {
+          tx.commit();
+        }
+      };
+      const tx = this.runtime.edit();
+
       try {
         this.runningPromise = Promise.resolve(
-          this.runtime.harness.invoke(handler),
-        ).catch((error) => {
-          this.handleError(error as Error, handler);
-        });
+          this.runtime.harness.invoke(() => handler(tx)),
+        ).then(() => finalize()).catch((error) => finalize(error));
         await this.runningPromise;
       } catch (error) {
-        this.handleError(error as Error, handler);
+        finalize(error);
       }
     }
 

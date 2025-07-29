@@ -15,10 +15,7 @@ export interface MentionableItem {
 /**
  * Attachment to a node - for future extensibility
  */
-export interface Attachment {
-  name: string;
-  charm: Charm;
-}
+export type Attachment = Charm;
 
 /**
  * Node - represents both the tree structure and content
@@ -119,7 +116,7 @@ export interface OutlinerOperations {
   requestUpdate(): void;
   getAllVisibleNodes(): Node[];
 
-  // Checkbox operations  
+  // Checkbox operations
   setNodeCheckbox(node: Node, isChecked: boolean): void;
   toggleNodeCheckbox(node: Node): void;
 
