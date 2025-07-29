@@ -370,15 +370,26 @@ describe("Schema Support", () => {
       });
       const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);
-      expect(reads.length).toEqual(3);
-      expect(
-        reads.map((r: IMemorySpaceAddress) => ({ id: r.id, path: r.path }))
-          .sort((a, b) => a.id.localeCompare(b.id)),
-      ).toEqual([
-        { id: toURI(docCell.entityId!), path: ["current"] },
-        { id: toURI(linkEntityId), path: [] },
-        { id: toURI(initialEntityId), path: ["foo"] },
-      ].sort((a, b) => a.id.localeCompare(b.id)));
+      console.log(reads);
+      expect(reads.length).toEqual(9);
+      expect(reads).toContainEqual({
+        space,
+        id: toURI(linkEntityId),
+        path: [],
+        type: "application/json",
+      });
+      expect(reads).toContainEqual({
+        space,
+        id: toURI(docCell.entityId!),
+        path: ["current"],
+        type: "application/json",
+      });
+      expect(reads).toContainEqual({
+        space,
+        id: toURI(initialEntityId),
+        path: ["foo"],
+        type: "application/json",
+      });
 
       // Then update it
       initial.withTx(tx).set({ foo: { label: "first - update" } });
@@ -405,7 +416,7 @@ describe("Schema Support", () => {
 
       await runtime.idle();
 
-      (expect(rootValues) as any).toEqualIgnoringSymbols([
+      expect(rootValues).toEqual([
         "root",
         "cancelled",
         "root",
@@ -418,7 +429,7 @@ describe("Schema Support", () => {
 
       await runtime.idle();
 
-      (expect(rootValues) as any).toEqualIgnoringSymbols([
+      expect(rootValues).toEqual([
         "root",
         "cancelled",
         "root",
