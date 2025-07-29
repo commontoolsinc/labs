@@ -148,6 +148,56 @@ function typeToJsonSchema(
       }
     }
   }
+  
+  // Check if this is a Cell<T> or Stream<T> type at the top level
+  const typeString = checker.typeToString(type);
+  if (typeString.startsWith("Cell<") && typeString.endsWith(">")) {
+    // This is a Cell<T> type
+    let innerType = type;
+    
+    // Extract the inner type
+    if (type.symbol && type.symbol.getName() === "Cell") {
+      const typeRef = type as ts.TypeReference;
+      if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+        innerType = typeRef.typeArguments[0];
+      }
+    } else if ((type as any).resolvedTypeArguments) {
+      const resolvedArgs = (type as any).resolvedTypeArguments;
+      if (resolvedArgs.length > 0) {
+        innerType = resolvedArgs[0];
+      }
+    }
+    
+    // Get schema for the inner type
+    let innerTypeNode: ts.TypeNode | undefined;
+    if (typeNode && ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments && typeNode.typeArguments.length > 0) {
+      innerTypeNode = typeNode.typeArguments[0];
+    }
+    const schema = typeToJsonSchema(innerType, checker, innerTypeNode || typeNode);
+    schema.asCell = true;
+    return schema;
+  }
+  
+  if (typeString.startsWith("Stream<") && typeString.endsWith(">")) {
+    // This is a Stream<T> type
+    let innerType = type;
+    
+    // Extract the inner type
+    const typeRef = type as ts.TypeReference;
+    if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+      innerType = typeRef.typeArguments[0];
+    }
+    
+    // Get schema for the inner type
+    let innerTypeNode: ts.TypeNode | undefined;
+    if (typeNode && ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments && typeNode.typeArguments.length > 0) {
+      innerTypeNode = typeNode.typeArguments[0];
+    }
+    const schema = typeToJsonSchema(innerType, checker, innerTypeNode || typeNode);
+    schema.asStream = true;
+    return schema;
+  }
+  
   // Handle primitive types
   if (type.flags & ts.TypeFlags.String) {
     return { type: "string" };
@@ -170,20 +220,130 @@ function typeToJsonSchema(
   if (type.symbol && type.symbol.name === "Array") {
     const typeRef = type as ts.TypeReference;
     if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
+      const elementType = typeRef.typeArguments[0];
+      const elementTypeString = checker.typeToString(elementType);
+      
+      // Check if the element type is Cell<T>
+      if (elementTypeString.startsWith("Cell<") && elementTypeString.endsWith(">")) {
+        let innerType = elementType;
+        
+        // Extract the inner type from Cell<T>
+        if (elementType.symbol && elementType.symbol.getName() === "Cell") {
+          const cellTypeRef = elementType as ts.TypeReference;
+          if (cellTypeRef.typeArguments && cellTypeRef.typeArguments.length > 0) {
+            innerType = cellTypeRef.typeArguments[0];
+          }
+        } else if ((elementType as any).resolvedTypeArguments) {
+          const resolvedArgs = (elementType as any).resolvedTypeArguments;
+          if (resolvedArgs.length > 0) {
+            innerType = resolvedArgs[0];
+          }
+        }
+        
+        // Get schema for the inner type
+        const itemSchema = typeToJsonSchema(innerType, checker, typeNode);
+        itemSchema.asCell = true;
+        
+        return {
+          type: "array",
+          items: itemSchema,
+        };
+      }
+      
+      // Check if the element type is Stream<T>
+      if (elementTypeString.startsWith("Stream<") && elementTypeString.endsWith(">")) {
+        let innerType = elementType;
+        
+        // Extract the inner type from Stream<T>
+        const streamTypeRef = elementType as ts.TypeReference;
+        if (streamTypeRef.typeArguments && streamTypeRef.typeArguments.length > 0) {
+          innerType = streamTypeRef.typeArguments[0];
+        }
+        
+        // Get schema for the inner type
+        const itemSchema = typeToJsonSchema(innerType, checker, typeNode);
+        itemSchema.asStream = true;
+        
+        return {
+          type: "array",
+          items: itemSchema,
+        };
+      }
+      
+      // Regular array element
       return {
         type: "array",
-        items: typeToJsonSchema(typeRef.typeArguments[0], checker),
+        items: typeToJsonSchema(elementType, checker),
       };
     }
     return { type: "array" };
   }
 
   // Also check if it's an array type using the checker
-  const typeString = checker.typeToString(type);
   if (typeString.endsWith("[]")) {
-    // Extract the element type
+    // Try to get the element type of the array
+    // For arrays, we need to check if it has a numeric index signature
+    const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+    
+    if (elementType) {
+      const elementTypeString = checker.typeToString(elementType);
+      
+      // Check if the element type is Cell<T>
+      if (elementTypeString.startsWith("Cell<") && elementTypeString.endsWith(">")) {
+        let innerType = elementType;
+        
+        // Extract the inner type from Cell<T>
+        if (elementType.symbol && elementType.symbol.getName() === "Cell") {
+          const cellTypeRef = elementType as ts.TypeReference;
+          if (cellTypeRef.typeArguments && cellTypeRef.typeArguments.length > 0) {
+            innerType = cellTypeRef.typeArguments[0];
+          }
+        } else if ((elementType as any).resolvedTypeArguments) {
+          const resolvedArgs = (elementType as any).resolvedTypeArguments;
+          if (resolvedArgs.length > 0) {
+            innerType = resolvedArgs[0];
+          }
+        }
+        
+        // Get schema for the inner type
+        const itemSchema = typeToJsonSchema(innerType, checker, typeNode);
+        itemSchema.asCell = true;
+        
+        return {
+          type: "array",
+          items: itemSchema,
+        };
+      }
+      
+      // Check if the element type is Stream<T>
+      if (elementTypeString.startsWith("Stream<") && elementTypeString.endsWith(">")) {
+        let innerType = elementType;
+        
+        // Extract the inner type from Stream<T>
+        const streamTypeRef = elementType as ts.TypeReference;
+        if (streamTypeRef.typeArguments && streamTypeRef.typeArguments.length > 0) {
+          innerType = streamTypeRef.typeArguments[0];
+        }
+        
+        // Get schema for the inner type
+        const itemSchema = typeToJsonSchema(innerType, checker, typeNode);
+        itemSchema.asStream = true;
+        
+        return {
+          type: "array",
+          items: itemSchema,
+        };
+      }
+      
+      // Regular array element
+      return {
+        type: "array",
+        items: typeToJsonSchema(elementType, checker, typeNode),
+      };
+    }
+    
+    // Fallback to string parsing if we can't get element type
     const elementTypeString = typeString.slice(0, -2);
-    // This is a simplified approach - in a real implementation we'd need to get the actual element type
     if (elementTypeString === "string") {
       return { type: "array", items: { type: "string" } };
     } else if (elementTypeString === "number") {
