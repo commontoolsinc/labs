@@ -355,16 +355,10 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
     const source = parseLink(sourceRef, { allowWellKnown: true });
     const target = parseLink(targetRef);
 
-    // For linking, we need paths unless source is a well-known ID
-    // Well-known IDs can be linked without a path (linking the entire cell)
-    const isWellKnownSource = !sourceRef.includes("/");
-
-    if (!isWellKnownSource && !source.path) {
-      throw new ValidationError(
-        `Source reference must include a path. Expected: charmId/path/to/field`,
-        { exitCode: 1 },
-      );
-    }
+    // For linking, sources can be either:
+    // 1. charmId (links entire result cell)
+    // 2. charmId/path/to/field (links specific field in result cell)
+    // Both well-known IDs and regular charm IDs can link without a path
 
     if (!target.path) {
       throw new ValidationError(

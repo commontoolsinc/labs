@@ -7,7 +7,7 @@ import {
   type CellController,
   createCellController,
 } from "../../core/cell-controller.ts";
-import { type Cell, isCell, NAME } from "@commontools/runner";
+import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
 
 import type {
   EditingKeyboardContext,
@@ -25,7 +25,8 @@ import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import { FocusUtils } from "./focus-utils.ts";
-import { Charm } from "@commontools/charm";
+import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
+import "../ct-render/ct-render.ts";
 
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
@@ -405,6 +406,35 @@ export class CTOutliner extends BaseElement {
     /* Hide bullet when checkbox is present */
     .node-content:has(.checkbox-content) .bullet {
       display: none;
+    }
+
+    /* Attachment styles */
+    .attachments {
+      margin-top: 0.5rem;
+      margin-left: 1rem;
+      border-left: 2px solid var(--border);
+      padding-left: 0.75rem;
+    }
+
+    .attachment {
+      margin-bottom: 0.5rem;
+      border-radius: 0.25rem;
+      background-color: var(--muted);
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+    }
+
+    .attachment:last-child {
+      margin-bottom: 0;
+    }
+
+    .attachment-error {
+      color: var(--muted-foreground);
+      font-style: italic;
+      padding: 0.25rem;
+      background-color: var(--background);
+      border: 1px dashed var(--border);
+      border-radius: 0.25rem;
     }
   `;
 
@@ -1626,7 +1656,7 @@ export class CTOutliner extends BaseElement {
   private handleCheckboxChange(node: OutlineTreeNode, event: Event) {
     const checkbox = event.target as HTMLInputElement;
     const isChecked = checkbox.checked;
-    
+
     // Update the node's body to match the checkbox state
     this.setNodeCheckbox(node, isChecked);
   }
@@ -1642,29 +1672,29 @@ export class CTOutliner extends BaseElement {
           const nodeBodyCell = this.getNodeBodyCell(node);
           if (nodeBodyCell) {
             const currentBody = nodeBodyCell.get();
-            
+
             // Set checkbox to the specified state
             let newBody: string;
             const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentBody);
-            
+
             if (hasCheckbox) {
               // Update existing checkbox
               if (isChecked) {
                 // Set to checked
-                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, '[x] ');
+                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[x] ");
               } else {
                 // Set to unchecked (normalize to [ ])
-                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, '[ ] ');
+                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[ ] ");
               }
             } else {
               // Add checkbox if none exists
               if (isChecked) {
-                newBody = '[x] ' + currentBody;
+                newBody = "[x] " + currentBody;
               } else {
-                newBody = '[ ] ' + currentBody;
+                newBody = "[ ] " + currentBody;
               }
             }
-            
+
             nodeBodyCell.withTx(tx).set(newBody);
           }
         } else {
@@ -1673,15 +1703,21 @@ export class CTOutliner extends BaseElement {
           const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(mutableNode.body);
           if (hasCheckbox) {
             if (isChecked) {
-              mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[x] ');
+              mutableNode.body = mutableNode.body.replace(
+                /^\s*\[[ x]?\]\s*/,
+                "[x] ",
+              );
             } else {
-              mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[ ] ');
+              mutableNode.body = mutableNode.body.replace(
+                /^\s*\[[ x]?\]\s*/,
+                "[ ] ",
+              );
             }
           } else {
             if (isChecked) {
-              mutableNode.body = '[x] ' + mutableNode.body;
+              mutableNode.body = "[x] " + mutableNode.body;
             } else {
-              mutableNode.body = '[ ] ' + mutableNode.body;
+              mutableNode.body = "[ ] " + mutableNode.body;
             }
           }
         }
@@ -1692,21 +1728,27 @@ export class CTOutliner extends BaseElement {
         const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(mutableNode.body);
         if (hasCheckbox) {
           if (isChecked) {
-            mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[x] ');
+            mutableNode.body = mutableNode.body.replace(
+              /^\s*\[[ x]?\]\s*/,
+              "[x] ",
+            );
           } else {
-            mutableNode.body = mutableNode.body.replace(/^\s*\[[ x]?\]\s*/, '[ ] ');
+            mutableNode.body = mutableNode.body.replace(
+              /^\s*\[[ x]?\]\s*/,
+              "[ ] ",
+            );
           }
         } else {
           if (isChecked) {
-            mutableNode.body = '[x] ' + mutableNode.body;
+            mutableNode.body = "[x] " + mutableNode.body;
           } else {
-            mutableNode.body = '[ ] ' + mutableNode.body;
+            mutableNode.body = "[ ] " + mutableNode.body;
           }
         }
       },
-      "setNodeCheckbox"
+      "setNodeCheckbox",
     );
-    
+
     this.requestUpdate();
   }
 
@@ -1720,12 +1762,16 @@ export class CTOutliner extends BaseElement {
     if (nodeBodyCell) {
       // Use current Cell value (not potentially stale node.body)
       const currentBody = nodeBodyCell.get();
-      currentState = TreeOperations.isCheckboxChecked({ body: currentBody, children: [], attachments: [] });
+      currentState = TreeOperations.isCheckboxChecked({
+        body: currentBody,
+        children: [],
+        attachments: [],
+      });
     } else {
       // Fallback to reading from node directly
       currentState = TreeOperations.isCheckboxChecked(node);
     }
-    
+
     this.setNodeCheckbox(node, !currentState);
   }
 
@@ -1935,7 +1981,7 @@ export class CTOutliner extends BaseElement {
           </div>
         </div>
 
-        ${hasChildren && !isCollapsed
+        ${this.renderAttachments(node)} ${hasChildren && !isCollapsed
         ? html`
           <div class="children">
             ${this.renderNodes(node.children, level + 1)}
@@ -2005,7 +2051,10 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  private renderMarkdownContent(content: string, node: OutlineTreeNode): unknown {
+  private renderMarkdownContent(
+    content: string,
+    node: OutlineTreeNode,
+  ): unknown {
     if (!content.trim()) {
       return html`
         <span class="placeholder">Empty</span>
@@ -2037,20 +2086,20 @@ export class CTOutliner extends BaseElement {
       });
 
       if (checkboxState !== null) {
-        const isChecked = checkboxState === 'checked';
+        const isChecked = checkboxState === "checked";
         return html`
           <span class="checkbox-content">
-            <input 
-              type="checkbox" 
-              class="node-checkbox" 
-              ?checked=${isChecked}
+            <input
+              type="checkbox"
+              class="node-checkbox"
+              ?checked="${isChecked}"
               @change="${(e: Event) => {
-                e.stopPropagation();
-                this.handleCheckboxChange(node, e);
-              }}"
+            e.stopPropagation();
+            this.handleCheckboxChange(node, e);
+          }}"
             />
             <span class="markdown-content" @click="${this
-              .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
+            .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
           </span>
         `;
       }
@@ -2065,6 +2114,96 @@ export class CTOutliner extends BaseElement {
         <span>${content}</span>
       `;
     }
+  }
+
+  /**
+   * Get the path through the tree structure to reach a specific node
+   * @param targetNode The node to find the path to
+   * @returns Array representing the path through the tree structure, e.g. ['root', 'children', 0, 'children', 0]
+   */
+  private getTreeStructurePath(
+    targetNode: OutlineTreeNode,
+  ): (string | number)[] | null {
+    const findStructurePath = (
+      node: OutlineTreeNode,
+      currentPath: (string | number)[],
+    ): (string | number)[] | null => {
+      for (let i = 0; i < node.children.length; i++) {
+        const child = node.children[i];
+        const childPath = [...currentPath, "children", i];
+
+        if (child === targetNode) {
+          return childPath;
+        }
+
+        const result = findStructurePath(child, childPath);
+        if (result) {
+          return result;
+        }
+      }
+      return null;
+    };
+
+    return findStructurePath(this.tree.root, ["root"]);
+  }
+
+  /**
+   * Render attachments for a node using ct-render
+   */
+  private renderAttachments(node: OutlineTreeNode): unknown {
+    if (!node.attachments || node.attachments.length === 0) {
+      return "";
+    }
+
+    if (!isCell(this.value)) {
+      return "";
+    }
+
+    const tree: Cell<Tree> = this.value;
+    const runtime = tree.runtime;
+    const space = tree.space;
+
+    // Create proper charm cell references from attachment charm objects
+    const charmCells = node.attachments.map((attachment) => {
+      try {
+        // Extract entity ID from the charm object
+        const entityId = getEntityId(attachment);
+
+        if (!entityId) {
+          console.warn("No entity ID found for attachment charm:", attachment);
+          return null;
+        }
+
+        // Create a proper charm cell reference using the runtime
+        const charmCell = runtime.getCellFromEntityId<Charm>(
+          space,
+          entityId,
+          [],
+          charmSchema,
+        );
+
+        return charmCell;
+      } catch (error) {
+        console.error(
+          "Error creating charm cell for attachment:",
+          error,
+          attachment,
+        );
+        return null;
+      }
+    }).filter((cell): cell is Cell<Charm> => cell !== null);
+
+    return html`
+      <div class="attachments">
+        ${charmCells.map((charmCell) => {
+        return html`
+          <div class="attachment">
+            <ct-render .cell="${charmCell}"></ct-render>
+          </div>
+        `;
+      })}
+      </div>
+    `;
   }
 }
 
