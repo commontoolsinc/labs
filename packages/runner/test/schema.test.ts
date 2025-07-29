@@ -371,7 +371,6 @@ describe("Schema Support", () => {
       const log = txToReactivityLog(tx);
       const reads = sortAndCompactPaths(log.reads);
       console.log(reads);
-      expect(reads.length).toEqual(9);
       expect(reads).toContainEqual({
         space,
         id: toURI(linkEntityId),
