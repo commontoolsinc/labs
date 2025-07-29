@@ -11,9 +11,6 @@ import {
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
-// @ts-ignore this is ok
-Error.stackTraceLimit = 100;
-
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
