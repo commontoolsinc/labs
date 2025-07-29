@@ -160,9 +160,6 @@ function typeToJsonSchema(
   if (type.flags & ts.TypeFlags.Null) {
     return { type: "null" };
   }
-  if (type.flags & ts.TypeFlags.Undefined) {
-    return { type: "undefined" };
-  }
 
   // Handle arrays
   if (type.symbol && type.symbol.name === "Array") {
