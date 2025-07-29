@@ -199,7 +199,7 @@ function isFunctionParameter(node: ts.Identifier, checker: ts.TypeChecker): bool
         for (const decl of declarations) {
           if (ts.isParameter(decl)) {
             // Find the containing function
-            let parent = decl.parent;
+            const parent = decl.parent;
             if (ts.isFunctionExpression(parent) || 
                 ts.isArrowFunction(parent) || 
                 ts.isFunctionDeclaration(parent) ||
