@@ -222,7 +222,7 @@ export function createQueryResultProxy<T>(
 
             if (!Array.isArray(newValue)) {
               throw new Error(
-                `Array is not an array anymore after ${prop} operation`,
+                `Array is not an array anymore after ${prop} operation, it's now ${typeof newValue}`,
               );
             }
 
