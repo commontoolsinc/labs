@@ -109,18 +109,19 @@ export const read = (
   if (error) {
     return { error };
   } else {
+    // Track read activity with metadata
+    journal.state.activity.push({
+      read: {
+        ...address,
+        space,
+        meta: options?.meta ?? {},
+      },
+    });
+
     const result = branch.read(address, options);
     if (result.error) {
       return { error: result.error.from(space) };
     } else {
-      // Track read activity with metadata
-      journal.state.activity.push({
-        read: {
-          ...address,
-          space,
-          meta: options?.meta ?? {},
-        },
-      });
       return result;
     }
   }
