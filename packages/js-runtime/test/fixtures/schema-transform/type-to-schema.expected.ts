@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { recipe, handler, Cell, Stream, JSONSchema } from "commontools";
+import { recipe, NAME, handler, Cell, Stream, JSONSchema } from "commontools";
 // Define types using TypeScript - more compact!
 interface UpdaterInput {
     newValues: string[];
@@ -125,3 +125,9 @@ const userSchema = {
     required: ["name", "age", "tags", "metadata"],
     description: "A user in the system"
 } as const satisfies JSONSchema;
+export default recipe("test", (state) => {
+    return {
+        [NAME]: "test",
+    };
+});
+
