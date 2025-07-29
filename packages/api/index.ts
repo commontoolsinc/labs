@@ -148,6 +148,7 @@ export type JSONSchemaTypes =
 export type JSONSchema = {
   readonly $ref?: string;
   readonly $defs?: Readonly<Record<string, JSONSchema>>;
+  readonly definitions?: Readonly<Record<string, JSONSchema | boolean>>;
 
   // Subschema logic
   readonly allOf?: readonly (JSONSchema | boolean)[]; // not validated

@@ -622,6 +622,55 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     }
   }
 
+  static resolveSchemaRef(
+    schemaContext: Readonly<SchemaContext>,
+  ): Readonly<SchemaContext> | undefined {
+    if (!isObject(schemaContext.schema) || !("$ref" in schemaContext.schema)) {
+      // We shouldn't have called this function, but just return it as-is
+      return schemaContext;
+    }
+    if (schemaContext.rootSchema === undefined) {
+      console.warn(
+        "Unsupported $ref without root schema: ",
+        schemaContext.schema["$ref"],
+      );
+      return undefined;
+    }
+    if (schemaContext.schema["$ref"] === "#") {
+      return {
+        schema: schemaContext.rootSchema,
+        rootSchema: schemaContext.rootSchema,
+      };
+    } else if (
+      schemaContext.schema["$ref"]?.startsWith("#/definitions/") ||
+      schemaContext.schema["$ref"]?.startsWith("#/$defs/")
+    ) {
+      const pathToDef = schemaContext.schema["$ref"].split("/");
+      let schemaCursor = schemaContext.rootSchema;
+      for (let i = 1; i < pathToDef.length; i++) {
+        if (!isObject(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
+          console.warn(
+            "Unresolved $ref in schema: ",
+            schemaContext.schema["$ref"],
+          );
+          return undefined;
+        }
+        schemaCursor =
+          (schemaCursor as Record<string, JSONSchema | boolean>)[pathToDef[i]];
+      }
+      return {
+        schema: schemaCursor,
+        rootSchema: schemaContext.rootSchema,
+      };
+    } else {
+      console.warn(
+        "Unsupported $ref in schema: ",
+        schemaContext.schema["$ref"],
+      );
+      return undefined;
+    }
+  }
+
   traverseWithSchemaContext(
     doc: ValueAtPath<K>,
     schemaContext: Readonly<SchemaContext>,
@@ -638,24 +687,11 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return undefined;
     }
     if ("$ref" in schemaContext.schema) {
-      // At some point, this should be extended to support more than just '#'
-      if (schemaContext.schema["$ref"] != "#") {
-        console.warn(
-          "Unsupported $ref in schema: ",
-          schemaContext.schema["$ref"],
-        );
+      const resolved = SchemaObjectTraverser.resolveSchemaRef(schemaContext);
+      if (resolved === undefined) {
+        return resolved;
       }
-      if (schemaContext.rootSchema === undefined) {
-        console.warn(
-          "Unsupported $ref without root schema: ",
-          schemaContext.schema["$ref"],
-        );
-        return undefined;
-      }
-      schemaContext = {
-        schema: schemaContext.rootSchema,
-        rootSchema: schemaContext.rootSchema,
-      };
+      schemaContext = resolved;
     }
     const schemaObj = schemaContext.schema as Immutable<JSONObject>;
     if (doc.value === null) {
