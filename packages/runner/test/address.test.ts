@@ -250,8 +250,8 @@ describe("Address Module", () => {
 
       const result = Address.includes(source, candidate);
 
-      // "items/10" starts with "items/1", so source includes candidate
-      expect(result).toBe(true);
+      // "items/10" starts with "items/1", but they are not really the same!
+      expect(result).toBe(false);
     });
   });
 
@@ -445,8 +445,8 @@ describe("Address Module", () => {
 
       const result = Address.intersects(source, candidate);
 
-      // "items/1" is a prefix of "items/10", so they intersect
-      expect(result).toBe(true);
+      // "items/1" is a prefix of "items/10", but they are not really the same!
+      expect(result).toBe(false);
     });
 
     it("should handle edge case with empty string in path", () => {
@@ -646,9 +646,9 @@ describe("Address Module", () => {
         path: ["items", "123"],
       } as const;
 
-      // "items/123" starts with "items/12", so source includes candidate and they intersect
-      expect(Address.includes(source, candidate)).toBe(true);
-      expect(Address.intersects(source, candidate)).toBe(true);
+      // "items/123" starts with "items/12", but they are not really the same!
+      expect(Address.includes(source, candidate)).toBe(false);
+      expect(Address.intersects(source, candidate)).toBe(false);
     });
   });
 });
