@@ -24,6 +24,8 @@ export abstract class BaseStorageProvider implements IStorageProvider {
   // TODO(@ubik2)
   //): Promise<Result<Selection<FactAddress, Revision<State>>, Error>>;
 
+  abstract synced(): Promise<void>;
+
   abstract get<T = any>(uri: URI): StorageValue<T> | undefined;
 
   sink<T = any>(uri: URI, callback: (value: StorageValue<T>) => void): Cancel {
