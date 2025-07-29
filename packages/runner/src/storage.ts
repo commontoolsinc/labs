@@ -224,6 +224,10 @@ export class Storage implements IStorage {
   }
 
   async synced(): Promise<void> {
+    if (!this.shim) {
+      return this.storageManager.synced();
+    }
+
     await Promise.all([
       ...this.loadingPromises.values(),
       ...this.docToStoragePromises.values(),
