@@ -1,173 +1,127 @@
 /// <cts-enable />
-import { recipe, handler, h, UI, NAME, str, Cell, derive, JSONSchema } from "commontools";
-// Define types using TypeScript interfaces
-interface TodoItem {
-    id: string;
-    text: string;
-    completed: boolean;
-    createdAt: Date;
+import { recipe, h, UI, NAME, Cell, Default, handler, JSONSchema } from "commontools";
+interface Item {
+    text: Default<string, "">;
 }
-interface TodoInput {
-    todos: Cell<TodoItem[]>;
+interface InputSchemaInterface {
+    title: Default<string, "untitled">;
+    items: Default<Item[], [
+    ]>;
 }
-interface TodoOutput extends TodoInput {
-    completedCount: number;
-    pendingCount: number;
+interface OutputSchemaInterface extends InputSchemaInterface {
+    items_count: number;
 }
-interface AddTodoEvent {
-    text: string;
-}
-interface ToggleTodoEvent {
-    id: string;
-}
-// Transform to schemas at compile time
+type InputEventType = {
+    detail: {
+        message: string;
+    };
+};
 const inputSchema = {
     type: "object",
     properties: {
-        todos: {
+        title: {
+            type: "string",
+            default: "untitled"
+        },
+        items: {
             type: "array",
             items: {
                 type: "object",
                 properties: {
-                    id: {
-                        type: "string"
-                    },
                     text: {
-                        type: "string"
-                    },
-                    completed: {
-                        type: "boolean"
-                    },
-                    createdAt: {
                         type: "string",
-                        format: "date-time"
+                        default: ""
                     }
                 },
-                required: ["id", "text", "completed", "createdAt"]
+                required: ["text"]
             },
-            asCell: true
+            default: []
         }
     },
-    required: ["todos"],
-    default: {
-        todos: []
-    }
+    required: ["title", "items"]
 } as const satisfies JSONSchema;
 const outputSchema = {
     type: "object",
     properties: {
-        completedCount: {
+        items_count: {
             type: "number"
         },
-        pendingCount: {
-            type: "number"
+        title: {
+            type: "string",
+            default: "untitled"
         },
-        todos: {
+        items: {
             type: "array",
             items: {
                 type: "object",
                 properties: {
-                    id: {
-                        type: "string"
-                    },
                     text: {
-                        type: "string"
-                    },
-                    completed: {
-                        type: "boolean"
-                    },
-                    createdAt: {
                         type: "string",
-                        format: "date-time"
+                        default: ""
                     }
                 },
-                required: ["id", "text", "completed", "createdAt"]
+                required: ["text"]
+            },
+            default: []
+        }
+    },
+    required: ["items_count", "title", "items"]
+} as const satisfies JSONSchema;
+// Handler that logs the message event
+const addItem = handler({
+    type: "object",
+    properties: {
+        detail: {
+            type: "object",
+            properties: {
+                message: {
+                    type: "string"
+                }
+            },
+            required: ["message"]
+        }
+    },
+    required: ["detail"]
+} as const satisfies JSONSchema, {
+    type: "object",
+    properties: {
+        items: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    text: {
+                        type: "string",
+                        default: ""
+                    }
+                },
+                required: ["text"]
             },
             asCell: true
         }
     },
-    required: ["completedCount", "pendingCount", "todos"]
-} as const satisfies JSONSchema;
-const addTodoSchema = {
-    type: "object",
-    properties: {
-        text: {
-            type: "string"
-        }
-    },
-    required: ["text"],
-    title: "Add Todo",
-    description: "Add a new todo item",
-    examples: [{
-            text: "Buy groceries"
-        }]
-} as const satisfies JSONSchema;
-const toggleTodoSchema = {
-    type: "object",
-    properties: {
-        id: {
-            type: "string"
-        }
-    },
-    required: ["id"],
-    title: "Toggle Todo",
-    description: "Toggle the completion status of a todo"
-} as const satisfies JSONSchema;
-// Handlers with full type safety
-const addTodo = handler(addTodoSchema, inputSchema, (event: AddTodoEvent, state: TodoInput) => {
-    state.todos.push({
-        id: Date.now().toString(),
-        text: event.text,
-        completed: false,
-        createdAt: new Date()
-    });
+    required: ["items"]
+} as const satisfies JSONSchema, (event: InputEventType, { items }: {
+    items: Cell<Item[]>;
+}) => {
+    items.push({ text: event.detail.message });
 });
-const toggleTodo = handler(toggleTodoSchema, inputSchema, (event: ToggleTodoEvent, state: TodoInput) => {
-    const todos = state.todos.get();
-    const todo = todos.find((t: any) => t.id === event.id);
-    if (todo) {
-        todo.completed = !todo.completed;
-        state.todos.set(todos);
-    }
-});
-export default recipe(inputSchema, outputSchema, ({ todos }) => {
-    const completedCount = derive(todos, (todos: TodoItem[]) => todos.filter((t: TodoItem) => t.completed).length);
-    const pendingCount = derive(todos, (todos: TodoItem[]) => todos.filter((t: TodoItem) => !t.completed).length);
+export default recipe(inputSchema, outputSchema, ({ title, items }) => {
+    const items_count = items.length;
     return {
-        [NAME]: str `Todo List (${pendingCount} pending)`,
+        [NAME]: title,
         [UI]: (<div>
-        <form onSubmit={(e: any) => {
-                e.preventDefault();
-                const input = e.target.text;
-                if (input.value) {
-                    addTodo({ text: input.value });
-                    input.value = '';
-                }
-            }}>
-          <input name="text" placeholder="Add todo..."/>
-          <button type="submit">Add</button>
-        </form>
-        
+        <h3>{title}</h3>
+        <p>Basic recipe</p>
+        <p>Items count: {items_count}</p>
         <ul>
-          {todos.map((todo: TodoItem) => (<li key={todo.id}>
-              <label>
-                <input type="checkbox" checked={todo.completed} onChange={() => toggleTodo({ id: todo.id })}/>
-                <span style={{
-                    textDecoration: todo.completed ? 'line-through' : 'none'
-                }}>
-                  {todo.text}
-                </span>
-              </label>
-            </li>))}
+          {items.map((item: Item, index: number) => (<li key={index}>{item.text}</li>))}
         </ul>
-        
-        <div>
-          Completed: {completedCount} | Pending: {pendingCount}
-        </div>
+        <common-send-message name="Send" placeholder="Type a message..." appearance="rounded" onmessagesend={addItem({ items })}/>
       </div>),
-        todos,
-        completedCount,
-        pendingCount
+        title,
+        items,
+        items_count
     };
 });
 

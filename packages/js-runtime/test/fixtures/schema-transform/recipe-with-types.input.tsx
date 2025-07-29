@@ -1,127 +1,65 @@
 /// <cts-enable />
-import { recipe, handler, toSchema, h, UI, NAME, str, Cell, derive } from "commontools";
+import { recipe, h, UI, NAME, toSchema, Cell, Default, handler } from "commontools";
 
-// Define types using TypeScript interfaces
-interface TodoItem {
-  id: string;
-  text: string;
-  completed: boolean;
-  createdAt: Date;
+interface Item {
+  text: Default<string, "">;
 }
 
-interface TodoInput {
-  todos: Cell<TodoItem[]>;
+interface InputSchemaInterface {
+  title: Default<string, "untitled">;
+  items: Default<Item[], []>;
 }
 
-interface TodoOutput extends TodoInput {
-  completedCount: number;
-  pendingCount: number;
+interface OutputSchemaInterface extends InputSchemaInterface {
+  items_count: number;
 }
 
-interface AddTodoEvent {
-  text: string;
-}
+type InputEventType = {
+  detail: {
+    message: string
+  }
+};
 
-interface ToggleTodoEvent {
-  id: string;
-}
+const inputSchema = toSchema<InputSchemaInterface>();
+const outputSchema = toSchema<OutputSchemaInterface>();
 
-// Transform to schemas at compile time
-const inputSchema = toSchema<TodoInput>({
-  default: { todos: [] }
-});
-
-const outputSchema = toSchema<TodoOutput>();
-
-const addTodoSchema = toSchema<AddTodoEvent>({
-  title: "Add Todo",
-  description: "Add a new todo item",
-  examples: [{ text: "Buy groceries" }]
-});
-
-const toggleTodoSchema = toSchema<ToggleTodoEvent>({
-  title: "Toggle Todo",
-  description: "Toggle the completion status of a todo"
-});
-
-// Handlers with full type safety
-const addTodo = handler(
-  addTodoSchema,
-  inputSchema,
-  (event: AddTodoEvent, state: TodoInput) => {
-    state.todos.push({
-      id: Date.now().toString(),
-      text: event.text,
-      completed: false,
-      createdAt: new Date()
-    });
+// Handler that logs the message event
+const addItem = handler
+// <
+//   { detail: { message: string } },
+//   { items: Item[] }
+// >
+(
+  (event: InputEventType, { items }: {items: Cell<Item[]>}) => {
+    items.push({text: event.detail.message});
   }
 );
 
-const toggleTodo = handler(
-  toggleTodoSchema,
-  inputSchema,
-  (event: ToggleTodoEvent, state: TodoInput) => {
-    const todos = state.todos.get();
-    const todo = todos.find((t: any) => t.id === event.id);
-    if (todo) {
-      todo.completed = !todo.completed;
-      state.todos.set(todos);
-    }
-  }
-);
-
-export default recipe(inputSchema, outputSchema, ({ todos }) => {
-  const completedCount = derive(todos, (todos: TodoItem[]) => 
-    todos.filter((t: TodoItem) => t.completed).length
-  );
+export default recipe(inputSchema, outputSchema, ({ title, items }) => {
+  const items_count = items.length;
   
-  const pendingCount = derive(todos, (todos: TodoItem[]) => 
-    todos.filter((t: TodoItem) => !t.completed).length
-  );
-
   return {
-    [NAME]: str`Todo List (${pendingCount} pending)`,
+    [NAME]: title,
     [UI]: (
       <div>
-        <form onSubmit={(e: any) => {
-          e.preventDefault();
-          const input = e.target.text;
-          if (input.value) {
-            addTodo({ text: input.value });
-            input.value = '';
-          }
-        }}>
-          <input name="text" placeholder="Add todo..." />
-          <button type="submit">Add</button>
-        </form>
-        
+        <h3>{title}</h3>
+        <p>Basic recipe</p>
+        <p>Items count: {items_count}</p>
         <ul>
-          {todos.map((todo: TodoItem) => (
-            <li key={todo.id}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={todo.completed}
-                  onChange={() => toggleTodo({ id: todo.id })}
-                />
-                <span style={{
-                  textDecoration: todo.completed ? 'line-through' : 'none'
-                }}>
-                  {todo.text}
-                </span>
-              </label>
-            </li>
+          {items.map((item: Item, index: number) => (
+            <li key={index}>{item.text}</li>
           ))}
         </ul>
-        
-        <div>
-          Completed: {completedCount} | Pending: {pendingCount}
-        </div>
+        <common-send-message
+          name="Send"
+          placeholder="Type a message..."
+          appearance="rounded"
+          onmessagesend={addItem({ items })}
+        />
       </div>
     ),
-    todos,
-    completedCount,
-    pendingCount
+    title,
+    items,
+    items_count
   };
 });
