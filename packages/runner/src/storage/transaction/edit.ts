@@ -6,7 +6,7 @@ import type {
   State,
 } from "../interface.ts";
 import { retract } from "@commontools/memory/fact";
-import { refer } from "merkle-reference";
+import { refer } from "merkle-reference/json";
 
 /**
  * Memory space atomic update builder.
