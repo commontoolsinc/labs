@@ -573,7 +573,7 @@ describe("createProxy", () => {
 
     // Modify the deeply nested array
     firstInnerArray.push(3);
-    expect([...firstInnerArray]).toEqual([1, 2, 3]);
+    expect(firstInnerArray).toEqual([1, 2, 3]);
 
     // Verify the change is reflected in the original data
     expect(proxy.nested.arrays[0]).toEqual([1, 2, 3]);
