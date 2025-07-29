@@ -143,7 +143,7 @@ describe("CTKanban Cell-based Tests", () => {
       }));
 
       expect(columnGroups[0].cells).toHaveLength(0); // backlog
-      expect(columnGroups[1].cells).toHaveLength(1); // todo
+      expect(columnGroups[1].cells).toHaveLength(1); // to-do status
       expect(columnGroups[2].cells).toHaveLength(1); // in-progress
       expect(columnGroups[3].cells).toHaveLength(1); // done
     });
