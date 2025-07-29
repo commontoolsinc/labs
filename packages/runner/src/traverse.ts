@@ -524,6 +524,7 @@ function narrowSchema(
     const schema = cfc.schemaAtPath(
       selector.schemaContext!.schema,
       docPath.slice(docPathIndex),
+      selector.schemaContext!.rootSchema,
     );
     return {
       path: [...targetPath],
