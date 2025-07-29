@@ -16,12 +16,12 @@ function createUnifiedDiff(
   const maxLines = Math.max(expectedLines.length, actualLines.length);
 
   const diffRanges: Array<{ start: number; end: number }> = [];
-  
+
   // First, find all ranges with differences
   for (let i = 0; i < maxLines; i++) {
     const expectedLine = expectedLines[i] ?? "";
     const actualLine = actualLines[i] ?? "";
-    
+
     if (expectedLine !== actualLine) {
       // Find or extend a range
       const lastRange = diffRanges[diffRanges.length - 1];
@@ -40,13 +40,13 @@ function createUnifiedDiff(
   for (const range of diffRanges) {
     const blockStart = Math.max(0, range.start - context);
     const blockEnd = Math.min(maxLines - 1, range.end + context);
-    
+
     const lines: string[] = [];
-    
+
     for (let i = blockStart; i <= blockEnd; i++) {
       const expectedLine = expectedLines[i] ?? "";
       const actualLine = actualLines[i] ?? "";
-      
+
       if (expectedLine === actualLine) {
         lines.push(`  ${expectedLine}`);
       } else {
@@ -58,12 +58,14 @@ function createUnifiedDiff(
         }
       }
     }
-    
+
     // Create the hunk header
-    const expectedCount = lines.filter(l => !l.startsWith("+")).length;
-    const actualCount = lines.filter(l => !l.startsWith("-")).length;
-    
-    diff += `@@ -${blockStart + 1},${expectedCount} +${blockStart + 1},${actualCount} @@\n`;
+    const expectedCount = lines.filter((l) => !l.startsWith("+")).length;
+    const actualCount = lines.filter((l) => !l.startsWith("-")).length;
+
+    diff += `@@ -${blockStart + 1},${expectedCount} +${
+      blockStart + 1
+    },${actualCount} @@\n`;
     diff += lines.join("\n") + "\n\n";
   }
 
@@ -234,8 +236,12 @@ for (const config of configsWithFixtures) {
               let diffMessage =
                 `\n\nTransformation output does not match expected for: ${testName}\n`;
               diffMessage += `\nFiles:\n`;
-              diffMessage += `  Input:    ${resolve(`test/fixtures/${inputPath}.input${ext}`)}\n`;
-              diffMessage += `  Expected: ${resolve(`test/fixtures/${inputPath}.expected${ext}`)}\n`;
+              diffMessage += `  Input:    ${
+                resolve(`test/fixtures/${inputPath}.input${ext}`)
+              }\n`;
+              diffMessage += `  Expected: ${
+                resolve(`test/fixtures/${inputPath}.expected${ext}`)
+              }\n`;
               diffMessage += `\n${"=".repeat(80)}\n`;
               diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
               diffMessage += `${"=".repeat(80)}\n`;
@@ -274,8 +280,12 @@ for (const config of configsWithFixtures) {
           let diffMessage =
             `\n\nTransformation output does not match expected for: ${testName}\n`;
           diffMessage += `\nFiles:\n`;
-          diffMessage += `  Input:    ${resolve(`test/fixtures/${inputPath}.input${ext}`)}\n`;
-          diffMessage += `  Expected: ${resolve(`test/fixtures/${inputPath}.expected${ext}`)}\n`;
+          diffMessage += `  Input:    ${
+            resolve(`test/fixtures/${inputPath}.input${ext}`)
+          }\n`;
+          diffMessage += `  Expected: ${
+            resolve(`test/fixtures/${inputPath}.expected${ext}`)
+          }\n`;
           diffMessage += `\n${"=".repeat(80)}\n`;
           diffMessage += `UNIFIED DIFF (expected vs actual):\n`;
           diffMessage += `${"=".repeat(80)}\n`;

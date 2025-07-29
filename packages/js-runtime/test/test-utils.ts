@@ -178,12 +178,11 @@ export async function transformSource(
   // Always add OpaqueRef transformer first
   transformers.push(createOpaqueRefTransformer(program, {
     mode,
-    logger,
   }));
 
   // Optionally add schema transformer
   if (applySchemaTransformer) {
-    transformers.push(createSchemaTransformer(program, { logger }));
+    transformers.push(createSchemaTransformer(program));
   }
 
   // Transform the source file

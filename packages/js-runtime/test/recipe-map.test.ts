@@ -35,9 +35,9 @@ export default recipe<{ items: string[] }>("Test Recipe", ({ items }) => {
     // The transformation should work correctly
     assertStringIncludes(result, "items.map((item, index)");
     assertStringIncludes(result, "{item}");
-    
+
     // Schema should be generated
-    assertStringIncludes(result, "type: \"array\"");
+    assertStringIncludes(result, 'type: "array"');
     assertStringIncludes(result, "items: {");
   });
 

@@ -13,6 +13,7 @@ import type {
 } from "typescript";
 import ts from "typescript";
 import * as path from "@std/path";
+import { getLogger } from "@commontools/utils/logger";
 import { getCompilerOptions, TARGET } from "./options.ts";
 import { bundleAMDOutput } from "./bundler/mod.ts";
 import { parseSourceMap } from "../source-map.ts";
@@ -26,6 +27,17 @@ import {
 
 const DEBUG_VIRTUAL_FS = false;
 const VFS_TYPES_DIR = "$types/";
+
+// Create logger for the compiler
+const logger = getLogger("js-runtime-compiler", {
+  enabled: true,
+  level: "info",
+});
+// Create a separate debug logger for VirtualFs operations
+const vfsLogger = getLogger("virtualfs", {
+  enabled: DEBUG_VIRTUAL_FS,
+  level: "debug",
+});
 
 // Mapping from virtual type path (e.g. `$types/es2023.d.ts`)
 type TypeLibs = Record<string, string>;
@@ -49,19 +61,19 @@ class VirtualFs implements ModuleResolutionHost {
   }
 
   writeFile(fileName: any, content: any) {
-    return this.log(`writeFile - ${fileName}`, () => {
-      if (typeof fileName !== "string") {
-        throw new Error("file name not string:" + typeof fileName);
-      }
-      if (typeof content !== "string") {
-        throw new Error("content not string:" + typeof content);
-      }
-      this.fsWrite[fileName] = content;
-    });
+    if (typeof fileName !== "string") {
+      throw new Error("file name not string:" + typeof fileName);
+    }
+    if (typeof content !== "string") {
+      throw new Error("content not string:" + typeof content);
+    }
+    vfsLogger.debug(() => `writeFile - ${fileName} (${content.length} chars)`);
+    this.fsWrite[fileName] = content;
   }
 
   getCurrentDirectory(): string {
-    return this.log(`getCurrentDirectory`, () => "/");
+    vfsLogger.debug(() => "getCurrentDirectory - returning /");
+    return "/";
   }
 
   getDirectories(_path: string): string[] {
@@ -69,14 +81,19 @@ class VirtualFs implements ModuleResolutionHost {
   }
 
   fileExists(fileName: string): boolean {
-    return this.log(
-      `fileExists - ${fileName}`,
-      () => !!this.innerRead(fileName),
-    );
+    const exists = !!this.innerRead(fileName);
+    vfsLogger.debug(() => `fileExists - ${fileName}: ${exists}`);
+    return exists;
   }
 
   readFile(fileName: string): string | undefined {
-    return this.log(`readFile - ${fileName}`, () => this.innerRead(fileName));
+    const content = this.innerRead(fileName);
+    vfsLogger.debug(() =>
+      `readFile - ${fileName}: ${
+        content ? content.length + " chars" : "not found"
+      }`
+    );
+    return content;
   }
 
   useCaseSensitiveFileNames() {
@@ -88,26 +105,17 @@ class VirtualFs implements ModuleResolutionHost {
   }
 
   private innerRead(fileName: string): string | undefined {
-    return this.log(`innerRead - ${fileName}`, () => {
-      let innerRecord;
-      if (fileName.startsWith(VFS_TYPES_DIR)) {
-        innerRecord = this.types;
-      } else {
-        innerRecord = this.fsRead;
-      }
-      return innerRecord[fileName];
-    });
-  }
-
-  private log<T>(name: string, callback: () => T): T {
-    const result = callback();
-    if (this.debug) {
-      const renderable = (typeof result === "string" && result.length > 100)
-        ? `${result.substring(0, 100)}...`
-        : result;
-      console.log(`${name}: ${renderable}`);
+    let innerRecord;
+    if (fileName.startsWith(VFS_TYPES_DIR)) {
+      innerRecord = this.types;
+    } else {
+      innerRecord = this.fsRead;
     }
-    return result;
+    const content = innerRecord[fileName];
+    vfsLogger.debug(() =>
+      `innerRead - ${fileName}: ${content ? "found" : "not found"}`
+    );
+    return content;
   }
 }
 
@@ -327,19 +335,14 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       }
     }
 
-    // Create logger based on showTransformed option
-    const transformerLogger = inputOptions.debugLoggingTransformers
-      ? (message: string) => console.log(message)
-      : undefined;
-
     // Build transformers list based on CTS directive and options
     const beforeTransformers: ts.TransformerFactory<ts.SourceFile>[] = [];
 
     if (hasCtsDirective) {
       // Add OpaqueRef and Schema transformers
       beforeTransformers.push(
-        createOpaqueRefTransformer(tsProgram, { logger: transformerLogger }),
-        createSchemaTransformer(tsProgram, { logger: transformerLogger }),
+        createOpaqueRefTransformer(tsProgram),
+        createSchemaTransformer(tsProgram),
       );
 
       // Only add logging transformer if showTransformed is true
@@ -353,8 +356,8 @@ export class TypeScriptCompiler implements Compiler<TypeScriptCompilerOptions> {
       }
     } else if (inputOptions.showTransformed) {
       // Warn if user requested transformed output but no CTS directive
-      console.warn(
-        "Warning: --show-transformed was specified but no /// <cts-enable /> directive found in the main source file",
+      logger.warn(() =>
+        "Warning: --show-transformed was specified but no /// <cts-enable /> directive found in the main source file"
       );
     }
 
