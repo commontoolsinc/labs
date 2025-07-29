@@ -12,7 +12,7 @@ export { createSchemaTransformer } from "./schema.ts";
 export { createLoggingTransformer } from "./logging.ts";
 
 // Debug utilities
-export { TRANSFORMATION_TYPES, type TransformerOptions } from "./debug.ts";
+export { TRANSFORMATION_TYPES } from "./debug.ts";
 
 // Type checking utilities
 export {

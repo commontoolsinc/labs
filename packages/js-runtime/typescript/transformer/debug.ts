@@ -1,11 +1,4 @@
 /**
- * Base options for all transformers
- */
-export interface TransformerOptions {
-  // Currently no shared options
-}
-
-/**
  * Transformation types for type safety and consistency
  */
 export const TRANSFORMATION_TYPES = {

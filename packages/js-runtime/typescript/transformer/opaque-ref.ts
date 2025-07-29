@@ -13,7 +13,7 @@ import {
   TransformationTypeString,
   transformExpressionWithOpaqueRef,
 } from "./transforms.ts";
-import { TRANSFORMATION_TYPES, TransformerOptions } from "./debug.ts";
+import { TRANSFORMATION_TYPES } from "./debug.ts";
 
 // Create logger for OpaqueRef transformer
 const logger = getLogger("opaque-ref-transformer", {
