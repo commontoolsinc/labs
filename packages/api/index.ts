@@ -329,6 +329,12 @@ export type LiftFunction = {
   <T extends (...args: any[]) => any>(
     implementation: T,
   ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
+
+  <T, R>(
+    argumentSchema?: JSONSchema | ((input: any) => any),
+    resultSchema?: JSONSchema,
+    implementation?: (input: T) => R,
+  ): ModuleFactory<T, R>;
 };
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state
