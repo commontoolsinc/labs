@@ -23,8 +23,8 @@ export default recipe({
     return {
         [UI]: (<div>
         <p>Price: {price}</p>
-        <p>Discount: {commontools_1.derive({ price, discount }, ({ price: _v1, discount: _v2 }) => _v1 - _v2)}</p>
-        <p>With tax: {commontools_1.derive({ price, discount, tax }, ({ price: _v1, discount: _v2, tax: _v3 }) => (_v1 - _v2) * (1 + _v3))}</p>
+        <p>Discount: {commontools_1.derive({ price, discount }, ({ price: price, discount: discount }) => price - discount)}</p>
+        <p>With tax: {commontools_1.derive({ price, discount, tax }, ({ price: price, discount: discount, tax: tax }) => (price - discount) * (1 + tax))}</p>
       </div>)
     };
 });

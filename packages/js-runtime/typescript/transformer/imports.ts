@@ -209,21 +209,23 @@ export function removeCommonToolsImport(
     }
   });
 
-  if (!existingImport || !existingImport.importClause || 
-      !existingImport.importClause.namedBindings ||
-      !ts.isNamedImports(existingImport.importClause.namedBindings)) {
+  if (
+    !existingImport || !existingImport.importClause ||
+    !existingImport.importClause.namedBindings ||
+    !ts.isNamedImports(existingImport.importClause.namedBindings)
+  ) {
     return sourceFile;
   }
 
   const existingElements = existingImport.importClause.namedBindings.elements;
   const newElements = existingElements.filter(
-    (element) => element.name.text !== importName
+    (element) => element.name.text !== importName,
   );
 
   // If no imports left, remove the entire import statement
   if (newElements.length === 0) {
     const newStatements = sourceFile.statements.filter(
-      (_, index) => index !== existingImportIndex
+      (_, index) => index !== existingImportIndex,
     );
     return factory.updateSourceFile(
       sourceFile,

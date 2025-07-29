@@ -105,6 +105,14 @@ export function createIfElseCall(
   );
 }
 
+function getSimpleName(ref: ts.Expression): string | undefined {
+  // If we only have one token, we can use it as the param name
+  if (ref.getLastToken() === undefined) {
+    return ref.getText();
+  }
+  return undefined;
+}
+
 /**
  * Transforms an expression containing OpaqueRef values.
  * Handles binary expressions and call expressions.
@@ -127,7 +135,8 @@ export function transformExpressionWithOpaqueRef(
 
     // For property access, we should have exactly one OpaqueRef (the object)
     const ref = opaqueRefs[0];
-    const paramName = "_v1";
+    // If we have a simple name, use that
+    const paramName = getSimpleName(ref) ?? "_v1";
 
     // Replace the OpaqueRef with the parameter in the expression
     const lambdaBody = replaceOpaqueRefWithParam(
@@ -185,7 +194,7 @@ export function transformExpressionWithOpaqueRef(
     opaqueRefs.forEach((ref) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
-        const paramName = `_v${uniqueRefs.size + 1}`;
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
@@ -349,7 +358,7 @@ export function transformExpressionWithOpaqueRef(
     opaqueRefs.forEach((ref) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
-        const paramName = `_v${uniqueRefs.size + 1}`;
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
@@ -489,9 +498,6 @@ export function transformExpressionWithOpaqueRef(
 
   // Handle binary expressions (e.g., cell.value + 1, cell.value * 2)
   if (ts.isBinaryExpression(expression)) {
-    // Get unique variable name
-    const varName = "_v";
-
     // Get all OpaqueRef identifiers in the expression
     const opaqueRefs = collectOpaqueRefs(expression, checker);
 
@@ -506,7 +512,7 @@ export function transformExpressionWithOpaqueRef(
     opaqueRefs.forEach((ref) => {
       const refText = ref.getText();
       if (!uniqueRefs.has(refText)) {
-        const paramName = `_v${uniqueRefs.size + 1}`;
+        const paramName = getSimpleName(ref) ?? `_v${uniqueRefs.size + 1}`;
         uniqueRefs.set(refText, ref);
         refToParamName.set(ref, paramName);
       } else {
@@ -721,20 +727,22 @@ export function addGetCallsToOpaqueRefs(
   return visit(node);
 }
 
+// TODO(@ubik2): Align these types with the TransformationType in debug.ts
+export type TransformationTypeString =
+  | "ternary"
+  | "jsx"
+  | "binary"
+  | "call"
+  | "element-access"
+  | "template";
+
 /**
  * Result of a transformation check.
  */
 export interface TransformationResult {
   transformed: boolean;
   node: ts.Node;
-  type:
-    | "ternary"
-    | "jsx"
-    | "binary"
-    | "call"
-    | "element-access"
-    | "template"
-    | null;
+  type: TransformationTypeString | null;
   error?: string;
 }
 
@@ -797,7 +805,7 @@ export function checkTransformation(
           type: null,
         };
       }
-      
+
       // Also skip if this is a method call (e.g., array.map)
       if (ts.isPropertyAccessExpression(node.expression.expression)) {
         // This is a method call, it should be handled at the CallExpression level
