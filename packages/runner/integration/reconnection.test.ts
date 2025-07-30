@@ -8,11 +8,11 @@
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "../src/storage/cache.ts";
 import type { SchemaContext, URI } from "@commontools/memory/interface";
+import { env } from "@commontools/integration";
+const { API_URL } = env;
 
-const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ||
-  "http://localhost:8000";
 const MEMORY_WS_URL = `${
-  TOOLSHED_URL.replace("http://", "ws://")
+  API_URL.replace("http://", "ws://")
 }/api/storage/memory`;
 const TEST_DOC_ID = "test-reconnection-counter";
 

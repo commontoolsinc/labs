@@ -7,6 +7,8 @@ import {
 } from "@astral/astral";
 import { Page } from "./page.ts";
 
+const DEFAULT_ASTRAL_TIMEOUT = 60_000;
+
 // Wrapper around `@astral/astral`'s `Browser`.
 export class Browser {
   private browser: AstralBrowser | null;
@@ -25,7 +27,7 @@ export class Browser {
   ): Promise<Browser> {
     const headless = config?.headless ?? true;
     const args = config?.args ?? [];
-    const timeout = config?.timeout ?? 10_000;
+    const timeout = config?.timeout ?? DEFAULT_ASTRAL_TIMEOUT;
 
     const browser = await launch({
       args,

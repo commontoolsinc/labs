@@ -1,10 +1,18 @@
-import { Page } from "@commontools/integration";
+import {
+  Browser,
+  dismissDialogs,
+  env,
+  Page,
+  pipeConsole,
+} from "@commontools/integration";
 import { ANYONE, Identity, InsecureCryptoKeyPair } from "@commontools/identity";
+import { afterAll, afterEach, beforeAll } from "@std/testing/bdd";
 import { AppState } from "../src/lib/app/mod.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
+import { PageErrorEvent } from "@astral/astral";
 
 // Pass the key over the boundary. When the state is returned,
 // the key is serialized to Uint8Arrays, and then turned into regular arrays,
@@ -18,7 +26,7 @@ export async function login(page: Page, identity: Identity): Promise<AppState> {
     publicKey: Array<number>;
   };
 
-  const serializedId = identity!.serialize() as InsecureCryptoKeyPair;
+  const serializedId = identity.serialize() as InsecureCryptoKeyPair;
   const transferrableId = {
     privateKey: Array.from(serializedId.privateKey),
     publicKey: Array.from(serializedId.privateKey),
@@ -95,4 +103,51 @@ export async function registerCharm(
     await runtime.dispose();
   }
   return charmId;
+}
+
+export class ShellIntegration {
+  browser?: Browser;
+  page?: Page;
+  identity?: Identity;
+  exceptions: Array<string> = [];
+
+  bindLifecycle() {
+    beforeAll(this.beforeAll);
+    afterAll(this.afterAll);
+    afterEach(this.afterEach);
+  }
+
+  get(): { page: Page; identity: Identity } {
+    if (!this.page) throw new Error("Page not initialized.");
+    if (!this.identity) throw new Error("Identity not initialized.");
+    return { page: this.page, identity: this.identity };
+  }
+
+  async login(): Promise<AppState> {
+    const { page, identity } = this.get();
+    return await login(page, identity);
+  }
+
+  beforeAll = async () => {
+    this.browser = await Browser.launch({ headless: env.HEADLESS });
+    this.page = await this.browser.newPage();
+    this.page.addEventListener("console", pipeConsole);
+    this.page.addEventListener("dialog", dismissDialogs);
+    this.page.addEventListener("pageerror", (e: PageErrorEvent) => {
+      console.error("Browser Page Error:", e.detail.message);
+      this.exceptions.push(e.detail.message);
+    });
+    this.identity = await Identity.generate({ implementation: "noble" });
+  };
+
+  afterAll = async () => {
+    await this.page?.close();
+    await this.browser?.close();
+  };
+
+  afterEach = () => {
+    if (this.exceptions.length > 0) {
+      throw new Error(`Exceptions recorded: \n${this.exceptions.join("\n")}`);
+    }
+  };
 }
