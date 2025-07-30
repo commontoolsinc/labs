@@ -5,6 +5,7 @@ import {
   type Immutable,
   isNumber,
   isObject,
+  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
@@ -626,6 +627,15 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     }
   }
 
+  /**
+   * Resolve a schema that's just a $ref.
+   * This doesn't currently handle $anchor tags or external documents
+   *
+   * @param schemaContext SchemaContext whose schema has the $ref and whose
+   *     rootSchema will be used to resolve the $ref.
+   * @returns an updated SchemaContext, with a schema that points to the
+   *     $ref's target or undefined if the $ref could not be resolved.
+   */
   static resolveSchemaRef(
     schemaContext: Readonly<SchemaContext>,
   ): Readonly<SchemaContext> | undefined {
@@ -641,29 +651,19 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return undefined;
     }
     const schemaRef = schemaContext.schema["$ref"];
-    if (schemaRef === "#") {
-      return {
-        schema: schemaContext.rootSchema,
-        rootSchema: schemaContext.rootSchema,
-      };
-    } else if (
-      schemaRef.startsWith("#/definitions/") || schemaRef.startsWith("#/$defs/")
-    ) {
-      const pathToDef = schemaRef.split("/");
-      let schemaCursor = schemaContext.rootSchema;
+    const pathToDef = schemaRef.split("/");
+    if (pathToDef[0] === "#") {
+      let schemaCursor: unknown = schemaContext.rootSchema;
       // start at 1, since the 0 element is "#"
       for (let i = 1; i < pathToDef.length; i++) {
-        if (!isObject(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
+        if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
           logger.warn(() => ["Unresolved $ref in schema: ", schemaRef]);
           return undefined;
         }
-        schemaCursor =
-          (schemaCursor as Readonly<Record<string, JSONSchema | boolean>>)[
-            pathToDef[i]
-          ];
+        schemaCursor = schemaCursor[pathToDef[i]];
       }
       return {
-        schema: schemaCursor,
+        schema: schemaCursor as JSONSchema | boolean,
         rootSchema: schemaContext.rootSchema,
       };
     } else {
