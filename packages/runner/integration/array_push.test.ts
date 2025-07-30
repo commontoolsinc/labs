@@ -13,6 +13,7 @@ import {
   Identity,
   Session,
 } from "@commontools/identity";
+import { env } from "@commontools/integration";
 import { StorageManager } from "../src/storage/cache.ts";
 import { getEntityId, type JSONSchema, Runtime } from "../src/index.ts";
 import { createBuilder } from "../src/builder/factory.ts";
@@ -20,10 +21,9 @@ import { CharmManager, compileRecipe } from "@commontools/charm";
 
 (Error as any).stackTraceLimit = 100;
 
-const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ||
-  "http://localhost:8000";
+const { API_URL } = env;
 const MEMORY_WS_URL = `${
-  TOOLSHED_URL.replace("http://", "ws://")
+  API_URL.replace("http://", "ws://")
 }/api/storage/memory`;
 const SPACE_NAME = "runner_integration";
 
@@ -32,7 +32,7 @@ const TIMEOUT_MS = 30000; // timeout for the test in ms
 
 console.log("Array Push Test");
 console.log(`Connecting to: ${MEMORY_WS_URL}`);
-console.log(`Toolshed URL: ${TOOLSHED_URL}`);
+console.log(`API URL: ${API_URL}`);
 
 // Set up timeout
 const timeoutPromise = new Promise((_, reject) => {
@@ -56,12 +56,12 @@ async function runTest() {
   // Create storage manager
   const storageManager = StorageManager.open({
     as: session.as,
-    address: new URL("/api/storage/memory", TOOLSHED_URL),
+    address: new URL("/api/storage/memory", API_URL),
   });
 
   // Create runtime
   const runtime = new Runtime({
-    blobbyServerUrl: TOOLSHED_URL,
+    blobbyServerUrl: API_URL,
     storageManager,
   });
 

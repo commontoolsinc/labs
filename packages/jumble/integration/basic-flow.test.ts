@@ -2,6 +2,7 @@ import { PageErrorEvent } from "@astral/astral";
 import {
   Browser,
   dismissDialogs,
+  env,
   Page,
   pipeConsole,
 } from "@commontools/integration";
@@ -14,11 +15,7 @@ import { sleep } from "@commontools/utils/sleep";
 import { decode } from "@commontools/utils/encoding";
 
 const TAKE_SNAPSHOTS = false;
-const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
-  "http://localhost:8000/";
-const FRONTEND_URL = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173/";
-const HEADLESS = !Deno.env.get("RUN_IN_BROWSER");
-const ASTRAL_TIMEOUT = 60_000;
+const { API_URL, FRONTEND_URL, HEADLESS } = env;
 const RECIPE_PATH = "../../recipes/simpleValue.tsx";
 const COMMON_CLI_PATH = path.join(
   import.meta.dirname!,
@@ -26,7 +23,7 @@ const COMMON_CLI_PATH = path.join(
 );
 const SNAPSHOTS_DIR = join(Deno.cwd(), "test_snapshots");
 
-console.log(`TOOLSHED_API_URL=${TOOLSHED_API_URL}`);
+console.log(`API_URL=${API_URL}`);
 console.log(`FRONTEND_URL=${FRONTEND_URL}`);
 
 let browser: Browser | void = undefined;
@@ -44,7 +41,7 @@ Deno.test({
         name: "add charm via cli",
         ignore: failed || exceptions.length > 0,
         fn: async () => {
-          testCharm = await addCharm(TOOLSHED_API_URL, RECIPE_PATH);
+          testCharm = await addCharm(API_URL, RECIPE_PATH);
           console.log(`Charm added`, testCharm);
         },
       });
@@ -54,7 +51,6 @@ Deno.test({
         ignore: failed || exceptions.length > 0,
         fn: async () => {
           browser = await Browser.launch({
-            timeout: ASTRAL_TIMEOUT,
             headless: HEADLESS,
           });
 
@@ -185,7 +181,7 @@ Deno.test({
             "Inspecting charm to verify updates propagated from browser.",
           );
           const charm = await inspectCharm(
-            TOOLSHED_API_URL,
+            API_URL,
             testCharm.name,
             testCharm.charmId,
           );

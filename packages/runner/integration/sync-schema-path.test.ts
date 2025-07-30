@@ -6,6 +6,8 @@ import { Identity, type IdentityCreateConfig } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "@commontools/runner";
 import { parseLink } from "../src/link-utils.ts";
+import { env } from "@commontools/integration";
+const { API_URL } = env;
 
 // Create test identity
 const keyConfig: IdentityCreateConfig = {
@@ -14,17 +16,15 @@ const keyConfig: IdentityCreateConfig = {
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 console.log("\n=== TEST: Sync Schema uses Path ===");
-const TOOLSHED_API_URL = Deno.env.get("TOOLSHED_API_URL") ??
-  "http://localhost:8000/";
 
 async function test() {
   // First runtime - save data
   const runtime1 = new Runtime({
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", TOOLSHED_API_URL),
+      address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: "http://localhost:8000",
+    blobbyServerUrl: API_URL,
   });
   const addressSchema = {
     type: "object",
@@ -94,9 +94,9 @@ async function test() {
   const runtime2 = new Runtime({
     storageManager: StorageManager.open({
       as: identity,
-      address: new URL("/api/storage/memory", TOOLSHED_API_URL),
+      address: new URL("/api/storage/memory", API_URL),
     }),
-    blobbyServerUrl: "http://localhost:8000",
+    blobbyServerUrl: API_URL,
   });
 
   // When we build a cell from a cell link, we don't do the right thing with

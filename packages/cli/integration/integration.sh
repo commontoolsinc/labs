@@ -19,10 +19,9 @@ if [ -n "$CT_CLI_INTEGRATION_USE_LOCAL" ]; then
  }
 fi
 
-if [ "$#" -eq 0 ]; then
-  error "Missing required argument: API_URL"
+if [ -z "$API_URL" ]; then
+  error "API_URL must be defined."
 fi
-API_URL="$1"
 SPACE=$(mktemp -u XXXXXXXXXX) # generates a random space
 IDENTITY=$(mktemp)
 SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
