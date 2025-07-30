@@ -57,18 +57,19 @@ const outputSchema = {
                 type: "string"
             }
         },
-        updater: { ...{
-                type: "object",
-                properties: {
-                    newValues: {
-                        type: "array",
-                        items: {
-                            type: "string"
-                        }
+        updater: {
+            type: "object",
+            properties: {
+                newValues: {
+                    type: "array",
+                    items: {
+                        type: "string"
                     }
-                },
-                required: ["newValues"]
-            }, asStream: true }
+                }
+            },
+            required: ["newValues"],
+            asStream: true
+        }
     },
     required: ["values", "updater"]
 } as const satisfies JSONSchema;

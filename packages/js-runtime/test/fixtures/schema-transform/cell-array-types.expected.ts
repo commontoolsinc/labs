@@ -132,9 +132,10 @@ const mixedArrayTypesSchema = {
         },
         streams: {
             type: "array",
-            items: { ...{
-                    type: "number"
-                }, asStream: true }
+            items: {
+                type: "number",
+                asStream: true
+            }
         },
         regularArray: {
             type: "array",
