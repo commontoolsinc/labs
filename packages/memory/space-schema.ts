@@ -14,13 +14,13 @@ import { type Immutable, isObject } from "@commontools/utils/types";
 import { the as COMMIT_THE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";
-import {
-  type Cause,
-  type Entity,
-  type FactAddress,
-  type FactSelection,
-  type MemorySpace,
-  type SchemaQuery,
+import type {
+  Cause,
+  Entity,
+  FactAddress,
+  FactSelection,
+  MemorySpace,
+  SchemaQuery,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";
 import {
@@ -147,6 +147,8 @@ export const selectSchema = <Space extends MemorySpace>(
   { selectSchema, since, classification }: SchemaQuery["args"],
   selectionTracker?: MapSet<string, SchemaPathSelector>,
 ): FactSelection => {
+  const startTime = performance.timeOrigin + performance.now();
+
   const providedClassifications = new Set<string>(classification);
   // Track any docs loaded while traversing the factSelection
   const manager = new ServerObjectManager(session, providedClassifications);
@@ -232,6 +234,14 @@ export const selectSchema = <Space extends MemorySpace>(
       setEmptyObj(includedFacts, factSelector.of, factSelector.the);
     }
   }
+  const endTime = performance.timeOrigin + performance.now();
+  console.log(
+    `Ran select schema in ${endTime - startTime} milliseconds`,
+  );
+  if ((endTime - startTime) > 100) {
+    console.log("selectSchema:", JSON.stringify(selectSchema, undefined, 2));
+  }
+
   return includedFacts;
 };
 
