@@ -641,7 +641,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   ): Readonly<SchemaContext> | undefined {
     if (
       !isObject(schemaContext.schema) || !("$ref" in schemaContext.schema) ||
-      schemaContext.schema["$ref"] === undefined
+      typeof schemaContext.schema["$ref"] !== "string"
     ) {
       // We shouldn't have called this function, but just return it as-is
       return schemaContext;
@@ -651,28 +651,33 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return undefined;
     }
     const schemaRef = schemaContext.schema["$ref"];
-    // schemaRef is a JSONPointer, so split and unescape
-    const pathToDef = schemaRef.split("/").map((p) =>
-      p.replace("~1", "/").replace("~0", "~")
-    );
-    if (pathToDef[0] === "#") {
-      let schemaCursor: unknown = schemaContext.rootSchema;
-      // start at 1, since the 0 element is "#"
-      for (let i = 1; i < pathToDef.length; i++) {
-        if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
-          logger.warn(() => ["Unresolved $ref in schema: ", schemaRef]);
-          return undefined;
-        }
-        schemaCursor = schemaCursor[pathToDef[i]];
-      }
-      return {
-        schema: schemaCursor as JSONSchema | boolean,
-        rootSchema: schemaContext.rootSchema,
-      };
-    } else {
+    // We only support schemaRefs that are URI fragments
+    if (!schemaRef.startsWith("#")) {
       logger.warn(() => ["Unsupported $ref in schema: ", schemaRef]);
       return undefined;
     }
+    // URI fragment schemaRefs are JSONPointers, so split and unescape
+    const pathToDef = schemaRef.split("/").map((p) =>
+      p.replace("~1", "/").replace("~0", "~")
+    );
+    // We don't support anchors yet (e.g. `"$ref": "#address"`)
+    if (pathToDef[0] !== "#") {
+      logger.warn(() => ["Unsupported anchor $ref in schema: ", schemaRef]);
+      return undefined;
+    }
+    let schemaCursor: unknown = schemaContext.rootSchema;
+    // start at 1, since the 0 element is "#"
+    for (let i = 1; i < pathToDef.length; i++) {
+      if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
+        logger.warn(() => ["Unresolved $ref in schema: ", schemaRef]);
+        return undefined;
+      }
+      schemaCursor = schemaCursor[pathToDef[i]];
+    }
+    return {
+      schema: schemaCursor as JSONSchema | boolean,
+      rootSchema: schemaContext.rootSchema,
+    };
   }
 
   traverseWithSchemaContext(
