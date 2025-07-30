@@ -15,38 +15,8 @@ const myHandler = handler({
             asCell: true
         },
         name: {
-            type: "object",
-            properties: {
-                get: {
-                    type: "object",
-                    properties: {}
-                },
-                set: {
-                    type: "object",
-                    properties: {}
-                },
-                send: {
-                    type: "object",
-                    properties: {}
-                },
-                update: {
-                    type: "object",
-                    properties: {}
-                },
-                push: {
-                    type: "object",
-                    properties: {}
-                },
-                equals: {
-                    type: "object",
-                    properties: {}
-                },
-                key: {
-                    type: "object",
-                    properties: {}
-                }
-            },
-            required: ["get", "set", "send", "update", "push", "equals", "key"]
+            type: "string",
+            asCell: true
         }
     },
     required: ["value"]
