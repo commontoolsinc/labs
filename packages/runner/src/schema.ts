@@ -404,7 +404,7 @@ export function validateAndTransform(
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
   const ref = resolveLink(tx ?? runtime.edit(), link);
-  let value = (tx ?? runtime.edit()).readValueOrThrow(ref);
+  const value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
