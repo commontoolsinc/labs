@@ -5,6 +5,7 @@ import {
   type Immutable,
   isNumber,
   isObject,
+  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
@@ -527,6 +528,7 @@ function narrowSchema(
     const schema = cfc.schemaAtPath(
       selector.schemaContext!.schema,
       docPath.slice(docPathIndex),
+      selector.schemaContext!.rootSchema,
     );
     return {
       path: [...targetPath],
@@ -625,6 +627,59 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     }
   }
 
+  /**
+   * Resolve a schema that's just a $ref.
+   * This doesn't currently handle $anchor tags or external documents
+   *
+   * @param schemaContext SchemaContext whose schema has the $ref and whose
+   *     rootSchema will be used to resolve the $ref.
+   * @returns an updated SchemaContext, with a schema that points to the
+   *     $ref's target or undefined if the $ref could not be resolved.
+   */
+  static resolveSchemaRef(
+    schemaContext: Readonly<SchemaContext>,
+  ): Readonly<SchemaContext> | undefined {
+    if (
+      !isObject(schemaContext.schema) || !("$ref" in schemaContext.schema) ||
+      typeof schemaContext.schema["$ref"] !== "string"
+    ) {
+      // We shouldn't have called this function, but just return it as-is
+      return schemaContext;
+    }
+    if (schemaContext.rootSchema === undefined) {
+      logger.warn(() => ["Unsupported $ref without root schema: ", schemaRef]);
+      return undefined;
+    }
+    const schemaRef = schemaContext.schema["$ref"];
+    // We only support schemaRefs that are URI fragments
+    if (!schemaRef.startsWith("#")) {
+      logger.warn(() => ["Unsupported $ref in schema: ", schemaRef]);
+      return undefined;
+    }
+    // URI fragment schemaRefs are JSONPointers, so split and unescape
+    const pathToDef = schemaRef.split("/").map((p) =>
+      p.replace("~1", "/").replace("~0", "~")
+    );
+    // We don't support anchors yet (e.g. `"$ref": "#address"`)
+    if (pathToDef[0] !== "#") {
+      logger.warn(() => ["Unsupported anchor $ref in schema: ", schemaRef]);
+      return undefined;
+    }
+    let schemaCursor: unknown = schemaContext.rootSchema;
+    // start at 1, since the 0 element is "#"
+    for (let i = 1; i < pathToDef.length; i++) {
+      if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
+        logger.warn(() => ["Unresolved $ref in schema: ", schemaRef]);
+        return undefined;
+      }
+      schemaCursor = schemaCursor[pathToDef[i]];
+    }
+    return {
+      schema: schemaCursor as JSONSchema | boolean,
+      rootSchema: schemaContext.rootSchema,
+    };
+  }
+
   traverseWithSchemaContext(
     doc: ValueAtPath<K>,
     schemaContext: Readonly<SchemaContext>,
@@ -643,25 +698,11 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return undefined;
     }
     if ("$ref" in schemaContext.schema) {
-      const schemaWithRef = schemaContext.schema as JSONSchema;
-      // At some point, this should be extended to support more than just '#'
-      if (schemaWithRef["$ref"] != "#") {
-        logger.warn(() => [
-          "Unsupported $ref in schema: ",
-          schemaWithRef["$ref"],
-        ]);
+      const resolved = SchemaObjectTraverser.resolveSchemaRef(schemaContext);
+      if (resolved === undefined) {
+        return resolved;
       }
-      if (schemaContext.rootSchema === undefined) {
-        logger.warn(() => [
-          "Unsupported $ref without root schema: ",
-          schemaWithRef["$ref"],
-        ]);
-        return undefined;
-      }
-      schemaContext = {
-        schema: schemaContext.rootSchema,
-        rootSchema: schemaContext.rootSchema,
-      };
+      schemaContext = resolved;
     }
     const schemaObj = schemaContext.schema as Immutable<JSONObject>;
     if (doc.value === null) {

@@ -66,6 +66,8 @@ export type JSONSchemaTypes = "object" | "array" | "string" | "integer" | "numbe
 export type JSONSchema = {
     readonly $ref?: string;
     readonly $defs?: Readonly<Record<string, JSONSchema>>;
+    /** @deprecated Use `$defs` for 2019-09/Draft 8 or later */
+    readonly definitions?: Readonly<Record<string, JSONSchema | boolean>>;
     readonly allOf?: readonly (JSONSchema | boolean)[];
     readonly anyOf?: readonly JSONSchema[];
     readonly oneOf?: readonly (JSONSchema | boolean)[];
@@ -181,6 +183,7 @@ export type LiftFunction = {
     <T, R>(implementation: (input: T) => R): ModuleFactory<T, R>;
     <T>(implementation: (input: T) => any): ModuleFactory<T, ReturnType<typeof implementation>>;
     <T extends (...args: any[]) => any>(implementation: T): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
+    <T, R>(argumentSchema?: JSONSchema, resultSchema?: JSONSchema, implementation?: (input: T) => R): ModuleFactory<T, R>;
 };
 export type HandlerState<T> = T extends Cell<any> ? T : T extends Stream<any> ? T : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>> : T extends object ? {
     readonly [K in keyof T]: HandlerState<T[K]>;
