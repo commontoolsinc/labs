@@ -571,7 +571,7 @@ export function validateAndTransform(
   }
 
   if (resolvedSchema.type === "object") {
-    if (!isRecord(value)) value = {};
+    const keys = isRecord(value) ? Object.keys(value) : [];
 
     const result: Record<string, any> = {};
 
@@ -589,7 +589,10 @@ export function validateAndTransform(
         if (childSchema === undefined) {
           continue;
         }
-        if (childSchema.asCell || childSchema.asStream || key in value) {
+        if (
+          (childSchema.asCell || childSchema.asStream || keys.includes(key)) &&
+          (isRecord(value) || childSchema.default !== undefined)
+        ) {
           result[key] = validateAndTransform(
             runtime,
             tx,
@@ -610,7 +613,6 @@ export function validateAndTransform(
     }
 
     // Handle additional properties if defined
-    const keys = Object.keys(value);
     for (const key of keys) {
       if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
         const childSchema = runtime.cfc.getSchemaAtPath(
@@ -631,6 +633,9 @@ export function validateAndTransform(
       }
     }
 
+    if (!isRecord(value) && Object.keys(result).length === 0) {
+      return undefined;
+    }
     return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
 
