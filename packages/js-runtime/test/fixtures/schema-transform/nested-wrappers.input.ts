@@ -45,9 +45,6 @@ interface ComplexNesting {
   // Cell containing Default
   cellOfDefault: Cell<Default<string, "default">>;
   
-  // Array of Defaults
-  arrayOfDefaults: Default<number, 0>[];
-  
   // Default containing array
   defaultArray: Default<string[], ["a", "b"]>;
 }

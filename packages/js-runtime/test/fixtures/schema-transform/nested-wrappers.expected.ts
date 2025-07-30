@@ -89,8 +89,6 @@ const cellOfArraySchema = {
 interface ComplexNesting {
     // Cell containing Default
     cellOfDefault: Cell<Default<string, "default">>;
-    // Array of Defaults
-    arrayOfDefaults: Default<number, 0>[];
     // Default containing array
     defaultArray: Default<string[], [
         "a",
@@ -105,13 +103,6 @@ const complexNestingSchema = {
             default: "default",
             asCell: true
         },
-        arrayOfDefaults: {
-            type: "array",
-            items: {
-                type: "number",
-                default: 0
-            }
-        },
         defaultArray: {
             type: "array",
             items: {
@@ -120,6 +111,6 @@ const complexNestingSchema = {
             default: ["a", "b"]
         }
     },
-    required: ["cellOfDefault", "arrayOfDefaults", "defaultArray"]
+    required: ["cellOfDefault", "defaultArray"]
 } as const satisfies JSONSchema;
 export { defaultCellSchema, cellOfDefaultSchema, streamOfDefaultSchema, arrayOfCellsSchema, cellOfArraySchema, complexNestingSchema };

@@ -277,37 +277,6 @@ function typeToJsonSchema(
     return { type: "string", format: "date-time" };
   }
   
-  // Check for Default type using aliasSymbol (for types resolved from arrays)
-  const aliasSymbol = (type as any).aliasSymbol;
-  if (aliasSymbol && aliasSymbol.name === "Default") {
-    const aliasTypeArguments = (type as any).aliasTypeArguments;
-    if (aliasTypeArguments && aliasTypeArguments.length >= 2) {
-      const innerType = aliasTypeArguments[0];
-      const defaultValueType = aliasTypeArguments[1];
-      
-      // Get the schema for the inner type
-      // Pass undefined for typeNode to avoid infinite recursion
-      const schema = typeToJsonSchema(innerType, checker, undefined);
-      
-      // Try to extract the literal value from the default value type
-      if (defaultValueType.flags & ts.TypeFlags.NumberLiteral) {
-        // @ts-ignore - accessing value property
-        schema.default = (defaultValueType as any).value;
-      } else if (defaultValueType.flags & ts.TypeFlags.StringLiteral) {
-        // @ts-ignore - accessing value property
-        schema.default = (defaultValueType as any).value;
-      } else if (defaultValueType.flags & ts.TypeFlags.BooleanLiteral) {
-        // @ts-ignore - accessing intrinsicName property
-        schema.default = (defaultValueType as any).intrinsicName === "true";
-      } else if ((defaultValueType as any).intrinsicName === "true") {
-        schema.default = true;
-      } else if ((defaultValueType as any).intrinsicName === "false") {
-        schema.default = false;
-      }
-      
-      return schema;
-    }
-  }
 
   // Check if this is a type reference (e.g., Default<T, V>)
   if ((type as any).target) {
