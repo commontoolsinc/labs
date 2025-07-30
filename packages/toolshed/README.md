@@ -69,21 +69,6 @@ The fastest path to install on MacOS and Linux is to run the following command:
 curl -fsSL https://deno.land/install.sh | sh
 ```
 
-#### Redis
-
-The blobby service uses [Redis](https://redis.io/), so you'll need to install
-Redis locally.
-
-On MacOS, you can install and run Redis using Homebrew:
-
-```shell
-brew install redis
-brew services start redis
-```
-
-For detailed instructions on other platforms, please refer to the
-[Redis installation guide](https://redis.io/docs/latest/install/).
-
 #### Environment Setup
 
 To setup your environment, you'll need to create a `.env` file in the root of

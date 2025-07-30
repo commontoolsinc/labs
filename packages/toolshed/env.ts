@@ -71,13 +71,6 @@ const EnvSchema = z.object({
   // ===========================================================================
   DISCORD_WEBHOOK_URL: z.string().default(""),
   // ===========================================================================
-  //
-  // ===========================================================================
-  // Blobby Storage
-  //   * /routes/storage/blobby
-  // ===========================================================================
-  BLOBBY_REDIS_URL: z.string().default("redis://localhost:6379"),
-  // ===========================================================================
   // Memory Store
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
   //  - MEMORY_URL is used by toolshed to connect to memory endpoint

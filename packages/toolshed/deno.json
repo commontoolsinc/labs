@@ -39,7 +39,6 @@
     "pino": "npm:pino@^9.6.0",
     "pino-pretty": "npm:pino-pretty@^13.0.0",
     "plaid": "npm:plaid@^36.0.0",
-    "redis": "npm:redis@^4.7.0",
     "stoker": "npm:stoker@^1.4.2",
     "mistreevous": "npm:mistreevous@4.2.0"
   }

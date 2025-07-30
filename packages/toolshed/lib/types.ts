@@ -1,6 +1,5 @@
 import type { OpenAPIHono, RouteConfig, RouteHandler } from "@hono/zod-openapi";
 import type { Logger } from "pino";
-import type { RedisClientType } from "redis";
 
 export interface AppBindings {
   Variables: {
