@@ -95,12 +95,14 @@ export default recipe(
           <p>Array length: {derive(my_numbers_array, (arr) => arr.length)}</p>
           <p>
             <ul>
-              Current values: {my_numbers_array.map((e) => <li>{e}</li>)}
+              Current values:{" "}
+              {my_numbers_array.map((e, i) => <li key={i}>{e}</li>)}
             </ul>
           </p>
           <p>
             <ul>
-              Current values: {my_objects_array.map((e) => <li>{e.count}</li>)}
+              Current values:{" "}
+              {my_objects_array.map((e, i) => <li key={i}>{e.count}</li>)}
             </ul>
           </p>
         </div>
