@@ -44,18 +44,20 @@ describe("Provider Reconnection", () => {
           properties: { name: { type: "string" } },
         },
       };
+      const selector1 = { path: [], schemaContext: schema1 };
 
       const schema2: SchemaContext = {
         schema: { type: "object", properties: { age: { type: "number" } } },
         rootSchema: { type: "object", properties: { age: { type: "number" } } },
       };
+      const selector2 = { path: [], schemaContext: schema2 };
 
       const uri1: URI = "of:user-1";
       const uri2: URI = "of:user-2";
 
       // Initial sync to establish subscriptions
-      await provider.sync(uri1, true, schema1);
-      await provider.sync(uri2, true, schema2);
+      await provider.sync(uri1, selector1);
+      await provider.sync(uri2, selector2);
 
       // Override the workspace's pull function to track calls
       const pullCalls: Array<[any, any?][]> = [];
@@ -89,14 +91,14 @@ describe("Provider Reconnection", () => {
         ([addr]) => addr.of === "of:user-1" && addr.the === "application/json",
       );
       expect(user1Entry).toBeDefined();
-      expect(user1Entry![1]).toEqual(schema1);
+      expect(user1Entry![1]).toEqual(selector1);
 
       // Check user-2 subscription
       const user2Entry = pullEntries.find(
         ([addr]) => addr.of === "of:user-2" && addr.the === "application/json",
       );
       expect(user2Entry).toBeDefined();
-      expect(user2Entry![1]).toEqual(schema2);
+      expect(user2Entry![1]).toEqual(selector2);
     });
 
     it("should handle pull failures gracefully", async () => {
@@ -105,8 +107,11 @@ describe("Provider Reconnection", () => {
         rootSchema: { type: "object" },
       };
 
-      await provider.sync("of:good-entity", true, schema);
-      await provider.sync("of:bad-entity", true, schema);
+      await provider.sync("of:good-entity", {
+        path: [],
+        schemaContext: schema,
+      });
+      await provider.sync("of:bad-entity", { path: [], schemaContext: schema });
 
       // Make pull fail
       const originalPull = provider.workspace.pull.bind(provider.workspace);

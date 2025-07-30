@@ -552,9 +552,9 @@ class QueryView<
   }
 
   // Get the facts returned by the query, together with the associated
-  // schema context used to query
-  get schemaFacts(): [Revision<Fact>, SchemaContext | undefined][] {
-    return this.facts.map((fact) => [fact, this.getSchema(fact)]);
+  // SchemaPathSelector used to query
+  get schemaFacts(): [Revision<Fact>, SchemaPathSelector | undefined][] {
+    return this.facts.map((fact) => [fact, this.getSchemaPathSelector(fact)]);
   }
 
   subscribe() {
@@ -566,13 +566,9 @@ class QueryView<
 
   // Get the schema context used to fetch the specified fact.
   // If the fact was included from another fact, it will not have a schemaContext.
-  getSchema(fact: Revision<Fact>): SchemaContext | undefined {
+  getSchemaPathSelector(fact: Revision<Fact>): SchemaPathSelector | undefined {
     const factSelector = this.selector as SchemaSelector;
-    const revision = getSelectorRevision(factSelector, fact.of, fact.the);
-    if (revision !== undefined) {
-      return revision.schemaContext;
-    }
-    return undefined;
+    return getSelectorRevision(factSelector, fact.of, fact.the);
   }
 }
 
