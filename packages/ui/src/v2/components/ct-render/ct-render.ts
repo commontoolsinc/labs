@@ -4,6 +4,8 @@ import { render } from "@commontools/html";
 import { isCell, UI } from "@commontools/runner";
 import type { Cell } from "@commontools/runner";
 import { getIframeRecipe, getRecipeIdFromCharm } from "@commontools/charm";
+// Import common-iframe component
+import "../../../v1/components/common-iframe.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -72,26 +74,64 @@ export class CTRender extends BaseElement {
   private async _loadAndRenderRecipe(recipeId: string) {
     this._log("loading recipe:", recipeId);
 
-    // Load and run the recipe
-    const recipe = await this.cell.runtime.recipeManager.loadRecipe(
-      recipeId,
-      this.cell.space,
-    );
-    await this.cell.runtime.runSynced(this.cell, recipe);
-    await this.cell.runtime.idle();
+    // Check if this is an iframe recipe before loading
+    const iframeData = getIframeRecipe(this.cell, this.cell.runtime);
+    
+    if (iframeData.iframe) {
+      // Handle iframe recipe
+      this._log("rendering iframe recipe");
+      
+      if (!this._renderContainer) {
+        throw new Error("Render container not found");
+      }
 
-    // Check if this is an iframe recipe (now that recipe is loaded)
-    if (getIframeRecipe(this.cell, this.cell.runtime).iframe) {
-      throw new Error("Cannot render IFrame recipe.");
+      // Create and render common-iframe element
+      const iframeElement = document.createElement("common-iframe") as any;
+      iframeElement.src = iframeData.iframe.src;
+      iframeElement.context = this.cell;
+      
+      // Add error handling for iframe errors
+      const handleIframeError = (event: Event) => {
+        const customEvent = event as CustomEvent;
+        console.error("[ct-render] Iframe error:", customEvent.detail);
+        // Propagate the error event up
+        this.dispatchEvent(new CustomEvent("iframe-error", {
+          detail: customEvent.detail,
+          bubbles: true,
+          composed: true
+        }));
+      };
+      
+      iframeElement.addEventListener("error", handleIframeError);
+      
+      // Clear container and add iframe
+      this._renderContainer.innerHTML = "";
+      this._renderContainer.appendChild(iframeElement);
+      
+      // Store cleanup function
+      this._cleanup = () => {
+        if (iframeElement) {
+          iframeElement.removeEventListener("error", handleIframeError);
+        }
+        this._renderContainer!.innerHTML = "";
+      };
+    } else {
+      // Load and run the regular recipe
+      const recipe = await this.cell.runtime.recipeManager.loadRecipe(
+        recipeId,
+        this.cell.space,
+      );
+      await this.cell.runtime.runSynced(this.cell, recipe);
+      await this.cell.runtime.idle();
+
+      // Render the UI output
+      if (!this._renderContainer) {
+        throw new Error("Render container not found");
+      }
+
+      this._log("rendering UI");
+      this._cleanup = render(this._renderContainer, this.cell.key(UI));
     }
-
-    // Render the UI output
-    if (!this._renderContainer) {
-      throw new Error("Render container not found");
-    }
-
-    this._log("rendering UI");
-    this._cleanup = render(this._renderContainer, this.cell.key(UI));
   }
 
   private async _renderCell() {

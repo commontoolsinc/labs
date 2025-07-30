@@ -7,6 +7,7 @@ import { API_URL } from "./env.ts";
 import { navigateToCharm } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
 import { InspectorState, InspectorUpdateEvent } from "./inspector.ts";
+import { setupIframe } from "./iframe-setup.ts";
 
 async function createSession(
   root: Identity,
@@ -131,6 +132,10 @@ export class RuntimeInternals extends EventTarget {
 
     charmManager = new CharmManager(session, runtime);
     await charmManager.synced();
+    
+    // Set up iframe context handler
+    setupIframe(runtime);
+    
     const cc = new CharmsController(charmManager);
     return new RuntimeInternals(cc);
   }
@@ -206,5 +211,9 @@ export async function createCharmsController(
 
   charmManager = new CharmManager(session, runtime);
   await charmManager.synced();
+  
+  // Set up iframe context handler
+  setupIframe(runtime);
+  
   return new CharmsController(charmManager);
 }
