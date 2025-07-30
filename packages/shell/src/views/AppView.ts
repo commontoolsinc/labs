@@ -5,6 +5,8 @@ import { AppState } from "../lib/app/mod.ts";
 import { BaseView } from "./BaseView.ts";
 import { KeyStore } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import { InspectorController } from "../lib/inspector-controller.ts";
+import "./InspectorView.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -39,6 +41,23 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   private keyStore?: KeyStore;
 
+  private inspectorController = new InspectorController(this);
+
+  override updated(changedProperties: Map<string, unknown>) {
+    super.updated(changedProperties);
+
+    // Update inspector controller with runtime
+    if (changedProperties.has("rt") && this.rt) {
+      this.inspectorController.setRuntime(this.rt);
+    }
+
+    // Update inspector visibility from app state
+    if (changedProperties.has("app") && this.app) {
+      this.inspectorController.setVisibility(
+        this.app.showInspectorView ?? false,
+      );
+    }
+  }
 
   override render() {
     const app = (this.app ?? {}) as AppState;
@@ -63,11 +82,21 @@ export class XAppView extends BaseView {
           .keyStore="${this.keyStore}"
           .charmId="${app.activeCharmId}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
+          .showInspectorView="${app.showInspectorView ?? false}"
         ></x-header-view>
         <div class="content-area">
           ${content}
         </div>
       </div>
+      ${this.app?.identity
+        ? html`
+          <x-inspector-view
+            .visible="${this.inspectorController.isVisible()}"
+            .inspectorState="${this.inspectorController.getState()}"
+            .updateVersion="${this.inspectorController.getUpdateVersion()}"
+          ></x-inspector-view>
+        `
+        : ""}
     `;
   }
 }

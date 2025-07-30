@@ -129,7 +129,14 @@ export class Chronicle {
     // Only return NotFound if we're accessing a path on a non-existent document
     // and there's no novelty write that would have created it
     if (rebase.ok.value === undefined && address.path.length > 0) {
-      return { error: new NotFound(rebase.ok, address) };
+      const path = rebase.ok.address.path;
+      return {
+        error: new NotFound(
+          rebase.ok,
+          address,
+          path.length > 0 ? path.slice(0, -1) : undefined,
+        ),
+      };
     }
 
     const { error } = write(rebase.ok, address, value);
@@ -180,6 +187,13 @@ export class Chronicle {
     const loaded = attest(state);
     const { error, ok: invariant } = read(loaded, address);
     if (error) {
+      // If the read failed because of path errors, this is still effectively a
+      // read, so let's log it for validation
+      if (
+        error.name === "NotFoundError" || error.name === "TypeMismatchError"
+      ) {
+        this.#history.claim(loaded);
+      }
       return { error };
     } else {
       // Capture the original replica read in history (for validation)
@@ -500,11 +514,8 @@ class Changes {
   get(at: IMemoryAddress["path"]): IAttestation | undefined {
     let candidate: undefined | IAttestation = undefined;
     for (const invariant of this.#model.values()) {
-      // Check if invariant's path is a prefix of requested path
-      const path = invariant.address.path.join("/");
-
       // For exact match or if invariant is parent of requested path
-      if (at.join("/").startsWith(path)) {
+      if (invariant.address.path.every((p, i) => p === at[i])) {
         const size = invariant.address.path.length;
         if ((candidate?.address?.path?.length ?? -1) < size) {
           candidate = invariant;
@@ -516,10 +527,10 @@ class Changes {
   }
 
   put(invariant: IAttestation) {
-    this.#model.set(invariant.address.path.join("/"), invariant);
+    this.#model.set(JSON.stringify(invariant.address.path), invariant);
   }
   delete(invariant: IAttestation) {
-    this.#model.delete(invariant.address.path.join("/"));
+    this.#model.delete(JSON.stringify(invariant.address.path));
   }
 
   /**

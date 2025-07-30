@@ -174,11 +174,15 @@ export class Storage implements IStorage {
           : cell.schema,
       };
     }
+    const selector = schemaContext === undefined ? undefined : {
+      path: cell.path.map((p) => p.toString()),
+      schemaContext,
+    };
 
     if (!this.shim) {
       const { space, id } = cell.getAsNormalizedFullLink();
       const storageProvider = this._getStorageProviderForSpace(space);
-      await storageProvider.sync(id, false, schemaContext);
+      await storageProvider.sync(id, selector);
       return cell;
     }
 
@@ -210,7 +214,7 @@ export class Storage implements IStorage {
     const storageProvider = this._getStorageProviderForSpace(doc.space);
     const uri = Storage.toURI(doc.entityId);
 
-    const result = await storageProvider.sync(uri, false, schemaContext);
+    const result = await storageProvider.sync(uri, selector);
     if (result.error) {
       // This will be a decoupled doc that is not persisted and cannot be edited
       doc.ephemeral = true;
@@ -225,6 +229,10 @@ export class Storage implements IStorage {
   }
 
   async synced(): Promise<void> {
+    if (!this.shim) {
+      return this.storageManager.synced();
+    }
+
     await Promise.all([
       ...this.loadingPromises.values(),
       ...this.docToStoragePromises.values(),

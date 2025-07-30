@@ -2,6 +2,20 @@ import * as esbuild from "esbuild";
 import { denoPlugins } from "@luca/esbuild-deno-loader";
 import { debounce } from "@std/async/debounce";
 import { ResolvedConfig } from "./interface.ts";
+import { blue, bold, dim, green, red, yellow } from "@std/fmt/colors";
+
+function formatFileSize(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  return `${size.toFixed(1)} ${units[unitIndex]}`;
+}
 
 export class Builder extends EventTarget {
   constructor(public manifest: ResolvedConfig) {
@@ -14,7 +28,7 @@ export class Builder extends EventTarget {
         await this.build();
       } catch (e: any) {
         const message = e && "message" in e ? e.message : e;
-        console.error(message);
+        console.error(`   ${red("✗")} ${red("Error:")} ${message}`);
       }
     }, debounceTimeout);
     const watcher = Deno.watchFs(watchRoot);
@@ -24,42 +38,67 @@ export class Builder extends EventTarget {
   }
 
   async build() {
-    console.log("Building...");
+    const startTime = performance.now();
+    console.log(
+      `${yellow("🔨")} ${dim("Building")} ${blue(this.manifest.entry)}...`,
+    );
 
-    const config: Partial<Parameters<typeof esbuild.build>[0]> = {
-      define: resolveDefines(this.manifest),
-      sourcemap: this.manifest.esbuild.sourcemap,
-      minify: this.manifest.esbuild.minify,
-      plugins: [...denoPlugins()],
-      platform: "browser",
-      entryPoints: [this.manifest.entry],
-      outfile: this.manifest.out,
-      external: this.manifest.esbuild.external,
-      bundle: true,
-      format: "esm",
-      supported: this.manifest.esbuild.supported,
-      // Explicitly compile decorators, as this what Jumble->Vite
-      // does, and no browsers currently support (any form of) decorators,
-      // and if we're bundling, we're probably running in a browser.
-      tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
-    };
+    try {
+      const config: Partial<Parameters<typeof esbuild.build>[0]> = {
+        define: resolveDefines(this.manifest),
+        sourcemap: this.manifest.esbuild.sourcemap,
+        minify: this.manifest.esbuild.minify,
+        plugins: [...denoPlugins()],
+        platform: "browser",
+        entryPoints: [this.manifest.entry],
+        outfile: this.manifest.out,
+        external: this.manifest.esbuild.external,
+        bundle: true,
+        format: "esm",
+        supported: this.manifest.esbuild.supported,
+        // Explicitly compile decorators, as this what Jumble->Vite
+        // does, and no browsers currently support (any form of) decorators,
+        // and if we're bundling, we're probably running in a browser.
+        tsconfigRaw: this.manifest.esbuild.tsconfigRaw,
+        logOverride: this.manifest.esbuild.logOverride,
+      };
 
-    if (this.manifest.esbuild.metafile) {
-      config.metafile = true;
-    }
+      if (this.manifest.esbuild.metafile) {
+        config.metafile = true;
+      }
 
-    const result = await esbuild.build(config);
-    esbuild.stop();
+      const result = await esbuild.build(config);
+      esbuild.stop();
 
-    if (this.manifest.esbuild.metafile && result.metafile) {
-      await Deno.writeTextFile(
-        this.manifest.esbuild.metafile,
-        JSON.stringify(result.metafile),
+      // Calculate build time
+      const buildTime = Math.round(performance.now() - startTime);
+
+      // Get output file size
+      const fileInfo = await Deno.stat(this.manifest.out);
+      const fileSize = formatFileSize(fileInfo.size);
+
+      console.log(
+        `   ${green("✓")} ${dim("Built")} ${blue(this.manifest.out)} ${
+          dim(`(${fileSize})`)
+        } ${green(`in ${buildTime}ms`)}`,
       );
 
-      console.log(await esbuild.analyzeMetafile(result.metafile));
+      if (this.manifest.esbuild.metafile && result.metafile) {
+        await Deno.writeTextFile(
+          this.manifest.esbuild.metafile,
+          JSON.stringify(result.metafile),
+        );
+
+        console.log(await esbuild.analyzeMetafile(result.metafile));
+      }
+      this.dispatchEvent(new CustomEvent("build"));
+    } catch (error) {
+      const buildTime = Math.round(performance.now() - startTime);
+      console.error(
+        `   ${red("✗")} ${red("Build failed")} ${dim(`after ${buildTime}ms`)}`,
+      );
+      throw error;
     }
-    this.dispatchEvent(new CustomEvent("build"));
   }
 }
 

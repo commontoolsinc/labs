@@ -7,8 +7,8 @@ import {
   type JSONSchema,
   type OpaqueRef,
   type Schema,
-  toOpaqueRef,
 } from "./builder/types.ts";
+import { toOpaqueRef } from "./back-to-cell.ts";
 import { type Cell, createCell } from "./cell.ts";
 import {
   createQueryResultProxy,

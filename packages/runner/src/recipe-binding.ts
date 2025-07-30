@@ -1,6 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import {
   type JSONValue,
+  isShadowRef,
   type Recipe,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
@@ -8,7 +9,7 @@ import {
 import { isLegacyAlias, isLink } from "./link-utils.ts";
 import { isDoc } from "./doc.ts";
 import { type Cell } from "./cell.ts";
-import { followWriteRedirects } from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import {
   areNormalizedLinksSame,
@@ -37,7 +38,7 @@ export function sendValueToBinding<T>(
   value: unknown,
 ): void {
   if (isLegacyAlias(binding)) {
-    const ref = followWriteRedirects(tx, binding, cell);
+    const ref = resolveLink(tx, parseLink(binding, cell), "writeRedirect");
     diffAndUpdate(
       cell.runtime,
       tx,

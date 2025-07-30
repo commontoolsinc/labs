@@ -1,4 +1,9 @@
-import { Identity, KeyStore } from "@commontools/identity";
+import {
+  Identity,
+  isKeyPairRaw,
+  KeyPairRaw,
+  KeyStore,
+} from "@commontools/identity";
 import { XRootView } from "../../views/RootView.ts";
 import { Command } from "./commands.ts";
 import { AppState, AppUpdateEvent } from "./mod.ts";
@@ -35,7 +40,10 @@ export class App extends EventTarget {
     await this.apply({ type: "set-active-charm-id", charmId });
   }
 
-  async setIdentity(identity: Identity) {
+  async setIdentity(id: Identity | KeyPairRaw) {
+    const identity = isKeyPairRaw(id)
+      ? await Identity.fromRaw(id.privateKey as Uint8Array<ArrayBufferLike>)
+      : id;
     await this.apply({ type: "set-identity", identity });
   }
 

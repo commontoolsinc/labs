@@ -36,7 +36,7 @@ export {
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export { addCommonIDfromObjectID } from "./data-updating.ts";
-export { followWriteRedirects } from "./link-resolution.ts";
+export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
   isLegacyCellLink,
@@ -102,7 +102,6 @@ export {
   type SchemaWithoutCell,
   type StreamValue,
   type toJSON,
-  toOpaqueRef,
   TYPE,
   UI,
   unsafe_materializeFactory,
@@ -111,6 +110,7 @@ export {
   type UnsafeBinding,
   type VNode,
 } from "./builder/types.ts";
+export { toOpaqueRef } from "./back-to-cell.ts";
 export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export { Classification, ContextualFlowControl } from "./cfc.ts";

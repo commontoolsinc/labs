@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import { refer } from "merkle-reference/json";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import {
@@ -29,7 +30,7 @@ import {
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoDoc,
 } from "./recipe-binding.ts";
-import { followWriteRedirects } from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import {
   areNormalizedLinksSame,
   createSigilLinkFromParsedLink,
@@ -51,6 +52,8 @@ import type {
 import { ignoreReadForScheduling } from "./scheduler.ts";
 import { FunctionCache } from "./function-cache.ts";
 import "./builtins/index.ts";
+
+const logger = getLogger("runner");
 
 export class Runner implements IRunner {
   readonly cancels = new Map<`${MemorySpace}/${URI}`, Cancel>();
@@ -123,21 +126,28 @@ export class Runner implements IRunner {
       resultCell.withTx(tx).setSourceCell(processCell);
     }
 
+    logger.debug(() => [
+      `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
+      `processCell: ${
+        resultCell.withTx(tx).getSourceCell()?.getAsNormalizedFullLink().id
+      }`,
+    ]);
+
     let recipeId: string | undefined;
 
-    if (
-      !recipeOrModule &&
-      processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
-    ) {
-      recipeId = processCell.key(TYPE).getRaw({
-        meta: ignoreReadForScheduling,
-      });
+    const previousRecipeId = processCell.withTx(tx).key(TYPE).getRaw({
+      meta: ignoreReadForScheduling,
+    });
+
+    if (!recipeOrModule && previousRecipeId) {
+      recipeId = previousRecipeId;
       recipeOrModule = this.runtime.recipeManager.recipeById(recipeId!);
       if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
     } else if (!recipeOrModule) {
       console.warn(
         "No recipe provided and no recipe found in process doc. Not running.",
       );
+      if (!providedTx) tx.commit();
       return resultCell;
     }
 
@@ -172,18 +182,42 @@ export class Runner implements IRunner {
       recipe,
     }, tx);
 
+    // If the bindings are a cell, doc or doc link, convert them to an alias
+    if (isLink(argument)) {
+      argument = createSigilLinkFromParsedLink(
+        parseLink(argument),
+        { base: processCell, includeSchema: true, overwrite: "redirect" },
+      ) as T;
+    }
+
     if (this.cancels.has(this.getDocKey(resultCell))) {
       // If it's already running and no new recipe or argument are given,
       // we are just returning the result doc
       if (
         argument === undefined &&
-        recipeId ===
-          processCell.key(TYPE).getRaw({ meta: ignoreReadForScheduling })
+        recipeId === previousRecipeId
       ) {
+        if (!providedTx) tx.commit();
         return resultCell;
       }
 
-      // TODO(seefeld): If recipe is the same, but argument is different, just update the argument without stopping
+      if (previousRecipeId === recipeId) {
+        console.log("updating argument", argument);
+        // If the recipe is the same, but argument is different, just update the
+        // argument without stopping
+        diffAndUpdate(
+          this.runtime,
+          tx,
+          processCell.key("argument").getAsNormalizedFullLink(),
+          argument,
+          processCell.getAsNormalizedFullLink(),
+        );
+        if (!providedTx) tx.commit();
+        return resultCell;
+      }
+
+      // TODO(seefeld): If recipe is the same, but argument is different, just
+      // update the argument without stopping
 
       // Otherwise stop execution of the old recipe. TODO: Await, but this will
       // make all this async.
@@ -194,14 +228,6 @@ export class Runner implements IRunner {
     const [cancel, addCancel] = useCancelGroup();
     this.cancels.set(this.getDocKey(resultCell), cancel);
     this.allCancels.add(cancel);
-
-    // If the bindings are a cell, doc or doc link, convert them to an alias
-    if (isLink(argument)) {
-      argument = createSigilLinkFromParsedLink(
-        parseLink(argument),
-        { base: processCell, includeSchema: true },
-      ) as T;
-    }
 
     // Walk the recipe's schema and extract all default values
     const defaults = extractDefaultValues(recipe.argumentSchema) as Partial<T>;
@@ -230,10 +256,6 @@ export class Runner implements IRunner {
     ) {
       argument = mergeObjects<T>(argument as any, defaults);
     }
-
-    const recipeChanged = recipeId !== processCell.key(TYPE).getRaw({
-      meta: ignoreReadForScheduling,
-    });
 
     processCell.withTx(tx).setRaw({
       ...processCell.getRaw({ meta: ignoreReadForScheduling }),
@@ -320,12 +342,15 @@ export class Runner implements IRunner {
     // TODO(seefeld): There is currently likely a race condition with the
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
+    const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
+    const tx = givenTx || this.runtime.edit();
     this.run(
-      resultCell.tx?.status().status === "ready" ? resultCell.tx : undefined,
+      tx,
       recipe,
       inputs,
-      resultCell,
+      resultCell.withTx(tx),
     );
+    const txPromise = givenTx ? undefined : tx.commit();
 
     // If a new recipe was specified, make sure to sync any new cells
     // TODO(seefeld): Possible race condition here with lifted functions running
@@ -333,7 +358,19 @@ export class Runner implements IRunner {
     // finishing the computation. Should be fixed by changing conflict resolution
     // for derived values to be based on what they are derived from.
     if (recipe || !synced) {
-      await this.syncCellsForRunningRecipe(resultCell, recipe);
+      await this.syncCellsForRunningRecipe(resultCell.withTx(tx), recipe);
+    }
+
+    if (txPromise) {
+      const { error } = await txPromise;
+      if (error) {
+        console.error(
+          "Error committing transaction:",
+          error,
+          JSON.stringify((error as any).transaction?.args, null, 2),
+        );
+        throw error;
+      }
     }
 
     return recipe?.resultSchema
@@ -648,7 +685,11 @@ export class Runner implements IRunner {
       for (const key in inputs) {
         let value = inputs[key];
         while (isWriteRedirectLink(value)) {
-          const maybeStreamLink = followWriteRedirects(tx, value, processCell);
+          const maybeStreamLink = resolveLink(
+            tx,
+            parseLink(value, processCell),
+            "writeRedirect",
+          );
           value = tx.readValueOrThrow(maybeStreamLink);
         }
         if (isStreamValue(value)) {
@@ -660,9 +701,8 @@ export class Runner implements IRunner {
 
     if (streamLink) {
       // Register as event handler for the stream
-      const handler = (event: any) => {
+      const handler = (tx: IExtendedStorageTransaction, event: any) => {
         // TODO(seefeld): Scheduler has to create the transaction instead
-        const tx = this.runtime.edit();
         if (event.preventDefault) event.preventDefault();
         const eventInputs = { ...(inputs as Record<string, any>) };
         const cause = { ...(inputs as Record<string, any>) };
@@ -693,7 +733,9 @@ export class Runner implements IRunner {
           tx,
         });
 
-        const argument = inputsCell.asSchema(module.argumentSchema).get();
+        const argument = module.argumentSchema
+          ? inputsCell.asSchema(module.argumentSchema).get()
+          : inputsCell.getAsQueryResult([], tx);
         const result = fn(argument);
 
         const postRun = (result: any) => {
@@ -719,7 +761,6 @@ export class Runner implements IRunner {
           }
 
           popFrame(frame);
-          tx.commit();
           return result;
         };
 
@@ -750,8 +791,9 @@ export class Runner implements IRunner {
       let previousResultRecipeAsString: string | undefined;
 
       const action: Action = (tx: IExtendedStorageTransaction) => {
-        const argument = inputsCell.asSchema(module.argumentSchema).withTx(tx)
-          .get();
+        const argument = module.argumentSchema
+          ? inputsCell.asSchema(module.argumentSchema).withTx(tx).get()
+          : inputsCell.getAsQueryResult([], tx);
 
         const frame = pushFrameFromCause(
           { inputs, outputs, fn: fn.toString() },
@@ -862,7 +904,6 @@ export class Runner implements IRunner {
       processCell,
     );
 
-    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
     const inputsCell = this.runtime.getImmutableCell(
       processCell.space,
       mappedInputBindings,
@@ -904,25 +945,8 @@ export class Runner implements IRunner {
     recipe: Recipe,
   ) {
     const inputs = unwrapOneLevelAndBindtoDoc(inputBindings, processCell);
-    // TODO(@ellyse): verify this should not be frozen even if its marked immutable in cause
-    const inputsCell = this.runtime.getCell(
-      processCell.space,
-      { immutable: inputs },
-      undefined,
-      tx,
-    );
-    inputsCell.setRaw(inputs);
-    const reads = findAllWriteRedirectCells(inputs, processCell);
 
-    const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
-    const writes = findAllWriteRedirectCells(outputs, processCell);
-
-    const action: Action = (tx: IExtendedStorageTransaction) => {
-      const inputsProxy = inputsCell.getAsQueryResult([], tx);
-      sendValueToBinding(tx, processCell, outputBindings, inputsProxy);
-    };
-
-    addCancel(this.runtime.scheduler.schedule(action, { reads, writes }));
+    sendValueToBinding(tx, processCell, outputBindings, inputs);
   }
 
   private instantiateRecipeNode(
@@ -1068,5 +1092,5 @@ export function mergeObjects<T>(
 
 const moduleWrappers = {
   handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn.bind(props.$ctx)(props.$event, props.$ctx),
+    fn(props.$event, props.$ctx),
 };

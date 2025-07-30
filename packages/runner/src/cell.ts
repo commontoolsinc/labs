@@ -10,9 +10,9 @@ import {
   type OpaqueRef,
   type Schema,
   type Stream,
-  toOpaqueRef,
   TYPE,
 } from "./builder/types.ts";
+import { toOpaqueRef } from "./back-to-cell.ts";
 import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
 import {
   createQueryResultProxy,
@@ -22,10 +22,7 @@ import {
   type QueryResult,
 } from "./query-result-proxy.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import {
-  resolveLinkToValue,
-  resolveLinkToWriteRedirect,
-} from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { ignoreReadForScheduling, txToReactivityLog } from "./scheduler.ts";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.ts";
 import { validateAndTransform } from "./schema.ts";
@@ -307,7 +304,7 @@ export function createCell<T>(
 
   // Resolve the path to check whether it's a stream.
   const readTx = runtime.readTx(tx);
-  const resolvedLink = noResolve ? link : resolveLinkToValue(readTx, link);
+  const resolvedLink = noResolve ? link : resolveLink(readTx, link);
   const value = readTx.readValueOrThrow(resolvedLink, {
     meta: ignoreReadForScheduling,
   });
@@ -436,7 +433,7 @@ export class RegularCell<T> implements Cell<T> {
     diffAndUpdate(
       this.runtime,
       this.tx,
-      resolveLinkToWriteRedirect(this.tx, this.link),
+      resolveLink(this.tx, this.link, "writeRedirect"),
       newValue,
       getTopFrame()?.cause,
     );
@@ -454,7 +451,7 @@ export class RegularCell<T> implements Cell<T> {
       throw new Error("Can't update with non-object value");
     }
     // Get current value, following aliases and references
-    const resolvedLink = resolveLinkToValue(this.tx, this.link);
+    const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
 
     // If there's no current value, initialize based on schema
@@ -499,7 +496,7 @@ export class RegularCell<T> implements Cell<T> {
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
-    const resolvedLink = resolveLinkToValue(this.tx, this.link);
+    const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
     const cause = getTopFrame()?.cause;
 
@@ -574,15 +571,15 @@ export class RegularCell<T> implements Cell<T> {
     schema?: JSONSchema,
   ): Cell<T>;
   asSchema(schema?: JSONSchema): Cell<any> {
-    return createCell(
+    return new RegularCell(
       this.runtime,
       { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
-    );
+    ) as Cell<any>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    return createCell(this.runtime, this.link, newTx);
+    return new RegularCell(this.runtime, this.link, newTx);
   }
 
   sink(callback: (value: T) => Cancel | undefined): Cancel {
@@ -651,6 +648,12 @@ export class RegularCell<T> implements Cell<T> {
 
   setRaw(value: any): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
+    try {
+      value = JSON.parse(JSON.stringify(value));
+    } catch (e) {
+      console.error("Can't set raw value, it's not JSON serializable", e);
+      return;
+    }
     this.tx.writeValueOrThrow(this.link, value);
   }
 

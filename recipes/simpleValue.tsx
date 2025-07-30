@@ -1,4 +1,5 @@
 import {
+  Cell,
   derive,
   h,
   handler,
@@ -9,6 +10,29 @@ import {
   str,
   UI,
 } from "commontools";
+
+const updater = handler<
+  { newValues: string[] },
+  { values: Cell<string[]> }
+>(
+  (event, state) => {
+    console.log("updating values", event);
+    (event.newValues ?? []).forEach((value) => {
+      console.log("adding value", value);
+      state.values.push(value);
+    });
+  },
+);
+
+const adder = handler<unknown, { values: Cell<string[]> }>(
+  (_, state) => {
+    console.log("adding a value");
+    state.values.push(Math.random().toString(36).substring(2, 15));
+  },
+);
+
+// FIXME(ja): the first pass at switching to typescript
+// didn't work for the output schema.
 
 const updaterSchema = {
   type: "object",
@@ -42,23 +66,6 @@ const outputSchema = {
   },
 } as const satisfies JSONSchema;
 
-const updater = handler(
-  updaterSchema,
-  inputSchema,
-  (event, state) => {
-    console.log("updating values", event);
-    event.newValues.forEach((value) => {
-      console.log("adding value", value);
-      state.values.push(value);
-    });
-  },
-);
-
-const adder = handler({}, inputSchema, (_, state) => {
-  console.log("adding a value");
-  state.values.push(Math.random().toString(36).substring(2, 15));
-});
-
 export default recipe(inputSchema, outputSchema, ({ values }) => {
   derive(values, (values) => {
     console.log("values#", values?.length);
@@ -69,7 +76,12 @@ export default recipe(inputSchema, outputSchema, ({ values }) => {
     }`,
     [UI]: (
       <div>
-        <button type="button" onClick={adder({ values })}>Add Value</button>
+        <button
+          type="button"
+          onClick={adder({ values })}
+        >
+          Add Value
+        </button>
         <div>
           {values.map((value, index) => (
             <div>

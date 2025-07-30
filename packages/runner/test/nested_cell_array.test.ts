@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { type Cell, isCell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
@@ -86,11 +88,11 @@ describe("Nested Cell Array", () => {
 
     // Normal array: items are plain objects
     expect(isCell(normalItems[0])).toBe(false);
-    expect(normalItems[0]).toEqual(testData);
+    expect(normalItems[0]).toEqualIgnoringSymbols(testData);
 
     // Cell array: items are cells containing objects
     expect(isCell(cellItems[0])).toBe(true);
-    expect(cellItems[0].get()).toEqual(testData);
+    expect(cellItems[0].get()).toEqualIgnoringSymbols(testData);
 
     // cellItems[0].get() should NOT be a cell
     expect(isCell(cellItems[0].get())).toBe(false);

@@ -13,7 +13,7 @@ import type {
   QueryError as IQueryError,
   Result,
   Retraction,
-  SchemaContext,
+  SchemaPathSelector,
   Signer,
   State,
   The as MediaType,
@@ -31,7 +31,7 @@ export type {
   MediaType,
   MemorySpace,
   Result,
-  SchemaContext,
+  SchemaPathSelector,
   State,
   Unit,
   URI,
@@ -74,16 +74,25 @@ export interface StorageValue<T = any> {
 
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
+
   /**
    * @deprecated
    */
   open(space: MemorySpace): IStorageProviderWithReplica;
+
   /**
    * Creates a storage transaction that can be used to read / write data into
    * locally replicated memory spaces. Transaction allows reading from many
    * multiple spaces but writing only to one space.
    */
   edit(): IStorageTransaction;
+
+  /**
+   * Wait for all pending syncs to complete.
+   *
+   * @returns Promise that resolves when all pending syncs are complete.
+   */
+  synced(): Promise<void>;
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -126,16 +135,21 @@ export interface IStorageProvider {
    * Sync a value from storage. Use `get()` to retrieve the value.
    *
    * @param uri - uri of the entity to sync.
-   * @param expectedInStorage - Wait for the value, it's assumed to be in
-   *   storage eventually.
-   * @param schemaContext - The schemaContext that determines what to sync.
+   * @param selector - The SchemaPathSelector with the path and schemaContext that determines what to sync.
    * @returns Promise that resolves when the value is synced.
    */
   sync(
     uri: URI,
-    expectedInStorage?: boolean,
-    schemaContext?: SchemaContext,
+    selector?: SchemaPathSelector,
   ): Promise<Result<Unit, Error>>;
+
+  /**
+   * Wait for all pending syncs to complete, that is all pending document syncs
+   * and all pending commits.
+   *
+   * @returns Promise that resolves when all pending syncs are complete.
+   */
+  synced(): Promise<void>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.
@@ -658,7 +672,7 @@ export interface INotFoundError extends Error {
   name: "NotFoundError";
   source: IAttestation;
   address: IMemoryAddress;
-  path?: MemoryAddressPathComponent[];
+  path?: readonly MemoryAddressPathComponent[];
   from(space: MemorySpace): INotFoundError;
 }
 

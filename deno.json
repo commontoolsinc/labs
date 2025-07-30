@@ -83,13 +83,14 @@
     "exclude": [
       "packages/jumble/integration/cache/llm-api-cache/",
       "packages/seeder/templates/",
-      "packages/static/assets/"
+      "packages/static/assets/",
+      "packages/js-runtime/test/fixtures"
     ]
   },
   "imports": {
     "commontools": "./packages/api/index.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js/proposals/explicit-resource-management",
-    "@astral/astral": "jsr:@astral/astral",
+    "@astral/astral": "jsr:@astral/astral@0.5.2",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
@@ -112,7 +113,7 @@
     "@vercel/otel": "npm:@vercel/otel@^1.10.1",
     "@web/test-runner": "npm:@web/test-runner",
     "ai": "npm:ai@^4.3.9",
-    "esbuild": "npm:esbuild",
+    "esbuild": "npm:esbuild@~0.23.1",
     "jsdom": "npm:jsdom",
     "lit": "npm:lit@^3.3.0",
     "merkle-reference": "npm:merkle-reference@^2.2.0",
@@ -124,6 +125,7 @@
     "typescript": "npm:typescript",
     "vite": "npm:vite@^6.2.1",
     "zod-to-json-schema": "npm:zod-to-json-schema@^3.24.1",
-    "zod": "npm:zod@^3.24.1"
+    "zod": "npm:zod@^3.24.1",
+    "@babel/standalone": "npm:@babel/standalone@^7.28.2"
   }
 }

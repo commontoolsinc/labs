@@ -51,7 +51,7 @@ export type Opaque<T> =
 
 // OpaqueRefMethods type with only public methods
 export interface OpaqueRefMethods<T> {
-  get(): OpaqueRef<T>;
+  get(): T;
   set(value: Opaque<T> | T): void;
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
   setDefault(value: Opaque<T> | T): void;
@@ -84,7 +84,7 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: Opaque<T>) => OpaqueRef<R>;
+  with: (inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<R>;
 };
 
 export type NodeFactory<T, R> =
@@ -103,7 +103,7 @@ export type ModuleFactory<T, R> =
   & toJSON;
 
 export type HandlerFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & ((inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -330,22 +330,38 @@ export type LiftFunction = {
   ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 };
 
+// Helper type to make non-Cell and non-Stream properties readonly in handler state
+export type HandlerState<T> = T extends Cell<any> ? T
+  : T extends Stream<any> ? T
+  : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
+  : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
+  : T;
+
 export type HandlerFunction = {
+  // With schemas
+
   <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(
     eventSchema: E,
     stateSchema: T,
     handler: (event: Schema<E>, props: Schema<T>) => any,
-  ): ModuleFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+  ): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
 
+  // With inferred types
   <E, T>(
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
-    handler: (event: E, props: T) => any,
-  ): ModuleFactory<T, E>;
+    handler: (event: E, props: HandlerState<T>) => any,
+  ): ModuleFactory<CellToOpaque<T>, E>;
 
+  // Without schemas
   <E, T>(
     handler: (event: E, props: T) => any,
-  ): ModuleFactory<T, E>;
+    options: { proxy: true },
+  ): ModuleFactory<Opaque<T>, E>;
+
+  <E, T>(
+    handler: (event: E, props: HandlerState<T>) => any,
+  ): ModuleFactory<CellToOpaque<T>, E>;
 };
 
 export type DeriveFunction = <In, Out>(
@@ -417,6 +433,9 @@ export type CreateCellFunction = {
   ): Cell<Schema<S>>;
 };
 
+// Default type for specifying default values in type definitions
+export type Default<T, V extends T = T> = T;
+
 // Re-export opaque ref creators
 export type CellFunction = <T>(value?: T, schema?: JSONSchema) => OpaqueRef<T>;
 export type StreamFunction = <T>(initial?: T) => OpaqueRef<T>;
@@ -463,6 +482,18 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T;
 
 export const schema = <T extends JSONSchema>(schema: T) => schema;
+
+// toSchema is a compile-time transformer that converts TypeScript types to JSONSchema
+// The actual implementation is done by the TypeScript transformer
+export const toSchema = <T>(options?: Partial<JSONSchema>): JSONSchema => {
+  return {} as JSONSchema;
+};
+
+// Helper type to transform Cell<T> to Opaque<T> in handler inputs
+export type CellToOpaque<T> = T extends Cell<infer U> ? Opaque<U>
+  : T extends Array<infer U> ? CellToOpaque<U>[]
+  : T extends object ? { [K in keyof T]: CellToOpaque<T[K]> }
+  : T;
 
 export type Schema<
   T extends JSONSchema,

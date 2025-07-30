@@ -33,7 +33,7 @@ import { assert, retract, unclaimed } from "@commontools/memory/fact";
 import { the, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
-import { type Cancel, type EntityId } from "@commontools/runner";
+import type { Cancel } from "@commontools/runner";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
@@ -311,17 +311,17 @@ class RevisionAddress {
 
 class PullQueue {
   constructor(
-    public members: Map<string, [FactAddress, SchemaContext?]> = new Map(),
+    public members: Map<string, [FactAddress, SchemaPathSelector?]> = new Map(),
   ) {
   }
-  add(entries: Iterable<[FactAddress, SchemaContext?]>) {
+  add(entries: Iterable<[FactAddress, SchemaPathSelector?]>) {
     // TODO(@ubik2) Ensure the schema context matches
-    for (const [entry, schema] of entries) {
-      this.members.set(toKey(entry), [entry, schema]);
+    for (const [entry, selector] of entries) {
+      this.members.set(toKey(entry), [entry, selector]);
     }
   }
 
-  consume(): [FactAddress, SchemaContext?][] {
+  consume(): [FactAddress, SchemaPathSelector?][] {
     const entries = [...this.members.values()];
     this.members.clear();
     return entries;
@@ -376,6 +376,10 @@ class SelectorTracker<T = Result<Unit, Error>> {
     const selectorRef = refer(JSON.stringify(selector)).toString();
     const promiseKey = `${toKey(doc)}?${selectorRef}`;
     return this.selectorPromises.get(promiseKey);
+  }
+
+  getAllPromises(): Iterable<Promise<T>> {
+    return this.selectorPromises.values();
   }
 
   /**
@@ -478,6 +482,9 @@ export class Replica {
     public queue: PullQueue = new PullQueue(),
     public pullRetryLimit: number = 100,
     public useSchemaQueries: boolean = false,
+    // Promises for commits that are in flight
+    public commitPromises: Set<Consumer.TransactionResult<MemorySpace>> =
+      new Set(),
     // Track the selectors used for top level docs -- we only add to this
     // once we've gotten our results (so the promise is resolved).
     private selectorTracker: SelectorTracker = new SelectorTracker(),
@@ -529,7 +536,7 @@ export class Replica {
    * local store in this session.
    */
   async pull(
-    entries: [FactAddress, SchemaContext?][] = this.queue.consume(),
+    entries: [FactAddress, SchemaPathSelector?][] = this.queue.consume(),
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
@@ -544,21 +551,23 @@ export class Replica {
 
     // Otherwise we build a query selector to fetch requested entries from the
     // remote.
+    // this is the object with the of/the/cause nesting, then a SchemaPathSelector inside
     const schemaSelector = {};
     const querySelector = {};
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
     const classifications = new Set<string>();
-    for (const [{ the, of }, context] of entries) {
+    for (const [{ the, of }, schemaPathSelector] of entries) {
       if (this.useSchemaQueries) {
         // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-        const schemaContext = context ?? SchemaNone;
-        setSelector(schemaSelector, of, the, "_", {
-          path: [],
-          schemaContext: schemaContext,
-        });
+        const selector = schemaPathSelector ??
+          { path: [], schemaContext: SchemaNone };
+        setSelector(schemaSelector, of, the, "_", selector);
         // Since we're accessing the entire document, we should base our classification on the rootSchema
-        this.cfc.joinSchema(classifications, schemaContext.rootSchema);
+        this.cfc.joinSchema(
+          classifications,
+          selector.schemaContext?.rootSchema ?? false,
+        );
       } else {
         // We're using the "cached" mode, and we don't use schema queries
         setSelector(querySelector, of, the, "_", {});
@@ -567,7 +576,8 @@ export class Replica {
 
     // We provided schema for the top level fact that we selected, but we
     // will have undefined schema for the entries included as links.
-    let fetchedEntries: [Revision<State>, SchemaContext | undefined][] = [];
+    let fetchedEntries: [Revision<State>, SchemaPathSelector | undefined][] =
+      [];
     // Run all our schema queries first
     if (Object.entries(schemaSelector).length > 0) {
       const queryArgs: SchemaQueryArgs = {
@@ -601,7 +611,7 @@ export class Replica {
       }
       fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
     }
-    const fetched = fetchedEntries.map(([fact, _schema]) => fact);
+    const fetched = fetchedEntries.map(([fact, _selector]) => fact);
     const changes = Differential.create().update(this, fetched);
     this.heap.merge(fetched, Replica.put);
 
@@ -612,7 +622,7 @@ export class Replica {
     const notFound = [];
     const revisions = new Map<FactAddress, Revision<State>>();
     if (fetched.length < entries.length) {
-      for (const [entry, _schema] of entries) {
+      for (const [entry, _selector] of entries) {
         if (!this.get(entry)) {
           // Note we use `-1` as `since` timestamp so that any change will appear greater.
           const revision = { ...unclaimed(entry), since: -1 };
@@ -622,7 +632,7 @@ export class Replica {
       }
     }
 
-    for (const [revision, schema] of fetchedEntries) {
+    for (const [revision, _selector] of fetchedEntries) {
       const factAddress = { the: revision.the, of: revision.of };
       revisions.set(factAddress, revision);
     }
@@ -643,12 +653,9 @@ export class Replica {
 
     const result = await this.cache.merge(revisions.values(), Replica.put);
 
-    for (const [revision, schema] of fetchedEntries) {
+    for (const [revision, selector] of fetchedEntries) {
       const factAddress = { the: revision.the, of: revision.of };
-      this.selectorTracker.add(factAddress, {
-        path: [],
-        schemaContext: schema,
-      }, Promise.resolve(result));
+      this.selectorTracker.add(factAddress, selector, Promise.resolve(result));
     }
 
     if (result.error) {
@@ -664,7 +671,7 @@ export class Replica {
    * be fetched from the remote.
    */
   async load(
-    entries: [FactAddress, SchemaContext?][],
+    entries: [FactAddress, SchemaPathSelector?][],
   ): Promise<
     Result<
       Selection<FactAddress, Revision<State>>,
@@ -672,12 +679,11 @@ export class Replica {
     >
   > {
     // First we identify entries that we need to load from the store.
-    const need: [FactAddress, SchemaContext?][] = [];
-    for (const [address, schema] of entries) {
+    const need: [FactAddress, SchemaPathSelector?][] = [];
+    for (const [address, selector] of entries) {
       if (!this.get(address)) {
-        need.push([address, schema]);
-      } else if (schema !== undefined) {
-        const selector = { path: [], schemaContext: schema };
+        need.push([address, selector]);
+      } else if (selector !== undefined) {
         // Even though we have our root doc in local store, we may need
         // to re-issue our query, since our cached copy may have been run with a
         // different schema, and thus have different linked documents.
@@ -686,7 +692,7 @@ export class Replica {
           // server for this selector, we don't need to send a new one
           // (revisit this when we allow unsubscribe)
           // Otherwise, add it to the set of things we need
-          need.push([address, schema]);
+          need.push([address, selector]);
         }
       }
     }
@@ -706,8 +712,8 @@ export class Replica {
     // We only do this for entries without a schema, since we'll want the server
     // to track our subscription for the entries with a schema.
     const schemaless = need
-      .filter(([_addr, schema]) => schema === undefined)
-      .map(([addr, _schema]) => addr);
+      .filter(([_addr, selector]) => selector === undefined)
+      .map(([addr, _selector]) => addr);
     const { ok: pulled, error } = await this.cache.pull(schemaless);
 
     if (error) {
@@ -735,7 +741,9 @@ export class Replica {
       // Otherwise we are able to complete checkout and we schedule a pull in
       // the background so we can get latest entries if there are some available.
       else {
-        const simple = need.filter(([_addr, schema]) => schema === undefined);
+        const simple = need.filter(([_addr, selector]) =>
+          selector === undefined
+        );
         // schedule an update for any entries without a schema.
         this.queue.add(simple);
         this.sync();
@@ -770,11 +778,20 @@ export class Replica {
       PushError
     >
   > {
+    // Generate the selectors for the various change objects
+    const loadArgs: [(Assert | Retract | Claim), SchemaPathSelector?][] =
+      changes.map((
+        change,
+      ) => {
+        const schema = generateSchemaFromLabels(change);
+        const selector = schema === undefined
+          ? undefined
+          : { path: [], schemaContext: { schema: schema, rootSchema: schema } };
+        return [change, selector];
+      });
     // First we pull all the affected entries into heap so we can build a
     // transaction that is aware of latest state.
-    const { error } = await this.load(
-      changes.map((change) => [change, getSchema(change)]),
-    );
+    const { error } = await this.load(loadArgs);
     if (error) {
       return { error };
     } else {
@@ -834,9 +851,12 @@ export class Replica {
     );
 
     // These push transaction that will commit desired state to a remote.
-    const result = await this.remote.transact({
+    const commitPromise = this.remote.transact({
       changes: getChanges([...claims, ...facts] as Statement[]),
     });
+    this.commitPromises.add(commitPromise);
+    const result = await commitPromise;
+    this.commitPromises.delete(commitPromise);
 
     // If transaction fails we delete facts from the nursery so that new
     // changes will not build upon rejected state. If there are other inflight
@@ -948,7 +968,17 @@ export class Replica {
    * state returns it otherwise returns recent state.
    */
   get(entry: FactAddress): State | undefined {
-    return this.nursery.get(entry) ?? this.heap.get(entry);
+    const nurseryState = this.nursery.get(entry);
+    if (nurseryState) return nurseryState;
+
+    const heapState = this.heap.get(entry);
+    if (heapState) {
+      // Remove `since` field from the state so that it can be used as a cause
+      const { since: _since, ...state } = heapState;
+      return state;
+    }
+
+    return undefined;
   }
 
   /**
@@ -1314,12 +1344,12 @@ class ProviderConnection implements IStorageProvider {
     return this.provider.sink(uri, callback);
   }
 
-  sync(
-    uri: URI,
-    expectedInStorage?: boolean,
-    schemaContext?: SchemaContext,
-  ) {
-    return this.provider.sync(uri, expectedInStorage, schemaContext);
+  sync(uri: URI, selector?: SchemaPathSelector) {
+    return this.provider.sync(uri, selector);
+  }
+
+  synced() {
+    return this.provider.synced();
   }
 
   get<T = any>(uri: URI): StorageValue<T> | undefined {
@@ -1435,13 +1465,11 @@ export class Provider implements IStorageProvider {
 
   sync(
     uri: URI,
-    expectedInStorage?: boolean,
-    schemaContext?: SchemaContext,
+    selector?: SchemaPathSelector,
   ) {
     const { the } = this;
     const factAddress = { the, of: uri };
-    if (schemaContext) {
-      const selector = { path: [], schemaContext: schemaContext };
+    if (selector) {
       // We track this server subscription, and don't re-issue it --
       // we will instead return the existing promise, so we can wait until
       // we have the response.
@@ -1452,12 +1480,19 @@ export class Provider implements IStorageProvider {
       if (existingPromise) {
         return existingPromise;
       }
-      const promise = this.workspace.load([[factAddress, schemaContext]]);
+      const promise = this.workspace.load([[factAddress, selector]]);
       this.serverSubscriptions.add(factAddress, selector, promise);
       return promise;
     } else {
       return this.workspace.load([[factAddress, undefined]]);
     }
+  }
+
+  synced() {
+    return Promise.all([
+      Promise.all(this.serverSubscriptions.getAllPromises()),
+      Promise.all(this.workspace.commitPromises),
+    ]) as unknown as Promise<void>;
   }
 
   get<T = any>(uri: URI): StorageValue<T> | undefined {
@@ -1550,7 +1585,7 @@ export class Provider implements IStorageProvider {
     this.workspace.reset();
 
     // Re-establish subscriptions
-    const need: [FactAddress, SchemaContext?][] = [];
+    const need: [FactAddress, SchemaPathSelector?][] = [];
 
     // Always include the space commit object to ensure proper query context
     const spaceCommitAddress: FactAddress = {
@@ -1561,7 +1596,7 @@ export class Provider implements IStorageProvider {
 
     // Add all tracked subscriptions
     for (const { factAddress, selector } of subscriptions) {
-      need.push([factAddress, selector.schemaContext]);
+      need.push([factAddress, selector]);
     }
 
     try {
@@ -1680,6 +1715,20 @@ export class StorageManager implements IStorageManager {
   subscribe(subscription: IStorageSubscription): void {
     this.#subscription.subscribe(subscription);
   }
+
+  /**
+   * Wait for all pending syncs to complete + the microtask queue to flush, so
+   * that they are also all processed.
+   *
+   * @returns Promise that resolves when all pending syncs are complete.
+   */
+  synced(): Promise<void> {
+    const { resolve, promise } = Promise.withResolvers<void>();
+    Promise.all(
+      this.#providers.values().map((provider) => provider.synced()),
+    ).finally(() => setTimeout(() => resolve(), 0));
+    return promise;
+  }
 }
 
 export const getChanges = (
@@ -1700,12 +1749,11 @@ export const getChanges = (
 };
 
 // Given an Assert statement with labels, return a SchemaContext with the ifc tags
-const getSchema = (
+const generateSchemaFromLabels = (
   change: Assert | Retract | Claim,
-): SchemaContext | undefined => {
+): JSONSchema | undefined => {
   if (isObject(change?.is) && "labels" in change.is) {
-    const schema = { ifc: change.is.labels } as JSONSchema;
-    return { schema: schema, rootSchema: schema };
+    return { ifc: change.is.labels } as JSONSchema;
   }
   return undefined;
 };

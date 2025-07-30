@@ -18,6 +18,8 @@ import { getEntityId, type JSONSchema, Runtime } from "../src/index.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { CharmManager, compileRecipe } from "@commontools/charm";
 
+(Error as any).stackTraceLimit = 100;
+
 const TOOLSHED_URL = Deno.env.get("TOOLSHED_API_URL") ||
   "http://localhost:8000";
 const MEMORY_WS_URL = `${
@@ -142,6 +144,6 @@ try {
   console.log("Test completed successfully within timeout");
 } catch (error) {
   const errorMessage = error instanceof Error ? error.message : String(error);
-  console.error("Test failed:", errorMessage);
+  console.error("Test failed:", errorMessage, (error as Error).stack);
   Deno.exit(1);
 }

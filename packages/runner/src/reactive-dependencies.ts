@@ -150,10 +150,12 @@ export function determineTriggeredActions(
       if (i <= beforeLastObject) {
         beforeValues[i + 1] = (beforeValues[i] as Keyable)[targetPath[i]!];
         if (isRecord(beforeValues[i + 1])) beforeLastObject = i + 1;
+        else beforeLastObject = i;
       }
       if (i <= afterLastObject) {
         afterValues[i + 1] = (afterValues[i] as Keyable)[targetPath[i]!];
         if (isRecord(afterValues[i + 1])) afterLastObject = i + 1;
+        else afterLastObject = i;
       }
     }
     currentPath = targetPath;

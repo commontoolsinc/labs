@@ -2,6 +2,7 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { type DID, Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
+import { URI } from "@commontools/memory/interface";
 // Some examples of how you can use this to play with the classification labels
 // Store the empty list
 // > deno task curl --spaceName robin --data '[]' ct://did:key:z6MkjMowGqCog2ZfvNBNrx32p2Fa2bKR1nT7pUWiPQFWzVAg/baedreih5ute2slgsylwtbszccarx6ky2ca3mtticxug6sfj3nwamacefmn/application/json
@@ -55,6 +56,7 @@ async function main() {
     Deno.exit(1);
   }
   const entityId = { "/": match.groups.of };
+  const uri: URI = `of:${match.groups.of}`;
   const the = (match.groups.the && match.groups.the !== "")
     ? match.groups.the
     : "application/json";
@@ -105,15 +107,18 @@ async function main() {
   }).open(spaceDID);
   // Before writing data, we need to read it to check if it's changed.
   // Since we need to read in either case, just do that here
-  const syncResult = await provider.sync(entityId, true, {
-    schema: schema,
-    rootSchema: schema,
+  const syncResult = await provider.sync(uri, {
+    path: [],
+    schemaContext: {
+      schema: schema,
+      rootSchema: schema,
+    },
   });
   if (syncResult.error) {
     console.log("Failed to sync object", syncResult.error);
   }
   if (!putData && !flags.delete) {
-    const storageValue = provider.get(entityId);
+    const storageValue = provider.get(uri);
     const data = flags.raw ? storageValue : storageValue?.value;
 
     console.log(JSON.stringify(data));
@@ -122,7 +127,7 @@ async function main() {
     // The entries in the database all get a value key and store their value there,
     // so we need to do the same for the value we provide to StorageValue for send.
     const result = await provider.send([{
-      entityId: entityId,
+      uri: uri,
       value: flags.delete
         ? { value: undefined }
         : flags.raw

@@ -59,6 +59,8 @@ describe("scheduler", () => {
       tx,
     );
     c.set(0);
+    tx.commit();
+    tx = runtime.edit();
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
@@ -68,7 +70,9 @@ describe("scheduler", () => {
     await runtime.scheduler.run(adder);
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
-    a.send(2); // No log, simulate external change
+    a.withTx(tx).send(2); // Simulate external change
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
@@ -97,6 +101,8 @@ describe("scheduler", () => {
       tx,
     );
     c.set(0);
+    tx.commit();
+    tx = runtime.edit();
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
@@ -112,7 +118,9 @@ describe("scheduler", () => {
     });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
-    a.send(2); // No log, simulate external change
+    a.withTx(tx).send(2); // No log, simulate external change
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
@@ -141,6 +149,8 @@ describe("scheduler", () => {
       tx,
     );
     c.set(0);
+    tx.commit();
+    tx = runtime.edit();
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
@@ -151,13 +161,17 @@ describe("scheduler", () => {
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
 
-    a.send(2);
+    a.withTx(tx).send(2);
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
 
     runtime.scheduler.unschedule(adder);
-    a.send(3);
+    a.withTx(tx).send(3);
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
@@ -186,6 +200,8 @@ describe("scheduler", () => {
       tx,
     );
     c.set(0);
+    tx.commit();
+    tx = runtime.edit();
     const adder: Action = (tx) => {
       runCount++;
       c.withTx(tx).send(
@@ -201,12 +217,16 @@ describe("scheduler", () => {
     });
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
-    a.send(2);
+    a.withTx(tx).send(2);
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
     cancel();
-    a.send(3);
+    a.withTx(tx).send(3);
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(4);
@@ -249,6 +269,8 @@ describe("scheduler", () => {
       tx,
     );
     e.set(0);
+    tx.commit();
+    tx = runtime.edit();
     const adder1: Action = (tx) => {
       runs.push("adder1");
       c.withTx(tx).send(
@@ -267,13 +289,17 @@ describe("scheduler", () => {
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(4);
 
-    d.send(2);
+    d.withTx(tx).send(2);
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2,adder2");
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(5);
 
-    a.send(2);
+    a.withTx(tx).send(2);
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2,adder2,adder1,adder2");
     expect(c.get()).toBe(4);
@@ -317,6 +343,8 @@ describe("scheduler", () => {
       tx,
     );
     e.set(0);
+    tx.commit();
+    tx = runtime.edit();
     const adder1: Action = (tx) => {
       c.withTx(tx).send(
         a.withTx(tx).get() + b.withTx(tx).get(),
@@ -365,6 +393,8 @@ describe("scheduler", () => {
       tx,
     );
     by.set(1);
+    tx.commit();
+    tx = runtime.edit();
     const inc: Action = (tx) =>
       counter
         .withTx(tx)
@@ -381,7 +411,9 @@ describe("scheduler", () => {
     await runtime.idle();
     expect(counter.get()).toBe(1);
 
-    by.send(2);
+    by.withTx(tx).send(2);
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
     expect(counter.get()).toBe(3);
 
@@ -414,6 +446,8 @@ describe("scheduler", () => {
       tx,
     );
     resultCell.set({ count: 0, lastValue: null });
+    tx.commit();
+    tx = runtime.edit();
 
     let actionRunCount = 0;
     let lastReadValue: any;
@@ -441,7 +475,9 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
 
     // Change the source cell
-    sourceCell.set({ value: 5 });
+    sourceCell.withTx(tx).set({ value: 5 });
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
 
     // Action should NOT run again because the read was ignored
@@ -449,7 +485,9 @@ describe("scheduler", () => {
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } }); // Unchanged
 
     // Change the source cell again to be extra sure
-    sourceCell.set({ value: 10 });
+    sourceCell.withTx(tx).set({ value: 10 });
+    tx.commit();
+    tx = runtime.edit();
     await runtime.idle();
 
     // Still should not have run
@@ -495,11 +533,13 @@ describe("event handling", () => {
       tx,
     );
     eventResultCell.set(0);
+    tx.commit();
+
     let eventCount = 0;
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = (tx, event) => {
       eventCount++;
-      eventResultCell.send(event);
+      eventResultCell.withTx(tx).send(event);
     };
 
     runtime.scheduler.addEventHandler(
@@ -525,11 +565,13 @@ describe("event handling", () => {
       tx,
     );
     eventCell.set(0);
+    tx.commit();
+
     let eventCount = 0;
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = (tx, event) => {
       eventCount++;
-      eventCell.send(event);
+      eventCell.withTx(tx).send(event);
     };
 
     const removeHandler = runtime.scheduler.addEventHandler(
@@ -560,6 +602,8 @@ describe("event handling", () => {
       tx,
     );
     parentCell.set({ child: { value: 0 } });
+    tx.commit();
+
     let eventCount = 0;
 
     const eventHandler: EventHandler = () => {
@@ -588,9 +632,11 @@ describe("event handling", () => {
       tx,
     );
     eventCell.set(0);
+    tx.commit();
+
     const events: number[] = [];
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = (_tx, event) => {
       events.push(event);
     };
 
@@ -623,13 +669,15 @@ describe("event handling", () => {
       tx,
     );
     eventResultCell.set(0);
+    tx.commit();
+
     let eventCount = 0;
     let actionCount = 0;
     let lastEventSeen = 0;
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = (tx, event) => {
       eventCount++;
-      eventResultCell.send(event);
+      eventResultCell.withTx(tx).send(event);
     };
 
     const action = (tx: IExtendedStorageTransaction) => {

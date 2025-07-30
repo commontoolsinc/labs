@@ -180,7 +180,7 @@ export interface IRuntime {
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
@@ -287,13 +287,13 @@ export interface IRunner {
   readonly runtime: IRuntime;
 
   run<T, R>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
@@ -566,19 +566,19 @@ export class Runtime implements IRuntime {
 
   // Convenience methods that delegate to the runner
   run<T, R>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
   ): Cell<R>;
   run<T, R = any>(
-    tx: IExtendedStorageTransaction,
+    tx: IExtendedStorageTransaction | undefined,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,

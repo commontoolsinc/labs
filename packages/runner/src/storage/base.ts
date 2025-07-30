@@ -1,5 +1,9 @@
-import { SchemaContext } from "../builder/types.ts";
-import type { Result, Unit, URI } from "@commontools/memory/interface";
+import type {
+  Result,
+  SchemaPathSelector,
+  Unit,
+  URI,
+} from "@commontools/memory/interface";
 import type { Cancel } from "../cancel.ts";
 import { log } from "../log.ts";
 import { IStorageProvider, StorageValue } from "./interface.ts";
@@ -18,11 +22,12 @@ export abstract class BaseStorageProvider implements IStorageProvider {
 
   abstract sync(
     uri: URI,
-    expectedInStorage: boolean,
-    schemaContext?: SchemaContext,
+    selector?: SchemaPathSelector,
   ): Promise<Result<Unit, Error>>;
   // TODO(@ubik2)
   //): Promise<Result<Selection<FactAddress, Revision<State>>, Error>>;
+
+  abstract synced(): Promise<void>;
 
   abstract get<T = any>(uri: URI): StorageValue<T> | undefined;
 

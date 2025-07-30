@@ -126,7 +126,7 @@ export class XLoginView extends BaseView {
       border: var(--border-width, 2px) solid var(--border-color, #000);
     }
 
-    [name=mnemonic-text] {
+    [name="mnemonic-text"] {
       font-family: monospace;
       font-size: 1rem;
       line-height: 1.5;
@@ -231,7 +231,7 @@ export class XLoginView extends BaseView {
 
   private getKeyStore(): KeyStore {
     if (this.keyStore) {
-      return this.keyStore; 
+      return this.keyStore;
     }
     throw new Error("Keystore not set.");
   }
@@ -446,11 +446,11 @@ export class XLoginView extends BaseView {
           ? html`
             <div class="login-row">
               <x-button
-                primary=${true}
+                variant="primary"
                 @click="${() => this.handleQuickUnlock()}"
               >
                 🔒 Login with Passkey (${this.storedCredential.id.slice(-4)})
-              </button>
+              </x-button>
               <x-button
                 class="delete-button"
                 @click="${() => {
@@ -464,13 +464,12 @@ export class XLoginView extends BaseView {
           `
           : html`
             <x-button
-              primary=${true}
+              variant="primary"
               @click="${() => this.handleQuickUnlock()}"
             >
               🔒 Login with Passphrase
             </x-button>
-          `}
-          ${isPassphrase && isPasskeyAvailable
+          `} ${isPassphrase && isPasskeyAvailable
           ? html`
             <x-button @click="${() => {
               this.flow = "login";
@@ -490,14 +489,17 @@ export class XLoginView extends BaseView {
             </x-button>
           `
           : null}
-          <x-button @click="${() => this.flow = "register"}">
-            ➕ Register New Key
-          </x-button>
+
+        <x-button test-id="register-new-key" @click="${() =>
+          this.flow = "register"}">
+          ➕ Register New Key
+        </x-button>
       `;
     }
 
     return html`
-      <x-button variant="primary" @click="${() => this.flow = "register"}">
+      <x-button variant="primary" test-id="register-new-key" @click="${() =>
+        this.flow = "register"}">
         ➕ Register
       </x-button>
       <x-button variant="primary" @click="${() => this.flow = "login"}">
@@ -555,7 +557,8 @@ export class XLoginView extends BaseView {
         return this.renderMnemonicDisplay();
       }
       return html`
-        <x-button variant="primary" @click="${() => this.handleRegister()}">
+        <x-button variant="primary" test-id="generate-passphrase" @click="${() =>
+          this.handleRegister()}">
           🔑 Generate Passphrase
         </x-button>
         <x-button @click="${() => {
@@ -604,7 +607,8 @@ export class XLoginView extends BaseView {
       </div>
       <div class="mnemonic-display">
         <v-box>
-          <textarea rows="7" name="mnemonic-text">${this.mnemonic || ""}</textarea>
+          <textarea rows="7" name="mnemonic-text">${this.mnemonic ||
+        ""}</textarea>
           <x-button
             class="copy-button"
             @click="${this.copyToClipboard}"
@@ -618,6 +622,7 @@ export class XLoginView extends BaseView {
       </p>
       <x-button
         variant="primary"
+        test-id="passphrase-continue"
         @click="${() => {
         // User has saved the mnemonic, now authenticate with it
         if (this.mnemonic) {

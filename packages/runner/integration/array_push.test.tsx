@@ -9,7 +9,7 @@ import {
   UI,
 } from "commontools";
 
-const ARRAY_LENGTH=1;
+const ARRAY_LENGTH = 1;
 
 // dummy input schema
 const InputSchema = {

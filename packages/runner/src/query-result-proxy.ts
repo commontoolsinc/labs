@@ -1,11 +1,11 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { getTopFrame } from "./builder/recipe.ts";
-import { type Frame, type OpaqueRef, toOpaqueRef } from "./builder/types.ts";
+import { type Frame, type OpaqueRef } from "./builder/types.ts";
+import { toCell, toOpaqueRef } from "./back-to-cell.ts";
 import { opaqueRef } from "./builder/opaque-ref.ts";
-import { type LegacyDocCellLink } from "./sigil-types.ts";
 import { diffAndUpdate } from "./data-updating.ts";
-import { resolveLinkToValue } from "./link-resolution.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
 import { type Cell, createCell } from "./cell.ts";
 import { type IRuntime } from "./runtime.ts";
@@ -92,7 +92,7 @@ export function createQueryResultProxy<T>(
   // Resolve path and follow links to actual value.
   const txStatus = tx?.status();
   const readTx = (txStatus?.status === "ready" && tx) ? tx : runtime.edit();
-  link = resolveLinkToValue(readTx, link);
+  link = resolveLink(readTx, link);
   const target = readTx.readValueOrThrow(link) as any;
 
   if (!isRecord(target)) return target;
@@ -110,16 +110,19 @@ export function createQueryResultProxy<T>(
   if (existingProxy) return existingProxy;
 
   const proxy = new Proxy(target as object, {
-    get: (target, prop, receiver) => {
+    get: (_, prop, receiver) => {
       if (typeof prop === "symbol") {
-        if (prop === getCellLink) {
-          return createCell(runtime, link, tx, true);
+        if (prop === toCell) {
+          return () => createCell(runtime, link, tx, true);
         } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(link);
         }
 
-        const value = Reflect.get(target, prop, receiver);
-        if (typeof value === "function") return value.bind(receiver);
+        const readTx = (tx?.status().status === "ready") ? tx : runtime.edit();
+        const current = readTx.readValueOrThrow(link) as typeof target;
+
+        const value = Reflect.get(current, prop, current);
+        if (typeof value === "function") return value.bind(current);
         else return value;
       }
 
@@ -136,18 +139,39 @@ export function createQueryResultProxy<T>(
             // This will also mark each element read in the log. Almost all
             // methods implicitly read all elements. TODO: Deal with
             // exceptions like at().
-            const copy = target.map((_, index) =>
-              createQueryResultProxy(
+            const readTx = (tx?.status().status === "ready")
+              ? tx
+              : runtime.edit();
+            const length = readTx.readValueOrThrow({
+              ...link,
+              path: [...link.path, "length"],
+            }) as number;
+
+            if (typeof length !== "number") {
+              throw new Error(
+                `Array length is not a number for ${prop} operation`,
+              );
+            }
+
+            const copy = new Array(length);
+            for (let i = 0; i < length; i++) {
+              copy[i] = createQueryResultProxy(
                 runtime,
                 tx,
-                { ...link, path: [...link.path, String(index)] },
+                { ...link, path: [...link.path, String(i)] },
                 depth + 1,
-              )
-            );
+              );
+            }
 
             return method.apply(copy, args);
           }
           : (...args: any[]) => {
+            if (!tx) {
+              throw new Error(
+                "Transaction required for changing query result proxy",
+              );
+            }
+
             // Operate on a copy so we can diff. For write-only methods like
             // push, don't proxy the other members so we don't log reads.
             // Wraps values in a proxy that remembers the original index and
@@ -186,17 +210,23 @@ export function createQueryResultProxy<T>(
 
             // Turn any newly added elements into cells. And if there was a
             // change at all, update the cell.
-            if (!tx) {
-              throw new Error(
-                "Transaction required for changing query result proxy",
-              );
-            }
             diffAndUpdate(runtime, tx, link, copy, {
               parent: { id: link.id, space: link.space },
               method: prop,
               call: new Error().stack,
               context: getTopFrame()?.cause ?? "unknown",
             });
+
+            // Update target from store
+            const newValue = tx.readValueOrThrow(link) as typeof target;
+
+            if (!Array.isArray(newValue)) {
+              throw new Error(
+                `Array is not an array anymore after ${prop} operation, it's now ${typeof newValue}`,
+              );
+            }
+
+            target.splice(0, target.length, ...newValue);
 
             if (Array.isArray(result)) {
               const cause = {
@@ -229,10 +259,10 @@ export function createQueryResultProxy<T>(
         depth + 1,
       );
     },
-    set: (target, prop, value) => {
+    set: (_, prop, value) => {
       if (typeof prop === "symbol") return false;
 
-      if (isQueryResult(value)) value = value[getCellLink];
+      if (isQueryResult(value)) value = value[toCell]();
 
       if (!tx) {
         throw new Error(
@@ -323,7 +353,7 @@ export function makeOpaqueRef(
  * @throws {Error} If the value is not a cell value proxy.
  */
 export function getCellOrThrow<T = any>(value: any): Cell<T> {
-  if (isQueryResult(value)) return value[getCellLink];
+  if (isQueryResult(value)) return value[toCell]();
   else throw new Error("Value is not a cell proxy");
 }
 
@@ -334,10 +364,8 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @returns {boolean}
  */
 export function isQueryResult(value: any): value is QueryResult<any> {
-  return isRecord(value) && value[getCellLink] !== undefined;
+  return isRecord(value) && typeof value[toCell] === "function";
 }
-
-const getCellLink = Symbol("isQueryResultProxy");
 
 /**
  * Check if value is a cell value proxy. Return as type that allows
@@ -353,7 +381,7 @@ export function isQueryResultForDereferencing(
 }
 
 export type QueryResultInternals = {
-  [getCellLink]: Cell<unknown>;
+  [toCell]: () => Cell<unknown>;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;

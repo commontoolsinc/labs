@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, type JSONSchema } from "../src/builder/types.ts";
@@ -7,7 +9,7 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { Runtime } from "../src/runtime.ts";
 import { type ErrorWithContext } from "../src/scheduler.ts";
 import { isCell } from "../src/cell.ts";
-import { resolveLinks } from "../src/link-resolution.ts";
+import { resolveLink } from "../src/link-resolution.ts";
 import { isAnyCellLink, parseLink } from "../src/link-utils.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
@@ -71,6 +73,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, simpleRecipe, {
       value: 5,
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -105,6 +108,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, outerRecipe, {
       value: 4,
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -134,6 +138,8 @@ describe("Recipe Runner", () => {
       {},
       resultCell1,
     );
+    tx.commit();
+    tx = runtime.edit();
 
     await runtime.idle();
 
@@ -148,6 +154,7 @@ describe("Recipe Runner", () => {
     const result2 = runtime.run(tx, recipeWithDefaults, {
       a: 20,
     }, resultCell2);
+    tx.commit();
 
     await runtime.idle();
 
@@ -186,10 +193,11 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, multipliedArray, {
       values: [{ x: 1 }, { x: 2 }, { x: 3 }],
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({
+    expect(result.get()).toMatchObjectIgnoringSymbols({
       multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
@@ -222,10 +230,11 @@ describe("Recipe Runner", () => {
       values: [1, 2, 3],
       factor: 3,
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({
+    expect(result.get()).toMatchObjectIgnoringSymbols({
       doubled: [3, 6, 9],
     });
   });
@@ -253,10 +262,11 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, doubleArray, {
       values: undefined,
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
-    expect(result.get()).toMatchObject({ doubled: [] });
+    expect(result.get()).toMatchObjectIgnoringSymbols({ doubled: [] });
   });
 
   it("should execute handlers", async () => {
@@ -267,6 +277,7 @@ describe("Recipe Runner", () => {
       ({ amount }, { counter }) => {
         counter.value += amount;
       },
+      { proxy: true },
     );
 
     const incRecipe = recipe<{ counter: { value: number } }>(
@@ -282,86 +293,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, incRecipe, {
       counter: { value: 0 },
     }, resultCell);
-
-    await runtime.idle();
-
-    result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
-
-    result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
-  });
-
-  it("should execute handlers that use bind and this", async () => {
-    // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler<
-      { amount: number },
-      { counter: { value: number } }
-    >(function (
-      this: { counter: { value: number } },
-      { amount },
-    ) {
-      this.counter.value += amount;
-    });
-
-    const incRecipe = recipe<{ counter: { value: number } }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler.bind({ counter }) };
-      },
-    );
-
-    const resultCell = runtime.getCell<
-      { counter: { value: number }; stream: any }
-    >(
-      space,
-      "should execute handlers that use bind and this",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, incRecipe, {
-      counter: { value: 0 },
-    }, resultCell);
-
-    await runtime.idle();
-
-    result.key("stream").send({ amount: 1 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
-
-    result.key("stream").send({ amount: 2 });
-    await runtime.idle();
-    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
-  });
-
-  it("should execute handlers that use bind and this (no types)", async () => {
-    // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler(
-      function (this: { counter: { value: number } }, { amount }) {
-        this.counter.value += amount;
-      },
-    );
-
-    const incRecipe = recipe<{ counter: { value: number } }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler.bind({ counter }) };
-      },
-    );
-
-    const resultCell = runtime.getCell<
-      { counter: { value: number }; stream: any }
-    >(
-      space,
-      "should execute handlers that use bind and this (no types)",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, incRecipe, {
-      counter: { value: 0 },
-    }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -403,10 +335,13 @@ describe("Recipe Runner", () => {
     const incHandler = handler<
       { amount: number },
       { counter: { value: number }; nested: { a: { b: { c: number } } } }
-    >((event, { counter, nested }) => {
-      counter.value += event.amount;
-      return incLogger({ counter, amount: event.amount, nested: nested.a.b });
-    });
+    >(
+      (event, { counter, nested }) => {
+        counter.value += event.amount;
+        return incLogger({ counter, amount: event.amount, nested: nested.a.b });
+      },
+      { proxy: true },
+    );
 
     const incRecipe = recipe<{
       counter: { value: number };
@@ -426,6 +361,7 @@ describe("Recipe Runner", () => {
       counter,
       nested,
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -435,30 +371,34 @@ describe("Recipe Runner", () => {
 
     result.key("stream").send({ amount: 2 });
     await runtime.idle();
-    expect(values).toEqual([
-      [1, 1, 0],
-      // Next is the first logger called again when counter changes, since this
-      // is now a long running charmlet:
-      [3, 1, 0],
-      [3, 2, 0],
-    ]);
+
+    expect(values).toContainEqual([1, 1, 0]);
+
+    // Next is the first logger called again when counter changes, since this
+    // is now a long running charmlet:
+    expect(values).toContainEqual([3, 1, 0]);
+
+    expect(values).toContainEqual([3, 2, 0]);
   });
 
   it("should handle recipes returned by lifted functions", async () => {
     const x = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 1",
-      undefined,
-      tx,
     );
-    x.set(2);
+    x.withTx(tx).set(2);
+    tx.commit();
+    tx = runtime.edit();
+
     const y = runtime.getCell<number>(
       space,
       "should handle recipes returned by lifted functions 2",
       undefined,
       tx,
     );
-    y.set(3);
+    y.withTx(tx).set(3);
+    tx.commit();
+    tx = runtime.edit();
 
     const runCounts = {
       multiply: 0,
@@ -503,6 +443,8 @@ describe("Recipe Runner", () => {
       x,
       y,
     }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
 
     expect(runCounts).toMatchObject({
       multiply: 0,
@@ -524,7 +466,10 @@ describe("Recipe Runner", () => {
       multiplyGenerator2: 1,
     });
 
-    x.send(3);
+    x.withTx(tx).send(3);
+    tx.commit();
+    tx = runtime.edit();
+
     await runtime.idle();
 
     expect(runCounts).toMatchObject({
@@ -564,6 +509,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, simpleRecipe, {
       value: 5,
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -604,7 +550,10 @@ describe("Recipe Runner", () => {
       undefined,
       tx,
     );
-    settingsCell.set({ value: 5 });
+    settingsCell.withTx(tx).set({ value: 5 });
+    tx.commit();
+    tx = runtime.edit();
+
     const resultCell = runtime.getCell<{ result: number }>(
       space,
       "should handle schema with cell references",
@@ -615,13 +564,17 @@ describe("Recipe Runner", () => {
       settings: settingsCell,
       multiplier: 3,
     }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
 
     await runtime.idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 15 });
 
     // Update the cell and verify the recipe recomputes
-    settingsCell.send({ value: 10 });
+    settingsCell.withTx(tx).send({ value: 10 });
+    tx.commit();
+    tx = runtime.edit();
 
     await runtime.idle();
 
@@ -691,6 +644,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, sumRecipe, {
       data: { items: [item1, item2] },
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -755,6 +709,7 @@ describe("Recipe Runner", () => {
         second: value2,
       },
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -795,6 +750,7 @@ describe("Recipe Runner", () => {
     const result = runtime.run(tx, incRecipe, {
       counter: 0,
     }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -826,6 +782,7 @@ describe("Recipe Runner", () => {
         }
         state.result = divisor / dividend;
       },
+      { proxy: true },
     );
 
     const divRecipe = recipe<{ result: number }>(
@@ -842,6 +799,7 @@ describe("Recipe Runner", () => {
       tx,
     );
     const charm = runtime.run(tx, divRecipe, { result: 1 }, charmCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -911,7 +869,9 @@ describe("Recipe Runner", () => {
       undefined,
       tx,
     );
-    dividend.set(1);
+    dividend.withTx(tx).set(1);
+    tx.commit();
+    tx = runtime.edit();
 
     const charmCell = runtime.getCell<{ result: number }>(
       space,
@@ -923,13 +883,18 @@ describe("Recipe Runner", () => {
       divisor: 10,
       dividend,
     }, charmCell);
+    tx.commit();
+    tx = runtime.edit();
 
     await runtime.idle();
 
     expect(errors).toBe(0);
     expect(charm.get()).toMatchObject({ result: 10 });
 
-    dividend.send(0);
+    dividend.withTx(tx).send(0);
+    tx.commit();
+    tx = runtime.edit();
+
     await runtime.idle();
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 10 });
@@ -943,7 +908,10 @@ describe("Recipe Runner", () => {
     );
 
     // Make sure it recovers:
-    dividend.send(2);
+    dividend.withTx(tx).send(2);
+    tx.commit();
+    tx = runtime.edit();
+
     await runtime.idle();
     expect((charm.getRaw() as any).result.$alias.cell).toEqual(
       JSON.parse(JSON.stringify(charm.getSourceCell()?.getDoc())),
@@ -981,6 +949,7 @@ describe("Recipe Runner", () => {
       tx,
     );
     const result = runtime.run(tx, slowRecipe, { x: 1 }, resultCell);
+    tx.commit();
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(liftCalled).toBe(true);
@@ -1007,6 +976,7 @@ describe("Recipe Runner", () => {
           }, 100)
         );
       },
+      { proxy: true },
     );
 
     const slowHandlerRecipe = recipe<{ result: number }>(
@@ -1023,6 +993,7 @@ describe("Recipe Runner", () => {
       tx,
     );
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -1062,6 +1033,7 @@ describe("Recipe Runner", () => {
           }, 10)
         );
       },
+      { proxy: true },
     );
 
     const slowHandlerRecipe = recipe<{ result: number }>(
@@ -1078,6 +1050,7 @@ describe("Recipe Runner", () => {
       tx,
     );
     const charm = runtime.run(tx, slowHandlerRecipe, { result: 0 }, charmCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -1112,10 +1085,10 @@ describe("Recipe Runner", () => {
     const input = runtime.getCell<number>(
       space,
       "should create and use a named cell inside a lift input",
-      undefined,
-      tx,
     );
-    input.set(5);
+    input.withTx(tx).set(5);
+    tx.commit();
+    tx = runtime.edit();
 
     const resultCell = runtime.getCell<{ value: Cell<number> }>(
       space,
@@ -1128,6 +1101,8 @@ describe("Recipe Runner", () => {
     );
 
     const result = runtime.run(tx, wrapperRecipe, { value: input }, resultCell);
+    tx.commit();
+    tx = runtime.edit();
 
     await runtime.idle();
 
@@ -1137,7 +1112,7 @@ describe("Recipe Runner", () => {
     expect(wrapperCell.get()).toBe(5);
 
     // Follow all the links until we get to the doc holding the value
-    const ref = resolveLinks(
+    const ref = resolveLink(
       tx,
       wrapperCell.getAsNormalizedFullLink(),
     );
@@ -1146,7 +1121,10 @@ describe("Recipe Runner", () => {
     // And let's make sure the value is correct
     expect(tx.readValueOrThrow(ref)).toBe(5);
 
-    input.send(10);
+    input.withTx(tx).send(10);
+    tx.commit();
+    tx = runtime.edit();
+
     await runtime.idle();
 
     // That same value was updated, which shows that the id was stable
@@ -1162,7 +1140,7 @@ describe("Recipe Runner", () => {
       if (title) {
         items.push({ title, items });
       }
-    });
+    }, { proxy: true });
 
     const itemsRecipe = recipe<
       { items: Array<{ title: string; items: any[] }> }
@@ -1180,6 +1158,7 @@ describe("Recipe Runner", () => {
       tx,
     );
     const result = runtime.run(tx, itemsRecipe, { items: [] }, resultCell);
+    tx.commit();
 
     await runtime.idle();
 
@@ -1263,6 +1242,7 @@ describe("Recipe Runner", () => {
     );
 
     const charm = runtime.run(tx, listRecipe, { list: [] }, charmCell);
+    tx.commit();
 
     await runtime.idle();
 

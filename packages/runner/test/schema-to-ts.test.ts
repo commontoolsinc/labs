@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import "@commontools/utils/equal-ignoring-symbols";
+
 import { handler, lift } from "../src/builder/module.ts";
 import { str } from "../src/builder/built-in.ts";
 import {
@@ -530,6 +532,8 @@ describe("Schema-to-TS Type Conversion", () => {
       tx,
     );
     settingsCell.set({ theme: "dark", notifications: true });
+    tx.commit();
+    tx = runtime.edit();
 
     // This is just to verify the type works at runtime
     // We're not actually testing the Schema type itself, just that it's compatible
@@ -546,12 +550,19 @@ describe("Schema-to-TS Type Conversion", () => {
       space,
       userData,
       schema,
+      tx,
     );
     const user = userCell.get();
 
     expect(user.name).toBe("John");
     expect(user.age).toBe(30);
-    expect(user.tags).toEqual(["developer", "typescript"]);
-    expect(user.settings.get()).toEqual({ theme: "dark", notifications: true });
+    (expect(user.tags) as any).toEqualIgnoringSymbols([
+      "developer",
+      "typescript",
+    ]);
+    (expect(user.settings.get()) as any).toEqualIgnoringSymbols({
+      theme: "dark",
+      notifications: true,
+    });
   });
 });

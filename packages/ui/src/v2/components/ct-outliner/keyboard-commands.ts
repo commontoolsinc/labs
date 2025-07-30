@@ -172,6 +172,16 @@ export const KeyboardCommands = {
     },
   },
 
+  l: {
+    execute(ctx: KeyboardContext): void {
+      if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNode) {
+        ctx.event.preventDefault();
+        // Toggle checkbox on the focused node using proper transactions
+        ctx.component.toggleNodeCheckbox(ctx.focusedNode);
+      }
+    },
+  },
+
   n: {
     execute(ctx: KeyboardContext): void {
       ctx.event.preventDefault();
@@ -390,6 +400,53 @@ export const EditingKeyboardCommands = {
           currentContent,
           cursorPosition,
         );
+
+        return true;
+      }
+      return false;
+    },
+  },
+
+  l: {
+    execute(ctx: EditingKeyboardContext): boolean {
+      const { event, textarea } = ctx;
+
+      // cmd/ctrl+l toggles checkbox even in edit mode
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault();
+
+        // Save current editing content from textarea
+        const currentContent = textarea.value;
+        
+        // Apply checkbox toggle logic inline
+        let newContent: string;
+        const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentContent);
+        const isChecked = /^\s*\[x\]\s*/.test(currentContent);
+        
+        if (hasCheckbox) {
+          // Toggle existing checkbox
+          if (isChecked) {
+            // Checked -> Unchecked (normalize to [ ])
+            newContent = currentContent.replace(/^\s*\[x\]\s*/, '[ ] ');
+          } else {
+            // Unchecked -> Checked
+            newContent = currentContent.replace(/^\s*\[[ ]?\]\s*/, '[x] ');
+          }
+        } else {
+          // Add checkbox if none exists
+          newContent = '[ ] ' + currentContent;
+        }
+        
+        // Update the textarea with the new content
+        textarea.value = newContent;
+        
+        // Update the component's editing content state
+        if ('editingContent' in ctx.component) {
+          (ctx.component as any).editingContent = newContent;
+        }
+
+        // Trigger input event to ensure proper handling
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
 
         return true;
       }
