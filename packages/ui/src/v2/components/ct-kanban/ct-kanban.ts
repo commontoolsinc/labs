@@ -2,8 +2,8 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell, isCell } from "@commontools/runner";
-import { type Charm, charmId } from "@commontools/charm";
+import { type Cell, getEntityId, isCell } from "@commontools/runner";
+import { type Charm, charmId, charmSchema } from "@commontools/charm";
 import {
   type ArrayCellController,
   createArrayCellController,
@@ -469,8 +469,33 @@ export class CTKanban extends BaseElement {
       return [];
     }
 
-    // Use .key(index) to get Cell<Charm> for each charm
-    const charmCells = charms.map((_, index) => this.charmsCell!.key(index));
+    const runtime = this.charmsCell.runtime;
+    const space = this.charmsCell.space;
+
+    // Create proper charm cell references from charm objects
+    const charmCells = charms.map((charm, index) => {
+      try {
+        // First, try to create proper charm cells using entity ID
+        const entityId = getEntityId(charm);
+        if (entityId) {
+          console.log("[ct-kanban] Found entity ID for charm:", entityId);
+          const charmCell = runtime.getCellFromEntityId<Charm>(
+            space,
+            entityId,
+            [],
+            charmSchema,
+          );
+          return charmCell;
+        }
+      } catch (error) {
+        console.warn("[ct-kanban] Failed to create charm cell from entity ID:", error);
+      }
+      
+      // Fall back to array indexing approach
+      console.log("[ct-kanban] Using array index approach for charm at index:", index);
+      return this.charmsCell!.key(index);
+    });
+
     console.log("[ct-kanban] Created charmCells:", charmCells.length);
     return charmCells;
   }
