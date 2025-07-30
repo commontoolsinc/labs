@@ -151,7 +151,9 @@ function typeToJsonSchema(
   
   // Check if this is a Cell<T> or Stream<T> type at the top level
   const typeString = checker.typeToString(type);
-  if (typeString.startsWith("Cell<") && typeString.endsWith(">")) {
+  
+  // Check for Cell type by symbol name (handles type aliases)
+  if (type.symbol?.name === "Cell" || (typeString.startsWith("Cell<") && typeString.endsWith(">"))) {
     // This is a Cell<T> type
     let innerType = type;
     
@@ -178,7 +180,8 @@ function typeToJsonSchema(
     return schema;
   }
   
-  if (typeString.startsWith("Stream<") && typeString.endsWith(">")) {
+  // Check for Stream type by symbol name (handles type aliases)
+  if (type.symbol?.name === "Stream" || (typeString.startsWith("Stream<") && typeString.endsWith(">"))) {
     // This is a Stream<T> type
     let innerType = type;
     
