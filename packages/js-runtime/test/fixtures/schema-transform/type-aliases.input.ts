@@ -10,8 +10,8 @@ type NumberCell = Cell<number>;
 type MyStream<T> = Stream<T>;
 type EventStream = Stream<{ type: string; data: any }>;
 
-// Note: Default type aliases are not currently supported
-// type WithDefault<T, V> = Default<T, V>;
+// Type alias for Default
+type WithDefault<T, V extends T> = Default<T, V>;
 
 // Complex type aliases
 type CellArray<T> = Cell<T[]>;
@@ -31,8 +31,8 @@ interface TypeAliasTest {
   genericStream: MyStream<number>;
   eventStream: EventStream;
   
-  // Direct Default (aliases not supported)
-  withDefault: Default<string, "hello">;
+  // Default alias
+  withDefault: WithDefault<string, "hello">;
   
   // Complex aliases
   cellOfArray: CellArray<number>;
