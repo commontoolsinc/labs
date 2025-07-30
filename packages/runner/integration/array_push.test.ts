@@ -87,23 +87,33 @@ async function runTest() {
   );
   console.log("Recipe compiled successfully");
 
-  const charm = await charmManager.runPersistent(
+  let charm = await charmManager.runPersistent(
     recipe,
     {},
   );
+  charm = (await charmManager.get(charm))!; // Attach result schema
   console.log("Result charm ID:", getEntityId(charm));
+  console.log("Result charm schema:", charm.schema);
 
   // Wait so we can load the page on the browser
   // await new Promise((resolve) => setTimeout(resolve, 10000));
 
   // Get the handler stream and send some numbers
-  const pushHandlerStream = charm.key("pushHandler");
+  const pushNumbersHandlerStream = charm.key("pushNumbersHandler");
+  const pushObjectsHandlerStream = charm.key("pushObjectsHandler");
+
+  const expectedNumbers = [];
+  const expectedObjects = [];
+
   let sendCount = 0;
 
   // Loop, sending numbers one by one
   for (let i = 0; i < TOTAL_COUNT; i++) {
     console.log(`Sending value: ${i}`);
-    pushHandlerStream.send({ value: i });
+    pushNumbersHandlerStream.send({ value: i });
+    pushObjectsHandlerStream.send({ value: { count: i } });
+    expectedNumbers.push(i);
+    expectedObjects.push({ count: i });
     sendCount++;
   }
 
@@ -113,19 +123,45 @@ async function runTest() {
   console.log("Storage synced");
 
   // Now we should have all elements
-  const actualElements = charm.get().my_array.length;
-  if (actualElements === TOTAL_COUNT) {
+  const actualNumbersElements = charm.get().my_numbers_array.length;
+  const actualObjectsElements = charm.get().my_objects_array.length;
+  if (
+    actualNumbersElements === TOTAL_COUNT &&
+    actualObjectsElements === TOTAL_COUNT
+  ) {
     console.log(`Test passed - all ${TOTAL_COUNT} elements received`);
   } else {
     console.error(
-      `Test failed - expected ${TOTAL_COUNT} elements but got ${actualElements} (missing ${
-        TOTAL_COUNT - actualElements
-      })`,
+      `Test failed - expected ${TOTAL_COUNT} but got ${actualNumbersElements} numbers and ${actualObjectsElements} objects`,
     );
-    console.log("Array contents:", charm.get().my_array);
+    console.log("Array contents (numbers):", charm.get().my_numbers_array);
+    console.log("Array contents (objects):", charm.get().my_objects_array);
     throw new Error(
-      `Expected ${TOTAL_COUNT} elements but got ${actualElements}`,
+      `Expected ${TOTAL_COUNT} numbers and ${TOTAL_COUNT} objects but got ${actualNumbersElements} numbers and ${actualObjectsElements} objects`,
     );
+  }
+
+  if (
+    JSON.stringify(charm.get().my_numbers_array) ===
+      JSON.stringify(expectedNumbers)
+  ) {
+    console.log("Numbers array is as expected");
+  } else {
+    console.log("Numbers array is not as expected");
+    console.log("Expected:", expectedNumbers);
+    console.log("Actual:", charm.get().my_numbers_array);
+    throw new Error("Numbers array is not as expected");
+  }
+  if (
+    JSON.stringify(charm.get().my_objects_array) ===
+      JSON.stringify(expectedObjects)
+  ) {
+    console.log("Objects array is as expected");
+  } else {
+    console.log("Objects array is not as expected");
+    console.log("Expected:", expectedObjects);
+    console.log("Actual:", charm.get().my_objects_array);
+    throw new Error("Objects array is not as expected");
   }
 
   // Clean up
