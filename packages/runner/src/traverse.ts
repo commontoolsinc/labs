@@ -651,7 +651,10 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       return undefined;
     }
     const schemaRef = schemaContext.schema["$ref"];
-    const pathToDef = schemaRef.split("/");
+    // schemaRef is a JSONPointer, so split and unescape
+    const pathToDef = schemaRef.split("/").map((p) =>
+      p.replace("~1", "/").replace("~0", "~")
+    );
     if (pathToDef[0] === "#") {
       let schemaCursor: unknown = schemaContext.rootSchema;
       // start at 1, since the 0 element is "#"
