@@ -154,7 +154,7 @@ describe("Storage", () => {
       let synced = false;
 
       const testCellURI = testCell.getAsNormalizedFullLink().id;
-      storageManager.open(space).sync(testCellURI, true).then(
+      storageManager.open(space).sync(testCellURI).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -167,7 +167,7 @@ describe("Storage", () => {
     it("should wait for a undefined doc to appear", async () => {
       let synced = false;
       const testCellURI = testCell.getAsNormalizedFullLink().id;
-      storageManager.open(space).sync(testCellURI, true).then(
+      storageManager.open(space).sync(testCellURI).then(
         () => (synced = true),
       );
       expect(synced).toBe(false);
@@ -178,13 +178,16 @@ describe("Storage", () => {
 
     it("should wait for a undefined doc to appear with schema and double sync", async () => {
       let synced = false;
-      const schemaContext = { schema: true, rootSchema: true };
+      const selector = {
+        path: [],
+        schemaContext: { schema: true, rootSchema: true },
+      };
       const testCellURI = testCell.getAsNormalizedFullLink().id;
-      storageManager.open(space).sync(testCellURI, true, schemaContext)
+      storageManager.open(space).sync(testCellURI, selector)
         .then(
           () => (synced = true),
         );
-      storageManager.open(space).sync(testCellURI, true, schemaContext)
+      storageManager.open(space).sync(testCellURI, selector)
         .then(
           () => (synced = true),
         );

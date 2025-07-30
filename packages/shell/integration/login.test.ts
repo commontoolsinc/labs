@@ -14,10 +14,6 @@ const API_URL = (() => {
   const url = Deno.env.get("API_URL") ?? "http://localhost:8000/";
   return url.substr(-1) === "/" ? url : `${url}/`;
 })();
-const FRONTEND_URL = (() => {
-  const url = Deno.env.get("FRONTEND_URL") ?? "http://localhost:5173";
-  return url.substr(-1) === "/" ? url : `${url}/`;
-})();
 const HEADLESS = !!Deno.env.get("HEADLESS");
 const ASTRAL_TIMEOUT = 60_000;
 
@@ -47,7 +43,7 @@ describe("shell login tests", () => {
 
   it("can create a new user via passphrase", async () => {
     const spaceName = "common-knowledge";
-    await page!.goto(`${FRONTEND_URL}`);
+    await page!.goto(`${API_URL}shell`);
     await page!.applyConsoleFormatter();
     const state = await page!.evaluate(() => {
       return globalThis.app.state();

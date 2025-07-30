@@ -50,7 +50,7 @@ export default recipe<RecipeState>("Counter", (state) => {
         <ct-button onClick={decrement(state)}>
           dec to {previous(state.value)}
         </ct-button>
-        Counter is the {nth(state.value)} number
+        <span>Counter is the {nth(state.value)} number</span>
         <ct-button onClick={increment({ value: state.value })}>
           inc to {state.value + 1}
         </ct-button>

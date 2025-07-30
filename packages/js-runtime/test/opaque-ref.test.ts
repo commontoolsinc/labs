@@ -50,7 +50,9 @@ const el = <div>{count + 1}</div>;
 
       await expect(
         transformSource(source, { mode: "error", types }),
-      ).rejects.toThrow(/JSX expression with OpaqueRef computation should use derive/);
+      ).rejects.toThrow(
+        /JSX expression with OpaqueRef computation should use derive/,
+      );
     });
 
     it("reports multiple errors", async () => {
@@ -90,7 +92,9 @@ const el = <div>{count + 1}</div>;
       // Check that debug mode produces some output
       expect(logs.length).toBeGreaterThan(0);
       // Check for the test transformer output that test-utils.ts generates
-      expect(logs.some((log) => log.includes("TEST TRANSFORMER OUTPUT"))).toBe(true);
+      expect(logs.some((log) => log.includes("TEST TRANSFORMER OUTPUT"))).toBe(
+        true,
+      );
     });
   });
 

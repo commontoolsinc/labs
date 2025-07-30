@@ -1,12 +1,4 @@
 /**
- * Base options for all transformers
- */
-export interface TransformerOptions {
-  /** Optional logger function for debugging output */
-  logger?: (message: string) => void;
-}
-
-/**
  * Transformation types for type safety and consistency
  */
 export const TRANSFORMATION_TYPES = {

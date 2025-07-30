@@ -34,7 +34,7 @@ const provider1 = storageManager1.open(signer.did());
 console.log(`Connected to memory server`);
 
 // Define test schema
-const testSchema: SchemaContext = {
+const testSchemaContext: SchemaContext = {
   schema: {
     type: "object",
     properties: {
@@ -52,6 +52,7 @@ const testSchema: SchemaContext = {
     required: ["value"],
   },
 };
+const testSelector = { path: [], schemaContext: testSchemaContext };
 
 interface UpdateValue {
   value: number;
@@ -89,8 +90,8 @@ provider3.sink(uri, (value) => {
 
 // Establish server-side subscription with schema
 console.log("Establishing subscriptions...");
-await provider1.sync(uri, true, testSchema);
-await provider3.sync(uri, true, testSchema);
+await provider1.sync(uri, testSelector);
+await provider3.sync(uri, testSelector);
 
 // Send initial value to server
 console.log("Sending initial value...");
@@ -155,7 +156,7 @@ console.log(`Connected to memory server as second client`);
 
 // Establish server-side subscription with schema
 console.log("Establishing subscription as second client...");
-await provider2.sync(uri, true, testSchema);
+await provider2.sync(uri, testSelector);
 
 // Send test updates and check if subscription still works
 console.log("Sending test updates after disconnection...");

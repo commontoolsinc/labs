@@ -1,9 +1,9 @@
 import ts from "typescript";
-import { TransformerOptions } from "./debug.ts";
 import { hasCtsEnableDirective } from "./utils.ts";
 
-export interface LoggingTransformerOptions extends TransformerOptions {
+export interface LoggingTransformerOptions {
   showTransformed?: boolean;
+  logger?: (message: string) => void;
 }
 
 /**
