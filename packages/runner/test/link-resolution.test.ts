@@ -648,6 +648,107 @@ describe("link-resolution", () => {
     });
   });
 
+  describe("overwrite field removal", () => {
+    it("should remove overwrite field from resolved links", () => {
+      const sourceCell = runtime.getCell<{ value: number }>(
+        space,
+        "source-cell",
+        undefined,
+        tx,
+      );
+      sourceCell.set({ value: 42 });
+
+      const targetCell = runtime.getCell<{ alias: any }>(
+        space,
+        "target-cell",
+        undefined,
+        tx,
+      );
+
+      // Create a write redirect link (which includes overwrite field)
+      targetCell.setRaw({
+        alias: sourceCell.key("value").getAsWriteRedirectLink(),
+      });
+
+      const link = parseLink(targetCell.key("alias"));
+      const resolved = resolveLink(tx, link!, "writeRedirect");
+
+      // Verify the resolved link doesn't have an overwrite field
+      expect("overwrite" in resolved).toBe(false);
+      expect(resolved.id).toBe(sourceCell.getAsNormalizedFullLink().id);
+      expect(resolved.path).toEqual(["value"]);
+    });
+
+    it("should preserve other link properties while removing overwrite", () => {
+      const cell = runtime.getCell<{ data: { nested: string } }>(
+        space,
+        "test-cell",
+        undefined,
+        tx,
+      );
+      cell.set({ data: { nested: "test" } });
+
+      const aliasCell = runtime.getCell<{ ref: any }>(
+        space,
+        "alias-cell",
+        undefined,
+        tx,
+      );
+
+      // Create write redirect link
+      aliasCell.setRaw({
+        ref: cell.key("data").key("nested").getAsWriteRedirectLink(),
+      });
+
+      const link = parseLink(aliasCell.key("ref"));
+      const resolved = resolveLink(tx, link!, "writeRedirect");
+
+      // Check that all other properties are preserved
+      expect(resolved.space).toBe(space);
+      expect(resolved.id).toBe(cell.getAsNormalizedFullLink().id);
+      expect(resolved.path).toEqual(["data", "nested"]);
+      expect("overwrite" in resolved).toBe(false);
+    });
+
+    it("should remove overwrite field when following multiple write redirects", () => {
+      const cellA = runtime.getCell<{ value: string }>(
+        space,
+        "cell-a",
+        undefined,
+        tx,
+      );
+      cellA.set({ value: "original" });
+
+      const cellB = runtime.getCell<{ redirect: any }>(
+        space,
+        "cell-b",
+        undefined,
+        tx,
+      );
+      cellB.setRaw({
+        redirect: cellA.key("value").getAsWriteRedirectLink(),
+      });
+
+      const cellC = runtime.getCell<{ alias: any }>(
+        space,
+        "cell-c",
+        undefined,
+        tx,
+      );
+      cellC.setRaw({
+        alias: cellB.key("redirect").getAsWriteRedirectLink(),
+      });
+
+      const link = parseLink(cellC.key("alias"));
+      const resolved = resolveLink(tx, link!, "writeRedirect");
+
+      // Should resolve to the final destination without overwrite field
+      expect("overwrite" in resolved).toBe(false);
+      expect(resolved.id).toBe(cellA.getAsNormalizedFullLink().id);
+      expect(resolved.path).toEqual(["value"]);
+    });
+  });
+
   describe("Cycle detection with circular references", () => {
     let runtime: Runtime;
     let storageManager: ReturnType<typeof StorageManager.emulate>;
