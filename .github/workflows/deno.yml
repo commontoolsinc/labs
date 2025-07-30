@@ -500,14 +500,18 @@ jobs:
         run: |
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
-          FRONTEND_URL=http://localhost:8000/shell/ \
           deno task integration
 
   # Automatic deployment to staging (toolshed)
   deploy-toolshed:
     name: "Deploy to Toolshed (Staging)"
     if: github.ref == 'refs/heads/main'
-    needs: ["integration-test", "cli-integration-test", "seeder-integration-test", "shell-integration-test"]
+    needs: [
+      "integration-test",
+      "cli-integration-test",
+      "seeder-integration-test",
+      "shell-integration-test",
+    ]
     runs-on: ubuntu-latest
     environment: toolshed
     steps:
