@@ -296,7 +296,7 @@ async function addCharm(toolshedUrl: string, recipePath: string) {
       "true",
     ],
     env: {
-      "TOOLSHED_API_URL": toolshedUrl,
+      "API_URL": toolshedUrl,
       "OPERATOR_PASS": "common user",
     },
   })).output();
@@ -333,7 +333,7 @@ async function inspectCharm(
       "true",
     ],
     env: {
-      "TOOLSHED_API_URL": toolshedUrl,
+      "API_URL": toolshedUrl,
       "OPERATOR_PASS": "common user",
     },
   })).output();

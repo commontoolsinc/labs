@@ -347,14 +347,14 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
-      - name: 🧪 Run end-to-end jumble integration tests
+      - name: 🧪 JUMBLE integration tests
         working-directory: packages/jumble
         run: |
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           deno task integration
 
-      - name: 🧪 Run end-to-end runner integration tests
+      - name: 🧪 RUNNER integration tests
         working-directory: packages/runner
         run: |
           API_URL=http://localhost:8000/ \
