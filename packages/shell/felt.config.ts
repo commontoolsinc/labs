@@ -11,7 +11,7 @@ const config: Config = {
   port: 5173,
   publicDir: "public",
   watchDir: "src",
-  redirectToIndex: /^\/(?!(((assets)|(scripts)|(styles))\/.*))/,
+  redirectToIndex: /^\/(?!(((assets)|(scripts)|(styles)|(module))\/.*))/,
   esbuild: {
     sourcemap: !PRODUCTION,
     minify: PRODUCTION,
