@@ -693,7 +693,7 @@ export class RegularCell<T> implements Cell<T> {
       sourceCellId = toURI(JSON.parse(sourceCellId));
     }
 
-    if (!sourceCellId?.startsWith("of:")) {
+    if (typeof sourceCellId !== "string" || !sourceCellId.startsWith("of:")) {
       throw new Error("Source cell ID must start with 'of:'");
     }
     return createCell(this.runtime, {
