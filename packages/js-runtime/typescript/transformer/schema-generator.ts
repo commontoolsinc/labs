@@ -15,30 +15,17 @@ function getArrayElementType(
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
   const typeString = checker.typeToString(type);
-  logger.debug(() =>
-    `getArrayElementType: checking type ${typeString}, flags: ${type.flags}`
-  );
 
   // Check ObjectFlags.Reference for Array/ReadonlyArray
   const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
-  logger.debug(() =>
-    `  objectFlags: ${objectFlags}, has Reference: ${!!(objectFlags &
-      ts.ObjectFlags.Reference)}`
-  );
 
   if (objectFlags & ts.ObjectFlags.Reference) {
     const typeRef = type as ts.TypeReference;
     const symbol = typeRef.target?.symbol;
-    logger.debug(() => `  target symbol: ${symbol?.name || "none"}`);
     if (
       symbol && (symbol.name === "Array" || symbol.name === "ReadonlyArray")
     ) {
       const elementType = typeRef.typeArguments?.[0];
-      logger.debug(() =>
-        `  Found array via Reference, element type: ${
-          elementType ? checker.typeToString(elementType) : "none"
-        }`
-      );
       return elementType;
     }
   }
@@ -47,26 +34,15 @@ function getArrayElementType(
   if (type.symbol?.name === "Array") {
     const typeRef = type as ts.TypeReference;
     const elementType = typeRef.typeArguments?.[0];
-    logger.debug(() =>
-      `  Found array via symbol name, element type: ${
-        elementType ? checker.typeToString(elementType) : "none"
-      }`
-    );
     return elementType;
   }
 
   // Use numeric index type as fallback
   const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
   if (elementType) {
-    logger.debug(() =>
-      `  Found array via numeric index, element type: ${
-        checker.typeToString(elementType)
-      }`
-    );
     return elementType;
   }
 
-  logger.debug(() => `  Not an array type`);
   return undefined;
 }
 
@@ -90,7 +66,6 @@ function typeToJsonSchemaHelper(
 
     // If we've already seen this type, return a $ref
     if (seenTypes.has(type)) {
-      logger.debug(() => `Returning $ref for cyclic type: ${typeName}`);
       return { "$ref": `#/definitions/${typeName}` };
     }
 
@@ -131,19 +106,6 @@ function typeToJsonSchemaHelper(
 
   // Old cycle detection for when cyclicTypes is not provided
   if (!cyclicTypes && seenTypes.has(type)) {
-    logger.debug(() =>
-      `Detected cycle for type: ${type.symbol?.name || "anonymous"} (${
-        checker.typeToString(type)
-      })`
-    );
-    logger.debug(() =>
-      `Type flags: ${type.flags}, Symbol flags: ${type.symbol?.flags || 0}`
-    );
-    logger.debug(() =>
-      `Type node kind: ${typeNode?.kind}, Is type reference: ${
-        typeNode && ts.isTypeReferenceNode(typeNode)
-      }`
-    );
     return {
       type: "object",
       additionalProperties: true,
@@ -176,19 +138,8 @@ function typeToJsonSchemaHelper(
 
     if (shouldTrack) {
       newSeenTypes.add(type);
-      logger.debug(() =>
-        `Added type to seenTypes: ${symbol.name} (${typeString}), flags: ${type.flags}`
-      );
     }
   }
-
-  // Log the type we're processing with indentation to show depth
-  const indent = "  ".repeat(depth);
-  logger.debug(() =>
-    `${indent}Processing type: ${type.symbol?.name || "anonymous"} (${
-      checker.typeToString(type)
-    })`
-  );
 
   // If we have a type node, check if it's a type reference to Default<T, V>
   if (typeNode && ts.isTypeReferenceNode(typeNode)) {
@@ -198,12 +149,6 @@ function typeToJsonSchemaHelper(
       // Check if the resolved type is Default
       const symbol = checker.getSymbolAtLocation(typeName);
       const resolvedType = checker.getTypeFromTypeNode(typeNode);
-
-      logger.debug(() =>
-        `Type reference: ${typeName.text}, symbol: ${symbol?.name}, aliasSymbol: ${
-          (resolvedType as any).aliasSymbol?.name
-        }`
-      );
 
       // Check if the symbol is a type alias that resolves to Default
       let declaredType: ts.Type | undefined;
@@ -221,17 +166,9 @@ function typeToJsonSchemaHelper(
             aliasDecl.type.typeName.text === "Default"
           ) {
             isDefaultAlias = true;
-            logger.debug(() =>
-              `Type alias ${symbol.name} is an alias to Default`
-            );
           }
         }
         declaredType = checker.getDeclaredTypeOfSymbol(symbol);
-        logger.debug(() =>
-          `Type alias ${symbol.name} resolves to: ${
-            declaredType ? checker.typeToString(declaredType) : "undefined"
-          }`
-        );
       }
 
       const isDefaultType = typeName.text === "Default" ||
@@ -246,29 +183,14 @@ function typeToJsonSchemaHelper(
             .startsWith("Default<"));
 
       if (isDefaultType) {
-        logger.debug(() =>
-          `Found Default type alias: ${typeName.text}, resolved type: ${
-            checker.typeToString(resolvedType)
-          }`
-        );
-
         // For type aliases that resolve to Default, we need to get the instantiated type
         // The resolvedType is the final type (e.g., string), but we need the Default<string, "hello"> type
         if (isDefaultAlias) {
-          logger.debug(() =>
-            `Processing Default type alias with ${
-              typeNode.typeArguments?.length ?? 0
-            } type arguments`
-          );
           // This is a type alias to Default - we need to instantiate it with the type arguments
           const typeArgs = typeNode.typeArguments;
           if (typeArgs && typeArgs.length >= 2) {
             const innerTypeNode = typeArgs[0];
             const defaultValueNode = typeArgs[1];
-
-            logger.debug(() =>
-              `Default alias: inner type = ${innerTypeNode.getText()}, default = ${defaultValueNode.getText()}`
-            );
 
             // Get the inner type
             const innerType = checker.getTypeFromTypeNode(innerTypeNode);
@@ -287,9 +209,6 @@ function typeToJsonSchemaHelper(
               defaultValueNode,
               checker,
             );
-            logger.debug(() =>
-              `Extracted default value: ${JSON.stringify(defaultValue)}`
-            );
             if (defaultValue !== undefined) {
               schema.default = defaultValue;
             }
@@ -300,9 +219,6 @@ function typeToJsonSchemaHelper(
 
         // For type aliases, we need to check if the resolved type has type arguments
         const typeRef = resolvedType as ts.TypeReference;
-        logger.debug(() =>
-          `Type arguments: ${typeRef.typeArguments?.length ?? 0}`
-        );
         if (typeRef.typeArguments && typeRef.typeArguments.length >= 2) {
           const innerType = typeRef.typeArguments[0];
           const defaultValueType = typeRef.typeArguments[1];
@@ -470,7 +386,6 @@ function typeToJsonSchemaHelper(
   // Handle arrays BEFORE object types (arrays are objects too)
   // First check if we have an array type node (most reliable)
   if (typeNode && ts.isArrayTypeNode(typeNode)) {
-    logger.debug(() => `Found array via ArrayTypeNode`);
     const elementTypeNode = typeNode.elementType;
     // Try to get the element type from the node
     const elementType = checker.getTypeFromTypeNode(elementTypeNode);
@@ -566,13 +481,6 @@ function typeToJsonSchemaHelper(
           }
         }
 
-        // Debug: log if we couldn't extract default
-        logger.debug(() =>
-          `Default type extraction - Type: ${
-            checker.typeToString(type)
-          }, Default value type flags: ${defaultValueType.flags}, Value extracted: ${schema.default}`
-        );
-
         return schema;
       }
     }
@@ -626,11 +534,6 @@ function typeToJsonSchemaHelper(
 
   // Handle object types (interfaces, type literals)
   if (type.flags & ts.TypeFlags.Object) {
-    logger.debug(() =>
-      `${indent}Processing object type properties for: ${
-        type.symbol?.name || "anonymous"
-      }`
-    );
     const properties: any = {};
     const required: string[] = [];
 
@@ -638,7 +541,6 @@ function typeToJsonSchemaHelper(
     const props = checker.getPropertiesOfType(type);
     for (const prop of props) {
       const propName = prop.getName();
-      logger.debug(() => `${indent}  Processing property: ${propName}`);
 
       // Skip symbol properties
       if (propName.startsWith("__")) continue;
@@ -647,44 +549,6 @@ function typeToJsonSchemaHelper(
         prop,
         prop.valueDeclaration || typeNode || prop.declarations?.[0]!,
       );
-
-      // Debug logging for specific properties
-      if (propName === "children") {
-        logger.debug(() =>
-          `Processing property 'children' with type: ${
-            checker.typeToString(propType)
-          }`
-        );
-        logger.debug(() => `  Type flags: ${propType.flags}`);
-        logger.debug(() =>
-          `  Object flags: ${(propType as ts.ObjectType).objectFlags ?? 0}`
-        );
-
-        // Try to get more info from the declaration
-        if (prop.valueDeclaration) {
-          logger.debug(() => `  Has valueDeclaration`);
-          if (
-            ts.isPropertySignature(prop.valueDeclaration) &&
-            prop.valueDeclaration.type
-          ) {
-            const declTypeNode = prop.valueDeclaration.type;
-            logger.debug(() =>
-              `  Declaration type node kind: ${
-                ts.SyntaxKind[declTypeNode.kind]
-              }`
-            );
-            if (ts.isArrayTypeNode(declTypeNode)) {
-              logger.debug(() => `  It's an ArrayTypeNode!`);
-              const elementTypeNode = declTypeNode.elementType;
-              logger.debug(() =>
-                `  Element type node: ${
-                  elementTypeNode.getText?.() || "no text"
-                }`
-              );
-            }
-          }
-        }
-      }
 
       // Check if property is optional
       const isOptional = prop.flags & ts.SymbolFlags.Optional;
