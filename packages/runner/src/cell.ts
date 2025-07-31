@@ -684,13 +684,16 @@ export class RegularCell<T> implements Cell<T> {
     let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] },
     ) as string | undefined;
-    if (!sourceCellId || typeof sourceCellId !== "string") {
-      return undefined;
-    }
-    if (sourceCellId.startsWith('{"/":')) {
+    if (!sourceCellId) return undefined;
+    if (isRecord(sourceCellId)) {
+      sourceCellId = toURI(sourceCellId);
+    } else if (
+      typeof sourceCellId === "string" && sourceCellId.startsWith('{"/":')
+    ) {
       sourceCellId = toURI(JSON.parse(sourceCellId));
     }
-    if (!sourceCellId.startsWith("of:")) {
+
+    if (!sourceCellId?.startsWith("of:")) {
       throw new Error("Source cell ID must start with 'of:'");
     }
     return createCell(this.runtime, {
