@@ -11,6 +11,7 @@ import {
   type ValueEntry,
 } from "@commontools/runner/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
+import { getLogger } from "@commontools/utils/logger";
 import { the as COMMIT_THE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";
@@ -49,6 +50,11 @@ import {
 export type * from "./interface.ts";
 
 type FullFactAddress = FactAddress & { cause: Cause; since: number };
+
+const logger = getLogger("space-schema", {
+  enabled: false,
+  level: "info",
+});
 
 // This class is used to manage the underlying objects in storage, so the
 // class that traverses the docs doesn't need to know the implementation.
@@ -120,8 +126,8 @@ export class ServerObjectManager extends BaseObjectManager<
           since: labelEntry.since,
         });
         if (!requiredClassifications.isSubsetOf(this.providedClassifications)) {
-          console.log(
-            `Skipping inclusion of ${fact.of}, due to classification`,
+          logger.info(
+            () => ["Skipping inclusion of", fact.of, "due to classification"],
           );
           this.restrictedValues.add(key);
           return null;
@@ -235,11 +241,8 @@ export const selectSchema = <Space extends MemorySpace>(
     }
   }
   const endTime = performance.timeOrigin + performance.now();
-  console.log(
-    `Ran select schema in ${endTime - startTime} milliseconds`,
-  );
   if ((endTime - startTime) > 100) {
-    console.log("selectSchema:", JSON.stringify(selectSchema, undefined, 2));
+    logger.info(() => ["Slow selectSchema:", selectSchema]);
   }
 
   return includedFacts;
