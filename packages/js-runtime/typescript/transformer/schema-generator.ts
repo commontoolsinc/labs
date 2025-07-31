@@ -8,6 +8,69 @@ const logger = getLogger("schema-transformer", {
 });
 
 /**
+ * Helper to extract array element type using multiple detection methods
+ */
+function getArrayElementType(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): ts.Type | undefined {
+  const typeString = checker.typeToString(type);
+  logger.debug(() =>
+    `getArrayElementType: checking type ${typeString}, flags: ${type.flags}`
+  );
+
+  // Check ObjectFlags.Reference for Array/ReadonlyArray
+  const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
+  logger.debug(() =>
+    `  objectFlags: ${objectFlags}, has Reference: ${!!(objectFlags &
+      ts.ObjectFlags.Reference)}`
+  );
+
+  if (objectFlags & ts.ObjectFlags.Reference) {
+    const typeRef = type as ts.TypeReference;
+    const symbol = typeRef.target?.symbol;
+    logger.debug(() => `  target symbol: ${symbol?.name || "none"}`);
+    if (
+      symbol && (symbol.name === "Array" || symbol.name === "ReadonlyArray")
+    ) {
+      const elementType = typeRef.typeArguments?.[0];
+      logger.debug(() =>
+        `  Found array via Reference, element type: ${
+          elementType ? checker.typeToString(elementType) : "none"
+        }`
+      );
+      return elementType;
+    }
+  }
+
+  // Check symbol name for Array
+  if (type.symbol?.name === "Array") {
+    const typeRef = type as ts.TypeReference;
+    const elementType = typeRef.typeArguments?.[0];
+    logger.debug(() =>
+      `  Found array via symbol name, element type: ${
+        elementType ? checker.typeToString(elementType) : "none"
+      }`
+    );
+    return elementType;
+  }
+
+  // Use numeric index type as fallback
+  const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+  if (elementType) {
+    logger.debug(() =>
+      `  Found array via numeric index, element type: ${
+        checker.typeToString(elementType)
+      }`
+    );
+    return elementType;
+  }
+
+  logger.debug(() => `  Not an array type`);
+  return undefined;
+}
+
+/**
  * Convert a TypeScript type to JSONSchema
  */
 export function typeToJsonSchema(
@@ -345,73 +408,48 @@ export function typeToJsonSchema(
     return { type: "null" };
   }
 
-  // Handle arrays
-  if (type.symbol && type.symbol.name === "Array") {
-    const typeRef = type as ts.TypeReference;
-    if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
-      const elementType = typeRef.typeArguments[0];
-
-      // Extract element type node if we have a type node
-      let elementTypeNode: ts.TypeNode | undefined;
-      if (
-        typeNode && ts.isTypeReferenceNode(typeNode) &&
-        typeNode.typeName && typeNode.typeArguments &&
-        typeNode.typeArguments.length > 0
-      ) {
-        elementTypeNode = typeNode.typeArguments[0];
-      }
-
-      // Let typeToJsonSchema handle all wrapper types (Default, Cell, Stream)
-      return {
-        type: "array",
-        items: typeToJsonSchema(
-          elementType,
-          checker,
-          elementTypeNode,
-          depth + 1,
-          newSeenTypes,
-        ),
-      };
-    }
-    return { type: "array" };
+  // Handle arrays BEFORE object types (arrays are objects too)
+  // First check if we have an array type node (most reliable)
+  if (typeNode && ts.isArrayTypeNode(typeNode)) {
+    logger.debug(() => `Found array via ArrayTypeNode`);
+    const elementTypeNode = typeNode.elementType;
+    // Try to get the element type from the node
+    const elementType = checker.getTypeFromTypeNode(elementTypeNode);
+    return {
+      type: "array",
+      items: typeToJsonSchema(
+        elementType,
+        checker,
+        elementTypeNode,
+        depth + 1,
+        newSeenTypes,
+      ),
+    };
   }
 
-  // Also check if it's an array type using the checker
-  if (typeString.endsWith("[]")) {
-    // Try to get the element type of the array
-    // For arrays, we need to check if it has a numeric index signature
-    const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-
-    if (elementType) {
-      // Extract element type node if we have an array type node
-      let elementTypeNode: ts.TypeNode | undefined;
-      if (typeNode && ts.isArrayTypeNode(typeNode)) {
-        elementTypeNode = typeNode.elementType;
-      }
-
-      // Let typeToJsonSchema handle all wrapper types (Default, Cell, Stream)
-      return {
-        type: "array",
-        items: typeToJsonSchema(
-          elementType,
-          checker,
-          elementTypeNode,
-          depth + 1,
-          newSeenTypes,
-        ),
-      };
+  // Otherwise use type-based detection
+  const arrayElementType = getArrayElementType(type, checker);
+  if (arrayElementType) {
+    // Extract element type node if we have a type node
+    let elementTypeNode: ts.TypeNode | undefined;
+    if (
+      typeNode && ts.isTypeReferenceNode(typeNode) &&
+      typeNode.typeName && typeNode.typeArguments &&
+      typeNode.typeArguments.length > 0
+    ) {
+      elementTypeNode = typeNode.typeArguments[0];
     }
 
-    // Fallback to string parsing if we can't get element type
-    const elementTypeString = typeString.slice(0, -2);
-    if (elementTypeString === "string") {
-      return { type: "array", items: { type: "string" } };
-    } else if (elementTypeString === "number") {
-      return { type: "array", items: { type: "number" } };
-    } else if (elementTypeString === "boolean") {
-      return { type: "array", items: { type: "boolean" } };
-    }
-    return { type: "array" };
+    return {
+      type: "array",
+      items: typeToJsonSchema(
+        arrayElementType,
+        checker,
+        elementTypeNode,
+        depth + 1,
+        newSeenTypes,
+      ),
+    };
   }
 
   // Handle Date
@@ -530,7 +568,7 @@ export function typeToJsonSchema(
     const required: string[] = [];
 
     // Get all properties (including inherited ones)
-    const props = type.getProperties();
+    const props = checker.getPropertiesOfType(type);
     for (const prop of props) {
       const propName = prop.getName();
       logger.debug(() => `${indent}  Processing property: ${propName}`);
@@ -542,6 +580,44 @@ export function typeToJsonSchema(
         prop,
         prop.valueDeclaration || typeNode || prop.declarations?.[0]!,
       );
+
+      // Debug logging for specific properties
+      if (propName === "children") {
+        logger.debug(() =>
+          `Processing property 'children' with type: ${
+            checker.typeToString(propType)
+          }`
+        );
+        logger.debug(() => `  Type flags: ${propType.flags}`);
+        logger.debug(() =>
+          `  Object flags: ${(propType as ts.ObjectType).objectFlags ?? 0}`
+        );
+
+        // Try to get more info from the declaration
+        if (prop.valueDeclaration) {
+          logger.debug(() => `  Has valueDeclaration`);
+          if (
+            ts.isPropertySignature(prop.valueDeclaration) &&
+            prop.valueDeclaration.type
+          ) {
+            const declTypeNode = prop.valueDeclaration.type;
+            logger.debug(() =>
+              `  Declaration type node kind: ${
+                ts.SyntaxKind[declTypeNode.kind]
+              }`
+            );
+            if (ts.isArrayTypeNode(declTypeNode)) {
+              logger.debug(() => `  It's an ArrayTypeNode!`);
+              const elementTypeNode = declTypeNode.elementType;
+              logger.debug(() =>
+                `  Element type node: ${
+                  elementTypeNode.getText?.() || "no text"
+                }`
+              );
+            }
+          }
+        }
+      }
 
       // Check if property is optional
       const isOptional = prop.flags & ts.SymbolFlags.Optional;
@@ -700,4 +776,119 @@ function extractValueFromTypeNode(
   }
 
   return undefined;
+}
+
+/**
+ * First pass: Detect which types are involved in cycles
+ * Returns a Set of types that have recursive references
+ */
+export function getCycles(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  visiting: Set<ts.Type> = new Set(),
+  cycles: Set<ts.Type> = new Set(),
+): Set<ts.Type> {
+  // Skip primitive types - they can't have cycles
+  if (
+    type.flags &
+    (ts.TypeFlags.String | ts.TypeFlags.Number | ts.TypeFlags.Boolean |
+      ts.TypeFlags.Null | ts.TypeFlags.Undefined | ts.TypeFlags.Void)
+  ) {
+    return cycles;
+  }
+
+  // Only track types that could potentially self-reference
+  if (type.flags & ts.TypeFlags.Object) {
+    const symbol = type.getSymbol();
+    const typeString = checker.typeToString(type);
+
+    // Use same logic as in typeToJsonSchema for consistency
+    const shouldTrack = symbol &&
+      (symbol.flags &
+        (ts.SymbolFlags.Interface | ts.SymbolFlags.Class |
+          ts.SymbolFlags.TypeAlias)) &&
+      symbol.name !== "Array" &&
+      !typeString.endsWith("[]") &&
+      !["Date", "RegExp", "Promise", "Map", "Set", "WeakMap", "WeakSet"]
+        .includes(symbol.name);
+
+    if (!shouldTrack) {
+      // Check if it's an array type using our helper
+      const elementType = getArrayElementType(type, checker);
+      if (elementType) {
+        getCycles(elementType, checker, visiting, cycles);
+      }
+      return cycles;
+    }
+
+    // Check if we're already visiting this type (cycle detected)
+    if (visiting.has(type)) {
+      // Add this type and all types in the current path to cycles
+      cycles.add(type);
+      // Only add tracked types from the visiting path
+      visiting.forEach((t) => {
+        const sym = t.getSymbol();
+        if (
+          sym &&
+          (sym.flags &
+            (ts.SymbolFlags.Interface | ts.SymbolFlags.Class |
+              ts.SymbolFlags.TypeAlias))
+        ) {
+          cycles.add(t);
+        }
+      });
+      return cycles;
+    }
+
+    // Add to visiting set
+    visiting.add(type);
+
+    // Check all properties
+    const props = checker.getPropertiesOfType(type);
+
+    if (props.length === 0) {
+      // No properties - might be an array type
+      const elementType = getArrayElementType(type, checker);
+      if (elementType) {
+        getCycles(elementType, checker, visiting, cycles);
+      }
+    } else {
+      for (const prop of props) {
+        // Skip symbol properties
+        if (prop.getName().startsWith("__")) continue;
+
+        const propType = checker.getTypeOfSymbolAtLocation(
+          prop,
+          prop.valueDeclaration || prop.declarations?.[0]!,
+        );
+
+        // Check if the property has a type node we can analyze directly
+        const propDecl = prop.valueDeclaration;
+        if (propDecl && ts.isPropertySignature(propDecl) && propDecl.type) {
+          // Check if it's an array type node
+          if (ts.isArrayTypeNode(propDecl.type)) {
+            const elementTypeNode = propDecl.type.elementType;
+            const elementType = checker.getTypeFromTypeNode(elementTypeNode);
+            getCycles(elementType, checker, visiting, cycles);
+            continue;
+          }
+        }
+
+        getCycles(propType, checker, visiting, cycles);
+      }
+    }
+
+    // Remove from visiting set
+    visiting.delete(type);
+  }
+
+  // Handle union types
+  if (type.isUnion()) {
+    const unionTypes = (type as ts.UnionType).types;
+    for (const unionType of unionTypes) {
+      getCycles(unionType, checker, visiting, cycles);
+    }
+  }
+
+  return cycles;
 }

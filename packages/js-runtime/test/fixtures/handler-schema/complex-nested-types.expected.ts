@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, Cell, JSONSchema } from "commontools";
+import { handler, Cell, recipe, JSONSchema } from "commontools";
 interface UserEvent {
     user: {
         name: string;
@@ -36,16 +36,10 @@ const userHandler = handler({
             required: ["name", "email"]
         },
         action: {
-            oneOf: [{
-                    type: "object",
-                    additionalProperties: true
-                }, {
-                    type: "object",
-                    additionalProperties: true
-                }, {
-                    type: "object",
-                    additionalProperties: true
-                }]
+            type: "array",
+            items: {
+                type: "string"
+            }
         }
     },
     required: ["user", "action"]
@@ -125,3 +119,7 @@ const updateTags = handler({
     state.tags.set(detail?.tags ?? []);
 });
 export { userHandler };
+export default recipe("complex-nested-types test", () => {
+    return { userHandler };
+});
+

@@ -1,7 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import ts from "typescript";
-import { typeToJsonSchema } from "../typescript/transformer/schema-generator.ts";
+import {
+  getCycles,
+  typeToJsonSchema,
+} from "../typescript/transformer/schema-generator.ts";
 
 // Helper to create a minimal TypeScript program for testing
 function createTestProgram(
@@ -165,6 +168,28 @@ describe("typeToJsonSchema", () => {
       });
     });
 
+    it("should handle array of recursive types in typeToJsonSchema", () => {
+      const code = `
+        interface TreeNode {
+          value: number;
+          children: TreeNode[];
+        }
+      `;
+      const { type, checker } = getTypeFromCode(code, "TreeNode");
+
+      const schema = typeToJsonSchema(type, checker);
+
+      // Should return a valid schema for the top level
+      expect(schema.type).toBe("object");
+      expect(schema.properties.value).toEqual({ type: "number" });
+
+      // The children property should exist
+      expect(schema.properties.children).toBeDefined();
+
+      // It should be an array
+      expect(schema.properties.children.type).toBe("array");
+    });
+
     it("should detect cycles with explicit seenTypes parameter", () => {
       const code = `
         interface LinkedList {
@@ -281,5 +306,140 @@ describe("typeToJsonSchema", () => {
       // Make sure no $comment about cycles
       expect(JSON.stringify(schema)).not.toContain("Recursive type detected");
     });
+  });
+});
+
+describe("getCycles", () => {
+  it("should return empty set for primitive types", () => {
+    const { type, checker } = getTypeFromCode(
+      "type MyString = string;",
+      "MyString",
+    );
+    const cycles = getCycles(type, checker);
+    expect(cycles.size).toBe(0);
+  });
+
+  it("should return empty set for simple non-recursive interface", () => {
+    const code = `
+      interface User {
+        name: string;
+        age: number;
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "User");
+    const cycles = getCycles(type, checker);
+    expect(cycles.size).toBe(0);
+  });
+
+  it("should detect simple recursive type", () => {
+    const code = `
+      interface LinkedList {
+        value: number;
+        next?: LinkedList;
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "LinkedList");
+    const cycles = getCycles(type, checker);
+    expect(cycles.size).toBe(1);
+    expect(cycles.has(type)).toBe(true);
+  });
+
+  it("should detect mutually recursive types", () => {
+    const code = `
+      interface A {
+        b: B;
+      }
+      interface B {
+        a: A;
+      }
+    `;
+    const { type: typeA, checker } = getTypeFromCode(code, "A");
+    const { type: typeB } = getTypeFromCode(code, "B");
+
+    const cycles = getCycles(typeA, checker);
+    expect(cycles.size).toBe(2);
+    // Both A and B should be in the cycles set
+  });
+
+  it("should not mark shared non-recursive types as cycles", () => {
+    const code = `
+      interface Shared {
+        value: string;
+      }
+      interface Parent {
+        child1: Shared;
+        child2: Shared;
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "Parent");
+    const cycles = getCycles(type, checker);
+    expect(cycles.size).toBe(0);
+  });
+
+  it("should handle array of recursive types", () => {
+    const code = `
+      interface TreeNode {
+        value: number;
+        children: TreeNode[];
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "TreeNode");
+    const cycles = getCycles(type, checker);
+
+    // TreeNode should be in cycles because it references itself through children array
+    expect(cycles.size).toBeGreaterThan(0);
+    // Check if TreeNode is in the cycles
+    let hasTreeNode = false;
+    cycles.forEach((t) => {
+      if (checker.typeToString(t) === "TreeNode") {
+        hasTreeNode = true;
+      }
+    });
+    expect(hasTreeNode).toBe(true);
+  });
+
+  it("should handle nested recursive types", () => {
+    const code = `
+      interface Category {
+        name: string;
+        subcategories: Category[];
+        parent?: Category;
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "Category");
+    const cycles = getCycles(type, checker);
+    expect(cycles.size).toBe(1);
+    expect(cycles.has(type)).toBe(true);
+  });
+
+  it("should not detect cycles in union types without recursion", () => {
+    const code = `
+      interface A {
+        type: "a";
+        value: string;
+      }
+      interface B {
+        type: "b";
+        value: number;
+      }
+      type Union = A | B;
+    `;
+    const { type, checker } = getTypeFromCode(code, "Union");
+    const cycles = getCycles(type, checker);
+    expect(cycles.size).toBe(0);
+  });
+
+  it("should handle types with Default wrapper", () => {
+    const code = `
+      type Default<T, V extends T> = T;
+      interface Settings {
+        theme: Default<string, "dark">;
+        config: Settings;
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "Settings");
+    const cycles = getCycles(type, checker);
+    expect(cycles.size).toBe(1);
+    expect(cycles.has(type)).toBe(true);
   });
 });

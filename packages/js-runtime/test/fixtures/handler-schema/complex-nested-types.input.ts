@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { handler, Cell } from "commontools";
+import { handler, Cell, recipe } from "commontools";
 
 interface UserEvent {
   user: {
@@ -40,3 +40,7 @@ const updateTags = handler<{ detail: { tags: string[] } }, { tags: Cell<string[]
 
 
 export { userHandler };
+
+export default recipe("complex-nested-types test", () => {
+  return { userHandler };
+});
