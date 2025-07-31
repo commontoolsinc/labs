@@ -299,6 +299,7 @@ export function createCell<T>(
   link: NormalizedFullLink,
   tx?: IExtendedStorageTransaction,
   noResolve = false,
+  synced = false,
 ): Cell<T> {
   let { schema, rootSchema } = link;
 
@@ -322,7 +323,12 @@ export function createCell<T>(
       tx,
     ) as unknown as Cell<T>;
   } else {
-    return new RegularCell(runtime, { ...link, schema, rootSchema }, tx);
+    return new RegularCell(
+      runtime,
+      { ...link, schema, rootSchema },
+      tx,
+      synced,
+    );
   }
 }
 
@@ -426,7 +432,7 @@ export class RegularCell<T> implements Cell<T> {
 
   get(): Readonly<T> {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return validateAndTransform(this.runtime, this.tx, this.link);
+    return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
   }
 
   set(newValue: Cellify<T> | T): void {
@@ -575,6 +581,8 @@ export class RegularCell<T> implements Cell<T> {
         schema: childSchema,
       },
       this.tx,
+      false,
+      this.synced,
     ) as Cell<
       T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
@@ -811,6 +819,7 @@ function subscribeToReferencedDocs<T>(
     runtime,
     tx,
     link,
+    true,
   );
   const log = txToReactivityLog(tx);
 
@@ -823,7 +832,7 @@ function subscribeToReferencedDocs<T>(
     if (isCancel(cleanup)) cleanup();
 
     // Run once with tx to capture _this_ cell's read dependencies.
-    validateAndTransform(runtime, tx, link);
+    validateAndTransform(runtime, tx, link, true);
 
     // Using a new transaction for the callback, as we're only interested in
     // dependencies for the initial get, not further cells the callback might
@@ -832,7 +841,7 @@ function subscribeToReferencedDocs<T>(
 
     const extraTx = runtime.edit();
 
-    const newValue = validateAndTransform(runtime, extraTx, link);
+    const newValue = validateAndTransform(runtime, extraTx, link, true);
     cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should
