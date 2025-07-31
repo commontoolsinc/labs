@@ -184,7 +184,7 @@ declare module "@commontools/api" {
       schema?: JSONSchema,
     ): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
-    sink(callback: (value: T) => Cancel | undefined | void): Cancel;
+    sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
@@ -251,7 +251,7 @@ declare module "@commontools/api" {
 
   interface Stream<T> {
     send(event: T): void;
-    sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+    sink(callback: (event: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Stream<T>> | Stream<T>;
     getRaw(options?: IReadOptions): any;
     getAsNormalizedFullLink(): NormalizedFullLink;
@@ -357,7 +357,7 @@ class StreamCell<T> implements Stream<T> {
     this.listeners.forEach((callback) => addCancel(callback(event)));
   }
 
-  sink(callback: (value: T) => Cancel | undefined): Cancel {
+  sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
   }
@@ -582,7 +582,7 @@ export class RegularCell<T> implements Cell<T> {
     return new RegularCell(this.runtime, this.link, newTx);
   }
 
-  sink(callback: (value: T) => Cancel | undefined): Cancel {
+  sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
     return subscribeToReferencedDocs(callback, this.runtime, this.link);
   }
 
