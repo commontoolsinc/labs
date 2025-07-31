@@ -19,22 +19,65 @@ export function typeToJsonSchema(
 ): any {
   // Check if we've already seen this type (cycle detection)
   if (seenTypes.has(type)) {
-    logger.debug(() => `Detected cycle for type: ${type.symbol?.name || "anonymous"} (${checker.typeToString(type)})`);
-    return { 
-      type: "object", 
+    logger.debug(() =>
+      `Detected cycle for type: ${type.symbol?.name || "anonymous"} (${
+        checker.typeToString(type)
+      })`
+    );
+    logger.debug(() =>
+      `Type flags: ${type.flags}, Symbol flags: ${type.symbol?.flags || 0}`
+    );
+    logger.debug(() =>
+      `Type node kind: ${typeNode?.kind}, Is type reference: ${
+        typeNode && ts.isTypeReferenceNode(typeNode)
+      }`
+    );
+    return {
+      type: "object",
       additionalProperties: true,
-      $comment: "Recursive type detected - placeholder schema"
+      $comment: "Recursive type detected - placeholder schema",
     };
   }
-  
+
   // Create a new set with this type added for recursive calls
   const newSeenTypes = new Set(seenTypes);
-  newSeenTypes.add(type);
-  
+
+  // Only add interface/class types to seenTypes - only these can cause recursive cycles
+  // Skip arrays, built-in types, and other types that can't self-reference
+  if (type.flags & ts.TypeFlags.Object) {
+    const symbol = type.getSymbol();
+    const typeString = checker.typeToString(type);
+
+    // Only track types that could potentially self-reference:
+    // - Has a symbol (named type)
+    // - Is an interface or class
+    // - Not an array type
+    // - Not a built-in type
+    const shouldTrack = symbol &&
+      (symbol.flags &
+        (ts.SymbolFlags.Interface | ts.SymbolFlags.Class |
+          ts.SymbolFlags.TypeAlias)) &&
+      symbol.name !== "Array" &&
+      !typeString.endsWith("[]") &&
+      !["Date", "RegExp", "Promise", "Map", "Set", "WeakMap", "WeakSet"]
+        .includes(symbol.name);
+
+    if (shouldTrack) {
+      newSeenTypes.add(type);
+      logger.debug(() =>
+        `Added type to seenTypes: ${symbol.name} (${typeString}), flags: ${type.flags}`
+      );
+    }
+  }
+
   // Log the type we're processing with indentation to show depth
   const indent = "  ".repeat(depth);
-  logger.debug(() => `${indent}Processing type: ${type.symbol?.name || "anonymous"} (${checker.typeToString(type)})`);
-  
+  logger.debug(() =>
+    `${indent}Processing type: ${type.symbol?.name || "anonymous"} (${
+      checker.typeToString(type)
+    })`
+  );
+
   // If we have a type node, check if it's a type reference to Default<T, V>
   if (typeNode && ts.isTypeReferenceNode(typeNode)) {
     const typeName = typeNode.typeName;
@@ -43,77 +86,122 @@ export function typeToJsonSchema(
       // Check if the resolved type is Default
       const symbol = checker.getSymbolAtLocation(typeName);
       const resolvedType = checker.getTypeFromTypeNode(typeNode);
-      
-      logger.debug(() => `Type reference: ${typeName.text}, symbol: ${symbol?.name}, aliasSymbol: ${(resolvedType as any).aliasSymbol?.name}`);
-      
+
+      logger.debug(() =>
+        `Type reference: ${typeName.text}, symbol: ${symbol?.name}, aliasSymbol: ${
+          (resolvedType as any).aliasSymbol?.name
+        }`
+      );
+
       // Check if the symbol is a type alias that resolves to Default
       let declaredType: ts.Type | undefined;
       let isDefaultAlias = false;
       if (symbol && symbol.flags & ts.SymbolFlags.TypeAlias) {
         // Get the type alias declaration to check what it aliases to
         const aliasDecl = symbol.declarations?.[0];
-        if (aliasDecl && ts.isTypeAliasDeclaration(aliasDecl) && aliasDecl.type) {
+        if (
+          aliasDecl && ts.isTypeAliasDeclaration(aliasDecl) && aliasDecl.type
+        ) {
           // Check if the type node is a reference to Default
-          if (ts.isTypeReferenceNode(aliasDecl.type) && 
-              ts.isIdentifier(aliasDecl.type.typeName) && 
-              aliasDecl.type.typeName.text === "Default") {
+          if (
+            ts.isTypeReferenceNode(aliasDecl.type) &&
+            ts.isIdentifier(aliasDecl.type.typeName) &&
+            aliasDecl.type.typeName.text === "Default"
+          ) {
             isDefaultAlias = true;
-            logger.debug(() => `Type alias ${symbol.name} is an alias to Default`);
+            logger.debug(() =>
+              `Type alias ${symbol.name} is an alias to Default`
+            );
           }
         }
         declaredType = checker.getDeclaredTypeOfSymbol(symbol);
-        logger.debug(() => `Type alias ${symbol.name} resolves to: ${declaredType ? checker.typeToString(declaredType) : 'undefined'}`);
+        logger.debug(() =>
+          `Type alias ${symbol.name} resolves to: ${
+            declaredType ? checker.typeToString(declaredType) : "undefined"
+          }`
+        );
       }
-      
-      const isDefaultType = typeName.text === "Default" || 
-                           (resolvedType as any).target?.symbol?.name === "Default" ||
-                           resolvedType.symbol?.name === "Default" ||
-                           (resolvedType as any).aliasSymbol?.name === "Default" ||
-                           (declaredType && (declaredType as any).aliasSymbol?.name === "Default") ||
-                           isDefaultAlias ||
-                           (symbol && checker.typeToString(checker.getDeclaredTypeOfSymbol(symbol)).startsWith("Default<"));
-      
-      
+
+      const isDefaultType = typeName.text === "Default" ||
+        (resolvedType as any).target?.symbol?.name === "Default" ||
+        resolvedType.symbol?.name === "Default" ||
+        (resolvedType as any).aliasSymbol?.name === "Default" ||
+        (declaredType &&
+          (declaredType as any).aliasSymbol?.name === "Default") ||
+        isDefaultAlias ||
+        (symbol &&
+          checker.typeToString(checker.getDeclaredTypeOfSymbol(symbol))
+            .startsWith("Default<"));
+
       if (isDefaultType) {
-        logger.debug(() => `Found Default type alias: ${typeName.text}, resolved type: ${checker.typeToString(resolvedType)}`);
-        
+        logger.debug(() =>
+          `Found Default type alias: ${typeName.text}, resolved type: ${
+            checker.typeToString(resolvedType)
+          }`
+        );
+
         // For type aliases that resolve to Default, we need to get the instantiated type
         // The resolvedType is the final type (e.g., string), but we need the Default<string, "hello"> type
         if (isDefaultAlias) {
-          logger.debug(() => `Processing Default type alias with ${typeNode.typeArguments?.length ?? 0} type arguments`);
+          logger.debug(() =>
+            `Processing Default type alias with ${
+              typeNode.typeArguments?.length ?? 0
+            } type arguments`
+          );
           // This is a type alias to Default - we need to instantiate it with the type arguments
           const typeArgs = typeNode.typeArguments;
           if (typeArgs && typeArgs.length >= 2) {
             const innerTypeNode = typeArgs[0];
             const defaultValueNode = typeArgs[1];
-            
-            logger.debug(() => `Default alias: inner type = ${innerTypeNode.getText()}, default = ${defaultValueNode.getText()}`);
-            
+
+            logger.debug(() =>
+              `Default alias: inner type = ${innerTypeNode.getText()}, default = ${defaultValueNode.getText()}`
+            );
+
             // Get the inner type
             const innerType = checker.getTypeFromTypeNode(innerTypeNode);
-            const schema = typeToJsonSchema(innerType, checker, innerTypeNode, depth + 1, newSeenTypes);
-            
+            const schema = typeToJsonSchema(
+              innerType,
+              checker,
+              innerTypeNode,
+              depth + 1,
+              newSeenTypes,
+            );
+
             // Extract the default value from the type node
-            const defaultValue = extractValueFromTypeNode(defaultValueNode, checker);
-            logger.debug(() => `Extracted default value: ${JSON.stringify(defaultValue)}`);
+            const defaultValue = extractValueFromTypeNode(
+              defaultValueNode,
+              checker,
+            );
+            logger.debug(() =>
+              `Extracted default value: ${JSON.stringify(defaultValue)}`
+            );
             if (defaultValue !== undefined) {
               schema.default = defaultValue;
             }
-            
+
             return schema;
           }
         }
-        
+
         // For type aliases, we need to check if the resolved type has type arguments
         const typeRef = resolvedType as ts.TypeReference;
-        logger.debug(() => `Type arguments: ${typeRef.typeArguments?.length ?? 0}`);
+        logger.debug(() =>
+          `Type arguments: ${typeRef.typeArguments?.length ?? 0}`
+        );
         if (typeRef.typeArguments && typeRef.typeArguments.length >= 2) {
           const innerType = typeRef.typeArguments[0];
           const defaultValueType = typeRef.typeArguments[1];
-          
+
           // Get the schema for the inner type
-          const schema = typeToJsonSchema(innerType, checker, typeNode, depth + 1, newSeenTypes);
-          
+          const schema = typeToJsonSchema(
+            innerType,
+            checker,
+            typeNode,
+            depth + 1,
+            newSeenTypes,
+          );
+
           // Try to extract the literal value from the default value type
           if (defaultValueType.flags & ts.TypeFlags.NumberLiteral) {
             // @ts-ignore - accessing value property
@@ -129,16 +217,24 @@ export function typeToJsonSchema(
           } else if ((defaultValueType as any).intrinsicName === "false") {
             schema.default = false;
           }
-          
+
           return schema;
-        } else if (typeNode.typeArguments && typeNode.typeArguments.length >= 2) {
+        } else if (
+          typeNode.typeArguments && typeNode.typeArguments.length >= 2
+        ) {
           // Fallback for direct Default<T, V> usage
           const innerTypeNode = typeNode.typeArguments[0];
           const defaultValueNode = typeNode.typeArguments[1];
 
           // Get the inner type
           const innerType = checker.getTypeFromTypeNode(innerTypeNode);
-          const schema = typeToJsonSchema(innerType, checker, innerTypeNode, depth + 1, seenTypes);
+          const schema = typeToJsonSchema(
+            innerType,
+            checker,
+            innerTypeNode,
+            depth + 1,
+            newSeenTypes,
+          );
 
           // Extract the default value from the type node
           const defaultValue = extractValueFromTypeNode(
@@ -154,16 +250,18 @@ export function typeToJsonSchema(
       }
     }
   }
-  
+
   // Check if this is a Cell<T> or Stream<T> type at the top level
   const typeString = checker.typeToString(type);
-  
-  
+
   // Check for Cell type by symbol name (handles type aliases)
-  if (type.symbol?.name === "Cell" || (typeString.startsWith("Cell<") && typeString.endsWith(">"))) {
+  if (
+    type.symbol?.name === "Cell" ||
+    (typeString.startsWith("Cell<") && typeString.endsWith(">"))
+  ) {
     // This is a Cell<T> type
     let innerType = type;
-    
+
     // Extract the inner type
     if (type.symbol && type.symbol.getName() === "Cell") {
       const typeRef = type as ts.TypeReference;
@@ -176,38 +274,59 @@ export function typeToJsonSchema(
         innerType = resolvedArgs[0];
       }
     }
-    
+
     // Get schema for the inner type
     let innerTypeNode: ts.TypeNode | undefined;
-    if (typeNode && ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments && typeNode.typeArguments.length > 0) {
+    if (
+      typeNode && ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments &&
+      typeNode.typeArguments.length > 0
+    ) {
       innerTypeNode = typeNode.typeArguments[0];
     }
-    const schema = typeToJsonSchema(innerType, checker, innerTypeNode || typeNode, depth + 1, newSeenTypes);
+    const schema = typeToJsonSchema(
+      innerType,
+      checker,
+      innerTypeNode || typeNode,
+      depth + 1,
+      newSeenTypes,
+    );
     schema.asCell = true;
     return schema;
   }
-  
+
   // Check for Stream type by symbol name (handles type aliases)
-  if (type.symbol?.name === "Stream" || (typeString.startsWith("Stream<") && typeString.endsWith(">"))) {
+  if (
+    type.symbol?.name === "Stream" ||
+    (typeString.startsWith("Stream<") && typeString.endsWith(">"))
+  ) {
     // This is a Stream<T> type
     let innerType = type;
-    
+
     // Extract the inner type
     const typeRef = type as ts.TypeReference;
     if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
       innerType = typeRef.typeArguments[0];
     }
-    
+
     // Get schema for the inner type
     let innerTypeNode: ts.TypeNode | undefined;
-    if (typeNode && ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments && typeNode.typeArguments.length > 0) {
+    if (
+      typeNode && ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments &&
+      typeNode.typeArguments.length > 0
+    ) {
       innerTypeNode = typeNode.typeArguments[0];
     }
-    const schema = typeToJsonSchema(innerType, checker, innerTypeNode || typeNode, depth + 1, newSeenTypes);
+    const schema = typeToJsonSchema(
+      innerType,
+      checker,
+      innerTypeNode || typeNode,
+      depth + 1,
+      newSeenTypes,
+    );
     schema.asStream = true;
     return schema;
   }
-  
+
   // Handle primitive types
   if (type.flags & ts.TypeFlags.String) {
     return { type: "string" };
@@ -231,19 +350,27 @@ export function typeToJsonSchema(
     const typeRef = type as ts.TypeReference;
     if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
       const elementType = typeRef.typeArguments[0];
-      
+
       // Extract element type node if we have a type node
       let elementTypeNode: ts.TypeNode | undefined;
-      if (typeNode && ts.isTypeReferenceNode(typeNode) && 
-          typeNode.typeName && typeNode.typeArguments && 
-          typeNode.typeArguments.length > 0) {
+      if (
+        typeNode && ts.isTypeReferenceNode(typeNode) &&
+        typeNode.typeName && typeNode.typeArguments &&
+        typeNode.typeArguments.length > 0
+      ) {
         elementTypeNode = typeNode.typeArguments[0];
       }
-      
+
       // Let typeToJsonSchema handle all wrapper types (Default, Cell, Stream)
       return {
         type: "array",
-        items: typeToJsonSchema(elementType, checker, elementTypeNode, depth + 1, newSeenTypes),
+        items: typeToJsonSchema(
+          elementType,
+          checker,
+          elementTypeNode,
+          depth + 1,
+          newSeenTypes,
+        ),
       };
     }
     return { type: "array" };
@@ -254,21 +381,27 @@ export function typeToJsonSchema(
     // Try to get the element type of the array
     // For arrays, we need to check if it has a numeric index signature
     const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-    
+
     if (elementType) {
       // Extract element type node if we have an array type node
       let elementTypeNode: ts.TypeNode | undefined;
       if (typeNode && ts.isArrayTypeNode(typeNode)) {
         elementTypeNode = typeNode.elementType;
       }
-      
+
       // Let typeToJsonSchema handle all wrapper types (Default, Cell, Stream)
       return {
         type: "array",
-        items: typeToJsonSchema(elementType, checker, elementTypeNode, depth + 1, newSeenTypes),
+        items: typeToJsonSchema(
+          elementType,
+          checker,
+          elementTypeNode,
+          depth + 1,
+          newSeenTypes,
+        ),
       };
     }
-    
+
     // Fallback to string parsing if we can't get element type
     const elementTypeString = typeString.slice(0, -2);
     if (elementTypeString === "string") {
@@ -286,7 +419,6 @@ export function typeToJsonSchema(
   if (symbol && symbol.name === "Date") {
     return { type: "string", format: "date-time" };
   }
-  
 
   // Check if this is a type reference (e.g., Default<T, V>)
   if ((type as any).target) {
@@ -301,7 +433,13 @@ export function typeToJsonSchema(
         const defaultValueType = typeRef.typeArguments[1];
 
         // Get the schema for the inner type
-        const schema = typeToJsonSchema(innerType, checker, typeNode, depth + 1, newSeenTypes);
+        const schema = typeToJsonSchema(
+          innerType,
+          checker,
+          typeNode,
+          depth + 1,
+          newSeenTypes,
+        );
 
         // Try to extract the literal value from the default value type
         if (defaultValueType.flags & ts.TypeFlags.NumberLiteral) {
@@ -324,10 +462,13 @@ export function typeToJsonSchema(
             schema.default = literalValue;
           }
         }
-        
+
         // Debug: log if we couldn't extract default
-        logger.debug(() => `Default type extraction - Type: ${checker.typeToString(type)}, Default value type flags: ${defaultValueType.flags}, Value extracted: ${schema.default}`);
-        
+        logger.debug(() =>
+          `Default type extraction - Type: ${
+            checker.typeToString(type)
+          }, Default value type flags: ${defaultValueType.flags}, Value extracted: ${schema.default}`
+        );
 
         return schema;
       }
@@ -336,7 +477,11 @@ export function typeToJsonSchema(
 
   // Handle Default<T, V> type via symbol check (fallback)
   // Also check if the type resolves to Default through an alias
-  if (symbol && (symbol.name === "Default" || (type as any).target?.symbol?.name === "Default")) {
+  if (
+    symbol &&
+    (symbol.name === "Default" ||
+      (type as any).target?.symbol?.name === "Default")
+  ) {
     // This is a generic type Default<T, V>
     const typeRef = type as ts.TypeReference;
     if (typeRef.typeArguments && typeRef.typeArguments.length >= 2) {
@@ -344,7 +489,13 @@ export function typeToJsonSchema(
       const defaultValueType = typeRef.typeArguments[1];
 
       // Get the schema for the inner type
-      const schema = typeToJsonSchema(innerType, checker, typeNode, depth + 1, newSeenTypes);
+      const schema = typeToJsonSchema(
+        innerType,
+        checker,
+        typeNode,
+        depth + 1,
+        newSeenTypes,
+      );
 
       // Try to extract the literal value from the default value type
       if (defaultValueType.flags & ts.TypeFlags.NumberLiteral) {
@@ -370,7 +521,11 @@ export function typeToJsonSchema(
 
   // Handle object types (interfaces, type literals)
   if (type.flags & ts.TypeFlags.Object) {
-    logger.debug(() => `${indent}Processing object type properties for: ${type.symbol?.name || "anonymous"}`);
+    logger.debug(() =>
+      `${indent}Processing object type properties for: ${
+        type.symbol?.name || "anonymous"
+      }`
+    );
     const properties: any = {};
     const required: string[] = [];
 
@@ -446,11 +601,19 @@ export function typeToJsonSchema(
 
     if (nonNullTypes.length === 1 && unionTypes.length === 2) {
       // This is an optional type, just return the non-null type schema
-      return typeToJsonSchema(nonNullTypes[0], checker, typeNode, depth, newSeenTypes);
+      return typeToJsonSchema(
+        nonNullTypes[0],
+        checker,
+        typeNode,
+        depth,
+        newSeenTypes,
+      );
     }
     // Otherwise, use oneOf
     return {
-      oneOf: unionTypes.map((t) => typeToJsonSchema(t, checker, typeNode, depth, newSeenTypes)),
+      oneOf: unionTypes.map((t) =>
+        typeToJsonSchema(t, checker, typeNode, depth, newSeenTypes)
+      ),
     };
   }
 

@@ -144,21 +144,6 @@ function createSchemaAst(schema: any, factory: ts.NodeFactory): ts.Expression {
     const properties: ts.PropertyAssignment[] = [];
 
     for (const [key, value] of Object.entries(schema)) {
-      // Handle nested schemas that might be references
-      if (key === "asStream" && value === true && schema.type) {
-        // For asStream properties, we need to spread the base schema
-        const baseSchema = { ...schema };
-        delete baseSchema.asStream;
-
-        return factory.createObjectLiteralExpression([
-          factory.createSpreadAssignment(createSchemaAst(baseSchema, factory)),
-          factory.createPropertyAssignment(
-            factory.createIdentifier("asStream"),
-            factory.createTrue(),
-          ),
-        ]);
-      }
-
       properties.push(
         factory.createPropertyAssignment(
           factory.createIdentifier(key),
