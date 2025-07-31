@@ -419,7 +419,12 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
   }
 
   constructor(public source: ConsumerInvocationFor<Ability, Protocol>) {
-    this.#reference = refer(source);
+    try {
+      this.#reference = refer(source);
+    } catch (error) {
+      console.error("Error referring invocation", source);
+      throw error;
+    }
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
       (resolve) => (receive = resolve),
