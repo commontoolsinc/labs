@@ -6,7 +6,10 @@ import { Task } from "@lit/task";
 import { getNavigationHref } from "../lib/navigate.ts";
 import { styleMap } from "lit/directives/style-map.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { InspectorConflicts, InspectorUpdateEvent } from "../lib/inspector.ts";
+import {
+  StorageInspectorConflicts,
+  StorageInspectorUpdateEvent,
+} from "../lib/inspector.ts";
 import "../components/Flex.ts";
 import { CharmController } from "@commontools/charm/ops";
 
@@ -106,7 +109,7 @@ export class XHeaderView extends BaseView {
   identity?: Identity;
 
   @state()
-  private _conflicts?: InspectorConflicts;
+  private _conflicts?: StorageInspectorConflicts;
 
   @property()
   showShellCharmListView = false;
@@ -198,7 +201,8 @@ export class XHeaderView extends BaseView {
   }
 
   #onInspectorUpdate = (e: Event) => {
-    this._conflicts = (e as InspectorUpdateEvent).detail.model.getErrors();
+    this._conflicts = (e as StorageInspectorUpdateEvent).detail.model
+      .getErrors();
   };
 
   override render() {

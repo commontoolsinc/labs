@@ -1,12 +1,20 @@
 import { ANYONE, Identity, Session } from "@commontools/identity";
-import { Runtime } from "@commontools/runner";
+import {
+  Runtime,
+  RuntimeTelemetry,
+  RuntimeTelemetryEvent,
+  RuntimeTelemetryMarkerResult,
+} from "@commontools/runner";
 import { charmId, CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { API_URL } from "./env.ts";
 import { navigateToCharm } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
-import { InspectorState, InspectorUpdateEvent } from "./inspector.ts";
+import {
+  StorageInspectorState,
+  StorageInspectorUpdateEvent,
+} from "./storage-inspector.ts";
 
 async function createSession(
   root: Identity,
@@ -32,11 +40,13 @@ async function createSession(
 // containing runtime, inspector, and charm references.
 export class RuntimeInternals extends EventTarget {
   #cc: CharmsController;
+  #telemetry: RuntimeTelemetry;
+  #telemetryMarkers: RuntimeTelemetryMarkerResult[];
   #inspector: Inspector.Channel;
-  #inspectorState = new InspectorState();
+  #inspectorState = new StorageInspectorState();
   #disposed = false;
 
-  private constructor(cc: CharmsController) {
+  private constructor(cc: CharmsController, telemetry: RuntimeTelemetry) {
     super();
     this.#cc = cc;
     const runtimeId = this.#cc.manager().runtime.id;
@@ -44,6 +54,13 @@ export class RuntimeInternals extends EventTarget {
       runtimeId,
       this.#onInspectorUpdate,
     );
+    this.#telemetry = telemetry;
+    this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
+    this.#telemetryMarkers = [];
+  }
+
+  telemetry(): RuntimeTelemetryMarkerResult[] {
+    return this.#telemetryMarkers;
   }
 
   cc(): CharmsController {
@@ -60,7 +77,15 @@ export class RuntimeInternals extends EventTarget {
   #onInspectorUpdate = (command: Inspector.BroadcastCommand) => {
     this.#check();
     this.#inspectorState.update(command);
-    this.dispatchEvent(new InspectorUpdateEvent(this.#inspectorState));
+    this.dispatchEvent(new StorageInspectorUpdateEvent(this.#inspectorState));
+  };
+
+  #onTelemetry = (event: Event) => {
+    this.#check();
+    this.#telemetryMarkers.push((event as RuntimeTelemetryEvent).marker);
+    // Dispatch an event here so that views may subscribe,
+    // and know when to rerender, fetching the markers
+    this.dispatchEvent(new CustomEvent("telemetryupdate"));
   };
 
   #check() {
@@ -88,6 +113,7 @@ export class RuntimeInternals extends EventTarget {
     // deno-lint-ignore prefer-const
     let charmManager: CharmManager;
 
+    const telemetry = new RuntimeTelemetry();
     const runtime = new Runtime({
       storageManager: StorageManager.open({
         as: session.as,
@@ -99,6 +125,7 @@ export class RuntimeInternals extends EventTarget {
         console.error(error);
         //Sentry.captureException(error);
       }],
+      telemetry,
       consoleHandler: (metadata, method, args) => {
         // Handle console messages depending on charm context.
         // This is essentially the same as the default handling currently,
@@ -126,7 +153,7 @@ export class RuntimeInternals extends EventTarget {
     charmManager = new CharmManager(session, runtime);
     await charmManager.synced();
     const cc = new CharmsController(charmManager);
-    return new RuntimeInternals(cc);
+    return new RuntimeInternals(cc, telemetry);
   }
 }
 

@@ -181,6 +181,10 @@ export class Scheduler implements IScheduler {
   }
 
   async run(action: Action): Promise<any> {
+    this.runtime.telemetry.submit({
+      type: "scheduler.run",
+      action: action.toString(),
+    });
     if (this.runningPromise) await this.runningPromise;
 
     const tx = this.runtime.edit();

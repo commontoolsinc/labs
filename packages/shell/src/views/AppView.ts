@@ -5,7 +5,7 @@ import { AppState } from "../lib/app/mod.ts";
 import { BaseView } from "./BaseView.ts";
 import { KeyStore } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { InspectorController } from "../lib/inspector-controller.ts";
+import { StorageInspectorController } from "../lib/inspector-controller.ts";
 import "./InspectorView.ts";
 import { Task } from "@lit/task";
 import { CharmController } from "@commontools/charm/ops";
@@ -59,7 +59,7 @@ export class XAppView extends BaseView {
     args: () => [this.app, this.rt],
   });
 
-  private inspectorController = new InspectorController(this);
+  private inspectorController = new StorageInspectorController(this);
 
   override updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);

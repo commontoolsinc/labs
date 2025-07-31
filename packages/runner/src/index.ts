@@ -115,6 +115,12 @@ export { createNodeFactory } from "./builder/module.ts";
 export { opaqueRef as cell } from "./builder/opaque-ref.ts";
 export { Classification, ContextualFlowControl } from "./cfc.ts";
 export type { Mutable } from "@commontools/utils/types";
+export {
+  RuntimeTelemetry,
+  RuntimeTelemetryEvent,
+  type RuntimeTelemetryMarker,
+  type RuntimeTelemetryMarkerResult,
+} from "./telemetry.ts";
 
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";

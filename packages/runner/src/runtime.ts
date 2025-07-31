@@ -45,6 +45,7 @@ import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { StaticCache } from "@commontools/static";
+import { RuntimeTelemetry } from "@commontools/runner";
 
 const DEFAULT_USE_REAL_TRANSACTIONS = isDeno()
   ? ["1", "true", "on", "yes"].includes(Deno.env.get("USE_REAL_TRANSACTIONS")!)
@@ -92,6 +93,7 @@ export interface RuntimeOptions {
    * @default false
    */
   useStorageManagerTransactions?: boolean;
+  telemetry?: RuntimeTelemetry;
 }
 
 export interface IRuntime {
@@ -110,6 +112,7 @@ export interface IRuntime {
   readonly useStorageManagerTransactions?: boolean;
   readonly storageManager: IStorageManager;
   readonly shimStorageManager?: ShimStorageManager;
+  readonly telemetry: RuntimeTelemetry;
 
   idle(): Promise<void>;
   dispose(): Promise<void>;
@@ -337,16 +340,19 @@ export class Runtime implements IRuntime {
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
   readonly storageManager: IStorageManager;
+  readonly telemetry: RuntimeTelemetry;
 
   constructor(options: RuntimeOptions) {
+    this.id = options.storageManager.id;
     this.staticCache = options.staticAssetServerUrl
       ? new StaticCache({
         baseUrl: options.staticAssetServerUrl,
       })
       : new StaticCache();
+    this.telemetry = options.telemetry ?? new RuntimeTelemetry();
+
     // Create harness first (no dependencies on other services)
     this.harness = new Engine(this);
-    this.id = options.storageManager.id;
 
     if (!options.blobbyServerUrl) {
       throw new Error("blobbyServerUrl is required");
@@ -404,6 +410,7 @@ export class Runtime implements IRuntime {
         harness: !!this.harness,
         runner: !!this.runner,
         useStorageManagerTransactions: !!this.storage.shim,
+        telemetry: !!this.telemetry,
       });
     }
   }
