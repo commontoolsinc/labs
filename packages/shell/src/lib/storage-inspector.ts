@@ -1,8 +1,8 @@
 import * as Inspector from "@commontools/runner/storage/inspector";
 
-export class InspectorUpdateEvent
-  extends CustomEvent<{ model: InspectorState }> {
-  constructor(model: InspectorState) {
+export class StorageInspectorUpdateEvent
+  extends CustomEvent<{ model: StorageInspectorState }> {
+  constructor(model: StorageInspectorState) {
     super("inspectorupdate", {
       detail: {
         model,
@@ -11,12 +11,12 @@ export class InspectorUpdateEvent
   }
 }
 
-export type InspectorConflicts = {
+export type StorageInspectorConflicts = {
   push: Inspector.PushStateValue[];
   pull: Inspector.PullStateValue[];
 };
 
-export class InspectorState extends Inspector.Model {
+export class StorageInspectorState extends Inspector.Model {
   // Keep a history of completed operations for display
   private pushHistory: Map<string, Inspector.PushStateValue> = new Map();
   private pullHistory: Map<string, Inspector.PullStateValue> = new Map();
@@ -119,7 +119,7 @@ export class InspectorState extends Inspector.Model {
     return all;
   }
 
-  getErrors(): InspectorConflicts | undefined {
+  getErrors(): StorageInspectorConflicts | undefined {
     const push = Object.values(this.push).filter(
       (v) => v.error,
     );

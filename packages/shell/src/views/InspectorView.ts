@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { property, state } from "lit/decorators.js";
-import { InspectorState } from "../lib/inspector.ts";
+import { StorageInspectorState } from "../lib/storage-inspector.ts";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
 
 /**
@@ -410,7 +410,7 @@ export class XInspectorView extends LitElement {
   visible = false;
 
   @property({ attribute: false })
-  inspectorState?: InspectorState;
+  inspectorState?: StorageInspectorState;
 
   @property({ type: Number })
   updateVersion = 0;
