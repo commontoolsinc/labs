@@ -2059,6 +2059,8 @@ test(
     assert(write3.ok);
     const c3 = Commit.toRevision(write3.ok);
 
+    // Check that with object, but no additionalProperties,
+    // we should not include doc2
     const schemaSelector: SchemaSelector = {
       [doc1]: {
         [the]: {
@@ -2091,8 +2093,74 @@ test(
       getResultForDoc(result, space.did(), doc1),
       "doc1 should be in the result",
     );
-    assertExists(
+    assertEquals(
       getResultForDoc(result, space.did(), doc2),
+      undefined,
+      "doc2 should not be in the result",
+    );
+
+    // Check that the `{}` schema does include doc2
+    const result2 = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: {
+          [doc1]: {
+            [the]: {
+              _: {
+                path: [],
+                schemaContext: {
+                  schema: {},
+                  rootSchema: {},
+                },
+              },
+            },
+          },
+        },
+      },
+      prf: [],
+    });
+
+    assertExists(
+      getResultForDoc(result2, space.did(), doc1),
+      "doc1 should be in the result",
+    );
+    assertExists(
+      getResultForDoc(result2, space.did(), doc2),
+      "doc2 should be in the result",
+    );
+
+    // Check that with object, and additionalProperties true,
+    // we should include doc2
+    const result3 = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: {
+          [doc1]: {
+            [the]: {
+              _: {
+                path: [],
+                schemaContext: {
+                  schema: { type: "object", additionalProperties: true },
+                  rootSchema: { type: "object", additionalProperties: true },
+                },
+              },
+            },
+          },
+        },
+      },
+      prf: [],
+    });
+
+    assertExists(
+      getResultForDoc(result3, space.did(), doc1),
+      "doc1 should be in the result",
+    );
+    assertExists(
+      getResultForDoc(result3, space.did(), doc2),
       "doc2 should be in the result",
     );
   },
