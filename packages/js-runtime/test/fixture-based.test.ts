@@ -125,7 +125,7 @@ const configs: FixtureConfig[] = [
       if (name === "with-opaque-ref") return "works with OpaqueRef transformer";
       return `transforms ${formatted}`;
     },
-    skip: ["no-directive", "recursive-type"], // no-directive needs special handling, recursive-type causes stack overflow
+    skip: ["no-directive"], // no-directive needs special handling
   },
 ];
 

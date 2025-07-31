@@ -5,20 +5,20 @@ interface LinkedList {
     next?: LinkedList;
 }
 const linkedListSchema = {
-    "$ref": "#/definitions/LinkedList",
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "definitions": {
-        "LinkedList": {
-            "type": "object",
-            "properties": {
-                "value": {
-                    "type": "number"
+    $ref: "#/definitions/LinkedList",
+    $schema: "http://json-schema.org/draft-07/schema#",
+    definitions: {
+        LinkedList: {
+            type: "object",
+            properties: {
+                value: {
+                    type: "number"
                 },
-                "next": {
-                    "$ref": "#/definitions/LinkedList"
+                next: {
+                    $ref: "#/definitions/LinkedList"
                 }
             },
-            "required": ["value"]
+            required: ["value"]
         }
     }
 } as const satisfies JSONSchema;
