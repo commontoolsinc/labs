@@ -56,7 +56,6 @@ export {
 export { h } from "@commontools/api";
 export type {
   Cell,
-  CellToOpaque,
   Child,
   CreateCellFunction,
   Handler,
@@ -74,6 +73,7 @@ export type {
   Recipe,
   RecipeFactory,
   Stream,
+  StripCell,
   toJSON,
   VNode,
 } from "@commontools/api";
@@ -227,7 +227,6 @@ export function canBeOpaqueRef(value: unknown): value is CanBeOpaqueRef {
 export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
   return value[toOpaqueRef]();
 }
-
 
 export type ShadowRef = {
   shadowOf: OpaqueRef<any> | ShadowRef;
