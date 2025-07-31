@@ -1,30 +1,16 @@
 import { css, html } from "lit";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell, isCell } from "@commontools/runner";
-import {
-  type ArrayCellController,
-  createArrayCellController,
-} from "../../core/cell-controller.ts";
+// Removed cell-controller import - working directly with Cell
 import "../ct-input/ct-input.ts";
 
-/**
- * Base interface for list items - all items must have at least a title
- */
-export interface CtListItem {
+type ListItem = {
   title: string;
   done?: boolean;
   status?: string;
-  statusBadge?: {
-    text: string;
-    color?: string;
-    icon?: string;
-  };
-  subtaskCount?: number;
-  items?: any[]; // For backward compatibility
-  [key: string]: any;
-}
+};
 
 /**
  * Action configuration for list items
@@ -74,9 +60,9 @@ export interface CtListContextAction {
  * <ct-list .value="${itemsCell}" title="Reactive List" editable></ct-list>
  */
 
-export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
+export class CTList extends BaseElement {
   @property()
-  value: T[] | Cell<T[]> = [];
+  value: Cell<ListItem[]> | null = null;
 
   @property()
   override title: string = "";
@@ -93,39 +79,31 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
   @property()
   contextActions: CtListContextAction[] = [];
 
-  // Cell controller for managing array values
-  private cellController: ArrayCellController<T>;
+  // Removed cellController - working directly with value/Cell
 
   // Private state for managing editing and context menu
-  private _editingItems: Map<string, Cell<string>> = new Map();
-  private _nextTempId: number = 1;
-  private _activeContextMenu: { item: T; x: number; y: number } | null = null;
+  @state()
+  private _editing: Cell<ListItem> | null = null;
+  private _activeContextMenu:
+    | { item: Cell<ListItem>; x: number; y: number }
+    | null = null;
 
   constructor() {
     super();
-    this.cellController = createArrayCellController<T>(this, {
-      timing: { strategy: "immediate" },
-      onChange: (newValue, oldValue) => {
-        // Trigger any change-related side effects here if needed
-        // The controller already handles requestUpdate()
-      },
-    });
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    // Bind to the initial value when connected
-    this.cellController.bind(this.value);
     // Add global click listener to close context menu
-    document.addEventListener('click', this.handleGlobalClick);
-    document.addEventListener('contextmenu', this.handleGlobalContextMenu);
+    document.addEventListener("click", this.handleGlobalClick);
+    document.addEventListener("contextmenu", this.handleGlobalContextMenu);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     // Remove global listeners
-    document.removeEventListener('click', this.handleGlobalClick);
-    document.removeEventListener('contextmenu', this.handleGlobalContextMenu);
+    document.removeEventListener("click", this.handleGlobalClick);
+    document.removeEventListener("contextmenu", this.handleGlobalContextMenu);
   }
 
   private handleGlobalClick = () => {
@@ -321,6 +299,22 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
       margin: -0.25rem 0;
     }
 
+    .edit-input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 0.25rem;
+      padding: 0.25rem;
+      font-size: inherit;
+      font-family: inherit;
+      background: var(--background);
+      color: var(--text);
+    }
+
+    .edit-input:focus {
+      outline: 2px solid var(--primary);
+      outline-offset: -1px;
+    }
+
     .item-action.edit {
       background-color: #3b82f6;
       color: white;
@@ -346,7 +340,9 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
       background: var(--background);
       border: var(--list-border);
       border-radius: var(--list-border-radius);
-      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      box-shadow:
+        0 10px 15px -3px rgba(0, 0, 0, 0.1),
+        0 4px 6px -2px rgba(0, 0, 0, 0.05);
       z-index: 1000;
       min-width: 150px;
       padding: 0.25rem;
@@ -452,51 +448,45 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
   // Lifecycle methods for Cell binding management
   override updated(changedProperties: Map<string, any>) {
     super.updated(changedProperties);
-
-    // If the value property itself changed (e.g., switched to a different cell)
-    if (changedProperties.has("value")) {
-      this.cellController.bind(this.value);
-    }
-  }
-
-  private getValue(): T[] {
-    return this.cellController.getValue();
-  }
-
-  private setValue(newValue: T[]): void {
-    this.cellController.setValue(newValue);
-    // For non-Cell values, update the property
-    if (!this.cellController.isCell()) {
-      this.value = newValue;
-    }
   }
 
   private addItem(title: string): void {
-    const newItem = { title } as T;
-    this.cellController.addItem(newItem);
-    // For non-Cell values, update the property
-    if (!this.cellController.isCell()) {
-      this.value = this.cellController.getValue();
+    if (!this.value) {
+      console.warn("Cannot add item to an empty list");
+      return;
     }
+
+    const newItem = { title } as ListItem;
+    const cell = this.value;
+    const tx = cell.runtime.edit();
+    cell.withTx(tx).push(newItem);
+    tx.commit();
+
+    this.requestUpdate();
   }
 
-  private removeItem(itemToRemove: T): void {
-    this.cellController.removeItem(itemToRemove);
-    // For non-Cell values, update the property
-    if (!this.cellController.isCell()) {
-      this.value = this.cellController.getValue();
+  private removeItem(itemToRemove: Cell<any>): void {
+    if (!this.value) {
+      console.warn("Cannot add item to an empty list");
+      return;
     }
+
+    const length = this.value.get().length;
+    for (let i = 0; i < length; i++) {
+      const c = this.value.key(i);
+      if (itemToRemove.equals(c)) {
+        const index = i;
+        const cell = this.value;
+        const tx = cell.runtime.edit();
+        cell.withTx(tx).get().splice(index, 1);
+        tx.commit();
+      }
+    }
+
+    this.requestUpdate();
   }
 
-  private updateItem(oldItem: T, newItem: T): void {
-    this.cellController.updateItem(oldItem, newItem);
-    // For non-Cell values, update the property
-    if (!this.cellController.isCell()) {
-      this.value = this.cellController.getValue();
-    }
-  }
-
-  private handleActionItem(item: T) {
+  private handleActionItem(item: Cell<ListItem>) {
     if (!this.action) return;
 
     switch (this.action.type) {
@@ -513,30 +503,33 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     }
   }
 
-  private handleItemContextMenu(event: MouseEvent, item: T) {
+  private handleItemContextMenu(event: MouseEvent, item: Cell<ListItem>) {
     if (this.contextActions.length === 0) return;
-    
+
     event.preventDefault();
     event.stopPropagation();
-    
+
     this._activeContextMenu = {
       item,
       x: event.clientX,
-      y: event.clientY
+      y: event.clientY,
     };
     this.requestUpdate();
   }
 
-  private handleContextAction(action: CtListContextAction, item: T) {
+  private handleContextAction(
+    action: CtListContextAction,
+    item: Cell<ListItem>,
+  ) {
     if (action.disabled) return;
-    
+
     this._activeContextMenu = null;
     this.emit("ct-context-action", { item, action });
     this.emit(action.event, { item });
     this.requestUpdate();
   }
 
-  private handleViewSubtasks(item: T) {
+  private handleViewSubtasks(item: Cell<ListItem>) {
     this.emit("ct-view-subtasks", { item });
   }
 
@@ -553,69 +546,62 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     }
   }
 
-  private getItemEditId(item: T, index: number): string {
-    // Use index + title for unique identification, avoiding duplicates
-    return `edit-${index}-${item.title.replace(/[^a-zA-Z0-9]/g, "-")}-${Date.now()}`;
-  }
-
-  private startEditing(item: T): void {
+  private startEditing(item: Cell<ListItem>): void {
     if (!this.editable) return;
+    if (!isCell(this.value)) return;
 
-    // Find the index of this item in the current array
-    const items = this.getValue();
-    const itemIndex = items.findIndex(i => i === item);
-    if (itemIndex === -1) return; // Item not found
-    
-    const editId = this.getItemEditId(item, itemIndex);
-    // Create a temporary cell for editing this item's title
-    const cell = this.cellController.getCell();
-    if (cell && cell.runtime) {
-      // Create a mutable cell for editing
-      const tempCell = cell.runtime.getCell<string>(
-        cell.space,
-        { type: "edit", itemTitle: item.title },
-      );
-      // Set initial value
-      const tx = cell.runtime.edit();
-      tempCell.withTx(tx).set(item.title);
-      tx.commit();
-      this._editingItems.set(editId, tempCell);
-    }
-    this.requestUpdate();
-  }
-
-  private finishEditing(item: T, editId: string, newTitle: string): void {
-    if (!this.editable) return;
-
-    const trimmedTitle = newTitle.trim();
-    if (trimmedTitle && trimmedTitle !== item.title) {
-      const updatedItem = { ...item, title: trimmedTitle };
-      this.updateItem(item, updatedItem);
-      this.emit("ct-edit-item", { item: updatedItem, oldItem: item });
-    }
-
-    this._editingItems.delete(editId);
-    this.requestUpdate();
-  }
-
-  private cancelEditing(editId: string): void {
-    this._editingItems.delete(editId);
-    this.requestUpdate();
-  }
-
-  private isItemBeingEdited(item: T, index: number): string | null {
-    // Check if any editing cell exists for this specific item
-    const expectedPrefix = `edit-${index}-${item.title.replace(/[^a-zA-Z0-9]/g, "-")}`;
-    for (const [editId, cell] of this._editingItems) {
-      if (editId.startsWith(expectedPrefix)) {
-        return editId;
+    const length = this.value.get().length;
+    for (let i = 0; i < length; i++) {
+      const c = this.value.key(i);
+      if (item.equals(c)) {
+        this._editing = item;
+        this.requestUpdate();
+        return;
       }
     }
-    return null;
+  }
+
+  private finishEditing(item: Cell<ListItem>, newTitle: string): void {
+    if (!this.editable) return;
+    if (!this.value) return;
+
+    const trimmedTitle = newTitle.trim();
+    if (trimmedTitle) {
+      const length = this.value.get().length;
+      for (let i = 0; i < length; i++) {
+        const c = this.value.key(i);
+        if (item.equals(c)) {
+          const cell = this.value;
+          const tx = cell.runtime.edit();
+          cell.withTx(tx).key(i).key("title").set(trimmedTitle);
+          tx.commit();
+
+          this.emit("ct-edit-item", {
+            item: { ...item, title: trimmedTitle },
+            oldItem: item,
+          });
+
+          this._editing = null;
+          this.requestUpdate();
+          return;
+        }
+      }
+    }
+  }
+
+  private cancelEditing(): void {
+    this._editing = null;
+    this.requestUpdate();
   }
 
   override render() {
-    const items = this.getValue();
+    if (!this.value) {
+      return html`
+        <div class="empty-state">No items in this list</div>
+      `;
+    }
+    const cell = this.value;
+    const items = this.value.get();
 
     return html`
       <div class="list-container">
@@ -633,7 +619,7 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
         : repeat(
           items.filter((item) => item && item.title),
           (item, index) => `${index}-${item.title}`,
-          (item, index) => this.renderItem(item, index),
+          (item, index) => this.renderItem(cell.key(index), index),
         )}
         </div>
 
@@ -644,38 +630,44 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     `;
   }
 
-  private renderItem(item: T, index: number) {
-    const editId = this.isItemBeingEdited(item, index);
-    const isEditing = editId !== null;
+  private renderItem(item: Cell<ListItem>, index: number) {
+    const isEditing = this._editing?.equals(item);
 
     const actionButton = this.action && !this.readonly
       ? this.renderActionButton(item)
       : "";
 
-    // If item is being edited, show ct-input
-    if (isEditing && editId) {
-      const editCell = this._editingItems.get(editId);
+    // If item is being edited, show input
+    if (isEditing) {
       return html`
         <div class="list-item editing">
           <div class="item-bullet"></div>
           <div class="item-content">
-            <ct-input
-              .value="${editCell}"
-              @ct-submit="${(e: CustomEvent) =>
-          this.finishEditing(item, editId, e.detail.value)}"
-              @ct-blur="${(e: CustomEvent) =>
-          this.finishEditing(item, editId, e.detail.value)}"
+            <input
+              type="text"
+              class="edit-input"
+              .value="${item.get().title}"
+              @input="${(e: Event) => {
+          this._editing = item;
+        }}"
+              @blur="${(e: Event) => {
+          const target = e.target as HTMLInputElement;
+          this.finishEditing(item, target.value);
+        }}"
               @keydown="${(e: KeyboardEvent) => {
-          if (e.key === "Escape") {
-            this.cancelEditing(editId);
+          if (e.key === "Enter") {
+            const target = e.target as HTMLInputElement;
+            this.finishEditing(item, target.value);
+          } else if (e.key === "Escape") {
+            this.cancelEditing();
           }
         }}"
               autofocus
-            ></ct-input>
+            />
           </div>
           <button
             class="item-action cancel"
-            @click="${() => this.cancelEditing(editId)}"
+            @click="${() => this.cancelEditing()}"
             title="Cancel editing"
           >
             ×
@@ -685,7 +677,7 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     }
 
     return html`
-      <div 
+      <div
         class="list-item"
         @contextmenu="${(e: MouseEvent) => this.handleItemContextMenu(e, item)}"
       >
@@ -696,11 +688,9 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
         : ""}"
           @dblclick="${() => this.startEditing(item)}"
         >
-          ${item.title}
+          ${item.get().title}
         </div>
-        ${this.renderSubtaskBadge(item)}
-        ${this.renderStatusBadge(item)}
-        ${this.editable && !this.readonly
+        ${this.renderStatusBadge(item.get())} ${this.editable && !this.readonly
         ? html`
           <button
             class="item-action edit"
@@ -715,7 +705,7 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     `;
   }
 
-  private renderActionButton(item: T) {
+  private renderActionButton(item: Cell<ListItem>) {
     if (!this.action) return "";
 
     const getButtonContent = () => {
@@ -757,77 +747,70 @@ export class CTList<T extends CtListItem = CtListItem> extends BaseElement {
     const { item, x, y } = this._activeContextMenu;
 
     return html`
-      <div 
-        class="context-menu" 
+      <div
+        class="context-menu"
         style="left: ${x}px; top: ${y}px;"
         @click="${(e: Event) => e.stopPropagation()}"
       >
-        ${this.contextActions.map(action => html`
-          <div 
-            class="context-menu-item ${action.disabled ? 'disabled' : ''}"
+        ${this.contextActions.map((action) =>
+        html`
+          <div
+            class="context-menu-item ${action.disabled ? "disabled" : ""}"
             @click="${() => this.handleContextAction(action, item)}"
           >
-            ${action.icon ? html`<span class="context-menu-icon">${action.icon}</span>` : ""}
-            ${action.label}
+            ${action.icon
+            ? html`
+              <span class="context-menu-icon">${action.icon}</span>
+            `
+            : ""} ${action.label}
           </div>
-        `)}
+        `
+      )}
       </div>
     `;
   }
 
-  private renderStatusBadge(item: T) {
-    if (!item.statusBadge && !item.status) return "";
+  private renderStatusBadge(item: ListItem) {
+    if (!item.status) return "";
 
     // Use explicit statusBadge if provided, otherwise derive from status
-    const badge = item.statusBadge || this.getDefaultStatusBadge(item.status);
+    const badge = this.getDefaultStatusBadge(item.status);
     const cssClass = this.getStatusCssClass(item.status || badge.text);
 
     return html`
       <span class="status-badge ${cssClass}">
-        ${badge.icon ? html`<span class="status-badge-icon">${badge.icon}</span>` : ""}
-        ${badge.text}
-      </span>
-    `;
-  }
-
-  private renderSubtaskBadge(item: T) {
-    const subtaskCount = item.subtaskCount || (item.items ? item.items.length : 0);
-    if (subtaskCount === 0) return "";
-
-    return html`
-      <span 
-        class="subtask-badge"
-        @click="${(e: Event) => {
-          e.stopPropagation();
-          this.handleViewSubtasks(item);
-        }}"
-        title="View subtasks"
-      >
-        <span class="subtask-badge-icon">📋</span>
-        ${subtaskCount}
+        ${badge.icon
+        ? html`
+          <span class="status-badge-icon">${badge.icon}</span>
+        `
+        : ""} ${badge.text}
       </span>
     `;
   }
 
   private getDefaultStatusBadge(status?: string) {
     switch (status) {
-      case 'todo': 
-        return { text: 'Todo', icon: '📋' };
-      case 'in-progress': 
-        return { text: 'In Progress', icon: '⚡' };
-      case 'done': 
-        return { text: 'Done', icon: '✅' };
-      default: 
-        return { text: status || 'Unknown', icon: '📄' };
+      case "todo":
+        return { text: "Todo", icon: "📋" };
+      case "in-progress":
+        return { text: "In Progress", icon: "⚡" };
+      case "done":
+        return { text: "Done", icon: "✅" };
+      default:
+        return { text: status || "Unknown", icon: "📄" };
     }
   }
 
   private getStatusCssClass(status: string): string {
     switch (status) {
-      case 'todo': return 'todo';
-      case 'in-progress': return 'in-progress';
-      case 'done': return 'done';
-      default: return 'default';
+      case "todo":
+        return "todo";
+      case "in-progress":
+        return "in-progress";
+      case "done":
+        return "done";
+      default:
+        return "default";
     }
   }
 
