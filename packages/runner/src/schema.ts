@@ -272,8 +272,8 @@ function annotateWithBackToCellSymbols(
   ) {
     value[toCell] = () => createCell(runtime, link, tx);
     value[toOpaqueRef] = () => makeOpaqueRef(link);
+    Object.freeze(value);
   }
-  Object.freeze(value);
   return value;
 }
 
