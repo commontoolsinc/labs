@@ -71,17 +71,57 @@ function getArrayElementType(
 }
 
 /**
- * Convert a TypeScript type to JSONSchema
+ * Convert a TypeScript type to JSONSchema (helper with cycle handling)
  */
-export function typeToJsonSchema(
+function typeToJsonSchemaHelper(
   type: ts.Type,
   checker: ts.TypeChecker,
   typeNode?: ts.TypeNode,
   depth: number = 0,
   seenTypes: Set<ts.Type> = new Set(),
+  cyclicTypes?: Set<ts.Type>,
+  definitions?: Record<string, any>,
+  isRootType: boolean = false,
 ): any {
-  // Check if we've already seen this type (cycle detection)
-  if (seenTypes.has(type)) {
+  // If cyclicTypes is provided, check if this is a cyclic type
+  if (cyclicTypes && cyclicTypes.has(type) && definitions) {
+    const typeName = type.symbol?.name ||
+      `Type${Object.keys(definitions).length}`;
+
+    // If we've already seen this type, return a $ref
+    if (seenTypes.has(type)) {
+      logger.debug(() => `Returning $ref for cyclic type: ${typeName}`);
+      return { "$ref": `#/definitions/${typeName}` };
+    }
+
+    // First time seeing this cyclic type - generate the full schema
+    // but we'll add it to definitions and return a $ref if this is not the root
+    if (!isRootType) {
+      // Mark that we're processing this type
+      seenTypes.add(type);
+
+      // Generate the full schema
+      const schema = typeToJsonSchemaHelper(
+        type,
+        checker,
+        typeNode,
+        depth,
+        seenTypes,
+        cyclicTypes,
+        definitions,
+        false,
+      );
+
+      // Add to definitions
+      definitions[typeName] = schema;
+
+      // Return a reference
+      return { "$ref": `#/definitions/${typeName}` };
+    }
+  }
+
+  // Old cycle detection for when cyclicTypes is not provided
+  if (!cyclicTypes && seenTypes.has(type)) {
     logger.debug(() =>
       `Detected cycle for type: ${type.symbol?.name || "anonymous"} (${
         checker.typeToString(type)
@@ -223,12 +263,14 @@ export function typeToJsonSchema(
 
             // Get the inner type
             const innerType = checker.getTypeFromTypeNode(innerTypeNode);
-            const schema = typeToJsonSchema(
+            const schema = typeToJsonSchemaHelper(
               innerType,
               checker,
               innerTypeNode,
               depth + 1,
               newSeenTypes,
+              cyclicTypes,
+              definitions,
             );
 
             // Extract the default value from the type node
@@ -257,12 +299,14 @@ export function typeToJsonSchema(
           const defaultValueType = typeRef.typeArguments[1];
 
           // Get the schema for the inner type
-          const schema = typeToJsonSchema(
+          const schema = typeToJsonSchemaHelper(
             innerType,
             checker,
             typeNode,
             depth + 1,
             newSeenTypes,
+            cyclicTypes,
+            definitions,
           );
 
           // Try to extract the literal value from the default value type
@@ -291,12 +335,14 @@ export function typeToJsonSchema(
 
           // Get the inner type
           const innerType = checker.getTypeFromTypeNode(innerTypeNode);
-          const schema = typeToJsonSchema(
+          const schema = typeToJsonSchemaHelper(
             innerType,
             checker,
             innerTypeNode,
             depth + 1,
             newSeenTypes,
+            cyclicTypes,
+            definitions,
           );
 
           // Extract the default value from the type node
@@ -346,12 +392,14 @@ export function typeToJsonSchema(
     ) {
       innerTypeNode = typeNode.typeArguments[0];
     }
-    const schema = typeToJsonSchema(
+    const schema = typeToJsonSchemaHelper(
       innerType,
       checker,
       innerTypeNode || typeNode,
       depth + 1,
       newSeenTypes,
+      cyclicTypes,
+      definitions,
     );
     schema.asCell = true;
     return schema;
@@ -379,12 +427,14 @@ export function typeToJsonSchema(
     ) {
       innerTypeNode = typeNode.typeArguments[0];
     }
-    const schema = typeToJsonSchema(
+    const schema = typeToJsonSchemaHelper(
       innerType,
       checker,
       innerTypeNode || typeNode,
       depth + 1,
       newSeenTypes,
+      cyclicTypes,
+      definitions,
     );
     schema.asStream = true;
     return schema;
@@ -417,12 +467,14 @@ export function typeToJsonSchema(
     const elementType = checker.getTypeFromTypeNode(elementTypeNode);
     return {
       type: "array",
-      items: typeToJsonSchema(
+      items: typeToJsonSchemaHelper(
         elementType,
         checker,
         elementTypeNode,
         depth + 1,
         newSeenTypes,
+        cyclicTypes,
+        definitions,
       ),
     };
   }
@@ -442,12 +494,14 @@ export function typeToJsonSchema(
 
     return {
       type: "array",
-      items: typeToJsonSchema(
+      items: typeToJsonSchemaHelper(
         arrayElementType,
         checker,
         elementTypeNode,
         depth + 1,
         newSeenTypes,
+        cyclicTypes,
+        definitions,
       ),
     };
   }
@@ -471,12 +525,14 @@ export function typeToJsonSchema(
         const defaultValueType = typeRef.typeArguments[1];
 
         // Get the schema for the inner type
-        const schema = typeToJsonSchema(
+        const schema = typeToJsonSchemaHelper(
           innerType,
           checker,
           typeNode,
           depth + 1,
           newSeenTypes,
+          cyclicTypes,
+          definitions,
         );
 
         // Try to extract the literal value from the default value type
@@ -527,12 +583,14 @@ export function typeToJsonSchema(
       const defaultValueType = typeRef.typeArguments[1];
 
       // Get the schema for the inner type
-      const schema = typeToJsonSchema(
+      const schema = typeToJsonSchemaHelper(
         innerType,
         checker,
         typeNode,
         depth + 1,
         newSeenTypes,
+        cyclicTypes,
+        definitions,
       );
 
       // Try to extract the literal value from the default value type
@@ -633,12 +691,14 @@ export function typeToJsonSchema(
       }
 
       // Get property schema - let typeToJsonSchema handle all wrapper types
-      const propSchema = typeToJsonSchema(
+      const propSchema = typeToJsonSchemaHelper(
         propType,
         checker,
         propTypeNode,
         depth + 1,
         newSeenTypes,
+        cyclicTypes,
+        definitions,
       );
 
       properties[propName] = propSchema;
@@ -677,18 +737,28 @@ export function typeToJsonSchema(
 
     if (nonNullTypes.length === 1 && unionTypes.length === 2) {
       // This is an optional type, just return the non-null type schema
-      return typeToJsonSchema(
+      return typeToJsonSchemaHelper(
         nonNullTypes[0],
         checker,
         typeNode,
         depth,
         newSeenTypes,
+        cyclicTypes,
+        definitions,
       );
     }
     // Otherwise, use oneOf
     return {
       oneOf: unionTypes.map((t) =>
-        typeToJsonSchema(t, checker, typeNode, depth, newSeenTypes)
+        typeToJsonSchemaHelper(
+          t,
+          checker,
+          typeNode,
+          depth,
+          newSeenTypes,
+          cyclicTypes,
+          definitions,
+        )
       ),
     };
   }
@@ -891,4 +961,63 @@ export function getCycles(
   }
 
   return cycles;
+}
+
+/**
+ * Convert a TypeScript type to JSONSchema
+ * Handles recursive types with JSON Schema $ref/definitions
+ */
+export function typeToJsonSchema(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  typeNode?: ts.TypeNode,
+): any {
+  // First pass: detect cycles
+  const cyclicTypes = getCycles(type, checker);
+
+  // If no cycles, just return the simple schema
+  if (cyclicTypes.size === 0) {
+    return typeToJsonSchemaHelper(type, checker, typeNode);
+  }
+
+  // Second pass: generate schema with definitions
+  const definitions: Record<string, any> = {};
+  const seenTypes = new Set<ts.Type>();
+
+  // Generate the schema for the root type
+  const rootSchema = typeToJsonSchemaHelper(
+    type,
+    checker,
+    typeNode,
+    0,
+    seenTypes,
+    cyclicTypes,
+    definitions,
+    true, // isRootType
+  );
+
+  // If the root type itself is cyclic, we need to add it to definitions
+  // and return a $ref structure
+  if (cyclicTypes.has(type)) {
+    const typeName = type.symbol?.name || "Type0";
+    definitions[typeName] = rootSchema;
+
+    return {
+      "$ref": `#/definitions/${typeName}`,
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "definitions": definitions,
+    };
+  }
+
+  // If only nested types are cyclic, return the root schema with definitions
+  if (Object.keys(definitions).length > 0) {
+    return {
+      ...rootSchema,
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "definitions": definitions,
+    };
+  }
+
+  // Shouldn't reach here, but just in case
+  return rootSchema;
 }

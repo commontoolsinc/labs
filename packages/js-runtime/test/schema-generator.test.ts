@@ -156,15 +156,20 @@ describe("typeToJsonSchema", () => {
 
       const schema = typeToJsonSchema(type, checker);
 
-      // Should return a valid schema for the top level
-      expect(schema.type).toBe("object");
-      expect(schema.properties.value).toEqual({ type: "number" });
-
-      // The recursive reference should be detected and return a placeholder
-      expect(schema.properties.next).toEqual({
-        type: "object",
-        additionalProperties: true,
-        $comment: "Recursive type detected - placeholder schema",
+      // Should now return proper $ref and definitions
+      expect(schema).toEqual({
+        "$ref": "#/definitions/LinkedList",
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "LinkedList": {
+            "type": "object",
+            "properties": {
+              "value": { "type": "number" },
+              "next": { "$ref": "#/definitions/LinkedList" },
+            },
+            "required": ["value"],
+          },
+        },
       });
     });
 
@@ -179,18 +184,27 @@ describe("typeToJsonSchema", () => {
 
       const schema = typeToJsonSchema(type, checker);
 
-      // Should return a valid schema for the top level
-      expect(schema.type).toBe("object");
-      expect(schema.properties.value).toEqual({ type: "number" });
-
-      // The children property should exist
-      expect(schema.properties.children).toBeDefined();
-
-      // It should be an array
-      expect(schema.properties.children.type).toBe("array");
+      // Should return proper $ref and definitions
+      expect(schema).toEqual({
+        "$ref": "#/definitions/TreeNode",
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "TreeNode": {
+            "type": "object",
+            "properties": {
+              "value": { "type": "number" },
+              "children": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/TreeNode" },
+              },
+            },
+            "required": ["value", "children"],
+          },
+        },
+      });
     });
 
-    it("should detect cycles with explicit seenTypes parameter", () => {
+    it("should handle recursive types with proper $ref", () => {
       const code = `
         interface LinkedList {
           value: number;
@@ -199,18 +213,22 @@ describe("typeToJsonSchema", () => {
       `;
       const { type, checker } = getTypeFromCode(code, "LinkedList");
 
-      // Test with a seenTypes set that already contains the type
-      const seenTypes = new Set<ts.Type>();
-      seenTypes.add(type);
+      const schema = typeToJsonSchema(type, checker);
 
-      // When we pass a type that's already in seenTypes, it should return a placeholder
-      const schema = typeToJsonSchema(type, checker, undefined, 0, seenTypes);
-
-      // For now, expect a placeholder object
+      // Should now generate proper $ref and definitions
       expect(schema).toEqual({
-        type: "object",
-        additionalProperties: true,
-        $comment: "Recursive type detected - placeholder schema",
+        "$ref": "#/definitions/LinkedList",
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "LinkedList": {
+            "type": "object",
+            "properties": {
+              "value": { "type": "number" },
+              "next": { "$ref": "#/definitions/LinkedList" },
+            },
+            "required": ["value"],
+          },
+        },
       });
     });
 
@@ -305,6 +323,58 @@ describe("typeToJsonSchema", () => {
 
       // Make sure no $comment about cycles
       expect(JSON.stringify(schema)).not.toContain("Recursive type detected");
+    });
+  });
+});
+
+describe("typeToJsonSchema with cycles", () => {
+  it("should generate complete schema with $ref and definitions for recursive types", () => {
+    const code = `
+      interface LinkedList {
+        value: number;
+        next?: LinkedList;
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "LinkedList");
+
+    // This function should do both passes and return proper JSON Schema
+    const schema = typeToJsonSchema(type, checker);
+
+    expect(schema).toEqual({
+      "$ref": "#/definitions/LinkedList",
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "definitions": {
+        "LinkedList": {
+          "type": "object",
+          "properties": {
+            "value": { "type": "number" },
+            "next": { "$ref": "#/definitions/LinkedList" },
+          },
+          "required": ["value"],
+        },
+      },
+    });
+  });
+
+  it("should return simple schema for non-recursive types", () => {
+    const code = `
+      interface User {
+        name: string;
+        age: number;
+      }
+    `;
+    const { type, checker } = getTypeFromCode(code, "User");
+
+    const schema = typeToJsonSchema(type, checker);
+
+    // Non-recursive types should not have $ref or definitions
+    expect(schema).toEqual({
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        age: { type: "number" },
+      },
+      required: ["name", "age"],
     });
   });
 });
