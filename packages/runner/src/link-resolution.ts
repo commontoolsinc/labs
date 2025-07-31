@@ -147,6 +147,11 @@ export function resolveLink(
 
   const result = { ...last, path: traversedPath } satisfies NormalizedFullLink;
 
+  // Remove overwrite field, i.e. when the last followed link was a write
+  // redirect. The idea is that this is a link pointing to the final value, it
+  // doesn't matter how we got there.
+  delete result.overwrite;
+
   // The casting is a workaround for the branding, we don't actually want to add
   // the symbol to the result.
   return result as unknown as ResolvedFullLink;

@@ -55,7 +55,7 @@ const updateItem = handler<
 
 const deleteItem = handler<never, { items: Cell<TodoItem[]>; item: TodoItem }>(
   (_, { item, items }) => {
-    const data = items.get();
+    const data = [...items.get()];
     const idx = data.findIndex((i) => i.title === item.title);
     if (idx !== -1) {
       data.splice(idx, 1);

@@ -4,7 +4,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 
 import { type Cell, isCell, isStream } from "../src/cell.ts";
 import { LegacyDocCellLink } from "../src/sigil-types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -12,6 +12,7 @@ import { toURI } from "../src/uri-utils.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../src/link-utils.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { sortAndCompactPaths } from "../src/reactive-dependencies.ts";
+import { toCell, toOpaqueRef } from "../src/back-to-cell.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -2180,6 +2181,370 @@ describe("Schema Support", () => {
 
       runtime.scheduler.runningPromise = undefined;
       expect(runtime.scheduler.runningPromise).toBeUndefined();
+    });
+  });
+
+  describe("Array element link resolution", () => {
+    it("should resolve array element links to the actual nested documents", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                value: { type: "number" },
+              },
+              required: ["name", "value"],
+            },
+          },
+        },
+        required: ["items"],
+      } as const satisfies JSONSchema;
+
+      const listCell = runtime.getCell(
+        space,
+        "array-link-list",
+        schema,
+        tx,
+      );
+
+      // Create nested documents in the array using [ID] syntax
+      listCell.set({
+        items: [
+          { [ID]: "item-1", name: "Item 1", value: 10 },
+          { [ID]: "item-2", name: "Item 2", value: 20 },
+          { [ID]: "item-3", name: "Item 3", value: 30 },
+        ],
+      });
+
+      // Get the array result
+      const result = listCell.get();
+
+      // Convert items back to cells and check their links
+      const itemCells = result.items.map((item: any) => item[toCell]());
+      const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
+
+      // Verify the links point to unique documents (empty path)
+      expect(links[0].path).toEqual([]);
+      expect(links[1].path).toEqual([]);
+      expect(links[2].path).toEqual([]);
+
+      // Verify they have different IDs (unique documents)
+      expect(links[0].id).not.toBe(links[1].id);
+      expect(links[1].id).not.toBe(links[2].id);
+      expect(links[0].id).not.toBe(links[2].id);
+    });
+
+    it("should resolve to array indices when elements are not nested documents", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+              },
+              required: ["name"],
+            },
+          },
+        },
+        required: ["items"],
+      } as const satisfies JSONSchema;
+
+      const listCell = runtime.getCell(
+        space,
+        "array-plain-items",
+        schema,
+        tx,
+      );
+
+      // Create plain objects (not nested documents)
+      listCell.set({
+        items: [
+          { name: "Item 1" },
+          { name: "Item 2" },
+          { name: "Item 3" },
+        ],
+      });
+
+      // Get the array result
+      const result = listCell.get();
+
+      // Convert items back to cells and check their links
+      const itemCells = result.items.map((item: any) => item[toCell]());
+      const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
+
+      // Without nested documents, links should point to array indices
+      expect(links[0].path).toEqual(["items", "0"]);
+      expect(links[1].path).toEqual(["items", "1"]);
+      expect(links[2].path).toEqual(["items", "2"]);
+
+      // They should all have the same ID (the parent cell)
+      expect(links[0].id).toBe(links[1].id);
+      expect(links[1].id).toBe(links[2].id);
+    });
+
+    it("should support array splice operations with nested documents", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          todos: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                done: { type: "boolean" },
+              },
+              required: ["title", "done"],
+            },
+          },
+        },
+        required: ["todos"],
+      } as const satisfies JSONSchema;
+
+      const todoCell = runtime.getCell(
+        space,
+        "todo-list-splice",
+        schema,
+        tx,
+      );
+
+      // Create todos as nested documents
+      todoCell.set({
+        todos: [
+          { [ID]: "todo-1", title: "Task 1", done: false },
+          { [ID]: "todo-2", title: "Task 2", done: true },
+          { [ID]: "todo-3", title: "Task 3", done: false },
+        ],
+      });
+
+      // Get initial state and verify nested documents
+      const initialData = todoCell.get();
+      const initialCells = initialData.todos.map((item: any) => item[toCell]());
+      const initialLinks = initialCells.map((cell) =>
+        cell.getAsNormalizedFullLink()
+      );
+
+      // All should have empty paths (nested documents)
+      expect(initialLinks[0].path).toEqual([]);
+      expect(initialLinks[1].path).toEqual([]);
+      expect(initialLinks[2].path).toEqual([]);
+
+      // Store the IDs for comparison after splice
+      const id1 = initialLinks[0].id;
+      const id3 = initialLinks[2].id;
+
+      // Simulate the pattern from todo-list.tsx - using spread to copy array
+      const data = [...todoCell.get().todos];
+      const idx = data.findIndex((item) => item.title === "Task 2");
+      expect(idx).toBe(1);
+
+      data.splice(idx, 1);
+      todoCell.set({ todos: data });
+
+      // Verify the item was removed
+      const updated = todoCell.get();
+      expect(updated.todos).toHaveLength(2);
+
+      // Verify the remaining items still point to their original documents
+      const remainingCells = updated.todos.map((item: any) => item[toCell]());
+      const remainingLinks = remainingCells.map((cell) =>
+        cell.getAsNormalizedFullLink()
+      );
+
+      // Should still have empty paths
+      expect(remainingLinks[0].path).toEqual([]);
+      expect(remainingLinks[1].path).toEqual([]);
+
+      // Should have the same IDs as before (minus the removed one)
+      expect(remainingLinks[0].id).toBe(id1);
+      expect(remainingLinks[1].id).toBe(id3);
+    });
+
+    it("should handle mixed arrays with both nested documents and plain objects", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                type: { type: "string" },
+                value: { type: "string" },
+              },
+              required: ["type", "value"],
+            },
+          },
+        },
+        required: ["items"],
+      } as const satisfies JSONSchema;
+
+      const mixedCell = runtime.getCell(
+        space,
+        "mixed-array",
+        schema,
+        tx,
+      );
+
+      // Mix of nested documents and plain objects
+      mixedCell.set({
+        items: [
+          { [ID]: "nested-1", type: "document", value: "A" },
+          { type: "plain", value: "B" }, // Plain object
+          { [ID]: "nested-2", type: "document", value: "C" },
+          { type: "plain", value: "D" }, // Plain object
+        ],
+      });
+
+      const result = mixedCell.get();
+      const cells = result.items.map((item: any) => item[toCell]());
+      const links = cells.map((cell) => cell.getAsNormalizedFullLink());
+
+      // Nested documents have empty paths
+      expect(links[0].path).toEqual([]);
+      expect(links[2].path).toEqual([]);
+
+      // Plain objects have array index paths
+      expect(links[1].path).toEqual(["items", "1"]);
+      expect(links[3].path).toEqual(["items", "3"]);
+
+      // Nested documents should have unique IDs
+      expect(links[0].id).not.toBe(links[2].id);
+
+      // Plain objects should share the parent cell's ID
+      expect(links[1].id).toBe(links[3].id);
+    });
+
+    it("should preserve nested document references when reordering arrays", () => {
+      const schema = {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                order: { type: "number" },
+              },
+              required: ["name", "order"],
+            },
+          },
+        },
+        required: ["items"],
+      } as const satisfies JSONSchema;
+
+      const listCell = runtime.getCell(
+        space,
+        "reorder-array-test",
+        schema,
+        tx,
+      );
+
+      // Create array with nested documents
+      listCell.set({
+        items: [
+          { [ID]: "doc-a", name: "A", order: 1 },
+          { [ID]: "doc-b", name: "B", order: 2 },
+          { [ID]: "doc-c", name: "C", order: 3 },
+        ],
+      });
+
+      // Get references before reordering
+      const beforeReorder = listCell.get();
+      const beforeCells = beforeReorder.items.map((item: any) =>
+        item[toCell]()
+      );
+      const beforeLinks = beforeCells.map((cell) =>
+        cell.getAsNormalizedFullLink()
+      );
+
+      // Verify initial state - all should be nested documents with empty paths
+      expect(beforeLinks[0].path).toEqual([]);
+      expect(beforeLinks[1].path).toEqual([]);
+      expect(beforeLinks[2].path).toEqual([]);
+
+      // Store IDs for comparison
+      const idA = beforeLinks[0].id;
+      const idB = beforeLinks[1].id;
+      const idC = beforeLinks[2].id;
+
+      // Reorder the array - move first item to end
+      const items = [...listCell.get().items];
+      const [removed] = items.splice(0, 1);
+      items.push(removed);
+      listCell.set({ items });
+
+      // Get state after reordering
+      const afterReorder = listCell.get();
+      const afterCells = afterReorder.items.map((item: any) => item[toCell]());
+      const afterLinks = afterCells.map((cell) =>
+        cell.getAsNormalizedFullLink()
+      );
+
+      // Items should still be nested documents with empty paths
+      expect(afterLinks[0].path).toEqual([]);
+      expect(afterLinks[1].path).toEqual([]);
+      expect(afterLinks[2].path).toEqual([]);
+
+      // The IDs should match the reordered pattern (B, C, A)
+      expect(afterLinks[0].id).toBe(idB);
+      expect(afterLinks[1].id).toBe(idC);
+      expect(afterLinks[2].id).toBe(idA);
+    });
+
+    it("should handle array element resolution via proxy (TypeScript generics)", () => {
+      // This test uses TypeScript generics instead of JSON schema
+      // to test the proxy code path
+      const listCell = runtime.getCell<{ items: any[] }>(
+        space,
+        "array-proxy-test",
+        undefined,
+        tx,
+      );
+
+      // Create nested documents in the array
+      listCell.set({
+        items: [
+          { [ID]: "proxy-1", name: "Proxy 1", value: 100 },
+          { [ID]: "proxy-2", name: "Proxy 2", value: 200 },
+        ],
+      });
+
+      // Get the array result
+      const result = listCell.get();
+
+      // Convert items back to cells and check their links
+      const itemCells = result.items.map((item: any) => item[toCell]());
+      const links = itemCells.map((cell) => cell.getAsNormalizedFullLink());
+
+      // Verify the links point to unique documents (empty path)
+      expect(links[0].path).toEqual([]);
+      expect(links[1].path).toEqual([]);
+
+      // Verify they have different IDs (unique documents)
+      expect(links[0].id).not.toBe(links[1].id);
+
+      // Test array operations work correctly
+      const data = [...result.items];
+      data.splice(0, 1); // Remove first item
+      listCell.set({ items: data });
+
+      const updated = listCell.get();
+      expect(updated.items).toHaveLength(1);
+
+      // Verify the remaining item still points to its original document
+      const remainingCell = updated.items[0][toCell]();
+      const remainingLink = remainingCell.getAsNormalizedFullLink();
+      expect(remainingLink.path).toEqual([]);
+      expect(remainingLink.id).toBe(links[1].id);
     });
   });
 });

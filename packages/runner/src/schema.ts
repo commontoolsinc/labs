@@ -1,12 +1,10 @@
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
-import {
-  type JSONSchema,
-  type JSONValue,
-} from "./builder/types.ts";
+import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell, isStream } from "./cell.ts";
 import { type ReactivityLog } from "./scheduler.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
+import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -272,7 +270,7 @@ function annotateWithBackToCellSymbols(
     isRecord(value) && !isCell(value) && !isStream(value) &&
     !isQueryResultForDereferencing(value)
   ) {
-    value[toCell] = () => createCell(runtime, link, tx, true);
+    value[toCell] = () => createCell(runtime, link, tx);
     value[toOpaqueRef] = () => makeOpaqueRef(link);
   }
   // TODO(seefeld): Freeze the value to make it immutable.
@@ -406,7 +404,7 @@ export function validateAndTransform(
   // below we might still create a new Cell and it should point to the top of
   // this set of links.
   const ref = resolveLink(tx ?? runtime.edit(), link);
-  let value = (tx ?? runtime.edit()).readValueOrThrow(ref);
+  const value = (tx ?? runtime.edit()).readValueOrThrow(ref);
 
   // Check for undefined value and return processed default if available
   if (value === undefined && resolvedSchema?.default !== undefined) {
@@ -573,7 +571,7 @@ export function validateAndTransform(
   }
 
   if (resolvedSchema.type === "object") {
-    if (!isRecord(value)) value = {};
+    const keys = isRecord(value) ? Object.keys(value) : [];
 
     const result: Record<string, any> = {};
 
@@ -591,7 +589,10 @@ export function validateAndTransform(
         if (childSchema === undefined) {
           continue;
         }
-        if (childSchema.asCell || childSchema.asStream || key in value) {
+        if (
+          (childSchema.asCell || childSchema.asStream || keys.includes(key)) &&
+          (isRecord(value) || childSchema.default !== undefined)
+        ) {
           result[key] = validateAndTransform(
             runtime,
             tx,
@@ -612,7 +613,6 @@ export function validateAndTransform(
     }
 
     // Handle additional properties if defined
-    const keys = Object.keys(value);
     for (const key of keys) {
       if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
         const childSchema = runtime.cfc.getSchemaAtPath(
@@ -633,6 +633,9 @@ export function validateAndTransform(
       }
     }
 
+    if (!isRecord(value) && Object.keys(result).length === 0) {
+      return undefined;
+    }
     return annotateWithBackToCellSymbols(result, runtime, link, tx);
   }
 
@@ -647,15 +650,38 @@ export function validateAndTransform(
 
     // Now process elements after adding the array to seen
     for (let i = 0; i < value.length; i++) {
+      // If the element on the array is a link, we follow that link so the
+      // returned object is the current item at that location (otherwise the
+      // link would refer to "Nth element"). This is important when turning
+      // returned objects back into cells: We want to then refer to the actual
+      // object by default, not the array location.
+      //
+      // This makes
+      // ```ts
+      // const array = [...cell.get()];
+      // array.splice(index, 1);
+      // cell.set(array);
+      // ```
+      // work as expected.
+      let elementLink: NormalizedFullLink = {
+        ...link,
+        path: [...link.path, String(i)],
+        // TODO(seefeld): Should be `true` instead of `{}`
+        schema: resolvedSchema.items ?? {},
+      };
+      const maybeLink = readMaybeLink(tx ?? runtime.edit(), elementLink);
+      if (maybeLink) {
+        elementLink = {
+          ...maybeLink,
+          schema: elementLink.schema,
+          rootSchema: elementLink.rootSchema,
+        };
+      }
+
       result[i] = validateAndTransform(
         runtime,
         tx,
-        {
-          ...link,
-          path: [...link.path, String(i)],
-          // TOOD(seefeld): Should be `false` instead of `{}`
-          schema: resolvedSchema.items ?? {},
-        },
+        elementLink,
         log,
         seen,
       );

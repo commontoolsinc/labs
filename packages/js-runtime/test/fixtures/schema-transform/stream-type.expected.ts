@@ -7,9 +7,10 @@ interface State {
 const stateSchema = {
     type: "object",
     properties: {
-        events: { ...{
-                type: "string"
-            }, asStream: true },
+        events: {
+            type: "string",
+            asStream: true
+        },
         label: {
             type: "string"
         }

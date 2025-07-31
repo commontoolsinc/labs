@@ -148,6 +148,8 @@ export type JSONSchemaTypes =
 export type JSONSchema = {
   readonly $ref?: string;
   readonly $defs?: Readonly<Record<string, JSONSchema>>;
+  /** @deprecated Use `$defs` for 2019-09/Draft 8 or later */
+  readonly definitions?: Readonly<Record<string, JSONSchema | boolean>>;
 
   // Subschema logic
   readonly allOf?: readonly (JSONSchema | boolean)[]; // not validated
@@ -328,6 +330,12 @@ export type LiftFunction = {
   <T extends (...args: any[]) => any>(
     implementation: T,
   ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
+
+  <T, R>(
+    argumentSchema?: JSONSchema,
+    resultSchema?: JSONSchema,
+    implementation?: (input: T) => R,
+  ): ModuleFactory<T, R>;
 };
 
 // Helper type to make non-Cell and non-Stream properties readonly in handler state

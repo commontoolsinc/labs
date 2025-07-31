@@ -1648,7 +1648,7 @@ test(
 );
 
 test(
-  "list single fact with schema query and schema filter using $ref",
+  "list single fact with schema query and schema filter using $ref of #",
   DB,
   async (session) => {
     const v1 = Fact.assert({
@@ -1695,30 +1695,114 @@ test(
     assert(write2.ok);
     const c2 = Commit.toRevision(write2.ok);
 
+    const rootSchema: JSONSchema = {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "left": { "$ref": "#" },
+        "right": { "$ref": "#" },
+      },
+      "required": ["name"],
+    };
     const schemaSelector: SchemaSelector = {
       [doc2]: {
         [the]: {
           _: {
             path: ["left"],
             schemaContext: {
-              schema: {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "left": { "$ref": "#" },
-                  "right": { "$ref": "#" },
-                },
-                "required": ["name"],
+              schema: rootSchema,
+              rootSchema: rootSchema,
+            },
+          },
+        },
+      },
+    };
+
+    const result = session.querySchema({
+      cmd: "/memory/graph/query",
+      iss: alice.did(),
+      sub: space.did(),
+      args: {
+        selectSchema: schemaSelector,
+      },
+      prf: [],
+    });
+
+    assertExists(getResultForDoc(result, space.did(), doc1));
+    assertExists(getResultForDoc(result, space.did(), doc2));
+  },
+);
+
+test(
+  "list single fact with schema query and schema filter using $ref of definitions",
+  DB,
+  async (session) => {
+    const v1 = Fact.assert({
+      the,
+      of: doc1,
+      is: {
+        "value": {
+          "name": "Alice",
+        },
+      },
+    });
+    const v2 = Fact.assert({
+      the,
+      of: doc2,
+      is: {
+        "value": {
+          "name": "Bob",
+          "left": {
+            "$alias": {
+              "cell": {
+                "/": doc1.slice(3), // strip off 'of:'
               },
-              rootSchema: {
-                "type": "object",
-                "properties": {
-                  "name": { "type": "string" },
-                  "left": { "$ref": "#" },
-                  "right": { "$ref": "#" },
-                },
-                "required": ["name"],
-              },
+              "path": [],
+            },
+          },
+          "right": { "name": "Charlie " },
+        },
+      },
+    });
+    const tr1 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v1]),
+    });
+    const write1 = await session.transact(tr1);
+    assert(write1.ok);
+    const c1 = Commit.toRevision(write1.ok);
+    const tr2 = Transaction.create({
+      issuer: alice.did(),
+      subject: space.did(),
+      changes: Changes.from([v2]),
+    });
+    const write2 = await session.transact(tr2);
+    assert(write2.ok);
+    const c2 = Commit.toRevision(write2.ok);
+
+    const rootSchema: JSONSchema = {
+      "definitions": {
+        "TreeNode": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "left": { "$ref": "#/definitions/TreeNode" },
+            "right": { "$ref": "#/definitions/TreeNode" },
+          },
+          "required": ["name"],
+        },
+      },
+      "$ref": "#/definitions/TreeNode",
+    };
+    const schemaSelector: SchemaSelector = {
+      [doc2]: {
+        [the]: {
+          _: {
+            path: ["left"],
+            schemaContext: {
+              schema: rootSchema,
+              rootSchema: rootSchema,
             },
           },
         },
