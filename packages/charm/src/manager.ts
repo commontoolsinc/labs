@@ -917,10 +917,11 @@ export class CharmManager {
     await this.add([charm]);
 
     if (llmRequestId) {
+      const tx = this.runtime.edit();
       charm.getSourceCell(charmSourceCellSchema)?.key("llmRequestId")
-        .set(
-          llmRequestId,
-        );
+        .withTx(tx)
+        .set(llmRequestId);
+      await tx.commit();
     }
 
     return charm;
