@@ -114,12 +114,18 @@ export class RuntimeInternals extends EventTarget {
           throw new Error(`Could not navigate to cell that is not a charm.`);
         }
 
-        // NOTE(jake): Eventually, once we're doing multi-space navigation, we will
-        // need to replace this charmManager.getSpaceName() with a call to some
-        // sort of address book / dns-style server, OR just navigate to the DID.
+        // NOTE(jake): Eventually, once we're doing multi-space navigation, we
+        // will need to replace this charmManager.getSpaceName() with a call to
+        // some sort of address book / dns-style server, OR just navigate to the
+        // DID.
 
-        // Use the human-readable space name from CharmManager instead of the DID
-        navigateToCharm(charmManager.getSpaceName(), id);
+        // Await storage being synced, at least for now, as the page fully
+        // reloads. Once we have in-page navigation with reloading, we don't
+        // need this anymore
+        runtime.storage.synced().then(() => {
+          // Use the human-readable space name from CharmManager instead of DID
+          navigateToCharm(charmManager.getSpaceName(), id);
+        });
       },
     });
 
