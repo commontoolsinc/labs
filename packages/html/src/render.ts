@@ -127,7 +127,7 @@ const bindChildren = (
         const [childElement, childCancel] = renderNode(childValue);
         newRendered = {
           node: childElement ?? document.createTextNode(""),
-          cancel: childCancel,
+          cancel: childCancel ?? (() => {}),
         };
       } else {
         if (childValue === null || childValue === undefined) {
@@ -145,10 +145,11 @@ const bindChildren = (
       if (currentNode) {
         // Replace the previous DOM node, if any
         currentNode.replaceWith(newRendered.node);
+        keyedChildren.get(key)?.cancel();
         // Update the mapping entry to capture any newly-rendered node.
         keyedChildren.set(key, {
           ...keyedChildren.get(key)!,
-          node: newRendered.node,
+          ...newRendered,
         });
       }
 
