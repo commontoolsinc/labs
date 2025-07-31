@@ -96,6 +96,9 @@ export class CTList extends BaseElement {
   // Private state for managing editing
   @state()
   private _editing: Cell<ListItem> | null = null;
+  
+  // Subscription cleanup function
+  private _unsubscribe: (() => void) | null = null;
 
   constructor() {
     super();
@@ -322,6 +325,31 @@ export class CTList extends BaseElement {
   // Lifecycle methods for Cell binding management
   override updated(changedProperties: Map<string, any>) {
     super.updated(changedProperties);
+    
+    // Handle value changes
+    if (changedProperties.has('value')) {
+      // Clean up previous subscription
+      if (this._unsubscribe) {
+        this._unsubscribe();
+        this._unsubscribe = null;
+      }
+      
+      // Subscribe to new Cell if it exists
+      if (this.value && isCell(this.value)) {
+        this._unsubscribe = this.value.sink(() => {
+          this.requestUpdate();
+        });
+      }
+    }
+  }
+  
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    // Clean up subscription
+    if (this._unsubscribe) {
+      this._unsubscribe();
+      this._unsubscribe = null;
+    }
   }
 
   private addItem(title: string): void {
