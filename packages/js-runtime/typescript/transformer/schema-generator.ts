@@ -97,17 +97,26 @@ function typeToJsonSchemaHelper(
     // First time seeing this cyclic type - generate the full schema
     // but we'll add it to definitions and return a $ref if this is not the root
     if (!isRootType) {
+      // Check if we already have a definition for this type
+      if (definitions[typeName]) {
+        return { "$ref": `#/definitions/${typeName}` };
+      }
+
       // Mark that we're processing this type
       seenTypes.add(type);
 
-      // Generate the full schema
+      // Generate the full schema WITHOUT checking for cycles again
+      // We temporarily remove this type from cyclicTypes to avoid infinite recursion
+      const tempCyclicTypes = new Set(cyclicTypes);
+      tempCyclicTypes.delete(type);
+
       const schema = typeToJsonSchemaHelper(
         type,
         checker,
         typeNode,
         depth,
         seenTypes,
-        cyclicTypes,
+        tempCyclicTypes,
         definitions,
         false,
       );
