@@ -431,6 +431,11 @@ export class RegularCell<T> implements Cell<T> {
 
   set(newValue: Cellify<T> | T): void {
     if (!this.tx) throw new Error("Transaction required for set");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
     diffAndUpdate(
       this.runtime,
@@ -452,6 +457,11 @@ export class RegularCell<T> implements Cell<T> {
     if (!isRecord(values)) {
       throw new Error("Can't update with non-object value");
     }
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     // Get current value, following aliases and references
     const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
@@ -495,6 +505,10 @@ export class RegularCell<T> implements Cell<T> {
     ...value: any[]
   ): void {
     if (!this.tx) throw new Error("Transaction required for push");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
@@ -650,11 +664,17 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   getRaw(options?: IReadOptions): any {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   setRaw(value: any): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     try {
       value = JSON.parse(JSON.stringify(value));
     } catch (e) {
@@ -688,6 +708,7 @@ export class RegularCell<T> implements Cell<T> {
     >
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] },
     ) as string | undefined;
@@ -714,6 +735,11 @@ export class RegularCell<T> implements Cell<T> {
 
   setSourceCell(sourceCell: Cell<any>): void {
     if (!this.tx) throw new Error("Transaction required for setSourceCell");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     const sourceLink = sourceCell.getAsNormalizedFullLink();
     if (sourceLink.path.length > 0) {
       throw new Error("Source cell must have empty path for now");
