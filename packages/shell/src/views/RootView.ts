@@ -37,7 +37,7 @@ export class XRootView extends LitElement {
 
   @state()
   // Non-private for typing in `updated()` callback
-  _app = { apiUrl: API_URL, spaceName: "common-knowledge" } as AppState;
+  _app = { apiUrl: API_URL } as AppState;
 
   @property()
   keyStore?: KeyStore;

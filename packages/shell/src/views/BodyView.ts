@@ -2,6 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
+import { CharmController } from "@commontools/charm/ops";
 
 export class XBodyView extends BaseView {
   static override styles = css`
@@ -16,15 +17,15 @@ export class XBodyView extends BaseView {
   rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  activeCharmId?: string;
+  activeCharm?: CharmController;
 
   @property()
   showShellCharmListView = false;
 
   override render() {
     const charmView = html`
-      <x-charm-view .rt="${this.rt}" .charmId="${this
-        .activeCharmId}"></x-charm-view>
+      <x-charm-view .rt="${this.rt}" .charm="${this
+        .activeCharm}"></x-charm-view>
     `;
     const spaceView = html`
       <x-space-view
@@ -33,7 +34,7 @@ export class XBodyView extends BaseView {
         .showShellCharmListView}"
       ></x-space-view>
     `;
-    const view = this.activeCharmId ? charmView : spaceView;
+    const view = this.activeCharm ? charmView : spaceView;
     return html`
       <div>${view}</div>
     `;

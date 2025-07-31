@@ -8,6 +8,7 @@ import { styleMap } from "lit/directives/style-map.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { InspectorConflicts, InspectorUpdateEvent } from "../lib/inspector.ts";
 import "../components/Flex.ts";
+import { CharmController } from "@commontools/charm/ops";
 
 type ConnectionStatus =
   | "connecting"
@@ -89,16 +90,6 @@ export class XHeaderView extends BaseView {
     }
   `;
 
-  private _charm = new Task(this, {
-    task: async ([charmId, rt]) => {
-      if (!charmId || !rt) {
-        return;
-      }
-      return await rt.cc().get(charmId!);
-    },
-    args: () => [this.charmId, this.rt],
-  });
-
   @property()
   private keyStore?: KeyStore;
 
@@ -106,7 +97,7 @@ export class XHeaderView extends BaseView {
   private rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  charmId?: string;
+  activeCharm?: CharmController;
 
   @property({ attribute: false })
   spaceName?: string;
@@ -211,8 +202,8 @@ export class XHeaderView extends BaseView {
   };
 
   override render() {
-    const activeCharmName = this._charm.value
-      ? this._charm.value.name()
+    const activeCharmName = this.activeCharm
+      ? this.activeCharm.name()
       : undefined;
     const spaceLink = this.spaceName
       ? html`
@@ -220,11 +211,11 @@ export class XHeaderView extends BaseView {
           .spaceName}</a>
       `
       : null;
-    const charmLink = activeCharmName && this.spaceName && this.charmId
+    const charmLink = activeCharmName && this.spaceName && this.activeCharm
       ? html`
         <a class="charm-link" href="${getNavigationHref(
           this.spaceName,
-          this.charmId,
+          this.activeCharm.id,
         )}">${activeCharmName}</a>
       `
       : null;
