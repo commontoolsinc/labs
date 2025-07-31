@@ -1,5 +1,7 @@
-import { isObject } from "@commontools/utils/types";
+import { isObject, isRecord } from "@commontools/utils/types";
+import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
+import { CycleTracker } from "./traverse.ts";
 
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be
@@ -10,6 +12,8 @@ export const Classification = {
   Secret: "secret",
   TopSecret: "topsecret",
 } as const;
+
+const logger = getLogger("cfc", { enabled: true, level: "warn" });
 
 // We'll often work with the transitive closure of this graph.
 // I currently require this to be a DAG, but I could support cycles
@@ -156,41 +160,83 @@ export class ContextualFlowControl {
     this.reachable = ContextualFlowControl.reachableNodes(lattice);
   }
 
-  // Collect any required classification tags required by the schema.
-  // This could be made more conservative by combining the schema with the object
-  // If our object lacks any of the fields that would have a higher classification,
-  // we don't need to consider them.
-  public joinSchema(
+  /**
+   * Collect any required classification tags required by the schema.
+   * This could be made more conservative by combining the schema with the object
+   * If our object lacks any of the fields that would have a higher classification,
+   * we don't need to consider them.
+   *
+   * @param joined set to which we will add any classification tags
+   * @param schema the schema with tags
+   * @param rootSchema the root schema
+   * @param cycleTracker used to avoid reference cycles
+   */
+  static joinSchema(
     joined: Set<string>,
     schema: JSONSchema | boolean,
-    rootSchema: JSONSchema | boolean = schema,
+    rootSchema: JSONSchema | boolean,
+    cycleTracker: CycleTracker<JSONSchema> = new CycleTracker<JSONSchema>(),
   ): Set<string> {
     if (typeof schema === "boolean") {
+      return joined;
+    }
+    using t = cycleTracker.include(schema);
+    if (t === null) {
+      // we've already joined this
       return joined;
     }
     if (schema.ifc) {
       if (schema.ifc?.classification) {
         for (const classification of schema.ifc.classification) {
-          for (const reachable of this.reachable.get(classification) ?? []) {
-            joined.add(reachable);
-          }
+          joined.add(classification);
         }
       }
     }
     if (schema.properties && typeof schema.properties === "object") {
       for (const value of Object.values(schema.properties)) {
-        this.joinSchema(joined, value, rootSchema);
+        ContextualFlowControl.joinSchema(
+          joined,
+          value,
+          rootSchema,
+          cycleTracker,
+        );
       }
     }
     if (
       schema.additionalProperties &&
       typeof schema.additionalProperties === "object"
     ) {
-      this.joinSchema(joined, schema.additionalProperties, rootSchema);
+      ContextualFlowControl.joinSchema(
+        joined,
+        schema.additionalProperties,
+        rootSchema,
+        cycleTracker,
+      );
     } else if (schema.items && typeof schema.items === "object") {
-      this.joinSchema(joined, schema.items, rootSchema);
+      ContextualFlowControl.joinSchema(
+        joined,
+        schema.items,
+        rootSchema,
+        cycleTracker,
+      );
     } else if (schema.$ref) {
-      console.log("Error: $ref not supported yet");
+      // Support ifc tags beside the ref tag
+      if (schema.ifc !== undefined && schema.ifc.classification) {
+        for (const classification of schema.ifc.classification) {
+          joined.add(classification);
+        }
+      }
+      // Follow the reference
+      const resolvedSchema = ContextualFlowControl.resolveSchemaRefOrThrow(
+        rootSchema,
+        schema.$ref,
+      );
+      ContextualFlowControl.joinSchema(
+        joined,
+        resolvedSchema,
+        rootSchema,
+        cycleTracker,
+      );
     }
     return joined;
   }
@@ -204,7 +250,8 @@ export class ContextualFlowControl {
     const classifications = (extraClassifications !== undefined)
       ? new Set<string>(extraClassifications)
       : new Set<string>();
-    this.joinSchema(classifications, schema, rootSchema);
+    ContextualFlowControl.joinSchema(classifications, schema, rootSchema);
+
     return (classifications.size === 0) ? undefined : this.lub(classifications);
   }
 
@@ -275,6 +322,75 @@ export class ContextualFlowControl {
     throw Error("Improper lattice");
   }
 
+  // TODO(@ubik2): We may need to collect ifc labels as we walk the tree
+  // This could be dome similarly to schemaAtPath, but that assumes
+  // our cursor points at a schema, while we will walk objects like the
+  // $defs that are not schema.
+  // In the case where we point to a definition, this should already do
+  // the right thing, since those are all at the top level. However, we
+  // could have a reference to an anchor (not currently allowed), and
+  // for those, if the User is secret, their Address should be too.
+  /**
+   * Resolve a schema that's just a $ref.
+   * This doesn't currently handle $anchor tags or external documents
+   *
+   * @param rootSchema Top level document for the schema which will be used
+   *     to resolve the $ref.
+   * @param schemaRef the string value of the $ref
+   * @returns an updated SchemaContext, with a schema that points to the
+   *     $ref's target or undefined if the $ref could not be resolved.
+   */
+  static resolveSchemaRef(
+    rootSchema: JSONSchema,
+    schemaRef: string,
+  ): JSONSchema | boolean | undefined {
+    // We only support schemaRefs that are URI fragments
+    if (!schemaRef.startsWith("#")) {
+      logger.warn(() => ["Unsupported $ref in schema: ", schemaRef]);
+      return undefined;
+    }
+    // URI fragment schemaRefs are JSONPointers, so split and unescape
+    const pathToDef = schemaRef.split("/").map((p) =>
+      p.replace("~1", "/").replace("~0", "~")
+    );
+    // We don't support anchors yet (e.g. `"$ref": "#address"`)
+    if (pathToDef[0] !== "#") {
+      logger.warn(() => ["Unsupported anchor $ref in schema: ", schemaRef]);
+      return undefined;
+    }
+    let schemaCursor: unknown = rootSchema;
+    // start at 1, since the 0 element is "#"
+    for (let i = 1; i < pathToDef.length; i++) {
+      if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
+        logger.warn(() => ["Unresolved $ref in schema: ", schemaRef]);
+        return undefined;
+      }
+      schemaCursor = schemaCursor[pathToDef[i]];
+    }
+    return schemaCursor as JSONSchema | boolean;
+  }
+
+  static resolveSchemaRefOrThrow(
+    rootSchema: JSONSchema | boolean | undefined,
+    schemaRef: string | undefined,
+  ) {
+    if (!isObject(rootSchema)) {
+      // We'd need a rootSchema to make this work
+      // We don't need to do real cycle detection, since the path is limited
+      throw new Error("Found $ref without rootSchema object");
+    } else if (typeof schemaRef !== "string") {
+      throw new Error("Found non-string $ref");
+    }
+    const resolved = ContextualFlowControl.resolveSchemaRef(
+      rootSchema,
+      schemaRef,
+    );
+    if (resolved === undefined) {
+      throw new Error(`Failed to resolve $ref: ${schemaRef}`);
+    }
+    return resolved;
+  }
+
   // This is a variant of schemaAtPath that allows for an undefined schema.
   // It will return the empty object instead of true and undefined instead of false.
   getSchemaAtPath(
@@ -306,20 +422,22 @@ export class ContextualFlowControl {
       : new Set<string>();
     let cursor = schema;
     for (const part of path) {
+      // If the cursor is a $ref, get the target location
+      if (isObject(cursor) && "$ref" in cursor) {
+        // Support ifc tags beside the ref tag
+        if (cursor.ifc !== undefined && cursor.ifc.classification) {
+          for (const classification of cursor.ifc.classification) {
+            joined.add(classification);
+          }
+        }
+        // Follow the reference
+        cursor = ContextualFlowControl.resolveSchemaRefOrThrow(
+          rootSchema,
+          cursor.$ref,
+        );
+      }
       if (typeof cursor === "boolean") {
         break;
-      } else if ("$ref" in cursor) {
-        if (rootSchema === undefined) {
-          // We'd need a rootSchema to make this work
-          // We don't need to do real cycle detection, since the path is limited
-          throw new Error("schemaAtPath encountered $ref without rootSchema");
-        } else if (cursor["$ref"] === "#") {
-          cursor = rootSchema;
-        } else {
-          throw new Error(
-            "schemaAtPath doesn't support $defs yet, and encountered complex $ref",
-          );
-        }
       } else if (ContextualFlowControl.isTrueSchema(cursor)) {
         // wildcard schema -- equivalent to true, but we can add ifc tags
         break;

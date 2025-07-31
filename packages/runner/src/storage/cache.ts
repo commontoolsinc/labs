@@ -563,10 +563,13 @@ export class Replica {
         const selector = schemaPathSelector ??
           { path: [], schemaContext: SchemaNone };
         setSelector(schemaSelector, of, the, "_", selector);
-        // Since we're accessing the entire document, we should base our classification on the rootSchema
-        this.cfc.joinSchema(
+        // Since we're accessing the entire document, we should base our
+        // classification on the rootSchema
+        const rootSchema = selector.schemaContext?.rootSchema ?? false;
+        ContextualFlowControl.joinSchema(
           classifications,
-          selector.schemaContext?.rootSchema ?? false,
+          rootSchema,
+          rootSchema,
         );
       } else {
         // We're using the "cached" mode, and we don't use schema queries
@@ -586,7 +589,8 @@ export class Replica {
         excludeSent: true,
       };
       if (classifications.size > 0) {
-        queryArgs.classification = [...classifications];
+        const lubClassification = this.cfc.lub(classifications);
+        queryArgs.classification = [lubClassification];
       }
       const query = this.remote.query(queryArgs);
       const { error } = await query.promise;
