@@ -13,6 +13,54 @@ type ListItem = {
 };
 
 /**
+ * Finds the index of an item in a Cell array by comparing Cell equality
+ * @param listCell - The Cell containing the array
+ * @param itemCell - The Cell to find in the array
+ * @returns The index of the item, or -1 if not found
+ */
+function findCellIndex<T>(listCell: Cell<T[]>, itemCell: Cell<T>): number {
+  const length = listCell.get().length;
+  for (let i = 0; i < length; i++) {
+    if (itemCell.equals(listCell.key(i))) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Executes a mutation on a Cell within a transaction
+ * @param cell - The Cell to mutate
+ * @param mutator - Function that performs the mutation
+ */
+function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
+  const tx = cell.runtime.edit();
+  mutator(cell.withTx(tx));
+  tx.commit();
+}
+
+/**
+ * Status configuration with badge and styling information
+ */
+const STATUS_CONFIG = {
+  todo: { text: "Todo", icon: "📋", cssClass: "todo" },
+  "in-progress": { text: "In Progress", icon: "⚡", cssClass: "in-progress" },
+  done: { text: "Done", icon: "✅", cssClass: "done" },
+} as const;
+
+/**
+ * Gets status configuration for a given status string
+ */
+function getStatusConfig(status?: string) {
+  if (!status) return { text: "Unknown", icon: "📄", cssClass: "default" };
+  return STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] || {
+    text: status,
+    icon: "📄",
+    cssClass: "default",
+  };
+}
+
+/**
  * Action configuration for list items
  */
 export interface CtListAction {
@@ -457,30 +505,19 @@ export class CTList extends BaseElement {
     }
 
     const newItem = { title } as ListItem;
-    const cell = this.value;
-    const tx = cell.runtime.edit();
-    cell.withTx(tx).push(newItem);
-    tx.commit();
-
+    mutateCell(this.value, (cell) => cell.push(newItem));
     this.requestUpdate();
   }
 
   private removeItem(itemToRemove: Cell<any>): void {
     if (!this.value) {
-      console.warn("Cannot add item to an empty list");
+      console.warn("Cannot remove item from an empty list");
       return;
     }
 
-    const length = this.value.get().length;
-    for (let i = 0; i < length; i++) {
-      const c = this.value.key(i);
-      if (itemToRemove.equals(c)) {
-        const index = i;
-        const cell = this.value;
-        const tx = cell.runtime.edit();
-        cell.withTx(tx).get().splice(index, 1);
-        tx.commit();
-      }
+    const index = findCellIndex(this.value, itemToRemove);
+    if (index !== -1) {
+      mutateCell(this.value, (cell) => cell.get().splice(index, 1));
     }
 
     this.requestUpdate();
@@ -550,14 +587,10 @@ export class CTList extends BaseElement {
     if (!this.editable) return;
     if (!isCell(this.value)) return;
 
-    const length = this.value.get().length;
-    for (let i = 0; i < length; i++) {
-      const c = this.value.key(i);
-      if (item.equals(c)) {
-        this._editing = item;
-        this.requestUpdate();
-        return;
-      }
+    const index = findCellIndex(this.value, item);
+    if (index !== -1) {
+      this._editing = item;
+      this.requestUpdate();
     }
   }
 
@@ -567,24 +600,19 @@ export class CTList extends BaseElement {
 
     const trimmedTitle = newTitle.trim();
     if (trimmedTitle) {
-      const length = this.value.get().length;
-      for (let i = 0; i < length; i++) {
-        const c = this.value.key(i);
-        if (item.equals(c)) {
-          const cell = this.value;
-          const tx = cell.runtime.edit();
-          cell.withTx(tx).key(i).key("title").set(trimmedTitle);
-          tx.commit();
+      const index = findCellIndex(this.value, item);
+      if (index !== -1) {
+        mutateCell(this.value, (cell) => {
+          cell.key(index).key("title").set(trimmedTitle);
+        });
 
-          this.emit("ct-edit-item", {
-            item: { ...item, title: trimmedTitle },
-            oldItem: item,
-          });
+        this.emit("ct-edit-item", {
+          item: { ...item, title: trimmedTitle },
+          oldItem: item,
+        });
 
-          this._editing = null;
-          this.requestUpdate();
-          return;
-        }
+        this._editing = null;
+        this.requestUpdate();
       }
     }
   }
@@ -773,46 +801,19 @@ export class CTList extends BaseElement {
   private renderStatusBadge(item: ListItem) {
     if (!item.status) return "";
 
-    // Use explicit statusBadge if provided, otherwise derive from status
-    const badge = this.getDefaultStatusBadge(item.status);
-    const cssClass = this.getStatusCssClass(item.status || badge.text);
+    const config = getStatusConfig(item.status);
 
     return html`
-      <span class="status-badge ${cssClass}">
-        ${badge.icon
+      <span class="status-badge ${config.cssClass}">
+        ${config.icon
         ? html`
-          <span class="status-badge-icon">${badge.icon}</span>
+          <span class="status-badge-icon">${config.icon}</span>
         `
-        : ""} ${badge.text}
+        : ""} ${config.text}
       </span>
     `;
   }
 
-  private getDefaultStatusBadge(status?: string) {
-    switch (status) {
-      case "todo":
-        return { text: "Todo", icon: "📋" };
-      case "in-progress":
-        return { text: "In Progress", icon: "⚡" };
-      case "done":
-        return { text: "Done", icon: "✅" };
-      default:
-        return { text: status || "Unknown", icon: "📄" };
-    }
-  }
-
-  private getStatusCssClass(status: string): string {
-    switch (status) {
-      case "todo":
-        return "todo";
-      case "in-progress":
-        return "in-progress";
-      case "done":
-        return "done";
-      default:
-        return "default";
-    }
-  }
 
   private renderAddItem() {
     return html`
