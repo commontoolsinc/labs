@@ -196,6 +196,7 @@ describe("Query", () => {
     const schemaContext = {
       schema: {
         "type": "object",
+        "additionalProperties": true,
       } as const satisfies JSONSchema,
       rootSchema: true,
     };

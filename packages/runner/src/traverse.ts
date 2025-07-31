@@ -807,16 +807,21 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       const schemaProperties = schema["properties"] as
         | Record<string, JSONSchema | boolean>
         | undefined;
-      const propSchema = (
-          isObject(schemaProperties) &&
-          schemaProperties !== undefined &&
-          propKey in schemaProperties
-        )
-        ? schemaProperties[propKey]
-        : (isObject(schema["additionalProperties"]) ||
-            schema["additionalProperties"] === false)
-        ? schema["additionalProperties"] as JSONSchema | boolean
-        : true;
+      const propSchema =
+        (isObject(schemaProperties) && propKey in schemaProperties)
+          ? schemaProperties[propKey]
+          : (isObject(schema["additionalProperties"]) ||
+              typeof schema["additionalProperties"] === "boolean")
+          ? schema["additionalProperties"] as JSONSchema | boolean
+          : undefined;
+      // Normally, if additionalProperties is not specified, it would
+      // default to true. However, we treat this specially, where we
+      // don't invalidate the object, but also don't descend down
+      // into that property.
+      if (propSchema === undefined) {
+        filteredObj[propKey] = propValue;
+        continue;
+      }
       const val = this.traverseWithSchemaContext({
         ...doc,
         path: [...doc.path, propKey],
