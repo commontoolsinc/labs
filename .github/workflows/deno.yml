@@ -352,6 +352,7 @@ jobs:
         run: |
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
+          TOOLSHED_API_URL=http://localhost:8000/ \
           deno task integration
 
       - name: 🧪 RUNNER integration tests
