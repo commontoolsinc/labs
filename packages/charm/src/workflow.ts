@@ -885,7 +885,14 @@ export async function processWorkflow(
     return form;
   } catch (error) {
     const totalTime = performance.now() - startTime;
-    console.warn("workflow failed:", error);
+    // Temporary stringification for rendering within astral
+    const message = error && typeof error === "object" && "message" in error
+      ? error.message
+      : "";
+    const stack = error && typeof error === "object" && "stack" in error
+      ? error.stack
+      : "";
+    console.warn("workflow failed:", message, stack);
     console.log(`Workflow failed after ${totalTime.toFixed(2)}ms`);
 
     globalThis.dispatchEvent(
