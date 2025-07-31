@@ -8,8 +8,6 @@ import "../ct-input/ct-input.ts";
 
 type ListItem = {
   title: string;
-  done?: boolean;
-  status?: string;
 };
 
 /**
@@ -39,26 +37,6 @@ function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
   tx.commit();
 }
 
-/**
- * Status configuration with badge and styling information
- */
-const STATUS_CONFIG = {
-  todo: { text: "Todo", icon: "📋", cssClass: "todo" },
-  "in-progress": { text: "In Progress", icon: "⚡", cssClass: "in-progress" },
-  done: { text: "Done", icon: "✅", cssClass: "done" },
-} as const;
-
-/**
- * Gets status configuration for a given status string
- */
-function getStatusConfig(status?: string) {
-  if (!status) return { text: "Unknown", icon: "📄", cssClass: "default" };
-  return STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] || {
-    text: status,
-    icon: "📄",
-    cssClass: "default",
-  };
-}
 
 /**
  * Action configuration for list items
@@ -69,15 +47,6 @@ export interface CtListAction {
   event?: string;
 }
 
-/**
- * Context menu action configuration
- */
-export interface CtListContextAction {
-  label: string;
-  event: string;
-  icon?: string;
-  disabled?: boolean;
-}
 
 /**
  * CTList - A list component that renders items with add/remove functionality
@@ -90,15 +59,12 @@ export interface CtListContextAction {
  * @attr {boolean} readonly - Whether the list is read-only
  * @attr {boolean} editable - Whether individual items can be edited in-place
  * @attr {CtListAction} action - Action button config
- * @attr {CtListContextAction[]} contextActions - Context menu actions
  *
  * @fires ct-add-item - Fired when adding an item with detail: { message }
  * @fires ct-remove-item - Fired when removing an item with detail: { item }
  * @fires ct-accept-item - Fired when accepting an item with detail: { item }
  * @fires ct-action-item - Fired for custom actions with detail: { item }
  * @fires ct-edit-item - Fired when editing an item with detail: { item, oldItem }
- * @fires ct-context-action - Fired for context menu actions with detail: { item, action }
- * @fires ct-view-subtasks - Fired when clicking on subtask badge with detail: { item }
  *
  * @example
  * <ct-list .value="${items}" title="My List" .action="${{type: 'accept'}}" @ct-accept-item="${handleAccept}"></ct-list>
@@ -124,48 +90,17 @@ export class CTList extends BaseElement {
   @property()
   action: CtListAction | null = { type: "remove" };
 
-  @property()
-  contextActions: CtListContextAction[] = [];
 
   // Removed cellController - working directly with value/Cell
 
-  // Private state for managing editing and context menu
+  // Private state for managing editing
   @state()
   private _editing: Cell<ListItem> | null = null;
-  private _activeContextMenu:
-    | { item: Cell<ListItem>; x: number; y: number }
-    | null = null;
 
   constructor() {
     super();
   }
 
-  override connectedCallback() {
-    super.connectedCallback();
-    // Add global click listener to close context menu
-    document.addEventListener("click", this.handleGlobalClick);
-    document.addEventListener("contextmenu", this.handleGlobalContextMenu);
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    // Remove global listeners
-    document.removeEventListener("click", this.handleGlobalClick);
-    document.removeEventListener("contextmenu", this.handleGlobalContextMenu);
-  }
-
-  private handleGlobalClick = () => {
-    this._activeContextMenu = null;
-    this.requestUpdate();
-  };
-
-  private handleGlobalContextMenu = (e: MouseEvent) => {
-    // Allow context menu inside our component, but close it elsewhere
-    if (!this.contains(e.target as Node)) {
-      this._activeContextMenu = null;
-      this.requestUpdate();
-    }
-  };
 
   static override styles = css`
     :host {
@@ -382,115 +317,6 @@ export class CTList extends BaseElement {
       background-color: #4b5563;
     }
 
-    /* Context menu styles */
-    .context-menu {
-      position: fixed;
-      background: var(--background);
-      border: var(--list-border);
-      border-radius: var(--list-border-radius);
-      box-shadow:
-        0 10px 15px -3px rgba(0, 0, 0, 0.1),
-        0 4px 6px -2px rgba(0, 0, 0, 0.05);
-      z-index: 1000;
-      min-width: 150px;
-      padding: 0.25rem;
-    }
-
-    .context-menu-item {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 0.75rem;
-      cursor: pointer;
-      border-radius: 0.25rem;
-      font-size: 0.875rem;
-      color: var(--foreground);
-      transition: background-color 0.1s;
-    }
-
-    .context-menu-item:hover {
-      background-color: var(--muted);
-    }
-
-    .context-menu-item.disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .context-menu-item.disabled:hover {
-      background-color: transparent;
-    }
-
-    .context-menu-icon {
-      width: 1rem;
-      height: 1rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    /* Status badge styles */
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.25rem;
-      padding: 0.125rem 0.5rem;
-      border-radius: 9999px;
-      font-size: 0.75rem;
-      font-weight: 500;
-      white-space: nowrap;
-      margin-left: auto;
-      flex-shrink: 0;
-    }
-
-    .status-badge.todo {
-      background-color: #fbbf24;
-      color: #92400e;
-    }
-
-    .status-badge.in-progress {
-      background-color: #60a5fa;
-      color: #1e40af;
-    }
-
-    .status-badge.done {
-      background-color: #34d399;
-      color: #065f46;
-    }
-
-    .status-badge.default {
-      background-color: var(--muted);
-      color: var(--muted-foreground);
-    }
-
-    .status-badge-icon {
-      font-size: 0.875rem;
-    }
-
-    /* Subtask count badge styles */
-    .subtask-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.25rem;
-      padding: 0.125rem 0.375rem;
-      border-radius: 9999px;
-      font-size: 0.75rem;
-      font-weight: 500;
-      background-color: #e5e7eb;
-      color: #374151;
-      margin-left: 0.5rem;
-      flex-shrink: 0;
-      cursor: pointer;
-      transition: background-color 0.1s;
-    }
-
-    .subtask-badge:hover {
-      background-color: #d1d5db;
-    }
-
-    .subtask-badge-icon {
-      font-size: 0.75rem;
-    }
   `;
 
   // Lifecycle methods for Cell binding management
@@ -540,35 +366,6 @@ export class CTList extends BaseElement {
     }
   }
 
-  private handleItemContextMenu(event: MouseEvent, item: Cell<ListItem>) {
-    if (this.contextActions.length === 0) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    this._activeContextMenu = {
-      item,
-      x: event.clientX,
-      y: event.clientY,
-    };
-    this.requestUpdate();
-  }
-
-  private handleContextAction(
-    action: CtListContextAction,
-    item: Cell<ListItem>,
-  ) {
-    if (action.disabled) return;
-
-    this._activeContextMenu = null;
-    this.emit("ct-context-action", { item, action });
-    this.emit(action.event, { item });
-    this.requestUpdate();
-  }
-
-  private handleViewSubtasks(item: Cell<ListItem>) {
-    this.emit("ct-view-subtasks", { item });
-  }
 
   private handleAddItem(event: Event) {
     event.preventDefault();
@@ -654,7 +451,6 @@ export class CTList extends BaseElement {
         ${!this.readonly ? this.renderAddItem() : ""}
       </div>
 
-      ${this._activeContextMenu ? this.renderContextMenu() : ""}
     `;
   }
 
@@ -707,7 +503,6 @@ export class CTList extends BaseElement {
     return html`
       <div
         class="list-item"
-        @contextmenu="${(e: MouseEvent) => this.handleItemContextMenu(e, item)}"
       >
         <div class="item-bullet"></div>
         <div
@@ -718,7 +513,7 @@ export class CTList extends BaseElement {
         >
           ${item.get().title}
         </div>
-        ${this.renderStatusBadge(item.get())} ${this.editable && !this.readonly
+        ${this.editable && !this.readonly
         ? html`
           <button
             class="item-action edit"
@@ -769,50 +564,6 @@ export class CTList extends BaseElement {
     `;
   }
 
-  private renderContextMenu() {
-    if (!this._activeContextMenu) return "";
-
-    const { item, x, y } = this._activeContextMenu;
-
-    return html`
-      <div
-        class="context-menu"
-        style="left: ${x}px; top: ${y}px;"
-        @click="${(e: Event) => e.stopPropagation()}"
-      >
-        ${this.contextActions.map((action) =>
-        html`
-          <div
-            class="context-menu-item ${action.disabled ? "disabled" : ""}"
-            @click="${() => this.handleContextAction(action, item)}"
-          >
-            ${action.icon
-            ? html`
-              <span class="context-menu-icon">${action.icon}</span>
-            `
-            : ""} ${action.label}
-          </div>
-        `
-      )}
-      </div>
-    `;
-  }
-
-  private renderStatusBadge(item: ListItem) {
-    if (!item.status) return "";
-
-    const config = getStatusConfig(item.status);
-
-    return html`
-      <span class="status-badge ${config.cssClass}">
-        ${config.icon
-        ? html`
-          <span class="status-badge-icon">${config.icon}</span>
-        `
-        : ""} ${config.text}
-      </span>
-    `;
-  }
 
 
   private renderAddItem() {
