@@ -182,7 +182,12 @@ export class Storage implements IStorage {
     if (!this.shim) {
       const { space, id } = cell.getAsNormalizedFullLink();
       const storageProvider = this._getStorageProviderForSpace(space);
-      await storageProvider.sync(id, JSON.parse(JSON.stringify(selector)));
+      await storageProvider.sync(
+        id,
+        selector !== undefined
+          ? JSON.parse(JSON.stringify(selector))
+          : undefined,
+      );
       return cell;
     }
 
