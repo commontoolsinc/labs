@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import { Task } from "@lit/task";
+import { CharmController } from "@commontools/charm/ops";
 
 export class XCharmView extends BaseView {
   static override styles = css`
@@ -15,25 +15,15 @@ export class XCharmView extends BaseView {
   rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  charmId?: string;
-
-  private _charm = new Task(this, {
-    task: async ([charmId, rt]) => {
-      if (!charmId || !rt) {
-        return;
-      }
-      return await rt.cc().get(charmId!);
-    },
-    args: () => [this.charmId, this.rt],
-  });
+  charm?: CharmController;
 
   override render() {
-    if (!this._charm.value) {
+    if (!this.charm) {
       return html`
         <x-spinner></x-spinner>
       `;
     }
-    const cell = this._charm.value.getCell();
+    const cell = this.charm.getCell();
     return html`
       <ct-render .cell="${cell}"></ct-render>
     `;

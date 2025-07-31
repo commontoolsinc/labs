@@ -7,6 +7,8 @@ import { KeyStore } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { InspectorController } from "../lib/inspector-controller.ts";
 import "./InspectorView.ts";
+import { Task } from "@lit/task";
+import { CharmController } from "@commontools/charm/ops";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -41,6 +43,22 @@ export class XAppView extends BaseView {
   @property({ attribute: false })
   private keyStore?: KeyStore;
 
+  private _activeCharm = new Task(this, {
+    task: async ([app, rt]): Promise<CharmController | undefined> => {
+      if (!app || !app.activeCharmId || !rt) {
+        return;
+      }
+      const current: CharmController | undefined = this._activeCharm.value;
+      if (
+        current && current.id === app.activeCharmId
+      ) {
+        return current;
+      }
+      return await rt.cc().get(app.activeCharmId);
+    },
+    args: () => [this.app, this.rt],
+  });
+
   private inspectorController = new InspectorController(this);
 
   override updated(changedProperties: Map<string, unknown>) {
@@ -67,7 +85,7 @@ export class XAppView extends BaseView {
     const authenticated = html`
       <x-body-view
         .rt="${this.rt}"
-        .activeCharmId="${app.activeCharmId}"
+        .activeCharm="${this._activeCharm.value}"
         .showShellCharmListView="${app.showShellCharmListView ?? false}"
       ></x-body-view>
     `;
@@ -80,7 +98,7 @@ export class XAppView extends BaseView {
           .spaceName="${app.spaceName}"
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
-          .charmId="${app.activeCharmId}"
+          .activeCharm="${this._activeCharm.value}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
           .showInspectorView="${app.showInspectorView ?? false}"
         ></x-header-view>
