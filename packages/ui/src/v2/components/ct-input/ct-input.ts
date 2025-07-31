@@ -467,6 +467,15 @@ export class CTInput extends BaseElement {
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
+      // For plain string values, update the internal state
+      if (!this._cellController.isCell() && typeof this.value === "string") {
+        // Get the current internal value
+        const currentValue = this._cellController.getValue();
+        // Only update if the value actually changed
+        if (currentValue !== this.value) {
+          this._cellController.setValue(this.value);
+        }
+      }
       this._cellController.bind(this.value);
     }
 
