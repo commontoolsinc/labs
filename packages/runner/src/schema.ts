@@ -272,8 +272,8 @@ function annotateWithBackToCellSymbols(
   ) {
     value[toCell] = () => createCell(runtime, link, tx);
     value[toOpaqueRef] = () => makeOpaqueRef(link);
+    Object.freeze(value);
   }
-  // TODO(seefeld): Freeze the value to make it immutable.
   return value;
 }
 
