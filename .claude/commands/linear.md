@@ -71,6 +71,38 @@ git checkout -b feat/2025-07-31-ct-703-websocket-auth
 gh pr create --title "Add WebSocket auth [CT-703]" --body "Closes CT-703..."
 ```
 
+### 4. Working Safely with Multiple Agents
+Since multiple agents/users may work on the same repo simultaneously:
+
+**Use Git Worktrees for Isolation:**
+```bash
+# Create isolated worktree for your issue
+git worktree add ../labs-ct-703 -b feat/2025-07-31-ct-703-websocket-auth
+
+# Work in the isolated directory
+cd ../labs-ct-703
+
+# This prevents conflicts with other agents working on main or other branches
+```
+
+**Always Check Before Starting:**
+```bash
+# See who else might be working
+gh pr list
+git worktree list
+git branch -r | grep -E "(in-progress|wip)"
+
+# Check if someone is already on your issue
+await mcp__linear-server__get_issue({ id: "issue-id" });
+// Look for "In Progress" status or recent comments
+```
+
+**Benefits of Worktrees:**
+- Prevents "files changed on disk" conflicts
+- No interference between concurrent work
+- Each agent has isolated file state
+- Shared git history for coordination
+
 ## 📋 Status Workflow
 
 Issues flow through these states:
