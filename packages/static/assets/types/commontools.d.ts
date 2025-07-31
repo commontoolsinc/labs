@@ -10,7 +10,7 @@ export declare const TYPE = "$TYPE";
 export declare const NAME = "$NAME";
 export declare const UI = "$UI";
 export interface Cell<T = any> {
-    get(): T;
+    get(): Readonly<T>;
     set(value: T): void;
     send(value: T): void;
     update(values: Partial<T>): void;

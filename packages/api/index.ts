@@ -19,7 +19,7 @@ export const UI = "$UI";
 // Cell type with only public methods
 export interface Cell<T = any> {
   // Public methods available in spell code and system
-  get(): T;
+  get(): Readonly<T>;
   set(value: T): void;
   send(value: T): void; // alias for set
   update(values: Partial<T>): void;

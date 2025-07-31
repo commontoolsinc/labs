@@ -423,7 +423,7 @@ export class RegularCell<T> implements Cell<T> {
     return this.link.rootSchema;
   }
 
-  get(): T {
+  get(): Readonly<T> {
     return validateAndTransform(this.runtime, this.tx, this.link);
   }
 
