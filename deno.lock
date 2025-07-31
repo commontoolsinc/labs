@@ -149,7 +149,6 @@
     "npm:react-markdown@^9.0.3": "9.1.0_@types+react@18.3.23_react@18.3.1",
     "npm:react-router-dom@^7.1.4": "7.7.1_react@18.3.1_react-dom@18.3.1__react@18.3.1",
     "npm:react@^18.3.1": "18.3.1",
-    "npm:redis@^4.7.0": "4.7.1_@redis+client@1.6.1",
     "npm:rich-textarea@~0.26.4": "0.26.5_react@18.3.1",
     "npm:rimraf@^6.0.1": "6.0.1",
     "npm:slate-history@0.100": "0.100.0_slate@0.112.0",
@@ -1982,44 +1981,6 @@
         "react-dom"
       ]
     },
-    "@redis/bloom@1.2.0_@redis+client@1.6.1": {
-      "integrity": "sha512-HG2DFjYKbpNmVXsa0keLHp/3leGJz1mjh09f2RLGGLQZzSHpkmZWuwJbAvo3QcRY8p80m5+ZdXZdYOSBLlp7Cg==",
-      "dependencies": [
-        "@redis/client"
-      ]
-    },
-    "@redis/client@1.6.1": {
-      "integrity": "sha512-/KCsg3xSlR+nCK8/8ZYSknYxvXHwubJrU82F3Lm1Fp6789VQ0/3RJKfsmRXjqfaTA++23CvC3hqmqe/2GEt6Kw==",
-      "dependencies": [
-        "cluster-key-slot",
-        "generic-pool",
-        "yallist@4.0.0"
-      ]
-    },
-    "@redis/graph@1.1.1_@redis+client@1.6.1": {
-      "integrity": "sha512-FEMTcTHZozZciLRl6GiiIB4zGm5z5F3F6a6FZCyrfxdKOhFlGkiAqlexWMBzCi4DcRoyiOsuLfW+cjlGWyExOw==",
-      "dependencies": [
-        "@redis/client"
-      ]
-    },
-    "@redis/json@1.0.7_@redis+client@1.6.1": {
-      "integrity": "sha512-6UyXfjVaTBTJtKNG4/9Z8PSpKE6XgSyEb8iwaqDcy+uKrd/DGYHTWkUdnQDyzm727V7p21WUMhsqz5oy65kPcQ==",
-      "dependencies": [
-        "@redis/client"
-      ]
-    },
-    "@redis/search@1.2.0_@redis+client@1.6.1": {
-      "integrity": "sha512-tYoDBbtqOVigEDMAcTGsRlMycIIjwMCgD8eR2t0NANeQmgK/lvxNAvYyb6bZDD4frHRhIHkJu2TBRvB0ERkOmw==",
-      "dependencies": [
-        "@redis/client"
-      ]
-    },
-    "@redis/time-series@1.1.0_@redis+client@1.6.1": {
-      "integrity": "sha512-c1Q99M5ljsIuc4YdaCwfUEXsofakb9c8+Zse2qxTadu8TalLXuAESzLvFAvNVbkmSlvlzIQOLpBCmWI9wTOt+g==",
-      "dependencies": [
-        "@redis/client"
-      ]
-    },
     "@rolldown/pluginutils@1.0.0-beta.27": {
       "integrity": "sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA=="
     },
@@ -3393,9 +3354,6 @@
     "clone@2.1.2": {
       "integrity": "sha512-3Pe/CF1Nn94hyhIYpjtiLhdCoEoz0DqQ+988E9gmeEdQZlojxnOb74wctFyuwWQHzqyf9X7C7MG8juUpqBJT8w=="
     },
-    "cluster-key-slot@1.1.2": {
-      "integrity": "sha512-RMr0FhtfXemyinomL4hrWcYJxmX6deFdCxpJzhDttxgO1+bcCnkk+9drydLVDmAMG7NE6aN/fl4F7ucU/90gAA=="
-    },
     "cmdk@1.1.1_react@18.3.1_react-dom@18.3.1__react@18.3.1_@types+react@18.3.23_@types+react-dom@18.3.7__@types+react@18.3.23": {
       "integrity": "sha512-Vsv7kFaXm+ptHDMZ7izaRsP70GgrW9NBNGswt9OZaVBLlE0SNpDq8eu/VGXyF9r7M0azK3Wy7OlYXsuyYLFzHg==",
       "dependencies": [
@@ -4053,9 +4011,6 @@
         "gaxios",
         "json-bigint"
       ]
-    },
-    "generic-pool@3.9.0": {
-      "integrity": "sha512-hymDOu5B53XvN4QT9dBmZxPX4CWhBPPLguTZ9MMFeFa/Kg0xWVfylOVNlJji/E7yTZWFd/q9GO5TxDLq156D7g=="
     },
     "gensync@1.0.0-beta.2": {
       "integrity": "sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg=="
@@ -5691,17 +5646,6 @@
     "real-require@0.2.0": {
       "integrity": "sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg=="
     },
-    "redis@4.7.1_@redis+client@1.6.1": {
-      "integrity": "sha512-S1bJDnqLftzHXHP8JsT5II/CtHWQrASX5K96REjWjlmWKrviSOLWmM7QnRLstAWsu1VBBV1ffV6DzCvxNP0UJQ==",
-      "dependencies": [
-        "@redis/bloom",
-        "@redis/client",
-        "@redis/graph",
-        "@redis/json",
-        "@redis/search",
-        "@redis/time-series"
-      ]
-    },
     "remark-parse@11.0.0": {
       "integrity": "sha512-FCxlKLNGknS5ba/1lmpYijMUzX2esxW5xQqjWxw2eHFfS2MSdaHVINFmhjo+qN1WhZhNimq0dZATN9pH0IDrpA==",
       "dependencies": [
@@ -6783,9 +6727,6 @@
     "yallist@3.1.1": {
       "integrity": "sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g=="
     },
-    "yallist@4.0.0": {
-      "integrity": "sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A=="
-    },
     "yallist@5.0.0": {
       "integrity": "sha512-YgvUTfwqyc7UXVMrB+SImsVYSmTS8X/tSrtdNZMImM+n7+QTriRXyXim0mBrTXNeqzVF0KWGgHPeiyViFFrNDw=="
     },
@@ -7053,7 +6994,6 @@
           "npm:pino-pretty@13",
           "npm:pino@^9.6.0",
           "npm:plaid@36",
-          "npm:redis@^4.7.0",
           "npm:stoker@^1.4.2"
         ]
       },
