@@ -11,16 +11,17 @@ import {
   type ValueEntry,
 } from "@commontools/runner/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
+import { getLogger } from "@commontools/utils/logger";
 import { the as COMMIT_THE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";
-import {
-  type Cause,
-  type Entity,
-  type FactAddress,
-  type FactSelection,
-  type MemorySpace,
-  type SchemaQuery,
+import type {
+  Cause,
+  Entity,
+  FactAddress,
+  FactSelection,
+  MemorySpace,
+  SchemaQuery,
 } from "./interface.ts";
 import { SelectAllString } from "./schema.ts";
 import {
@@ -49,6 +50,11 @@ import {
 export type * from "./interface.ts";
 
 type FullFactAddress = FactAddress & { cause: Cause; since: number };
+
+const logger = getLogger("space-schema", {
+  enabled: false,
+  level: "info",
+});
 
 // This class is used to manage the underlying objects in storage, so the
 // class that traverses the docs doesn't need to know the implementation.
@@ -120,8 +126,8 @@ export class ServerObjectManager extends BaseObjectManager<
           since: labelEntry.since,
         });
         if (!requiredClassifications.isSubsetOf(this.providedClassifications)) {
-          console.log(
-            `Skipping inclusion of ${fact.of}, due to classification`,
+          logger.info(
+            () => ["Skipping inclusion of", fact.of, "due to classification"],
           );
           this.restrictedValues.add(key);
           return null;
@@ -147,6 +153,8 @@ export const selectSchema = <Space extends MemorySpace>(
   { selectSchema, since, classification }: SchemaQuery["args"],
   selectionTracker?: MapSet<string, SchemaPathSelector>,
 ): FactSelection => {
+  const startTime = performance.timeOrigin + performance.now();
+
   const providedClassifications = new Set<string>(classification);
   // Track any docs loaded while traversing the factSelection
   const manager = new ServerObjectManager(session, providedClassifications);
@@ -232,6 +240,11 @@ export const selectSchema = <Space extends MemorySpace>(
       setEmptyObj(includedFacts, factSelector.of, factSelector.the);
     }
   }
+  const endTime = performance.timeOrigin + performance.now();
+  if ((endTime - startTime) > 100) {
+    logger.info(() => ["Slow selectSchema:", selectSchema]);
+  }
+
   return includedFacts;
 };
 
