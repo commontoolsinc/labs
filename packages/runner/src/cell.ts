@@ -159,7 +159,7 @@ import { getEntityId } from "./doc-map.ts";
  */
 declare module "@commontools/api" {
   interface Cell<T> {
-    get(): T;
+    get(): Readonly<T>;
     set(value: Cellify<T> | T): void;
     send(value: Cellify<T> | T): void;
     update<V extends Cellify<Partial<T> | Partial<T>>>(
@@ -405,6 +405,7 @@ export class RegularCell<T> implements Cell<T> {
     public readonly runtime: IRuntime,
     private readonly link: NormalizedFullLink,
     public readonly tx: IExtendedStorageTransaction | undefined,
+    private synced: boolean = false,
   ) {}
 
   get space(): MemorySpace {
@@ -424,6 +425,7 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   get(): Readonly<T> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     return validateAndTransform(this.runtime, this.tx, this.link);
   }
 
@@ -575,18 +577,22 @@ export class RegularCell<T> implements Cell<T> {
       this.runtime,
       { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
+      this.synced,
     ) as Cell<any>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    return new RegularCell(this.runtime, this.link, newTx);
+    return new RegularCell(this.runtime, this.link, newTx, this.synced);
   }
 
   sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     return subscribeToReferencedDocs(callback, this.runtime, this.link);
   }
 
   sync(): Promise<Cell<T>> | Cell<T> {
+    this.synced = true;
+    if (this.link.id.startsWith("data:")) return this;
     return this.runtime.storage.syncCell(this);
   }
 
@@ -594,6 +600,7 @@ export class RegularCell<T> implements Cell<T> {
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
   ): QueryResult<DeepKeyLookup<T, Path>> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
     return createQueryResultProxy(
       this.runtime,
@@ -713,7 +720,7 @@ export class RegularCell<T> implements Cell<T> {
     }
     this.tx.writeOrThrow(
       { ...this.link, path: ["source"] },
-      JSON.stringify(getEntityId(sourceLink.id)),
+      getEntityId(sourceLink.id),
     );
   }
 
