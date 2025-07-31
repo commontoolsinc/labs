@@ -1,5 +1,4 @@
 import type {
-  CellToOpaque,
   Handler,
   HandlerFactory,
   JSONSchema,
@@ -10,6 +9,7 @@ import type {
   OpaqueRef,
   Schema,
   SchemaWithoutCell,
+  StripCell,
   toJSON,
 } from "./types.ts";
 import { isModule } from "./types.ts";
@@ -109,7 +109,7 @@ export function handler<E, T>(
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
   handler: (Event: E, props: T) => any,
-  options: { proxy: true }
+  options: { proxy: true },
 ): HandlerFactory<T, E>;
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
@@ -138,20 +138,20 @@ export function handler<E, T>(
     : undefined;
 
   const module: Handler<T, E> & toJSON & {
-    bind: (inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<E>;
+    bind: (inputs: Opaque<StripCell<T>>) => OpaqueRef<E>;
   } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
-    with: (inputs: Opaque<CellToOpaque<T>>) => factory(inputs),
+    with: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
-    bind: (inputs: Opaque<CellToOpaque<T>>) => factory(inputs),
+    bind: (inputs: Opaque<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema ? { argumentSchema: schema } : {}),
   };
 
-  const factory = Object.assign((props: Opaque<CellToOpaque<T>>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<StripCell<T>>): OpaqueRef<E> => {
     const stream = opaqueRef();
     stream.set({ $stream: true });
     const node: NodeRef = {

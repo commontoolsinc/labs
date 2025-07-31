@@ -47,12 +47,12 @@ export type toJSON = {
     toJSON(): unknown;
 };
 export type Handler<T = any, R = any> = Module & {
-    with: (inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<R>;
+    with: (inputs: Opaque<StripCell<T>>) => OpaqueRef<R>;
 };
 export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & (Module | Handler | Recipe) & toJSON;
 export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Recipe & toJSON;
 export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Module & toJSON;
-export type HandlerFactory<T, R> = ((inputs: Opaque<CellToOpaque<T>>) => OpaqueRef<R>) & Handler<T, R> & toJSON;
+export type HandlerFactory<T, R> = ((inputs: Opaque<StripCell<T>>) => OpaqueRef<R>) & Handler<T, R> & toJSON;
 export type JSONValue = null | boolean | number | string | JSONArray | JSONObject & IDFields;
 export interface JSONArray extends ArrayLike<JSONValue> {
 }
@@ -189,12 +189,12 @@ export type HandlerState<T> = T extends Cell<any> ? T : T extends Stream<any> ? 
     readonly [K in keyof T]: HandlerState<T[K]>;
 } : T;
 export type HandlerFunction = {
-    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: Schema<T>) => any): ModuleFactory<CellToOpaque<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
-    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<CellToOpaque<T>, E>;
+    <E extends JSONSchema = JSONSchema, T extends JSONSchema = JSONSchema>(eventSchema: E, stateSchema: T, handler: (event: Schema<E>, props: Schema<T>) => any): ModuleFactory<StripCell<SchemaWithoutCell<T>>, SchemaWithoutCell<E>>;
+    <E, T>(eventSchema: JSONSchema, stateSchema: JSONSchema, handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<StripCell<T>, E>;
     <E, T>(handler: (event: E, props: T) => any, options: {
         proxy: true;
-    }): ModuleFactory<Opaque<T>, E>;
-    <E, T>(handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<CellToOpaque<T>, E>;
+    }): ModuleFactory<StripCell<T>, E>;
+    <E, T>(handler: (event: E, props: HandlerState<T>) => any): ModuleFactory<StripCell<T>, E>;
 };
 export type DeriveFunction = <In, Out>(input: Opaque<In>, f: (input: In) => Out | Promise<Out>) => OpaqueRef<Out>;
 export type ComputeFunction = <T>(fn: () => T) => OpaqueRef<T>;
@@ -268,8 +268,8 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[] : T ext
 }) : T;
 export declare const schema: <T extends JSONSchema>(schema: T) => T;
 export declare const toSchema: <T>(options?: Partial<JSONSchema>) => JSONSchema;
-export type CellToOpaque<T> = T extends Cell<infer U> ? Opaque<U> : T extends Array<infer U> ? CellToOpaque<U>[] : T extends object ? {
-    [K in keyof T]: CellToOpaque<T[K]>;
+export type StripCell<T> = T extends Cell<infer U> ? StripCell<U> : T extends Array<infer U> ? StripCell<U>[] : T extends object ? {
+    [K in keyof T]: StripCell<T[K]>;
 } : T;
 export type Schema<T extends JSONSchema, Root extends JSONSchema = T, Depth extends DepthLevel = 9> = Depth extends 0 ? unknown : T extends {
     asCell: true;
