@@ -28,7 +28,7 @@ class ExtendedShellIntegration extends ShellIntegration {
 describe("simple-list integration test", () => {
   const shell = new ExtendedShellIntegration();
   shell.bindLifecycle();
-  
+
   let spaceName: string;
   let charmId: string;
 
@@ -142,7 +142,7 @@ describe("simple-list integration test", () => {
     assertEquals(titleValue, "My Shopping List");
   });
 
-  // TODO: Fix this test - removal works (seen in console) but DOM query fails
+  // TODO(bf): Fix this test - removal works (seen in console) but DOM query fails
   it.skip("should remove items from the list", async () => {
     const { page } = shell.get();
 
@@ -156,16 +156,16 @@ describe("simple-list integration test", () => {
     const removeButtons = await page.$$("pierce/button[title='Remove item']");
     console.log(`Found ${removeButtons.length} remove buttons`);
     assert(removeButtons.length > 0, "Should find remove buttons");
-    
+
     await removeButtons[0].click();
-    
+
     // Wait longer for the DOM to update after removal
     await sleep(2000);
 
     // Verify item was removed - try multiple times
     let remainingItems = await page.$$("pierce/.list-item");
     console.log(`After removal, found ${remainingItems.length} items`);
-    
+
     // If still showing same count, wait a bit more and try again
     if (remainingItems.length === initialCount) {
       console.log("DOM not updated yet, waiting more...");
@@ -173,7 +173,7 @@ describe("simple-list integration test", () => {
       remainingItems = await page.$$("pierce/.list-item");
       console.log(`After additional wait, found ${remainingItems.length} items`);
     }
-    
+
     assertEquals(remainingItems.length, initialCount - 1, "Should have one less item after removal");
 
     // Verify the first item is now what was the second item
