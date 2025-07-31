@@ -108,7 +108,7 @@ function filterOutEntity(
   target: Cell<Charm> | string | EntityId,
 ): Cell<Charm>[] {
   const targetId = getEntityId(target);
-  if (!targetId) return list.get();
+  if (!targetId) return list.get() as Cell<Charm>[];
 
   return list.get().filter((charm) => !isSameEntity(charm, targetId));
 }
