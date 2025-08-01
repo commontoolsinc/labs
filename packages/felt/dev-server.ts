@@ -36,7 +36,7 @@ export class DevServer {
     }
   }
 
-  private async onRequest(req: Request) {
+  private onRequest(req: Request) {
     const url = new URL(req.url);
 
     if (req.headers.get("upgrade") === "websocket") {
@@ -60,27 +60,6 @@ export class DevServer {
       });
     }
 
-    // Handle /module/ paths with CORS headers for iframe compatibility
-    if (url.pathname.startsWith("/module/")) {
-      const response = await serveDir(req, {
-        fsRoot: this.outDir,
-        quiet: true,
-      });
-      
-      // Add CORS headers to allow loading from null origin (iframes)
-      if (response.status === 200) {
-        const headers = new Headers(response.headers);
-        headers.set("Access-Control-Allow-Origin", "*");
-        headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
-        
-        return new Response(response.body, {
-          status: response.status,
-          headers,
-        });
-      }
-      
-      return response;
-    }
 
     return serveDir(req, {
       fsRoot: this.outDir,
