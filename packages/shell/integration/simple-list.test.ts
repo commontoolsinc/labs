@@ -242,9 +242,16 @@ describe("simple-list integration test", () => {
     }
   });
 
-  // Skip edit test for now as it requires double-click interaction
+  // Skip this test too - similar Shadow DOM issues prevent reliable editing
   it.skip("should edit items in the list", async () => {
-    // Edit functionality would go here
+    const { page } = shell.get();
+
+    // The test reveals that:
+    // 1. Direct DOM queries don't work due to Shadow DOM encapsulation
+    // 2. Edit button clicks don't trigger edit mode programmatically
+    // 3. ElementHandle.evaluate fails on shadow DOM elements
+    // Similar to the delete test, this appears to be a limitation of
+    // programmatic interaction with the ct-list component
   });
 
 });
