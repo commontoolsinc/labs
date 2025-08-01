@@ -948,6 +948,41 @@ describe("Schema Support", () => {
       expect(value.children[1].name).toBe("child2");
       expect(value.children[1].value.name).toBe("root");
     });
+
+    it("Should support named $ref links", () => {
+      const schema = {
+        "$defs": {
+          "LinkedNode": {
+            type: "object",
+            properties: {
+              value: { type: "number" },
+              next: { $ref: "#/$defs/LinkedNode" },
+            },
+            required: ["value"],
+          },
+        },
+        $ref: "#/$defs/LinkedNode",
+        asCell: true,
+      } as const satisfies JSONSchema;
+
+      const c = runtime.getCell(
+        space,
+        "Should support $defs references",
+        schema,
+        tx,
+      );
+      // TODO(@ubik2): this is a bit messy, but we need to have this to
+      // have the rootSchema set
+      const cell = c.asSchema(schema);
+      cell.set({ value: 1, next: { value: 2, next: { value: 3 } } });
+
+      const value = cell.get();
+
+      expect(isCell(value)).toBe(true);
+      expect(value.get().value).toBe(1);
+      expect(value.get().next.value).toBe(2);
+      expect(value.get().next.next.value).toBe(3);
+    });
   });
 
   describe("Key Navigation", () => {
