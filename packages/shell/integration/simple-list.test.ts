@@ -99,6 +99,26 @@ describe("simple-list integration test", () => {
     const listItems = await page.$$("pierce/.list-item");
     assertEquals(listItems.length, 3, "Should have 3 items in the list");
 
+    // Debug: Log the structure of list items
+    console.log("List item structure:");
+    for (let i = 0; i < listItems.length; i++) {
+      const itemInfo = await listItems[i].evaluate((el: HTMLElement, idx: number) => {
+        const buttons = el.querySelectorAll('button');
+        return {
+          index: idx,
+          className: el.className,
+          innerText: el.innerText,
+          buttonCount: buttons.length,
+          buttons: Array.from(buttons).map(b => ({
+            className: b.className,
+            title: b.title || 'no title',
+            innerText: b.innerText
+          }))
+        };
+      }, { args: [i] } as any);
+      console.log(`Item ${i}:`, itemInfo);
+    }
+
     // Wait a bit for content to render
     await sleep(500);
 
@@ -142,9 +162,16 @@ describe("simple-list integration test", () => {
     assertEquals(titleValue, "My Shopping List");
   });
 
-  // TODO(bf): Fix this test - removal works (seen in console) but DOM query fails
+  // TODO: Fix this test - there's a bug where programmatic clicks on the remove button
+  // remove ALL items instead of just one. Manual clicking works correctly.
+  // This appears to be an issue with how ct-list handles synthetic click events
+  // versus real user clicks. 
   it.skip("should remove items from the list", async () => {
     const { page } = shell.get();
+
+    // Wait for the component to fully stabilize after adding items
+    console.log("Waiting for component to stabilize...");
+    await sleep(2000);
 
     // Get initial count
     const initialItems = await page.$$("pierce/.list-item");
@@ -153,11 +180,40 @@ describe("simple-list integration test", () => {
     assert(initialCount > 0, "Should have items to remove");
 
     // Find and click the first remove button
-    const removeButtons = await page.$$("pierce/button[title='Remove item']");
+    const removeButtons = await page.$$("pierce/button.item-action.remove");
     console.log(`Found ${removeButtons.length} remove buttons`);
     assert(removeButtons.length > 0, "Should find remove buttons");
 
-    await removeButtons[0].click();
+    // Debug: check what we're about to click
+    const buttonText = await removeButtons[0].evaluate((el: HTMLElement) => {
+      return {
+        className: el.className,
+        title: el.title,
+        innerText: el.innerText,
+        parentText: el.parentElement?.innerText || 'no parent'
+      };
+    });
+    console.log("About to click button:", buttonText);
+
+    // Try clicking more carefully
+    console.log("Waiting before click...");
+    await sleep(500);
+    
+    // Alternative approach: dispatch click event
+    await removeButtons[0].evaluate((button: HTMLElement) => {
+      console.log("About to dispatch click event on button:", button);
+      button.dispatchEvent(new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      }));
+    });
+    console.log("Dispatched click event on first remove button");
+
+    // Check immediately after click
+    await sleep(100);
+    const immediateItems = await page.$$("pierce/.list-item");
+    console.log(`Immediately after click, found ${immediateItems.length} items`);
 
     // Wait longer for the DOM to update after removal
     await sleep(2000);
@@ -190,4 +246,5 @@ describe("simple-list integration test", () => {
   it.skip("should edit items in the list", async () => {
     // Edit functionality would go here
   });
+
 });
