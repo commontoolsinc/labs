@@ -20,15 +20,15 @@ import type { KeyboardContext } from "./types.ts";
 describe("Keyboard Commands", () => {
   let outliner: CTOutliner;
 
-  function setupOutliner() {
-    const setup = setupMockOutliner();
+  async function setupOutliner() {
+    const setup = await setupMockOutliner();
     outliner = setup.outliner;
     return setup;
   }
 
   describe("Basic Commands", () => {
-    it("should handle Enter key to create new node", () => {
-      setupOutliner();
+    it("should handle Enter key to create new node", async () => {
+      await setupOutliner();
       const initialChildCount = outliner.tree.root.children.length;
 
       const event = createMockKeyboardEvent("Enter");
@@ -39,8 +39,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children.length).toBe(initialChildCount + 1);
     });
 
-    it("should handle Shift+Enter to create child node", () => {
-      setupOutliner();
+    it("should handle Shift+Enter to create child node", async () => {
+      await setupOutliner();
       const parentNode = outliner.focusedNode!;
       const initialChildCount = parentNode.children.length;
 
@@ -52,8 +52,8 @@ describe("Keyboard Commands", () => {
       expect(parentNode.children.length).toBe(initialChildCount + 1);
     });
 
-    it("should handle cmd/ctrl+Enter to toggle edit mode", () => {
-      setupOutliner();
+    it("should handle cmd/ctrl+Enter to toggle edit mode", async () => {
+      await setupOutliner();
       const node = outliner.focusedNode!;
 
       const event = createMockKeyboardEvent("Enter", { metaKey: true });
@@ -68,8 +68,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingNode).toBe(null);
     });
 
-    it("should exit edit mode with cmd/ctrl+Enter when already editing", () => {
-      setupOutliner();
+    it("should exit edit mode with cmd/ctrl+Enter when already editing", async () => {
+      await setupOutliner();
       const node = outliner.focusedNode!;
       const initialNodeCount = outliner.tree.root.children.length;
 
@@ -97,8 +97,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children.length).toBe(initialNodeCount);
     });
 
-    it("should handle Space key to start editing", () => {
-      setupOutliner();
+    it("should handle Space key to start editing", async () => {
+      await setupOutliner();
       const node = outliner.focusedNode!;
 
       const event = createMockKeyboardEvent(" ");
@@ -110,8 +110,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingContent).toBe(node.body);
     });
 
-    it("should handle Delete key to delete node", () => {
-      setupOutliner();
+    it("should handle Delete key to delete node", async () => {
+      await setupOutliner();
       const nodeToDelete = outliner.tree.root.children[0];
       const secondNode = outliner.tree.root.children[1];
 
@@ -124,8 +124,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children[0]).toBe(secondNode);
     });
 
-    it("should handle cmd/ctrl+Backspace to delete node", () => {
-      setupOutliner();
+    it("should handle cmd/ctrl+Backspace to delete node", async () => {
+      await setupOutliner();
       const nodeToDelete = outliner.tree.root.children[0];
       const secondNode = outliner.tree.root.children[1];
 
@@ -138,8 +138,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children[0]).toBe(secondNode);
     });
 
-    it("should not delete on regular Backspace without modifiers", () => {
-      setupOutliner();
+    it("should not delete on regular Backspace without modifiers", async () => {
+      await setupOutliner();
       const initialChildCount = outliner.tree.root.children.length;
 
       const event = createMockKeyboardEvent("Backspace");
@@ -153,8 +153,8 @@ describe("Keyboard Commands", () => {
   });
 
   describe("Navigation Commands", () => {
-    it("should handle Tab key for indentation", () => {
-      setupOutliner();
+    it("should handle Tab key for indentation", async () => {
+      await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
       const firstNode = outliner.tree.root.children[0];
       outliner.focusedNode = secondNode;
@@ -169,8 +169,8 @@ describe("Keyboard Commands", () => {
       expect(firstNode.children[0]).toBe(secondNode);
     });
 
-    it("should handle Shift+Tab for outdentation", () => {
-      setupOutliner();
+    it("should handle Shift+Tab for outdentation", async () => {
+      await setupOutliner();
       // Setup nested structure first
       const tree = {
         root: {
@@ -187,7 +187,7 @@ describe("Keyboard Commands", () => {
           attachments: [],
         },
       };
-      const treeCell = createMockTreeCell(tree);
+      const treeCell = await createMockTreeCell(tree);
       outliner.value = treeCell;
       const childNode = tree.root.children[0].children[0];
       outliner.focusedNode = childNode;
@@ -201,8 +201,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children[1]).toBe(childNode);
     });
 
-    it("should handle arrow key navigation", () => {
-      setupOutliner();
+    it("should handle arrow key navigation", async () => {
+      await setupOutliner();
       const firstNode = outliner.tree.root.children[0];
       const secondNode = outliner.tree.root.children[1];
       outliner.focusedNode = firstNode;
@@ -215,8 +215,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.focusedNode).toBe(secondNode);
     });
 
-    it("should handle cmd/ctrl+] for indentation", () => {
-      setupOutliner();
+    it("should handle cmd/ctrl+] for indentation", async () => {
+      await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
       const firstNode = outliner.tree.root.children[0];
       outliner.focusedNode = secondNode;
@@ -231,8 +231,8 @@ describe("Keyboard Commands", () => {
       expect(firstNode.children[0]).toBe(secondNode);
     });
 
-    it("should handle cmd/ctrl+[ for outdentation", () => {
-      setupOutliner();
+    it("should handle cmd/ctrl+[ for outdentation", async () => {
+      await setupOutliner();
       // Setup nested structure first
       const tree = {
         root: {
@@ -249,7 +249,7 @@ describe("Keyboard Commands", () => {
           attachments: [],
         },
       };
-      const treeCell = createMockTreeCell(tree);
+      const treeCell = await createMockTreeCell(tree);
       outliner.value = treeCell;
       const childNode = tree.root.children[0].children[0];
       outliner.focusedNode = childNode;
@@ -263,8 +263,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children[1]).toBe(childNode);
     });
 
-    it("should not indent/outdent without modifiers", () => {
-      setupOutliner();
+    it("should not indent/outdent without modifiers", async () => {
+      await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
       const initialStructure = JSON.stringify(outliner.tree);
 
@@ -284,8 +284,8 @@ describe("Keyboard Commands", () => {
   });
 
   describe("Typing to Edit", () => {
-    it("should enter edit mode when typing regular characters", () => {
-      setupOutliner();
+    it("should enter edit mode when typing regular characters", async () => {
+      await setupOutliner();
       const node = outliner.focusedNode!;
 
       const event = createMockKeyboardEvent("a");
@@ -298,8 +298,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingContent).toBe("a");
     });
 
-    it("should not enter edit mode for modifier keys", () => {
-      setupOutliner();
+    it("should not enter edit mode for modifier keys", async () => {
+      await setupOutliner();
 
       const event = createMockKeyboardEvent("a", { ctrlKey: true });
       const context = createKeyboardContext(event, outliner);
@@ -310,8 +310,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingNode).toBe(null);
     });
 
-    it("should not enter edit mode for special keys", () => {
-      setupOutliner();
+    it("should not enter edit mode for special keys", async () => {
+      await setupOutliner();
 
       const event = createMockKeyboardEvent("Enter");
       const context = createKeyboardContext(event, outliner);
@@ -322,8 +322,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingNode).toBe(null);
     });
 
-    it("should overwrite existing content when typing", () => {
-      setupOutliner();
+    it("should overwrite existing content when typing", async () => {
+      await setupOutliner();
       const node = outliner.focusedNode!;
       const originalContent = node.body;
 
@@ -338,8 +338,8 @@ describe("Keyboard Commands", () => {
   });
 
   describe("Command Integration", () => {
-    it("should execute keyboard commands via executeKeyboardCommand", () => {
-      setupOutliner();
+    it("should execute keyboard commands via executeKeyboardCommand", async () => {
+      await setupOutliner();
       const initialChildCount = outliner.tree.root.children.length;
 
       const event = createMockKeyboardEvent("Enter");
@@ -351,8 +351,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children.length).toBe(initialChildCount + 1);
     });
 
-    it("should fall back to typing handler for unknown keys", () => {
-      setupOutliner();
+    it("should fall back to typing handler for unknown keys", async () => {
+      await setupOutliner();
       const node = outliner.focusedNode!;
 
       const event = createMockKeyboardEvent("z");
@@ -365,8 +365,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingContent).toBe("z");
     });
 
-    it("should return false for non-actionable keys", () => {
-      setupOutliner();
+    it("should return false for non-actionable keys", async () => {
+      await setupOutliner();
 
       const event = createMockKeyboardEvent("Shift");
       const context = createKeyboardContext(event, outliner);
@@ -376,8 +376,8 @@ describe("Keyboard Commands", () => {
       expect(handled).toBe(false);
     });
 
-    it("should handle cmd/ctrl+[ and ] in edit mode", () => {
-      setupOutliner();
+    it("should handle cmd/ctrl+[ and ] in edit mode", async () => {
+      await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
       const firstNode = outliner.tree.root.children[0];
 
@@ -426,8 +426,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.tree.root.children.length).toBe(2);
     });
 
-    it("should preserve edit mode after indent/outdent operations", () => {
-      setupOutliner();
+    it("should preserve edit mode after indent/outdent operations", async () => {
+      await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
       const editingContent = "editing this node";
 
@@ -475,8 +475,8 @@ describe("Keyboard Commands", () => {
       expect(outliner.testAPI.editingContent).toBe(editingContent);
     });
 
-    it("should preserve cursor position and content during edit mode indentation", () => {
-      setupOutliner();
+    it("should preserve cursor position and content during edit mode indentation", async () => {
+      await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
       const firstNode = outliner.tree.root.children[0];
       const editingContent = "I am editing this text";
@@ -514,8 +514,8 @@ describe("Keyboard Commands", () => {
   });
 
   describe("Edge Cases", () => {
-    it("should handle commands when no node is focused", () => {
-      setupOutliner();
+    it("should handle commands when no node is focused", async () => {
+      await setupOutliner();
       outliner.focusedNode = null;
 
       const event = createMockKeyboardEvent("Enter");
@@ -525,8 +525,8 @@ describe("Keyboard Commands", () => {
       expect(() => KeyboardCommands.Enter.execute(context)).not.toThrow();
     });
 
-    it("should handle readonly mode correctly", () => {
-      setupOutliner();
+    it("should handle readonly mode correctly", async () => {
+      await setupOutliner();
       outliner.readonly = true;
       const node = outliner.focusedNode!;
 
