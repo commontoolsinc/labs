@@ -110,6 +110,7 @@ export class Felt {
       redirectToIndex,
       port,
       outDir,
+      staticDirs: this.config.staticDirs,
     });
 
     if (isDev) {
