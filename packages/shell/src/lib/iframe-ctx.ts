@@ -131,7 +131,7 @@ export const setupIframe = (runtime: Runtime) =>
     },
     
     // Simplified handlers - not implementing LLM and webpage reading for now
-    async onLLMRequest(
+    onLLMRequest(
       _element: CommonIframeSandboxElement,
       _context: any,
       _payload: string,
@@ -140,7 +140,7 @@ export const setupIframe = (runtime: Runtime) =>
       return { error: "LLM requests not yet implemented" };
     },
     
-    async onReadWebpageRequest(
+    onReadWebpageRequest(
       _element: CommonIframeSandboxElement,
       _context: any,
       _payload: string,
@@ -149,12 +149,12 @@ export const setupIframe = (runtime: Runtime) =>
       return { error: "Webpage reading not yet implemented" };
     },
     
-    async onPerform(
+    onPerform(
       _element: CommonIframeSandboxElement,
       _context: unknown,
       command: IPC.TaskPerform,
     ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
       console.warn("Perform commands not yet implemented in shell");
-      return { error: new Error(`Command is not implemented`) };
+      return Promise.resolve({ error: new Error(`Command is not implemented`) });
     },
   });
