@@ -1,3 +1,4 @@
+/// <cts-enable />
 import {
   Cell,
   derive,
