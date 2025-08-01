@@ -362,7 +362,9 @@ export class ContextualFlowControl {
     // start at 1, since the 0 element is "#"
     for (let i = 1; i < pathToDef.length; i++) {
       if (!isRecord(schemaCursor) || !(pathToDef[i] in schemaCursor)) {
-        logger.warn(() => ["Unresolved $ref in schema: ", schemaRef]);
+        logger.warn(
+          () => ["Unresolved $ref in schema: ", schemaRef, rootSchema],
+        );
         return undefined;
       }
       schemaCursor = schemaCursor[pathToDef[i]];
@@ -386,7 +388,7 @@ export class ContextualFlowControl {
       schemaRef,
     );
     if (resolved === undefined) {
-      throw new Error(`Failed to resolve $ref: ${schemaRef}`);
+      throw new Error(`Failed to resolve $ref: "${schemaRef}"`);
     }
     return resolved;
   }
