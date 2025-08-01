@@ -16,7 +16,7 @@ declare global {
               $value?: Cell<{ title: string }[]>,
               editable?: boolean,
               title?: string,
-              onct-remove-item?: (e: { detail: { item: Cell<{ title: string }> } }) => void,
+              'onct-remove-item'?: (e: { detail: { item: Cell<{ title: string }> } }) => void,
             } & Child;
     }
   }
