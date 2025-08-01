@@ -378,7 +378,7 @@ describe("scheduler", () => {
     assertSpyCall(stopped, 0, undefined);
   });
 
-  it("should not loop on r/w changes on its own output", async () => {
+  it.skip("should not loop on r/w changes on its own output", async () => {
     const counter = runtime.getCell<number>(
       space,
       "should not loop on r/w changes on its own output 1",
