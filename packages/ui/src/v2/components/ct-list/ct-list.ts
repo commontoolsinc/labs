@@ -3,7 +3,7 @@ import { property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { type Cell, isCell } from "@commontools/runner";
-// Removed cell-controller import - working directly with Cell
+import { cell, mutateCell } from "../../core/cell-decorator.ts";
 import "../ct-input/ct-input.ts";
 
 type ListItem = {
@@ -26,17 +26,6 @@ function findCellIndex<T>(listCell: Cell<T[]>, itemCell: Cell<T>): number {
   return -1;
 }
 
-/**
- * Executes a mutation on a Cell within a transaction
- * @param cell - The Cell to mutate
- * @param mutator - Function that performs the mutation
- */
-function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
-  const tx = cell.runtime.edit();
-  mutator(cell.withTx(tx));
-  tx.commit();
-}
-
 
 /**
  * Action configuration for list items
@@ -50,11 +39,11 @@ export interface CtListAction {
 
 /**
  * CTList - A list component that renders items with add/remove functionality
- * Supports both Cell<T[]> and plain T[] values for reactive data binding
+ * Uses the @cell() decorator for reactive Cell<T[]> data binding
  *
  * @element ct-list
  *
- * @attr {T[]|Cell<T[]>} value - Array of list items (supports both plain array and Cell<T[]>)
+ * @attr {Cell<T[]>} value - Cell containing array of list items
  * @attr {string} title - List title
  * @attr {boolean} readonly - Whether the list is read-only
  * @attr {boolean} editable - Whether individual items can be edited in-place
@@ -67,16 +56,17 @@ export interface CtListAction {
  * @fires ct-edit-item - Fired when editing an item with detail: { item, oldItem }
  *
  * @example
- * <ct-list .value="${items}" title="My List" .action="${{type: 'accept'}}" @ct-accept-item="${handleAccept}"></ct-list>
+ * <!-- With Cell binding -->
+ * <ct-list .value="${itemsCell}" title="My List" .action="${{type: 'accept'}}" @ct-accept-item="${handleAccept}"></ct-list>
  *
  * @example
- * <!-- With Cell binding -->
+ * <!-- Editable list -->
  * <ct-list .value="${itemsCell}" title="Reactive List" editable></ct-list>
  */
 
 export class CTList extends BaseElement {
-  @property()
-  value: Cell<ListItem[]> | null = null;
+  @cell()
+  value: Cell<ListItem[]> | undefined;
 
   @property()
   override title: string = "";
@@ -96,9 +86,6 @@ export class CTList extends BaseElement {
   // Private state for managing editing
   @state()
   private _editing: Cell<ListItem> | null = null;
-  
-  // Subscription cleanup function
-  private _unsubscribe: (() => void) | null = null;
 
   constructor() {
     super();
@@ -322,35 +309,6 @@ export class CTList extends BaseElement {
 
   `;
 
-  // Lifecycle methods for Cell binding management
-  override updated(changedProperties: Map<string, any>) {
-    super.updated(changedProperties);
-    
-    // Handle value changes
-    if (changedProperties.has('value')) {
-      // Clean up previous subscription
-      if (this._unsubscribe) {
-        this._unsubscribe();
-        this._unsubscribe = null;
-      }
-      
-      // Subscribe to new Cell if it exists
-      if (this.value && isCell(this.value)) {
-        this._unsubscribe = this.value.sink(() => {
-          this.requestUpdate();
-        });
-      }
-    }
-  }
-  
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    // Clean up subscription
-    if (this._unsubscribe) {
-      this._unsubscribe();
-      this._unsubscribe = null;
-    }
-  }
 
   private addItem(title: string): void {
     if (!this.value) {
@@ -359,8 +317,7 @@ export class CTList extends BaseElement {
     }
 
     const newItem = { title } as ListItem;
-    mutateCell(this.value, (cell) => cell.push(newItem));
-    this.requestUpdate();
+    mutateCell(this, 'value', (cell) => cell.push(newItem));
   }
 
   private removeItem(itemToRemove: Cell<any>): void {
@@ -370,12 +327,10 @@ export class CTList extends BaseElement {
     }
 
     // Use filter with .equals() to remove the item
-    mutateCell(this.value, (cell) => {
-      const filtered = cell.get().filter((_, i) => !cell.key(i).equals(itemToRemove));
+    mutateCell(this, 'value', (cell: Cell<ListItem[]>) => {
+      const filtered = cell.get().filter((_: ListItem, i: number) => !cell.key(i).equals(itemToRemove));
       cell.set(filtered);
     });
-
-    this.requestUpdate();
   }
 
   private handleActionItem(item: Cell<ListItem>) {
@@ -428,7 +383,7 @@ export class CTList extends BaseElement {
     if (trimmedTitle) {
       const index = findCellIndex(this.value, item);
       if (index !== -1) {
-        mutateCell(this.value, (cell) => {
+        mutateCell(this, 'value', (cell: Cell<ListItem[]>) => {
           cell.key(index).key("title").set(trimmedTitle);
         });
 

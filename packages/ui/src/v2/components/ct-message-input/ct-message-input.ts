@@ -1,6 +1,8 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { type Cell } from "@commontools/runner";
+import { cell, getCellValue, setCellValue } from "../../core/cell-decorator.ts";
 
 /**
  * CTMessageInput - Input component with send button for messages/chat interfaces
@@ -64,41 +66,34 @@ export class CTMessageInput extends BaseElement {
     placeholder: { type: String },
     buttonText: { type: String, attribute: "button-text" },
     disabled: { type: Boolean, reflect: true },
-    value: { type: String },
   };
 
   declare placeholder: string;
   declare buttonText: string;
   declare disabled: boolean;
-  declare value: string;
 
-  private _inputElement?: HTMLElement;
+  @cell()
+  value: Cell<string> | undefined;
 
   constructor() {
     super();
     this.placeholder = "";
     this.buttonText = "Send";
     this.disabled = false;
-    this.value = "";
-  }
-
-  override firstUpdated() {
-    this._inputElement = this.shadowRoot?.querySelector(
-      "ct-input",
-    ) as HTMLElement;
   }
 
   private _handleSend(event?: Event) {
     event?.preventDefault();
 
-    const input = this._inputElement as any;
-    if (!input || !input.value?.trim()) return;
+    const currentValue = getCellValue(this, "value");
+    if (
+      !currentValue || typeof currentValue !== "string" || !currentValue.trim()
+    ) return;
 
-    const message = input.value;
+    const message = currentValue;
 
-    // Clear the input
-    input.value = "";
-    this.value = "";
+    // Clear the input using setCellValue helper
+    setCellValue(this, "value", "");
 
     // Emit the send event
     this.emit("ct-send", { message });
@@ -112,7 +107,8 @@ export class CTMessageInput extends BaseElement {
   }
 
   private _handleInput(event: CustomEvent) {
-    this.value = event.detail.value;
+    // The ct-input child component will handle the Cell updates automatically
+    // No need for manual value tracking since we're using the @cell() decorator
   }
 
   override render() {
