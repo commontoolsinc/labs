@@ -38,7 +38,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should move nodes up", () => {
       const tree = createTestTree();
       const secondChild = tree.root.children[1];
-      
+
       // moveNodeUp now modifies tree in place and returns void
       TreeOperations.moveNodeUp(tree, secondChild);
 
@@ -49,7 +49,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should move nodes down", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
-      
+
       // moveNodeDown now modifies tree in place and returns void
       TreeOperations.moveNodeDown(tree, firstChild);
 
@@ -60,7 +60,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should delete nodes", () => {
       const tree = createTestTree();
       const child1 = tree.root.children[0];
-      
+
       // deleteNode now modifies tree in place and returns void
       TreeOperations.deleteNode(tree, child1);
 
@@ -86,7 +86,7 @@ describe("CTOutliner Logic Tests", () => {
       const tree = createTestTree();
       const secondChild = tree.root.children[1];
       const firstChild = tree.root.children[0];
-      
+
       // indentNode now modifies tree in place and returns void
       TreeOperations.indentNode(tree, secondChild);
 
@@ -113,7 +113,7 @@ describe("CTOutliner Logic Tests", () => {
       };
 
       const childNode = tree.root.children[0].children[0];
-      
+
       // outdentNode now modifies tree in place and returns void
       TreeOperations.outdentNode(tree, childNode);
 
@@ -323,7 +323,7 @@ describe("CTOutliner Logic Tests", () => {
       };
 
       const parentNode = tree.root.children[0];
-      
+
       // deleteNode now modifies tree in place and returns void
       TreeOperations.deleteNode(tree, parentNode);
 
@@ -334,7 +334,7 @@ describe("CTOutliner Logic Tests", () => {
 
     it("should not allow deleting root node", () => {
       const tree = createTestTree();
-      
+
       // deleteNode now throws errors instead of returning failure results
       expect(() => {
         TreeOperations.deleteNode(tree, tree.root);
@@ -344,7 +344,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should not indent first child", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
-      
+
       // indentNode now throws errors instead of returning failure results
       expect(() => {
         TreeOperations.indentNode(tree, firstChild);
@@ -354,7 +354,7 @@ describe("CTOutliner Logic Tests", () => {
     it("should not outdent root-level nodes", () => {
       const tree = createTestTree();
       const firstChild = tree.root.children[0];
-      
+
       // outdentNode now throws errors instead of returning failure results
       expect(() => {
         TreeOperations.outdentNode(tree, firstChild);
