@@ -41,26 +41,26 @@ async function getCharmResult(page: Page): Promise<any> {
   if (!appView) {
     throw new Error("Could not find x-app-view element");
   }
-  
+
   // Use the element handle to evaluate in its context
   return await appView.evaluate((element: any) => {
     // Access the private _activeCharm property
     const activeCharmTask = element._activeCharm;
-    
+
     if (!activeCharmTask) {
       throw new Error("No _activeCharm property found on element");
     }
-    
+
     if (!activeCharmTask.value) {
       throw new Error("No active charm value found");
     }
-    
+
     // Get the charm controller from the Task's value
     const charmController = activeCharmTask.value;
-    
+
     // Get the result from the charm controller
     const result = charmController.getResult();
-    
+
     return result;
   });
 }
@@ -130,9 +130,53 @@ describe("shell iframe counter tests", () => {
     console.log("Getting charm result to verify count...");
     const charmResult = await getCharmResult(page);
     console.log("Charm result:", charmResult);
-    
+
     // Verify the count is 2
-    assertEquals(charmResult.count, 2, "Count should be 2 after 5 increments and 3 decrements");
+    assertEquals(
+      charmResult.count,
+      2,
+      "Count should be 2 after 5 increments and 3 decrements",
+    );
     console.log("✅ Successfully verified count is 2");
+
+    // Reload the page to test persistence
+    console.log("\nReloading page to test persistence...");
+    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.applyConsoleFormatter();
+
+    // Need to login again after reload
+    await shell.login();
+
+    // Wait for the page and iframe to load
+    await sleep(5000);
+
+    // Get the iframe again after reload
+    const counterIframeAfterReload = await page.$("pierce/iframe");
+    assert(
+      counterIframeAfterReload,
+      "Outer iframe should be found after reload",
+    );
+
+    // Click increment 4 times
+    console.log("Clicking increment 4 times after reload...");
+    for (let i = 0; i < 4; i++) {
+      await clickIncrementBtn(counterIframeAfterReload);
+      await sleep(300);
+    }
+
+    await sleep(1000);
+
+    // Get the charm's result and verify the count is now 6
+    console.log("Getting charm result after reload and increments...");
+    const charmResultAfterReload = await getCharmResult(page);
+    console.log("Charm result after reload:", charmResultAfterReload);
+
+    // Verify the count is 6 (2 + 4)
+    assertEquals(
+      charmResultAfterReload.count,
+      6,
+      "Count should be 6 after reload (2 + 4 increments)",
+    );
+    console.log("✅ Successfully verified count persistence and is now 6");
   });
 });
