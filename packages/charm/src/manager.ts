@@ -74,7 +74,7 @@ export const charmSourceCellSchema = {
       items: charmLineageSchema,
       default: [],
     },
-    llmRequestId: { type: "string", default: undefined },
+    llmRequestId: { type: "string" },
   },
 } as const satisfies JSONSchema;
 
