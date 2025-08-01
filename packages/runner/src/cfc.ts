@@ -331,7 +331,7 @@ export class ContextualFlowControl {
   // could have a reference to an anchor (not currently allowed), and
   // for those, if the User is secret, their Address should be too.
   /**
-   * Resolve a schema that's just a $ref.
+   * Resolve a $ref in a schema.
    * This doesn't currently handle $anchor tags or external documents
    *
    * @param rootSchema Top level document for the schema which will be used

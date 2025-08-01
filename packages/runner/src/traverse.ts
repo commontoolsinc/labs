@@ -662,7 +662,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         schemaRef,
       );
       if (resolved === undefined) {
-        return resolved;
+        return undefined;
       }
       schemaContext = {
         schema: resolved,
