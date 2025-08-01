@@ -419,24 +419,7 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
   }
 
   constructor(public source: ConsumerInvocationFor<Ability, Protocol>) {
-    try {
-      this.#reference = refer(source);
-    } catch (error) {
-      const findUndefined = (obj: any, path: PropertyKey[] = []) => {
-        for (const key of Object.keys(obj)) {
-          if (obj[key] === undefined) {
-            console.log("Undefined", [...path, key]);
-            return [...path, key];
-          }
-          if (typeof obj[key] === "object" && obj[key] !== null) {
-            findUndefined(obj[key], [...path, key]);
-          }
-        }
-      };
-      console.error("Error referring invocation", source);
-      findUndefined(source);
-      throw error;
-    }
+    this.#reference = refer(JSON.parse(JSON.stringify(source)));
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
       (resolve) => (receive = resolve),
