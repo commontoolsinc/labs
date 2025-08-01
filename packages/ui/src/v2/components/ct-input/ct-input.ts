@@ -356,6 +356,7 @@ export class CTInput extends BaseElement {
     super();
     this.type = "text";
     this.placeholder = "";
+    this.value = "";
     this.disabled = false;
     this.readonly = false;
     this.error = false;
@@ -462,21 +463,26 @@ export class CTInput extends BaseElement {
     // CellController handles cleanup automatically via ReactiveController
   }
 
-  override updated(changedProperties: Map<string, any>) {
-    super.updated(changedProperties);
+  override willUpdate(changedProperties: Map<string, any>) {
+    super.willUpdate(changedProperties);
 
     // If the value property itself changed (e.g., switched to a different cell)
     if (changedProperties.has("value")) {
-      // For plain string values, update the internal state
-      if (!this._cellController.isCell() && typeof this.value === "string") {
-        // Get the current internal value
-        const currentValue = this._cellController.getValue();
-        // Only update if the value actually changed
-        if (currentValue !== this.value) {
-          this._cellController.setValue(this.value);
-        }
-      }
+      // Bind the new value (Cell or plain) to the controller
+      // This updates the internal reference so getValue() returns the correct value
       this._cellController.bind(this.value);
+    }
+  }
+
+  override updated(changedProperties: Map<string, any>) {
+    super.updated(changedProperties);
+
+    // If value changed, ensure the DOM input is synchronized
+    if (changedProperties.has("value") && this.input) {
+      const currentValue = this.getValue();
+      if (this.input.value !== currentValue) {
+        this.input.value = currentValue;
+      }
     }
 
     // Update timing controller if timing options changed

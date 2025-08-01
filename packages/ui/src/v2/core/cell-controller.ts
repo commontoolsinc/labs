@@ -145,7 +145,7 @@ export class CellController<T> implements ReactiveController {
    * Get the current value from Cell<T> | T
    */
   getValue(): T {
-    if (!this._currentValue) {
+    if (this._currentValue === undefined || this._currentValue === null) {
       return undefined as T;
     }
     return this.options.getValue(this._currentValue);
@@ -155,7 +155,7 @@ export class CellController<T> implements ReactiveController {
    * Set a new value, handling timing and transactions
    */
   setValue(newValue: T): void {
-    if (!this._currentValue) return;
+    if (this._currentValue === undefined || this._currentValue === null) return;
     
     const oldValue = this.getValue();
     
@@ -293,7 +293,8 @@ export class StringCellController extends CellController<string> {
         if (isCell(value)) {
           return value.get?.() || "";
         }
-        return value || "";
+        // Handle empty strings explicitly - don't treat them as falsy
+        return value === undefined || value === null ? "" : value;
       }),
     });
   }
