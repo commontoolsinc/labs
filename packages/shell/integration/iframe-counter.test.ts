@@ -1,4 +1,4 @@
-import { env } from "@commontools/integration";
+import { env, Page } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
 import { registerCharm, ShellIntegration } from "./utils.ts";
 import { describe, it } from "@std/testing/bdd";
@@ -31,6 +31,37 @@ async function clickDecrementBtn(counterIframe: ElementHandle): Promise<void> {
       x: box.width * 0.17, // Left third of the screen
       y: box.height * 0.5, // Middle vertically
     },
+  });
+}
+
+// Helper function to get the active charm's result from the app
+async function getCharmResult(page: Page): Promise<any> {
+  // First get the app view element using pierce selector
+  const appView = await page.$("pierce/x-app-view");
+  if (!appView) {
+    throw new Error("Could not find x-app-view element");
+  }
+  
+  // Use the element handle to evaluate in its context
+  return await appView.evaluate((element: any) => {
+    // Access the private _activeCharm property
+    const activeCharmTask = element._activeCharm;
+    
+    if (!activeCharmTask) {
+      throw new Error("No _activeCharm property found on element");
+    }
+    
+    if (!activeCharmTask.value) {
+      throw new Error("No active charm value found");
+    }
+    
+    // Get the charm controller from the Task's value
+    const charmController = activeCharmTask.value;
+    
+    // Get the result from the charm controller
+    const result = charmController.getResult();
+    
+    return result;
   });
 }
 
@@ -95,9 +126,13 @@ describe("shell iframe counter tests", () => {
 
     await sleep(1000);
 
-    // TODO: Once we can access iframe content, verify the count is 2
-    // For now, we're testing that the clicks work without errors
-    console.log("Successfully clicked increment 5 times and decrement 3 times");
-    console.log("Expected count: 2 (starting from 0: +5 -3 = 2)");
+    // Get the charm's result and verify the count
+    console.log("Getting charm result to verify count...");
+    const charmResult = await getCharmResult(page);
+    console.log("Charm result:", charmResult);
+    
+    // Verify the count is 2
+    assertEquals(charmResult.count, 2, "Count should be 2 after 5 increments and 3 decrements");
+    console.log("✅ Successfully verified count is 2");
   });
 });
