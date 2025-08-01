@@ -369,10 +369,11 @@ export class CTList extends BaseElement {
       return;
     }
 
-    const index = findCellIndex(this.value, itemToRemove);
-    if (index !== -1) {
-      mutateCell(this.value, (cell) => cell.get().splice(index, 1));
-    }
+    // Use filter with .equals() to remove the item
+    mutateCell(this.value, (cell) => {
+      const filtered = cell.get().filter((_, i) => !cell.key(i).equals(itemToRemove));
+      cell.set(filtered);
+    });
 
     this.requestUpdate();
   }
