@@ -15,6 +15,7 @@ const libraries = {
       "https://esm.sh/@use-gesture/react@10.3.0?external=react",
     "uuid": "https://esm.sh/uuid@11.0.1",
     "tone": "https://esm.sh/tone@15.0.4",
+    "@babel/standalone": "https://esm.sh/@babel/standalone@7.24.7",
   },
 };
 
@@ -31,7 +32,7 @@ export const prefillHtml = `<html>
 ${JSON.stringify(libraries)}
 </script>
 <!-- Bootstrap script that runs first to set up React and utility functions -->
-<script type="module" id="bootstrap" src="/module/charm/sandbox/bootstrap.js"></script>
+<script type="module" id="bootstrap" src="/static/scripts/iframe-bootstrap.js"></script>
 
 <!-- User code to be transformed by Babel -->
 <script type="text/babel" data-presets="react" id="user-code">

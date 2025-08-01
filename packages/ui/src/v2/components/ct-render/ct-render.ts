@@ -1,4 +1,4 @@
-import { html, PropertyValues } from "lit";
+import { css, html, PropertyValues } from "lit";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commontools/html";
 import { isCell, UI } from "@commontools/runner";
@@ -19,6 +19,19 @@ const DEBUG_LOGGING = false;
  * <ct-render .cell=${myCharmCell}></ct-render>
  */
 export class CTRender extends BaseElement {
+  static override styles = css`
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .render-container {
+      width: 100%;
+      height: 100%;
+    }
+  `;
+
   static override properties = {
     cell: { attribute: false },
   };
@@ -79,11 +92,6 @@ export class CTRender extends BaseElement {
     );
     await this.cell.runtime.runSynced(this.cell, recipe);
     await this.cell.runtime.idle();
-
-    // Check if this is an iframe recipe (now that recipe is loaded)
-    if (getIframeRecipe(this.cell, this.cell.runtime).iframe) {
-      throw new Error("Cannot render IFrame recipe.");
-    }
 
     // Render the UI output
     if (!this._renderContainer) {

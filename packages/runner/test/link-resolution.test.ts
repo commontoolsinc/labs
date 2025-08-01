@@ -816,7 +816,7 @@ describe("link-resolution", () => {
       // This is where the overtrigger might happen - accessing bar through the cycle
       let barResult: string;
       try {
-        barResult = cellA.key("foo").key("bar").get();
+        barResult = cellA.key("foo").key("bar").get() as any;
         expect(barResult).toBe("baz");
       } catch (e) {
         // If this throws, we've hit the overtrigger bug

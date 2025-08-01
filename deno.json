@@ -21,7 +21,8 @@
     "./packages/static",
     "./packages/toolshed",
     "./packages/ui",
-    "./packages/utils"
+    "./packages/utils",
+    "./packages/vendor-astral"
   ],
   "tasks": {
     "check": "./tasks/check.sh",
@@ -57,7 +58,8 @@
   "lint": {
     "exclude": [
       "./packages/static/assets",
-      "./packages/deno-vite-plugin"
+      "./packages/deno-vite-plugin",
+      "./packages/vendor-astral"
     ],
     "rules": {
       "tags": [
@@ -84,13 +86,14 @@
       "packages/jumble/integration/cache/llm-api-cache/",
       "packages/seeder/templates/",
       "packages/static/assets/",
-      "packages/js-runtime/test/fixtures"
+      "packages/js-runtime/test/fixtures",
+      "packages/vendor-astral"
     ]
   },
   "imports": {
     "commontools": "./packages/api/index.ts",
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js/proposals/explicit-resource-management",
-    "@astral/astral": "jsr:@astral/astral@0.5.2",
+    "@astral/astral": "./packages/vendor-astral/mod.ts",
     "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
     "@cmd-johnson/oauth2-client": "jsr:@cmd-johnson/oauth2-client@^2.0.0",
     "@codemirror/lang-javascript": "npm:@codemirror/lang-javascript@^6.2.2",
