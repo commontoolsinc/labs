@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CTOutliner } from "./ct-outliner.ts";
-import { createNestedTestTree, setupMockOutliner, createMockTreeCell } from "./test-utils.ts";
+import {
+  createMockTreeCell,
+  createNestedTestTree,
+  setupMockOutliner,
+} from "./test-utils.ts";
 
 describe("CTOutliner Component Integration Tests", () => {
   let outliner: CTOutliner;

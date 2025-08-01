@@ -146,13 +146,13 @@ export const TreeOperations = {
    * Enhanced with defensive checks for corrupted node objects
    */
   getAllNodes(node: Node): Node[] {
-    if (!node || typeof node !== 'object') {
-      console.warn('Invalid node encountered in getAllNodes:', node);
+    if (!node || typeof node !== "object") {
+      console.warn("Invalid node encountered in getAllNodes:", node);
       return [];
     }
 
     const result: Node[] = [node];
-    
+
     // Ensure children array exists and is valid
     if (node.children && Array.isArray(node.children)) {
       for (const child of node.children) {
@@ -161,7 +161,7 @@ export const TreeOperations = {
         }
       }
     }
-    
+
     return result;
   },
 
@@ -276,17 +276,22 @@ export const TreeOperations = {
     const result: Node[] = [];
     const traverse = (currentNode: Node) => {
       // Defensive check for valid node structure
-      if (!currentNode || typeof currentNode !== 'object') {
-        console.warn('Invalid node encountered in tree traversal:', currentNode);
+      if (!currentNode || typeof currentNode !== "object") {
+        console.warn(
+          "Invalid node encountered in tree traversal:",
+          currentNode,
+        );
         return;
       }
 
       result.push(currentNode);
-      
+
       // Ensure children array exists and is valid
-      if (!collapsedNodes.has(currentNode) && 
-          currentNode.children && 
-          Array.isArray(currentNode.children)) {
+      if (
+        !collapsedNodes.has(currentNode) &&
+        currentNode.children &&
+        Array.isArray(currentNode.children)
+      ) {
         for (const child of currentNode.children) {
           if (child) {
             traverse(child);
@@ -303,7 +308,7 @@ export const TreeOperations = {
         }
       }
     }
-    
+
     return result;
   },
 
@@ -522,19 +527,19 @@ export const TreeOperations = {
    */
   toggleCheckbox(tree: Tree, targetNode: Node): void {
     const mutableNode = targetNode as MutableNode;
-    
+
     if (TreeOperations.hasCheckbox(targetNode)) {
       // Toggle existing checkbox
       if (TreeOperations.isCheckboxChecked(targetNode)) {
         // Checked -> Unchecked (normalize to [ ])
-        mutableNode.body = mutableNode.body.replace(/^\s*\[x\]\s*/, '[ ] ');
+        mutableNode.body = mutableNode.body.replace(/^\s*\[x\]\s*/, "[ ] ");
       } else {
         // Unchecked -> Checked
-        mutableNode.body = mutableNode.body.replace(/^\s*\[[ ]?\]\s*/, '[x] ');
+        mutableNode.body = mutableNode.body.replace(/^\s*\[[ ]?\]\s*/, "[x] ");
       }
     } else {
       // Add checkbox if none exists
-      mutableNode.body = '[ ] ' + mutableNode.body;
+      mutableNode.body = "[ ] " + mutableNode.body;
     }
   },
 
@@ -542,18 +547,18 @@ export const TreeOperations = {
    * Get the body text without the checkbox prefix
    */
   getBodyWithoutCheckbox(node: Node): string {
-    return node.body.replace(/^\s*\[[ x]?\]\s*/, '');
+    return node.body.replace(/^\s*\[[ x]?\]\s*/, "");
   },
 
   /**
    * Extract checkbox state from node body
    * Returns: 'checked', 'unchecked', or null if no checkbox
    */
-  getCheckboxState(node: Node): 'checked' | 'unchecked' | null {
+  getCheckboxState(node: Node): "checked" | "unchecked" | null {
     if (TreeOperations.isCheckboxChecked(node)) {
-      return 'checked';
+      return "checked";
     } else if (TreeOperations.hasCheckbox(node)) {
-      return 'unchecked';
+      return "unchecked";
     }
     return null;
   },

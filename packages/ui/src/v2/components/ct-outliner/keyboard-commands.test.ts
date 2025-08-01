@@ -11,9 +11,9 @@ import {
   createKeyboardContext,
   createMockKeyboardEvent,
   createMockTextarea,
+  createMockTreeCell,
   createNestedTestTree,
   setupMockOutliner,
-  createMockTreeCell,
 } from "./test-utils.ts";
 import type { KeyboardContext } from "./types.ts";
 

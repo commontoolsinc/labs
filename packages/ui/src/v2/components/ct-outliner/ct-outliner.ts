@@ -125,7 +125,7 @@ export class CTOutliner extends BaseElement {
   declare value: Cell<Tree> | null;
   declare readonly: boolean;
   declare mentionable: Cell<Charm[]>;
-  
+
   // Direct tree access from Cell
   get tree(): Tree {
     if (!this.value) {
@@ -141,7 +141,7 @@ export class CTOutliner extends BaseElement {
 
   private editingNode: OutlineTreeNode | null = null;
   private editingContent: string = "";
-  
+
   // Subscription cleanup function
   private _unsubscribe: (() => void) | null = null;
 
@@ -464,25 +464,28 @@ export class CTOutliner extends BaseElement {
     super.updated(changedProperties);
 
     // Handle value changes
-    if (changedProperties.has('value')) {
+    if (changedProperties.has("value")) {
       // Clean up previous subscription
       if (this._unsubscribe) {
         this._unsubscribe();
         this._unsubscribe = null;
       }
-      
+
       // Subscribe to new Cell if it exists
       if (this.value && isCell(this.value)) {
         this._unsubscribe = this.value.sink(() => {
           this.emit("ct-change", { value: this.tree });
           // Handle focus restoration after tree changes
-          this.focusedNode = FocusUtils.findValidFocus(this.tree, this.focusedNode);
+          this.focusedNode = FocusUtils.findValidFocus(
+            this.tree,
+            this.focusedNode,
+          );
           this.requestUpdate();
         });
       }
     }
   }
-  
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     // Clean up subscription
@@ -495,7 +498,6 @@ export class CTOutliner extends BaseElement {
   private getNodeIndex(node: OutlineTreeNode): number {
     return this.nodeIndexer.getIndex(node);
   }
-
 
   // =============================================================================
   // Cell Path Navigation Utilities
@@ -535,7 +537,7 @@ export class CTOutliner extends BaseElement {
    */
   private getNodeCell(node: OutlineTreeNode): Cell<OutlineTreeNode> | null {
     if (!this.value) return null;
-    
+
     const nodePath = this.getNodePath(node);
     if (!nodePath) return null;
 
@@ -587,7 +589,6 @@ export class CTOutliner extends BaseElement {
 
     return this.getNodeChildrenCell(parentNode);
   }
-
 
   private getAllNodes(): OutlineTreeNode[] {
     return NodeUtils.getAllNodesExcludingRoot(this.tree);
@@ -803,12 +804,16 @@ export class CTOutliner extends BaseElement {
             const newChildren = [...currentChildren];
 
             // Insert all new nodes at once using immutable operations
-            const nodesToInsert = lines.slice(1).map(line => 
+            const nodesToInsert = lines.slice(1).map((line) =>
               TreeOperations.createNode({ body: line })
             );
             const beforeInsert = newChildren.slice(0, nodeIndex + 1);
             const afterInsert = newChildren.slice(nodeIndex + 1);
-            const finalChildren = [...beforeInsert, ...nodesToInsert, ...afterInsert];
+            const finalChildren = [
+              ...beforeInsert,
+              ...nodesToInsert,
+              ...afterInsert,
+            ];
 
             cell.set(finalChildren);
           });
@@ -950,7 +955,7 @@ export class CTOutliner extends BaseElement {
    */
   createNewNodeAfter(node: OutlineTreeNode) {
     if (!this.value) return;
-    
+
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) return;
 
@@ -982,7 +987,7 @@ export class CTOutliner extends BaseElement {
    */
   createChildNode(node: OutlineTreeNode) {
     if (!this.value) return;
-    
+
     const newNode = TreeOperations.createNode({ body: "" });
 
     const nodeChildrenCell = this.getNodeChildrenCell(node);
@@ -1011,7 +1016,7 @@ export class CTOutliner extends BaseElement {
 
   deleteNode(node: OutlineTreeNode) {
     if (!this.value) return;
-    
+
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) {
       console.error("Cannot delete root node");
@@ -1030,7 +1035,7 @@ export class CTOutliner extends BaseElement {
         const currentChildren = cell.get();
         const beforeNode = currentChildren.slice(0, nodeIndex);
         const afterNode = currentChildren.slice(nodeIndex + 1);
-        
+
         // Move children up to parent level if any, otherwise just remove
         let newChildren: OutlineTreeNode[];
         if (node.children.length > 0) {
@@ -1060,7 +1065,7 @@ export class CTOutliner extends BaseElement {
 
   indentNode(node: OutlineTreeNode) {
     if (!this.value) return;
-    
+
     // Preserve editing state if this node is being edited
     const wasEditing = this.editingNode === node;
     const editingContent = wasEditing ? this.editingContent : "";
@@ -1084,16 +1089,18 @@ export class CTOutliner extends BaseElement {
     if (parentChildrenCell && siblingChildrenCell) {
       // V-DOM style: precise mutations using single transaction
       const tx = this.value.runtime.edit();
-      
+
       // Remove from current parent
       const currentParentChildren = parentChildrenCell.get();
-      const newParentChildren = currentParentChildren.filter(child => child !== node);
+      const newParentChildren = currentParentChildren.filter((child) =>
+        child !== node
+      );
       parentChildrenCell.withTx(tx).set(newParentChildren);
-      
+
       // Add to previous sibling's children
       const currentSiblingChildren = siblingChildrenCell.get();
       siblingChildrenCell.withTx(tx).set([...currentSiblingChildren, node]);
-      
+
       tx.commit();
     }
 
@@ -1135,7 +1142,7 @@ export class CTOutliner extends BaseElement {
 
   outdentNode(node: OutlineTreeNode) {
     if (!this.value) return;
-    
+
     // Preserve editing state if this node is being edited
     const wasEditing = this.editingNode === node;
     const editingContent = wasEditing ? this.editingContent : "";
@@ -1169,19 +1176,21 @@ export class CTOutliner extends BaseElement {
     if (parentChildrenCell && grandParentChildrenCell) {
       // V-DOM style: precise mutations using single transaction
       const tx = this.value.runtime.edit();
-      
+
       // Remove from current parent
       const currentParentChildren = parentChildrenCell.get();
-      const newParentChildren = currentParentChildren.filter(child => child !== node);
+      const newParentChildren = currentParentChildren.filter((child) =>
+        child !== node
+      );
       parentChildrenCell.withTx(tx).set(newParentChildren);
-      
+
       // Add to grandparent after parent
       const currentGrandParentChildren = grandParentChildrenCell.get();
       const beforeParent = currentGrandParentChildren.slice(0, parentIndex + 1);
       const afterParent = currentGrandParentChildren.slice(parentIndex + 1);
       const newGrandParentChildren = [...beforeParent, node, ...afterParent];
       grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
-      
+
       tx.commit();
     }
 
@@ -1222,7 +1231,7 @@ export class CTOutliner extends BaseElement {
 
   moveNodeUp(node: OutlineTreeNode) {
     if (!this.value) return;
-    
+
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) {
       return; // Cannot move node up: node has no parent
@@ -1239,11 +1248,13 @@ export class CTOutliner extends BaseElement {
       mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
         const newChildren = [...currentChildren];
-        
+
         // Swap the node with the previous one
-        [newChildren[childIndex - 1], newChildren[childIndex]] = 
-        [newChildren[childIndex], newChildren[childIndex - 1]];
-        
+        [newChildren[childIndex - 1], newChildren[childIndex]] = [
+          newChildren[childIndex],
+          newChildren[childIndex - 1],
+        ];
+
         cell.set(newChildren);
       });
     }
@@ -1253,7 +1264,7 @@ export class CTOutliner extends BaseElement {
 
   moveNodeDown(node: OutlineTreeNode) {
     if (!this.value) return;
-    
+
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) {
       return; // Cannot move node down: node has no parent
@@ -1270,11 +1281,13 @@ export class CTOutliner extends BaseElement {
       mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
         const newChildren = [...currentChildren];
-        
+
         // Swap the node with the next one
-        [newChildren[childIndex], newChildren[childIndex + 1]] = 
-        [newChildren[childIndex + 1], newChildren[childIndex]];
-        
+        [newChildren[childIndex], newChildren[childIndex + 1]] = [
+          newChildren[childIndex + 1],
+          newChildren[childIndex],
+        ];
+
         cell.set(newChildren);
       });
     }
@@ -1470,7 +1483,7 @@ export class CTOutliner extends BaseElement {
    */
   setNodeCheckbox(node: OutlineTreeNode, isChecked: boolean) {
     if (!this.value) return;
-    
+
     const nodeBodyCell = this.getNodeBodyCell(node);
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => {
@@ -1557,7 +1570,9 @@ export class CTOutliner extends BaseElement {
       const newNode = TreeOperations.createNode({ body: "" });
 
       if (this.value) {
-        const rootChildrenCell = this.value.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        const rootChildrenCell = this.value.key("root").key("children") as Cell<
+          OutlineTreeNode[]
+        >;
         mutateCell(rootChildrenCell, (cell) => {
           cell.set([newNode]);
         });
@@ -1602,7 +1617,11 @@ export class CTOutliner extends BaseElement {
             const currentChildren = cell.get();
             const beforeInsert = currentChildren.slice(0, nodeIndex + 1);
             const afterInsert = currentChildren.slice(nodeIndex + 1);
-            const newChildren = [...beforeInsert, ...parsedTree.root.children, ...afterInsert];
+            const newChildren = [
+              ...beforeInsert,
+              ...parsedTree.root.children,
+              ...afterInsert,
+            ];
 
             cell.set(newChildren);
           });
@@ -1614,7 +1633,9 @@ export class CTOutliner extends BaseElement {
     } else if (this.tree.root.children.length === 0) {
       // No nodes exist, replace root children using Cell operations
       if (this.value) {
-        const rootChildrenCell = this.value.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        const rootChildrenCell = this.value.key("root").key("children") as Cell<
+          OutlineTreeNode[]
+        >;
         mutateCell(rootChildrenCell, (cell) => {
           cell.set(parsedTree.root.children);
         });
@@ -1623,7 +1644,9 @@ export class CTOutliner extends BaseElement {
     } else {
       // No focused node but tree has nodes, append to the end using Cell operations
       if (this.value) {
-        const rootChildrenCell = this.value.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        const rootChildrenCell = this.value.key("root").key("children") as Cell<
+          OutlineTreeNode[]
+        >;
         mutateCell(rootChildrenCell, (cell) => {
           const currentChildren = cell.get();
           const newChildren = [...currentChildren, ...parsedTree.root.children];
@@ -1646,7 +1669,7 @@ export class CTOutliner extends BaseElement {
         </div>
       `;
     }
-    
+
     const hasNodes = this.tree && this.tree.root.children.length > 0;
 
     return html`

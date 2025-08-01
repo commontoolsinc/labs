@@ -16,7 +16,7 @@ class MockRuntime {
 }
 
 // Mock Cell implementation for testing
-// @ts-ignore
+// @ts-ignore: Partial implementation of Cell interface for testing
 class MockCell<T> implements Partial<Cell<T>> {
   private value: T;
   private parent?: MockCell<any>;
@@ -39,7 +39,7 @@ class MockCell<T> implements Partial<Cell<T>> {
     // Update parent if this is a nested cell
     if (this.parent && this.keyInParent !== undefined) {
       const parentValue = this.parent.get() as any;
-      if (parentValue && typeof parentValue === 'object') {
+      if (parentValue && typeof parentValue === "object") {
         parentValue[this.keyInParent] = value;
         this.parent.set(parentValue);
       }
@@ -48,7 +48,9 @@ class MockCell<T> implements Partial<Cell<T>> {
 
   key(key: string | number): any {
     const currentValue = this.get() as any;
-    if (currentValue && typeof currentValue === 'object' && key in currentValue) {
+    if (
+      currentValue && typeof currentValue === "object" && key in currentValue
+    ) {
       return new MockCell(currentValue[key], this, key);
     }
     return new MockCell(undefined, this, key);
