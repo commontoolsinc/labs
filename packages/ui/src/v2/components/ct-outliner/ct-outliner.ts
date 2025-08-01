@@ -600,6 +600,19 @@ export class CTOutliner extends BaseElement {
     return this.getNodeChildrenCell(parentNode);
   }
 
+  /**
+   * Create a clean copy of a node to avoid proxy reference issues in Cell operations
+   * @param node The node to copy
+   * @returns A clean copy of the node that's safe to use in Cell operations
+   */
+  private createNodeCopy(node: OutlineTreeNode): OutlineTreeNode {
+    return {
+      body: node.body || "",
+      children: (node.children || []).map(child => this.createNodeCopy(child)),
+      attachments: [...(node.attachments || [])],
+    };
+  }
+
   private getAllNodes(): OutlineTreeNode[] {
     return NodeUtils.getAllNodesExcludingRoot(this.tree);
   }
@@ -1049,7 +1062,8 @@ export class CTOutliner extends BaseElement {
         // Move children up to parent level if any, otherwise just remove
         let newChildren: OutlineTreeNode[];
         if (node.children.length > 0) {
-          newChildren = [...beforeNode, ...node.children, ...afterNode];
+          const childrenCopies = node.children.map(child => this.createNodeCopy(child));
+          newChildren = [...beforeNode, ...childrenCopies, ...afterNode];
         } else {
           newChildren = [...beforeNode, ...afterNode];
         }
@@ -1109,7 +1123,8 @@ export class CTOutliner extends BaseElement {
 
       // Add to previous sibling's children
       const currentSiblingChildren = siblingChildrenCell.get();
-      siblingChildrenCell.withTx(tx).set([...currentSiblingChildren, node]);
+      const nodeCopy = this.createNodeCopy(node);
+      siblingChildrenCell.withTx(tx).set([...currentSiblingChildren, nodeCopy]);
 
       await tx.commit();
     }
@@ -1198,7 +1213,8 @@ export class CTOutliner extends BaseElement {
       const currentGrandParentChildren = grandParentChildrenCell.get();
       const beforeParent = currentGrandParentChildren.slice(0, parentIndex + 1);
       const afterParent = currentGrandParentChildren.slice(parentIndex + 1);
-      const newGrandParentChildren = [...beforeParent, node, ...afterParent];
+      const nodeCopy = this.createNodeCopy(node);
+      const newGrandParentChildren = [...beforeParent, nodeCopy, ...afterParent];
       grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
 
       await tx.commit();

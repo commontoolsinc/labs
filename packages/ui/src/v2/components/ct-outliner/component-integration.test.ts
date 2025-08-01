@@ -48,6 +48,7 @@ describe("CTOutliner Component Integration Tests", () => {
       const secondNodeBody = outliner.tree.root.children[1].body;
 
       await outliner.deleteNode(nodeToDelete);
+      await waitForOutlinerUpdate(outliner);
 
       expect(outliner.tree.root.children.length).toBe(1);
       // Compare node properties instead of object identity
@@ -62,6 +63,7 @@ describe("CTOutliner Component Integration Tests", () => {
       const secondNode = outliner.tree.root.children[1];
 
       await outliner.indentNode(secondNode);
+      await waitForOutlinerUpdate(outliner);
 
       expect(outliner.tree.root.children.length).toBe(1);
       // Get fresh reference to first node after operation
@@ -80,6 +82,7 @@ describe("CTOutliner Component Integration Tests", () => {
       const childNodeBody = childNode.body;
 
       await outliner.outdentNode(childNode);
+      await waitForOutlinerUpdate(outliner);
 
       expect(outliner.tree.root.children.length).toBe(2);
       // Compare node properties instead of object identity
@@ -119,6 +122,7 @@ describe("CTOutliner Component Integration Tests", () => {
 
       // Create a new node
       await outliner.createNewNodeAfter(firstNode);
+      await waitForOutlinerUpdate(outliner);
 
       // Original nodes should still be present and identifiable by content
       expect(outliner.tree.root.children[0].body).toBe(originalFirstNodeBody);
