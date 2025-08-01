@@ -54,7 +54,7 @@ async function clickDecrementBtn(counterIframe: ElementHandle): Promise<void> {
 // Helper function to get the active charm's result from the app
 async function getCharmResult(page: Page): Promise<any> {
   // First get the app view element using pierce selector
-  const appView = await page.$("pierce/x-app-view");
+  const appView = await page.$("x-app-view", { strategy: "pierce" });
   if (!appView) {
     throw new Error("Could not find x-app-view element");
   }
@@ -123,7 +123,7 @@ describe("shell iframe counter tests", () => {
     await sleep(5000);
 
     // Get the iframe element using pierce selector to traverse shadow DOM
-    const counterIframe = await page.$("pierce/iframe");
+    const counterIframe = await page.$("iframe", { strategy: "pierce" });
     assert(counterIframe, "Outer iframe should be found");
 
     // Click the right third of the iframe 5 times to increment (starting from 0)
@@ -169,7 +169,9 @@ describe("shell iframe counter tests", () => {
     await sleep(5000);
 
     // Get the iframe again after reload
-    const counterIframeAfterReload = await page.$("pierce/iframe");
+    const counterIframeAfterReload = await page.$("iframe", {
+      strategy: "pierce",
+    });
     assert(
       counterIframeAfterReload,
       "Outer iframe should be found after reload",
