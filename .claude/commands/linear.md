@@ -2,9 +2,50 @@
 
 This document establishes your working context for Linear-driven development with GitHub integration. It runs at the start of each session to set up proper workflows and mental models.
 
+## ⚠️ CRITICAL: Always Follow This Workflow
+
+### For ANY Implementation Task:
+1. Create worktree
+2. Check for conflicts  
+3. Update Linear status
+4. Use specialized agent
+5. Let agent handle PR
+
+## 🎯 Direct Command Responses
+
+When user says: **"let's fix CT-XXX"**
+You MUST respond with: "I'll help you fix CT-XXX. Let me set up the proper workflow first."
+Then execute these steps:
+
+```javascript
+// When user says "let's fix CT-XXX", ALWAYS start with:
+const issue = await mcp__linear-server__get_issue({ id: "CT-XXX" });
+
+// 1. Create worktree FIRST
+await Bash({ command: "cd /Users/ben/code/labs && git worktree add labs-ct-xxx -b fix/2025-MM-DD-ct-xxx-brief-description" });
+
+// 2. Check for conflicts
+await Bash({ command: "gh pr list | grep -i ct-xxx" });
+
+// 3. Update status
+await mcp__linear-server__update_issue({ id: issue.id, stateId: inProgressId });
+
+// 4. THEN delegate to implementation agent
+await Task({
+  description: "Fix issue CT-XXX",
+  subagent_type: "plan-implementer", 
+  prompt: `Fix the issue described in Linear issue ${issue.identifier}...`
+});
+```
+
+When user says: **"can you implement..."**  
+You MUST respond with: "I'll set up the workflow and delegate this to the appropriate implementation agent."
+
+**NEVER jump directly to: Read, Edit, MultiEdit, or Write tools**
+
 ## 🚀 Quick Session Startup
 
-When the `/linear` command is run, immediately orient yourself with a subagent:
+When the `/linear` command is run WITHOUT a specific issue:
 
 ```javascript
 // 1. Check your active issues
@@ -13,18 +54,23 @@ const myIssues = await mcp__linear-server__list_my_issues({ limit: 50 });
 // 2. Group by status for overview
 const inProgress = myIssues.filter(i => i.state?.name === "In Progress");
 const inReview = myIssues.filter(i => i.state?.name === "In Review");
-const triage = myIssues.filter(i => i.state?.name === "Triage");
 
 // 3. Present concise summary
 "Linear Status:
 - In Progress (3): CT-701, CT-703, CT-705
 - In Review (2): CT-699, CT-700
-- Triage (5): CT-706 through CT-710
 
 What would you like to focus on today?"
 ```
 
-**Key principle: Start minimal, expand as needed. Don't deep-dive until directed.**
+### STOP! Pre-Work Checklist (MANDATORY)
+When starting work on a specific issue:
+- [ ] Have you created a git worktree for this issue?
+- [ ] Have you checked for concurrent work (gh pr list, git worktree list)?
+- [ ] Have you updated the Linear issue status to "In Progress"?
+- [ ] Have you created a TodoWrite list for tracking?
+
+⚠️ **DO NOT PROCEED TO CODE UNTIL ALL BOXES ARE CHECKED**
 
 ### Finding Your Team ID
 ```javascript
@@ -264,6 +310,23 @@ await Task({
 ```
 
 **Key principle: Always include Linear issue context in agent prompts for continuity.**
+
+## ❌ Common Mistakes to Avoid
+
+### The "Quick Fix" Trap
+**Mistake**: "This looks simple, I'll just fix it quickly"
+**Why it's bad**: Skips workflow, causes conflicts, inconsistent approach
+**Instead**: ALWAYS use worktrees and agents, even for "simple" fixes
+
+### The "Already in the Right Directory" Fallacy  
+**Mistake**: "I'm already in packages/ui, so I'll just work here"
+**Why it's bad**: Conflicts with other agents/users, no isolation
+**Instead**: Create a fresh worktree for EVERY issue
+
+### The "I Can Do It Myself" Syndrome
+**Mistake**: Implementing directly instead of using specialized agents
+**Why it's bad**: Misses domain knowledge, patterns, and optimizations
+**Instead**: Delegate to agents - they have specialized knowledge
 
 ## 🎨 Best Practices
 
