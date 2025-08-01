@@ -1,23 +1,26 @@
-// Vendored form of the patch at https://github.com/lino-levan/astral/pull/166
-// Once/if landed upstream, we can remove this handling
-// TODO(js): Temporary workaround for upstream https://github.com/lino-levan/astral/pull/166
+import type { Celestial, DOM_NodeId } from "../bindings/celestial.ts";
 
-import type { Page } from "@astral/astral";
-type DOM_NodeId = number;
-type Celestial = ReturnType<typeof Page.prototype.unsafelyGetCelestialBindings>;
+/**
+ * Strategy applied to a DOM query. "native" is always
+ * chosen by default where optional.
+ *
+ * * "native" uses the DOM's native query selectors.
+ * * "pierce" applies the query to all shadow roots
+ *   within the document.
+ */
+export type QueryStrategy = "native" | "pierce";
 
 export interface QueryOpts {
   nodeId: DOM_NodeId;
   selector: string;
+  strategy: QueryStrategy;
 }
 
-// Queries an element from the DOM from `parent` with `selector`.
-// Supports CDP querying, and custom `pierce/*` selector.
 export async function query(
   bindings: Celestial,
   opts: QueryOpts,
 ): Promise<DOM_NodeId | undefined> {
-  if (opts.selector.startsWith("pierce/")) {
+  if (opts.strategy === "pierce") {
     return (await pierceQuerySelector(
       bindings,
       opts,
@@ -28,13 +31,11 @@ export async function query(
   }
 }
 
-// Queries multiple elements from the DOM from `parent` with `selector`.
-// Supports CDP querying, and custom `pierce/*` selector.
 export async function queryAll(
   bindings: Celestial,
   opts: QueryOpts,
 ): Promise<DOM_NodeId[]> {
-  if (opts.selector.startsWith("pierce/")) {
+  if (opts.strategy === "pierce") {
     return await pierceQuerySelector(bindings, opts, true);
   } else {
     const result = await bindings.DOM.querySelectorAll(opts);
@@ -47,11 +48,6 @@ async function pierceQuerySelector(
   opts: QueryOpts,
   queryAll?: boolean,
 ): Promise<DOM_NodeId[]> {
-  if (!opts.selector.startsWith("pierce/")) {
-    throw new Error("Not a `pierce/` selector.");
-  }
-  const selector = opts.selector.substring("pierce/".length);
-
   const { object } = await bindings.DOM.resolveNode({
     nodeId: opts.nodeId,
   });
@@ -64,7 +60,7 @@ async function pierceQuerySelector(
         {
           objectId: object.objectId,
         },
-        { value: selector },
+        { value: opts.selector },
         { value: queryAll },
       ],
       returnByValue: false,
@@ -101,8 +97,14 @@ async function pierceQuerySelector(
   return nodeIds;
 }
 
-// This function is executed in content, implementing
-// the `pierce/` shadow piercing selector.
+type Element = {
+  shadowRoot?: Element;
+  querySelectorAll(selector: string): Array<Element>;
+};
+
+// This function is executed in content, applying
+// the "pierce" query strategy of applying the selector
+// to all shadow roots within the document.
 function contentPierceQuerySelector(
   element: Element,
   selector: string,

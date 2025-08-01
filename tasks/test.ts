@@ -7,6 +7,7 @@ export const ALL_DISABLED = [
   "deno-vite-plugin", // Do not test vendored code
   "toolshed", // Requires extra configuration to run (e.g. redis)
   "background-charm-service", // no tests yet
+  "vendor-astral", // no tests yet
 ];
 
 export async function testPackage(packagePath: string): Promise<boolean> {
