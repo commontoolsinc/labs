@@ -1,0 +1,6 @@
+types.json
+.vscode
+./docs/build
+.DS_Store
+vendor
+tests/coverage_test
