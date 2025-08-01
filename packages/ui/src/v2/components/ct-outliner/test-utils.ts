@@ -19,11 +19,15 @@ class MockRuntime {
 // @ts-ignore
 class MockCell<T> implements Partial<Cell<T>> {
   private value: T;
+  private parent?: MockCell<any>;
+  private keyInParent?: string | number;
   runtime = new MockRuntime() as any;
   space = "test" as any;
 
-  constructor(value: T) {
+  constructor(value: T, parent?: MockCell<any>, keyInParent?: string | number) {
     this.value = value;
+    this.parent = parent;
+    this.keyInParent = keyInParent;
   }
 
   get(): T {
@@ -32,18 +36,27 @@ class MockCell<T> implements Partial<Cell<T>> {
 
   set(value: T): void {
     this.value = value;
+    // Update parent if this is a nested cell
+    if (this.parent && this.keyInParent !== undefined) {
+      const parentValue = this.parent.get() as any;
+      if (parentValue && typeof parentValue === 'object') {
+        parentValue[this.keyInParent] = value;
+        this.parent.set(parentValue);
+      }
+    }
   }
 
   key(key: string | number): any {
     const currentValue = this.get() as any;
     if (currentValue && typeof currentValue === 'object' && key in currentValue) {
-      return new MockCell(currentValue[key]);
+      return new MockCell(currentValue[key], this, key);
     }
-    return new MockCell(undefined);
+    return new MockCell(undefined, this, key);
   }
 
   withTx(tx: any): any {
-    return this; // For testing, just return self
+    // For testing, create a new instance that behaves the same
+    return new MockCell(this.value, this.parent, this.keyInParent);
   }
 
   push(...items: any[]): void {

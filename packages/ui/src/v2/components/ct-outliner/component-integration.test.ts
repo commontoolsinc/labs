@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CTOutliner } from "./ct-outliner.ts";
-import { createNestedTestTree, setupMockOutliner } from "./test-utils.ts";
+import { createNestedTestTree, setupMockOutliner, createMockTreeCell } from "./test-utils.ts";
 
 describe("CTOutliner Component Integration Tests", () => {
   let outliner: CTOutliner;
@@ -64,7 +64,8 @@ describe("CTOutliner Component Integration Tests", () => {
 
     it("should outdent node correctly", () => {
       const tree = createNestedTestTree();
-      outliner.tree = tree;
+      const treeCell = createMockTreeCell(tree);
+      outliner.value = treeCell;
       const childNode = tree.root.children[0].children[0];
 
       outliner.outdentNode(childNode);

@@ -13,6 +13,7 @@ import {
   createMockTextarea,
   createNestedTestTree,
   setupMockOutliner,
+  createMockTreeCell,
 } from "./test-utils.ts";
 import type { KeyboardContext } from "./types.ts";
 
@@ -186,7 +187,8 @@ describe("Keyboard Commands", () => {
           attachments: [],
         },
       };
-      outliner.tree = tree;
+      const treeCell = createMockTreeCell(tree);
+      outliner.value = treeCell;
       const childNode = tree.root.children[0].children[0];
       outliner.focusedNode = childNode;
 
@@ -247,7 +249,8 @@ describe("Keyboard Commands", () => {
           attachments: [],
         },
       };
-      outliner.tree = tree;
+      const treeCell = createMockTreeCell(tree);
+      outliner.value = treeCell;
       const childNode = tree.root.children[0].children[0];
       outliner.focusedNode = childNode;
 

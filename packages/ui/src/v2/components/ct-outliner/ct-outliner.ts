@@ -802,13 +802,15 @@ export class CTOutliner extends BaseElement {
             const currentChildren = cell.get();
             const newChildren = [...currentChildren];
 
-            // Insert all new nodes at once
-            for (let i = 1; i < lines.length; i++) {
-              const newNode = TreeOperations.createNode({ body: lines[i] });
-              newChildren.splice(nodeIndex + i, 0, newNode);
-            }
+            // Insert all new nodes at once using immutable operations
+            const nodesToInsert = lines.slice(1).map(line => 
+              TreeOperations.createNode({ body: line })
+            );
+            const beforeInsert = newChildren.slice(0, nodeIndex + 1);
+            const afterInsert = newChildren.slice(nodeIndex + 1);
+            const finalChildren = [...beforeInsert, ...nodesToInsert, ...afterInsert];
 
-            cell.set(newChildren);
+            cell.set(finalChildren);
           });
         }
       }
@@ -959,8 +961,9 @@ export class CTOutliner extends BaseElement {
     if (parentChildrenCell) {
       mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
-        const newChildren = [...currentChildren];
-        newChildren.splice(nodeIndex + 1, 0, newNode);
+        const beforeNode = currentChildren.slice(0, nodeIndex + 1);
+        const afterNode = currentChildren.slice(nodeIndex + 1);
+        const newChildren = [...beforeNode, newNode, ...afterNode];
         cell.set(newChildren);
       });
     }
@@ -1025,13 +1028,15 @@ export class CTOutliner extends BaseElement {
     if (parentChildrenCell) {
       mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
-        const newChildren = [...currentChildren];
-
+        const beforeNode = currentChildren.slice(0, nodeIndex);
+        const afterNode = currentChildren.slice(nodeIndex + 1);
+        
         // Move children up to parent level if any, otherwise just remove
+        let newChildren: OutlineTreeNode[];
         if (node.children.length > 0) {
-          newChildren.splice(nodeIndex, 1, ...node.children);
+          newChildren = [...beforeNode, ...node.children, ...afterNode];
         } else {
-          newChildren.splice(nodeIndex, 1);
+          newChildren = [...beforeNode, ...afterNode];
         }
 
         cell.set(newChildren);
@@ -1172,8 +1177,9 @@ export class CTOutliner extends BaseElement {
       
       // Add to grandparent after parent
       const currentGrandParentChildren = grandParentChildrenCell.get();
-      const newGrandParentChildren = [...currentGrandParentChildren];
-      newGrandParentChildren.splice(parentIndex + 1, 0, node);
+      const beforeParent = currentGrandParentChildren.slice(0, parentIndex + 1);
+      const afterParent = currentGrandParentChildren.slice(parentIndex + 1);
+      const newGrandParentChildren = [...beforeParent, node, ...afterParent];
       grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
       
       tx.commit();
@@ -1594,12 +1600,9 @@ export class CTOutliner extends BaseElement {
         if (parentChildrenCell) {
           mutateCell(parentChildrenCell, (cell) => {
             const currentChildren = cell.get();
-            const newChildren = [...currentChildren];
-
-            // Insert all parsed nodes at once
-            parsedTree.root.children.forEach((node, index) => {
-              newChildren.splice(nodeIndex + 1 + index, 0, node);
-            });
+            const beforeInsert = currentChildren.slice(0, nodeIndex + 1);
+            const afterInsert = currentChildren.slice(nodeIndex + 1);
+            const newChildren = [...beforeInsert, ...parsedTree.root.children, ...afterInsert];
 
             cell.set(newChildren);
           });
