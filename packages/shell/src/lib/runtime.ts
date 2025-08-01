@@ -150,8 +150,34 @@ export class RuntimeInternals extends EventTarget {
         // Await storage being synced, at least for now, as the page fully
         // reloads. Once we have in-page navigation with reloading, we don't
         // need this anymore
-        runtime.storage.synced().then(() => {
+        runtime.storage.synced().then(async () => {
+          // Check if the charm is already in the list
+          const charms = charmManager.getCharms();
+          const existingCharm = charms.get().find((charm) =>
+            charmId(charm) === id
+          );
+
+          // If the charm doesn't exist in the list, add it
+          if (!existingCharm) {
+            // FIXME(jake): This feels, perhaps, like an incorrect mix of
+            // concerns, but this gets us to parity with jumble. If `navigateTo`
+            // should be managing/updating the charms list cell, that should be
+            // happening as part of the runtime built-in function, not up in
+            // the shell layer...
+
+            // Add target charm to the charm list
+            await charmManager.add([target]);
+          }
+
           // Use the human-readable space name from CharmManager instead of DID
+          navigate({
+            type: "charm",
+            spaceName: charmManager.getSpaceName(),
+            charmId: id,
+          });
+        }).catch((err) => {
+          console.error("[navigateCallback] Error during storage sync:", err);
+
           navigate({
             type: "charm",
             spaceName: charmManager.getSpaceName(),
