@@ -112,7 +112,8 @@ export const setupMockOutlinerAsync = async () => {
   const tree = createTestTree();
   const treeCell = await createMockTreeCellAsync(tree);
   outliner.value = treeCell;
-  outliner.focusedNode = tree.root.children[0];
+  // Set focused node to the one from the outliner's tree, not the original tree
+  outliner.focusedNode = outliner.tree.root.children[0];
 
   return { outliner, tree, treeCell };
 };
@@ -179,3 +180,46 @@ export const createMockTextarea = (
   selectionEnd: cursorPosition,
   value: content,
 } as HTMLTextAreaElement);
+
+/**
+ * Wait for Cell updates to propagate
+ * This helps tests wait for async Cell operations to complete
+ */
+export const waitForCellUpdate = async (): Promise<void> => {
+  // Wait for async Cell operations to complete
+  // We need to wait longer than just a microtask since Cell operations
+  // involve database transactions that are truly async
+  await new Promise(resolve => setTimeout(resolve, 10));
+};
+
+/**
+ * Wait for Cell updates to propagate by observing an outliner
+ * This waits for the outliner's Cell to actually update and trigger the sink
+ */
+export const waitForOutlinerUpdate = async (outliner: CTOutliner): Promise<void> => {
+  if (!outliner.value) {
+    return;
+  }
+  
+  const cell = outliner.value;
+  
+  return new Promise(resolve => {
+    let unsubscribe: (() => void) | null = null;
+    
+    // Set up a one-time listener for the next Cell update
+    unsubscribe = cell.sink(() => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+      resolve();
+    });
+    
+    // Fallback timeout in case the update doesn't come
+    setTimeout(() => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+      resolve();
+    }, 100);
+  });
+};

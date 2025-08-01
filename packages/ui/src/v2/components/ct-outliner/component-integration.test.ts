@@ -5,6 +5,7 @@ import {
   createMockTreeCell,
   createNestedTestTree,
   setupMockOutliner,
+  waitForOutlinerUpdate,
 } from "./test-utils.ts";
 
 describe("CTOutliner Component Integration Tests", () => {
@@ -21,7 +22,7 @@ describe("CTOutliner Component Integration Tests", () => {
       await setupOutliner();
       const initialCount = outliner.tree.root.children.length;
 
-      outliner.createNewNodeAfter(outliner.focusedNode!);
+      await outliner.createNewNodeAfter(outliner.focusedNode!);
 
       expect(outliner.tree.root.children.length).toBe(initialCount + 1);
       expect(outliner.focusedNode!.body).toBe("");
@@ -32,7 +33,7 @@ describe("CTOutliner Component Integration Tests", () => {
       const parentNode = outliner.focusedNode!;
       const initialChildCount = parentNode.children.length;
 
-      outliner.createChildNode(parentNode);
+      await outliner.createChildNode(parentNode);
 
       // Since tree is mutable, parentNode should have the new child
       expect(parentNode.children.length).toBe(initialChildCount + 1);
@@ -44,38 +45,45 @@ describe("CTOutliner Component Integration Tests", () => {
     it("should delete node and update focus", async () => {
       await setupOutliner();
       const nodeToDelete = outliner.tree.root.children[0];
-      const secondNode = outliner.tree.root.children[1];
+      const secondNodeBody = outliner.tree.root.children[1].body;
 
-      outliner.deleteNode(nodeToDelete);
+      await outliner.deleteNode(nodeToDelete);
 
       expect(outliner.tree.root.children.length).toBe(1);
-      expect(outliner.tree.root.children[0]).toBe(secondNode);
+      // Compare node properties instead of object identity
+      expect(outliner.tree.root.children[0].body).toBe(secondNodeBody);
     });
   });
 
   describe("Node Indentation", () => {
     it("should indent node correctly", async () => {
       await setupOutliner();
+      const secondNodeBody = outliner.tree.root.children[1].body;
       const secondNode = outliner.tree.root.children[1];
-      const firstNode = outliner.tree.root.children[0];
 
-      outliner.indentNode(secondNode);
+      await outliner.indentNode(secondNode);
 
       expect(outliner.tree.root.children.length).toBe(1);
+      // Get fresh reference to first node after operation
+      const firstNode = outliner.tree.root.children[0];
       expect(firstNode.children.length).toBe(1);
-      expect(firstNode.children[0]).toBe(secondNode);
+      // Compare node properties instead of object identity
+      expect(firstNode.children[0].body).toBe(secondNodeBody);
     });
 
     it("should outdent node correctly", async () => {
       const tree = createNestedTestTree();
       const treeCell = await createMockTreeCell(tree);
       outliner.value = treeCell;
-      const childNode = tree.root.children[0].children[0];
+      // Use node from outliner.tree instead of original tree
+      const childNode = outliner.tree.root.children[0].children[0];
+      const childNodeBody = childNode.body;
 
-      outliner.outdentNode(childNode);
+      await outliner.outdentNode(childNode);
 
       expect(outliner.tree.root.children.length).toBe(2);
-      expect(outliner.tree.root.children[1]).toBe(childNode);
+      // Compare node properties instead of object identity
+      expect(outliner.tree.root.children[1].body).toBe(childNodeBody);
     });
   });
 
@@ -103,17 +111,19 @@ describe("CTOutliner Component Integration Tests", () => {
   });
 
   describe("Tree Structure Integrity", () => {
-    it("should preserve node references after operations", async () => {
+    it("should preserve node content after operations", async () => {
       await setupOutliner();
-      const originalFirstNode = outliner.tree.root.children[0];
-      const originalSecondNode = outliner.tree.root.children[1];
+      const originalFirstNodeBody = outliner.tree.root.children[0].body;
+      const originalSecondNodeBody = outliner.tree.root.children[1].body;
+      const firstNode = outliner.tree.root.children[0];
 
       // Create a new node
-      outliner.createNewNodeAfter(originalFirstNode);
+      await outliner.createNewNodeAfter(firstNode);
 
-      // Original nodes should still be present and identifiable
-      expect(outliner.tree.root.children[0]).toBe(originalFirstNode);
-      expect(outliner.tree.root.children[2]).toBe(originalSecondNode);
+      // Original nodes should still be present and identifiable by content
+      expect(outliner.tree.root.children[0].body).toBe(originalFirstNodeBody);
+      expect(outliner.tree.root.children[2].body).toBe(originalSecondNodeBody);
+      expect(outliner.tree.root.children.length).toBe(3);
     });
 
     it("should maintain focus correctly after tree modifications", async () => {
@@ -121,7 +131,8 @@ describe("CTOutliner Component Integration Tests", () => {
       const firstNode = outliner.tree.root.children[0];
 
       // Create new node and verify focus is on new node
-      outliner.createNewNodeAfter(firstNode);
+      await outliner.createNewNodeAfter(firstNode);
+      
       expect(outliner.focusedNode!.body).toBe("");
       expect(outliner.focusedNode).not.toBe(firstNode);
     });

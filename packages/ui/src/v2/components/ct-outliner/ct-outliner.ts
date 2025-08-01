@@ -11,10 +11,10 @@ import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
  * @param cell - The Cell to mutate
  * @param mutator - Function that performs the mutation
  */
-function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
+async function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): Promise<void> {
   const tx = cell.runtime.edit();
   mutator(cell.withTx(tx));
-  tx.commit();
+  await tx.commit();
 }
 
 import type {
@@ -963,7 +963,7 @@ export class CTOutliner extends BaseElement {
    * @description Creates an empty node as a sibling after the given node,
    * focuses it, and immediately enters edit mode. Uses Cell operations.
    */
-  createNewNodeAfter(node: OutlineTreeNode) {
+  async createNewNodeAfter(node: OutlineTreeNode) {
     if (!this.value) return;
 
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
@@ -974,7 +974,7 @@ export class CTOutliner extends BaseElement {
 
     const parentChildrenCell = this.getNodeChildrenCell(parentNode);
     if (parentChildrenCell) {
-      mutateCell(parentChildrenCell, (cell) => {
+      await mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
         const beforeNode = currentChildren.slice(0, nodeIndex + 1);
         const afterNode = currentChildren.slice(nodeIndex + 1);
@@ -995,14 +995,14 @@ export class CTOutliner extends BaseElement {
    * @description Creates an empty node as the first child of the given node,
    * focuses it, and immediately enters edit mode. Uses Cell operations.
    */
-  createChildNode(node: OutlineTreeNode) {
+  async createChildNode(node: OutlineTreeNode) {
     if (!this.value) return;
 
     const newNode = TreeOperations.createNode({ body: "" });
 
     const nodeChildrenCell = this.getNodeChildrenCell(node);
     if (nodeChildrenCell) {
-      mutateCell(nodeChildrenCell, (cell) => {
+      await mutateCell(nodeChildrenCell, (cell) => {
         const currentChildren = cell.get();
         const newChildren = [newNode, ...currentChildren];
         cell.set(newChildren);
@@ -1024,7 +1024,7 @@ export class CTOutliner extends BaseElement {
     OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
   }
 
-  deleteNode(node: OutlineTreeNode) {
+  async deleteNode(node: OutlineTreeNode) {
     if (!this.value) return;
 
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
@@ -1041,7 +1041,7 @@ export class CTOutliner extends BaseElement {
 
     const parentChildrenCell = this.getNodeChildrenCell(parentNode);
     if (parentChildrenCell) {
-      mutateCell(parentChildrenCell, (cell) => {
+      await mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
         const beforeNode = currentChildren.slice(0, nodeIndex);
         const afterNode = currentChildren.slice(nodeIndex + 1);
@@ -1073,7 +1073,7 @@ export class CTOutliner extends BaseElement {
     }
   }
 
-  indentNode(node: OutlineTreeNode) {
+  async indentNode(node: OutlineTreeNode) {
     if (!this.value) return;
 
     // Preserve editing state if this node is being edited
@@ -1111,7 +1111,7 @@ export class CTOutliner extends BaseElement {
       const currentSiblingChildren = siblingChildrenCell.get();
       siblingChildrenCell.withTx(tx).set([...currentSiblingChildren, node]);
 
-      tx.commit();
+      await tx.commit();
     }
 
     // Restore editing state if it was being edited
@@ -1150,7 +1150,7 @@ export class CTOutliner extends BaseElement {
     }, 0);
   }
 
-  outdentNode(node: OutlineTreeNode) {
+  async outdentNode(node: OutlineTreeNode) {
     if (!this.value) return;
 
     // Preserve editing state if this node is being edited
@@ -1201,7 +1201,7 @@ export class CTOutliner extends BaseElement {
       const newGrandParentChildren = [...beforeParent, node, ...afterParent];
       grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
 
-      tx.commit();
+      await tx.commit();
     }
 
     // Restore editing state if it was being edited
