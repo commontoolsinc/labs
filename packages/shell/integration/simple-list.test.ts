@@ -162,7 +162,7 @@ describe("simple-list integration test", () => {
     assertEquals(titleValue, "My Shopping List");
   });
 
-  // TODO: Fix this test - there's a bug where programmatic clicks on the remove button
+  // TODO(#CT-703): Fix this test - there's a bug where programmatic clicks on the remove button
   // remove ALL items instead of just one. Manual clicking works correctly.
   // This appears to be an issue with how ct-list handles synthetic click events
   // versus real user clicks. 
@@ -243,7 +243,7 @@ describe("simple-list integration test", () => {
   });
 
   // Skip this test too - similar Shadow DOM issues prevent reliable editing
-  it.skip("should edit items in the list", async () => {
+  it.skip("should edit items in the list", () => {
     const { page } = shell.get();
 
     // The test reveals that:
