@@ -4,90 +4,120 @@
 import { CTOutliner } from "./ct-outliner.ts";
 import type { KeyboardContext, Tree } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
-import { type Cell } from "@commontools/runner";
-
-// Mock runtime for creating test Cells
-class MockRuntime {
-  edit() {
-    return {
-      commit: () => {},
-    };
-  }
-}
-
-// Mock Cell implementation for testing
-// @ts-ignore: Partial implementation of Cell interface for testing
-class MockCell<T> implements Partial<Cell<T>> {
-  private value: T;
-  private parent?: MockCell<any>;
-  private keyInParent?: string | number;
-  runtime = new MockRuntime() as any;
-  space = "test" as any;
-
-  constructor(value: T, parent?: MockCell<any>, keyInParent?: string | number) {
-    this.value = value;
-    this.parent = parent;
-    this.keyInParent = keyInParent;
-  }
-
-  get(): T {
-    return this.value;
-  }
-
-  set(value: T): void {
-    this.value = value;
-    // Update parent if this is a nested cell
-    if (this.parent && this.keyInParent !== undefined) {
-      const parentValue = this.parent.get() as any;
-      if (parentValue && typeof parentValue === "object") {
-        parentValue[this.keyInParent] = value;
-        this.parent.set(parentValue);
-      }
-    }
-  }
-
-  key(key: string | number): any {
-    const currentValue = this.get() as any;
-    if (
-      currentValue && typeof currentValue === "object" && key in currentValue
-    ) {
-      return new MockCell(currentValue[key], this, key);
-    }
-    return new MockCell(undefined, this, key);
-  }
-
-  withTx(tx: any): any {
-    // For testing, create a new instance that behaves the same
-    return new MockCell(this.value, this.parent, this.keyInParent);
-  }
-
-  push(...items: any[]): void {
-    if (Array.isArray(this.value)) {
-      (this.value as any[]).push(...items);
-    }
-  }
-
-  sink(callback: (value: any) => void): () => void {
-    // Mock subscription
-    return () => {};
-  }
-
-  equals(other: any): boolean {
-    return this === other;
-  }
-
-  // Add other required Cell methods as no-ops
-  [Symbol.iterator]() {
-    return [][Symbol.iterator]();
-  }
-}
+import { type Cell, Runtime, toOpaqueRef } from "@commontools/runner";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
 /**
- * Create a mock Cell for a tree structure
+ * Create a real Cell for a tree structure using a fresh runtime
+ * This is the async version that should be preferred when possible
  */
-export const createMockTreeCell = (tree: Tree): Cell<Tree> => {
-  return new MockCell(tree) as any;
+export const createMockTreeCellAsync = async (tree: Tree): Promise<Cell<Tree>> => {
+  const signer = await Identity.fromPassphrase("test-outliner-user");
+  const space = signer.did();
+  const storageManager = StorageManager.emulate({ as: signer });
+  
+  const runtime = new Runtime({
+    storageManager,
+    blobbyServerUrl: import.meta.url,
+  });
+  
+  const tx = runtime.edit();
+  const cell = runtime.getCell<Tree>(space as any, "test-tree", undefined, tx);
+  cell.set(tree);
+  await tx.commit();
+  return cell;
 };
+
+/**
+ * Create a synchronous mock cell that behaves like a real cell
+ * This maintains the existing test interface while providing better behavior than the old MockCell
+ */
+export const createMockTreeCellSync = (initialTree: Tree): Cell<Tree> => {
+  // Use a mutable container that can be updated
+  const container = { value: initialTree };
+  
+  // Helper function to create a subcell for any path within the container
+  function createPathCell(path: (string | number)[]): Cell<any> {
+    return {
+      get: () => {
+        let current = container.value;
+        for (const key of path) {
+          current = (current as any)[key];
+          if (current === undefined) break;
+        }
+        return current;
+      },
+      set: (newValue: any) => {
+        if (path.length === 0) {
+          container.value = newValue;
+          return;
+        }
+        
+        let current = container.value as any;
+        for (let i = 0; i < path.length - 1; i++) {
+          current = current[path[i]];
+        }
+        current[path[path.length - 1]] = newValue;
+      },
+      key: (key: string | number) => createPathCell([...path, key]),
+      send: function(value: any) { this.set(value); },
+      update: (values: any) => {
+        const current = this.get();
+        if (current && typeof current === 'object') {
+          Object.assign(current, values);
+        }
+      },
+      push: (...items: any[]) => {
+        const current = this.get();
+        if (Array.isArray(current)) {
+          current.push(...items);
+        }
+      },
+      equals: (other: any) => other === this,
+      asSchema: () => this as any,
+      withTx: () => this as any,
+      sink: () => () => {},
+      sync: () => this as any,
+      getAsQueryResult: () => this.get() as any,
+      getAsNormalizedFullLink: () => ({} as any),
+      getAsLink: () => ({} as any),
+      getAsWriteRedirectLink: () => ({} as any),
+      getDoc: () => ({} as any),
+      getRaw: () => this.get(),
+      setRaw: (value: any) => this.set(value),
+      getSourceCell: () => undefined,
+      setSourceCell: () => {},
+      freeze: () => {},
+      isFrozen: () => false,
+      toJSON: () => ({ cell: { "/": "" }, path: [] } as any),
+      runtime: {
+        edit: () => ({
+          commit: () => Promise.resolve(),
+        }),
+      } as any,
+      tx: undefined,
+      schema: undefined,
+      rootSchema: undefined,
+      get value() { return this.get(); },
+      cellLink: {} as any,
+      space: {} as any,
+      entityId: { "/": "" },
+      sourceURI: "" as any,
+      path: path,
+      copyTrap: false,
+      [toOpaqueRef]: () => ({} as any),
+    } as Cell<any>;
+  }
+  
+  return createPathCell([]);
+};
+
+/**
+ * For backward compatibility, export createMockTreeCell as the sync version
+ * New code should use createMockTreeCellAsync for real cells
+ */
+export const createMockTreeCell = createMockTreeCellSync;
 
 /**
  * Mock DOM element for testing
@@ -119,7 +149,7 @@ export const createMockShadowRoot = () => ({
 /**
  * Create a standard test tree structure
  */
-export const createTestTree = () => ({
+export const createTestTree = (): Tree => ({
   root: {
     body: "",
     children: [
@@ -133,7 +163,7 @@ export const createTestTree = () => ({
 /**
  * Create a nested test tree structure
  */
-export const createNestedTestTree = () => ({
+export const createNestedTestTree = (): Tree => ({
   root: {
     body: "",
     children: [{
@@ -151,6 +181,7 @@ export const createNestedTestTree = () => ({
 
 /**
  * Setup outliner with mock DOM and basic tree
+ * Uses the sync mock cell for compatibility with existing tests
  */
 export const setupMockOutliner = () => {
   const outliner = new CTOutliner();
@@ -163,7 +194,29 @@ export const setupMockOutliner = () => {
 
   // Setup basic tree with Cell
   const tree = createTestTree();
-  const treeCell = createMockTreeCell(tree);
+  const treeCell = createMockTreeCellSync(tree);
+  outliner.value = treeCell;
+  outliner.focusedNode = tree.root.children[0];
+
+  return { outliner, tree, treeCell };
+};
+
+/**
+ * Async version of setupMockOutliner that uses real Cells
+ * This is the preferred version for new tests
+ */
+export const setupMockOutlinerAsync = async () => {
+  const outliner = new CTOutliner();
+
+  // Mock the shadowRoot
+  Object.defineProperty(outliner, "shadowRoot", {
+    value: createMockShadowRoot(),
+    writable: false,
+  });
+
+  // Setup basic tree with real Cell
+  const tree = createTestTree();
+  const treeCell = await createMockTreeCellAsync(tree);
   outliner.value = treeCell;
   outliner.focusedNode = tree.root.children[0];
 

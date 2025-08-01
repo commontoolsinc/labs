@@ -507,6 +507,11 @@ export class CTOutliner extends BaseElement {
    * Get the path to a node as an array of indices from root.children
    */
   private getNodePath(targetNode: OutlineTreeNode): number[] | null {
+    // Handle root node as a special case
+    if (targetNode === this.tree.root) {
+      return []; // Root node has empty path
+    }
+
     const findPath = (
       node: OutlineTreeNode,
       currentPath: number[],
@@ -539,7 +544,12 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return null;
 
     const nodePath = this.getNodePath(node);
-    if (!nodePath) return null;
+    if (nodePath === null) return null;
+
+    // Handle root node (empty path)
+    if (nodePath.length === 0) {
+      return this.value.key("root") as Cell<OutlineTreeNode>;
+    }
 
     let targetCell: Cell<any> = this.value.key("root").key("children");
     for (let i = 0; i < nodePath.length; i++) {
