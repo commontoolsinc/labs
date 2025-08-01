@@ -1,3 +1,17 @@
+/**
+ * Integration test for iframe counter recipe.
+ *
+ * This test uses coordinate-based clicking due to iframe sandbox restrictions
+ * that prevent direct DOM access. The counter recipe has a full-screen layout
+ * divided into three sections:
+ * - Left third: Decrement area (red)
+ * - Center third: Count display
+ * - Right third: Increment area (green)
+ *
+ * State verification is done through the charm controller API rather than
+ * DOM inspection, as the iframe content is not directly accessible.
+ */
+
 import { env, Page } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
 import { registerCharm, ShellIntegration } from "./utils.ts";
@@ -9,11 +23,14 @@ import type { ElementHandle } from "@astral/astral";
 
 const { API_URL, FRONTEND_URL } = env;
 
-// Helper functions for clicking increment/decrement buttons
+// Helper functions for coordinate-based clicking on the iframe
+// These click specific regions of the iframe since we cannot access
+// the actual buttons due to sandbox restrictions
 async function clickIncrementBtn(counterIframe: ElementHandle): Promise<void> {
   const box = await counterIframe.boundingBox();
   assert(box, "Should get iframe bounding box");
 
+  // Click the right third of the iframe where the increment area is located
   await counterIframe.click({
     offset: {
       x: box.width * 0.83, // Right third of the screen
@@ -26,6 +43,7 @@ async function clickDecrementBtn(counterIframe: ElementHandle): Promise<void> {
   const box = await counterIframe.boundingBox();
   assert(box, "Should get iframe bounding box");
 
+  // Click the left third of the iframe where the decrement area is located
   await counterIframe.click({
     offset: {
       x: box.width * 0.17, // Left third of the screen
@@ -102,14 +120,15 @@ describe("shell iframe counter tests", () => {
     );
 
     // Wait for iframe content to load
-    await sleep(5000); // Give more time for nested iframes to load
+    // The charm uses nested iframes with sandbox restrictions, requiring coordinate-based interaction
+    await sleep(5000);
 
-    // Get the outer iframe using pierce selector
+    // Get the iframe element using pierce selector to traverse shadow DOM
     const counterIframe = await page.$("pierce/iframe");
     assert(counterIframe, "Outer iframe should be found");
 
-    // Click increment button 5 times (starting from 0)
-    console.log("Clicking increment 5 times...");
+    // Click the right third of the iframe 5 times to increment (starting from 0)
+    console.log("Clicking increment area 5 times...");
     for (let i = 0; i < 5; i++) {
       await clickIncrementBtn(counterIframe);
       await sleep(300);
@@ -117,8 +136,8 @@ describe("shell iframe counter tests", () => {
 
     await sleep(1000);
 
-    // Click decrement button 3 times (5 - 3 = 2)
-    console.log("Clicking decrement 3 times...");
+    // Click the left third of the iframe 3 times to decrement (5 - 3 = 2)
+    console.log("Clicking decrement area 3 times...");
     for (let i = 0; i < 3; i++) {
       await clickDecrementBtn(counterIframe);
       await sleep(300);
@@ -157,8 +176,8 @@ describe("shell iframe counter tests", () => {
       "Outer iframe should be found after reload",
     );
 
-    // Click increment 4 times
-    console.log("Clicking increment 4 times after reload...");
+    // Click the right third of the iframe 4 times to increment
+    console.log("Clicking increment area 4 times after reload...");
     for (let i = 0; i < 4; i++) {
       await clickIncrementBtn(counterIframeAfterReload);
       await sleep(300);
