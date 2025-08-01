@@ -2,8 +2,77 @@
  * Shared test utilities for CT Outliner component tests
  */
 import { CTOutliner } from "./ct-outliner.ts";
-import type { KeyboardContext } from "./types.ts";
+import type { KeyboardContext, Tree } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
+import { type Cell } from "@commontools/runner";
+
+// Mock runtime for creating test Cells
+class MockRuntime {
+  edit() {
+    return {
+      commit: () => {},
+    };
+  }
+}
+
+// Mock Cell implementation for testing
+// @ts-ignore
+class MockCell<T> implements Partial<Cell<T>> {
+  private value: T;
+  runtime = new MockRuntime() as any;
+  space = "test" as any;
+
+  constructor(value: T) {
+    this.value = value;
+  }
+
+  get(): T {
+    return this.value;
+  }
+
+  set(value: T): void {
+    this.value = value;
+  }
+
+  key(key: string | number): any {
+    const currentValue = this.get() as any;
+    if (currentValue && typeof currentValue === 'object' && key in currentValue) {
+      return new MockCell(currentValue[key]);
+    }
+    return new MockCell(undefined);
+  }
+
+  withTx(tx: any): any {
+    return this; // For testing, just return self
+  }
+
+  push(...items: any[]): void {
+    if (Array.isArray(this.value)) {
+      (this.value as any[]).push(...items);
+    }
+  }
+
+  sink(callback: (value: any) => void): () => void {
+    // Mock subscription
+    return () => {};
+  }
+
+  equals(other: any): boolean {
+    return this === other;
+  }
+
+  // Add other required Cell methods as no-ops
+  [Symbol.iterator]() {
+    return [][Symbol.iterator]();
+  }
+}
+
+/**
+ * Create a mock Cell for a tree structure
+ */
+export const createMockTreeCell = (tree: Tree): Cell<Tree> => {
+  return new MockCell(tree) as any;
+};
 
 /**
  * Mock DOM element for testing
@@ -77,12 +146,13 @@ export const setupMockOutliner = () => {
     writable: false,
   });
 
-  // Setup basic tree
+  // Setup basic tree with Cell
   const tree = createTestTree();
-  outliner.tree = tree;
+  const treeCell = createMockTreeCell(tree);
+  outliner.value = treeCell;
   outliner.focusedNode = tree.root.children[0];
 
-  return { outliner, tree };
+  return { outliner, tree, treeCell };
 };
 
 /**

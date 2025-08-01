@@ -3,11 +3,19 @@ import { repeat } from "lit/directives/repeat.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
-import {
-  type CellController,
-  createCellController,
-} from "../../core/cell-controller.ts";
+// Removed cell-controller import - working directly with Cell
 import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
+
+/**
+ * Executes a mutation on a Cell within a transaction
+ * @param cell - The Cell to mutate
+ * @param mutator - Function that performs the mutation
+ */
+function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
+  const tx = cell.runtime.edit();
+  mutator(cell.withTx(tx));
+  tx.commit();
+}
 
 import type {
   EditingKeyboardContext,
@@ -31,13 +39,12 @@ import "../ct-render/ct-render.ts";
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
  *
- * Uses CellController for reactive state management. When value is a Cell<Tree>,
- * operations automatically propagate changes. When value is a plain Tree object,
- * falls back to manual change events.
+ * Works directly with Cell<Tree> values for reactive state management.
+ * Operations automatically propagate changes through the Cell system.
  *
  * @element ct-outliner
  *
- * @attr {Tree | Cell<Tree>} value - Tree structure with root node or Cell containing tree
+ * @attr {Cell<Tree>} value - Tree structure Cell containing root node and children
  * @attr {boolean} readonly - Whether the outliner is read-only
  * @attr {Array} mentionable - Array of mentionable items with {name, charm} structure
  *
@@ -45,10 +52,6 @@ import "../ct-render/ct-render.ts";
  * @fires charm-link-click - Fired when a charm link is clicked with detail: { href, text, charm }
  *
  * @example
- * // With plain tree object
- * const tree = { root: { body: "", children: [{ body: "Item 1", children: [], attachments: [] }] } };
- * <ct-outliner .value=${tree}></ct-outliner>
- *
  * // With Cell<Tree> for reactive updates
  * const treeCell = runtime.getCell<Tree>({ type: "tree" });
  * <ct-outliner .value=${treeCell}></ct-outliner>
@@ -119,18 +122,16 @@ export class CTOutliner extends BaseElement {
     selectedMentionIndex: { type: Number, state: true },
   };
 
-  declare value: Tree | Cell<Tree>;
+  declare value: Cell<Tree> | null;
   declare readonly: boolean;
   declare mentionable: Cell<Charm[]>;
-  // Backward compatibility getter/setter for tree access
+  
+  // Direct tree access from Cell
   get tree(): Tree {
-    return this.cellController.getValue();
-  }
-
-  set tree(newTree: Tree) {
-    // Always bind to ensure we have a Cell for transactions
-    // This is safe to call multiple times
-    this.cellController.bind(newTree);
+    if (!this.value) {
+      return TreeOperations.createEmptyTree();
+    }
+    return this.value.get();
   }
   declare collapsedNodes: Set<OutlineTreeNode>;
   declare focusedNode: OutlineTreeNode | null;
@@ -140,7 +141,9 @@ export class CTOutliner extends BaseElement {
 
   private editingNode: OutlineTreeNode | null = null;
   private editingContent: string = "";
-  private cellController: CellController<Tree>;
+  
+  // Subscription cleanup function
+  private _unsubscribe: (() => void) | null = null;
 
   // Node indexer for stable DOM element IDs
   private nodeIndexer = NodeUtils.createNodeIndexer();
@@ -446,45 +449,46 @@ export class CTOutliner extends BaseElement {
     this.showingMentions = false;
     this.mentionQuery = "";
     this.selectedMentionIndex = 0;
-
-    // Initialize with empty tree
-    this.value = TreeOperations.createEmptyTree();
-
-    // Initialize CellController with immediate timing for tree updates
-    this.cellController = createCellController<Tree>(this, {
-      timing: { strategy: "immediate" },
-      onChange: (newTree, oldTree) => {
-        this.emit("ct-change", { value: newTree });
-        // Handle focus restoration after tree changes
-        this.focusedNode = FocusUtils.findValidFocus(newTree, this.focusedNode);
-      },
-    });
-
-    // Bind the initial value to the CellController
-    this.cellController.bind(this.value);
+    this.value = null;
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    // Only initialize if tree is empty
-    if (!this.tree || this.tree.root.children.length === 0) {
-      // Initialize with empty tree if no value provided
-      if (!this.value) {
-        this.value = TreeOperations.createEmptyTree();
-      }
-      // Set initial focus to first node if we have nodes
-      if (this.tree.root.children.length > 0 && !this.focusedNode) {
-        this.focusedNode = this.tree.root.children[0];
-      }
+    // Set initial focus to first node if we have nodes
+    if (this.value && this.tree.root.children.length > 0 && !this.focusedNode) {
+      this.focusedNode = this.tree.root.children[0];
     }
   }
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
 
-    // Bind CellController to new value when value property changes
-    if (changedProperties.has("value")) {
-      this.cellController.bind(this.value);
+    // Handle value changes
+    if (changedProperties.has('value')) {
+      // Clean up previous subscription
+      if (this._unsubscribe) {
+        this._unsubscribe();
+        this._unsubscribe = null;
+      }
+      
+      // Subscribe to new Cell if it exists
+      if (this.value && isCell(this.value)) {
+        this._unsubscribe = this.value.sink(() => {
+          this.emit("ct-change", { value: this.tree });
+          // Handle focus restoration after tree changes
+          this.focusedNode = FocusUtils.findValidFocus(this.tree, this.focusedNode);
+          this.requestUpdate();
+        });
+      }
+    }
+  }
+  
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    // Clean up subscription
+    if (this._unsubscribe) {
+      this._unsubscribe();
+      this._unsubscribe = null;
     }
   }
 
@@ -492,23 +496,6 @@ export class CTOutliner extends BaseElement {
     return this.nodeIndexer.getIndex(node);
   }
 
-  /**
-   * Deep clone a single node and all its children
-   */
-  private deepCloneNode(node: OutlineTreeNode): OutlineTreeNode {
-    const cloned: OutlineTreeNode = {
-      body: node.body || "",
-      children: [],
-      attachments: node.attachments ? [...node.attachments] : [],
-    };
-
-    // Clone children if they exist and are valid
-    if (node.children && Array.isArray(node.children)) {
-      cloned.children = node.children.map((child) => this.deepCloneNode(child));
-    }
-
-    return cloned;
-  }
 
   // =============================================================================
   // Cell Path Navigation Utilities
@@ -542,37 +529,22 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
-   * Convert a node path (array of indices) to a Cell key path
-   */
-  private getNodeCellPath(node: OutlineTreeNode): string[] | null {
-    const nodePath = this.getNodePath(node);
-    if (!nodePath) return null;
-
-    // Convert [0, 2, 1] to ["root", "children", "0", "children", "2", "children", "1"]
-    const cellPath = ["root", "children"];
-    for (let i = 0; i < nodePath.length; i++) {
-      cellPath.push(String(nodePath[i]));
-      if (i < nodePath.length - 1) {
-        cellPath.push("children");
-      }
-    }
-    return cellPath;
-  }
-
-  /**
-   * Get the Cell for a specific node in the tree
+   * Get the Cell for a specific node in the tree using its path
    * @param node The target node to get a Cell for
    * @returns Cell<Node> pointing to the node, or null if not found
    */
   private getNodeCell(node: OutlineTreeNode): Cell<OutlineTreeNode> | null {
-    const rootCell = this.cellController.getCell();
-    const cellPath = this.getNodeCellPath(node);
+    if (!this.value) return null;
+    
+    const nodePath = this.getNodePath(node);
+    if (!nodePath) return null;
 
-    if (!rootCell || !cellPath) return null;
-
-    let targetCell: Cell<any> = rootCell;
-    for (const key of cellPath) {
-      targetCell = targetCell.key(key);
+    let targetCell: Cell<any> = this.value.key("root").key("children");
+    for (let i = 0; i < nodePath.length; i++) {
+      targetCell = targetCell.key(nodePath[i]);
+      if (i < nodePath.length - 1) {
+        targetCell = targetCell.key("children");
+      }
     }
 
     return targetCell as Cell<OutlineTreeNode>;
@@ -616,38 +588,6 @@ export class CTOutliner extends BaseElement {
     return this.getNodeChildrenCell(parentNode);
   }
 
-  /**
-   * Execute a Cell transaction with proper error handling and change emission
-   * If working with a plain object (not a Cell), fall back to direct mutations and emitChange()
-   * @param cellOperation Function that performs Cell operations within the transaction
-   * @param fallbackOperation Optional function for direct mutations when no Cell is available
-   */
-  private executeTransaction(
-    cellOperation: (tx: any) => void,
-    fallbackOperation?: () => void,
-    operationName: string = "unknown",
-  ): void {
-    try {
-      const rootCell = this.cellController.getCell();
-      if (rootCell) {
-        // We have a Cell - use transactions
-        const tx = rootCell.runtime.edit();
-        cellOperation(tx);
-        tx.commit();
-        // CellController handles change propagation automatically
-      } else {
-        // We have a plain object - use fallback or execute with null tx
-        if (fallbackOperation) {
-          fallbackOperation();
-        } else {
-          cellOperation(null); // Pass null to indicate no transaction
-        }
-        this.emitChange();
-      }
-    } catch (error) {
-      console.error(`[${operationName}] Transaction failed:`, error);
-    }
-  }
 
   private getAllNodes(): OutlineTreeNode[] {
     return NodeUtils.getAllNodesExcludingRoot(this.tree);
@@ -658,8 +598,9 @@ export class CTOutliner extends BaseElement {
   }
 
   emitChange() {
-    // Update the value property and let CellController handle change emission
-    this.value = this.tree;
+    // Manual change emission for non-Cell fallback scenarios
+    // In normal Cell usage, changes are handled automatically by subscriptions
+    this.emit("ct-change", { value: this.tree });
   }
 
   /**
@@ -715,28 +656,15 @@ export class CTOutliner extends BaseElement {
    * Finish editing the current node and save changes
    *
    * @description Saves the current editing content to the node body and exits edit mode.
-   * Uses Cell operations when available, otherwise falls back to direct mutations.
+   * Uses Cell operations for direct mutations.
    */
   finishEditing() {
-    if (!this.editingNode) return;
+    if (!this.editingNode || !this.value) return;
 
-    // Use Cell operations or fallback to direct mutation
-    this.executeTransaction((tx) => {
-      if (tx) {
-        // Cell-based operation
-        const nodeBodyCell = this.getNodeBodyCell(this.editingNode!);
-        if (nodeBodyCell) {
-          nodeBodyCell.withTx(tx).set(this.editingContent);
-        }
-      } else {
-        // Direct mutation fallback
-        TreeOperations.updateNodeBody(
-          this.tree,
-          this.editingNode!,
-          this.editingContent,
-        );
-      }
-    });
+    const nodeBodyCell = this.getNodeBodyCell(this.editingNode);
+    if (nodeBodyCell) {
+      mutateCell(nodeBodyCell, (cell) => cell.set(this.editingContent));
+    }
 
     this.focusedNode = this.editingNode;
     this.editingNode = null;
@@ -868,10 +796,10 @@ export class CTOutliner extends BaseElement {
         );
 
         // Insert new nodes after current one using Cell operations
-        this.executeTransaction((tx) => {
-          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-          if (parentChildrenCell) {
-            const currentChildren = parentChildrenCell.get();
+        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+        if (parentChildrenCell) {
+          mutateCell(parentChildrenCell, (cell) => {
+            const currentChildren = cell.get();
             const newChildren = [...currentChildren];
 
             // Insert all new nodes at once
@@ -880,9 +808,9 @@ export class CTOutliner extends BaseElement {
               newChildren.splice(nodeIndex + i, 0, newNode);
             }
 
-            parentChildrenCell.withTx(tx).set(newChildren);
-          }
-        });
+            cell.set(newChildren);
+          });
+        }
       }
     }
   }
@@ -1016,38 +944,26 @@ export class CTOutliner extends BaseElement {
    *
    * @param node - The node to create a sibling after
    * @description Creates an empty node as a sibling after the given node,
-   * focuses it, and immediately enters edit mode. Uses Cell operations when available.
+   * focuses it, and immediately enters edit mode. Uses Cell operations.
    */
   createNewNodeAfter(node: OutlineTreeNode) {
+    if (!this.value) return;
+    
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) return;
 
     const nodeIndex = TreeOperations.getNodeIndex(parentNode, node);
     const newNode = TreeOperations.createNode({ body: "" });
 
-    // Use Cell operations with fallback to direct mutation
-    this.executeTransaction(
-      (tx) => {
-        // Cell-based operation
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-        if (parentChildrenCell) {
-          const currentChildren = parentChildrenCell.get();
-          const newChildren = [...currentChildren];
-          newChildren.splice(nodeIndex + 1, 0, newNode);
-          parentChildrenCell.withTx(tx).set(newChildren);
-        }
-      },
-      () => {
-        // Direct mutation fallback
-        TreeOperations.insertNode(
-          this.tree,
-          parentNode,
-          newNode,
-          nodeIndex + 1,
-        );
-      },
-      "createNewNodeAfter",
-    );
+    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    if (parentChildrenCell) {
+      mutateCell(parentChildrenCell, (cell) => {
+        const currentChildren = cell.get();
+        const newChildren = [...currentChildren];
+        newChildren.splice(nodeIndex + 1, 0, newNode);
+        cell.set(newChildren);
+      });
+    }
 
     this.focusedNode = newNode;
     this.requestUpdate();
@@ -1059,27 +975,21 @@ export class CTOutliner extends BaseElement {
    *
    * @param node - The parent node to create a child under
    * @description Creates an empty node as the first child of the given node,
-   * focuses it, and immediately enters edit mode. Uses Cell operations when available.
+   * focuses it, and immediately enters edit mode. Uses Cell operations.
    */
   createChildNode(node: OutlineTreeNode) {
+    if (!this.value) return;
+    
     const newNode = TreeOperations.createNode({ body: "" });
 
-    // Use Cell operations with fallback to direct mutation
-    this.executeTransaction(
-      (tx) => {
-        // Cell-based operation
-        const nodeChildrenCell = this.getNodeChildrenCell(node);
-        if (nodeChildrenCell) {
-          const currentChildren = nodeChildrenCell.get();
-          const newChildren = [newNode, ...currentChildren];
-          nodeChildrenCell.withTx(tx).set(newChildren);
-        }
-      },
-      () => {
-        // Direct mutation fallback
-        TreeOperations.insertNode(this.tree, node, newNode, 0);
-      },
-    );
+    const nodeChildrenCell = this.getNodeChildrenCell(node);
+    if (nodeChildrenCell) {
+      mutateCell(nodeChildrenCell, (cell) => {
+        const currentChildren = cell.get();
+        const newChildren = [newNode, ...currentChildren];
+        cell.set(newChildren);
+      });
+    }
 
     this.focusedNode = newNode;
     this.requestUpdate();
@@ -1097,6 +1007,8 @@ export class CTOutliner extends BaseElement {
   }
 
   deleteNode(node: OutlineTreeNode) {
+    if (!this.value) return;
+    
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) {
       console.error("Cannot delete root node");
@@ -1109,30 +1021,22 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    // Use Cell operations with fallback to TreeOperations
-    this.executeTransaction(
-      (tx) => {
-        // Cell-based operation
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-        if (parentChildrenCell) {
-          const currentChildren = parentChildrenCell.get();
-          const newChildren = [...currentChildren];
+    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    if (parentChildrenCell) {
+      mutateCell(parentChildrenCell, (cell) => {
+        const currentChildren = cell.get();
+        const newChildren = [...currentChildren];
 
-          // Move children up to parent level if any, otherwise just remove
-          if (node.children.length > 0) {
-            newChildren.splice(nodeIndex, 1, ...node.children);
-          } else {
-            newChildren.splice(nodeIndex, 1);
-          }
-
-          parentChildrenCell.withTx(tx).set(newChildren);
+        // Move children up to parent level if any, otherwise just remove
+        if (node.children.length > 0) {
+          newChildren.splice(nodeIndex, 1, ...node.children);
+        } else {
+          newChildren.splice(nodeIndex, 1);
         }
-      },
-      () => {
-        // Direct mutation fallback
-        TreeOperations.deleteNode(this.tree, node);
-      },
-    );
+
+        cell.set(newChildren);
+      });
+    }
 
     // Determine new focus using existing logic
     const newFocusNode = TreeOperations.determineFocusAfterDeletion(
@@ -1150,6 +1054,8 @@ export class CTOutliner extends BaseElement {
   }
 
   indentNode(node: OutlineTreeNode) {
+    if (!this.value) return;
+    
     // Preserve editing state if this node is being edited
     const wasEditing = this.editingNode === node;
     const editingContent = wasEditing ? this.editingContent : "";
@@ -1167,61 +1073,29 @@ export class CTOutliner extends BaseElement {
     }
 
     const previousSibling = parentNode.children[nodeIndex - 1];
+    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    const siblingChildrenCell = this.getNodeChildrenCell(previousSibling);
 
-    // Use Cell operations when CellController is active
-    const rootCell = this.cellController.getCell();
-    if (rootCell) {
-      // COPY-DELETE-ADD approach to avoid Cell reference issues
-      this.executeTransaction(
-        (tx) => {
-          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-          const siblingChildrenCell = this.getNodeChildrenCell(previousSibling);
-
-          if (parentChildrenCell && siblingChildrenCell) {
-            // Step 1: Create a deep copy of the node to move
-            const nodeCopy = this.deepCloneNode(node);
-
-            // Step 2: Remove from current parent
-            const currentParentChildren = parentChildrenCell.get();
-            const newParentChildren = currentParentChildren.filter((child) =>
-              child !== node
-            );
-            parentChildrenCell.withTx(tx).set(newParentChildren);
-
-            // Step 3: Add copy to previous sibling's children
-            const currentSiblingChildren = siblingChildrenCell.get();
-            const newSiblingChildren = [...currentSiblingChildren, nodeCopy];
-            siblingChildrenCell.withTx(tx).set(newSiblingChildren);
-
-            // Step 4: Update focus to the new copy
-            if (this.focusedNode === node) {
-              this.focusedNode = nodeCopy;
-            }
-            if (this.editingNode === node) {
-              this.editingNode = nodeCopy;
-            }
-          }
-        },
-        undefined, // No fallback to avoid mixed mutations
-        "indentNode",
-      );
-    } else {
-      // Only use TreeOperations when CellController is completely unavailable
-      TreeOperations.indentNode(this.tree, node);
-      this.emitChange();
+    if (parentChildrenCell && siblingChildrenCell) {
+      // V-DOM style: precise mutations using single transaction
+      const tx = this.value.runtime.edit();
+      
+      // Remove from current parent
+      const currentParentChildren = parentChildrenCell.get();
+      const newParentChildren = currentParentChildren.filter(child => child !== node);
+      parentChildrenCell.withTx(tx).set(newParentChildren);
+      
+      // Add to previous sibling's children
+      const currentSiblingChildren = siblingChildrenCell.get();
+      siblingChildrenCell.withTx(tx).set([...currentSiblingChildren, node]);
+      
+      tx.commit();
     }
 
     // Restore editing state if it was being edited
-    // Note: focus has already been updated to the new copy inside the transaction for Cell operations
     if (wasEditing) {
-      if (rootCell) {
-        // For Cell operations, editingNode was already updated to the copy
-        this.editingContent = editingContent;
-      } else {
-        // For TreeOperations fallback, update to the same node
-        this.editingNode = node;
-        this.editingContent = editingContent;
-      }
+      this.editingNode = node;
+      this.editingContent = editingContent;
     }
 
     this.requestUpdate();
@@ -1255,6 +1129,8 @@ export class CTOutliner extends BaseElement {
   }
 
   outdentNode(node: OutlineTreeNode) {
+    if (!this.value) return;
+    
     // Preserve editing state if this node is being edited
     const wasEditing = this.editingNode === node;
     const editingContent = wasEditing ? this.editingContent : "";
@@ -1282,63 +1158,31 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    // Use Cell operations when CellController is active
-    const rootCell = this.cellController.getCell();
-    if (rootCell) {
-      // COPY-DELETE-ADD approach to avoid Cell reference issues
-      this.executeTransaction(
-        (tx) => {
-          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-          const grandParentChildrenCell = this.getNodeChildrenCell(
-            grandParentNode,
-          );
+    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    const grandParentChildrenCell = this.getNodeChildrenCell(grandParentNode);
 
-          if (parentChildrenCell && grandParentChildrenCell) {
-            // Step 1: Create a deep copy of the node to move
-            const nodeCopy = this.deepCloneNode(node);
-
-            // Step 2: Remove from current parent
-            const currentParentChildren = parentChildrenCell.get();
-            const newParentChildren = currentParentChildren.filter((child) =>
-              child !== node
-            );
-            parentChildrenCell.withTx(tx).set(newParentChildren);
-
-            // Step 3: Add copy to grandparent after parent
-            const currentGrandParentChildren = grandParentChildrenCell.get();
-            const newGrandParentChildren = [...currentGrandParentChildren];
-            newGrandParentChildren.splice(parentIndex + 1, 0, nodeCopy);
-            grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
-
-            // Step 4: Update focus to the new copy
-            if (this.focusedNode === node) {
-              this.focusedNode = nodeCopy;
-            }
-            if (this.editingNode === node) {
-              this.editingNode = nodeCopy;
-            }
-          }
-        },
-        undefined, // No fallback to avoid mixed mutations
-        "outdentNode",
-      );
-    } else {
-      // Only use TreeOperations when CellController is completely unavailable
-      TreeOperations.outdentNode(this.tree, node);
-      this.emitChange();
+    if (parentChildrenCell && grandParentChildrenCell) {
+      // V-DOM style: precise mutations using single transaction
+      const tx = this.value.runtime.edit();
+      
+      // Remove from current parent
+      const currentParentChildren = parentChildrenCell.get();
+      const newParentChildren = currentParentChildren.filter(child => child !== node);
+      parentChildrenCell.withTx(tx).set(newParentChildren);
+      
+      // Add to grandparent after parent
+      const currentGrandParentChildren = grandParentChildrenCell.get();
+      const newGrandParentChildren = [...currentGrandParentChildren];
+      newGrandParentChildren.splice(parentIndex + 1, 0, node);
+      grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
+      
+      tx.commit();
     }
 
     // Restore editing state if it was being edited
-    // Note: focus has already been updated to the new copy inside the transaction for Cell operations
     if (wasEditing) {
-      if (rootCell) {
-        // For Cell operations, editingNode was already updated to the copy
-        this.editingContent = editingContent;
-      } else {
-        // For TreeOperations fallback, update to the same node
-        this.editingNode = node;
-        this.editingContent = editingContent;
-      }
+      this.editingNode = node;
+      this.editingContent = editingContent;
     }
 
     this.requestUpdate();
@@ -1371,6 +1215,8 @@ export class CTOutliner extends BaseElement {
   }
 
   moveNodeUp(node: OutlineTreeNode) {
+    if (!this.value) return;
+    
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) {
       return; // Cannot move node up: node has no parent
@@ -1381,50 +1227,27 @@ export class CTOutliner extends BaseElement {
       return; // Cannot move node up: already at first position
     }
 
-    // Use Cell operations when CellController is active
-    const rootCell = this.cellController.getCell();
-    if (rootCell) {
-      // COPY-DELETE-ADD approach to avoid Cell reference issues
-      this.executeTransaction(
-        (tx) => {
-          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-          if (parentChildrenCell) {
-            const currentChildren = parentChildrenCell.get();
-            const previousNode = currentChildren[childIndex - 1];
-
-            // Step 1: Create copies of both nodes that need to swap positions
-            const nodeCopy = this.deepCloneNode(node);
-            const previousNodeCopy = this.deepCloneNode(previousNode);
-
-            // Step 2: Build new children array with swapped positions
-            const newChildren = [...currentChildren];
-            newChildren[childIndex - 1] = nodeCopy; // Put current node in previous position
-            newChildren[childIndex] = previousNodeCopy; // Put previous node in current position
-
-            parentChildrenCell.withTx(tx).set(newChildren);
-
-            // Step 3: Update focus to the new copy
-            if (this.focusedNode === node) {
-              this.focusedNode = nodeCopy;
-            }
-            if (this.editingNode === node) {
-              this.editingNode = nodeCopy;
-            }
-          }
-        },
-        undefined, // No fallback to avoid mixed mutations
-        "moveNodeUp",
-      );
-    } else {
-      // Only use TreeOperations when CellController is completely unavailable
-      TreeOperations.moveNodeUp(this.tree, node);
-      this.emitChange();
+    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    if (parentChildrenCell) {
+      // V-DOM style: swap positions directly
+      mutateCell(parentChildrenCell, (cell) => {
+        const currentChildren = cell.get();
+        const newChildren = [...currentChildren];
+        
+        // Swap the node with the previous one
+        [newChildren[childIndex - 1], newChildren[childIndex]] = 
+        [newChildren[childIndex], newChildren[childIndex - 1]];
+        
+        cell.set(newChildren);
+      });
     }
 
     this.requestUpdate();
   }
 
   moveNodeDown(node: OutlineTreeNode) {
+    if (!this.value) return;
+    
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
     if (!parentNode) {
       return; // Cannot move node down: node has no parent
@@ -1435,44 +1258,19 @@ export class CTOutliner extends BaseElement {
       return; // Cannot move node down: already at last position
     }
 
-    // Use Cell operations when CellController is active
-    const rootCell = this.cellController.getCell();
-    if (rootCell) {
-      // COPY-DELETE-ADD approach to avoid Cell reference issues
-      this.executeTransaction(
-        (tx) => {
-          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-          if (parentChildrenCell) {
-            const currentChildren = parentChildrenCell.get();
-            const nextNode = currentChildren[childIndex + 1];
-
-            // Step 1: Create copies of both nodes that need to swap positions
-            const nodeCopy = this.deepCloneNode(node);
-            const nextNodeCopy = this.deepCloneNode(nextNode);
-
-            // Step 2: Build new children array with swapped positions
-            const newChildren = [...currentChildren];
-            newChildren[childIndex] = nextNodeCopy; // Put next node in current position
-            newChildren[childIndex + 1] = nodeCopy; // Put current node in next position
-
-            parentChildrenCell.withTx(tx).set(newChildren);
-
-            // Step 3: Update focus to the new copy
-            if (this.focusedNode === node) {
-              this.focusedNode = nodeCopy;
-            }
-            if (this.editingNode === node) {
-              this.editingNode = nodeCopy;
-            }
-          }
-        },
-        undefined, // No fallback to avoid mixed mutations
-        "moveNodeDown",
-      );
-    } else {
-      // Only use TreeOperations when CellController is completely unavailable
-      TreeOperations.moveNodeDown(this.tree, node);
-      this.emitChange();
+    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    if (parentChildrenCell) {
+      // V-DOM style: swap positions directly
+      mutateCell(parentChildrenCell, (cell) => {
+        const currentChildren = cell.get();
+        const newChildren = [...currentChildren];
+        
+        // Swap the node with the next one
+        [newChildren[childIndex], newChildren[childIndex + 1]] = 
+        [newChildren[childIndex + 1], newChildren[childIndex]];
+        
+        cell.set(newChildren);
+      });
     }
 
     this.requestUpdate();
@@ -1662,92 +1460,41 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
-   * Set checkbox state on a node to a specific boolean value using proper Cell transactions
+   * Set checkbox state on a node to a specific boolean value using Cell operations
    */
   setNodeCheckbox(node: OutlineTreeNode, isChecked: boolean) {
-    this.executeTransaction(
-      (tx) => {
-        if (tx) {
-          // Cell-based operation
-          const nodeBodyCell = this.getNodeBodyCell(node);
-          if (nodeBodyCell) {
-            const currentBody = nodeBodyCell.get();
+    if (!this.value) return;
+    
+    const nodeBodyCell = this.getNodeBodyCell(node);
+    if (nodeBodyCell) {
+      mutateCell(nodeBodyCell, (cell) => {
+        const currentBody = cell.get();
 
-            // Set checkbox to the specified state
-            let newBody: string;
-            const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentBody);
+        // Set checkbox to the specified state
+        let newBody: string;
+        const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentBody);
 
-            if (hasCheckbox) {
-              // Update existing checkbox
-              if (isChecked) {
-                // Set to checked
-                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[x] ");
-              } else {
-                // Set to unchecked (normalize to [ ])
-                newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[ ] ");
-              }
-            } else {
-              // Add checkbox if none exists
-              if (isChecked) {
-                newBody = "[x] " + currentBody;
-              } else {
-                newBody = "[ ] " + currentBody;
-              }
-            }
-
-            nodeBodyCell.withTx(tx).set(newBody);
-          }
-        } else {
-          // Direct mutation fallback
-          const mutableNode = node as any;
-          const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(mutableNode.body);
-          if (hasCheckbox) {
-            if (isChecked) {
-              mutableNode.body = mutableNode.body.replace(
-                /^\s*\[[ x]?\]\s*/,
-                "[x] ",
-              );
-            } else {
-              mutableNode.body = mutableNode.body.replace(
-                /^\s*\[[ x]?\]\s*/,
-                "[ ] ",
-              );
-            }
-          } else {
-            if (isChecked) {
-              mutableNode.body = "[x] " + mutableNode.body;
-            } else {
-              mutableNode.body = "[ ] " + mutableNode.body;
-            }
-          }
-        }
-      },
-      () => {
-        // Fallback operation
-        const mutableNode = node as any;
-        const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(mutableNode.body);
         if (hasCheckbox) {
+          // Update existing checkbox
           if (isChecked) {
-            mutableNode.body = mutableNode.body.replace(
-              /^\s*\[[ x]?\]\s*/,
-              "[x] ",
-            );
+            // Set to checked
+            newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[x] ");
           } else {
-            mutableNode.body = mutableNode.body.replace(
-              /^\s*\[[ x]?\]\s*/,
-              "[ ] ",
-            );
+            // Set to unchecked (normalize to [ ])
+            newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[ ] ");
           }
         } else {
+          // Add checkbox if none exists
           if (isChecked) {
-            mutableNode.body = "[x] " + mutableNode.body;
+            newBody = "[x] " + currentBody;
           } else {
-            mutableNode.body = "[ ] " + mutableNode.body;
+            newBody = "[ ] " + currentBody;
           }
         }
-      },
-      "setNodeCheckbox",
-    );
+
+        cell.set(newBody);
+      });
+    }
 
     this.requestUpdate();
   }
@@ -1803,14 +1550,12 @@ export class CTOutliner extends BaseElement {
       // Create new node using Cell operations
       const newNode = TreeOperations.createNode({ body: "" });
 
-      this.executeTransaction((tx) => {
-        const rootChildrenCell = this.cellController.getCell()?.key("root").key(
-          "children",
-        ) as Cell<OutlineTreeNode[]>;
-        if (rootChildrenCell) {
-          rootChildrenCell.withTx(tx).set([newNode]);
-        }
-      });
+      if (this.value) {
+        const rootChildrenCell = this.value.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        mutateCell(rootChildrenCell, (cell) => {
+          cell.set([newNode]);
+        });
+      }
 
       this.focusedNode = newNode;
       this.requestUpdate();
@@ -1845,10 +1590,10 @@ export class CTOutliner extends BaseElement {
         );
 
         // Insert all parsed nodes after the focused node using Cell operations
-        this.executeTransaction((tx) => {
-          const parentChildrenCell = this.getNodeChildrenCell(parentNode);
-          if (parentChildrenCell) {
-            const currentChildren = parentChildrenCell.get();
+        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+        if (parentChildrenCell) {
+          mutateCell(parentChildrenCell, (cell) => {
+            const currentChildren = cell.get();
             const newChildren = [...currentChildren];
 
             // Insert all parsed nodes at once
@@ -1856,36 +1601,32 @@ export class CTOutliner extends BaseElement {
               newChildren.splice(nodeIndex + 1 + index, 0, node);
             });
 
-            parentChildrenCell.withTx(tx).set(newChildren);
-          }
-        });
+            cell.set(newChildren);
+          });
+        }
 
         // Focus the first newly inserted node
         this.focusedNode = parsedTree.root.children[0];
       }
     } else if (this.tree.root.children.length === 0) {
       // No nodes exist, replace root children using Cell operations
-      this.executeTransaction((tx) => {
-        const rootChildrenCell = this.cellController.getCell()?.key("root").key(
-          "children",
-        ) as Cell<OutlineTreeNode[]>;
-        if (rootChildrenCell) {
-          rootChildrenCell.withTx(tx).set(parsedTree.root.children);
-        }
-      });
+      if (this.value) {
+        const rootChildrenCell = this.value.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        mutateCell(rootChildrenCell, (cell) => {
+          cell.set(parsedTree.root.children);
+        });
+      }
       this.focusedNode = parsedTree.root.children[0];
     } else {
       // No focused node but tree has nodes, append to the end using Cell operations
-      this.executeTransaction((tx) => {
-        const rootChildrenCell = this.cellController.getCell()?.key("root").key(
-          "children",
-        ) as Cell<OutlineTreeNode[]>;
-        if (rootChildrenCell) {
-          const currentChildren = rootChildrenCell.get();
+      if (this.value) {
+        const rootChildrenCell = this.value.key("root").key("children") as Cell<OutlineTreeNode[]>;
+        mutateCell(rootChildrenCell, (cell) => {
+          const currentChildren = cell.get();
           const newChildren = [...currentChildren, ...parsedTree.root.children];
-          rootChildrenCell.withTx(tx).set(newChildren);
-        }
-      });
+          cell.set(newChildren);
+        });
+      }
       this.focusedNode = parsedTree.root.children[0];
     }
 
@@ -1893,6 +1634,16 @@ export class CTOutliner extends BaseElement {
   }
 
   override render() {
+    if (!this.value) {
+      return html`
+        <div style="position: relative;">
+          <div class="outliner" tabindex="0">
+            <div class="placeholder">No value provided</div>
+          </div>
+        </div>
+      `;
+    }
+    
     const hasNodes = this.tree && this.tree.root.children.length > 0;
 
     return html`
