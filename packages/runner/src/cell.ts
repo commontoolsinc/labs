@@ -599,7 +599,7 @@ export class RegularCell<T> implements Cell<T> {
       this.runtime,
       { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
-      this.synced,
+      false, // Reset synced flag, since schmema is changing
     ) as Cell<any>;
   }
 
