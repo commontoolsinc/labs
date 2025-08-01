@@ -4,6 +4,7 @@ import { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
 // An `IframeContextHandler` is used by consumers to
 // register how read/writing values from frames are handled.
 export interface IframeContextHandler {
+  additionalAllowedHosts(): string[];
   read(element: CommonIframeSandboxElement, context: any, key: string): any;
   write(
     element: CommonIframeSandboxElement,

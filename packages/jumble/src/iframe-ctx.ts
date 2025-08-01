@@ -166,6 +166,9 @@ function setPreviousValue(context: any, key: string, value: any) {
 
 export const setupIframe = (runtime: Runtime) =>
   setIframeContextHandler({
+    additionalAllowedHosts(): string[] {
+      return [];
+    },
     read(_element: CommonIframeSandboxElement, context: any, key: string): any {
       const data = key === "*"
         ? isCell(context) ? context.get() : context

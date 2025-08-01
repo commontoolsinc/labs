@@ -32,6 +32,10 @@ function setPreviousValue(context: any, key: string, value: any) {
 
 export const setupIframe = (runtime: Runtime) =>
   setIframeContextHandler({
+    additionalAllowedHosts(): string[] {
+      // blobbyServerUrl is set from `apiUrl` from app state.
+      return [new URL(runtime.blobbyServerUrl).origin];
+    },
     read(_element: CommonIframeSandboxElement, context: any, key: string): any {
       const data = key === "*"
         ? isCell(context) ? context.get() : context
@@ -42,7 +46,7 @@ export const setupIframe = (runtime: Runtime) =>
       setPreviousValue(context, key, JSON.stringify(serialized));
       return serialized;
     },
-    
+
     write(
       _element: CommonIframeSandboxElement,
       context: any,
@@ -50,7 +54,7 @@ export const setupIframe = (runtime: Runtime) =>
       value: any,
     ) {
       setPreviousValue(context, key, JSON.stringify(value));
-      
+
       if (isCell(context)) {
         const currentValue = context.key(key).get();
         const currentValueType = currentValue !== undefined
@@ -58,7 +62,7 @@ export const setupIframe = (runtime: Runtime) =>
           : undefined;
         const type = context.key(key).schema?.type ??
           currentValueType ?? typeof value;
-          
+
         if (type === "object" && isObject(value)) {
           context.key(key).update(value);
         } else if (
@@ -81,7 +85,7 @@ export const setupIframe = (runtime: Runtime) =>
         context[key] = value;
       }
     },
-    
+
     subscribe(
       _element: CommonIframeSandboxElement,
       context: any,
@@ -98,7 +102,7 @@ export const setupIframe = (runtime: Runtime) =>
         const serialized = removeNonJsonData(data);
         const serializedString = JSON.stringify(serialized);
         const previousValue = getPreviousValue(context, key);
-        
+
         if (serializedString !== previousValue || !doNotSendMyDataBack) {
           setPreviousValue(context, key, serializedString);
           callback(key, serialized);
@@ -115,7 +119,7 @@ export const setupIframe = (runtime: Runtime) =>
       const cancel = runtime.scheduler.schedule(action, { reads, writes: [] });
       return { action, cancel };
     },
-    
+
     unsubscribe(
       _element: CommonIframeSandboxElement,
       _context: any,
@@ -129,7 +133,7 @@ export const setupIframe = (runtime: Runtime) =>
         runtime.scheduler.unschedule(receipt);
       }
     },
-    
+
     // Simplified handlers - not implementing LLM and webpage reading for now
     onLLMRequest(
       _element: CommonIframeSandboxElement,
@@ -139,7 +143,7 @@ export const setupIframe = (runtime: Runtime) =>
       console.warn("LLM requests not yet implemented in shell");
       return Promise.resolve({ error: "LLM requests not yet implemented" });
     },
-    
+
     onReadWebpageRequest(
       _element: CommonIframeSandboxElement,
       _context: any,
@@ -148,13 +152,15 @@ export const setupIframe = (runtime: Runtime) =>
       console.warn("Webpage reading not yet implemented in shell");
       return Promise.resolve({ error: "Webpage reading not yet implemented" });
     },
-    
+
     onPerform(
       _element: CommonIframeSandboxElement,
       _context: unknown,
       command: IPC.TaskPerform,
     ): Promise<{ ok: object; error?: void } | { ok?: void; error: Error }> {
       console.warn("Perform commands not yet implemented in shell");
-      return Promise.resolve({ error: new Error(`Command is not implemented`) });
+      return Promise.resolve({
+        error: new Error(`Command is not implemented`),
+      });
     },
   });

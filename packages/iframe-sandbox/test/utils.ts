@@ -54,6 +54,9 @@ export class ContextShim {
 
 export function setIframeTestHandler() {
   setIframeContextHandler({
+    additionalAllowedHosts(): string[] {
+      return [];
+    },
     read(element, context, key) {
       return context.get(element, key);
     },

@@ -9,6 +9,7 @@ import {
   HealthCheckTimeout,
 } from "./health-check.ts";
 import { sleep } from "@commontools/utils/sleep";
+import createOuterFrame from "./outer-frame.ts";
 
 let FRAME_IDS = 0;
 
@@ -54,28 +55,28 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   static override styles = css`
-  :host {
-    display: block;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: #ddd;
-  }
-  #crash-message {
-    width: 50%;
-    margin: 20px auto;
-    display: flex;
-    flex-direction: column;
-    text-align: center;
-  }
-  #crash-message > * {
-    flex: 1; 
-  }
-  #crash-message button {
-    font-size: 20px;
-    background-color: white;
-    border: 1px solid black;
-  }
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #ddd;
+    }
+    #crash-message {
+      width: 50%;
+      margin: 20px auto;
+      display: flex;
+      flex-direction: column;
+      text-align: center;
+    }
+    #crash-message > * {
+      flex: 1;
+    }
+    #crash-message button {
+      font-size: 20px;
+      background-color: white;
+      border: 1px solid black;
+    }
   `;
 
   // Static id for this component for its lifetime.
@@ -492,18 +493,21 @@ export class CommonIframeSandboxElement extends LitElement {
   override render() {
     if (this.crashed) {
       return html`
-      <div id="crash-message">
-        <div class="message">🤨 Charm crashed! 🤨</div>
-        <button @click=${this.onCrashReload}>Reload</button>
-      </div>
+        <div id="crash-message">
+          <div class="message">🤨 Charm crashed! 🤨</div>
+          <button @click="${this.onCrashReload}">Reload</button>
+        </div>
       `;
     }
+    const additionalAllowedHosts =
+      getIframeContextHandler()?.additionalAllowedHosts() ?? [];
+    const outerFrame = createOuterFrame(additionalAllowedHosts);
     return html`
       <iframe
         ${ref(this.iframeRef)}
         allow="clipboard-write"
         sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox"
-        .srcdoc=${OuterFrame}
+        .srcdoc="${outerFrame}"
         height="100%"
         width="100%"
         style="border: none;"

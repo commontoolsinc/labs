@@ -1,7 +1,12 @@
-import { CSP, HOST_ORIGIN } from "./csp.ts";
+import { createCSP } from "./csp.ts";
 
-export default `
-<!DOCTYPE html>
+export default function createOuterFrame(
+  additionalAllowedHosts: string[],
+): string {
+  const hostOrigin =
+    new URL(globalThis?.location?.href || "http://localhost").origin;
+  const CSP = createCSP(hostOrigin, additionalAllowedHosts);
+  return `<!DOCTYPE html>
 <html>
 <head>
 <meta http-equiv="Content-Security-Policy" content="${CSP}" \/>
@@ -33,7 +38,7 @@ iframe {
   sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts allow-modals"><\/iframe>
 <script>
 const iframe = document.querySelector("iframe");
-const HOST_ORIGIN = "${HOST_ORIGIN}";
+const HOST_ORIGIN = "${hostOrigin}";
 const HOST_WINDOW = window.parent;
 const INNER_WINDOW = iframe.contentWindow;
 let FRAME_ID = null;
@@ -120,3 +125,4 @@ function toInner(data) {
 <\/html>
 <\/html>
 `;
+}
