@@ -103,7 +103,6 @@ write("ready", true);
 });
 
 Deno.test("handles multiple iframes", async () => {
-  // Test that multiple iframes can have independent contexts
   const context1 = new ContextShim({ a: 1 });
   const context2 = new ContextShim({ b: 100 });
 
@@ -125,8 +124,6 @@ read("b");
 </script>`;
   const iframe1 = await render(body1, context1);
   const iframe2 = await render(body2, context2);
-  
-  // Verify each iframe maintains its own context
   await waitForCondition(() =>
     context1.get(iframe1, "a") === 1 && context1.get(iframe1, "b") === 1
   );
@@ -136,7 +133,6 @@ read("b");
 });
 
 Deno.test("handles loading new documents", async () => {
-  // Test that iframe can load new documents and maintain context isolation
   const context = new ContextShim({ a: 1 });
 
   const body1 = `
@@ -151,15 +147,12 @@ write("c", 1);
 </script>`;
   const iframe = await render(body1, context);
   await waitForCondition(() => context.get(iframe, "b") === 1);
-  
-  // Load a new document in the same iframe
   // @ts-ignore This is a lit property.
   iframe.src = body2;
   await waitForCondition(() => context.get(iframe, "c") === 1);
 });
 
 Deno.test("cancels subscriptions between documents", async () => {
-  // Test that subscriptions from previous documents are properly cancelled
   const context = new ContextShim({ a: 1 });
 
   const body1 = `
@@ -184,16 +177,11 @@ write("ready2", true);
 </script>`;
   const iframe = await render(body1, context);
   await waitForCondition(() => context.get(iframe, "ready1") === true);
-  
-  // Load new document that only subscribes to "b"
   // @ts-ignore This is a lit property.
   iframe.src = body2;
   await waitForCondition(() => context.get(iframe, "ready2") === true);
-  
-  // Verify old subscription to "a" is cancelled but new subscription to "b" works
   context.set(iframe, "a", 1000);
   context.set(iframe, "b", 1000);
   await waitForCondition(() => context.get(iframe, "got-b-update") === true);
   assertEquals(context.get(iframe, "got-a-update"), undefined);
 });
-
