@@ -25,7 +25,7 @@ export class CTRender extends BaseElement {
       width: 100%;
       height: 100%;
     }
-    
+
     .render-container {
       width: 100%;
       height: 100%;
@@ -92,9 +92,6 @@ export class CTRender extends BaseElement {
     );
     await this.cell.runtime.runSynced(this.cell, recipe);
     await this.cell.runtime.idle();
-
-    // Note: Iframe recipes are now supported - they will render their UI output
-    // which includes the common-iframe element
 
     // Render the UI output
     if (!this._renderContainer) {

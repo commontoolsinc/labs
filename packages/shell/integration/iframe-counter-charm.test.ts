@@ -18,7 +18,6 @@ import { registerCharm, ShellIntegration } from "./utils.ts";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import "../src/globals.ts";
 import type { ElementHandle } from "@astral/astral";
 
 const { API_URL, FRONTEND_URL } = env;
