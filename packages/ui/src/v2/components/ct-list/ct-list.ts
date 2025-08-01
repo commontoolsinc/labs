@@ -37,7 +37,6 @@ function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): void {
   tx.commit();
 }
 
-
 /**
  * Action configuration for list items
  */
@@ -46,7 +45,6 @@ export interface CtListAction {
   label?: string;
   event?: string;
 }
-
 
 /**
  * CTList - A list component that renders items with add/remove functionality
@@ -90,20 +88,18 @@ export class CTList extends BaseElement {
   @property()
   action: CtListAction | null = { type: "remove" };
 
-
   // Removed cellController - working directly with value/Cell
 
   // Private state for managing editing
   @state()
   private _editing: Cell<ListItem> | null = null;
-  
+
   // Subscription cleanup function
   private _unsubscribe: (() => void) | null = null;
 
   constructor() {
     super();
   }
-
 
   static override styles = css`
     :host {
@@ -319,21 +315,20 @@ export class CTList extends BaseElement {
     .item-action.cancel:hover {
       background-color: #4b5563;
     }
-
   `;
 
   // Lifecycle methods for Cell binding management
   override updated(changedProperties: Map<string, any>) {
     super.updated(changedProperties);
-    
+
     // Handle value changes
-    if (changedProperties.has('value')) {
+    if (changedProperties.has("value")) {
       // Clean up previous subscription
       if (this._unsubscribe) {
         this._unsubscribe();
         this._unsubscribe = null;
       }
-      
+
       // Subscribe to new Cell if it exists
       if (this.value && isCell(this.value)) {
         this._unsubscribe = this.value.sink(() => {
@@ -342,7 +337,7 @@ export class CTList extends BaseElement {
       }
     }
   }
-  
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     // Clean up subscription
@@ -369,10 +364,13 @@ export class CTList extends BaseElement {
       return;
     }
 
-    const index = findCellIndex(this.value, itemToRemove);
-    if (index !== -1) {
-      mutateCell(this.value, (cell) => cell.get().splice(index, 1));
-    }
+    // Use filter with .equals() to remove the item
+    mutateCell(this.value, (cell) => {
+      const filtered = cell.get().filter((_, i) =>
+        !cell.key(i).equals(itemToRemove)
+      );
+      cell.set(filtered);
+    });
 
     this.requestUpdate();
   }
@@ -393,7 +391,6 @@ export class CTList extends BaseElement {
         break;
     }
   }
-
 
   private handleAddItem(event: Event) {
     event.preventDefault();
@@ -478,7 +475,6 @@ export class CTList extends BaseElement {
 
         ${!this.readonly ? this.renderAddItem() : ""}
       </div>
-
     `;
   }
 
@@ -529,9 +525,7 @@ export class CTList extends BaseElement {
     }
 
     return html`
-      <div
-        class="list-item"
-      >
+      <div class="list-item">
         <div class="item-bullet"></div>
         <div
           class="item-content ${this.editable && !this.readonly
@@ -591,8 +585,6 @@ export class CTList extends BaseElement {
       </button>
     `;
   }
-
-
 
   private renderAddItem() {
     return html`

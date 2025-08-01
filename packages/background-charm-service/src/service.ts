@@ -73,7 +73,7 @@ export class BackgroundCharmService {
   // FIXME(ja): space managers should watch their own charms!
   // Note(ja): this assumes that sync won't return an empty
   // array / partial results!
-  private ensureCharms(charms: Cell<BGCharmEntry>[]) {
+  private ensureCharms(charms: readonly Cell<BGCharmEntry>[]) {
     if (!this.isRunning) {
       log("ignoring charms update because service asked to stop");
       return;

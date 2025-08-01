@@ -3,6 +3,8 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "./builder/types.ts";
 import { CycleTracker } from "./traverse.ts";
 
+const logger = getLogger("cfc");
+
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be
 // up to implementation.
@@ -12,8 +14,6 @@ export const Classification = {
   Secret: "secret",
   TopSecret: "topsecret",
 } as const;
-
-const logger = getLogger("cfc", { enabled: true, level: "warn" });
 
 // We'll often work with the transitive closure of this graph.
 // I currently require this to be a DAG, but I could support cycles

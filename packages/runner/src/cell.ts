@@ -159,7 +159,7 @@ import { getEntityId } from "./doc-map.ts";
  */
 declare module "@commontools/api" {
   interface Cell<T> {
-    get(): T;
+    get(): Readonly<T>;
     set(value: Cellify<T> | T): void;
     send(value: Cellify<T> | T): void;
     update<V extends Cellify<Partial<T> | Partial<T>>>(
@@ -184,7 +184,7 @@ declare module "@commontools/api" {
       schema?: JSONSchema,
     ): Cell<T>;
     withTx(tx?: IExtendedStorageTransaction): Cell<T>;
-    sink(callback: (value: T) => Cancel | undefined | void): Cancel;
+    sink(callback: (value: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Cell<T>> | Cell<T>;
     getAsQueryResult<Path extends PropertyKey[]>(
       path?: Readonly<Path>,
@@ -251,7 +251,7 @@ declare module "@commontools/api" {
 
   interface Stream<T> {
     send(event: T): void;
-    sink(callback: (event: T) => Cancel | undefined | void): Cancel;
+    sink(callback: (event: Readonly<T>) => Cancel | undefined | void): Cancel;
     sync(): Promise<Stream<T>> | Stream<T>;
     getRaw(options?: IReadOptions): any;
     getAsNormalizedFullLink(): NormalizedFullLink;
@@ -299,6 +299,7 @@ export function createCell<T>(
   link: NormalizedFullLink,
   tx?: IExtendedStorageTransaction,
   noResolve = false,
+  synced = false,
 ): Cell<T> {
   let { schema, rootSchema } = link;
 
@@ -322,7 +323,12 @@ export function createCell<T>(
       tx,
     ) as unknown as Cell<T>;
   } else {
-    return new RegularCell(runtime, { ...link, schema, rootSchema }, tx);
+    return new RegularCell(
+      runtime,
+      { ...link, schema, rootSchema },
+      tx,
+      synced,
+    );
   }
 }
 
@@ -357,7 +363,7 @@ class StreamCell<T> implements Stream<T> {
     this.listeners.forEach((callback) => addCancel(callback(event)));
   }
 
-  sink(callback: (value: T) => Cancel | undefined): Cancel {
+  sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
   }
@@ -405,6 +411,7 @@ export class RegularCell<T> implements Cell<T> {
     public readonly runtime: IRuntime,
     private readonly link: NormalizedFullLink,
     public readonly tx: IExtendedStorageTransaction | undefined,
+    private synced: boolean = false,
   ) {}
 
   get space(): MemorySpace {
@@ -423,12 +430,18 @@ export class RegularCell<T> implements Cell<T> {
     return this.link.rootSchema;
   }
 
-  get(): T {
-    return validateAndTransform(this.runtime, this.tx, this.link);
+  get(): Readonly<T> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
+    return validateAndTransform(this.runtime, this.tx, this.link, this.synced);
   }
 
   set(newValue: Cellify<T> | T): void {
     if (!this.tx) throw new Error("Transaction required for set");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     // TODO(@ubik2) investigate whether i need to check classified as i walk down my own obj
     diffAndUpdate(
       this.runtime,
@@ -450,6 +463,11 @@ export class RegularCell<T> implements Cell<T> {
     if (!isRecord(values)) {
       throw new Error("Can't update with non-object value");
     }
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     // Get current value, following aliases and references
     const resolvedLink = resolveLink(this.tx, this.link);
     const currentValue = this.tx.readValueOrThrow(resolvedLink);
@@ -493,6 +511,10 @@ export class RegularCell<T> implements Cell<T> {
     ...value: any[]
   ): void {
     if (!this.tx) throw new Error("Transaction required for push");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
@@ -559,6 +581,8 @@ export class RegularCell<T> implements Cell<T> {
         schema: childSchema,
       },
       this.tx,
+      false,
+      this.synced,
     ) as Cell<
       T extends Cell<infer S> ? S[K & keyof S] : T[K] extends never ? any : T[K]
     >;
@@ -575,18 +599,22 @@ export class RegularCell<T> implements Cell<T> {
       this.runtime,
       { ...this.link, schema: schema, rootSchema: schema },
       this.tx,
+      false, // Reset synced flag, since schmema is changing
     ) as Cell<any>;
   }
 
   withTx(newTx?: IExtendedStorageTransaction): Cell<T> {
-    return new RegularCell(this.runtime, this.link, newTx);
+    return new RegularCell(this.runtime, this.link, newTx, this.synced);
   }
 
-  sink(callback: (value: T) => Cancel | undefined): Cancel {
+  sink(callback: (value: Readonly<T>) => Cancel | undefined): Cancel {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     return subscribeToReferencedDocs(callback, this.runtime, this.link);
   }
 
   sync(): Promise<Cell<T>> | Cell<T> {
+    this.synced = true;
+    if (this.link.id.startsWith("data:")) return this;
     return this.runtime.storage.syncCell(this);
   }
 
@@ -594,6 +622,7 @@ export class RegularCell<T> implements Cell<T> {
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
   ): QueryResult<DeepKeyLookup<T, Path>> {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
     return createQueryResultProxy(
       this.runtime,
@@ -643,11 +672,17 @@ export class RegularCell<T> implements Cell<T> {
   }
 
   getRaw(options?: IReadOptions): any {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
   }
 
   setRaw(value: any): void {
     if (!this.tx) throw new Error("Transaction required for setRaw");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     try {
       value = JSON.parse(JSON.stringify(value));
     } catch (e) {
@@ -681,6 +716,7 @@ export class RegularCell<T> implements Cell<T> {
     >
     | undefined;
   getSourceCell(schema?: JSONSchema): Cell<any> | undefined {
+    if (!this.synced) this.sync(); // No await, just kicking this off
     let sourceCellId = this.runtime.readTx(this.tx).readOrThrow(
       { ...this.link, path: ["source"] },
     ) as string | undefined;
@@ -707,13 +743,18 @@ export class RegularCell<T> implements Cell<T> {
 
   setSourceCell(sourceCell: Cell<any>): void {
     if (!this.tx) throw new Error("Transaction required for setSourceCell");
+
+    // No await for the sync, just kicking this off, so we have the data to
+    // retry on conflict.
+    if (!this.synced) this.sync();
+
     const sourceLink = sourceCell.getAsNormalizedFullLink();
     if (sourceLink.path.length > 0) {
       throw new Error("Source cell must have empty path for now");
     }
     this.tx.writeOrThrow(
       { ...this.link, path: ["source"] },
-      JSON.stringify(getEntityId(sourceLink.id)),
+      getEntityId(sourceLink.id),
     );
   }
 
@@ -778,6 +819,7 @@ function subscribeToReferencedDocs<T>(
     runtime,
     tx,
     link,
+    true,
   );
   const log = txToReactivityLog(tx);
 
@@ -790,7 +832,7 @@ function subscribeToReferencedDocs<T>(
     if (isCancel(cleanup)) cleanup();
 
     // Run once with tx to capture _this_ cell's read dependencies.
-    validateAndTransform(runtime, tx, link);
+    validateAndTransform(runtime, tx, link, true);
 
     // Using a new transaction for the callback, as we're only interested in
     // dependencies for the initial get, not further cells the callback might
@@ -799,7 +841,7 @@ function subscribeToReferencedDocs<T>(
 
     const extraTx = runtime.edit();
 
-    const newValue = validateAndTransform(runtime, extraTx, link);
+    const newValue = validateAndTransform(runtime, extraTx, link, true);
     cleanup = callback(newValue);
 
     // no async await here, but that also means no retry. TODO(seefeld): Should

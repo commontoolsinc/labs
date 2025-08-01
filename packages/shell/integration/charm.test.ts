@@ -46,7 +46,8 @@ describe("shell charm tests", () => {
 
     await sleep(2000);
     let handle = await page.$(
-      "pierce/ct-button",
+      "ct-button",
+      { strategy: "pierce" },
     );
     assert(handle);
     handle.click();
@@ -54,7 +55,8 @@ describe("shell charm tests", () => {
     handle.click();
     await sleep(1000);
     handle = await page.$(
-      "pierce/span",
+      "#counter-result",
+      { strategy: "pierce" },
     );
     await sleep(2000);
     const text = await handle?.innerText();

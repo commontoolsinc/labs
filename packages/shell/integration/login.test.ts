@@ -32,25 +32,28 @@ describe("shell login tests", () => {
 
     await sleep(2000);
     let handle = await page.$(
-      'pierce/[test-id="register-new-key"]',
+      '[test-id="register-new-key"]',
+      { strategy: "pierce" },
     );
     assert(handle);
     handle.click();
     await sleep(2000);
     handle = await page.$(
-      'pierce/[test-id="generate-passphrase"]',
+      '[test-id="generate-passphrase"]',
+      { strategy: "pierce" },
     );
     assert(handle);
     handle.click();
     await sleep(2000);
     handle = await page.$(
-      'pierce/[test-id="passphrase-continue"]',
+      '[test-id="passphrase-continue"]',
+      { strategy: "pierce" },
     );
     assert(handle);
     handle.click();
     await sleep(2000);
 
-    handle = await page.$("pierce/#page-title");
+    handle = await page.$("#page-title", { strategy: "pierce" });
     assert(handle);
     const title = await handle.evaluate((el: Element) => el.textContent);
     assert(

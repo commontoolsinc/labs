@@ -1,6 +1,7 @@
 import { getLogger } from "@commontools/utils/logger";
 import { refer } from "merkle-reference/json";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
+import { vdomSchema } from "@commontools/html";
 import {
   isModule,
   isOpaqueRef,
@@ -13,6 +14,7 @@ import {
   type NodeFactory,
   type Recipe,
   TYPE,
+  UI,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   type UnsafeBinding,
@@ -426,19 +428,34 @@ export class Runner implements IRunner {
 
     const cells: Cell<any>[] = [];
 
+    // Sync all the inputs and outputs of the recipe nodes.
     for (const node of recipe.nodes) {
       const inputs = findAllWriteRedirectCells(node.inputs, sourceCell);
       const outputs = findAllWriteRedirectCells(node.outputs, sourceCell);
 
       // TODO(seefeld): This ignores schemas provided by modules, so it might
       // still fetch a lot.
-      [...inputs, ...outputs].forEach((cell) => {
-        cells.push(this.runtime.getCellFromLink(cell));
+      [...inputs, ...outputs].forEach((link) => {
+        cells.push(this.runtime.getCellFromLink(link));
       });
     }
 
+    // Sync all the previously computed results.
     if (recipe.resultSchema) {
       cells.push(resultCell.asSchema(recipe.resultSchema));
+    }
+
+    // If the result has a UI and it wasn't already included in the result
+    // schema, sync it as well. This prevents the UI from flashing, because it's
+    // first locally computed, then conflicts on write and only then properly
+    // received from the server.
+    if (
+      isRecord(recipe.result) &&
+      recipe.result[UI] &&
+      (!isRecord(recipe.resultSchema) ||
+        !recipe.resultSchema.properties?.[UI])
+    ) {
+      cells.push(resultCell.key(UI).asSchema(vdomSchema));
     }
 
     await Promise.all(cells.map((c) => c.sync()));

@@ -272,8 +272,8 @@ function annotateWithBackToCellSymbols(
   ) {
     value[toCell] = () => createCell(runtime, link, tx);
     value[toOpaqueRef] = () => makeOpaqueRef(link);
+    Object.freeze(value);
   }
-  // TODO(seefeld): Freeze the value to make it immutable.
   return value;
 }
 
@@ -281,7 +281,7 @@ export function validateAndTransform(
   runtime: IRuntime,
   tx: IExtendedStorageTransaction | undefined,
   link: NormalizedFullLink,
-  log?: ReactivityLog,
+  synced: boolean = false,
   seen: Array<[string, any]> = [],
 ): any {
   // If the transaction is no longer open, just treat it as no transaction, i.e.
@@ -439,7 +439,7 @@ export function validateAndTransform(
           runtime,
           tx,
           { ...link, schema: arrayOptions[0] },
-          log,
+          synced,
           seen,
         );
       }
@@ -455,7 +455,7 @@ export function validateAndTransform(
         runtime,
         tx,
         { ...link, schema: { type: "array", items: { anyOf: merged } } },
-        log,
+        synced,
         seen,
       );
     } else if (isRecord(value)) {
@@ -486,7 +486,6 @@ export function validateAndTransform(
       const candidates = options
         .filter((option) => option.type === "object")
         .map((option) => {
-          const extraLog = { reads: [], writes: [] } satisfies ReactivityLog;
           const candidateSeen = [...seen];
           return {
             schema: option,
@@ -494,10 +493,9 @@ export function validateAndTransform(
               runtime,
               tx,
               { ...link, schema: option },
-              extraLog,
+              synced,
               candidateSeen,
             ),
-            extraLog,
           };
         });
       if (candidates.length === 0) {
@@ -508,13 +506,12 @@ export function validateAndTransform(
       // Merge all the object extractions
       let merged: Record<string, any> = {};
       const extraReads: IMemorySpaceAddress[] = [];
-      for (const { result, extraLog } of candidates) {
+      for (const { result } of candidates) {
         if (isCell(result)) {
           merged = result;
           break; // TODO(seefeld): Complain if it's a mix of cells and non-cells?
         } else if (isRecord(result)) {
           merged = { ...merged, ...result };
-          extraReads.push(...extraLog.reads);
         } else {
           console.warn(
             "validateAndTransform: unexpected non-object result",
@@ -522,7 +519,6 @@ export function validateAndTransform(
           );
         }
       }
-      log?.reads.push(...extraReads);
       seen.push([seenKey, merged]);
       return annotateWithBackToCellSymbols(merged, runtime, link, tx);
     } else {
@@ -541,7 +537,7 @@ export function validateAndTransform(
               runtime,
               tx,
               { ...link, schema: option },
-              log,
+              synced,
               candidateSeen,
             ),
           };
@@ -556,7 +552,7 @@ export function validateAndTransform(
           runtime,
           tx,
           { ...link, schema: anyTypeOption },
-          log,
+          synced,
           seen,
         );
       } else {
@@ -597,7 +593,7 @@ export function validateAndTransform(
             runtime,
             tx,
             { ...link, path: [...link.path, key], schema: childSchema },
-            log,
+            synced,
             seen,
           );
         } else if (childSchema.default !== undefined) {
@@ -627,7 +623,7 @@ export function validateAndTransform(
           runtime,
           tx,
           { ...link, path: [...link.path, key], schema: childSchema },
-          log,
+          synced,
           seen,
         );
       }
@@ -682,7 +678,7 @@ export function validateAndTransform(
         runtime,
         tx,
         elementLink,
-        log,
+        synced,
         seen,
       );
     }

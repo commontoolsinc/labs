@@ -1,5 +1,8 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
-import { InspectorState, InspectorUpdateEvent } from "./inspector.ts";
+import {
+  StorageInspectorState,
+  StorageInspectorUpdateEvent,
+} from "./storage-inspector.ts";
 import { RuntimeInternals } from "./runtime.ts";
 
 const STORAGE_KEY = "showInspectorView";
@@ -12,10 +15,10 @@ const STORAGE_KEY = "showInspectorView";
  * - Cross-tab synchronization via storage events
  * - Runtime connection and inspector state updates
  */
-export class InspectorController implements ReactiveController {
+export class StorageInspectorController implements ReactiveController {
   private host: ReactiveControllerHost;
   private runtime?: RuntimeInternals;
-  private inspectorState?: InspectorState;
+  private inspectorState?: StorageInspectorState;
   private visible = false;
   private updateVersion = 0;
 
@@ -57,7 +60,7 @@ export class InspectorController implements ReactiveController {
     }
   }
 
-  getState(): InspectorState | undefined {
+  getState(): StorageInspectorState | undefined {
     return this.inspectorState;
   }
 
@@ -82,7 +85,7 @@ export class InspectorController implements ReactiveController {
   }
 
   private handleInspectorUpdate = (event: Event) => {
-    if (event instanceof InspectorUpdateEvent) {
+    if (event instanceof StorageInspectorUpdateEvent) {
       this.inspectorState = event.detail.model;
       this.updateVersion++;
       // Request update to ensure new operations are shown immediately

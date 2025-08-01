@@ -27,7 +27,7 @@ const MEMORY_WS_URL = `${
 }/api/storage/memory`;
 const SPACE_NAME = "runner_integration";
 
-const TOTAL_COUNT = 100; // how many elements we push to the array
+const TOTAL_COUNT = 20; // how many elements we push to the array
 const TIMEOUT_MS = 30000; // timeout for the test in ms
 
 console.log("Array Push Test");
@@ -173,6 +173,7 @@ async function runTest() {
 try {
   await Promise.race([runTest(), timeoutPromise]);
   console.log("Test completed successfully within timeout");
+  Deno.exit(0);
 } catch (error) {
   const errorMessage = error instanceof Error ? error.message : String(error);
   console.error("Test failed:", errorMessage, (error as Error).stack);

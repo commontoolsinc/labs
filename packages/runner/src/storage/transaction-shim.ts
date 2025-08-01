@@ -470,7 +470,18 @@ class TransactionWriter extends TransactionReader
         return { ok: undefined, error: notFoundError };
       }
       // Value must be a JSON EntityId string
-      if (typeof value !== "string" || !value.startsWith('{"/":"')) {
+      if (typeof value === "string") {
+        try {
+          value = JSON.parse(value);
+        } catch (error) {
+          const notFoundError: INotFoundError = new Error(
+            `Value for 'source' must be a JSON string`,
+          ) as INotFoundError;
+          notFoundError.name = "NotFoundError";
+          return { ok: undefined, error: notFoundError };
+        }
+      }
+      if (!isObject(value)) {
         const notFoundError: INotFoundError = new Error(
           `Value for 'source' must be a JSON string`,
         ) as INotFoundError;
@@ -479,12 +490,12 @@ class TransactionWriter extends TransactionReader
       }
       const sourceDoc = this.runtime.documentMap.getDocByEntityId(
         address.space,
-        value,
+        value as EntityId,
         false,
       );
       if (!sourceDoc) {
         const notFoundError: INotFoundError = new Error(
-          `Source document not found: ${value}`,
+          `Source document not found: ${JSON.stringify(value)}`,
         ) as INotFoundError;
         notFoundError.name = "NotFoundError";
         return { ok: undefined, error: notFoundError };
@@ -492,7 +503,7 @@ class TransactionWriter extends TransactionReader
       doc.sourceCell = sourceDoc;
       const write: Write = {
         address,
-        value,
+        value: value as JSONValue | undefined,
       };
       this.journal.addWrite(address);
       return { ok: write };
