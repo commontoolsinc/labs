@@ -419,6 +419,7 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
   }
 
   constructor(public source: ConsumerInvocationFor<Ability, Protocol>) {
+    // JSON.parse(JSON.stringify) is used to strip `undefined` values
     this.#reference = refer(JSON.parse(JSON.stringify(source)));
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
