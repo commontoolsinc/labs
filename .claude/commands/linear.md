@@ -47,6 +47,31 @@ You MUST respond with: "I'll set up the workflow and delegate this to the approp
 
 When the `/linear` command is run WITHOUT a specific issue:
 
+```javascript
+// 1. Check your active issues
+const myIssues = await mcp__linear-server__list_my_issues({ limit: 50 });
+
+// 2. Group by status for overview
+const inProgress = myIssues.filter(i => i.state?.name === "In Progress");
+const inReview = myIssues.filter(i => i.state?.name === "In Review");
+
+// 3. Present concise summary
+"Linear Status:
+- In Progress (3): CT-701, CT-703, CT-705
+- In Review (2): CT-699, CT-700
+
+What would you like to focus on today?"
+```
+
+### STOP! Pre-Work Checklist (MANDATORY)
+When starting work on a specific issue:
+- [ ] Have you created a git worktree for this issue?
+- [ ] Have you checked for concurrent work (gh pr list, git worktree list)?
+- [ ] Have you updated the Linear issue status to "In Progress"?
+- [ ] Have you created a TodoWrite list for tracking?
+
+⚠️ **DO NOT PROCEED TO CODE UNTIL ALL BOXES ARE CHECKED**
+
 ### Finding Your Team ID
 ```javascript
 // List all teams to find your team ID
