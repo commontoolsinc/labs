@@ -198,10 +198,18 @@ write("ready2", true);
 });
 
 Deno.test("clicks increment button and verifies counter changes", async () => {
-  // Test simulating increment/decrement operations and verifying counter updates
+  // This test verifies counter functionality by simulating button clicks through
+  // the iframe's message-passing API. Due to cross-origin security restrictions,
+  // we cannot directly click buttons inside the sandboxed iframe. Instead, we:
+  // 1. Send "action" messages through the context API to simulate clicks
+  // 2. Use waitForCondition() to verify the count updates after each action
+  // 3. Use assertEquals() to double-check the final values
+  
   const context = new ContextShim({ count: 0 });
   
-  // This simulates a counter with increment/decrement functionality
+  // This creates a custom counter implementation that responds to "action" messages.
+  // In a real charm, the counter would have actual buttons, but for testing purposes
+  // we simulate the button clicks by sending action messages.
   const counterHTML = `
 ${API_SHIM}
 <script>
@@ -248,7 +256,9 @@ setTimeout(() => {
   // Wait for ready signal
   await waitForCondition(() => context.get(iframe, "ready") === true);
   
-  // Helper to simulate button clicks through context updates
+  // Helper to simulate button clicks through context updates.
+  // This sends an "action" message to the iframe which the counter
+  // script interprets as a button click.
   const simulateClick = async (action: "increment" | "decrement") => {
     context.set(iframe, "action", action);
     // Small delay to allow message processing
@@ -257,37 +267,49 @@ setTimeout(() => {
   
   // Verify initial count
   assertEquals(context.get(iframe, "count"), 0);
+  console.log("✓ Initial count verified: 0");
   
-  // Click increment button 3 times
+  // Click increment button 3 times and verify each increment
+  console.log("Testing increment functionality...");
+  
   await simulateClick("increment");
   await waitForCondition(() => context.get(iframe, "count") === 1);
+  assertEquals(context.get(iframe, "count"), 1);
+  console.log("✓ After 1st increment: count = 1");
   
   await simulateClick("increment");
   await waitForCondition(() => context.get(iframe, "count") === 2);
+  assertEquals(context.get(iframe, "count"), 2);
+  console.log("✓ After 2nd increment: count = 2");
   
   await simulateClick("increment");
   await waitForCondition(() => context.get(iframe, "count") === 3);
-  
-  // Verify count is 3
   assertEquals(context.get(iframe, "count"), 3);
+  console.log("✓ After 3rd increment: count = 3");
   
-  // Click decrement button back to 0
+  // Click decrement button back to 0 and verify each decrement
+  console.log("Testing decrement functionality...");
+  
   await simulateClick("decrement");
   await waitForCondition(() => context.get(iframe, "count") === 2);
+  assertEquals(context.get(iframe, "count"), 2);
+  console.log("✓ After 1st decrement: count = 2");
   
   await simulateClick("decrement");
   await waitForCondition(() => context.get(iframe, "count") === 1);
+  assertEquals(context.get(iframe, "count"), 1);
+  console.log("✓ After 2nd decrement: count = 1");
   
   await simulateClick("decrement");
   await waitForCondition(() => context.get(iframe, "count") === 0);
-  
-  // Verify back at 0
   assertEquals(context.get(iframe, "count"), 0);
+  console.log("✓ After 3rd decrement: count = 0");
   
   // Test going negative
+  console.log("Testing negative values...");
+  
   await simulateClick("decrement");
   await waitForCondition(() => context.get(iframe, "count") === -1);
-  
-  // Verify negative value
   assertEquals(context.get(iframe, "count"), -1);
+  console.log("✓ After 4th decrement: count = -1 (negative values supported)");
 });
