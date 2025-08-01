@@ -135,18 +135,18 @@ export const setupIframe = (runtime: Runtime) =>
       _element: CommonIframeSandboxElement,
       _context: any,
       _payload: string,
-    ) {
+    ): Promise<object> {
       console.warn("LLM requests not yet implemented in shell");
-      return { error: "LLM requests not yet implemented" };
+      return Promise.resolve({ error: "LLM requests not yet implemented" });
     },
     
     onReadWebpageRequest(
       _element: CommonIframeSandboxElement,
       _context: any,
       _payload: string,
-    ) {
+    ): Promise<object> {
       console.warn("Webpage reading not yet implemented in shell");
-      return { error: "Webpage reading not yet implemented" };
+      return Promise.resolve({ error: "Webpage reading not yet implemented" });
     },
     
     onPerform(
