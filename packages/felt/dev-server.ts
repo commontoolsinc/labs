@@ -60,6 +60,7 @@ export class DevServer {
       });
     }
 
+
     return serveDir(req, {
       fsRoot: this.outDir,
       quiet: true,

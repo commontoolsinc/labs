@@ -4,19 +4,19 @@ import * as ReactDOM from "react-dom/client"
 import * as Babel from "@babel/standalone";
 
 // Make React available globally
-window.React = React
-window.ReactDOM = ReactDOM
-window.Babel = Babel
+globalThis.React = React
+globalThis.ReactDOM = ReactDOM
+globalThis.Babel = Babel
 // if LLM forgets the prefix
-window.useState = window.React.useState
-window.useEffect = window.React.useEffect
-window.useCallback = window.React.useCallback
+globalThis.useState = globalThis.React.useState
+globalThis.useEffect = globalThis.React.useEffect
+globalThis.useCallback = globalThis.React.useCallback
 
 // bf: this got considerably more complicated when supporting key paths
 // but that's because the iframe RPC doesn't support it, so we're emulating it internally
 // we should revisit this, it's conceptually simple but I'm not quite sure what the solution looks like
 // iframe-ctx.ts is a better place to solve the problem.
-window.useReactiveCell = function useReactiveCell(pathOrKey) {
+globalThis.useReactiveCell = function useReactiveCell(pathOrKey) {
   const pathArr = Array.isArray(pathOrKey) ? pathOrKey : [pathOrKey];
   const rootKey = pathArr[0];                // the key used for IPC
   const nestedPath = pathArr.slice(1);       // [] when we stay at the root
@@ -41,7 +41,7 @@ window.useReactiveCell = function useReactiveCell(pathOrKey) {
 
   // Last full root value we have seen.
   const rootRef = React.useRef(
-    window.sourceData ? window.sourceData[rootKey] : undefined,
+    globalThis.sourceData ? globalThis.sourceData[rootKey] : undefined,
   );
 
   // Local state holds ONLY the nested value the caller cares about.
@@ -65,13 +65,13 @@ window.useReactiveCell = function useReactiveCell(pathOrKey) {
       }
     }
 
-    window.addEventListener("message", handleMessage);
-    window.parent.postMessage({ type: "subscribe", data: [rootKey] }, "*");
-    window.parent.postMessage({ type: "read", data: rootKey }, "*");
+    globalThis.addEventListener("message", handleMessage);
+    globalThis.parent.postMessage({ type: "subscribe", data: [rootKey] }, "*");
+    globalThis.parent.postMessage({ type: "read", data: rootKey }, "*");
 
     return () => {
-      window.removeEventListener("message", handleMessage);
-      window.parent.postMessage({ type: "unsubscribe", data: [rootKey] }, "*");
+      globalThis.removeEventListener("message", handleMessage);
+      globalThis.parent.postMessage({ type: "unsubscribe", data: [rootKey] }, "*");
     };
   }, [rootKey, nestedPath.join(".")]); // Dependency on stringified path
   /* ------------------------------------------------------------------------ */
@@ -85,28 +85,28 @@ window.useReactiveCell = function useReactiveCell(pathOrKey) {
     rootRef.current = newRoot;
     setDocState(newValue);
 
-    window.parent.postMessage({ type: "write", data: [rootKey, newRoot] }, "*");
+    globalThis.parent.postMessage({ type: "write", data: [rootKey, newRoot] }, "*");
   };
   /* ------------------------------------------------------------------------ */
 
   // If we never received an explicit update yet, fall back to pre-loaded data
-  const fallback = getNested(window.sourceData?.[rootKey], nestedPath);
+  const fallback = getNested(globalThis.sourceData?.[rootKey], nestedPath);
 
   return [received ? doc : fallback, updateDoc];
 };
 
 
-window.useDoc = window.useReactiveCell;
+globalThis.useDoc = globalThis.useReactiveCell;
 
 // Define llm utility with React available
-window.llm = (function () {
+globalThis.llm = (function () {
   const inflight = []
 
-  async function llm(payload) {
+  function llm(payload) {
     return new Promise((resolve, reject) => {
-      let stringified = JSON.stringify(payload)
+      const stringified = JSON.stringify(payload)
       inflight.push([stringified, resolve, reject])
-      window.parent.postMessage(
+      globalThis.parent.postMessage(
         {
           type: "llm-request",
           data: stringified,
@@ -116,14 +116,14 @@ window.llm = (function () {
     })
   }
 
-  window.addEventListener("message", e => {
+  globalThis.addEventListener("message", e => {
     if (e.data.type !== "llm-response") {
       return
     }
-    let { request, data, error } = e.data
-    let index = inflight.findIndex(([payload, res, rej]) => request === payload)
+    const { request, data, error } = e.data
+    const index = inflight.findIndex(([payload, res, rej]) => request === payload)
     if (index !== -1) {
-      let [_, res, rej] = inflight[index]
+      const [_, res, rej] = inflight[index]
       inflight.splice(index, 1)
       if (data) {
         res(data)
@@ -135,16 +135,16 @@ window.llm = (function () {
   return llm
 })()
 
-window.generateText = function ({ system, messages, model }) {
-  return window.llm({
+globalThis.generateText = function ({ system, messages, model }) {
+  return globalThis.llm({
     system,
     messages,
     model: model ?? "google:gemini-2.5-pro"
   })
 }
 
-window.generateObject = function ({ system, messages, model }) {
-  return window.llm({
+globalThis.generateObject = function ({ system, messages, model }) {
+  return globalThis.llm({
     system,
     messages,
     model: model ?? "google:gemini-2.5-pro",
@@ -153,6 +153,7 @@ window.generateObject = function ({ system, messages, model }) {
     .then(result => {
       try {
         // Handle possible control characters and escape sequences
+        // deno-lint-ignore no-control-regex
         const cleanedResult = result.replace(/[\u0000-\u001F\u007F-\u009F]/g, match => {
           // Keep common whitespace characters as they are
           if (match === '\n' || match === '\r' || match === '\t') {
@@ -182,13 +183,25 @@ window.generateObject = function ({ system, messages, model }) {
     });
 }
 
-window.perform = (() => {
+globalThis.perform = (() => {
   const pending = new Map()
+  
+  globalThis.addEventListener("message", event => {
+    if (event.data.type === "command-effect") {
+      const task = pending.get(event.data.id)
+      if (event.data.output.ok) {
+        task.succeed(event.data.output.ok)
+      } else {
+        task.fail(event.data.output.error)
+      }
+    }
+  })
+  
   return function perform(command) {
     return new Promise((succeed, fail) => {
-      let id = crypto.randomUUID()
+      const id = crypto.randomUUID()
       pending.set(id, { succeed, fail })
-      window.parent.postMessage(
+      globalThis.parent.postMessage(
         {
           type: "perform",
           data: {
@@ -200,27 +213,16 @@ window.perform = (() => {
       )
     })
   }
-
-  window.addEventListener("message", event => {
-    if (e.data.type === "command-effect") {
-      const task = pending.get(event.data.id)
-      if (event.data.output.ok) {
-        task.succeed(event.data.output.ok)
-      } else {
-        task.fail(event.data.output.error)
-      }
-    }
-  })
 })()
 
 // Define readWebpage utility with React available
-window.readWebpage = (function () {
+globalThis.readWebpage = (function () {
   const inflight = []
 
-  async function readWebpage(url) {
+  function readWebpage(url) {
     return new Promise((resolve, reject) => {
       inflight.push([url, resolve, reject])
-      window.parent.postMessage(
+      globalThis.parent.postMessage(
         {
           type: "readwebpage-request",
           data: url,
@@ -230,14 +232,14 @@ window.readWebpage = (function () {
     })
   }
 
-  window.addEventListener("message", e => {
+  globalThis.addEventListener("message", e => {
     if (e.data.type !== "readwebpage-response") {
       return
     }
-    let { request, data, error } = e.data
-    let index = inflight.findIndex(([payload, res, rej]) => request === payload)
+    const { request, data, error } = e.data
+    const index = inflight.findIndex(([payload, res, rej]) => request === payload)
     if (index !== -1) {
-      let [_, res, rej] = inflight[index]
+      const [_, res, rej] = inflight[index]
       inflight.splice(index, 1)
       if (data) {
         res(data)
@@ -249,15 +251,15 @@ window.readWebpage = (function () {
   return readWebpage
 })()
 
-window.generateImage = function (prompt) {
+globalThis.generateImage = function (prompt) {
   return "/api/ai/img?prompt=" + encodeURIComponent(prompt)
 }
 
-window.generateImageUrl = window.generateImage;
+globalThis.generateImageUrl = globalThis.generateImage;
 
 // Error handling
-window.onerror = function (message, source, lineno, colno, error) {
-  window.parent.postMessage(
+globalThis.onerror = function (message, source, lineno, colno, error) {
+  globalThis.parent.postMessage(
     {
       type: "error",
       data: {
@@ -274,7 +276,7 @@ window.onerror = function (message, source, lineno, colno, error) {
 }
 
 // Define LoadingUI
-window.LoadingUI = function () {
+globalThis.LoadingUI = function () {
   const mountPoint = document.createElement("div")
   mountPoint.className =
     "fixed inset-0 flex items-center justify-center bg-white bg-opacity-80 z-50"
@@ -370,10 +372,10 @@ window.LoadingUI = function () {
 }
 
 // Helper functions
-window.waitForBabel = function () {
+globalThis.waitForBabel = function () {
   return new Promise(resolve => {
     function check() {
-      if (window.__app) {
+      if (globalThis.__app) {
         resolve()
       } else {
         setTimeout(check, 50)
@@ -383,8 +385,8 @@ window.waitForBabel = function () {
   })
 }
 
-window.loadUserModules = async function () {
-  const loader = window.LoadingUI()
+globalThis.loadUserModules = async function () {
+  const loader = globalThis.LoadingUI()
   loader.updateStatus("Loading ESM modules...")
 
   const modules = {
@@ -394,7 +396,7 @@ window.loadUserModules = async function () {
 
   try {
     // Get requested libraries from user code
-    const requestedLibs = window.__app.onLoad ? window.__app.onLoad() : []
+    const requestedLibs = globalThis.__app.onLoad ? globalThis.__app.onLoad() : []
 
     if (!requestedLibs || requestedLibs.length === 0) {
       loader.updateStatus("No additional libraries to load")
@@ -460,7 +462,7 @@ window.loadUserModules = async function () {
 }
 
 // Subscribe to source data
-window.subscribeToSource = function () {
+globalThis.subscribeToSource = function () {
   return new Promise(resolve => {
     function handleSourceMessage(event) {
       if (
@@ -472,25 +474,25 @@ window.subscribeToSource = function () {
       ) {
         const sourceData = event.data.data[1]
         // Remove this listener once we have the data
-        window.removeEventListener("message", handleSourceMessage)
+        globalThis.removeEventListener("message", handleSourceMessage)
         resolve(sourceData)
       }
     }
 
-    window.addEventListener("message", handleSourceMessage)
-    window.parent.postMessage({ type: "subscribe", data: "*" }, "*")
-    window.parent.postMessage({ type: "read", data: "*" }, "*")
+    globalThis.addEventListener("message", handleSourceMessage)
+    globalThis.parent.postMessage({ type: "subscribe", data: "*" }, "*")
+    globalThis.parent.postMessage({ type: "read", data: "*" }, "*")
 
     // Set a timeout in case source data doesn't arrive
     setTimeout(() => {
-      window.removeEventListener("message", handleSourceMessage)
+      globalThis.removeEventListener("message", handleSourceMessage)
       resolve(null)
     }, 3000)
   })
 }
 
 // Initialize the application
-window.initializeApp = async function () {
+globalThis.initializeApp = async function () {
   console.log("!! initializing")
   const container = document.createElement("div")
   container.id = "app-container"
@@ -498,37 +500,37 @@ window.initializeApp = async function () {
 
   console.log("!! loading UI")
 
-  const loader = window.LoadingUI()
+  const loader = globalThis.LoadingUI()
 
   try {
     // Wait for Babel transformation to complete
     loader.updateStatus("Waiting for code transformation...")
     console.log("!! wait for babel")
-    await window.waitForBabel()
+    await globalThis.waitForBabel()
     console.log("!! got babel")
     loader.updateStatus("Code transformation complete")
 
     // Load modules and source data in parallel
     const [modules, sourceData] = await Promise.all([
-      window.loadUserModules(),
-      window.subscribeToSource(),
+      globalThis.loadUserModules(),
+      globalThis.subscribeToSource(),
     ])
 
     console.log("!! load modules & subscsribe")
 
-    window.sourceData = sourceData
+    globalThis.sourceData = sourceData
 
     // Initialize the app
     loader.updateStatus("Initializing application...")
     setTimeout(() => {
       loader.remove()
-      if (typeof window.__app.onReady === "function") {
+      if (typeof globalThis.__app.onReady === "function") {
         console.group("App Initialization")
         console.log("Container:", container)
         console.log("Source Data:", sourceData)
         console.log("Modules:", modules)
         console.groupEnd()
-        window.__app.onReady(container, sourceData, modules)
+        globalThis.__app.onReady(container, sourceData, modules)
       } else {
         console.error("onReady function not defined or not a function")
       }
@@ -541,9 +543,9 @@ window.initializeApp = async function () {
 
 // Start the initialization once DOM is ready
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", window.initializeApp)
+  document.addEventListener("DOMContentLoaded", globalThis.initializeApp)
 } else {
-  window.initializeApp()
+  globalThis.initializeApp()
 }
 
 // This is the third listener to "message";
@@ -552,12 +554,12 @@ if (document.readyState === "loading") {
 // Leave the sigil below as an indicator that
 // health checks are supported:
 // <PING-HANDLER>
-window.addEventListener("message", e => {
+globalThis.addEventListener("message", e => {
   if (e.data.type !== "ping") {
     return
   }
   const nonce = e.data.data
-  window.parent.postMessage(
+  globalThis.parent.postMessage(
     {
       type: "pong",
       data: nonce,
