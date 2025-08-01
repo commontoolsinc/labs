@@ -27,6 +27,9 @@ export interface Config {
   // against a path, and if successful, will return
   // the root index.html.
   redirectToIndex?: RegExp;
+  // Additional static directories to serve during development.
+  // Maps source directories to URL paths.
+  staticDirs?: Array<{ from: string; to: string }>;
   esbuild?: ESBuildConfig;
 }
 
@@ -57,6 +60,7 @@ export class ResolvedConfig {
   publicDir: string;
   watchDir: string;
   redirectToIndex?: RegExp;
+  staticDirs: Array<{ from: string; to: string }>;
   esbuild: {
     sourcemap: boolean;
     external: string[];
@@ -81,6 +85,10 @@ export class ResolvedConfig {
     this.hostname = partial?.hostname ?? "127.0.0.1";
     this.port = partial?.port ?? 5173;
     this.redirectToIndex = partial?.redirectToIndex;
+    this.staticDirs = (partial?.staticDirs ?? []).map(({ from, to }) => ({
+      from: join(cwd, from),
+      to,
+    }));
     this.esbuild = {
       sourcemap: !!(partial?.esbuild?.sourcemap),
       minify: !!(partial?.esbuild?.minify),
