@@ -1,5 +1,8 @@
 import { isObject } from "@commontools/utils/types";
 import type { JSONSchema } from "./builder/types.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("cfc");
 
 // I use these strings in other code, so make them available as
 // constants. These are just strings, and real meaning would be
@@ -190,7 +193,7 @@ export class ContextualFlowControl {
     } else if (schema.items && typeof schema.items === "object") {
       this.joinSchema(joined, schema.items, rootSchema);
     } else if (schema.$ref) {
-      console.log("Error: $ref not supported yet");
+      logger.warn("Error: $ref not supported yet");
     }
     return joined;
   }

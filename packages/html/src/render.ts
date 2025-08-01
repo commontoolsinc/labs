@@ -13,7 +13,7 @@ import {
 import { type Child, isVNode, type Props, type VNode } from "./jsx.ts";
 import * as logger from "./logger.ts";
 
-const vdomSchema: JSONSchema = {
+export const vdomSchema: JSONSchema = {
   type: "object",
   properties: {
     type: { type: "string" },

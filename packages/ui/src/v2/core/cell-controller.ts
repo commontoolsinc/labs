@@ -1,6 +1,9 @@
 import { ReactiveController, ReactiveControllerHost } from "lit";
 import { type Cell, isCell } from "@commontools/runner";
-import { InputTimingController, type InputTimingOptions } from "./input-timing-controller.ts";
+import {
+  InputTimingController,
+  type InputTimingOptions,
+} from "./input-timing-controller.ts";
 
 /**
  * Configuration options for CellController
@@ -10,25 +13,25 @@ export interface CellControllerOptions<T> {
    * Input timing strategy configuration
    */
   timing?: InputTimingOptions;
-  
+
   /**
    * Custom getter function for extracting values from Cell<T> | T
    * Defaults to standard Cell.get() or direct value access
    */
-  getValue?: (value: Cell<T> | T) => T;
-  
+  getValue?: (value: Cell<T> | T) => Readonly<T>;
+
   /**
    * Custom setter function for updating Cell<T> | T values
    * Defaults to standard transaction-based Cell.set() or direct assignment
    */
   setValue?: (value: Cell<T> | T, newValue: T, oldValue: T) => void;
-  
+
   /**
    * Custom change handler called when value changes
    * Use this for component-specific logic like custom events or validation
    */
   onChange?: (newValue: T, oldValue: T) => void;
-  
+
   /**
    * Custom transaction strategy
    * - "auto" (default): Create transaction, set value, commit immediately
@@ -36,13 +39,13 @@ export interface CellControllerOptions<T> {
    * - "batch": Collect changes and commit in batches (advanced usage)
    */
   transactionStrategy?: "auto" | "manual" | "batch";
-  
+
   /**
    * Whether to trigger host.requestUpdate() on Cell changes
    * Defaults to true
    */
   triggerUpdate?: boolean;
-  
+
   /**
    * Custom focus/blur handlers for timing integration
    */
@@ -53,33 +56,33 @@ export interface CellControllerOptions<T> {
 /**
  * A reactive controller that manages Cell<T> | T integration for Lit components.
  * Handles subscription lifecycle, transaction management, and timing strategies.
- * 
+ *
  * This controller eliminates boilerplate code by providing a unified interface
  * for components that need to work with both plain values and reactive Cells.
- * 
+ *
  * @example Basic usage:
  * ```typescript
  * class MyComponent extends BaseElement {
  *   @property() value: Cell<string> | string = "";
- *   
+ *
  *   private cellController = new CellController<string>(this, {
  *     timing: { strategy: "debounce", delay: 300 },
  *     onChange: (newValue, oldValue) => {
  *       this.emit("value-changed", { value: newValue, oldValue });
  *     }
  *   });
- *   
+ *
  *   private handleInput(event: Event) {
  *     const input = event.target as HTMLInputElement;
  *     this.cellController.setValue(input.value);
  *   }
- *   
+ *
  *   override render() {
  *     return html`<input .value="${this.cellController.getValue()}" @input="${this.handleInput}">`;
  *   }
  * }
  * ```
- * 
+ *
  * @example With timing controller integration:
  * ```typescript
  * class MyInput extends BaseElement {
@@ -88,11 +91,11 @@ export interface CellControllerOptions<T> {
  *     onFocus: () => this.classList.add("focused"),
  *     onBlur: () => this.classList.remove("focused")
  *   });
- *   
+ *
  *   private handleFocus() {
  *     this.cellController.onFocus();
  *   }
- *   
+ *
  *   private handleBlur() {
  *     this.cellController.onBlur();
  *   }
@@ -105,7 +108,7 @@ export class CellController<T> implements ReactiveController {
   private _currentValue: Cell<T> | T | undefined;
   private _cellUnsubscribe: (() => void) | null = null;
   private _inputTiming?: InputTimingController;
-  
+
   constructor(
     host: ReactiveControllerHost,
     options: CellControllerOptions<T> = {},
@@ -121,15 +124,15 @@ export class CellController<T> implements ReactiveController {
       onFocus: options.onFocus || (() => {}),
       onBlur: options.onBlur || (() => {}),
     };
-    
+
     // Create timing controller if timing options are provided
     if (this.options.timing) {
       this._inputTiming = new InputTimingController(host, this.options.timing);
     }
-    
+
     host.addController(this);
   }
-  
+
   /**
    * Set the current value reference and set up subscriptions
    */
@@ -140,25 +143,25 @@ export class CellController<T> implements ReactiveController {
       this._setupCellSubscription();
     }
   }
-  
+
   /**
    * Get the current value from Cell<T> | T
    */
-  getValue(): T {
+  getValue(): Readonly<T> {
     if (this._currentValue === undefined || this._currentValue === null) {
       return undefined as T;
     }
     return this.options.getValue(this._currentValue);
   }
-  
+
   /**
    * Set a new value, handling timing and transactions
    */
   setValue(newValue: T): void {
     if (this._currentValue === undefined || this._currentValue === null) return;
-    
+
     const oldValue = this.getValue();
-    
+
     const performUpdate = () => {
       if (this.options.transactionStrategy === "auto") {
         this.options.setValue(this._currentValue!, newValue, oldValue);
@@ -166,11 +169,11 @@ export class CellController<T> implements ReactiveController {
         // For manual/batch strategies, just call setValue without transaction handling
         this.options.setValue(this._currentValue!, newValue, oldValue);
       }
-      
+
       // Call custom change handler
       this.options.onChange(newValue, oldValue);
     };
-    
+
     // Use timing controller if available
     if (this._inputTiming) {
       this._inputTiming.schedule(performUpdate);
@@ -178,7 +181,7 @@ export class CellController<T> implements ReactiveController {
       performUpdate();
     }
   }
-  
+
   /**
    * Update timing controller options
    */
@@ -188,7 +191,7 @@ export class CellController<T> implements ReactiveController {
     }
     this.options.timing = { ...this.options.timing, ...timingOptions };
   }
-  
+
   /**
    * Notify timing controller of focus event
    */
@@ -196,7 +199,7 @@ export class CellController<T> implements ReactiveController {
     this._inputTiming?.onFocus();
     this.options.onFocus();
   }
-  
+
   /**
    * Notify timing controller of blur event
    */
@@ -204,42 +207,42 @@ export class CellController<T> implements ReactiveController {
     this._inputTiming?.onBlur();
     this.options.onBlur();
   }
-  
+
   /**
    * Cancel any pending operations
    */
   cancel(): void {
     this._inputTiming?.cancel();
   }
-  
+
   /**
    * Check if current value is a Cell
    */
   isCell(): boolean {
     return isCell(this._currentValue);
   }
-  
+
   /**
    * Get the underlying Cell (if applicable)
    */
   getCell(): Cell<T> | null {
     return isCell(this._currentValue) ? this._currentValue : null;
   }
-  
+
   // ReactiveController implementation
   hostConnected(): void {
     this._setupCellSubscription();
   }
-  
+
   hostDisconnected(): void {
     this._cleanupCellSubscription();
     this._inputTiming?.cancel();
   }
-  
+
   hostUpdated(): void {
     // Override in subclasses if needed
   }
-  
+
   // Private methods
   private defaultGetValue(value: Cell<T> | T): T {
     if (isCell(value)) {
@@ -247,7 +250,7 @@ export class CellController<T> implements ReactiveController {
     }
     return value || (undefined as T);
   }
-  
+
   private defaultSetValue(value: Cell<T> | T, newValue: T, _oldValue: T): void {
     if (isCell(value)) {
       const tx = value.runtime.edit();
@@ -259,7 +262,7 @@ export class CellController<T> implements ReactiveController {
       // The caller should update their property and trigger re-render
     }
   }
-  
+
   private _setupCellSubscription(): void {
     if (isCell(this._currentValue)) {
       this._cellUnsubscribe = this._currentValue.sink(() => {
@@ -269,7 +272,7 @@ export class CellController<T> implements ReactiveController {
       });
     }
   }
-  
+
   private _cleanupCellSubscription(): void {
     if (this._cellUnsubscribe) {
       this._cellUnsubscribe();
@@ -319,7 +322,7 @@ export class ArrayCellController<T> extends CellController<T[]> {
       }),
     });
   }
-  
+
   /**
    * Add an item to the array
    */
@@ -337,16 +340,16 @@ export class ArrayCellController<T> extends CellController<T[]> {
       this.setValue([...currentArray, item]);
     }
   }
-  
+
   /**
    * Remove an item from the array
    * Note: Cell doesn't have native remove/splice methods, so we use filter + setValue
    */
   removeItem(itemToRemove: T): void {
     const currentArray = this.getValue();
-    this.setValue(currentArray.filter(item => item !== itemToRemove));
+    this.setValue(currentArray.filter((item) => item !== itemToRemove));
   }
-  
+
   /**
    * Update an item in the array
    */
