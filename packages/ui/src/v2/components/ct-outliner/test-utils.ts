@@ -196,9 +196,9 @@ export const waitForCellUpdate = async (): Promise<void> => {
  * Wait for Cell updates to propagate by observing an outliner
  * This waits for the outliner's Cell to actually update and trigger the sink
  */
-export const waitForOutlinerUpdate = async (outliner: CTOutliner): Promise<void> => {
+export const waitForOutlinerUpdate = (outliner: CTOutliner): Promise<void> => {
   if (!outliner.value) {
-    return;
+    return Promise.resolve();
   }
   
   const cell = outliner.value;
