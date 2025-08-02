@@ -274,6 +274,13 @@ export class Scheduler implements IScheduler {
     return {
       next: (notification) => {
         const space = notification.space;
+
+        // Only process commit notifications to avoid self-triggering
+        // from async notifications that lack source tracking
+        if (notification.type !== "commit") {
+          return { done: false };
+        }
+
         if ("changes" in notification) {
           for (const change of notification.changes) {
             logger.debug(() => ["Received change:", change]);

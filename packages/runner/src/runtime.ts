@@ -51,8 +51,8 @@ import { RuntimeTelemetry } from "@commontools/runner";
 Error.stackTraceLimit = 500;
 
 const DEFAULT_USE_REAL_TRANSACTIONS = isDeno()
-  ? ["1", "true", "on", "yes"].includes(Deno.env.get("USE_REAL_TRANSACTIONS")!)
-  : false;
+  ? !["1", "true", "on", "yes"].includes(Deno.env.get("USE_TRANSACTIONS_SHIM")!)
+  : true;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
