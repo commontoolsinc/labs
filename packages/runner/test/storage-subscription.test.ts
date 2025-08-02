@@ -529,7 +529,9 @@ describe("Storage Subscription", () => {
       expect([...commit.changes].length).toBeGreaterThanOrEqual(1);
       const change = [...commit.changes][0];
       // The actual value contains the full document where source field has the JSON string
-      expect(change.after).toEqual({ source: JSON.stringify(cell.entityId) });
+      expect(change.after).toEqual({
+        source: JSON.parse(JSON.stringify(cell.entityId)),
+      });
       expect((change.before as any)?.source).toBeUndefined();
     });
   });

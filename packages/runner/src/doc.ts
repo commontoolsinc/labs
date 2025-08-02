@@ -414,14 +414,21 @@ export function createDoc<T>(
       }
 
       if (runtime.storage.shim) {
+        // EntityId may be in non-json form, so stringify and parse
+        const sourceBefore = sourceCell?.entityId
+          ? JSON.parse(JSON.stringify(sourceCell.entityId))
+          : undefined;
+        const sourceAfter = cell?.entityId
+          ? JSON.parse(JSON.stringify(cell.entityId))
+          : undefined;
         const change: IMemoryChange = {
           address: {
             id: toURI(entityId),
             type: "application/json",
             path: ["source"],
           },
-          before: { source: JSON.stringify(sourceCell?.entityId) },
-          after: { source: JSON.stringify(cell?.entityId) },
+          before: { source: sourceBefore },
+          after: { source: sourceAfter },
         };
 
         const notification: ICommitNotification = {
