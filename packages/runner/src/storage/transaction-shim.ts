@@ -341,8 +341,8 @@ class TransactionReader implements ITransactionReader {
       const sourceCell = doc.sourceCell;
       let value: string | undefined = undefined;
       if (sourceCell) {
-        // Convert EntityId to string
-        value = JSON.stringify(sourceCell.entityId);
+        // Convert EntityId to nice form
+        value = JSON.parse(JSON.stringify(sourceCell.entityId));
       }
       const read: Read = {
         address,
@@ -471,6 +471,9 @@ class TransactionWriter extends TransactionReader
       }
       // Value must be a JSON EntityId string
       if (typeof value === "string") {
+        logger.info(
+          () => ["Encountered string source", value, "for", address.id],
+        );
         try {
           value = JSON.parse(value);
         } catch (error) {
