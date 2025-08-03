@@ -11,7 +11,10 @@ import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
  * @param cell - The Cell to mutate
  * @param mutator - Function that performs the mutation
  */
-async function mutateCell<T>(cell: Cell<T>, mutator: (cell: Cell<T>) => void): Promise<void> {
+async function mutateCell<T>(
+  cell: Cell<T>,
+  mutator: (cell: Cell<T>) => void,
+): Promise<void> {
   const tx = cell.runtime.edit();
   mutator(cell.withTx(tx));
   await tx.commit();
@@ -115,7 +118,7 @@ export class CTOutliner extends BaseElement {
     readonly: { type: Boolean },
     mentionable: { type: Array },
     tree: { type: Object, state: true },
-    collapsedNodes: { type: Object, state: true },
+    _collapsedNodePaths: { type: Object, state: true },
     focusedNode: { type: Object, state: true },
     showingMentions: { type: Boolean, state: true },
     mentionQuery: { type: String, state: true },
@@ -133,13 +136,46 @@ export class CTOutliner extends BaseElement {
     }
     return this.value.get();
   }
-  declare collapsedNodes: Set<OutlineTreeNode>;
-  declare focusedNode: OutlineTreeNode | null;
+  private _collapsedNodePaths: Set<string> = new Set(); // Set of node paths as strings
+  declare focusedNodePath: number[] | null;
   declare showingMentions: boolean;
+
+  // Compatibility getters for OutlinerOperations interface
+  get focusedNode(): OutlineTreeNode | null {
+    if (!this.focusedNodePath) return null;
+    return this.getNodeByPath(this.focusedNodePath);
+  }
+
+  set focusedNode(node: OutlineTreeNode | null) {
+    this.focusedNodePath = node ? this.getNodePath(node) : null;
+  }
+
+  // Expose collapsedNodes as Set<Node> for compatibility
+  get collapsedNodes(): Set<OutlineTreeNode> {
+    const nodes = new Set<OutlineTreeNode>();
+    for (const pathStr of this._collapsedNodePaths) {
+      const path = this.stringToPath(pathStr);
+      const node = this.getNodeByPath(path);
+      if (node) {
+        nodes.add(node);
+      }
+    }
+    return nodes;
+  }
+
+  set collapsedNodes(nodes: Set<OutlineTreeNode>) {
+    this._collapsedNodePaths.clear();
+    for (const node of nodes) {
+      const path = this.getNodePath(node);
+      if (path) {
+        this._collapsedNodePaths.add(this.pathToString(path));
+      }
+    }
+  }
   declare mentionQuery: string;
   declare selectedMentionIndex: number;
 
-  private editingNode: OutlineTreeNode | null = null;
+  private editingNodePath: number[] | null = null;
   private editingContent: string = "";
 
   // Subscription cleanup function
@@ -151,7 +187,7 @@ export class CTOutliner extends BaseElement {
   // Test API - expose internal state for testing
   get testAPI() {
     return {
-      editingNode: this.editingNode,
+      editingNodePath: this.editingNodePath,
       editingContent: this.editingContent,
       emitChange: () => this.emitChange(),
       startEditing: (node: OutlineTreeNode) => this.startEditing(node),
@@ -444,8 +480,8 @@ export class CTOutliner extends BaseElement {
   constructor() {
     super();
     this.readonly = false;
-    this.collapsedNodes = new Set<OutlineTreeNode>();
-    this.focusedNode = null;
+    this._collapsedNodePaths = new Set<string>();
+    this.focusedNodePath = null;
     this.showingMentions = false;
     this.mentionQuery = "";
     this.selectedMentionIndex = 0;
@@ -455,8 +491,10 @@ export class CTOutliner extends BaseElement {
   override connectedCallback() {
     super.connectedCallback();
     // Set initial focus to first node if we have nodes
-    if (this.value && this.tree.root.children.length > 0 && !this.focusedNode) {
-      this.focusedNode = this.tree.root.children[0];
+    if (
+      this.value && this.tree.root.children.length > 0 && !this.focusedNodePath
+    ) {
+      this.focusedNodePath = [0]; // First child of root
     }
   }
 
@@ -476,10 +514,21 @@ export class CTOutliner extends BaseElement {
         this._unsubscribe = this.value.sink(() => {
           this.emit("ct-change", { value: this.tree });
           // Handle focus restoration after tree changes
-          this.focusedNode = FocusUtils.findValidFocus(
-            this.tree,
-            this.focusedNode,
-          );
+          if (this.focusedNodePath) {
+            const focusedNode = this.getNodeByPath(this.focusedNodePath);
+            if (!focusedNode) {
+              // Node no longer exists, find a valid focus
+              const oldNode = {
+                body: "",
+                children: [],
+                attachments: [],
+              } as OutlineTreeNode; // Dummy node for FocusUtils
+              const newFocus = FocusUtils.findValidFocus(this.tree, oldNode);
+              this.focusedNodePath = newFocus
+                ? this.getNodePath(newFocus)
+                : null;
+            }
+          }
           this.requestUpdate();
         });
       }
@@ -502,6 +551,38 @@ export class CTOutliner extends BaseElement {
   // =============================================================================
   // Cell Path Navigation Utilities
   // =============================================================================
+
+  /**
+   * Convert a path to a string for use as a key
+   */
+  private pathToString(path: number[]): string {
+    return path.join(".");
+  }
+
+  /**
+   * Convert a string key back to a path
+   */
+  private stringToPath(str: string): number[] {
+    return str ? str.split(".").map(Number) : [];
+  }
+
+  /**
+   * Get the node at a given path
+   */
+  private getNodeByPath(path: number[]): OutlineTreeNode | null {
+    if (path.length === 0) {
+      return this.tree.root;
+    }
+
+    let current = this.tree.root;
+    for (const index of path) {
+      if (!current.children || index >= current.children.length) {
+        return null;
+      }
+      current = current.children[index];
+    }
+    return current;
+  }
 
   /**
    * Get the path to a node as an array of indices from root.children
@@ -573,6 +654,30 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
+   * Get the Cell for a node's body content using a path
+   * @param nodePath The path to the node as an array of indices
+   * @returns Cell<string> pointing to the node's body, or null if not found
+   */
+  private getNodeBodyCellByPath(nodePath: number[]): Cell<string> | null {
+    if (!this.value) return null;
+
+    // Handle root node (empty path)
+    if (nodePath.length === 0) {
+      return this.value.key("root").key("body") as Cell<string>;
+    }
+
+    let targetCell: Cell<any> = this.value.key("root").key("children");
+    for (let i = 0; i < nodePath.length; i++) {
+      targetCell = targetCell.key(nodePath[i]);
+      if (i < nodePath.length - 1) {
+        targetCell = targetCell.key("children");
+      }
+    }
+
+    return targetCell.key("body") as Cell<string>;
+  }
+
+  /**
    * Get the Cell for a specific node's children array
    * @param node The target node to get a children Cell for
    * @returns Cell<OutlineTreeNode[]> pointing to the node's children, or null if not found
@@ -608,7 +713,9 @@ export class CTOutliner extends BaseElement {
   private createNodeCopy(node: OutlineTreeNode): OutlineTreeNode {
     return {
       body: node.body || "",
-      children: (node.children || []).map(child => this.createNodeCopy(child)),
+      children: (node.children || []).map((child) =>
+        this.createNodeCopy(child)
+      ),
       attachments: [...(node.attachments || [])],
     };
   }
@@ -618,6 +725,7 @@ export class CTOutliner extends BaseElement {
   }
 
   getAllVisibleNodes(): OutlineTreeNode[] {
+    // Use the compatibility getter
     return NodeUtils.getVisibleNodes(this.tree, this.collapsedNodes);
   }
 
@@ -650,7 +758,10 @@ export class CTOutliner extends BaseElement {
    */
   startEditing(node: OutlineTreeNode) {
     if (this.readonly) return;
-    this.editingNode = node;
+    const path = this.getNodePath(node);
+    if (!path) return;
+
+    this.editingNodePath = path;
     this.editingContent = node.body;
     this.requestUpdate();
     const nodeIndex = this.getNodeIndex(node);
@@ -667,7 +778,15 @@ export class CTOutliner extends BaseElement {
   toggleEditMode(node: OutlineTreeNode) {
     if (this.readonly) return;
 
-    if (this.editingNode === node) {
+    const nodePath = this.getNodePath(node);
+    if (!nodePath) return;
+
+    // Check if we're editing this node by comparing paths
+    const isEditingThisNode = this.editingNodePath &&
+      this.editingNodePath.length === nodePath.length &&
+      this.editingNodePath.every((val, idx) => val === nodePath[idx]);
+
+    if (isEditingThisNode) {
       // Currently editing this node - finish editing
       this.finishEditing();
     } else {
@@ -683,25 +802,26 @@ export class CTOutliner extends BaseElement {
    * Uses Cell operations for direct mutations.
    */
   finishEditing() {
-    if (!this.editingNode || !this.value) return;
+    if (!this.value || !this.editingNodePath) return;
 
-    const nodeBodyCell = this.getNodeBodyCell(this.editingNode);
+    // Use the stored path to get the Cell
+    const nodeBodyCell = this.getNodeBodyCellByPath(this.editingNodePath);
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => cell.set(this.editingContent));
     }
 
-    this.focusedNode = this.editingNode;
-    this.editingNode = null;
+    this.focusedNodePath = this.editingNodePath;
+    this.editingNodePath = null;
     this.editingContent = "";
     this.requestUpdate();
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
   private cancelEditing() {
-    if (!this.editingNode) return;
+    if (!this.editingNodePath) return;
 
-    this.focusedNode = this.editingNode;
-    this.editingNode = null;
+    this.focusedNodePath = this.editingNodePath;
+    this.editingNodePath = null;
     this.editingContent = "";
     this.requestUpdate();
     OutlinerEffects.focusOutliner(this.shadowRoot);
@@ -711,11 +831,21 @@ export class CTOutliner extends BaseElement {
     if (this.readonly) return;
     event.stopPropagation();
 
-    if (this.editingNode && this.editingNode !== node) {
-      this.finishEditing();
+    const nodePath = this.getNodePath(node);
+    if (!nodePath) return;
+
+    // Check if we're editing a different node
+    if (this.editingNodePath) {
+      const isEditingDifferentNode =
+        this.editingNodePath.length !== nodePath.length ||
+        !this.editingNodePath.every((val, idx) => val === nodePath[idx]);
+
+      if (isEditingDifferentNode) {
+        this.finishEditing();
+      }
     }
 
-    this.focusedNode = node;
+    this.focusedNodePath = nodePath;
     this.requestUpdate();
   }
 
@@ -728,10 +858,14 @@ export class CTOutliner extends BaseElement {
   private handleCollapseClick(node: OutlineTreeNode, event: MouseEvent) {
     event.stopPropagation();
 
-    if (this.collapsedNodes.has(node)) {
-      this.collapsedNodes.delete(node);
+    const nodePath = this.getNodePath(node);
+    if (!nodePath) return;
+
+    const pathStr = this.pathToString(nodePath);
+    if (this._collapsedNodePaths.has(pathStr)) {
+      this._collapsedNodePaths.delete(pathStr);
     } else {
-      this.collapsedNodes.add(node);
+      this._collapsedNodePaths.add(pathStr);
     }
 
     this.requestUpdate();
@@ -773,14 +907,14 @@ export class CTOutliner extends BaseElement {
   private handleEditorBlur() {
     // Use a timeout to allow click events on mentions to fire first
     setTimeout(() => {
-      if (this.editingNode && !this.showingMentions) {
+      if (this.editingNodePath && !this.showingMentions) {
         this.finishEditing();
       }
     }, 200);
   }
 
   private handleEditorPaste(event: ClipboardEvent) {
-    if (!this.editingNode) return;
+    if (!this.editingNodePath) return;
 
     const pastedText = event.clipboardData?.getData("text/plain");
     if (!pastedText || !pastedText.includes("\n")) {
@@ -888,10 +1022,13 @@ export class CTOutliner extends BaseElement {
     const target = event.target as HTMLTextAreaElement;
 
     // Try executing editing keyboard commands first
+    const editingNode = this.getNodeByPath(this.editingNodePath!);
+    if (!editingNode) return;
+
     const editingContext = EventUtils.createEditingKeyboardContext(
       event,
       this,
-      this.editingNode!,
+      editingNode,
       this.editingContent,
       target,
     );
@@ -932,7 +1069,9 @@ export class CTOutliner extends BaseElement {
       case "Delete":
         if (target.selectionStart === this.editingContent.length) {
           const allNodes = this.getAllNodes();
-          const currentNodeIndex = allNodes.indexOf(this.editingNode!);
+          const editingNode = this.getNodeByPath(this.editingNodePath!);
+          if (!editingNode) return;
+          const currentNodeIndex = allNodes.indexOf(editingNode);
           if (
             currentNodeIndex !== -1 && currentNodeIndex < allNodes.length - 1
           ) {
@@ -945,28 +1084,40 @@ export class CTOutliner extends BaseElement {
   }
 
   private handleKeyDown(event: KeyboardEvent) {
-    if (this.readonly || this.editingNode) return;
+    if (this.readonly || this.editingNodePath) return;
 
     // Ensure we have a focused node before proceeding
-    if (!this.focusedNode) {
+    if (!this.focusedNodePath) {
       console.warn("No focused node available for keyboard command");
+      return;
+    }
+
+    const focusedNode = this.getNodeByPath(this.focusedNodePath);
+    if (!focusedNode) {
+      console.warn("Focused node no longer exists");
       return;
     }
 
     const context = EventUtils.createKeyboardContext(
       event,
       this,
-      this.focusedNode,
+      focusedNode,
     );
 
     executeKeyboardCommand(event.key, context);
   }
 
   private finishEditingAndCreateNew() {
-    if (!this.editingNode) return;
+    if (!this.editingNodePath) return;
 
     this.finishEditing();
-    this.createNewNodeAfter(this.focusedNode!);
+
+    if (this.focusedNodePath) {
+      const focusedNode = this.getNodeByPath(this.focusedNodePath);
+      if (focusedNode) {
+        this.createNewNodeAfter(focusedNode);
+      }
+    }
   }
 
   /**
@@ -996,7 +1147,10 @@ export class CTOutliner extends BaseElement {
       });
     }
 
-    this.focusedNode = newNode;
+    const newNodePath = this.getNodePath(newNode);
+    if (newNodePath) {
+      this.focusedNodePath = newNodePath;
+    }
     this.requestUpdate();
     this.startEditing(newNode);
   }
@@ -1022,14 +1176,20 @@ export class CTOutliner extends BaseElement {
       });
     }
 
-    this.focusedNode = newNode;
+    const newNodePath = this.getNodePath(newNode);
+    if (newNodePath) {
+      this.focusedNodePath = newNodePath;
+    }
     this.requestUpdate();
     this.startEditing(newNode);
   }
 
   startEditingWithInitialText(node: OutlineTreeNode, initialText: string) {
     if (this.readonly) return;
-    this.editingNode = node;
+    const path = this.getNodePath(node);
+    if (!path) return;
+
+    this.editingNodePath = path;
     this.editingContent = initialText; // Replace entire content with initial text
     this.requestUpdate();
     const nodeIndex = this.getNodeIndex(node);
@@ -1062,7 +1222,9 @@ export class CTOutliner extends BaseElement {
         // Move children up to parent level if any, otherwise just remove
         let newChildren: OutlineTreeNode[];
         if (node.children.length > 0) {
-          const childrenCopies = node.children.map(child => this.createNodeCopy(child));
+          const childrenCopies = node.children.map((child) =>
+            this.createNodeCopy(child)
+          );
           newChildren = [...beforeNode, ...childrenCopies, ...afterNode];
         } else {
           newChildren = [...beforeNode, ...afterNode];
@@ -1079,10 +1241,14 @@ export class CTOutliner extends BaseElement {
       nodeIndex,
     );
 
-    this.focusedNode = newFocusNode;
+    if (newFocusNode) {
+      this.focusedNodePath = this.getNodePath(newFocusNode);
+    } else {
+      this.focusedNodePath = null;
+    }
     this.requestUpdate();
 
-    if (this.focusedNode) {
+    if (this.focusedNodePath) {
       OutlinerEffects.focusOutliner(this.shadowRoot);
     }
   }
@@ -1091,7 +1257,10 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     // Preserve editing state if this node is being edited
-    const wasEditing = this.editingNode === node;
+    const nodePath = this.getNodePath(node);
+    const wasEditing = this.editingNodePath && nodePath &&
+      this.editingNodePath.length === nodePath.length &&
+      this.editingNodePath.every((val, idx) => val === nodePath[idx]);
     const editingContent = wasEditing ? this.editingContent : "";
 
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
@@ -1131,7 +1300,7 @@ export class CTOutliner extends BaseElement {
 
     // Restore editing state if it was being edited
     if (wasEditing) {
-      this.editingNode = node;
+      // Node reference no longer used - path stored above
       this.editingContent = editingContent;
     }
 
@@ -1144,8 +1313,14 @@ export class CTOutliner extends BaseElement {
     cursorPosition: number,
   ) {
     // Store editing state before indent
-    const wasEditing = this.editingNode === node;
-    this.editingNode = node;
+    const nodePath = this.getNodePath(node);
+    if (!nodePath) return;
+
+    const wasEditing = this.editingNodePath &&
+      this.editingNodePath.length === nodePath.length &&
+      this.editingNodePath.every((val, idx) => val === nodePath[idx]);
+
+    this.editingNodePath = nodePath;
     this.editingContent = editingContent;
 
     // Perform indent using migrated method
@@ -1169,7 +1344,10 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     // Preserve editing state if this node is being edited
-    const wasEditing = this.editingNode === node;
+    const nodePath = this.getNodePath(node);
+    const wasEditing = this.editingNodePath && nodePath &&
+      this.editingNodePath.length === nodePath.length &&
+      this.editingNodePath.every((val, idx) => val === nodePath[idx]);
     const editingContent = wasEditing ? this.editingContent : "";
 
     const parentNode = TreeOperations.findParentNode(this.tree.root, node);
@@ -1214,7 +1392,11 @@ export class CTOutliner extends BaseElement {
       const beforeParent = currentGrandParentChildren.slice(0, parentIndex + 1);
       const afterParent = currentGrandParentChildren.slice(parentIndex + 1);
       const nodeCopy = this.createNodeCopy(node);
-      const newGrandParentChildren = [...beforeParent, nodeCopy, ...afterParent];
+      const newGrandParentChildren = [
+        ...beforeParent,
+        nodeCopy,
+        ...afterParent,
+      ];
       grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
 
       await tx.commit();
@@ -1222,7 +1404,7 @@ export class CTOutliner extends BaseElement {
 
     // Restore editing state if it was being edited
     if (wasEditing) {
-      this.editingNode = node;
+      // Node reference no longer used - path stored above
       this.editingContent = editingContent;
     }
 
@@ -1235,7 +1417,10 @@ export class CTOutliner extends BaseElement {
     cursorPosition: number,
   ) {
     // Store editing state before outdent
-    this.editingNode = node;
+    const nodePath = this.getNodePath(node);
+    if (!nodePath) return;
+
+    this.editingNodePath = nodePath;
     this.editingContent = editingContent;
 
     // Perform outdent using migrated method
@@ -1322,18 +1507,26 @@ export class CTOutliner extends BaseElement {
   }
 
   private deleteCurrentNode() {
-    if (!this.editingNode) return;
+    if (!this.editingNodePath) return;
 
     this.cancelEditing();
     // Use the migrated deleteNode method
-    this.deleteNode(this.focusedNode!);
+    if (this.focusedNodePath) {
+      const focusedNode = this.getNodeByPath(this.focusedNodePath);
+      if (focusedNode) {
+        this.deleteNode(focusedNode);
+      }
+    }
   }
 
   private mergeWithNextNode() {
-    if (!this.editingNode) return;
+    if (!this.editingNodePath) return;
+
+    const editingNode = this.getNodeByPath(this.editingNodePath);
+    if (!editingNode) return;
 
     const allNodes = this.getAllNodes();
-    const currentIndex = allNodes.indexOf(this.editingNode);
+    const currentIndex = allNodes.indexOf(editingNode);
 
     if (currentIndex === -1 || currentIndex >= allNodes.length - 1) return;
 
@@ -1359,7 +1552,7 @@ export class CTOutliner extends BaseElement {
   }
 
   private handleIndentation(shiftKey: boolean) {
-    if (!this.editingNode) return;
+    if (!this.editingNodePath) return;
 
     this.finishEditing();
 
@@ -1391,10 +1584,13 @@ export class CTOutliner extends BaseElement {
   }
 
   private async insertMention(mention: Charm) {
-    if (!this.editingNode) return;
+    if (!this.editingNodePath) return;
+
+    const editingNode = this.getNodeByPath(this.editingNodePath);
+    if (!editingNode) return;
 
     const textarea = this.shadowRoot?.querySelector(
-      `#editor-${this.getNodeIndex(this.editingNode)}`,
+      `#editor-${this.getNodeIndex(editingNode)}`,
     ) as HTMLTextAreaElement;
 
     if (!textarea) return;
@@ -1604,7 +1800,10 @@ export class CTOutliner extends BaseElement {
         });
       }
 
-      this.focusedNode = newNode;
+      const newNodePath = this.getNodePath(newNode);
+      if (newNodePath) {
+        this.focusedNodePath = newNodePath;
+      }
       this.requestUpdate();
       this.startEditing(newNode);
     }
@@ -1612,7 +1811,7 @@ export class CTOutliner extends BaseElement {
 
   private handleOutlinerPaste(event: ClipboardEvent) {
     // Only handle paste when not editing
-    if (this.editingNode || this.readonly) return;
+    if (this.editingNodePath || this.readonly) return;
 
     const pastedText = event.clipboardData?.getData("text/plain");
     if (!pastedText) return;
@@ -1624,16 +1823,19 @@ export class CTOutliner extends BaseElement {
 
     if (parsedTree.root.children.length === 0) return;
 
-    if (this.focusedNode) {
+    if (this.focusedNodePath) {
+      const focusedNode = this.getNodeByPath(this.focusedNodePath);
+      if (!focusedNode) return;
+
       const parentNode = TreeOperations.findParentNode(
         this.tree.root,
-        this.focusedNode,
+        focusedNode,
       );
 
       if (parentNode) {
         const nodeIndex = TreeOperations.getNodeIndex(
           parentNode,
-          this.focusedNode,
+          focusedNode,
         );
 
         // Insert all parsed nodes after the focused node using Cell operations
@@ -1666,7 +1868,10 @@ export class CTOutliner extends BaseElement {
           cell.set(parsedTree.root.children);
         });
       }
-      this.focusedNode = parsedTree.root.children[0];
+      const firstNewNodePath = this.getNodePath(parsedTree.root.children[0]);
+      if (firstNewNodePath) {
+        this.focusedNodePath = firstNewNodePath;
+      }
     } else {
       // No focused node but tree has nodes, append to the end using Cell operations
       if (this.value) {
@@ -1679,7 +1884,10 @@ export class CTOutliner extends BaseElement {
           cell.set(newChildren);
         });
       }
-      this.focusedNode = parsedTree.root.children[0];
+      const firstNewNodePath = this.getNodePath(parsedTree.root.children[0]);
+      if (firstNewNodePath) {
+        this.focusedNodePath = firstNewNodePath;
+      }
     }
 
     this.requestUpdate();
@@ -1737,10 +1945,24 @@ export class CTOutliner extends BaseElement {
       `;
     }
 
+    const nodePath = this.getNodePath(node);
+    if (!nodePath) return null;
+
     const hasChildren = node.children.length > 0;
-    const isEditing = this.editingNode === node;
-    const isFocused = this.focusedNode === node;
-    const isCollapsed = this.collapsedNodes.has(node);
+
+    // Check if this node is being edited
+    const isEditing = this.editingNodePath &&
+      this.editingNodePath.length === nodePath.length &&
+      this.editingNodePath.every((val, idx) => val === nodePath[idx]);
+
+    // Check if this node is focused
+    const isFocused = this.focusedNodePath &&
+      this.focusedNodePath.length === nodePath.length &&
+      this.focusedNodePath.every((val, idx) => val === nodePath[idx]);
+
+    const isCollapsed = this._collapsedNodePaths.has(
+      this.pathToString(nodePath),
+    );
     const nodeIndex = this.getNodeIndex(node);
 
     return html`
@@ -1802,9 +2024,18 @@ export class CTOutliner extends BaseElement {
       return "";
     }
 
+    if (!this.editingNodePath) {
+      return "";
+    }
+
+    const editingNode = this.getNodeByPath(this.editingNodePath);
+    if (!editingNode) {
+      return "";
+    }
+
     // Calculate position relative to viewport for fixed positioning
     const editor = this.shadowRoot?.querySelector(
-      `#editor-${this.getNodeIndex(this.editingNode!)}`,
+      `#editor-${this.getNodeIndex(editingNode)}`,
     ) as HTMLTextAreaElement;
     let style = "top: 100%; left: 0;";
 

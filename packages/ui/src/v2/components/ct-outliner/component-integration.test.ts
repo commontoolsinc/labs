@@ -136,7 +136,7 @@ describe("CTOutliner Component Integration Tests", () => {
 
       // Create new node and verify focus is on new node
       await outliner.createNewNodeAfter(firstNode);
-      
+
       expect(outliner.focusedNode!.body).toBe("");
       expect(outliner.focusedNode).not.toBe(firstNode);
     });

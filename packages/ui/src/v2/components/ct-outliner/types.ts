@@ -82,8 +82,8 @@ export interface OutlineUIState {
  */
 export interface OutlinerOperations {
   readonly tree: Tree; // Access via cellController.getValue() - kept for backward compatibility
-  focusedNode: Node | null;
-  collapsedNodes: Set<Node>;
+  focusedNode: Node | null; // Deprecated - use path-based approach internally
+  collapsedNodes: Set<Node>; // Deprecated - use path-based approach internally
 
   // Tree operations - return void as CellController handles change propagation
   deleteNode(node: Node): void;

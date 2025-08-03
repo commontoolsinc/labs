@@ -12,16 +12,18 @@ import { StorageManager } from "@commontools/runner/storage/cache.deno";
  * Create a real Cell for a tree structure using a fresh runtime
  * This is the async version that should be preferred when possible
  */
-export const createMockTreeCellAsync = async (tree: Tree): Promise<Cell<Tree>> => {
+export const createMockTreeCellAsync = async (
+  tree: Tree,
+): Promise<Cell<Tree>> => {
   const signer = await Identity.fromPassphrase("test-outliner-user");
   const space = signer.did();
   const storageManager = StorageManager.emulate({ as: signer });
-  
+
   const runtime = new Runtime({
     storageManager,
     blobbyServerUrl: import.meta.url,
   });
-  
+
   const tx = runtime.edit();
   const cell = runtime.getCell<Tree>(space as any, "test-tree", undefined, tx);
   cell.set(tree);
@@ -189,7 +191,7 @@ export const waitForCellUpdate = async (): Promise<void> => {
   // Wait for async Cell operations to complete
   // We need to wait longer than just a microtask since Cell operations
   // involve database transactions that are truly async
-  await new Promise(resolve => setTimeout(resolve, 10));
+  await new Promise((resolve) => setTimeout(resolve, 10));
 };
 
 /**
@@ -200,12 +202,12 @@ export const waitForOutlinerUpdate = (outliner: CTOutliner): Promise<void> => {
   if (!outliner.value) {
     return Promise.resolve();
   }
-  
+
   const cell = outliner.value;
-  
-  return new Promise(resolve => {
+
+  return new Promise((resolve) => {
     let unsubscribe: (() => void) | null = null;
-    
+
     // Set up a one-time listener for the next Cell update
     unsubscribe = cell.sink(() => {
       if (unsubscribe) {
@@ -213,7 +215,7 @@ export const waitForOutlinerUpdate = (outliner: CTOutliner): Promise<void> => {
       }
       resolve();
     });
-    
+
     // Fallback timeout in case the update doesn't come
     setTimeout(() => {
       if (unsubscribe) {
