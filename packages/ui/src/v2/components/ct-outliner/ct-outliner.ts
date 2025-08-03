@@ -189,6 +189,8 @@ export class CTOutliner extends BaseElement {
     return {
       editingNodePath: this.editingNodePath,
       editingContent: this.editingContent,
+      // Compatibility: provide editing node for tests
+      editingNode: this.editingNodePath ? this.getNodeByPath(this.editingNodePath) : null,
       emitChange: () => this.emitChange(),
       startEditing: (node: OutlineTreeNode) => this.startEditing(node),
       handleKeyDown: (event: KeyboardEvent) => this.handleKeyDown(event),
@@ -1136,6 +1138,12 @@ export class CTOutliner extends BaseElement {
     const nodeIndex = TreeOperations.getNodeIndex(parentNode, node);
     const newNode = TreeOperations.createNode({ body: "" });
 
+    // Calculate the expected path for the new node before mutation
+    const parentPath = this.getNodePath(parentNode);
+    if (!parentPath) return;
+    
+    const newNodePath = [...parentPath, nodeIndex + 1]; // Insert after current node
+
     const parentChildrenCell = this.getNodeChildrenCell(parentNode);
     if (parentChildrenCell) {
       await mutateCell(parentChildrenCell, (cell) => {
@@ -1147,12 +1155,20 @@ export class CTOutliner extends BaseElement {
       });
     }
 
-    const newNodePath = this.getNodePath(newNode);
-    if (newNodePath) {
-      this.focusedNodePath = newNodePath;
-    }
+    // Use the calculated path instead of trying to find the node
+    this.focusedNodePath = newNodePath;
+    this.editingNodePath = newNodePath;
+    this.editingContent = "";
     this.requestUpdate();
-    this.startEditing(newNode);
+    
+    // Focus the editor after the update
+    setTimeout(() => {
+      const newNodeFromTree = this.getNodeByPath(newNodePath);
+      if (newNodeFromTree) {
+        const nodeIndex = this.getNodeIndex(newNodeFromTree);
+        OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
+      }
+    }, 0);
   }
 
   /**
@@ -1167,6 +1183,12 @@ export class CTOutliner extends BaseElement {
 
     const newNode = TreeOperations.createNode({ body: "" });
 
+    // Calculate the expected path for the new child node before mutation
+    const parentPath = this.getNodePath(node);
+    if (parentPath === null) return;
+    
+    const newNodePath = [...parentPath, 0]; // Insert as first child
+
     const nodeChildrenCell = this.getNodeChildrenCell(node);
     if (nodeChildrenCell) {
       await mutateCell(nodeChildrenCell, (cell) => {
@@ -1176,12 +1198,20 @@ export class CTOutliner extends BaseElement {
       });
     }
 
-    const newNodePath = this.getNodePath(newNode);
-    if (newNodePath) {
-      this.focusedNodePath = newNodePath;
-    }
+    // Use the calculated path instead of trying to find the node
+    this.focusedNodePath = newNodePath;
+    this.editingNodePath = newNodePath;
+    this.editingContent = "";
     this.requestUpdate();
-    this.startEditing(newNode);
+    
+    // Focus the editor after the update
+    setTimeout(() => {
+      const newNodeFromTree = this.getNodeByPath(newNodePath);
+      if (newNodeFromTree) {
+        const nodeIndex = this.getNodeIndex(newNodeFromTree);
+        OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
+      }
+    }, 0);
   }
 
   startEditingWithInitialText(node: OutlineTreeNode, initialText: string) {
@@ -1800,12 +1830,21 @@ export class CTOutliner extends BaseElement {
         });
       }
 
-      const newNodePath = this.getNodePath(newNode);
-      if (newNodePath) {
-        this.focusedNodePath = newNodePath;
-      }
+      // For the first node, the path is [0]
+      const newNodePath = [0];
+      this.focusedNodePath = newNodePath;
+      this.editingNodePath = newNodePath;
+      this.editingContent = "";
       this.requestUpdate();
-      this.startEditing(newNode);
+      
+      // Focus the editor after the update
+      setTimeout(() => {
+        const newNodeFromTree = this.getNodeByPath(newNodePath);
+        if (newNodeFromTree) {
+          const nodeIndex = this.getNodeIndex(newNodeFromTree);
+          OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
+        }
+      }, 0);
     }
   }
 
@@ -1855,8 +1894,12 @@ export class CTOutliner extends BaseElement {
           });
         }
 
-        // Focus the first newly inserted node
-        this.focusedNode = parsedTree.root.children[0];
+        // Focus the first newly inserted node - calculate the path instead of using reference
+        const parentPath = this.getNodePath(parentNode);
+        if (parentPath !== null) {
+          const firstNewNodePath = [...parentPath, nodeIndex + 1];
+          this.focusedNodePath = firstNewNodePath;
+        }
       }
     } else if (this.tree.root.children.length === 0) {
       // No nodes exist, replace root children using Cell operations
@@ -1868,10 +1911,8 @@ export class CTOutliner extends BaseElement {
           cell.set(parsedTree.root.children);
         });
       }
-      const firstNewNodePath = this.getNodePath(parsedTree.root.children[0]);
-      if (firstNewNodePath) {
-        this.focusedNodePath = firstNewNodePath;
-      }
+      // For root children, the first new node will be at path [0]
+      this.focusedNodePath = [0];
     } else {
       // No focused node but tree has nodes, append to the end using Cell operations
       if (this.value) {
@@ -1884,10 +1925,9 @@ export class CTOutliner extends BaseElement {
           cell.set(newChildren);
         });
       }
-      const firstNewNodePath = this.getNodePath(parsedTree.root.children[0]);
-      if (firstNewNodePath) {
-        this.focusedNodePath = firstNewNodePath;
-      }
+      // The first new node will be appended at the end
+      const currentRootChildrenCount = this.tree.root.children.length;
+      this.focusedNodePath = [currentRootChildrenCount];
     }
 
     this.requestUpdate();
@@ -1919,7 +1959,7 @@ export class CTOutliner extends BaseElement {
         ? html`
           <div class="placeholder">Click to start typing...</div>
         `
-        : this.renderNodes(this.tree.root.children, 0)}
+        : this.renderNodes(this.tree.root.children, 0, [])}
         </div>
       </div>
     `;
@@ -1928,15 +1968,16 @@ export class CTOutliner extends BaseElement {
   private renderNodes(
     nodes: readonly OutlineTreeNode[],
     level: number,
+    parentPath: number[] = [],
   ): unknown {
     return repeat(
       nodes,
       (node) => this.getNodeIndex(node),
-      (node) => this.renderNode(node, level),
+      (node, index) => this.renderNode(node, level, [...parentPath, index]),
     );
   }
 
-  private renderNode(node: OutlineTreeNode, level: number): unknown {
+  private renderNode(node: OutlineTreeNode, level: number, calculatedPath: number[]): unknown {
     // Defensive check for corrupted nodes
     if (!node || typeof node !== "object" || !Array.isArray(node.children)) {
       console.error("Corrupted node in renderNode:", node);
@@ -1945,8 +1986,8 @@ export class CTOutliner extends BaseElement {
       `;
     }
 
-    const nodePath = this.getNodePath(node);
-    if (!nodePath) return null;
+    // Use calculated path from renderNodes instead of getNodePath to avoid timing issues
+    const nodePath = calculatedPath;
 
     const hasChildren = node.children.length > 0;
 
@@ -2009,7 +2050,7 @@ export class CTOutliner extends BaseElement {
         ${this.renderAttachments(node)} ${hasChildren && !isCollapsed
         ? html`
           <div class="children">
-            ${this.renderNodes(node.children, level + 1)}
+            ${this.renderNodes(node.children, level + 1, nodePath)}
           </div>
         `
         : ""}
