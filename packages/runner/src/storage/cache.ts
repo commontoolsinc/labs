@@ -611,9 +611,19 @@ export class Replica {
       }
       fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
     }
-    const fetched = fetchedEntries.map(([fact, _selector]) => fact);
+    const allFetched = fetchedEntries.map(([fact, _selector]) => fact);
+    const localFacts = this.getLocalFacts(allFetched);
+    const fetched = allFetched.filter((fact) =>
+      fact === undefined || !localFacts.has(fact)
+    );
+
     const changes = Differential.create().update(this, fetched);
-    this.heap.merge(fetched, Replica.put);
+    // We can put stale facts in the heap, but not in the nursery
+    this.heap.merge(
+      allFetched,
+      Replica.put,
+      (revision) => revision === undefined || !localFacts.has(revision),
+    );
 
     // Remote may not have all the requested entries. We denitrify them by
     // looking up which of the facts are not available locally and then create
