@@ -350,7 +350,9 @@ describe("StorageTransaction", () => {
         path: ["source"],
       });
       expect(readSource.ok).toBeDefined();
-      expect(readSource.ok?.value).toBe(JSON.stringify(getEntityId(doc2Id)));
+      expect(readSource.ok?.value).toEqual(
+        JSON.parse(JSON.stringify(getEntityId(doc2Id))),
+      );
     });
 
     it("should error if path beyond 'source' is used", () => {

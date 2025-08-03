@@ -11,17 +11,20 @@ export class DevServer {
   private socketScript: string;
   private useReloadSocket: boolean;
   private redirectToIndex?: RegExp;
+  private staticDirs: Array<{ from: string; to: string }>;
 
-  constructor({ useReloadSocket, outDir, port, hostname, redirectToIndex }: {
+  constructor({ useReloadSocket, outDir, port, hostname, redirectToIndex, staticDirs = [] }: {
     useReloadSocket: boolean;
     port: number;
     hostname: string;
     outDir: string;
     redirectToIndex?: RegExp;
+    staticDirs?: Array<{ from: string; to: string }>;
   }) {
     this.useReloadSocket = useReloadSocket;
     this.outDir = outDir;
     this.redirectToIndex = redirectToIndex;
+    this.staticDirs = staticDirs;
     this.html = this.getHtml({ useReloadSocket, outDir });
     this.socketScript = this.getSocketScript({ hostname, port });
     this._server = Deno.serve(
@@ -36,7 +39,7 @@ export class DevServer {
     }
   }
 
-  private onRequest(req: Request) {
+  private async onRequest(req: Request) {
     const url = new URL(req.url);
 
     if (req.headers.get("upgrade") === "websocket") {
@@ -60,6 +63,40 @@ export class DevServer {
       });
     }
 
+    // Check static directories
+    for (const { from, to } of this.staticDirs) {
+      if (url.pathname.startsWith(to)) {
+        // Handle OPTIONS requests for CORS
+        if (req.method === "OPTIONS") {
+          return new Response(null, {
+            status: 204,
+            headers: {
+              "Access-Control-Allow-Origin": "*",
+              "Access-Control-Allow-Methods": "GET, OPTIONS, HEAD",
+              "Access-Control-Allow-Headers": "*",
+            },
+          });
+        }
+        
+        // Create a new request with the path adjusted to remove the URL prefix
+        const relativePath = url.pathname.slice(to.length);
+        const adjustedUrl = new URL(req.url);
+        adjustedUrl.pathname = relativePath || "/";
+        const adjustedReq = new Request(adjustedUrl, req);
+        
+        const response = await serveDir(adjustedReq, {
+          fsRoot: from,
+          quiet: true,
+        });
+        
+        // Add CORS headers for all responses
+        response.headers.set("Access-Control-Allow-Origin", "*");
+        response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS, HEAD");
+        response.headers.set("Access-Control-Allow-Headers", "*");
+        
+        return response;
+      }
+    }
 
     return serveDir(req, {
       fsRoot: this.outDir,

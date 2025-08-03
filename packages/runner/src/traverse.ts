@@ -443,6 +443,12 @@ export function loadSource<K, S>(
   // We also want to include the source cells
   const source = targetObj["source"];
   if (!isObject(source) || !("/" in source) || !isString(source["/"])) {
+    // undefined is strange, but acceptable
+    if (source !== undefined) {
+      logger.warn(
+        () => ["Invalid source link", source, "in", valueEntry.source],
+      );
+    }
     return;
   }
   const of: string = source["/"];
