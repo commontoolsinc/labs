@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import type {
   CommitError,
   IAttestation,
@@ -23,6 +24,11 @@ import type {
 } from "./interface.ts";
 
 import * as Journal from "./transaction/journal.ts";
+
+const logger = getLogger("storage-transaction", {
+  enabled: false,
+  level: "debug",
+});
 
 export const create = (manager: IStorageManager) =>
   new StorageTransaction({
@@ -117,7 +123,11 @@ export const status = (
   const state = use(transaction);
   if (state.status === "done") {
     if (state.result.error) {
-      return { status: "error", journal: state.journal, error: state.result.error };
+      return {
+        status: "error",
+        journal: state.journal,
+        error: state.result.error,
+      };
     } else {
       return { status: "done", journal: state.journal };
     }
@@ -215,7 +225,43 @@ export const read = (
     return { error };
   } else {
     const { space: _, ...memoryAddress } = address;
-    return space.read(memoryAddress, options);
+    const result = space.read(memoryAddress, options);
+
+    // Special handling for source path, API is to always return object
+    // We should return objects, but we get JSON strings from transaction, so we convert
+    if (
+      result.ok && address.path.length === 1 && address.path[0] === "source"
+    ) {
+      const value = result.ok.value;
+      logger.debug(() => [
+        `[SOURCE PATH] Read source path for ${address.id}`,
+        `Value type: ${typeof value}`,
+        `Value: ${JSON.stringify(value)}`,
+      ]);
+
+      if (typeof value === "string" && value.startsWith('{"/":')) {
+        try {
+          // Parse the JSON string to return an object
+          const parsedValue = JSON.parse(value);
+          // Create a new attestation with the parsed value
+          result.ok = {
+            address: result.ok.address,
+            value: parsedValue,
+          };
+          logger.debug(() => [
+            `[SOURCE PATH] Parsed JSON string to object`,
+            `Result: ${JSON.stringify(parsedValue)}`,
+          ]);
+        } catch (e) {
+          // If parsing fails, leave it as is
+          logger.error(() => [
+            `[SOURCE PATH] Failed to parse JSON string`,
+            `Error: ${e}`,
+          ]);
+        }
+      }
+    }
+    return result;
   }
 };
 
