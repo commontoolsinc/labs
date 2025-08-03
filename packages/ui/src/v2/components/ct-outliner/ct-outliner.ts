@@ -190,7 +190,9 @@ export class CTOutliner extends BaseElement {
       editingNodePath: this.editingNodePath,
       editingContent: this.editingContent,
       // Compatibility: provide editing node for tests
-      editingNode: this.editingNodePath ? this.getNodeByPath(this.editingNodePath) : null,
+      editingNode: this.editingNodePath
+        ? this.getNodeByPath(this.editingNodePath)
+        : null,
       emitChange: () => this.emitChange(),
       startEditing: (node: OutlineTreeNode) => this.startEditing(node),
       handleKeyDown: (event: KeyboardEvent) => this.handleKeyDown(event),
@@ -771,6 +773,29 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
+   * Start editing a node by path instead of node reference
+   *
+   * @param path - The path to the node to start editing
+   * @param initialContent - The initial content to edit
+   * @description Enters edit mode for the node at the specified path.
+   * If the component is readonly, this method does nothing.
+   */
+  startEditingByPath(path: number[], initialContent: string) {
+    if (this.readonly) return;
+
+    this.editingNodePath = path;
+    this.editingContent = initialContent;
+    this.requestUpdate();
+
+    // Get the node by path to determine its index for focusing
+    const node = this.getNodeByPath(path);
+    if (node) {
+      const nodeIndex = this.getNodeIndex(node);
+      OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
+    }
+  }
+
+  /**
    * Toggle edit mode for a specific node
    *
    * @param node - The node to toggle editing for
@@ -829,12 +854,13 @@ export class CTOutliner extends BaseElement {
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
-  private handleNodeClick(node: OutlineTreeNode, event: MouseEvent) {
+  private handleNodeClick(
+    node: OutlineTreeNode,
+    nodePath: number[],
+    event: MouseEvent,
+  ) {
     if (this.readonly) return;
     event.stopPropagation();
-
-    const nodePath = this.getNodePath(node);
-    if (!nodePath) return;
 
     // Check if we're editing a different node
     if (this.editingNodePath) {
@@ -851,17 +877,22 @@ export class CTOutliner extends BaseElement {
     this.requestUpdate();
   }
 
-  private handleNodeDoubleClick(node: OutlineTreeNode, event: MouseEvent) {
+  private handleNodeDoubleClick(
+    node: OutlineTreeNode,
+    nodePath: number[],
+    event: MouseEvent,
+  ) {
     if (this.readonly) return;
     event.stopPropagation();
-    this.startEditing(node);
+    this.startEditingByPath(nodePath, node.body);
   }
 
-  private handleCollapseClick(node: OutlineTreeNode, event: MouseEvent) {
+  private handleCollapseClick(
+    node: OutlineTreeNode,
+    nodePath: number[],
+    event: MouseEvent,
+  ) {
     event.stopPropagation();
-
-    const nodePath = this.getNodePath(node);
-    if (!nodePath) return;
 
     const pathStr = this.pathToString(nodePath);
     if (this._collapsedNodePaths.has(pathStr)) {
@@ -1141,7 +1172,7 @@ export class CTOutliner extends BaseElement {
     // Calculate the expected path for the new node before mutation
     const parentPath = this.getNodePath(parentNode);
     if (!parentPath) return;
-    
+
     const newNodePath = [...parentPath, nodeIndex + 1]; // Insert after current node
 
     const parentChildrenCell = this.getNodeChildrenCell(parentNode);
@@ -1160,7 +1191,7 @@ export class CTOutliner extends BaseElement {
     this.editingNodePath = newNodePath;
     this.editingContent = "";
     this.requestUpdate();
-    
+
     // Focus the editor after the update
     setTimeout(() => {
       const newNodeFromTree = this.getNodeByPath(newNodePath);
@@ -1186,7 +1217,7 @@ export class CTOutliner extends BaseElement {
     // Calculate the expected path for the new child node before mutation
     const parentPath = this.getNodePath(node);
     if (parentPath === null) return;
-    
+
     const newNodePath = [...parentPath, 0]; // Insert as first child
 
     const nodeChildrenCell = this.getNodeChildrenCell(node);
@@ -1203,7 +1234,7 @@ export class CTOutliner extends BaseElement {
     this.editingNodePath = newNodePath;
     this.editingContent = "";
     this.requestUpdate();
-    
+
     // Focus the editor after the update
     setTimeout(() => {
       const newNodeFromTree = this.getNodeByPath(newNodePath);
@@ -1219,12 +1250,30 @@ export class CTOutliner extends BaseElement {
     const path = this.getNodePath(node);
     if (!path) return;
 
+    this.startEditingWithInitialTextByPath(path, initialText);
+  }
+
+  /**
+   * Start editing with initial text by path instead of node reference
+   *
+   * @param path - The path to the node to start editing
+   * @param initialText - The initial text to start with
+   * @description Enters edit mode for the node at the specified path with initial text.
+   */
+  startEditingWithInitialTextByPath(path: number[], initialText: string) {
+    if (this.readonly) return;
+
     this.editingNodePath = path;
     this.editingContent = initialText; // Replace entire content with initial text
     this.requestUpdate();
-    const nodeIndex = this.getNodeIndex(node);
-    // Focus the editor and select all text so typing replaces content
-    OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
+
+    // Get the node by path to determine its index for focusing
+    const node = this.getNodeByPath(path);
+    if (node) {
+      const nodeIndex = this.getNodeIndex(node);
+      // Focus the editor and select all text so typing replaces content
+      OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
+    }
   }
 
   async deleteNode(node: OutlineTreeNode) {
@@ -1722,12 +1771,16 @@ export class CTOutliner extends BaseElement {
   /**
    * Handle checkbox change event to sync state
    */
-  private handleCheckboxChange(node: OutlineTreeNode, event: Event) {
+  private handleCheckboxChange(
+    node: OutlineTreeNode,
+    nodePath: number[],
+    event: Event,
+  ) {
     const checkbox = event.target as HTMLInputElement;
     const isChecked = checkbox.checked;
 
     // Update the node's body to match the checkbox state
-    this.setNodeCheckbox(node, isChecked);
+    this.setNodeCheckboxByPath(nodePath, isChecked);
   }
 
   /**
@@ -1737,6 +1790,46 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     const nodeBodyCell = this.getNodeBodyCell(node);
+    if (nodeBodyCell) {
+      mutateCell(nodeBodyCell, (cell) => {
+        const currentBody = cell.get();
+
+        // Set checkbox to the specified state
+        let newBody: string;
+        const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentBody);
+
+        if (hasCheckbox) {
+          // Update existing checkbox
+          if (isChecked) {
+            // Set to checked
+            newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[x] ");
+          } else {
+            // Set to unchecked (normalize to [ ])
+            newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[ ] ");
+          }
+        } else {
+          // Add checkbox if none exists
+          if (isChecked) {
+            newBody = "[x] " + currentBody;
+          } else {
+            newBody = "[ ] " + currentBody;
+          }
+        }
+
+        cell.set(newBody);
+      });
+    }
+
+    this.requestUpdate();
+  }
+
+  /**
+   * Set checkbox state on a node by path using Cell operations
+   */
+  setNodeCheckboxByPath(nodePath: number[], isChecked: boolean) {
+    if (!this.value) return;
+
+    const nodeBodyCell = this.getNodeBodyCellByPath(nodePath);
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => {
         const currentBody = cell.get();
@@ -1836,7 +1929,7 @@ export class CTOutliner extends BaseElement {
       this.editingNodePath = newNodePath;
       this.editingContent = "";
       this.requestUpdate();
-      
+
       // Focus the editor after the update
       setTimeout(() => {
         const newNodeFromTree = this.getNodeByPath(newNodePath);
@@ -1977,7 +2070,11 @@ export class CTOutliner extends BaseElement {
     );
   }
 
-  private renderNode(node: OutlineTreeNode, level: number, calculatedPath: number[]): unknown {
+  private renderNode(
+    node: OutlineTreeNode,
+    level: number,
+    calculatedPath: number[],
+  ): unknown {
     // Defensive check for corrupted nodes
     if (!node || typeof node !== "object" || !Array.isArray(node.children)) {
       console.error("Corrupted node in renderNode:", node);
@@ -1987,24 +2084,37 @@ export class CTOutliner extends BaseElement {
     }
 
     // Use calculated path from renderNodes instead of getNodePath to avoid timing issues
-    const nodePath = calculatedPath;
+    // Create a local copy to ensure it's captured properly in event handlers
+    const pathArray = [...calculatedPath];
 
     const hasChildren = node.children.length > 0;
 
     // Check if this node is being edited
     const isEditing = this.editingNodePath &&
-      this.editingNodePath.length === nodePath.length &&
-      this.editingNodePath.every((val, idx) => val === nodePath[idx]);
+      this.editingNodePath.length === calculatedPath.length &&
+      this.editingNodePath.every((val, idx) => val === calculatedPath[idx]);
 
     // Check if this node is focused
     const isFocused = this.focusedNodePath &&
-      this.focusedNodePath.length === nodePath.length &&
-      this.focusedNodePath.every((val, idx) => val === nodePath[idx]);
+      this.focusedNodePath.length === calculatedPath.length &&
+      this.focusedNodePath.every((val, idx) => val === calculatedPath[idx]);
 
     const isCollapsed = this._collapsedNodePaths.has(
-      this.pathToString(nodePath),
+      this.pathToString(calculatedPath),
     );
     const nodeIndex = this.getNodeIndex(node);
+
+    // Create event handlers that capture the path correctly
+    const nodeClickHandler = (e: MouseEvent) =>
+      this.handleNodeClick(node, pathArray, e);
+    const nodeDoubleClickHandler = (e: MouseEvent) =>
+      this.handleNodeDoubleClick(node, pathArray, e);
+    const collapseClickHandler = (e: MouseEvent) =>
+      this.handleCollapseClick(node, pathArray, e);
+    const checkboxChangeHandler = (e: Event) => {
+      e.stopPropagation();
+      this.handleCheckboxChange(node, pathArray, e);
+    };
 
     return html`
       <div class="node" style="position: relative;">
@@ -2012,14 +2122,14 @@ export class CTOutliner extends BaseElement {
           class="node-content ${isFocused ? "focused" : ""} ${isEditing
         ? "editing"
         : ""}"
-          @click="${(e: MouseEvent) => this.handleNodeClick(node, e)}"
-          @dblclick="${(e: MouseEvent) => this.handleNodeDoubleClick(node, e)}"
+          @click="${nodeClickHandler}"
+          @dblclick="${nodeDoubleClickHandler}"
         >
           <div
             class="collapse-icon ${isCollapsed ? "collapsed" : ""} ${hasChildren
         ? ""
         : "invisible"}"
-            @click="${(e: MouseEvent) => this.handleCollapseClick(node, e)}"
+            @click="${collapseClickHandler}"
           >
             <svg viewBox="0 0 24 24">
               <path d="M7 10l5 5 5-5H7z" />
@@ -2043,14 +2153,14 @@ export class CTOutliner extends BaseElement {
           ></textarea>
           ${this.showingMentions ? this.renderMentionsDropdown() : ""}
         `
-        : this.renderMarkdownContent(node.body, node)}
+        : this.renderMarkdownContent(node.body, node, checkboxChangeHandler)}
           </div>
         </div>
 
         ${this.renderAttachments(node)} ${hasChildren && !isCollapsed
         ? html`
           <div class="children">
-            ${this.renderNodes(node.children, level + 1, nodePath)}
+            ${this.renderNodes(node.children, level + 1, calculatedPath)}
           </div>
         `
         : ""}
@@ -2129,6 +2239,7 @@ export class CTOutliner extends BaseElement {
   private renderMarkdownContent(
     content: string,
     node: OutlineTreeNode,
+    checkboxChangeHandler?: (e: Event) => void,
   ): unknown {
     if (!content.trim()) {
       return html`
@@ -2168,10 +2279,10 @@ export class CTOutliner extends BaseElement {
               type="checkbox"
               class="node-checkbox"
               ?checked="${isChecked}"
-              @change="${(e: Event) => {
+              @change="${checkboxChangeHandler || ((e: Event) => {
             e.stopPropagation();
-            this.handleCheckboxChange(node, e);
-          }}"
+            this.handleCheckboxChange(node, this.getNodePath(node) || [], e);
+          })}"
             />
             <span class="markdown-content" @click="${this
             .handleCharmLinkClick}">${unsafeHTML(html_content)}</span>
