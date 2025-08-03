@@ -199,14 +199,8 @@ export class Scheduler implements IScheduler {
           // This matches the original scheduler behavior
           tx.commit();
           const log = txToReactivityLog(tx);
-
-          // FIXME(@ellyxir) delay re-subscription to prevent self-triggering from async notifications
-          // without this, async storage notifications can arrive after re-subscription
-          // and trigger infinite loops for self-referential actions
-          setTimeout(() => {
-            this.subscribe(action, log);
-            resolve(result);
-          }, 50);
+          this.subscribe(action, log);
+          resolve(result);
         }
       };
 
