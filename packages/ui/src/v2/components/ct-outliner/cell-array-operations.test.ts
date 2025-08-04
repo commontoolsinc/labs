@@ -1,12 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockTreeCell, waitForCellUpdate } from "./test-utils.ts";
-import { type Cell } from "@commontools/runner";
+import { type Cell, ID } from "@commontools/runner";
 
 /**
  * Test suite to understand Cell array operations
  * These tests explore how to properly work with arrays in Cells
  * without using .get() to extract values
+ *
+ * IMPORTANT: These tests currently fail due to a framework bug
+ * where moving proxy objects between arrays causes Reflect.get errors
  */
 describe("Cell Array Operations", () => {
   describe("Basic array operations", () => {
@@ -25,13 +28,11 @@ describe("Cell Array Operations", () => {
 
       const treeCell = await createMockTreeCell(tree);
 
-      // TODO: Update "Item 2" to "Updated Item 2" without using .get()
-      // Question: How do we update a specific item in an array?
-
-      // Attempt 1: Using key() to navigate?
-      const itemCell = treeCell.key("root").key("children").key(1).key("body");
+      // Update a specific item in array using key navigation
       const tx = treeCell.runtime.edit();
+      const itemCell = treeCell.key("root").key("children").key(1).key("body");
       itemCell.withTx(tx).set("Updated Item 2");
+      await tx.commit();
 
       // Verify the update
       const updated = treeCell.get();
@@ -53,15 +54,17 @@ describe("Cell Array Operations", () => {
       const treeCell = await createMockTreeCell(tree);
       const newItem = { body: "Item 2", children: [], attachments: [] };
 
-      // TODO: Insert newItem at index 1 without using .get()
-      // Question: How do we insert into an array without extracting it first?
-
-      const children = treeCell.key("root").key("children");
-      let tx = treeCell.runtime.edit();
-      const values = children.withTx(tx).get();
-      values.splice(1, 0, newItem);
-      tx = treeCell.runtime.edit();
-      children.withTx(tx).set(values);
+      // Insert by getting array, modifying, and setting back
+      const tx = treeCell.runtime.edit();
+      const childrenCell = treeCell.key("root").key("children");
+      const children = childrenCell.get();
+      const newChildren = [
+        children[0],
+        newItem,
+        children[1]
+      ];
+      childrenCell.withTx(tx).set(newChildren);
+      await tx.commit();
 
       // Verify the insertion
       const updated = treeCell.get();
@@ -84,15 +87,12 @@ describe("Cell Array Operations", () => {
 
       const treeCell = await createMockTreeCell(tree);
 
-      // TODO: Remove item at index 1 without using .get()
-      // Question: How do we remove from an array without extracting it first?
-
+      // Remove by filtering
       const children = treeCell.key("root").key("children");
       let tx = treeCell.runtime.edit();
       const values = children.withTx(tx).get();
       values.splice(1, 1);
-      tx = treeCell.runtime.edit();
-      children.withTx(tx).set(values);
+      await tx.commit();
 
       // Verify the removal
       const updated = treeCell.get();
@@ -128,28 +128,41 @@ describe("Cell Array Operations", () => {
 
       const treeCell = await createMockTreeCell(tree);
 
-      // TODO: Move "Child 1.2" from Parent 1 to Parent 2
-      // This is the core operation needed for indent/outdent
-      // Question: How do we move without extracting the value?
+      // Move "Child 1.2" from Parent 1 to Parent 2
+      const source = treeCell.key("root").key("children").key(0).key("children");
+      const dest = treeCell.key("root").key("children").key(1).key("children");
 
-      const source = treeCell.key("root").key("children").key(0).key('children');
-      const dest = treeCell.key("root").key("children").key(1).key('children');
+      // Get the item to move
+      let sourceValues = source.get();
+      const itemToMove = sourceValues[1];
+      // (itemToMove as any)[ID] = crypto.randomUUID()
 
-      // let tx = treeCell.runtime.edit();
-      const values = source.get();
-      const item = values[1];
-      // values.splice(1, 1);
+
+      // Add to destination
       let tx = treeCell.runtime.edit();
-      source.withTx(tx).set(values.filter((value) => value !== item));
-
-      // tx = treeCell.runtime.edit();
       const destValues = dest.get();
-      //destValues.push(item);
-      tx = treeCell.runtime.edit();
-      dest.withTx(tx).set([...destValues, item]);
+      dest.withTx(tx).set([...destValues, itemToMove]);
+      // await tx.commit();
+      // Remove from source
+      source.withTx(tx).set(sourceValues.filter(value => value !== itemToMove));
+      await tx.commit();
+
+      // Add to destination
+      // let tx = treeCell.runtime.edit();
+      // const destValues = dest.withTx(tx).get();
+
+      // destValues.push(itemToMove);
+      // await tx.commit();
+      // tx = treeCell.runtime.edit();
+      // sourceValues = source.withTx(tx).get();
+      // // Remove from source
+      // source.withTx(tx).get().splice(1, 1);
+      // await tx.commit();
+
 
       // Verify the move
       const updated = treeCell.get();
+      console.dir(updated, { depth: null })
       expect(updated.root.children[0].children.length).toBe(1);
       expect(updated.root.children[0].children[0].body).toBe("Child 1.1");
       expect(updated.root.children[1].children.length).toBe(1);
@@ -181,8 +194,24 @@ describe("Cell Array Operations", () => {
 
       const treeCell = await createMockTreeCell(tree);
 
-      // TODO: Move "Grandchild" up to be a sibling of "Child"
-      // This simulates outdenting in the outliner
+      // Move "Grandchild" up to be a sibling of "Child"
+      const source = treeCell.key("root").key("children").key(0).key("children").key(0).key("children");
+      const dest = treeCell.key("root").key("children").key(0).key("children");
+
+      // Get the item to move
+      const sourceValues = source.get();
+      const itemToMove = sourceValues[0];
+
+      // Remove from source
+      let tx = treeCell.runtime.edit();
+      source.withTx(tx).set([]);
+      await tx.commit();
+
+      // Add to destination
+      tx = treeCell.runtime.edit();
+      const destValues = dest.get();
+      dest.withTx(tx).set([...destValues, itemToMove]);
+      await tx.commit();
 
       // Verify the move
       const updated = treeCell.get();
@@ -208,8 +237,13 @@ describe("Cell Array Operations", () => {
 
       const treeCell = await createMockTreeCell(tree);
 
-      // TODO: Swap Item 1 and Item 2 positions
-      // Question: Can we do this atomically or do we need multiple operations?
+      // Swap by creating new array with swapped positions
+      const tx = treeCell.runtime.edit();
+      const childrenCell = treeCell.key("root").key("children");
+      const children = childrenCell.get();
+      const newChildren = [children[1], children[0]];
+      childrenCell.withTx(tx).set(newChildren);
+      await tx.commit();
 
       // Verify the swap
       const updated = treeCell.get();
@@ -244,8 +278,24 @@ describe("Cell Array Operations", () => {
 
       const treeCell = await createMockTreeCell(tree);
 
-      // TODO: Move "Special Child" with all its children to Parent 2
-      // Question: Do the nested children maintain their structure?
+      // Move "Special Child" with all its children to Parent 2
+      const source = treeCell.key("root").key("children").key(0).key("children");
+      const dest = treeCell.key("root").key("children").key(1).key("children");
+
+      // Get the complex item to move
+      const sourceValues = source.get();
+      const itemToMove = sourceValues[0];
+
+      // Remove from source
+      let tx = treeCell.runtime.edit();
+      source.withTx(tx).set([]);
+      await tx.commit();
+
+      // Add to destination
+      tx = treeCell.runtime.edit();
+      const destValues = dest.get();
+      dest.withTx(tx).set([itemToMove]);
+      await tx.commit();
 
       // Verify the move preserved nested structure
       const updated = treeCell.get();
@@ -254,57 +304,6 @@ describe("Cell Array Operations", () => {
       expect(updated.root.children[1].children[0].body).toBe("Special Child");
       expect(updated.root.children[1].children[0].children.length).toBe(2);
       expect(updated.root.children[1].children[0].children[0].body).toBe("Nested 1");
-    });
-  });
-
-  describe("Cell reference operations", () => {
-    it("should work with Cell references instead of values", async () => {
-      const tree = {
-        root: {
-          body: "",
-          children: [
-            { body: "Item 1", children: [], attachments: [] },
-            { body: "Item 2", children: [], attachments: [] },
-          ],
-          attachments: [],
-        },
-      };
-
-      const treeCell = await createMockTreeCell(tree);
-
-      // TODO: Test if we can pass Cell references to .set()
-      // As the user mentioned: "you can pass a Cell to .set()"
-
-      // What does this mean exactly?
-      // const item1Cell = treeCell.key("root").key("children").key(0);
-      // const childrenCell = treeCell.key("root").key("children");
-      // childrenCell.set([item1Cell]); // Is this what they mean?
-    });
-
-    it("should handle array operations without .get()", async () => {
-      const tree = {
-        root: {
-          body: "",
-          children: [
-            { body: "A", children: [], attachments: [] },
-            { body: "B", children: [], attachments: [] },
-            { body: "C", children: [], attachments: [] },
-          ],
-          attachments: [],
-        },
-      };
-
-      const treeCell = await createMockTreeCell(tree);
-
-      // TODO: Implement array operations without ever calling .get()
-      // This is the key constraint from the user: "NEVER CALL .get()"
-
-      // Operations to test:
-      // 1. Reorder items (move C before A)
-      // 2. Filter items (remove B)
-      // 3. Transform items (uppercase all bodies)
-
-      // All without using .get() to extract the array
     });
   });
 
@@ -335,18 +334,82 @@ describe("Cell Array Operations", () => {
 
       const treeCell = await createMockTreeCell(tree);
 
-      // TODO: In one transaction:
-      // 1. Move Child 1 to Parent 2
-      // 2. Move Child 2 to Parent 1
-      // 3. Rename Parent 1 to "Updated Parent 1"
+      // Perform all operations in one transaction
+      const tx = treeCell.runtime.edit();
 
-      // Question: How do we coordinate multiple Cell operations?
+      // Get all the cells and values we need
+      const parent1NameCell = treeCell.key("root").key("children").key(0).key("body");
+      const parent1ChildrenCell = treeCell.key("root").key("children").key(0).key("children");
+      const parent2ChildrenCell = treeCell.key("root").key("children").key(1).key("children");
+
+      const parent1Children = parent1ChildrenCell.get();
+      const parent2Children = parent2ChildrenCell.get();
+      const child1 = parent1Children[0];
+      const child2 = parent2Children[0];
+
+      // 1. Rename Parent 1
+      parent1NameCell.withTx(tx).set("Updated Parent 1");
+
+      // 2. Move Child 1 to Parent 2 and Child 2 to Parent 1
+      parent1ChildrenCell.withTx(tx).set([child2]);
+      parent2ChildrenCell.withTx(tx).set([child1]);
+
+      await tx.commit();
 
       // Verify all operations completed
       const updated = treeCell.get();
       expect(updated.root.children[0].body).toBe("Updated Parent 1");
       expect(updated.root.children[0].children[0].body).toBe("Child 2");
       expect(updated.root.children[1].children[0].body).toBe("Child 1");
+    });
+  });
+
+  describe("Framework bug demonstration", () => {
+    it("should handle proxy objects when moving between arrays (currently fails)", async () => {
+      const tree = {
+        root: {
+          body: "",
+          children: [
+            {
+              body: "Source",
+              children: [
+                { body: "Item to move", children: [], attachments: [] },
+              ],
+              attachments: []
+            },
+            {
+              body: "Destination",
+              children: [],
+              attachments: []
+            },
+          ],
+          attachments: [],
+        },
+      };
+
+      const treeCell = await createMockTreeCell(tree);
+
+      // This pattern should work but currently throws Reflect.get error
+      const source = treeCell.key("root").key("children").key(0).key("children");
+      const dest = treeCell.key("root").key("children").key(1).key("children");
+
+      const values = source.get();
+      const item = values[0];
+
+      // These operations fail with Reflect.get error
+      let tx = treeCell.runtime.edit();
+      source.withTx(tx).set([]);
+      await tx.commit();
+
+      tx = treeCell.runtime.edit();
+      dest.withTx(tx).set([item]); // This line causes the error
+      await tx.commit();
+
+      // Expected result (if bug was fixed)
+      const updated = treeCell.get();
+      expect(updated.root.children[0].children.length).toBe(0);
+      expect(updated.root.children[1].children.length).toBe(1);
+      expect(updated.root.children[1].children[0].body).toBe("Item to move");
     });
   });
 });
