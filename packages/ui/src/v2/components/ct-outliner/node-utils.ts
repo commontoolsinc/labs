@@ -153,36 +153,48 @@ export const NodeUtils = {
 
   /**
    * Get siblings of a node
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   getSiblings(tree: Tree, targetNode: Node): Node[] {
     const parent = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parent) return [];
     return parent.children.filter((child) => child !== targetNode);
   },
+  */
 
   /**
    * Get node index among its siblings
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   getSiblingIndex(tree: Tree, targetNode: Node): number {
     const parent = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parent) return -1;
     return parent.children.indexOf(targetNode);
   },
+  */
 
   /**
    * Check if a node is the first child
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   isFirstChild(tree: Tree, targetNode: Node): boolean {
     return NodeUtils.getSiblingIndex(tree, targetNode) === 0;
   },
+  */
 
   /**
    * Check if a node is the last child
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   isLastChild(tree: Tree, targetNode: Node): boolean {
     const parent = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parent) return false;
     const index = parent.children.indexOf(targetNode);
     return index === parent.children.length - 1;
   },
+  */
 };

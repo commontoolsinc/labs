@@ -132,12 +132,16 @@ export const TreeOperations = {
    * Find the parent node containing a child
    */
   findParentNode(node: Cell<Node>, targetNode: Cell<Node>): Cell<Node> | null {
-    for (const child of node.getAsQueryResult().children) {
-      if (child == targetNode) {
+    const nodeChildren = node.key("children");
+    const childrenArray = nodeChildren.getAsQueryResult();
+    
+    for (let i = 0; i < childrenArray.length; i++) {
+      const childCell = nodeChildren.key(i);
+      if (childCell.equals(targetNode)) {
         return node;
       }
 
-      const found = TreeOperations.findParentNode(child, targetNode);
+      const found = TreeOperations.findParentNode(childCell, targetNode);
       if (found) return found;
     }
 
@@ -171,8 +175,18 @@ export const TreeOperations = {
   /**
    * Get the index of a node in its parent's children array
    */
-  getNodeIndex(parent: Node, targetNode: Node): number {
-    return parent.children.indexOf(targetNode);
+  getNodeIndex(parent: Cell<Node>, targetNode: Cell<Node>): number {
+    const parentChildren = parent.key("children");
+    const childrenArray = parentChildren.getAsQueryResult();
+    
+    for (let i = 0; i < childrenArray.length; i++) {
+      const childCell = parentChildren.key(i);
+      if (childCell.equals(targetNode)) {
+        return i;
+      }
+    }
+    
+    return -1;
   },
 
   /**
@@ -222,6 +236,9 @@ export const TreeOperations = {
    * Mutates the tree structure directly
    */
   moveNodeUp(tree: Tree, targetNode: Node): void {
+    // This method is deprecated - use Cell-based operations instead
+    throw new Error("moveNodeUp is deprecated. Use Cell-based operations in ct-outliner.ts");
+    /*
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) {
       throw new Error("Cannot move node up: node has no parent");
@@ -242,13 +259,18 @@ export const TreeOperations = {
     mutableParent.children = mutableChildren;
 
     // Operation completed successfully
+    */
   },
 
   /**
    * Move a node down among its siblings
    * Mutates the tree structure directly
+   * @deprecated Use Cell-based operations in ct-outliner.ts instead
    */
   moveNodeDown(tree: Tree, targetNode: Node): void {
+    // This method is deprecated - use Cell-based operations instead
+    throw new Error("moveNodeDown is deprecated. Use Cell-based operations in ct-outliner.ts");
+    /*
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) {
       throw new Error("Cannot move node down: node has no parent");
@@ -269,6 +291,7 @@ export const TreeOperations = {
     mutableParent.children = mutableChildren;
 
     // Operation completed successfully
+    */
   },
 
   /**
@@ -318,8 +341,12 @@ export const TreeOperations = {
   /**
    * Delete a node from the tree
    * Mutates the tree structure directly
+   * @deprecated Use Cell-based operations in ct-outliner.ts instead
    */
   deleteNode(tree: Tree, targetNode: Node): void {
+    // This method is deprecated - use Cell-based operations instead
+    throw new Error("deleteNode is deprecated. Use Cell-based operations in ct-outliner.ts");
+    /*
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) {
       throw new Error("Cannot delete root node");
@@ -345,13 +372,18 @@ export const TreeOperations = {
 
     // Operation completed successfully
     // Note: Focus handling is managed by the calling component
+    */
   },
 
   /**
    * Indent a node (make it a child of the previous sibling)
    * Mutates the tree structure directly
+   * @deprecated Use Cell-based operations in ct-outliner.ts instead
    */
   indentNode(tree: Tree, targetNode: Node): void {
+    // This method is deprecated - use Cell-based operations instead
+    throw new Error("indentNode is deprecated. Use Cell-based operations in ct-outliner.ts");
+    /*
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) {
       throw new Error("Cannot indent node: node has no parent");
@@ -375,13 +407,18 @@ export const TreeOperations = {
     mutableSibling.children = [...mutableSibling.children, targetNode];
 
     // Operation completed successfully
+    */
   },
 
   /**
    * Outdent a node (move it up to parent's level)
    * Mutates the tree structure directly
+   * @deprecated Use Cell-based operations in ct-outliner.ts instead
    */
   outdentNode(tree: Tree, targetNode: Node): void {
+    // This method is deprecated - use Cell-based operations instead
+    throw new Error("outdentNode is deprecated. Use Cell-based operations in ct-outliner.ts");
+    /*
     const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parentNode) {
       throw new Error("Cannot outdent node: node has no parent");
@@ -415,6 +452,7 @@ export const TreeOperations = {
     mutableGrandParent.children = mutableGrandParentChildren;
 
     // Operation completed successfully
+    */
   },
 
   /**

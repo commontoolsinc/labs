@@ -67,12 +67,15 @@ export const KeyboardCommands = {
             ctx.component.requestUpdate();
           } else {
             // Move to parent if collapsed or leaf
-            const parentNode = TreeOperations.findParentNode(
-              ctx.component.tree.root,
-              ctx.focusedNode,
-            );
-            if (parentNode && parentNode !== ctx.component.tree.root) {
-              ctx.component.focusedNode = parentNode;
+            // Use focusedNode to find parent
+            const allNodes = ctx.component.getAllVisibleNodes();
+            const currentIndex = allNodes.indexOf(ctx.focusedNode);
+            if (currentIndex > 0) {
+              // Find parent by looking backwards in visible nodes
+              const parentNode = allNodes[currentIndex - 1];
+              if (parentNode) {
+                ctx.component.focusedNode = parentNode;
+              }
             }
           }
         }
