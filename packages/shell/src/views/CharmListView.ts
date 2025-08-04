@@ -1,7 +1,6 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
-import { getNavigationHref } from "../lib/navigate.ts";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
 
@@ -90,10 +89,12 @@ export class XCharmListView extends BaseView {
     const list = charms.map((charm) => {
       const name = charm.name();
       const id = charm.id;
-      const href = getNavigationHref(spaceName, id);
       return html`
         <li class="charm-item">
-          <a class="charm-link" href="${href}">${name}</a>
+          <x-charm-link
+            .charmId="${id}"
+            .spaceName="${spaceName}"
+          ></x-charm-link>
           <x-button
             class="remove-button"
             size="small"

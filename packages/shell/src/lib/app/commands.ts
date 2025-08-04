@@ -1,7 +1,7 @@
 import { Identity } from "@commontools/identity";
 
 export type Command =
-  | { type: "set-active-charm-id"; charmId: string }
+  | { type: "set-active-charm-id"; charmId?: string }
   | { type: "set-identity"; identity: Identity }
   | { type: "set-space"; spaceName: string }
   | { type: "clear-authentication" }
@@ -25,7 +25,7 @@ export function isCommand(value: unknown): value is Command {
     }
     case "set-active-charm-id": {
       return "charmId" in value && !!value.charmId &&
-        typeof value.charmId === "string";
+        (typeof value.charmId === "string" || value.charmId === undefined);
     }
     case "clear-authentication": {
       return true;

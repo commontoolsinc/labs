@@ -12,7 +12,7 @@ import { XRootView } from "./views/RootView.ts";
 import "./components/index.ts";
 import "./views/index.ts";
 import { App } from "./lib/app/controller.ts";
-import { getNavigationHref } from "./lib/navigate.ts";
+import { Navigation } from "./lib/navigate.ts";
 import "./globals.ts";
 console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
@@ -46,22 +46,4 @@ await app.initializeKeys();
   app.setSpace(spaceName);
   if (charmId) app.setActiveCharmId(charmId);
 }
-
-globalThis.addEventListener("navigate-to-charm", (e) => {
-  const { spaceName, charmId } = (e as CustomEvent).detail ?? {};
-  if (!spaceName) {
-    console.warn(`Navigation event missing 'spaceName'.`);
-    return;
-  }
-  if (!charmId) {
-    console.warn(`Navigation event missing 'charmId'.`);
-    return;
-  }
-  app.setSpace(spaceName);
-  app.setActiveCharmId(charmId);
-
-  // Update the browser URL to reflect the new location
-  // (DefaultCharmList should not use this event, it sets activeCharmId directly)
-  const href = getNavigationHref(spaceName, charmId);
-  globalThis.history.pushState({}, "", href);
-});
+const navigation = new Navigation(app);

@@ -36,7 +36,7 @@ export class App extends EventTarget {
     await this.apply({ type: "set-space", spaceName });
   }
 
-  async setActiveCharmId(charmId: string) {
+  async setActiveCharmId(charmId?: string) {
     await this.apply({ type: "set-active-charm-id", charmId });
   }
 
