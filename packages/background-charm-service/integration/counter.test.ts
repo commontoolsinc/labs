@@ -88,7 +88,13 @@ describe("background charm counter tests", () => {
 
     // Ensure the dev server is killed after the test
     try {
-      text = await countValueEl?.innerText();
+      // Re-query the element to avoid stale reference
+      const updatedCountValueEl = await page.$(
+        "#countValue",
+        { strategy: "pierce" },
+      );
+      assert(updatedCountValueEl);
+      text = await updatedCountValueEl.innerText();
       value = text ? parseInt(text) : NaN;
       console.log("after text/value", text, value);
       assert(value === 1);
