@@ -200,8 +200,8 @@ describe("Cell Array Operations - Standalone", () => {
 
   it("shows that [ID] fixes simple array operations", async () => {
     const data = {
-      list1: [{ [ID]: "A" }, { [ID]: "B" }, { [ID]: "C" }],
-      list2: [{ [ID]: "X" }, { [ID]: "Y" }, { [ID]: "Z" }],
+      list1: [{ [ID]: crypto.randomUUID(), name: "A" }, { [ID]: crypto.randomUUID(), name: "B" }, { [ID]: crypto.randomUUID(), name: "C" }],
+      list2: [{ [ID]: crypto.randomUUID(), name: "X" }, { [ID]: crypto.randomUUID(), name: "Y" }, { [ID]: crypto.randomUUID(), name: "Z" }],
     };
 
     const cell = await createCell(data);
@@ -215,7 +215,7 @@ describe("Cell Array Operations - Standalone", () => {
 
     // Remove from list1
     let tx = cell.runtime.edit();
-    list1.withTx(tx).set([{ [ID]: "A" }, { [ID]: "C" }]);
+    list1.withTx(tx).set([values1[0], values1[2]]);
     await tx.commit();
 
     // Try to add to list2 - this fails
@@ -225,8 +225,15 @@ describe("Cell Array Operations - Standalone", () => {
     await tx.commit();
 
     const updated = cell.get();
-    expect(updated.list1).toEqual([{ [ID]: "A" }, { [ID]: "C" }]);
-    expect(updated.list2).toEqual([{ [ID]: "X" }, { [ID]: "Y" }, { [ID]: "Z" }, { [ID]: "B" }]);
+    expect(updated.list1.length).toBe(2);
+    expect(updated.list1[0]["name"]).toBe("A");
+    expect(updated.list1[1]["name"]).toBe("C");
+
+    expect(updated.list2.length).toBe(4);
+    expect(updated.list2[0]["name"]).toBe("X");
+    expect(updated.list2[1]["name"]).toBe("Y");
+    expect(updated.list2[2]["name"]).toBe("Z");
+    expect(updated.list2[3]["name"]).toBe("B");
   });
 
   it("shows the workaround using deep cloning", async () => {
