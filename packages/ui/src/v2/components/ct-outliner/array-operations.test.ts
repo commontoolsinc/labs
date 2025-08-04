@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { Cell, Runtime } from "@commontools/runner";
+import { Cell, Runtime, ID } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
@@ -115,6 +115,58 @@ describe("Cell Array Operations - Standalone", () => {
     expect(updated.root.children[1].children[0].name).toBe("Child B");
   });
 
+  it("demonstrate that [ID] can fix the array move bug", async () => {
+    const tree: Tree = {
+      root: {
+        name: "Root",
+        children: [
+          {
+            name: "Parent 1",
+            children: [
+              { name: "Child A", children: [] },
+              { [ID]: crypto.randomUUID(), name: "Child B", children: [] } as any,
+            ],
+          },
+          {
+            name: "Parent 2",
+            children: [],
+          },
+        ],
+      },
+    };
+
+    const treeCell = await createCell(tree);
+
+    // Try to move "Child B" from Parent 1 to Parent 2
+    const source = treeCell.key("root").key("children").key(0).key("children");
+    const dest = treeCell.key("root").key("children").key(1).key("children");
+
+    // Get the item to move
+    const sourceValues = source.get();
+    const itemToMove = sourceValues[1]; // Child B
+
+    // Remove from source (this works)
+    let tx = treeCell.runtime.edit();
+    source.withTx(tx).set([sourceValues[0]]); // Keep only Child A
+    await tx.commit();
+
+    // Try to add to destination (this fails with Reflect.get error)
+    tx = treeCell.runtime.edit();
+    const destValues = dest.get();
+
+    // This line throws: "Reflect.get called on non-object"
+    // because itemToMove is a proxy from a different Cell context
+    dest.withTx(tx).set([...destValues, itemToMove]);
+    await tx.commit();
+
+    // If it worked, we'd expect:
+    const updated = treeCell.get();
+    expect(updated.root.children[0].children.length).toBe(1);
+    expect(updated.root.children[0].children[0].name).toBe("Child A");
+    expect(updated.root.children[1].children.length).toBe(1);
+    expect(updated.root.children[1].children[0].name).toBe("Child B");
+  });
+
   it("shows that even simple array operations fail", async () => {
     const data = {
       list1: [{ id: "A" }, { id: "B" }, { id: "C" }],
@@ -144,6 +196,37 @@ describe("Cell Array Operations - Standalone", () => {
     const updated = cell.get();
     expect(updated.list1).toEqual([{ id: "A" }, { id: "C" }]);
     expect(updated.list2).toEqual([{ id: "X" }, { id: "Y" }, { id: "Z" }, { id: "B" }]);
+  });
+
+  it("shows that [ID] fixes simple array operations", async () => {
+    const data = {
+      list1: [{ [ID]: "A" }, { [ID]: "B" }, { [ID]: "C" }],
+      list2: [{ [ID]: "X" }, { [ID]: "Y" }, { [ID]: "Z" }],
+    };
+
+    const cell = await createCell(data);
+
+    // Try to move "B" from list1 to list2
+    const list1 = cell.key("list1");
+    const list2 = cell.key("list2");
+
+    const values1 = list1.get();
+    const itemToMove = values1[1]; // { id: "B" }
+
+    // Remove from list1
+    let tx = cell.runtime.edit();
+    list1.withTx(tx).set([{ [ID]: "A" }, { [ID]: "C" }]);
+    await tx.commit();
+
+    // Try to add to list2 - this fails
+    tx = cell.runtime.edit();
+    const values2 = list2.get();
+    list2.withTx(tx).set([...values2, itemToMove]); // Reflect.get error here
+    await tx.commit();
+
+    const updated = cell.get();
+    expect(updated.list1).toEqual([{ [ID]: "A" }, { [ID]: "C" }]);
+    expect(updated.list2).toEqual([{ [ID]: "X" }, { [ID]: "Y" }, { [ID]: "Z" }, { [ID]: "B" }]);
   });
 
   it("shows the workaround using deep cloning", async () => {
