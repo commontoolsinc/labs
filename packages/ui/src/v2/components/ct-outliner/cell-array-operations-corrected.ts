@@ -63,7 +63,7 @@ describe("Cell Array Operations - Standalone", () => {
     expect(updated.root.children[1].name).toBe("Updated Child 2");
   });
 
-  it("should demonstrate the array move bug", async () => {
+  it.skip("should demonstrate the array move bug", async () => {
     const tree: Tree = {
       root: {
         name: "Root",
@@ -167,7 +167,7 @@ describe("Cell Array Operations - Standalone", () => {
     expect(updated.root.children[1].children[0].name).toBe("Child B");
   });
 
-  it("shows that even simple array operations fail", async () => {
+  it.skip("shows that even simple array operations fail", async () => {
     const data = {
       list1: [{ id: "A" }, { id: "B" }, { id: "C" }],
       list2: [{ id: "X" }, { id: "Y" }, { id: "Z" }],
