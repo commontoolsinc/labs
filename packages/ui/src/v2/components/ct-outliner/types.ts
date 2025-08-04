@@ -25,6 +25,7 @@ export interface Node {
   body: string;
   children: Node[];
   attachments: Attachment[];
+  [key: symbol]: any; // Allow [ID] property and other symbols
 }
 
 /**

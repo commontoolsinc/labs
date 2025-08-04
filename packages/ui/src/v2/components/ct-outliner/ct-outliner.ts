@@ -38,7 +38,6 @@ import { EventUtils } from "./event-utils.ts";
 import { FocusUtils } from "./focus-utils.ts";
 import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
 import "../ct-render/ct-render.ts";
-import { moveNodeBetweenArrays } from "./ct-outliner-workaround.ts";
 
 /**
  * CTOutliner - An outliner component with hierarchical tree structure
@@ -135,7 +134,7 @@ export class CTOutliner extends BaseElement {
     if (!this.value) {
       return TreeOperations.createEmptyTree();
     }
-    return this.value.get();
+    return this.value.getAsQueryResult();
   }
   private _collapsedNodePaths: Set<string> = new Set(); // Set of node paths as strings
   declare focusedNodePath: number[] | null;
@@ -602,8 +601,14 @@ export class CTOutliner extends BaseElement {
       node: OutlineTreeNode,
       currentPath: number[],
     ): number[] | null => {
+      if (!node || !node.children) {
+        return null;
+      }
+
       for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
+        if (!child) continue;
+
         const childPath = [...currentPath, i];
 
         if (child === targetNode) {
@@ -702,9 +707,13 @@ export class CTOutliner extends BaseElement {
    * @returns Cell<OutlineTreeNode[]> pointing to the parent's children array, or null if not found
    */
   private getParentChildrenCell(
-    node: OutlineTreeNode,
+    node: Cell<OutlineTreeNode>,
   ): Cell<OutlineTreeNode[]> | null {
-    const parentNode = TreeOperations.findParentNode(this.tree.root, node);
+    if (!this.value) return null;
+    const parentNode = TreeOperations.findParentNode(
+      this.value.key("root"),
+      node,
+    );
     if (!parentNode) return null;
 
     return this.getNodeChildrenCell(parentNode);
@@ -720,9 +729,9 @@ export class CTOutliner extends BaseElement {
    */
   private getNodeCellByPath(path: (number | string)[]): Cell<any> | null {
     if (!this.value) return null;
-    
+
     let cell: Cell<any> = this.value.key("root");
-    
+
     for (const segment of path) {
       if (segment === "children" || typeof segment === "string") {
         cell = cell.key(segment);
@@ -730,7 +739,7 @@ export class CTOutliner extends BaseElement {
         cell = cell.key("children").key(segment);
       }
     }
-    
+
     return cell;
   }
 
@@ -1170,10 +1179,10 @@ export class CTOutliner extends BaseElement {
    * @description Creates an empty node as a sibling after the given node,
    * focuses it, and immediately enters edit mode. Uses Cell operations.
    */
-  async createNewNodeAfter(node: OutlineTreeNode) {
+  async createNewNodeAfter(node: Cell<OutlineTreeNode>) {
     if (!this.value) return;
 
-    const parentNode = TreeOperations.findParentNode(this.tree.root, node);
+    const parentNode = TreeOperations.findParentNode(this.value.key('root'), node);
     if (!parentNode) return;
 
     const nodeIndex = TreeOperations.getNodeIndex(parentNode, node);
@@ -1403,7 +1412,7 @@ export class CTOutliner extends BaseElement {
 
   /**
    * Indent a node by path instead of node reference
-   * Uses Cell operations with paths for reliable indentation
+   * Uses simple Cell array operations following the pattern from tests
    */
   async indentNodeByPath(nodePath: number[]) {
     if (!this.value) return;
@@ -1418,52 +1427,56 @@ export class CTOutliner extends BaseElement {
     const nodeIndex = nodePath[nodePath.length - 1];
     const previousSiblingIndex = nodeIndex - 1;
 
-    const tx = this.value.runtime.edit();
-
-    // Get parent's children Cell
-    const parentChildrenCell = this.getNodeCellByPath([...parentPath, "children"]);
+    // Get parent's children Cell (source)
+    const parentChildrenCell = this.getNodeChildrenCell(
+      this.getNodeByPath(parentPath)!,
+    );
     if (!parentChildrenCell) {
       console.error("Cannot find parent children cell");
       return;
     }
 
-    // Get sibling's children Cell
-    const siblingChildrenCell = this.getNodeCellByPath([...parentPath, previousSiblingIndex, "children"]);
+    // Get sibling's children Cell (destination)
+    const siblingPath = [...parentPath, previousSiblingIndex];
+    const siblingNode = this.getNodeByPath(siblingPath);
+    if (!siblingNode) {
+      console.error("Cannot find sibling node");
+      return;
+    }
+    const siblingChildrenCell = this.getNodeChildrenCell(siblingNode);
     if (!siblingChildrenCell) {
       console.error("Cannot find sibling children cell");
       return;
     }
 
-    // Get the current arrays
+    // Simple pattern: get values, move item, set arrays
     const parentChildren = parentChildrenCell.get();
     const siblingChildren = siblingChildrenCell.get();
-    
-    // Get the node value we're moving
     const nodeToMove = parentChildren[nodeIndex];
-    
-    // Create new arrays
+
+    const tx = this.value.runtime.edit();
+
+    // Remove from parent children
     const newParentChildren = [
       ...parentChildren.slice(0, nodeIndex),
-      ...parentChildren.slice(nodeIndex + 1)
+      ...parentChildren.slice(nodeIndex + 1),
     ];
-    
-    const newSiblingChildren = [...siblingChildren, nodeToMove];
-    
-    // Update both arrays
     parentChildrenCell.withTx(tx).set(newParentChildren);
+
+    // Add to sibling children
+    const newSiblingChildren = [...siblingChildren, nodeToMove];
     siblingChildrenCell.withTx(tx).set(newSiblingChildren);
-    
+
     await tx.commit();
 
-    // Update focused path
-    this.focusedNodePath = [...parentPath, previousSiblingIndex, siblingChildren.length];
-    
+    // Update focused path to new location
+    this.focusedNodePath = [...siblingPath, siblingChildren.length];
     this.requestUpdate();
   }
 
   /**
    * Outdent a node by path instead of node reference
-   * Uses Cell operations with paths for reliable outdentation
+   * Uses simple Cell array operations following the pattern from tests
    */
   async outdentNodeByPath(nodePath: number[]) {
     if (!this.value) return;
@@ -1474,83 +1487,70 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    // Get paths
     const parentPath = nodePath.slice(0, -1);
     const grandParentPath = parentPath.slice(0, -1);
     const nodeIndex = nodePath[nodePath.length - 1];
     const parentIndex = parentPath[parentPath.length - 1];
 
-    // We'll get the node data after we have the Cell reference
+    // Get current parent's children Cell (source)
+    const parentNode = this.getNodeByPath(parentPath);
+    if (!parentNode) {
+      console.error("Cannot find parent node");
+      return;
+    }
+    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    if (!parentChildrenCell) {
+      console.error("Cannot find parent children cell");
+      return;
+    }
 
-    // Use single transaction for both operations
+    // Get grandparent's children Cell (destination)
+    const grandParentNode = this.getNodeByPath(grandParentPath);
+    if (!grandParentNode) {
+      console.error("Cannot find grandparent node");
+      return;
+    }
+    const grandParentChildrenCell = this.getNodeChildrenCell(grandParentNode);
+    if (!grandParentChildrenCell) {
+      console.error("Cannot find grandparent children cell");
+      return;
+    }
+
+    // Simple pattern: get values, move item, set arrays
+    const parentChildren = parentChildrenCell.get();
+    const grandParentChildren = grandParentChildrenCell.get();
+    const nodeToMove = parentChildren[nodeIndex];
+
     const tx = this.value.runtime.edit();
 
-    try {
-      // Get current parent's children Cell
-      let parentChildrenCell: Cell<any>;
-      if (parentPath.length === 0) {
-        // Parent is root
-        parentChildrenCell = this.value.key("root").key("children");
-      } else {
-        let cell: Cell<any> = this.value.key("root").key("children");
-        for (let i = 0; i < parentPath.length; i++) {
-          cell = cell.key(parentPath[i]);
-          if (i < parentPath.length - 1) {
-            cell = cell.key("children");
-          }
-        }
-        parentChildrenCell = cell.key("children");
-      }
+    // Remove from parent children
+    const newParentChildren = [
+      ...parentChildren.slice(0, nodeIndex),
+      ...parentChildren.slice(nodeIndex + 1),
+    ];
+    parentChildrenCell.withTx(tx).set(newParentChildren);
 
-      // Get grandparent's children Cell
-      let grandParentChildrenCell: Cell<any>;
-      if (grandParentPath.length === 0) {
-        // Grandparent is root
-        grandParentChildrenCell = this.value.key("root").key("children");
-      } else {
-        let cell: Cell<any> = this.value.key("root").key("children");
-        for (let i = 0; i < grandParentPath.length; i++) {
-          cell = cell.key(grandParentPath[i]);
-          if (i < grandParentPath.length - 1) {
-            cell = cell.key("children");
-          }
-        }
-        grandParentChildrenCell = cell.key("children");
-      }
+    // Insert into grandparent children after parent
+    const newGrandParentChildren = [
+      ...grandParentChildren.slice(0, parentIndex + 1),
+      nodeToMove,
+      ...grandParentChildren.slice(parentIndex + 1),
+    ];
+    grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
 
-      // Get the Cell of the node we're moving
-      const nodeCell = parentChildrenCell.key(nodeIndex);
-      
-      // Get parent's current children to build new array without the moved node
-      const currentParentChildren = parentChildrenCell.get();
-      const newParentChildren = [...currentParentChildren.slice(0, nodeIndex), ...currentParentChildren.slice(nodeIndex + 1)];
-      parentChildrenCell.withTx(tx).set(newParentChildren);
+    await tx.commit();
 
-      // Get grandparent's current children and insert the node Cell
-      const currentGrandParentChildren = grandParentChildrenCell.get();
-      const newGrandParentChildren = [
-        ...currentGrandParentChildren.slice(0, parentIndex + 1),
-        nodeCell,
-        ...currentGrandParentChildren.slice(parentIndex + 1)
-      ];
-      grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
+    // Update focused path to new location
+    const newFocusedPath = [...grandParentPath, parentIndex + 1];
+    this.focusedNodePath = newFocusedPath;
 
-      await tx.commit();
-
-      // Update focused node path to new location (after parent in grandparent)
-      const newFocusedPath = [...grandParentPath, parentIndex + 1];
-      this.focusedNodePath = newFocusedPath;
-
-      // If we were editing this node, update the editing path
-      if (this.editingNodePath && 
-          this.editingNodePath.length === nodePath.length &&
-          this.editingNodePath.every((val, idx) => val === nodePath[idx])) {
-        this.editingNodePath = newFocusedPath;
-      }
-
-    } catch (error) {
-      console.error("Error during outdent operation:", error);
-      // Transaction will be automatically rolled back on error
+    // If we were editing this node, update the editing path
+    if (
+      this.editingNodePath &&
+      this.editingNodePath.length === nodePath.length &&
+      this.editingNodePath.every((val, idx) => val === nodePath[idx])
+    ) {
+      this.editingNodePath = newFocusedPath;
     }
 
     this.requestUpdate();
@@ -1937,10 +1937,10 @@ export class CTOutliner extends BaseElement {
   /**
    * Toggle checkbox state on a node (for keyboard shortcuts)
    */
-  toggleNodeCheckbox(node: OutlineTreeNode) {
+  toggleNodeCheckbox(node: Cell<OutlineTreeNode>) {
     // Read current checkbox state from Cell if available, otherwise from node
     let currentState: boolean;
-    const nodeBodyCell = this.getNodeBodyCell(node);
+    const nodeBodyCell = node.key('body');
     if (nodeBodyCell) {
       // Use current Cell value (not potentially stale node.body)
       const currentBody = nodeBodyCell.get();
@@ -1950,6 +1950,7 @@ export class CTOutliner extends BaseElement {
         attachments: [],
       });
     } else {
+      // TODO(bf): remove branch
       // Fallback to reading from node directly
       currentState = TreeOperations.isCheckboxChecked(node);
     }
@@ -2110,6 +2111,7 @@ export class CTOutliner extends BaseElement {
 
     const hasNodes = this.tree && this.tree.root.children.length > 0;
 
+    console.log(this.tree);
     return html`
       <div style="position: relative;">
         <div
@@ -2123,32 +2125,38 @@ export class CTOutliner extends BaseElement {
         ? html`
           <div class="placeholder">Click to start typing...</div>
         `
-        : this.renderNodes(this.tree.root.children, 0, [])}
+        : this.renderNodes(this.value.key("root").key("children"), 0, [])}
         </div>
       </div>
     `;
   }
 
   private renderNodes(
-    nodes: readonly OutlineTreeNode[],
+    nodes: Cell<OutlineTreeNode[]>,
     level: number,
     parentPath: number[] = [],
   ): unknown {
     return repeat(
-      nodes,
+      nodes.get(),
       (node) => this.getNodeIndex(node),
-      (node, index) => this.renderNode(node, level, [...parentPath, index]),
+      (node, index) =>
+        this.renderNode(nodes.key(index), level, [...parentPath, index]),
     );
   }
 
   private renderNode(
-    node: OutlineTreeNode,
+    node: Cell<OutlineTreeNode>,
     level: number,
     calculatedPath: number[],
   ): unknown {
     // Defensive check for corrupted nodes
-    if (!node || typeof node !== "object" || !Array.isArray(node.children)) {
-      console.error("Corrupted node in renderNode:", node);
+    const instance = node.getAsQueryResult();
+    if (
+      !instance || typeof instance !== "object" ||
+      !Array.isArray(instance.children)
+    ) {
+      debugger;
+      console.error("Corrupted node in renderNode:", instance);
       return html`
         <div class="error">Corrupted node</div>
       `;
@@ -2158,7 +2166,7 @@ export class CTOutliner extends BaseElement {
     // Create a local copy to ensure it's captured properly in event handlers
     const pathArray = [...calculatedPath];
 
-    const hasChildren = node.children.length > 0;
+    const hasChildren = instance.children.length > 0;
 
     // Check if this node is being edited
     const isEditing = this.editingNodePath &&
@@ -2177,16 +2185,17 @@ export class CTOutliner extends BaseElement {
 
     // Create event handlers that capture the path correctly
     const nodeClickHandler = (e: MouseEvent) =>
-      this.handleNodeClick(node, pathArray, e);
+      this.handleNodeClick(instance, pathArray, e);
     const nodeDoubleClickHandler = (e: MouseEvent) =>
-      this.handleNodeDoubleClick(node, pathArray, e);
+      this.handleNodeDoubleClick(instance, pathArray, e);
     const collapseClickHandler = (e: MouseEvent) =>
-      this.handleCollapseClick(node, pathArray, e);
+      this.handleCollapseClick(instance, pathArray, e);
     const checkboxChangeHandler = (e: Event) => {
       e.stopPropagation();
-      this.handleCheckboxChange(node, pathArray, e);
+      this.handleCheckboxChange(instance, pathArray, e);
     };
 
+    console.log("renderNode", node, instance);
     return html`
       <div class="node" style="position: relative;">
         <div
@@ -2224,14 +2233,18 @@ export class CTOutliner extends BaseElement {
           ></textarea>
           ${this.showingMentions ? this.renderMentionsDropdown() : ""}
         `
-        : this.renderMarkdownContent(node.body, node, checkboxChangeHandler)}
+        : this.renderMarkdownContent(
+          instance.body,
+          instance,
+          checkboxChangeHandler,
+        )}
           </div>
         </div>
 
         ${this.renderAttachments(node)} ${hasChildren && !isCollapsed
         ? html`
           <div class="children">
-            ${this.renderNodes(node.children, level + 1, calculatedPath)}
+            ${this.renderNodes(node.key("children"), level + 1, calculatedPath)}
           </div>
         `
         : ""}
@@ -2286,25 +2299,6 @@ export class CTOutliner extends BaseElement {
       )}
       </div>
     `;
-  }
-
-  private getCharmDisplayText(charm: any): string {
-    if (!charm) return "";
-
-    // Try to get a meaningful identifier from the charm
-    if (typeof charm === "string") return charm;
-    if (charm.id) return charm.id;
-    if (charm._id) return charm._id;
-    if (charm.charmId) return charm.charmId;
-    if (charm.title) return `"${charm.title}"`;
-
-    // Fallback to a truncated JSON representation
-    try {
-      const str = JSON.stringify(charm);
-      return str.length > 40 ? str.substring(0, 40) + "..." : str;
-    } catch {
-      return "[Object]";
-    }
   }
 
   private renderMarkdownContent(
@@ -2374,41 +2368,12 @@ export class CTOutliner extends BaseElement {
   }
 
   /**
-   * Get the path through the tree structure to reach a specific node
-   * @param targetNode The node to find the path to
-   * @returns Array representing the path through the tree structure, e.g. ['root', 'children', 0, 'children', 0]
-   */
-  private getTreeStructurePath(
-    targetNode: OutlineTreeNode,
-  ): (string | number)[] | null {
-    const findStructurePath = (
-      node: OutlineTreeNode,
-      currentPath: (string | number)[],
-    ): (string | number)[] | null => {
-      for (let i = 0; i < node.children.length; i++) {
-        const child = node.children[i];
-        const childPath = [...currentPath, "children", i];
-
-        if (child === targetNode) {
-          return childPath;
-        }
-
-        const result = findStructurePath(child, childPath);
-        if (result) {
-          return result;
-        }
-      }
-      return null;
-    };
-
-    return findStructurePath(this.tree.root, ["root"]);
-  }
-
-  /**
    * Render attachments for a node using ct-render
    */
-  private renderAttachments(node: OutlineTreeNode): unknown {
-    if (!node.attachments || node.attachments.length === 0) {
+  private renderAttachments(node: Cell<OutlineTreeNode>): unknown {
+    const attachments = node.key('attachments').get();
+
+    if (!attachments || attachments.length === 0) {
       return "";
     }
 
@@ -2421,7 +2386,7 @@ export class CTOutliner extends BaseElement {
     const space = tree.space;
 
     // Create proper charm cell references from attachment charm objects
-    const charmCells = node.attachments.map((attachment) => {
+    const charmCells = attachments.map((attachment) => {
       try {
         // Extract entity ID from the charm object
         const entityId = getEntityId(attachment);
@@ -2452,7 +2417,7 @@ export class CTOutliner extends BaseElement {
 
     return html`
       <div class="attachments">
-        ${charmCells.map((charmCell) => {
+        ${charmCells.map((charmCell: Cell<Charm>) => {
         return html`
           <div class="attachment">
             <ct-render .cell="${charmCell}"></ct-render>

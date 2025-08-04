@@ -6,6 +6,7 @@ import type {
   NodeCreationOptions,
   Tree,
 } from "./types.ts";
+import { ID, Cell } from "@commontools/runner";
 
 /**
  * Pure functional operations for Tree manipulation
@@ -93,13 +94,15 @@ export const TreeOperations = {
 
   /**
    * Create a new node with given options
+   * Includes [ID] property required for Cell array operations
    */
   createNode(options: NodeCreationOptions): Node {
     return {
+      [ID]: crypto.randomUUID(),
       body: options.body,
       children: options.children || [],
       attachments: options.attachments || [],
-    };
+    } as Node;
   },
 
   /**
@@ -128,12 +131,12 @@ export const TreeOperations = {
   /**
    * Find the parent node containing a child
    */
-  findParentNode(node: Node, targetNode: Node): Node | null {
-    if (node.children.includes(targetNode)) {
-      return node;
-    }
+  findParentNode(node: Cell<Node>, targetNode: Cell<Node>): Cell<Node> | null {
+    for (const child of node.getAsQueryResult().children) {
+      if (child == targetNode) {
+        return node;
+      }
 
-    for (const child of node.children) {
       const found = TreeOperations.findParentNode(child, targetNode);
       if (found) return found;
     }

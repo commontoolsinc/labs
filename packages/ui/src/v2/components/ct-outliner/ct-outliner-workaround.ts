@@ -22,7 +22,6 @@ function cloneNode(node: OutlineTreeNode): OutlineTreeNode {
     body: node.body,
     children: node.children.map(child => cloneNode(child)),
     attachments: [...node.attachments],
-    checked: node.checked,
   };
 }
 
