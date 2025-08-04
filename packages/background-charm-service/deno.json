@@ -7,7 +7,8 @@
     "test": "deno test test/*.test.ts",
     "check": "deno check src/**/*.ts",
     "lint": "deno lint",
-    "fmt": "deno fmt"
+    "fmt": "deno fmt",
+    "integration": "deno test -A ./integration/*.test.ts"
   },
   "imports": {},
   "exports": {
