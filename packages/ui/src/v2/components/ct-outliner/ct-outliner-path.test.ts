@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Node, Tree } from "./types.ts";
+import { getNodePath, getNodeByPath } from "./node-path.ts";
 
 describe("CTOutliner Path-based Node Finding (CT-693)", () => {
   // Helper to create a test tree
@@ -36,62 +37,23 @@ describe("CTOutliner Path-based Node Finding (CT-693)", () => {
     };
   }
 
-  // Simplified version of getNodePath from ct-outliner.ts
-  function getNodePath(root: Node, targetNode: Node): number[] | null {
-    if (targetNode === root) {
-      return [];
-    }
-
-    const findPath = (
-      node: Node,
-      currentPath: number[],
-    ): number[] | null => {
-      for (let i = 0; i < node.children.length; i++) {
-        const child = node.children[i];
-        const childPath = [...currentPath, i];
-
-        if (child === targetNode) {
-          return childPath;
-        }
-
-        const result = findPath(child, childPath);
-        if (result) {
-          return result;
-        }
-      }
-      return null;
-    };
-
-    return findPath(root, []);
-  }
-
-  // Navigate to a node using a path
-  function getNodeByPath(root: Node, path: number[]): Node | null {
-    let current = root;
-    for (const index of path) {
-      if (index >= current.children.length) {
-        return null;
-      }
-      current = current.children[index];
-    }
-    return current;
-  }
+  // Tests now use the extracted functions from node-path.ts
 
   it("should find correct path to nodes", () => {
     const tree = createTestTree();
 
     // Test root
-    const rootPath = getNodePath(tree.root, tree.root);
+    const rootPath = getNodePath(tree, tree.root);
     expect(rootPath).toEqual([]);
 
     // Test first child
     const child1 = tree.root.children[0];
-    const child1Path = getNodePath(tree.root, child1);
+    const child1Path = getNodePath(tree, child1);
     expect(child1Path).toEqual([0]);
 
     // Test grandchild
     const grandchild = tree.root.children[0].children[1];
-    const grandchildPath = getNodePath(tree.root, grandchild);
+    const grandchildPath = getNodePath(tree, grandchild);
     expect(grandchildPath).toEqual([0, 1]);
   });
 
@@ -99,15 +61,15 @@ describe("CTOutliner Path-based Node Finding (CT-693)", () => {
     const tree = createTestTree();
 
     // Navigate to root
-    const rootNode = getNodeByPath(tree.root, []);
+    const rootNode = getNodeByPath(tree, []);
     expect(rootNode).toBe(tree.root);
 
     // Navigate to child
-    const childNode = getNodeByPath(tree.root, [0]);
+    const childNode = getNodeByPath(tree, [0]);
     expect(childNode?.body).toBe("Child 1");
 
     // Navigate to grandchild
-    const grandchildNode = getNodeByPath(tree.root, [0, 1]);
+    const grandchildNode = getNodeByPath(tree, [0, 1]);
     expect(grandchildNode?.body).toBe("Grandchild 1.2");
   });
 
@@ -116,7 +78,7 @@ describe("CTOutliner Path-based Node Finding (CT-693)", () => {
 
     // Get initial reference and path to grandchild
     const grandchild = tree.root.children[0].children[1];
-    const grandchildPath = getNodePath(tree.root, grandchild);
+    const grandchildPath = getNodePath(tree, grandchild);
     expect(grandchildPath).toEqual([0, 1]);
 
     // Simulate tree modification (like what happens with Cell updates)
@@ -152,11 +114,11 @@ describe("CTOutliner Path-based Node Finding (CT-693)", () => {
     };
 
     // The old grandchild reference is now stale
-    const stillFoundByReference = getNodePath(modifiedTree.root, grandchild);
+    const stillFoundByReference = getNodePath(modifiedTree, grandchild);
     expect(stillFoundByReference).toBeNull(); // Can't find by reference!
 
     // But we can still navigate using the path
-    const nodeByPath = getNodeByPath(modifiedTree.root, grandchildPath!);
+    const nodeByPath = getNodeByPath(modifiedTree, grandchildPath!);
     expect(nodeByPath).not.toBeNull();
     expect(nodeByPath?.body).toBe("Grandchild 1.2");
 
@@ -168,18 +130,18 @@ describe("CTOutliner Path-based Node Finding (CT-693)", () => {
 
     // Simulate starting to edit a grandchild node
     const editingNode = tree.root.children[0].children[1];
-    const editingNodePath = getNodePath(tree.root, editingNode);
+    const editingNodePath = getNodePath(tree, editingNode);
     const editingContent = "Updated content";
 
     // Simulate tree update (Cell operation that creates new objects)
     const updatedTree: Tree = JSON.parse(JSON.stringify(tree)); // Deep clone
 
     // Old approach: try to find node by reference (FAILS)
-    const nodeByReference = getNodePath(updatedTree.root, editingNode);
+    const nodeByReference = getNodePath(updatedTree, editingNode);
     expect(nodeByReference).toBeNull();
 
     // New approach: use stored path (WORKS)
-    const nodeByPath = getNodeByPath(updatedTree.root, editingNodePath!);
+    const nodeByPath = getNodeByPath(updatedTree, editingNodePath!);
     expect(nodeByPath).not.toBeNull();
 
     // We can now update the correct node

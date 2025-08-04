@@ -34,6 +34,17 @@ import {
 import { TreeOperations, createCleanNodeCopy } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
+import {
+  pathToString,
+  stringToPath,
+  getNodeByPath,
+  getNodePath,
+  getNodeCell,
+  getNodeBodyCell,
+  getNodeBodyCellByPath,
+  getNodeChildrenCell,
+  getNodeCellByPath,
+} from "./node-path.ts";
 import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
 import "../ct-render/ct-render.ts";
 
@@ -141,19 +152,19 @@ export class CTOutliner extends BaseElement {
   // Compatibility getters for OutlinerOperations interface
   get focusedNode(): OutlineTreeNode | null {
     if (!this.focusedNodePath) return null;
-    return this.getNodeByPath(this.focusedNodePath);
+    return getNodeByPath(this.tree, this.focusedNodePath);
   }
 
   set focusedNode(node: OutlineTreeNode | null) {
-    this.focusedNodePath = node ? this.getNodePath(node) : null;
+    this.focusedNodePath = node ? getNodePath(this.tree, node) : null;
   }
 
   // Expose collapsedNodes as Set<Node> for compatibility
   get collapsedNodes(): Set<OutlineTreeNode> {
     const nodes = new Set<OutlineTreeNode>();
     for (const pathStr of this._collapsedNodePaths) {
-      const path = this.stringToPath(pathStr);
-      const node = this.getNodeByPath(path);
+      const path = stringToPath(pathStr);
+      const node = getNodeByPath(this.tree, path);
       if (node) {
         nodes.add(node);
       }
@@ -164,9 +175,9 @@ export class CTOutliner extends BaseElement {
   set collapsedNodes(nodes: Set<OutlineTreeNode>) {
     this._collapsedNodePaths.clear();
     for (const node of nodes) {
-      const path = this.getNodePath(node);
+      const path = getNodePath(this.tree, node);
       if (path) {
-        this._collapsedNodePaths.add(this.pathToString(path));
+        this._collapsedNodePaths.add(pathToString(path));
       }
     }
   }
@@ -189,7 +200,7 @@ export class CTOutliner extends BaseElement {
       editingContent: this.editingContent,
       // Compatibility: provide editing node for tests
       editingNode: this.editingNodePath
-        ? this.getNodeByPath(this.editingNodePath)
+        ? getNodeByPath(this.tree, this.editingNodePath)
         : null,
       emitChange: () => this.emitChange(),
       startEditing: (node: OutlineTreeNode) => this.startEditing(node),
@@ -517,7 +528,7 @@ export class CTOutliner extends BaseElement {
           this.emit("ct-change", { value: this.tree });
           // Handle focus restoration after tree changes
           if (this.focusedNodePath) {
-            const focusedNode = this.getNodeByPath(this.focusedNodePath);
+            const focusedNode = getNodeByPath(this.tree, this.focusedNodePath);
             if (!focusedNode) {
               // Node no longer exists, find a valid focus
               // Simply focus the first node if available
@@ -548,193 +559,8 @@ export class CTOutliner extends BaseElement {
   }
 
   // =============================================================================
-  // Cell Path Navigation Utilities
+  // Cell Path Navigation Utilities - moved to node-path.ts
   // =============================================================================
-
-  /**
-   * Convert a path to a string for use as a key
-   */
-  private pathToString(path: number[]): string {
-    return path.join(".");
-  }
-
-  /**
-   * Convert a string key back to a path
-   */
-  private stringToPath(str: string): number[] {
-    return str ? str.split(".").map(Number) : [];
-  }
-
-  /**
-   * Get the node at a given path
-   */
-  private getNodeByPath(path: number[]): OutlineTreeNode | null {
-    if (path.length === 0) {
-      return this.tree.root;
-    }
-
-    let current = this.tree.root;
-    for (const index of path) {
-      if (!current.children || index >= current.children.length) {
-        return null;
-      }
-      current = current.children[index];
-    }
-    return current;
-  }
-
-  /**
-   * Get the path to a node as an array of indices from root.children
-   */
-  private getNodePath(targetNode: OutlineTreeNode | Cell<OutlineTreeNode>): number[] | null {
-    // If it's a Cell, we need to find it in the tree
-    if ('equals' in targetNode) {
-      if (!this.value) return null;
-
-      const findCellPath = (
-        currentCell: Cell<OutlineTreeNode>,
-        currentPath: number[],
-      ): number[] | null => {
-        if (currentCell.equals(targetNode)) {
-          return currentPath;
-        }
-
-        const children = currentCell.key("children").getAsQueryResult();
-        for (let i = 0; i < children.length; i++) {
-          const childCell = currentCell.key("children").key(i);
-          const result = findCellPath(childCell, [...currentPath, i]);
-          if (result) return result;
-        }
-
-        return null;
-      };
-
-      // Check if it's the root
-      const rootCell = this.value.key("root");
-      if (rootCell.equals(targetNode)) {
-        return [];
-      }
-
-      // Search in children
-      return findCellPath(rootCell, []);
-    }
-
-    // Original logic for regular nodes
-    const targetNodeTyped = targetNode as OutlineTreeNode;
-    // Handle root node as a special case
-    if (targetNodeTyped === this.tree.root) {
-      return []; // Root node has empty path
-    }
-
-    const findPath = (
-      node: OutlineTreeNode,
-      currentPath: number[],
-    ): number[] | null => {
-      if (!node || !node.children) {
-        return null;
-      }
-
-      for (let i = 0; i < node.children.length; i++) {
-        const child = node.children[i];
-        if (!child) continue;
-
-        const childPath = [...currentPath, i];
-
-        if (child === targetNodeTyped) {
-          return childPath;
-        }
-
-        const result = findPath(child, childPath);
-        if (result) {
-          return result;
-        }
-      }
-      return null;
-    };
-
-    return findPath(this.tree.root, []);
-  }
-
-  /**
-   * Get the Cell for a specific node in the tree using its path
-   * @param node The target node to get a Cell for
-   * @returns Cell<Node> pointing to the node, or null if not found
-   */
-  private getNodeCell(node: OutlineTreeNode): Cell<OutlineTreeNode> | null {
-    if (!this.value) return null;
-
-    const nodePath = this.getNodePath(node);
-    if (nodePath === null) return null;
-
-    // Handle root node (empty path)
-    if (nodePath.length === 0) {
-      return this.value.key("root") as Cell<OutlineTreeNode>;
-    }
-
-    let targetCell: Cell<any> = this.value.key("root").key("children");
-    for (let i = 0; i < nodePath.length; i++) {
-      targetCell = targetCell.key(nodePath[i]);
-      if (i < nodePath.length - 1) {
-        targetCell = targetCell.key("children");
-      }
-    }
-
-    return targetCell as Cell<OutlineTreeNode>;
-  }
-
-  /**
-   * Get the Cell for a specific node's body content
-   * @param node The target node to get a body Cell for
-   * @returns Cell<string> pointing to the node's body, or null if not found
-   */
-  private getNodeBodyCell(node: OutlineTreeNode): Cell<string> | null {
-    const nodeCell = this.getNodeCell(node);
-    return nodeCell ? nodeCell.key("body") as Cell<string> : null;
-  }
-
-  /**
-   * Get the Cell for a node's body content using a path
-   * @param nodePath The path to the node as an array of indices
-   * @returns Cell<string> pointing to the node's body, or null if not found
-   */
-  private getNodeBodyCellByPath(nodePath: number[]): Cell<string> | null {
-    if (!this.value) return null;
-
-    // Handle root node (empty path)
-    if (nodePath.length === 0) {
-      return this.value.key("root").key("body") as Cell<string>;
-    }
-
-    let targetCell: Cell<any> = this.value.key("root").key("children");
-    for (let i = 0; i < nodePath.length; i++) {
-      targetCell = targetCell.key(nodePath[i]);
-      if (i < nodePath.length - 1) {
-        targetCell = targetCell.key("children");
-      }
-    }
-
-    return targetCell.key("body") as Cell<string>;
-  }
-
-  /**
-   * Get the Cell for a specific node's children array
-   * @param node The target node to get a children Cell for
-   * @returns Cell<OutlineTreeNode[]> pointing to the node's children, or null if not found
-   */
-  private getNodeChildrenCell(
-    node: OutlineTreeNode | Cell<OutlineTreeNode>,
-  ): Cell<OutlineTreeNode[]> | null {
-    if ('equals' in node) {
-      // It's already a Cell
-      return node.key("children") as Cell<OutlineTreeNode[]>;
-    } else {
-      // It's a regular node
-      const nodeCell = this.getNodeCell(node);
-      return nodeCell
-        ? nodeCell.key("children") as Cell<OutlineTreeNode[]>
-        : null;
-    }
-  }
 
   /**
    * Get the Cell for a parent node's children array where a specific node is located
@@ -751,31 +577,7 @@ export class CTOutliner extends BaseElement {
     );
     if (!parentNode) return null;
 
-    return this.getNodeChildrenCell(parentNode);
-  }
-
-  /**
-   * Create a clean copy of a node to avoid proxy reference issues in Cell operations
-   * @param node The node to copy
-   * @returns A clean copy of the node that's safe to use in Cell operations
-   */
-  /**
-   * Get a Cell at a specific path, supporting both numeric indices and string keys
-   */
-  private getNodeCellByPath(path: (number | string)[]): Cell<any> | null {
-    if (!this.value) return null;
-
-    let cell: Cell<any> = this.value.key("root");
-
-    for (const segment of path) {
-      if (segment === "children" || typeof segment === "string") {
-        cell = cell.key(segment);
-      } else {
-        cell = cell.key("children").key(segment);
-      }
-    }
-
-    return cell;
+    return getNodeChildrenCell(this.value, this.tree, parentNode);
   }
 
   private getAllNodes(): OutlineTreeNode[] {
@@ -816,7 +618,7 @@ export class CTOutliner extends BaseElement {
    */
   startEditing(node: OutlineTreeNode) {
     if (this.readonly) return;
-    const path = this.getNodePath(node);
+    const path = getNodePath(this.tree, node);
     if (!path) return;
 
     this.editingNodePath = path;
@@ -842,7 +644,7 @@ export class CTOutliner extends BaseElement {
     this.requestUpdate();
 
     // Get the node by path to determine its index for focusing
-    const node = this.getNodeByPath(path);
+    const node = getNodeByPath(this.tree, path);
     if (node) {
       const nodeIndex = this.getNodeIndex(node);
       OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
@@ -859,7 +661,7 @@ export class CTOutliner extends BaseElement {
   toggleEditMode(node: OutlineTreeNode) {
     if (this.readonly) return;
 
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) return;
 
     // Check if we're editing this node by comparing paths
@@ -886,7 +688,7 @@ export class CTOutliner extends BaseElement {
     if (!this.value || !this.editingNodePath) return;
 
     // Use the stored path to get the Cell
-    const nodeBodyCell = this.getNodeBodyCellByPath(this.editingNodePath);
+    const nodeBodyCell = getNodeBodyCellByPath(this.value, this.editingNodePath);
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => cell.set(this.editingContent));
     }
@@ -948,7 +750,7 @@ export class CTOutliner extends BaseElement {
   ) {
     event.stopPropagation();
 
-    const pathStr = this.pathToString(nodePath);
+    const pathStr = pathToString(nodePath);
     if (this._collapsedNodePaths.has(pathStr)) {
       this._collapsedNodePaths.delete(pathStr);
     } else {
@@ -1032,7 +834,7 @@ export class CTOutliner extends BaseElement {
 
       const focusedNodePath = this.focusedNodePath;
       if (!focusedNodePath || !this.value) return;
-      const focusedNodeCell = this.getNodeCellByPath(focusedNodePath) as Cell<OutlineTreeNode>;
+      const focusedNodeCell = getNodeCellByPath(this.value, focusedNodePath) as Cell<OutlineTreeNode>;
       if (!focusedNodeCell) return;
 
       const parentNode = TreeOperations.findParentNodeCell(
@@ -1046,7 +848,7 @@ export class CTOutliner extends BaseElement {
         );
 
         // Insert new nodes after current one using Cell operations
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+        const parentChildrenCell = getNodeChildrenCell(this.value, this.tree, parentNode);
         if (parentChildrenCell) {
           mutateCell(parentChildrenCell, (cell) => {
             const currentChildren = cell.get();
@@ -1114,7 +916,7 @@ export class CTOutliner extends BaseElement {
     const target = event.target as HTMLTextAreaElement;
 
     // Try executing editing keyboard commands first
-    const editingNode = this.getNodeByPath(this.editingNodePath!);
+    const editingNode = getNodeByPath(this.tree, this.editingNodePath!);
     if (!editingNode) return;
 
     const editingContext = EventUtils.createEditingKeyboardContext(
@@ -1161,7 +963,7 @@ export class CTOutliner extends BaseElement {
       case "Delete":
         if (target.selectionStart === this.editingContent.length) {
           const allNodes = this.getAllNodes();
-          const editingNode = this.getNodeByPath(this.editingNodePath!);
+          const editingNode = getNodeByPath(this.tree, this.editingNodePath!);
           if (!editingNode) return;
           const currentNodeIndex = allNodes.indexOf(editingNode);
           if (
@@ -1184,7 +986,7 @@ export class CTOutliner extends BaseElement {
       return;
     }
 
-    const focusedNode = this.getNodeByPath(this.focusedNodePath);
+    const focusedNode = getNodeByPath(this.tree, this.focusedNodePath);
     if (!focusedNode) {
       console.warn("Focused node no longer exists");
       return;
@@ -1205,7 +1007,7 @@ export class CTOutliner extends BaseElement {
     this.finishEditing();
 
     if (this.focusedNodePath) {
-      const focusedNode = this.getNodeByPath(this.focusedNodePath);
+      const focusedNode = getNodeByPath(this.tree, this.focusedNodePath);
       if (focusedNode) {
         this.createNewNodeAfter(focusedNode);
       }
@@ -1221,9 +1023,9 @@ export class CTOutliner extends BaseElement {
   async createNewNodeAfter(node: OutlineTreeNode | Cell<OutlineTreeNode>): Promise<void> {
     // If it's a regular node, find its Cell representation
     if (!('equals' in node)) {
-      const nodePath = this.getNodePath(node as OutlineTreeNode);
+      const nodePath = getNodePath(this.tree, node as OutlineTreeNode);
       if (!nodePath || !this.value) return;
-      const nodeCell = this.getNodeCellByPath(nodePath) as Cell<OutlineTreeNode>;
+      const nodeCell = getNodeCellByPath(this.value, nodePath) as Cell<OutlineTreeNode>;
       if (!nodeCell) return;
       return this.createNewNodeAfterCell(nodeCell);
     }
@@ -1248,12 +1050,12 @@ export class CTOutliner extends BaseElement {
     const newNode = TreeOperations.createNode({ body: "" });
 
     // Calculate the expected path for the new node before mutation
-    const parentPath = this.getNodePath(parentNode);
+    const parentPath = getNodePath(this.tree, parentNode);
     if (!parentPath) return;
 
     const newNodePath = [...parentPath, nodeIndex + 1]; // Insert after current node
 
-    const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+    const parentChildrenCell = getNodeChildrenCell(this.value, this.tree, parentNode);
     if (parentChildrenCell) {
       await mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
@@ -1286,7 +1088,7 @@ export class CTOutliner extends BaseElement {
 
     // Focus the editor after the update
     setTimeout(() => {
-      const newNodeFromTree = this.getNodeByPath(newNodePath);
+      const newNodeFromTree = getNodeByPath(this.tree, newNodePath);
       if (newNodeFromTree) {
         const nodeIndex = this.getNodeIndex(newNodeFromTree);
         OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
@@ -1307,12 +1109,12 @@ export class CTOutliner extends BaseElement {
     const newNode = TreeOperations.createNode({ body: "" });
 
     // Calculate the expected path for the new child node before mutation
-    const parentPath = this.getNodePath(node);
+    const parentPath = getNodePath(this.tree, node);
     if (parentPath === null) return;
 
     const newNodePath = [...parentPath, 0]; // Insert as first child
 
-    const nodeChildrenCell = this.getNodeChildrenCell(node);
+    const nodeChildrenCell = getNodeChildrenCell(this.value, this.tree, node);
     if (nodeChildrenCell) {
       await mutateCell(nodeChildrenCell, (cell) => {
         const currentChildren = cell.get();
@@ -1329,7 +1131,7 @@ export class CTOutliner extends BaseElement {
 
     // Focus the editor after the update
     setTimeout(() => {
-      const newNodeFromTree = this.getNodeByPath(newNodePath);
+      const newNodeFromTree = getNodeByPath(this.tree, newNodePath);
       if (newNodeFromTree) {
         const nodeIndex = this.getNodeIndex(newNodeFromTree);
         OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
@@ -1339,7 +1141,7 @@ export class CTOutliner extends BaseElement {
 
   startEditingWithInitialText(node: OutlineTreeNode, initialText: string) {
     if (this.readonly) return;
-    const path = this.getNodePath(node);
+    const path = getNodePath(this.tree, node);
     if (!path) return;
 
     this.startEditingWithInitialTextByPath(path, initialText);
@@ -1360,7 +1162,7 @@ export class CTOutliner extends BaseElement {
     this.requestUpdate();
 
     // Get the node by path to determine its index for focusing
-    const node = this.getNodeByPath(path);
+    const node = getNodeByPath(this.tree, path);
     if (node) {
       const nodeIndex = this.getNodeIndex(node);
       // Focus the editor and select all text so typing replaces content
@@ -1372,10 +1174,10 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     // Get node path to find its Cell
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) return;
 
-    const nodeCell = this.getNodeCellByPath(nodePath) as Cell<OutlineTreeNode>;
+    const nodeCell = getNodeCellByPath(this.value, nodePath) as Cell<OutlineTreeNode>;
     if (!nodeCell) return;
 
     // Use TreeOperations.deleteNodeCell
@@ -1398,7 +1200,7 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     // Convert to path immediately and delegate to path-based method
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) {
       console.error("Cannot find path for node");
       return;
@@ -1414,7 +1216,7 @@ export class CTOutliner extends BaseElement {
     cursorPosition: number,
   ) {
     // Store editing state before indent
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) return;
 
     const wasEditing = this.editingNodePath &&
@@ -1445,7 +1247,7 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     // Convert to path immediately and delegate to path-based method
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) {
       console.error("Cannot find path for node");
       return;
@@ -1511,7 +1313,7 @@ export class CTOutliner extends BaseElement {
     cursorPosition: number,
   ) {
     // Store editing state before outdent
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) return;
 
     this.editingNodePath = nodePath;
@@ -1538,10 +1340,10 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     // Get node path to find its Cell
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) return;
 
-    const nodeCell = this.getNodeCellByPath(nodePath) as Cell<OutlineTreeNode>;
+    const nodeCell = getNodeCellByPath(this.value, nodePath) as Cell<OutlineTreeNode>;
     if (!nodeCell) return;
 
     // Use TreeOperations.moveNodeUpCell
@@ -1560,10 +1362,10 @@ export class CTOutliner extends BaseElement {
     if (!this.value) return;
 
     // Get node path to find its Cell
-    const nodePath = this.getNodePath(node);
+    const nodePath = getNodePath(this.tree, node);
     if (!nodePath) return;
 
-    const nodeCell = this.getNodeCellByPath(nodePath) as Cell<OutlineTreeNode>;
+    const nodeCell = getNodeCellByPath(this.value, nodePath) as Cell<OutlineTreeNode>;
     if (!nodeCell) return;
 
     // Use TreeOperations.moveNodeDownCell
@@ -1584,7 +1386,7 @@ export class CTOutliner extends BaseElement {
     this.cancelEditing();
     // Use the migrated deleteNode method
     if (this.focusedNodePath) {
-      const focusedNode = this.getNodeByPath(this.focusedNodePath);
+      const focusedNode = getNodeByPath(this.tree, this.focusedNodePath);
       if (focusedNode) {
         this.deleteNode(focusedNode);
       }
@@ -1594,7 +1396,7 @@ export class CTOutliner extends BaseElement {
   private mergeWithNextNode() {
     if (!this.editingNodePath) return;
 
-    const editingNode = this.getNodeByPath(this.editingNodePath);
+    const editingNode = getNodeByPath(this.tree, this.editingNodePath);
     if (!editingNode) return;
 
     const allNodes = this.getAllNodes();
@@ -1663,7 +1465,7 @@ export class CTOutliner extends BaseElement {
   private async insertMention(mention: Charm) {
     if (!this.editingNodePath) return;
 
-    const editingNode = this.getNodeByPath(this.editingNodePath);
+    const editingNode = getNodeByPath(this.tree, this.editingNodePath);
     if (!editingNode) return;
 
     const textarea = this.shadowRoot?.querySelector(
@@ -1787,7 +1589,7 @@ export class CTOutliner extends BaseElement {
   setNodeCheckbox(node: OutlineTreeNode, isChecked: boolean) {
     if (!this.value) return;
 
-    const nodeBodyCell = this.getNodeBodyCell(node);
+    const nodeBodyCell = getNodeBodyCell(this.value, this.tree, node);
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => {
         const currentBody = cell.get();
@@ -1827,7 +1629,7 @@ export class CTOutliner extends BaseElement {
   setNodeCheckboxByPath(nodePath: number[], isChecked: boolean) {
     if (!this.value) return;
 
-    const nodeBodyCell = this.getNodeBodyCellByPath(nodePath);
+    const nodeBodyCell = getNodeBodyCellByPath(this.value, nodePath);
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => {
         const currentBody = cell.get();
@@ -1869,9 +1671,9 @@ export class CTOutliner extends BaseElement {
   toggleNodeCheckbox(node: OutlineTreeNode | Cell<OutlineTreeNode>): void {
     // If it's a regular node, find its Cell representation
     if (!('equals' in node)) {
-      const nodePath = this.getNodePath(node as OutlineTreeNode);
+      const nodePath = getNodePath(this.tree, node as OutlineTreeNode);
       if (!nodePath || !this.value) return;
-      const nodeCell = this.getNodeCellByPath(nodePath) as Cell<OutlineTreeNode>;
+      const nodeCell = getNodeCellByPath(this.value, nodePath) as Cell<OutlineTreeNode>;
       if (!nodeCell) return;
       return this.toggleNodeCheckboxCell(nodeCell);
     }
@@ -1948,7 +1750,7 @@ export class CTOutliner extends BaseElement {
 
       // Focus the editor after the update
       setTimeout(() => {
-        const newNodeFromTree = this.getNodeByPath(newNodePath);
+        const newNodeFromTree = getNodeByPath(this.tree, newNodePath);
         if (newNodeFromTree) {
           const nodeIndex = this.getNodeIndex(newNodeFromTree);
           OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
@@ -1972,10 +1774,10 @@ export class CTOutliner extends BaseElement {
     if (parsedTree.root.children.length === 0) return;
 
     if (this.focusedNodePath) {
-      const focusedNode = this.getNodeByPath(this.focusedNodePath);
+      const focusedNode = getNodeByPath(this.tree, this.focusedNodePath);
       if (!focusedNode) return;
 
-      const focusedNodeCell = this.getNodeCellByPath(this.focusedNodePath) as Cell<OutlineTreeNode>;
+      const focusedNodeCell = this.value ? getNodeCellByPath(this.value, this.focusedNodePath) as Cell<OutlineTreeNode> : null;
       if (!focusedNodeCell || !this.value) return;
 
       const parentNode = TreeOperations.findParentNodeCell(
@@ -1990,7 +1792,7 @@ export class CTOutliner extends BaseElement {
         );
 
         // Insert all parsed nodes after the focused node using Cell operations
-        const parentChildrenCell = this.getNodeChildrenCell(parentNode);
+        const parentChildrenCell = getNodeChildrenCell(this.value, this.tree, parentNode);
         if (parentChildrenCell) {
           mutateCell(parentChildrenCell, (cell) => {
             const currentChildren = cell.get();
@@ -2007,7 +1809,7 @@ export class CTOutliner extends BaseElement {
         }
 
         // Focus the first newly inserted node - calculate the path instead of using reference
-        const parentPath = this.getNodePath(parentNode);
+        const parentPath = getNodePath(this.tree, parentNode);
         if (parentPath !== null) {
           const firstNewNodePath = [...parentPath, nodeIndex + 1];
           this.focusedNodePath = firstNewNodePath;
@@ -2126,7 +1928,7 @@ export class CTOutliner extends BaseElement {
       this.focusedNodePath.every((val, idx) => val === calculatedPath[idx]);
 
     const isCollapsed = this._collapsedNodePaths.has(
-      this.pathToString(calculatedPath),
+      pathToString(calculatedPath),
     );
     const nodeIndex = this.getNodeIndex(instance);
 
@@ -2210,7 +2012,7 @@ export class CTOutliner extends BaseElement {
       return "";
     }
 
-    const editingNode = this.getNodeByPath(this.editingNodePath);
+    const editingNode = getNodeByPath(this.tree, this.editingNodePath);
     if (!editingNode) {
       return "";
     }
@@ -2293,7 +2095,7 @@ export class CTOutliner extends BaseElement {
               ?checked="${isChecked}"
               @change="${checkboxChangeHandler || ((e: Event) => {
             e.stopPropagation();
-            this.handleCheckboxChange(node, this.getNodePath(node) || [], e);
+            this.handleCheckboxChange(node, getNodePath(this.tree, node) || [], e);
           })}"
             />
             <span class="markdown-content" @click="${this
