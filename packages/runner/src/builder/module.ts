@@ -123,17 +123,8 @@ export function handler<E, T>(
   handler?: (event: E, props: T) => any,
 ): HandlerFactory<T, E> {
   if (typeof eventSchema === "function") {
-    if (
-      stateSchema && typeof stateSchema === "object" &&
-      "proxy" in stateSchema && stateSchema.proxy === true
-    ) {
-      handler = eventSchema;
-      eventSchema = stateSchema = undefined;
-    } else {
-      throw new Error(
-        "invalid handler, no schema provided - did you forget to enable CTS?",
-      );
-    }
+    handler = eventSchema;
+    eventSchema = stateSchema = undefined;
   }
 
   const schema: JSONSchema | undefined = eventSchema || stateSchema
