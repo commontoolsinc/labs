@@ -562,24 +562,6 @@ export class CTOutliner extends BaseElement {
   // Cell Path Navigation Utilities - moved to node-path.ts
   // =============================================================================
 
-  /**
-   * Get the Cell for a parent node's children array where a specific node is located
-   * @param node The child node whose parent's children Cell we want
-   * @returns Cell<OutlineTreeNode[]> pointing to the parent's children array, or null if not found
-   */
-  private getParentChildrenCell(
-    node: Cell<OutlineTreeNode>,
-  ): Cell<OutlineTreeNode[]> | null {
-    if (!this.value) return null;
-    const parentNode = TreeOperations.findParentNodeCell(
-      this.value.key("root"),
-      node,
-    );
-    if (!parentNode) return null;
-
-    return getNodeChildrenCell(this.value, this.tree, parentNode);
-  }
-
   private getAllNodes(): OutlineTreeNode[] {
     return NodeUtils.getAllNodesExcludingRoot(this.tree);
   }
@@ -999,19 +981,6 @@ export class CTOutliner extends BaseElement {
     );
 
     executeKeyboardCommand(event.key, context);
-  }
-
-  private finishEditingAndCreateNew() {
-    if (!this.editingNodePath) return;
-
-    this.finishEditing();
-
-    if (this.focusedNodePath) {
-      const focusedNode = getNodeByPath(this.tree, this.focusedNodePath);
-      if (focusedNode) {
-        this.createNewNodeAfter(focusedNode);
-      }
-    }
   }
 
   /**
@@ -1860,7 +1829,6 @@ export class CTOutliner extends BaseElement {
 
     const hasNodes = this.tree && this.tree.root.children.length > 0;
 
-    console.log(this.tree);
     return html`
       <div style="position: relative;">
         <div
