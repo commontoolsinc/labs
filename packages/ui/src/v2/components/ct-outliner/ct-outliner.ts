@@ -3,7 +3,6 @@ import { repeat } from "lit/directives/repeat.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { marked } from "marked";
-// Removed cell-controller import - working directly with Cell
 import { type Cell, getEntityId, isCell, NAME } from "@commontools/runner";
 
 /**
@@ -591,7 +590,7 @@ export class CTOutliner extends BaseElement {
     // If it's a Cell, we need to find it in the tree
     if ('equals' in targetNode) {
       if (!this.value) return null;
-      
+
       const findCellPath = (
         currentCell: Cell<OutlineTreeNode>,
         currentPath: number[],
@@ -599,27 +598,27 @@ export class CTOutliner extends BaseElement {
         if (currentCell.equals(targetNode)) {
           return currentPath;
         }
-        
+
         const children = currentCell.key("children").getAsQueryResult();
         for (let i = 0; i < children.length; i++) {
           const childCell = currentCell.key("children").key(i);
           const result = findCellPath(childCell, [...currentPath, i]);
           if (result) return result;
         }
-        
+
         return null;
       };
-      
+
       // Check if it's the root
       const rootCell = this.value.key("root");
       if (rootCell.equals(targetNode)) {
         return [];
       }
-      
+
       // Search in children
       return findCellPath(rootCell, []);
     }
-    
+
     // Original logic for regular nodes
     const targetNodeTyped = targetNode as OutlineTreeNode;
     // Handle root node as a special case
@@ -1035,7 +1034,7 @@ export class CTOutliner extends BaseElement {
       if (!focusedNodePath || !this.value) return;
       const focusedNodeCell = this.getNodeCellByPath(focusedNodePath) as Cell<OutlineTreeNode>;
       if (!focusedNodeCell) return;
-      
+
       const parentNode = TreeOperations.findParentNodeCell(
         this.value.key("root"),
         focusedNodeCell,
@@ -1258,23 +1257,23 @@ export class CTOutliner extends BaseElement {
     if (parentChildrenCell) {
       await mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
-        
+
         // Create clean copies to avoid Cell proxy issues
         let newChildren: OutlineTreeNode[] = [];
-        
+
         // Add nodes before and including the target node
         for (let i = 0; i <= nodeIndex; i++) {
           newChildren.push(createCleanNodeCopy(currentChildren[i]));
         }
-        
+
         // Add the new node
         newChildren.push(newNode);
-        
+
         // Add nodes after the target node
         for (let i = nodeIndex + 1; i < currentChildren.length; i++) {
           newChildren.push(createCleanNodeCopy(currentChildren[i]));
         }
-        
+
         cell.set(newChildren);
       });
     }
@@ -1978,7 +1977,7 @@ export class CTOutliner extends BaseElement {
 
       const focusedNodeCell = this.getNodeCellByPath(this.focusedNodePath) as Cell<OutlineTreeNode>;
       if (!focusedNodeCell || !this.value) return;
-      
+
       const parentNode = TreeOperations.findParentNodeCell(
         this.value.key("root"),
         focusedNodeCell,
