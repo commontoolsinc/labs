@@ -23,6 +23,19 @@ async function mutateCell<T>(
 }
 
 /**
+ * Create a clean deep copy of a node to avoid Cell proxy issues
+ * Recursively copies children and assigns new IDs to prevent reference conflicts
+ */
+export function createCleanNodeCopy(node: Node): Node {
+  return {
+    [ID]: crypto.randomUUID(),
+    body: node.body,
+    attachments: [...(node.attachments || [])],
+    children: node.children.map(child => createCleanNodeCopy(child)),
+  };
+}
+
+/**
  * Pure functional operations for Tree manipulation
  *
  * This module provides pure functions for tree operations that work with:
@@ -428,31 +441,42 @@ export const TreeOperations = {
 
     await mutateCell(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
-      const beforeNode = currentChildren.slice(0, nodeIndex);
-      const afterNode = currentChildren.slice(nodeIndex + 1);
-
-      // Move children up to parent level if any, otherwise just remove
-      let newChildren: Node[];
+      
+      // Create clean copies of all nodes that should remain
+      let newChildren: Node[] = [];
+      
+      // Add nodes before the deleted one
+      for (let i = 0; i < nodeIndex; i++) {
+        newChildren.push(createCleanNodeCopy(currentChildren[i]));
+      }
+      
+      // Add promoted children if any
       if (node.children.length > 0) {
-        // Preserve Cell references - no copying!
-        newChildren = [...beforeNode, ...node.children, ...afterNode];
-      } else {
-        newChildren = [...beforeNode, ...afterNode];
+        for (const child of node.children) {
+          newChildren.push(createCleanNodeCopy(child));
+        }
+      }
+      
+      // Add nodes after the deleted one  
+      for (let i = nodeIndex + 1; i < currentChildren.length; i++) {
+        newChildren.push(createCleanNodeCopy(currentChildren[i]));
       }
 
       cell.set(newChildren);
     });
 
-    // Determine new focus after deletion
+    // Calculate new focus after deletion - need to check the actual updated array
     const parentPath = nodePath.slice(0, -1);
-    if (nodeIndex > 0) {
+    const updatedChildren = parentNode.key("children").getAsQueryResult();
+    
+    if (nodeIndex > 0 && updatedChildren.length > nodeIndex - 1) {
       // Focus previous sibling
       return [...parentPath, nodeIndex - 1];
-    } else if (parentNode.key("children").getAsQueryResult().length > 0) {
-      // Focus next sibling (which is now at the same index)
-      return [...parentPath, nodeIndex];
+    } else if (updatedChildren.length > 0) {
+      // Focus first available sibling (or promoted child)
+      return [...parentPath, Math.min(nodeIndex, updatedChildren.length - 1)];
     } else if (parentPath.length > 0) {
-      // Focus parent
+      // Focus parent if no children left
       return parentPath;
     } else {
       // No nodes left
@@ -486,10 +510,13 @@ export const TreeOperations = {
     // Navigate to sibling's children Cell
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
 
-    // Simple pattern: get values, move item, set arrays
+    // Get values and create clean copies instead of moving proxy objects
     const parentChildren = parentChildrenCell.get();
     const siblingChildren = siblingChildrenCell.get();
     const nodeToMove = parentChildren[nodeIndex];
+    
+    // Create a clean deep copy of the node to avoid proxy issues
+    const cleanNodeCopy = createCleanNodeCopy(nodeToMove);
 
     const tx = rootCell.runtime.edit();
 
@@ -500,8 +527,8 @@ export const TreeOperations = {
     ];
     parentChildrenCell.withTx(tx).set(newParentChildren);
 
-    // Add to sibling children
-    const newSiblingChildren = [...siblingChildren, nodeToMove];
+    // Add clean copy to sibling children
+    const newSiblingChildren = [...siblingChildren, cleanNodeCopy];
     siblingChildrenCell.withTx(tx).set(newSiblingChildren);
 
     await tx.commit();
@@ -538,10 +565,13 @@ export const TreeOperations = {
     // Navigate to grandparent's children Cell (destination)
     const grandParentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, grandParentPath);
 
-    // Simple pattern: get values, move item, set arrays
+    // Get values and create clean copies instead of moving proxy objects
     const parentChildren = parentChildrenCell.get();
     const grandParentChildren = grandParentChildrenCell.get();
     const nodeToMove = parentChildren[nodeIndex];
+    
+    // Create a clean deep copy of the node to avoid proxy issues
+    const cleanNodeCopy = createCleanNodeCopy(nodeToMove);
 
     const tx = rootCell.runtime.edit();
 
@@ -552,10 +582,10 @@ export const TreeOperations = {
     ];
     parentChildrenCell.withTx(tx).set(newParentChildren);
 
-    // Insert into grandparent children after parent
+    // Insert clean copy into grandparent children after parent
     const newGrandParentChildren = [
       ...grandParentChildren.slice(0, parentIndex + 1),
-      nodeToMove,
+      cleanNodeCopy,
       ...grandParentChildren.slice(parentIndex + 1),
     ];
     grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);

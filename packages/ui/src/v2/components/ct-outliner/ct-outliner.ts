@@ -32,7 +32,7 @@ import {
   executeEditingKeyboardCommand,
   executeKeyboardCommand,
 } from "./keyboard-commands.ts";
-import { TreeOperations } from "./tree-operations.ts";
+import { TreeOperations, createCleanNodeCopy } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
@@ -1258,9 +1258,23 @@ export class CTOutliner extends BaseElement {
     if (parentChildrenCell) {
       await mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
-        const beforeNode = currentChildren.slice(0, nodeIndex + 1);
-        const afterNode = currentChildren.slice(nodeIndex + 1);
-        const newChildren = [...beforeNode, newNode, ...afterNode];
+        
+        // Create clean copies to avoid Cell proxy issues
+        let newChildren: OutlineTreeNode[] = [];
+        
+        // Add nodes before and including the target node
+        for (let i = 0; i <= nodeIndex; i++) {
+          newChildren.push(createCleanNodeCopy(currentChildren[i]));
+        }
+        
+        // Add the new node
+        newChildren.push(newNode);
+        
+        // Add nodes after the target node
+        for (let i = nodeIndex + 1; i < currentChildren.length; i++) {
+          newChildren.push(createCleanNodeCopy(currentChildren[i]));
+        }
+        
         cell.set(newChildren);
       });
     }
