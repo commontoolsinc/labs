@@ -9,7 +9,7 @@ import { charmId, CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { API_URL } from "./env.ts";
-import { navigateToCharm } from "./navigate.ts";
+import { navigate } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
 import {
   StorageInspectorState,
@@ -152,7 +152,11 @@ export class RuntimeInternals extends EventTarget {
         // need this anymore
         runtime.storage.synced().then(() => {
           // Use the human-readable space name from CharmManager instead of DID
-          navigateToCharm(charmManager.getSpaceName(), id);
+          navigate({
+            type: "charm",
+            spaceName: charmManager.getSpaceName(),
+            charmId: id,
+          });
         });
       },
     });
@@ -165,80 +169,4 @@ export class RuntimeInternals extends EventTarget {
     const cc = new CharmsController(charmManager);
     return new RuntimeInternals(cc, telemetry);
   }
-}
-
-export async function createCharmsController(
-  { identity, spaceName, apiUrl }: {
-    identity: Identity;
-    spaceName: string;
-    apiUrl: URL;
-  },
-): Promise<CharmsController> {
-  console.log("[createCharmsController] Starting with:", {
-    identityDid: identity.did(),
-    spaceName,
-    apiUrl: apiUrl.toString(),
-  });
-
-  const session = await createSession(identity, spaceName);
-  const url = apiUrl.toString();
-
-  console.log("[createCharmsController] Creating Runtime with:", {
-    storageUrl: new URL("/api/storage/memory", url).toString(),
-    blobbyServerUrl: url,
-    sessionIdentity: session.as.did(),
-    sessionSpace: session.space,
-    isPrivateSpace: session.private,
-  });
-
-  const staticAssetUrl = new URL(API_URL);
-  staticAssetUrl.pathname = "/static";
-
-  // We're hoisting CharmManager so that
-  // we can create it after the runtime, but still reference
-  // its `getSpaceName` method in a runtime callback.
-  // deno-lint-ignore prefer-const
-  let charmManager: CharmManager;
-
-  const runtime = new Runtime({
-    storageManager: StorageManager.open({
-      as: session.as,
-      address: new URL("/api/storage/memory", url),
-    }),
-    blobbyServerUrl: url,
-    staticAssetServerUrl: staticAssetUrl,
-    errorHandlers: [(error) => {
-      console.error(error);
-      //Sentry.captureException(error);
-    }],
-    consoleHandler: (metadata, method, args) => {
-      // Handle console messages depending on charm context.
-      // This is essentially the same as the default handling currently,
-      // but adding this here for future use.
-      if (metadata?.charmId) {
-        return [`Charm(${metadata.charmId}) [${method}]:`, ...args];
-      }
-      return [`Console [${method}]:`, ...args];
-    },
-    navigateCallback: (target) => {
-      const id = charmId(target);
-      if (!id) {
-        throw new Error(`Could not navigate to cell that is not a charm.`);
-      }
-
-      // NOTE(jake): Eventually, once we're doing multi-space navigation, we will
-      // need to replace this charmManager.getSpaceName() with a call to some
-      // sort of address book / dns-style server, OR just navigate to the DID.
-
-      // Use the human-readable space name from CharmManager instead of the DID
-      navigateToCharm(charmManager.getSpaceName(), id);
-    },
-  });
-
-  // Set up iframe context handler
-  setupIframe(runtime);
-
-  charmManager = new CharmManager(session, runtime);
-  await charmManager.synced();
-  return new CharmsController(charmManager);
 }
