@@ -34,7 +34,7 @@ import {
   executeKeyboardCommand,
   executePathBasedKeyboardCommand,
 } from "./keyboard-commands.ts";
-import { TreeOperations, createCleanNodeCopy } from "./tree-operations.ts";
+import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import {
@@ -1370,21 +1370,12 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       await mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
 
-        // Create clean copies to avoid Cell proxy issues
-        let newChildren: OutlineTreeNode[] = [];
-
-        // Add nodes before and including the target node
-        for (let i = 0; i <= nodeIndex; i++) {
-          newChildren.push(createCleanNodeCopy(currentChildren[i]));
-        }
-
-        // Add the new node
-        newChildren.push(newNode);
-
-        // Add nodes after the target node
-        for (let i = nodeIndex + 1; i < currentChildren.length; i++) {
-          newChildren.push(createCleanNodeCopy(currentChildren[i]));
-        }
+        // Build new children array with the new node inserted
+        const newChildren = [
+          ...currentChildren.slice(0, nodeIndex + 1),
+          newNode,
+          ...currentChildren.slice(nodeIndex + 1),
+        ];
 
         cell.set(newChildren);
       });

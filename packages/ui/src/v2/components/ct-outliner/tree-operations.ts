@@ -28,7 +28,7 @@ async function mutateCell<T>(
  */
 export function createCleanNodeCopy(node: Node): Node {
   return {
-    [ID]: crypto.randomUUID(),
+    [ID]: node[ID] || crypto.randomUUID(), // Preserve existing ID if it exists
     body: node.body,
     attachments: [...(node.attachments || [])],
     children: node.children.map(child => createCleanNodeCopy(child)),
@@ -442,25 +442,19 @@ export const TreeOperations = {
     await mutateCell(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
       
-      // Create clean copies of all nodes that should remain
+      // Build new children array without the deleted node
       let newChildren: Node[] = [];
       
       // Add nodes before the deleted one
-      for (let i = 0; i < nodeIndex; i++) {
-        newChildren.push(createCleanNodeCopy(currentChildren[i]));
-      }
+      newChildren.push(...currentChildren.slice(0, nodeIndex));
       
-      // Add promoted children if any
+      // Add promoted children if any (they already have [ID])
       if (node.children.length > 0) {
-        for (const child of node.children) {
-          newChildren.push(createCleanNodeCopy(child));
-        }
+        newChildren.push(...node.children);
       }
       
-      // Add nodes after the deleted one  
-      for (let i = nodeIndex + 1; i < currentChildren.length; i++) {
-        newChildren.push(createCleanNodeCopy(currentChildren[i]));
-      }
+      // Add nodes after the deleted one
+      newChildren.push(...currentChildren.slice(nodeIndex + 1));
 
       cell.set(newChildren);
     });
@@ -510,24 +504,23 @@ export const TreeOperations = {
     // Navigate to sibling's children Cell
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
 
-    // Get the node to move and create a clean copy
+    // Get the node to move
     const parentChildren = parentChildrenCell.get();
     const nodeToMove = parentChildren[nodeIndex];
-    const cleanNodeCopy = createCleanNodeCopy(nodeToMove);
 
     // Use transactions for atomic updates
     const tx = rootCell.runtime.edit();
 
-    // Remove node from parent children - create clean copies for all remaining nodes
+    // Remove node from parent children - keep original references for siblings
     const newParentChildren = [
-      ...parentChildren.slice(0, nodeIndex).map(child => createCleanNodeCopy(child)),
-      ...parentChildren.slice(nodeIndex + 1).map(child => createCleanNodeCopy(child)),
+      ...parentChildren.slice(0, nodeIndex),
+      ...parentChildren.slice(nodeIndex + 1),
     ];
     parentChildrenCell.withTx(tx).set(newParentChildren);
 
-    // Add clean copy to sibling children
+    // Add original node to sibling children (works because nodes have [ID])
     const currentSiblingChildren = siblingChildrenCell.get();
-    const newSiblingChildren = [...currentSiblingChildren, cleanNodeCopy];
+    const newSiblingChildren = [...currentSiblingChildren, nodeToMove];
     siblingChildrenCell.withTx(tx).set(newSiblingChildren);
 
     await tx.commit();
@@ -565,28 +558,25 @@ export const TreeOperations = {
     // Navigate to grandparent's children Cell (destination)
     const grandParentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, grandParentPath);
 
-    // Get values and create clean copies instead of moving proxy objects
+    // Get the node to move
     const parentChildren = parentChildrenCell.get();
     const grandParentChildren = grandParentChildrenCell.get();
     const nodeToMove = parentChildren[nodeIndex];
-    
-    // Create a clean deep copy of the node to avoid proxy issues
-    const cleanNodeCopy = createCleanNodeCopy(nodeToMove);
 
     const tx = rootCell.runtime.edit();
 
-    // Remove from parent children - create clean copies
+    // Remove from parent children
     const newParentChildren = [
-      ...parentChildren.slice(0, nodeIndex).map(child => createCleanNodeCopy(child)),
-      ...parentChildren.slice(nodeIndex + 1).map(child => createCleanNodeCopy(child)),
+      ...parentChildren.slice(0, nodeIndex),
+      ...parentChildren.slice(nodeIndex + 1),
     ];
     parentChildrenCell.withTx(tx).set(newParentChildren);
 
-    // Insert clean copy into grandparent children after parent - create clean copies for all
+    // Insert original node into grandparent children after parent
     const newGrandParentChildren = [
-      ...grandParentChildren.slice(0, parentIndex + 1).map(child => createCleanNodeCopy(child)),
-      cleanNodeCopy,
-      ...grandParentChildren.slice(parentIndex + 1).map(child => createCleanNodeCopy(child)),
+      ...grandParentChildren.slice(0, parentIndex + 1),
+      nodeToMove,
+      ...grandParentChildren.slice(parentIndex + 1),
     ];
     grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
 

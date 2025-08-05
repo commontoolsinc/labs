@@ -150,12 +150,10 @@ describe("Cell Array Operations - Standalone", () => {
     source.withTx(tx).set([sourceValues[0]]); // Keep only Child A
     await tx.commit();
 
-    // Try to add to destination (this fails with Reflect.get error)
+    // Try to add to destination (this does not fail)
     tx = treeCell.runtime.edit();
     const destValues = dest.get();
 
-    // This line throws: "Reflect.get called on non-object"
-    // because itemToMove is a proxy from a different Cell context
     dest.withTx(tx).set([...destValues, itemToMove]);
     await tx.commit();
 
@@ -218,10 +216,10 @@ describe("Cell Array Operations - Standalone", () => {
     list1.withTx(tx).set([values1[0], values1[2]]);
     await tx.commit();
 
-    // Try to add to list2 - this fails
+    // Try to add to list2
     tx = cell.runtime.edit();
     const values2 = list2.get();
-    list2.withTx(tx).set([...values2, itemToMove]); // Reflect.get error here
+    list2.withTx(tx).set([...values2, itemToMove]);
     await tx.commit();
 
     const updated = cell.get();
