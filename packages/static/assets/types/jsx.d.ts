@@ -1,5 +1,5 @@
 type Child = {
-  children: string[];
+  children?: string[];
 };
 
 type Cell<T> = {
@@ -22,8 +22,8 @@ declare global {
       [elemName: string]: any;
       "ct-outliner": {
               $value: Cell<{ root: OutlinerNode }>,
-              $mentionable: Cell<{"$NAME": string, "$UI": any }[]>
-              'oncharm-link-click'?: (e: { detail: { item: Cell<Charm> } }) => void,
+              $mentionable: Cell<Charm[]>
+              'oncharm-link-click'?: any,
             } & Child;
     }
   }
