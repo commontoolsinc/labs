@@ -353,6 +353,14 @@ jobs:
           API_URL=http://localhost:8000/ \
           deno task integration
 
+      - name: 🧪 Run background worker integration tests
+        working-directory: packages/background-charm-service
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          FRONTEND_URL=http://localhost:8000/ \
+          deno task integration
+
   cli-integration-test:
     name: "CLI Integration Tests"
     runs-on: ubuntu-latest
@@ -414,6 +422,7 @@ jobs:
         run: |
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
+          FRONTEND_URL=http://localhost:8000/ \
           deno task integration
 
       - name: 🧪 Run end-to-end shell integration tests
