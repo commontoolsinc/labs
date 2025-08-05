@@ -1511,12 +1511,12 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   }
 
   private getFilteredMentions(): Charm[] {
-    if (!this.mentionable || this.mentionable.get().length === 0) return [];
+    if (!this.mentionable || this.mentionable.getAsQueryResult().length === 0) return [];
 
     const query = this.mentionQuery.toLowerCase();
     const matches = [];
 
-    const flattened = this.mentionable.get();
+    const flattened = this.mentionable.getAsQueryResult();
     for (const mention of flattened) {
       if (mention[NAME]?.toLowerCase()?.includes(query)) {
         matches.push(flattened.indexOf(mention));
@@ -1587,7 +1587,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   private async decodeCharmFromHref(href: string | null): Promise<Charm> {
     // Check if hash matches any mentionable charm
     let match = -1;
-    const flattened = this.mentionable.get() || [];
+    const flattened = this.mentionable.getAsQueryResult() || [];
     for (const mention of flattened) {
       const mentionHash = await this.generateHash(mention[NAME] || "");
       if (mentionHash === href) {
@@ -1831,7 +1831,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     parentPath: number[] = [],
   ): unknown {
     return repeat(
-      nodes.get(),
+      nodes.getAsQueryResult() as OutlineTreeNode[],
       (node) => this.getNodeIndex(node),
       (node, index) =>
         this.renderNode(nodes.key(index), level, [...parentPath, index]),
@@ -2065,7 +2065,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
    * Render attachments for a node using ct-render
    */
   private renderAttachments(node: Cell<OutlineTreeNode>): unknown {
-    const attachments = node.key('attachments').get();
+    const attachments = node.key('attachments').getAsQueryResult() as Charm[];
 
     if (!attachments || attachments.length === 0) {
       return "";
@@ -2080,7 +2080,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     const space = tree.space;
 
     // Create proper charm cell references from attachment charm objects
-    const charmCells = attachments.map((attachment) => {
+    const charmCells = attachments.map((attachment: Charm) => {
       try {
         // Extract entity ID from the charm object
         const entityId = getEntityId(attachment);

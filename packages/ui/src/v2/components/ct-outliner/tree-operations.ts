@@ -427,7 +427,7 @@ export const TreeOperations = {
 
     // Get the children to promote before modifying anything
     const nodeChildrenCell = nodeCell.key("children") as Cell<Node[]>;
-    const childrenToPromote = nodeChildrenCell.get();
+    const childrenToPromote = nodeChildrenCell.getAsQueryResult();
 
     await mutateCell(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
@@ -495,7 +495,7 @@ export const TreeOperations = {
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
 
     // Get the node to move before any modifications
-    const parentChildren = parentChildrenCell.get();
+    const parentChildren = parentChildrenCell.getAsQueryResult();
     const nodeToMove = parentChildren[nodeIndex];
 
     // First transaction: Remove from parent
@@ -509,14 +509,14 @@ export const TreeOperations = {
 
     // Second transaction: Add to sibling
     tx = rootCell.runtime.edit();
-    const siblingChildren = siblingChildrenCell.get();
+    const siblingChildren = siblingChildrenCell.getAsQueryResult();
     const newSiblingChildren = [...siblingChildren, nodeToMove];
     siblingChildrenCell.withTx(tx).set(newSiblingChildren);
     await tx.commit();
 
     // Return new focused path
     const siblingPath = [...parentPath, previousSiblingIndex];
-    const updatedSiblingChildren = siblingChildrenCell.get();
+    const updatedSiblingChildren = siblingChildrenCell.getAsQueryResult();
     return [...siblingPath, updatedSiblingChildren.length - 1]; // -1 because we just added the node
   },
 
@@ -548,7 +548,7 @@ export const TreeOperations = {
     const grandParentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, grandParentPath);
 
     // Get the node to move before any modifications
-    const parentChildren = parentChildrenCell.get();
+    const parentChildren = parentChildrenCell.getAsQueryResult();
     const nodeToMove = parentChildren[nodeIndex];
 
     // First transaction: Remove from parent
@@ -562,7 +562,7 @@ export const TreeOperations = {
 
     // Second transaction: Add to grandparent
     tx = rootCell.runtime.edit();
-    const grandParentChildren = grandParentChildrenCell.get();
+    const grandParentChildren = grandParentChildrenCell.getAsQueryResult();
     const newGrandParentChildren = [
       ...grandParentChildren.slice(0, parentIndex + 1),
       nodeToMove,
