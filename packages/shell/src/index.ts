@@ -28,22 +28,4 @@ if (ENVIRONMENT !== "production") {
   });
 }
 await app.initializeKeys();
-{
-  const location = new URL(globalThis.location.href);
-  const segments = location.pathname.split("/");
-  segments.shift(); // shift off the pathnames' prefix "/";
-  let [spaceName, charmId] = USE_SHELL_PREFIX
-    ? [segments[1], segments[2]]
-    : [segments[0], segments[1]];
-  if (!spaceName) {
-    spaceName = "common-knowledge";
-    globalThis.history.replaceState(
-      {},
-      "",
-      USE_SHELL_PREFIX ? "/shell/common-knowledge" : "/common-knowledge",
-    );
-  }
-  app.setSpace(spaceName);
-  if (charmId) app.setActiveCharmId(charmId);
-}
 const navigation = new Navigation(app);
