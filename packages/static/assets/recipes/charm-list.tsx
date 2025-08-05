@@ -44,7 +44,7 @@ const CharmsListOutputSchema = {
 
 const visit = handler<{}, { charm: any }>((_, state) => {
   return navigateTo(state.charm);
-});
+}, { proxy: true });
 
 
 const removeCharm = handler({}, {
