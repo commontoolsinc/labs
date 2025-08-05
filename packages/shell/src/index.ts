@@ -7,6 +7,7 @@ import { XRootView } from "./views/RootView.ts";
 import "./components/index.ts";
 import "./views/index.ts";
 import { App } from "./lib/app/controller.ts";
+import { Navigation } from "./lib/navigate.ts";
 import "./globals.ts";
 console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
