@@ -9,7 +9,6 @@ import discord from "@/routes/integrations/discord/discord.index.ts";
 import googleOAuth from "@/routes/integrations/google-oauth/google-oauth.index.ts";
 import plaidOAuth from "@/routes/integrations/plaid-oauth/plaid-oauth.index.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
-import frontendProxy from "@/routes/frontend/frontend.index.ts";
 import whoami from "@/routes/whoami/whoami.index.ts";
 import meta from "@/routes/meta/meta.index.ts";
 import shell from "@/routes/shell/shell.index.ts";
@@ -31,14 +30,15 @@ const routes = [
   memory,
   whoami,
   meta,
-  shell,
   staticRoute,
-  frontendProxy, // This is the frontend proxy for jumble in the CDN.
 ] as const;
 
 routes.forEach((route) => {
   app.route("/", route);
 });
+
+// Shell serves at root, so add it last to catch all unmatched routes
+app.route("/", shell);
 
 export type AppType = (typeof routes)[number];
 

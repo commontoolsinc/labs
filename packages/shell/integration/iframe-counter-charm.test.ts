@@ -109,7 +109,7 @@ describe("shell iframe counter tests", () => {
     });
 
     // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
     // Login and verify state
@@ -162,7 +162,7 @@ describe("shell iframe counter tests", () => {
 
     // Reload the page to test persistence
     console.log("\nReloading page to test persistence...");
-    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
     // Need to login again after reload

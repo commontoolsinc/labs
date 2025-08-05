@@ -40,7 +40,7 @@ describe("simple-list integration test", () => {
     const { page } = shell.get();
 
     // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
     // Login

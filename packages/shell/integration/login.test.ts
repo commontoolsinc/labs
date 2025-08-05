@@ -13,7 +13,7 @@ describe("shell login tests", () => {
   it("can create a new user via passphrase", async () => {
     const { page } = shell.get();
     const spaceName = "common-knowledge";
-    await page.goto(`${FRONTEND_URL}shell`);
+    await page.goto(`${FRONTEND_URL}`);
     await page.applyConsoleFormatter();
     const state = await page.evaluate(() => {
       return globalThis.app.state();

@@ -7,7 +7,7 @@ import { getMimeType } from "@/lib/mime-type.ts";
 const router = createRouter();
 
 router.use(
-  "/shell/*",
+  "/*",
   cors({
     origin: "*",
     allowMethods: ["GET", "OPTIONS"],
@@ -25,11 +25,8 @@ const SHELL_URL = Deno.env.get("SHELL_URL");
 
 if (COMPILED) {
   // Production mode - serve static files
-  router.get("/shell/*", async (c) => {
-    const fullPath = c.req.path;
-    let reqPath = fullPath.startsWith("/shell/")
-      ? fullPath.slice(7) // Remove "/shell/" prefix
-      : "";
+  router.get("/*", async (c) => {
+    let reqPath = c.req.path.slice(1); // Remove leading slash
 
     // Default to index.html for root path
     if (!reqPath) {
@@ -83,8 +80,8 @@ if (COMPILED) {
     return response;
   });
 
-  router.get("/shell/*", async (c) => {
-    const reqPath = c.req.path.replace("/shell", "") || "/";
+  router.get("/*", async (c) => {
+    const reqPath = c.req.path || "/";
     const targetUrl = `${SHELL_URL}${reqPath}`;
 
     try {
@@ -103,7 +100,7 @@ if (COMPILED) {
   });
 } else {
   // Development mode without proxy
-  router.get("/shell/*", (c) => {
+  router.get("/*", (c) => {
     return c.text(
       "Shell app not available. Set SHELL_URL=http://localhost:5173 or run the compiled binary",
       404,
