@@ -100,6 +100,7 @@ describe("module", () => {
           props.x = event.clientX;
           props.y = event.clientY;
         },
+        { proxy: true },
       );
       expect(typeof clickHandler).toBe("function");
       expect(isModule(clickHandler)).toBe(true);
@@ -111,6 +112,7 @@ describe("module", () => {
           props.x = event.clientX;
           props.y = event.clientY;
         },
+        { proxy: true },
       );
       const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
@@ -201,6 +203,7 @@ describe("module", () => {
           props.x = event.clientX;
           props.y = event.clientY;
         },
+        { proxy: true },
       );
       const stream = clickHandler.with({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
