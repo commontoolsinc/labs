@@ -46,12 +46,6 @@ jobs:
             exit 1
           fi
 
-      - name: 📥 Download frontend artifacts for Sentry
-        run: |
-          mkdir -p jumble-artifacts
-          # Extract the jumble frontend artifacts from the tarball if they exist
-          # or download them from a known location if stored separately
-          tar -xzf downloaded-artifacts/labs-${{ github.event.inputs.commit_sha }}.tar.gz -C jumble-artifacts || true
 
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
@@ -64,27 +58,6 @@ jobs:
           deno run --allow-all npm:@sentry/cli --version
           echo "::endgroup::"
 
-      - name: 📊 Create Jumble Sentry release & upload source maps
-        run: |
-          # Create a release with version based on commit SHA
-          deno run --allow-all npm:@sentry/cli releases new ${{ github.event.inputs.commit_sha }}
-
-          # Associate commits with the release
-          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.event.inputs.commit_sha }} --auto
-
-          # Upload source maps if they exist
-          if [ -d "./jumble-artifacts" ]; then
-            deno run --allow-all npm:@sentry/cli releases files ${{ github.event.inputs.commit_sha }} upload-sourcemaps ./jumble-artifacts --rewrite
-          else
-            echo "No source maps found to upload"
-          fi
-
-          # Finalize the release
-          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.event.inputs.commit_sha }}
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_JUMBLE_PROJECT }}
 
       - name: 📊 Create Toolshed server Sentry release
         run: |

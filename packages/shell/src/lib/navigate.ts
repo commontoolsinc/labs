@@ -1,5 +1,4 @@
 import { App } from "./app/controller.ts";
-import { USE_SHELL_PREFIX } from "./env.ts";
 import { getLogger } from "@commontools/utils/logger";
 
 const logger = getLogger("shell.navigation");
@@ -148,17 +147,14 @@ function getNavigationHref(command: NavigationCommand): string {
       throw new Error("Unsupported navigation type.");
     }
   }
-  const prefix = USE_SHELL_PREFIX ? `/shell` : "";
-  return `${prefix}/${content}`;
+  return `/${content}`;
 }
 
 function generateCommandFromPageLoad(): NavigationCommand {
   const location = new URL(globalThis.location.href);
   const segments = location.pathname.split("/");
   segments.shift(); // shift off the pathnames' prefix "/";
-  const [first, charmId] = USE_SHELL_PREFIX
-    ? [segments[1], segments[2]]
-    : [segments[0], segments[1]];
+  const [first, charmId] = [segments[0], segments[1]];
 
   const spaceName = first || "common-knowledge";
   if (charmId) {

@@ -1,18 +1,12 @@
 import "core-js/proposals/explicit-resource-management";
 import "@commontools/ui/v1";
 import "@commontools/ui/v2";
-import {
-  API_URL,
-  COMMIT_SHA,
-  ENVIRONMENT,
-  USE_SHELL_PREFIX,
-} from "./lib/env.ts";
+import { API_URL, COMMIT_SHA, ENVIRONMENT } from "./lib/env.ts";
 import { AppUpdateEvent } from "./lib/app/events.ts";
 import { XRootView } from "./views/RootView.ts";
 import "./components/index.ts";
 import "./views/index.ts";
 import { App } from "./lib/app/controller.ts";
-import { Navigation } from "./lib/navigate.ts";
 import "./globals.ts";
 console.log(`ENVIRONMENT=${ENVIRONMENT}`);
 console.log(`API_URL=${API_URL}`);
@@ -28,4 +22,5 @@ if (ENVIRONMENT !== "production") {
   });
 }
 await app.initializeKeys();
+
 const navigation = new Navigation(app);

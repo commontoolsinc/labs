@@ -13,8 +13,8 @@ const cache = new StaticCache();
 router.use(
   "*",
   // Setup CORS so that modules imported from sandboxed null-origin iframe are rejected.
-  // Specifically we need this to be able to import ./jumble/public/module/charm/sandbox/bootstrap.js
-  // from sandboxed iframe
+  // Specifically we need this to be able to import iframe-bootstrap.js
+  // from sandboxed iframes
   cors({
     origin: "*",
     allowMethods: ["GET", "OPTIONS"],
