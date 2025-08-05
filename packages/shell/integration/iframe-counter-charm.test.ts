@@ -14,7 +14,10 @@
 
 import { env, Page } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { registerCharm, ShellIntegration } from "./utils.ts";
+import {
+  registerCharm,
+  ShellIntegration,
+} from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";

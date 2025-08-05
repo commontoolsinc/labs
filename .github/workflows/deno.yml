@@ -409,6 +409,13 @@ jobs:
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
 
+      - name: 🧩 Run end-to-end patterns integration tests
+        working-directory: packages/patterns
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          deno task integration
+
       - name: 🧪 Run end-to-end shell integration tests
         working-directory: packages/shell
         run: |
