@@ -3,6 +3,7 @@
  */
 
 import { Charm } from "@commontools/charm";
+import type { TreeOperationResult } from "./tree-diff.ts";
 
 /**
  * Represents an item that can be mentioned using @ syntax
@@ -72,6 +73,7 @@ export interface OutlineUIState {
 // Legacy types removed - using Tree/Node/Block structure exclusively
 
 /**
+ * @deprecated Use PathBasedOutlinerOperations instead
  * Operations interface for outliner component
  *
  * @description Provides type-safe access to component methods for keyboard commands.
@@ -126,6 +128,48 @@ export interface OutlinerOperations {
 }
 
 /**
+ * Path-based operations interface for outliner component
+ *
+ * @description Modern interface that uses paths instead of node references.
+ * All operations return TreeOperationResult with diffs describing what changed.
+ * This enables better state management and undo/redo functionality.
+ */
+export interface PathBasedOutlinerOperations {
+  readonly tree: Tree;
+  focusedNodePath: number[] | null;
+  editingNodePath: number[] | null;
+  collapsedNodePaths: Set<string>;
+
+  // Tree operations - return TreeOperationResult with diffs
+  deleteNodeByPath(path: number[]): Promise<TreeOperationResult>;
+  indentNodeByPath(path: number[]): Promise<TreeOperationResult>;
+  outdentNodeByPath(path: number[]): Promise<TreeOperationResult>;
+  moveNodeUpByPath(path: number[]): Promise<TreeOperationResult>;
+  moveNodeDownByPath(path: number[]): Promise<TreeOperationResult>;
+
+  // Edit operations
+  startEditingByPath(path: number[], initialContent?: string): void;
+  finishEditing(): void;
+  cancelEditing(): void;
+
+  // Node creation
+  createNodeAfterPath(path: number[], nodeData: { body: string }): Promise<TreeOperationResult>;
+  createChildNodeAtPath(path: number[], nodeData: { body: string }): Promise<TreeOperationResult>;
+
+  // UI operations
+  requestUpdate(): void;
+  getAllVisibleNodes(): Node[];
+  getNodeByPath(path: number[]): Node | null;
+
+  // Checkbox operations
+  setNodeCheckboxByPath(path: number[], isChecked: boolean): void;
+  toggleNodeCheckboxByPath(path: number[]): void;
+
+  // State management
+  applyTreeDiff(result: TreeOperationResult): void;
+}
+
+/**
  * Context object passed to keyboard commands
  */
 export interface KeyboardContext {
@@ -134,6 +178,17 @@ export interface KeyboardContext {
   readonly allNodes: Node[];
   readonly currentIndex: number;
   readonly focusedNode: Node | null;
+}
+
+/**
+ * Path-based context object for keyboard commands
+ */
+export interface PathBasedKeyboardContext {
+  readonly event: KeyboardEvent;
+  readonly component: PathBasedOutlinerOperations;
+  readonly allNodes: Node[];
+  readonly currentIndex: number;
+  readonly focusedNodePath: number[] | null;
 }
 
 /**
@@ -148,10 +203,28 @@ export interface EditingKeyboardContext {
 }
 
 /**
+ * Path-based context for editing mode keyboard commands
+ */
+export interface PathBasedEditingKeyboardContext {
+  readonly event: KeyboardEvent;
+  readonly component: PathBasedOutlinerOperations;
+  readonly editingNodePath: number[];
+  readonly editingContent: string;
+  readonly textarea: HTMLTextAreaElement;
+}
+
+/**
  * Command interface for keyboard actions
  */
 export interface KeyboardCommand {
   execute(context: KeyboardContext): void;
+}
+
+/**
+ * Path-based command interface for keyboard actions
+ */
+export interface PathBasedKeyboardCommand {
+  execute(context: PathBasedKeyboardContext): void;
 }
 
 /**
