@@ -94,7 +94,7 @@ export class XCharmListView extends BaseView {
           <x-charm-link
             .charmId="${id}"
             .spaceName="${spaceName}"
-          ></x-charm-link>
+          >${name}</x-charm-link>
           <x-button
             class="remove-button"
             size="small"
