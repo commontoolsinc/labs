@@ -3,11 +3,10 @@ import { sleep } from "@commontools/utils/sleep";
 import {
   registerCharm,
   ShellIntegration,
-} from "../../shell/integration/utils.ts";
+} from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import "../../shell/src/globals.ts";
 
 const { API_URL, FRONTEND_URL } = env;
 
@@ -18,6 +17,8 @@ describe("background charm counter tests", () => {
   it("can register and interact with background counter charm", async () => {
     // FIXME(ja): currently bg process doesn't receive updates of bgCharms,
     // and so we need to start it after we register :(  We should start it here
+    // this.charmCell.sink only seems to trigger when the service.ts starts -
+    // restarting is currently the only way to get the charmCell to update
 
     const { page, identity } = shell.get();
     const spaceName = globalThis.crypto.randomUUID();
