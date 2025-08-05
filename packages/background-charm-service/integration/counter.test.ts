@@ -40,7 +40,7 @@ describe("background charm counter tests", () => {
     });
 
     // TODO(js): Remove /shell when no longer prefixed
-    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
     const state = await shell.login();
