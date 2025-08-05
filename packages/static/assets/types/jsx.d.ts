@@ -1,5 +1,7 @@
+type Children = JSX.Element[] | JSX.Element | string | number | boolean | null | undefined;
+
 type Child = {
-  children?: string[];
+  children?: Children;
 };
 
 type Cell<T> = {
@@ -15,9 +17,14 @@ type OutlinerNode = {
   attachments: Charm[]
 }
 
-
 declare global {
   namespace JSX {
+    interface Element {
+      type: string;
+      props: any;
+      children?: Children;
+    }
+
     interface IntrinsicElements {
       [elemName: string]: any;
       "ct-outliner": {
