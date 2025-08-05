@@ -35,6 +35,7 @@ const ResultSchema = {
   required: ["title", "items"],
 } as const satisfies JSONSchema;
 
+// Example of a handler to add to the list manually, if you set `readonly` the list will lose its in-built add form
 const addItem = handler(
   {
     type: "object",
