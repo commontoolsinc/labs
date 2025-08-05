@@ -117,8 +117,27 @@ The command handles common failure scenarios:
 The command uses regex pattern: `https://github\.com/[^/\s]+/[^/\s]+(?:/[^\s]*)?`
 
 ### Attachment Linking Process
-1. Insert `[null]` at target attachment path: `echo '[null]' | ct charm set ... attachments/N`
-2. Execute link operation: `ct charm link source-charm target-charm/path/to/attachments/N`
+
+**⚠️ Known Issue**: The `ct charm link` command has a bug when linking to array indices - it incorrectly reports "attachments is not a record" when trying to access array paths.
+
+**Working Manual Approach**:
+Instead of using `ct charm link`, manually create the link by writing the link JSON structure directly:
+
+```bash
+# Create node with GitHub link in attachments
+echo '{
+  "body": "Node text here",
+  "children": [],
+  "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]
+}' | ct charm set ... [PATH_TO_NODE]
+```
+
+Or for existing nodes, set the entire attachments array:
+```bash
+echo '[{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]' | ct charm set ... [PATH_TO_ATTACHMENTS]
+```
+
+Note: Setting individual array indices (e.g., `attachments/0`) does not work with the current implementation.
 
 ### Data Structures
 The command maintains internal state tracking:
@@ -212,9 +231,20 @@ Implementation Plan:
    c. Record the new charm ID for linking
 
 2. For each attachment insertion point:
-   a. Ensure attachments array exists or create it: `echo '[]' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_ATTACHMENTS]` (if needed)
-   b. Add null placeholder: `echo '[null]' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_ATTACHMENTS]/[INDEX]`
-   c. Create the link: `./dist/ct charm link --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [GITHUB_FETCHER_CHARM_ID] [PAGE_CHARM_ID]/[PATH_TO_ATTACHMENTS]/[INDEX]`
+   a. Get the space DID: `./dist/ct space info --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] | grep "did:key"`
+   b. Create the link manually due to ct charm link bug with array indices:
+      - For new nodes: Create node with link in attachments:
+        ```
+        echo '{
+          "body": "[NODE_BODY_TEXT]",
+          "children": [],
+          "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]
+        }' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_NODE]
+        ```
+      - For existing nodes: Set the entire attachments array:
+        ```
+        echo '[{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_ATTACHMENTS]
+        ```
 
 3. Verify all links are working by inspecting the final attachment structures
 
