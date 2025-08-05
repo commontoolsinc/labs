@@ -22,6 +22,7 @@ import {
   waitForCellUpdate,
   waitForOutlinerUpdate,
 } from "./test-utils.ts";
+import { TreeOperations } from "./tree-operations.ts";
 import type { KeyboardContext, PathBasedKeyboardContext } from "./types.ts";
 import { getNodeByPath } from "./node-path.ts";
 
@@ -198,19 +199,17 @@ describe("Keyboard Commands", () => {
       await setupOutliner();
       // Setup nested structure first
       const tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
-          children: [{
-            body: "Parent",
-            children: [{
-              body: "Child",
-              children: [],
-              attachments: [],
-            }],
-            attachments: [],
-          }],
-          attachments: [],
-        },
+          children: [
+            TreeOperations.createNode({
+              body: "Parent",
+              children: [
+                TreeOperations.createNode({ body: "Child" }),
+              ],
+            }),
+          ],
+        }),
       };
       const treeCell = await createMockTreeCell(tree);
       outliner.value = treeCell;
@@ -272,19 +271,17 @@ describe("Keyboard Commands", () => {
       await setupOutliner();
       // Setup nested structure first
       const tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
-          children: [{
-            body: "Parent",
-            children: [{
-              body: "Child",
-              children: [],
-              attachments: [],
-            }],
-            attachments: [],
-          }],
-          attachments: [],
-        },
+          children: [
+            TreeOperations.createNode({
+              body: "Parent",
+              children: [
+                TreeOperations.createNode({ body: "Child" }),
+              ],
+            }),
+          ],
+        }),
       };
       const treeCell = await createMockTreeCell(tree);
       outliner.value = treeCell;

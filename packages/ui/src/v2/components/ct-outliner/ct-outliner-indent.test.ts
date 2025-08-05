@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CTOutliner } from "./ct-outliner.ts";
 import { createMockTreeCell, waitForCellUpdate, waitForOutlinerUpdate } from "./test-utils.ts";
+import { TreeOperations } from "./tree-operations.ts";
 import type { Tree } from "./types.ts";
 
 describe("CTOutliner Indentation Operations (CT-693)", () => {
@@ -15,27 +16,14 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
   describe("indentNodeByPath", () => {
     it("should indent a node under its previous sibling", async () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
           children: [
-            {
-              body: "Item 1",
-              children: [],
-              attachments: [],
-            },
-            {
-              body: "Item 2", // This will be indented under Item 1
-              children: [],
-              attachments: [],
-            },
-            {
-              body: "Item 3",
-              children: [],
-              attachments: [],
-            },
+            TreeOperations.createNode({ body: "Item 1" }),
+            TreeOperations.createNode({ body: "Item 2" }), // This will be indented under Item 1
+            TreeOperations.createNode({ body: "Item 3" }),
           ],
-          attachments: [],
-        },
+        }),
       };
 
       const { outliner } = await setupOutliner(tree);
@@ -58,22 +46,13 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
 
     it("should not indent the first child", async () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
           children: [
-            {
-              body: "Item 1",
-              children: [],
-              attachments: [],
-            },
-            {
-              body: "Item 2",
-              children: [],
-              attachments: [],
-            },
+            TreeOperations.createNode({ body: "Item 1" }),
+            TreeOperations.createNode({ body: "Item 2" }),
           ],
-          attachments: [],
-        },
+        }),
       };
 
       const { outliner } = await setupOutliner(tree);
@@ -95,28 +74,18 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
   describe("outdentNodeByPath", () => {
     it("should outdent a nested node", async () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
           children: [
-            {
+            TreeOperations.createNode({
               body: "Item 1",
               children: [
-                {
-                  body: "Item 1.1", // This will be outdented
-                  children: [],
-                  attachments: [],
-                },
+                TreeOperations.createNode({ body: "Item 1.1" }), // This will be outdented
               ],
-              attachments: [],
-            },
-            {
-              body: "Item 2",
-              children: [],
-              attachments: [],
-            },
+            }),
+            TreeOperations.createNode({ body: "Item 2" }),
           ],
-          attachments: [],
-        },
+        }),
       };
 
       const { outliner } = await setupOutliner(tree);
@@ -139,22 +108,13 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
 
     it("should not outdent root-level nodes", async () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
           children: [
-            {
-              body: "Item 1",
-              children: [],
-              attachments: [],
-            },
-            {
-              body: "Item 2",
-              children: [],
-              attachments: [],
-            },
+            TreeOperations.createNode({ body: "Item 1" }),
+            TreeOperations.createNode({ body: "Item 2" }),
           ],
-          attachments: [],
-        },
+        }),
       };
 
       const { outliner } = await setupOutliner(tree);
@@ -176,22 +136,13 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
   describe("combined operations", () => {
     it("should handle indent then outdent", async () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
           children: [
-            {
-              body: "Item 1",
-              children: [],
-              attachments: [],
-            },
-            {
-              body: "Item 2",
-              children: [],
-              attachments: [],
-            },
+            TreeOperations.createNode({ body: "Item 1" }),
+            TreeOperations.createNode({ body: "Item 2" }),
           ],
-          attachments: [],
-        },
+        }),
       };
 
       const { outliner } = await setupOutliner(tree);

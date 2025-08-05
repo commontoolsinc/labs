@@ -23,19 +23,6 @@ async function mutateCell<T>(
 }
 
 /**
- * Create a clean deep copy of a node to avoid Cell proxy issues
- * Recursively copies children and assigns new IDs to prevent reference conflicts
- */
-export function createCleanNodeCopy(node: Node): Node {
-  return {
-    [ID]: node[ID] || crypto.randomUUID(), // Preserve existing ID if it exists
-    body: node.body,
-    attachments: [...(node.attachments || [])],
-    children: node.children.map(child => createCleanNodeCopy(child)),
-  };
-}
-
-/**
  * Pure functional operations for Tree manipulation
  *
  * This module provides pure functions for tree operations that work with:
@@ -177,7 +164,7 @@ export const TreeOperations = {
   findParentNodeCell(node: Cell<Node>, targetNode: Cell<Node>): Cell<Node> | null {
     const nodeChildren = node.key("children");
     const childrenArray = nodeChildren.getAsQueryResult();
-    
+
     for (let i = 0; i < childrenArray.length; i++) {
       const childCell = nodeChildren.key(i);
       if (childCell.equals(targetNode)) {
@@ -221,14 +208,14 @@ export const TreeOperations = {
   getNodeIndex(parent: Cell<Node>, targetNode: Cell<Node>): number {
     const parentChildren = parent.key("children");
     const childrenArray = parentChildren.getAsQueryResult();
-    
+
     for (let i = 0; i < childrenArray.length; i++) {
       const childCell = parentChildren.key(i);
       if (childCell.equals(targetNode)) {
         return i;
       }
     }
-    
+
     return -1;
   },
 
@@ -420,7 +407,7 @@ export const TreeOperations = {
    * @returns Promise resolving to new focus path or null
    */
   async deleteNodeCell(
-    rootCell: Cell<Node>, 
+    rootCell: Cell<Node>,
     nodeCell: Cell<Node>,
     nodePath: number[]
   ): Promise<number[] | null> {
@@ -437,25 +424,25 @@ export const TreeOperations = {
     }
 
     const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
-    
+
     // Get the children to promote before modifying anything
     const nodeChildrenCell = nodeCell.key("children") as Cell<Node[]>;
     const childrenToPromote = nodeChildrenCell.get();
 
     await mutateCell(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
-      
+
       // Build new children array without the deleted node
       let newChildren: Node[] = [];
-      
+
       // Add nodes before the deleted one
       newChildren.push(...currentChildren.slice(0, nodeIndex));
-      
+
       // Add promoted children if any
       if (childrenToPromote.length > 0) {
         newChildren.push(...childrenToPromote);
       }
-      
+
       // Add nodes after the deleted one
       newChildren.push(...currentChildren.slice(nodeIndex + 1));
 
@@ -465,7 +452,7 @@ export const TreeOperations = {
     // Calculate new focus after deletion - need to check the actual updated array
     const parentPath = nodePath.slice(0, -1);
     const updatedChildren = parentNode.key("children").getAsQueryResult();
-    
+
     if (nodeIndex > 0 && updatedChildren.length > nodeIndex - 1) {
       // Focus previous sibling
       return [...parentPath, nodeIndex - 1];
