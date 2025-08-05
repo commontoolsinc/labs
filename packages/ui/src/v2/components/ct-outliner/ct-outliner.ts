@@ -161,6 +161,38 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     this._collapsedNodePaths = new Set(paths);
   }
 
+  // Compatibility properties for OutlinerOperations interface
+  get focusedNode(): OutlineTreeNode | null {
+    return this.focusedNodePath ? getNodeByPath(this.tree, this.focusedNodePath) : null;
+  }
+
+  set focusedNode(node: OutlineTreeNode | null) {
+    this.focusedNodePath = node ? getNodePath(this.tree, node) : null;
+  }
+
+  get collapsedNodes(): Set<OutlineTreeNode> {
+    const nodes = new Set<OutlineTreeNode>();
+    for (const pathStr of this.collapsedNodePaths) {
+      const path = stringToPath(pathStr);
+      const node = getNodeByPath(this.tree, path);
+      if (node) {
+        nodes.add(node);
+      }
+    }
+    return nodes;
+  }
+
+  set collapsedNodes(nodes: Set<OutlineTreeNode>) {
+    const paths = new Set<string>();
+    for (const node of nodes) {
+      const path = getNodePath(this.tree, node);
+      if (path) {
+        paths.add(pathToString(path));
+      }
+    }
+    this.collapsedNodePaths = paths;
+  }
+
   // PathBasedOutlinerOperations implementation
   getNodeByPath(path: number[]): OutlineTreeNode | null {
     return getNodeByPath(this.tree, path);
@@ -360,7 +392,10 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     const newNode = TreeOperations.createNode({ body: nodeData.body });
     const newNodePath = [...path, 0]; // Insert as first child
 
-    const nodeChildrenCell = getNodeChildrenCell(this.value, this.tree, getNodeByPath(this.tree, path));
+    const node = getNodeByPath(this.tree, path);
+    if (!node) return result;
+    
+    const nodeChildrenCell = getNodeChildrenCell(this.value, this.tree, node);
     if (nodeChildrenCell) {
       await mutateCell(nodeChildrenCell, (cell) => {
         const currentChildren = cell.get();
@@ -396,6 +431,112 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     this.editingContent = "";
     this.requestUpdate();
     OutlinerEffects.focusOutliner(this.shadowRoot);
+  }
+
+  /**
+   * Start editing a node (compatibility method for tests)
+   * @param node - The node to start editing
+   */
+  startEditing(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.startEditingByPath(path, node.body);
+    }
+  }
+
+  // Compatibility methods for OutlinerOperations interface
+  deleteNode(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.deleteNodeByPath(path);
+    }
+  }
+
+  indentNode(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.indentNodeByPath(path);
+    }
+  }
+
+  outdentNode(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.outdentNodeByPath(path);
+    }
+  }
+
+  moveNodeUp(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.moveNodeUpByPath(path);
+    }
+  }
+
+  moveNodeDown(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.moveNodeDownByPath(path);
+    }
+  }
+
+  indentNodeWithEditState(node: OutlineTreeNode, editingContent: string, cursorPosition: number): void {
+    // For compatibility - finish editing first, then indent
+    if (this.editingNodePath) {
+      this.finishEditing();
+    }
+    this.indentNode(node);
+  }
+
+  outdentNodeWithEditState(node: OutlineTreeNode, editingContent: string, cursorPosition: number): void {
+    // For compatibility - finish editing first, then outdent
+    if (this.editingNodePath) {
+      this.finishEditing();
+    }
+    this.outdentNode(node);
+  }
+
+  startEditingWithInitialText(node: OutlineTreeNode, text: string): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.startEditingWithInitialTextByPath(path, text);
+    }
+  }
+
+  toggleEditMode(node: OutlineTreeNode): void {
+    if (this.editingNodePath) {
+      this.finishEditing();
+    } else {
+      this.startEditing(node);
+    }
+  }
+
+  createNewNodeAfter(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.createNodeAfterPath(path, { body: "" });
+    }
+  }
+
+  createChildNode(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.createChildNodeAtPath(path, { body: "" });
+    }
+  }
+
+  setNodeCheckbox(node: OutlineTreeNode, isChecked: boolean): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.setNodeCheckboxByPath(path, isChecked);
+    }
+  }
+
+  toggleNodeCheckbox(node: OutlineTreeNode): void {
+    const path = getNodePath(this.tree, node);
+    if (path) {
+      this.toggleNodeCheckboxByPath(path);
+    }
   }
 
   setNodeCheckboxByPath(path: number[], isChecked: boolean): void {
@@ -459,7 +600,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   declare mentionQuery: string;
   declare selectedMentionIndex: number;
 
-  private editingNodePath: number[] | null = null;
+  editingNodePath: number[] | null = null;
   private editingContent: string = "";
 
   // Subscription cleanup function
@@ -846,7 +987,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   }
 
   getAllVisibleNodes(): OutlineTreeNode[] {
-    // Use the compatibility getter
+    // Use the compatibility getter to convert path-based collapsed nodes to node-based
     return NodeUtils.getVisibleNodes(this.tree, this.collapsedNodes);
   }
 
@@ -871,28 +1012,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   }
 
 
-  /**
-   * Start editing a node by path instead of node reference
-   *
-   * @param path - The path to the node to start editing
-   * @param initialContent - The initial content to edit
-   * @description Enters edit mode for the node at the specified path.
-   * If the component is readonly, this method does nothing.
-   */
-  startEditingByPath(path: number[], initialContent: string) {
-    if (this.readonly) return;
-
-    this.editingNodePath = path;
-    this.editingContent = initialContent;
-    this.requestUpdate();
-
-    // Get the node by path to determine its index for focusing
-    const node = getNodeByPath(this.tree, path);
-    if (node) {
-      const nodeIndex = this.getNodeIndex(node);
-      OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
-    }
-  }
 
 
   /**
@@ -917,15 +1036,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
 
-  private cancelEditing() {
-    if (!this.editingNodePath) return;
-
-    this.focusedNodePath = this.editingNodePath;
-    this.editingNodePath = null;
-    this.editingContent = "";
-    this.requestUpdate();
-    OutlinerEffects.focusOutliner(this.shadowRoot);
-  }
 
   private handleNodeClick(
     node: OutlineTreeNode,
@@ -1547,45 +1657,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   }
 
 
-  /**
-   * Set checkbox state on a node by path using Cell operations
-   */
-  setNodeCheckboxByPath(nodePath: number[], isChecked: boolean) {
-    if (!this.value) return;
-
-    const nodeBodyCell = getNodeBodyCellByPath(this.value, nodePath);
-    if (nodeBodyCell) {
-      mutateCell(nodeBodyCell, (cell) => {
-        const currentBody = cell.get();
-
-        // Set checkbox to the specified state
-        let newBody: string;
-        const hasCheckbox = /^\s*\[[ x]?\]\s*/.test(currentBody);
-
-        if (hasCheckbox) {
-          // Update existing checkbox
-          if (isChecked) {
-            // Set to checked
-            newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[x] ");
-          } else {
-            // Set to unchecked (normalize to [ ])
-            newBody = currentBody.replace(/^\s*\[[ x]?\]\s*/, "[ ] ");
-          }
-        } else {
-          // Add checkbox if none exists
-          if (isChecked) {
-            newBody = "[x] " + currentBody;
-          } else {
-            newBody = "[ ] " + currentBody;
-          }
-        }
-
-        cell.set(newBody);
-      });
-    }
-
-    this.requestUpdate();
-  }
 
 
   private handleOutlinerClick(event: MouseEvent) {

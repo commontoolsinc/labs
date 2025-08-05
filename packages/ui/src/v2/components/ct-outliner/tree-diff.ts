@@ -453,8 +453,8 @@ export class PathDiffApplier {
     }
 
     return {
-      focused: newFocused,
-      editing: newEditing,
+      focused: newFocused ?? null,
+      editing: newEditing ?? null,
       collapsed: newCollapsed,
     };
   }
