@@ -2,8 +2,9 @@
  * Shared test utilities for CT Outliner component tests
  */
 import { CTOutliner } from "./ct-outliner.ts";
-import type { KeyboardContext, Tree } from "./types.ts";
+import type { KeyboardContext, PathBasedKeyboardContext, Tree, Node } from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
+import { getNodeByPath } from "./node-path.ts";
 import { type Cell, Runtime, toOpaqueRef } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -114,8 +115,8 @@ export const setupMockOutlinerAsync = async () => {
   const tree = createTestTree();
   const treeCell = await createMockTreeCellAsync(tree);
   outliner.value = treeCell;
-  // Set focused node to the one from the outliner's tree, not the original tree
-  outliner.focusedNode = outliner.tree.root.children[0];
+  // Set focused node path to the first child
+  outliner.focusedNodePath = [0];
 
   return { outliner, tree, treeCell };
 };
@@ -158,8 +159,11 @@ export const createKeyboardContext = (
     outliner.tree.root,
     new Set(),
   );
-  const currentIndex = outliner.focusedNode
-    ? allNodes.indexOf(outliner.focusedNode)
+  const focusedNode = outliner.focusedNodePath 
+    ? getNodeByPath(outliner.tree, outliner.focusedNodePath)
+    : null;
+  const currentIndex = focusedNode
+    ? allNodes.indexOf(focusedNode)
     : -1;
 
   return {
@@ -167,8 +171,69 @@ export const createKeyboardContext = (
     component: outliner,
     allNodes,
     currentIndex,
-    focusedNode: outliner.focusedNode,
+    focusedNode: focusedNode,
   };
+};
+
+/**
+ * Create path-based keyboard context for testing
+ */
+export const createPathBasedKeyboardContext = (
+  event: KeyboardEvent,
+  outliner: CTOutliner,
+): PathBasedKeyboardContext => {
+  const allNodes = TreeOperations.getAllVisibleNodes(
+    outliner.tree.root,
+    new Set(),
+  );
+  const focusedNode = outliner.focusedNodePath 
+    ? getNodeByPath(outliner.tree, outliner.focusedNodePath)
+    : null;
+  
+  // Find current index by comparing node content instead of object identity
+  // since Cell-based nodes might have different proxy references
+  let currentIndex = -1;
+  if (focusedNode) {
+    // Try to find the node by matching body content
+    for (let i = 0; i < allNodes.length; i++) {
+      if (allNodes[i].body === focusedNode.body) {
+        currentIndex = i;
+        break;
+      }
+    }
+  }
+
+  return {
+    event,
+    component: outliner,
+    allNodes,
+    currentIndex,
+    focusedNodePath: outliner.focusedNodePath,
+  };
+};
+
+/**
+ * Get all visible node paths from a tree
+ */
+export const getAllVisibleNodePaths = (tree: Tree): number[][] => {
+  const paths: number[][] = [];
+  
+  const traverse = (node: Node, currentPath: number[]) => {
+    // Add current path if not root (root is at empty path)
+    if (currentPath.length > 0) {
+      paths.push([...currentPath]);
+    }
+    
+    // Traverse children
+    if (node.children && node.children.length > 0) {
+      node.children.forEach((child, index) => {
+        traverse(child, [...currentPath, index]);
+      });
+    }
+  };
+
+  traverse(tree.root, []);
+  return paths;
 };
 
 /**
@@ -198,30 +263,9 @@ export const waitForCellUpdate = async (): Promise<void> => {
  * Wait for Cell updates to propagate by observing an outliner
  * This waits for the outliner's Cell to actually update and trigger the sink
  */
-export const waitForOutlinerUpdate = (outliner: CTOutliner): Promise<void> => {
-  if (!outliner.value) {
-    return Promise.resolve();
-  }
-
-  const cell = outliner.value;
-
-  return new Promise((resolve) => {
-    let unsubscribe: (() => void) | null = null;
-
-    // Set up a one-time listener for the next Cell update
-    unsubscribe = cell.sink(() => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-      resolve();
-    });
-
-    // Fallback timeout in case the update doesn't come
-    setTimeout(() => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-      resolve();
-    }, 100);
-  });
+export const waitForOutlinerUpdate = async (outliner: CTOutliner): Promise<void> => {
+  // Since tree operations use transactions and await tx.commit(), 
+  // they should be synchronous by the time they return.
+  // We just need a small delay to let any microtasks complete.
+  await new Promise(resolve => setTimeout(resolve, 0));
 };

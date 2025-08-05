@@ -510,28 +510,27 @@ export const TreeOperations = {
     // Navigate to sibling's children Cell
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
 
-    // Get the node to move before we start modifying anything
-    const nodeToMove = parentChildrenCell.get()[nodeIndex];
+    // Get the node to move and create a clean copy
+    const parentChildren = parentChildrenCell.get();
+    const nodeToMove = parentChildren[nodeIndex];
+    const cleanNodeCopy = createCleanNodeCopy(nodeToMove);
 
-    // Use the simpler V-DOM style pattern like moveNodeUpCell
-    await mutateCell(parentChildrenCell, (parentCell) => {
-      const currentParentChildren = parentCell.get();
-      
-      // Remove node from parent children
-      const newParentChildren = [
-        ...currentParentChildren.slice(0, nodeIndex),
-        ...currentParentChildren.slice(nodeIndex + 1),
-      ];
-      
-      parentCell.set(newParentChildren);
-    });
+    // Use transactions for atomic updates
+    const tx = rootCell.runtime.edit();
 
-    // Add node to sibling children
-    await mutateCell(siblingChildrenCell, (siblingCell) => {
-      const currentSiblingChildren = siblingCell.get();
-      const newSiblingChildren = [...currentSiblingChildren, nodeToMove];
-      siblingCell.set(newSiblingChildren);
-    });
+    // Remove node from parent children - create clean copies for all remaining nodes
+    const newParentChildren = [
+      ...parentChildren.slice(0, nodeIndex).map(child => createCleanNodeCopy(child)),
+      ...parentChildren.slice(nodeIndex + 1).map(child => createCleanNodeCopy(child)),
+    ];
+    parentChildrenCell.withTx(tx).set(newParentChildren);
+
+    // Add clean copy to sibling children
+    const currentSiblingChildren = siblingChildrenCell.get();
+    const newSiblingChildren = [...currentSiblingChildren, cleanNodeCopy];
+    siblingChildrenCell.withTx(tx).set(newSiblingChildren);
+
+    await tx.commit();
 
     // Return new focused path
     const siblingPath = [...parentPath, previousSiblingIndex];
@@ -576,18 +575,18 @@ export const TreeOperations = {
 
     const tx = rootCell.runtime.edit();
 
-    // Remove from parent children
+    // Remove from parent children - create clean copies
     const newParentChildren = [
-      ...parentChildren.slice(0, nodeIndex),
-      ...parentChildren.slice(nodeIndex + 1),
+      ...parentChildren.slice(0, nodeIndex).map(child => createCleanNodeCopy(child)),
+      ...parentChildren.slice(nodeIndex + 1).map(child => createCleanNodeCopy(child)),
     ];
     parentChildrenCell.withTx(tx).set(newParentChildren);
 
-    // Insert clean copy into grandparent children after parent
+    // Insert clean copy into grandparent children after parent - create clean copies for all
     const newGrandParentChildren = [
-      ...grandParentChildren.slice(0, parentIndex + 1),
+      ...grandParentChildren.slice(0, parentIndex + 1).map(child => createCleanNodeCopy(child)),
       cleanNodeCopy,
-      ...grandParentChildren.slice(parentIndex + 1),
+      ...grandParentChildren.slice(parentIndex + 1).map(child => createCleanNodeCopy(child)),
     ];
     grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
 

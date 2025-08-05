@@ -41,8 +41,12 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       const { outliner } = await setupOutliner(tree);
       
       // Indent Item 2 (index 1)
-      await outliner.indentNodeByPath([1]);
+      const result = await outliner.indentNodeByPath([1]);
       await waitForOutlinerUpdate(outliner);
+      
+      // Check that the operation succeeded
+      expect(result.success).toBe(true);
+      
       
       // Verify structure
       expect(outliner.tree.root.children.length).toBe(2); // Item 1 and Item 3 at root
@@ -75,8 +79,11 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       const { outliner } = await setupOutliner(tree);
       
       // Try to indent Item 1 (index 0) - should fail
-      await outliner.indentNodeByPath([0]);
+      const result = await outliner.indentNodeByPath([0]);
       await waitForCellUpdate();
+
+      // Check that the operation failed
+      expect(result.success).toBe(false);
 
       // Verify structure is unchanged
       expect(outliner.tree.root.children.length).toBe(2);
@@ -115,8 +122,12 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       const { outliner } = await setupOutliner(tree);
       
       // Outdent Item 1.1 (path [0, 0])
-      await outliner.outdentNodeByPath([0, 0]);
+      const result = await outliner.outdentNodeByPath([0, 0]);
       await waitForCellUpdate();
+
+      // Check that the operation succeeded
+      expect(result.success).toBe(true);
+
 
       // Verify structure
       expect(outliner.tree.root.children.length).toBe(3); // Item 1, Item 1.1, Item 2
@@ -149,8 +160,11 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       const { outliner } = await setupOutliner(tree);
       
       // Try to outdent Item 1 (path [0]) - should fail
-      await outliner.outdentNodeByPath([0]);
+      const result = await outliner.outdentNodeByPath([0]);
       await waitForCellUpdate();
+
+      // Check that the operation failed
+      expect(result.success).toBe(false);
 
       // Verify structure is unchanged
       expect(outliner.tree.root.children.length).toBe(2);
@@ -183,8 +197,11 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       const { outliner } = await setupOutliner(tree);
       
       // Indent Item 2
-      await outliner.indentNodeByPath([1]);
+      const indentResult = await outliner.indentNodeByPath([1]);
       await waitForCellUpdate();
+
+      // Check that the indent operation succeeded
+      expect(indentResult.success).toBe(true);
 
       // Verify indented
       expect(outliner.tree.root.children.length).toBe(1);
@@ -192,8 +209,11 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       expect(outliner.tree.root.children[0].children[0].body).toBe("Item 2");
 
       // Outdent Item 2 (now at path [0, 0])
-      await outliner.outdentNodeByPath([0, 0]);
+      const outdentResult = await outliner.outdentNodeByPath([0, 0]);
       await waitForCellUpdate();
+
+      // Check that the outdent operation succeeded
+      expect(outdentResult.success).toBe(true);
 
       // Verify back to original structure
       expect(outliner.tree.root.children.length).toBe(2);

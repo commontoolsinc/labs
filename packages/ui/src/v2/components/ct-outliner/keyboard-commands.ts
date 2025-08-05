@@ -139,7 +139,9 @@ export const PathBasedKeyboardCommands = {
     execute(ctx: PathBasedKeyboardContext): void {
       ctx.event.preventDefault();
       if (ctx.focusedNodePath) {
-        ctx.component.startEditingByPath(ctx.focusedNodePath);
+        const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+        const initialContent = focusedNode?.body || "";
+        ctx.component.startEditingByPath(ctx.focusedNodePath, initialContent);
       }
     },
   },
