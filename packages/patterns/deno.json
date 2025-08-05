@@ -1,0 +1,10 @@
+{
+  "name": "@commontools/patterns",
+  "tasks": {
+    "integration": "deno test -A ./integration/*.test.ts",
+    "test": "echo 'No tests defined.'"
+  },
+  "exports": {
+    ".": "./mod.ts"
+  }
+}

@@ -32,6 +32,7 @@ deno check \
   packages/jumble \
   packages/llm \
   packages/memory \
+  packages/patterns \
   packages/runner \
   packages/seeder \
   packages/shell \

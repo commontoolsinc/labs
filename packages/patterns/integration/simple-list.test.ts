@@ -1,32 +1,17 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { registerCharm, ShellIntegration } from "./utils.ts";
+import {
+  registerCharm,
+  ShellIntegration,
+} from "@commontools/integration/shell-utils";
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import "../src/globals.ts";
 
 const { API_URL, FRONTEND_URL } = env;
 
-// Extend ShellIntegration with waitForSelector that works with shadow DOM
-class ExtendedShellIntegration extends ShellIntegration {
-  async waitForSelector(selector: string, options?: { timeout?: number }) {
-    const { page } = this.get();
-    const timeout = options?.timeout ?? 30000;
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < timeout) {
-      const handle = await page.$(selector);
-      if (handle) return handle;
-      await sleep(100);
-    }
-
-    throw new Error(`Timeout waiting for selector: ${selector}`);
-  }
-}
-
 describe("simple-list integration test", () => {
-  const shell = new ExtendedShellIntegration();
+  const shell = new ShellIntegration();
   shell.bindLifecycle();
 
   let spaceName: string;
@@ -45,9 +30,6 @@ describe("simple-list integration test", () => {
         join(
           import.meta.dirname!,
           "..",
-          "..",
-          "..",
-          "recipes",
           "simple-list.tsx",
         ),
       ),

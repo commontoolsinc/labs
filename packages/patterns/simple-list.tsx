@@ -1,14 +1,4 @@
-import {
-  Cell,
-  derive,
-  h,
-  handler,
-  JSONSchema,
-  NAME,
-  recipe,
-  Schema,
-  UI,
-} from "commontools";
+import { h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
 
 const ItemSchema = {
   type: "object",

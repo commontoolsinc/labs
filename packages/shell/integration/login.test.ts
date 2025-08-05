@@ -2,8 +2,7 @@ import { env } from "@commontools/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertObjectMatch } from "@std/assert";
 import { sleep } from "@commontools/utils/sleep";
-import "../src/globals.ts";
-import { ShellIntegration } from "./utils.ts";
+import { ShellIntegration } from "../../integration/shell-utils.ts";
 
 const { FRONTEND_URL } = env;
 
