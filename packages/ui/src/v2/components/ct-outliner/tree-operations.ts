@@ -6,6 +6,21 @@ import type {
   NodeCreationOptions,
   Tree,
 } from "./types.ts";
+import { ID, Cell } from "@commontools/runner";
+
+/**
+ * Executes a mutation on a Cell within a transaction
+ * @param cell - The Cell to mutate
+ * @param mutator - Function that performs the mutation
+ */
+async function mutateCell<T>(
+  cell: Cell<T>,
+  mutator: (cell: Cell<T>) => void,
+): Promise<void> {
+  const tx = cell.runtime.edit();
+  mutator(cell.withTx(tx));
+  await tx.commit();
+}
 
 /**
  * Pure functional operations for Tree manipulation
@@ -93,13 +108,15 @@ export const TreeOperations = {
 
   /**
    * Create a new node with given options
+   * Includes [ID] property required for Cell array operations
    */
   createNode(options: NodeCreationOptions): Node {
     return {
+      [ID]: crypto.randomUUID(),
       body: options.body,
       children: options.children || [],
       attachments: options.attachments || [],
-    };
+    } as Node;
   },
 
   /**
@@ -126,15 +143,35 @@ export const TreeOperations = {
   },
 
   /**
-   * Find the parent node containing a child
+   * Find the parent node containing a child (for regular Nodes)
    */
   findParentNode(node: Node, targetNode: Node): Node | null {
-    if (node.children.includes(targetNode)) {
-      return node;
+    for (const child of node.children) {
+      if (child === targetNode) {
+        return node;
+      }
+
+      const found = TreeOperations.findParentNode(child, targetNode);
+      if (found) return found;
     }
 
-    for (const child of node.children) {
-      const found = TreeOperations.findParentNode(child, targetNode);
+    return null;
+  },
+
+  /**
+   * Find the parent node containing a child (for Cell<Node>)
+   */
+  findParentNodeCell(node: Cell<Node>, targetNode: Cell<Node>): Cell<Node> | null {
+    const nodeChildren = node.key("children");
+    const childrenArray = nodeChildren.getAsQueryResult();
+
+    for (let i = 0; i < childrenArray.length; i++) {
+      const childCell = nodeChildren.key(i);
+      if (childCell.equals(targetNode)) {
+        return node;
+      }
+
+      const found = TreeOperations.findParentNodeCell(childCell, targetNode);
       if (found) return found;
     }
 
@@ -146,13 +183,13 @@ export const TreeOperations = {
    * Enhanced with defensive checks for corrupted node objects
    */
   getAllNodes(node: Node): Node[] {
-    if (!node || typeof node !== 'object') {
-      console.warn('Invalid node encountered in getAllNodes:', node);
+    if (!node || typeof node !== "object") {
+      console.warn("Invalid node encountered in getAllNodes:", node);
       return [];
     }
 
     const result: Node[] = [node];
-    
+
     // Ensure children array exists and is valid
     if (node.children && Array.isArray(node.children)) {
       for (const child of node.children) {
@@ -161,15 +198,36 @@ export const TreeOperations = {
         }
       }
     }
-    
+
     return result;
   },
 
   /**
    * Get the index of a node in its parent's children array
    */
-  getNodeIndex(parent: Node, targetNode: Node): number {
-    return parent.children.indexOf(targetNode);
+  getNodeIndex(parent: Cell<Node>, targetNode: Cell<Node>): number {
+    const parentChildren = parent.key("children");
+    const childrenArray = parentChildren.getAsQueryResult();
+
+    for (let i = 0; i < childrenArray.length; i++) {
+      const childCell = parentChildren.key(i);
+      if (childCell.equals(targetNode)) {
+        return i;
+      }
+    }
+
+    return -1;
+  },
+
+  /**
+   * Navigate to a node's children Cell by path
+   */
+  getChildrenCellByPath(rootCell: Cell<Node>, nodePath: number[]): Cell<Node[]> {
+    let childrenCell = rootCell.key("children") as Cell<Node[]>;
+    for (const pathIndex of nodePath) {
+      childrenCell = childrenCell.key(pathIndex).key("children") as Cell<Node[]>;
+    }
+    return childrenCell;
   },
 
   /**
@@ -215,57 +273,86 @@ export const TreeOperations = {
   },
 
   /**
-   * Move a node up among its siblings
-   * Mutates the tree structure directly
+   * Move a node up among its siblings using Cell operations
+   * @param rootCell - The root Cell of the tree
+   * @param nodeCell - The Cell for the node to move up
+   * @param nodePath - Path to the node (for focus management)
+   * @returns Promise<boolean> indicating success
    */
-  moveNodeUp(tree: Tree, targetNode: Node): void {
-    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
+  async moveNodeUpCell(
+    rootCell: Cell<Node>,
+    nodeCell: Cell<Node>,
+    nodePath: number[]
+  ): Promise<boolean> {
+    const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
-      throw new Error("Cannot move node up: node has no parent");
+      return false; // Cannot move node up: node has no parent
     }
 
-    const childIndex = parentNode.children.indexOf(targetNode);
+    const childIndex = TreeOperations.getNodeIndex(parentNode, nodeCell);
     if (childIndex <= 0) {
-      throw new Error("Cannot move node up: already at first position");
+      return false; // Cannot move node up: already at first position
     }
 
-    // Mutate the children array directly
-    const mutableParent = parentNode as MutableNode;
-    const mutableChildren = [...mutableParent.children];
-    [mutableChildren[childIndex - 1], mutableChildren[childIndex]] = [
-      mutableChildren[childIndex],
-      mutableChildren[childIndex - 1],
-    ];
-    mutableParent.children = mutableChildren;
+    const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
 
-    // Operation completed successfully
+    // V-DOM style: swap positions directly
+    await mutateCell(parentChildrenCell, (cell) => {
+      const currentChildren = cell.get();
+      const newChildren = [...currentChildren];
+
+      // Swap the node with the previous one
+      [newChildren[childIndex - 1], newChildren[childIndex]] = [
+        newChildren[childIndex],
+        newChildren[childIndex - 1],
+      ];
+
+      cell.set(newChildren);
+    });
+
+    return true;
   },
 
   /**
-   * Move a node down among its siblings
-   * Mutates the tree structure directly
+   * Move a node down among its siblings using Cell operations
+   * @param rootCell - The root Cell of the tree
+   * @param nodeCell - The Cell for the node to move down
+   * @param nodePath - Path to the node (for focus management)
+   * @returns Promise<boolean> indicating success
    */
-  moveNodeDown(tree: Tree, targetNode: Node): void {
-    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
+  async moveNodeDownCell(
+    rootCell: Cell<Node>,
+    nodeCell: Cell<Node>,
+    nodePath: number[]
+  ): Promise<boolean> {
+    const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
-      throw new Error("Cannot move node down: node has no parent");
+      return false; // Cannot move node down: node has no parent
     }
 
-    const childIndex = parentNode.children.indexOf(targetNode);
-    if (childIndex === -1 || childIndex >= parentNode.children.length - 1) {
-      throw new Error("Cannot move node down: already at last position");
+    const childIndex = TreeOperations.getNodeIndex(parentNode, nodeCell);
+    const parentChildren = parentNode.key("children").getAsQueryResult();
+    if (childIndex === -1 || childIndex >= parentChildren.length - 1) {
+      return false; // Cannot move node down: already at last position
     }
 
-    // Mutate the children array directly
-    const mutableParent = parentNode as MutableNode;
-    const mutableChildren = [...mutableParent.children];
-    [mutableChildren[childIndex], mutableChildren[childIndex + 1]] = [
-      mutableChildren[childIndex + 1],
-      mutableChildren[childIndex],
-    ];
-    mutableParent.children = mutableChildren;
+    const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
 
-    // Operation completed successfully
+    // V-DOM style: swap positions directly
+    await mutateCell(parentChildrenCell, (cell) => {
+      const currentChildren = cell.get();
+      const newChildren = [...currentChildren];
+
+      // Swap the node with the next one
+      [newChildren[childIndex], newChildren[childIndex + 1]] = [
+        newChildren[childIndex + 1],
+        newChildren[childIndex],
+      ];
+
+      cell.set(newChildren);
+    });
+
+    return true;
   },
 
   /**
@@ -276,17 +363,22 @@ export const TreeOperations = {
     const result: Node[] = [];
     const traverse = (currentNode: Node) => {
       // Defensive check for valid node structure
-      if (!currentNode || typeof currentNode !== 'object') {
-        console.warn('Invalid node encountered in tree traversal:', currentNode);
+      if (!currentNode || typeof currentNode !== "object") {
+        console.warn(
+          "Invalid node encountered in tree traversal:",
+          currentNode,
+        );
         return;
       }
 
       result.push(currentNode);
-      
+
       // Ensure children array exists and is valid
-      if (!collapsedNodes.has(currentNode) && 
-          currentNode.children && 
-          Array.isArray(currentNode.children)) {
+      if (
+        !collapsedNodes.has(currentNode) &&
+        currentNode.children &&
+        Array.isArray(currentNode.children)
+      ) {
         for (const child of currentNode.children) {
           if (child) {
             traverse(child);
@@ -303,110 +395,184 @@ export const TreeOperations = {
         }
       }
     }
-    
+
     return result;
   },
 
   /**
-   * Delete a node from the tree
-   * Mutates the tree structure directly
+   * Delete a node from the tree using Cell operations
+   * @param rootCell - The root Cell of the tree
+   * @param nodeCell - The Cell for the node to delete
+   * @param nodePath - Path to the node (for focus management)
+   * @returns Promise resolving to new focus path or null
    */
-  deleteNode(tree: Tree, targetNode: Node): void {
-    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
+  async deleteNodeCell(
+    rootCell: Cell<Node>,
+    nodeCell: Cell<Node>,
+    nodePath: number[]
+  ): Promise<number[] | null> {
+    const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
-      throw new Error("Cannot delete root node");
+      console.error("Cannot delete root node");
+      return null;
     }
 
-    const nodeIndex = parentNode.children.indexOf(targetNode);
+    const nodeIndex = TreeOperations.getNodeIndex(parentNode, nodeCell);
     if (nodeIndex === -1) {
-      throw new Error("Node not found in parent");
+      console.error("Node not found in parent");
+      return null;
     }
 
-    // Mutate parent's children array directly
-    const mutableParent = parentNode as MutableNode;
-    const newChildren = [...mutableParent.children];
+    const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
 
-    // Move children up to parent level if any
-    if (targetNode.children.length > 0) {
-      newChildren.splice(nodeIndex, 1, ...targetNode.children);
+    // Get the children to promote before modifying anything
+    const nodeChildrenCell = nodeCell.key("children") as Cell<Node[]>;
+    const childrenToPromote = nodeChildrenCell.getAsQueryResult();
+
+    await mutateCell(parentChildrenCell, (cell) => {
+      const currentChildren = cell.get();
+
+      // Build new children array without the deleted node
+      const newChildren: Node[] = [];
+
+      // Add nodes before the deleted one
+      newChildren.push(...currentChildren.slice(0, nodeIndex));
+
+      // Add promoted children if any
+      if (childrenToPromote.length > 0) {
+        newChildren.push(...childrenToPromote);
+      }
+
+      // Add nodes after the deleted one
+      newChildren.push(...currentChildren.slice(nodeIndex + 1));
+
+      cell.set(newChildren);
+    });
+
+    // Calculate new focus after deletion - need to check the actual updated array
+    const parentPath = nodePath.slice(0, -1);
+    const updatedChildren = parentNode.key("children").getAsQueryResult();
+
+    if (nodeIndex > 0 && updatedChildren.length > nodeIndex - 1) {
+      // Focus previous sibling
+      return [...parentPath, nodeIndex - 1];
+    } else if (updatedChildren.length > 0) {
+      // Focus first available sibling (or promoted child)
+      return [...parentPath, Math.min(nodeIndex, updatedChildren.length - 1)];
+    } else if (parentPath.length > 0) {
+      // Focus parent if no children left
+      return parentPath;
     } else {
-      newChildren.splice(nodeIndex, 1);
+      // No nodes left
+      return null;
     }
-
-    mutableParent.children = newChildren;
-
-    // Operation completed successfully
-    // Note: Focus handling is managed by the calling component
   },
 
   /**
-   * Indent a node (make it a child of the previous sibling)
-   * Mutates the tree structure directly
+   * Indent a node (make it a child of the previous sibling) using Cell operations
+   * @param rootCell - The root Cell of the tree
+   * @param nodePath - Path to the node to indent
+   * @returns Promise resolving to new focus path or null if operation failed
    */
-  indentNode(tree: Tree, targetNode: Node): void {
-    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
-    if (!parentNode) {
-      throw new Error("Cannot indent node: node has no parent");
+  async indentNodeCell(
+    rootCell: Cell<Node>,
+    nodePath: number[]
+  ): Promise<number[] | null> {
+    // Check if we can indent (must not be first child)
+    if (nodePath.length === 0 || nodePath[nodePath.length - 1] === 0) {
+      console.error("Cannot indent first child node or root node");
+      return null;
     }
 
-    const nodeIndex = parentNode.children.indexOf(targetNode);
-    if (nodeIndex <= 0) {
-      throw new Error("Cannot indent first child node");
-    }
+    const parentPath = nodePath.slice(0, -1);
+    const nodeIndex = nodePath[nodePath.length - 1];
+    const previousSiblingIndex = nodeIndex - 1;
 
-    const previousSibling = parentNode.children[nodeIndex - 1];
+    // Navigate to parent's children Cell
+    const parentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, parentPath);
 
-    // Remove targetNode from parent's children
-    const mutableParent = parentNode as MutableNode;
-    const mutableChildren = [...mutableParent.children];
-    mutableChildren.splice(nodeIndex, 1);
-    mutableParent.children = mutableChildren;
+    // Navigate to sibling's children Cell
+    const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
 
-    // Add targetNode to previous sibling's children
-    const mutableSibling = previousSibling as MutableNode;
-    mutableSibling.children = [...mutableSibling.children, targetNode];
+    // Get the node to move before any modifications
+    const parentChildren = parentChildrenCell.getAsQueryResult();
+    const nodeToMove = parentChildren[nodeIndex];
 
-    // Operation completed successfully
+    // First transaction: Remove from parent
+    let tx = rootCell.runtime.edit();
+    const newParentChildren = [
+      ...parentChildren.slice(0, nodeIndex),
+      ...parentChildren.slice(nodeIndex + 1),
+    ];
+    parentChildrenCell.withTx(tx).set(newParentChildren);
+    await tx.commit();
+
+    // Second transaction: Add to sibling
+    tx = rootCell.runtime.edit();
+    const siblingChildren = siblingChildrenCell.getAsQueryResult();
+    const newSiblingChildren = [...siblingChildren, nodeToMove];
+    siblingChildrenCell.withTx(tx).set(newSiblingChildren);
+    await tx.commit();
+
+    // Return new focused path
+    const siblingPath = [...parentPath, previousSiblingIndex];
+    const updatedSiblingChildren = siblingChildrenCell.getAsQueryResult();
+    return [...siblingPath, updatedSiblingChildren.length - 1]; // -1 because we just added the node
   },
 
   /**
-   * Outdent a node (move it up to parent's level)
-   * Mutates the tree structure directly
+   * Outdent a node (move it up to parent's level) using Cell operations
+   * @param rootCell - The root Cell of the tree
+   * @param nodePath - Path to the node to outdent
+   * @returns Promise resolving to new focus path or null if operation failed
    */
-  outdentNode(tree: Tree, targetNode: Node): void {
-    const parentNode = TreeOperations.findParentNode(tree.root, targetNode);
-    if (!parentNode) {
-      throw new Error("Cannot outdent node: node has no parent");
+  async outdentNodeCell(
+    rootCell: Cell<Node>,
+    nodePath: number[]
+  ): Promise<number[] | null> {
+    // Check if we can outdent (must have grandparent)
+    if (nodePath.length < 2) {
+      console.error("Cannot outdent node: already at root level or is root");
+      return null;
     }
 
-    const grandParentNode = TreeOperations.findParentNode(
-      tree.root,
-      parentNode,
-    );
-    if (!grandParentNode) {
-      throw new Error("Cannot outdent node: already at root level");
-    }
+    const parentPath = nodePath.slice(0, -1);
+    const grandParentPath = parentPath.slice(0, -1);
+    const nodeIndex = nodePath[nodePath.length - 1];
+    const parentIndex = parentPath[parentPath.length - 1];
 
-    const nodeIndex = parentNode.children.indexOf(targetNode);
-    const parentIndex = grandParentNode.children.indexOf(parentNode);
+    // Navigate to parent's children Cell (source)
+    const parentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, parentPath);
 
-    if (nodeIndex === -1 || parentIndex === -1) {
-      throw new Error("Node structure is inconsistent");
-    }
+    // Navigate to grandparent's children Cell (destination)
+    const grandParentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, grandParentPath);
 
-    // Remove targetNode from parent's children
-    const mutableParent = parentNode as MutableNode;
-    const mutableParentChildren = [...mutableParent.children];
-    mutableParentChildren.splice(nodeIndex, 1);
-    mutableParent.children = mutableParentChildren;
+    // Get the node to move before any modifications
+    const parentChildren = parentChildrenCell.getAsQueryResult();
+    const nodeToMove = parentChildren[nodeIndex];
 
-    // Add targetNode to grandparent after parent
-    const mutableGrandParent = grandParentNode as MutableNode;
-    const mutableGrandParentChildren = [...mutableGrandParent.children];
-    mutableGrandParentChildren.splice(parentIndex + 1, 0, targetNode);
-    mutableGrandParent.children = mutableGrandParentChildren;
+    // First transaction: Remove from parent
+    let tx = rootCell.runtime.edit();
+    const newParentChildren = [
+      ...parentChildren.slice(0, nodeIndex),
+      ...parentChildren.slice(nodeIndex + 1),
+    ];
+    parentChildrenCell.withTx(tx).set(newParentChildren);
+    await tx.commit();
 
-    // Operation completed successfully
+    // Second transaction: Add to grandparent
+    tx = rootCell.runtime.edit();
+    const grandParentChildren = grandParentChildrenCell.getAsQueryResult();
+    const newGrandParentChildren = [
+      ...grandParentChildren.slice(0, parentIndex + 1),
+      nodeToMove,
+      ...grandParentChildren.slice(parentIndex + 1),
+    ];
+    grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
+    await tx.commit();
+
+    // Return new focused path
+    return [...grandParentPath, parentIndex + 1];
   },
 
   /**
@@ -522,19 +688,19 @@ export const TreeOperations = {
    */
   toggleCheckbox(tree: Tree, targetNode: Node): void {
     const mutableNode = targetNode as MutableNode;
-    
+
     if (TreeOperations.hasCheckbox(targetNode)) {
       // Toggle existing checkbox
       if (TreeOperations.isCheckboxChecked(targetNode)) {
         // Checked -> Unchecked (normalize to [ ])
-        mutableNode.body = mutableNode.body.replace(/^\s*\[x\]\s*/, '[ ] ');
+        mutableNode.body = mutableNode.body.replace(/^\s*\[x\]\s*/, "[ ] ");
       } else {
         // Unchecked -> Checked
-        mutableNode.body = mutableNode.body.replace(/^\s*\[[ ]?\]\s*/, '[x] ');
+        mutableNode.body = mutableNode.body.replace(/^\s*\[[ ]?\]\s*/, "[x] ");
       }
     } else {
       // Add checkbox if none exists
-      mutableNode.body = '[ ] ' + mutableNode.body;
+      mutableNode.body = "[ ] " + mutableNode.body;
     }
   },
 
@@ -542,18 +708,18 @@ export const TreeOperations = {
    * Get the body text without the checkbox prefix
    */
   getBodyWithoutCheckbox(node: Node): string {
-    return node.body.replace(/^\s*\[[ x]?\]\s*/, '');
+    return node.body.replace(/^\s*\[[ x]?\]\s*/, "");
   },
 
   /**
    * Extract checkbox state from node body
    * Returns: 'checked', 'unchecked', or null if no checkbox
    */
-  getCheckboxState(node: Node): 'checked' | 'unchecked' | null {
+  getCheckboxState(node: Node): "checked" | "unchecked" | null {
     if (TreeOperations.isCheckboxChecked(node)) {
-      return 'checked';
+      return "checked";
     } else if (TreeOperations.hasCheckbox(node)) {
-      return 'unchecked';
+      return "unchecked";
     }
     return null;
   },

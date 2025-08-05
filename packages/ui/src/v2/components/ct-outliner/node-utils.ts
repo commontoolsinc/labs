@@ -43,17 +43,21 @@ export const NodeUtils = {
     const createNodeKey = (node: Node): string => {
       try {
         // Ensure we can safely access node properties
-        if (!node || typeof node !== 'object') {
+        if (!node || typeof node !== "object") {
           return `invalid:${counter++}`;
         }
-        
-        const body = typeof node.body === 'string' ? node.body : 'no-body';
-        const childrenLength = Array.isArray(node.children) ? node.children.length : 0;
-        const attachmentsLength = Array.isArray(node.attachments) ? node.attachments.length : 0;
-        
+
+        const body = typeof node.body === "string" ? node.body : "no-body";
+        const childrenLength = Array.isArray(node.children)
+          ? node.children.length
+          : 0;
+        const attachmentsLength = Array.isArray(node.attachments)
+          ? node.attachments.length
+          : 0;
+
         return `${body}:${childrenLength}:${attachmentsLength}`;
       } catch (error) {
-        console.warn('Failed to create node key:', error);
+        console.warn("Failed to create node key:", error);
         return `error:${counter++}`;
       }
     };
@@ -61,14 +65,14 @@ export const NodeUtils = {
     const isValidWeakMapKey = (node: Node): boolean => {
       try {
         // Check if the node is a valid object that can be used as a WeakMap key
-        if (!node || typeof node !== 'object') {
+        if (!node || typeof node !== "object") {
           return false;
         }
-        
+
         // Try to access key properties to ensure the object isn't corrupted
         const _ = node.body;
         const __ = node.children;
-        
+
         return true;
       } catch (error) {
         return false;
@@ -79,7 +83,7 @@ export const NodeUtils = {
       getIndex: (node: Node) => {
         // Validate input node
         if (!node) {
-          console.warn('Invalid node passed to indexer');
+          console.warn("Invalid node passed to indexer");
           return -1;
         }
 
@@ -95,7 +99,10 @@ export const NodeUtils = {
             indexMap.set(node, newIndex);
             return newIndex;
           } catch (error) {
-            console.warn('WeakMap operation failed, falling back to content key:', error);
+            console.warn(
+              "WeakMap operation failed, falling back to content key:",
+              error,
+            );
           }
         }
 
@@ -146,36 +153,48 @@ export const NodeUtils = {
 
   /**
    * Get siblings of a node
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   getSiblings(tree: Tree, targetNode: Node): Node[] {
     const parent = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parent) return [];
     return parent.children.filter((child) => child !== targetNode);
   },
+  */
 
   /**
    * Get node index among its siblings
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   getSiblingIndex(tree: Tree, targetNode: Node): number {
     const parent = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parent) return -1;
     return parent.children.indexOf(targetNode);
   },
+  */
 
   /**
    * Check if a node is the first child
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   isFirstChild(tree: Tree, targetNode: Node): boolean {
     return NodeUtils.getSiblingIndex(tree, targetNode) === 0;
   },
+  */
 
   /**
    * Check if a node is the last child
+   * @deprecated Not used - outliner uses path-based operations
    */
+  /*
   isLastChild(tree: Tree, targetNode: Node): boolean {
     const parent = TreeOperations.findParentNode(tree.root, targetNode);
     if (!parent) return false;
     const index = parent.children.indexOf(targetNode);
     return index === parent.children.length - 1;
   },
+  */
 };

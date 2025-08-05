@@ -68,7 +68,7 @@ describe("simple-list integration test", () => {
 
     // Wait for charm to load and verify ct-list exists
     await sleep(5000);
-    const ctList = await page.$("pierce/ct-list");
+    const ctList = await page.$("ct-list", { strategy: "pierce" });
     assert(ctList, "Should find ct-list component");
   });
 
@@ -76,7 +76,7 @@ describe("simple-list integration test", () => {
     const { page } = shell.get();
 
     // Find the add item input in ct-list
-    const addInput = await page.$("pierce/.add-item-input");
+    const addInput = await page.$(".add-item-input", { strategy: "pierce" });
     assert(addInput, "Should find add item input");
 
     // Add first item
@@ -96,26 +96,29 @@ describe("simple-list integration test", () => {
     await sleep(500);
 
     // Verify items were added
-    const listItems = await page.$$("pierce/.list-item");
+    const listItems = await page.$$(".list-item", { strategy: "pierce" });
     assertEquals(listItems.length, 3, "Should have 3 items in the list");
 
     // Debug: Log the structure of list items
     console.log("List item structure:");
     for (let i = 0; i < listItems.length; i++) {
-      const itemInfo = await listItems[i].evaluate((el: HTMLElement, idx: number) => {
-        const buttons = el.querySelectorAll('button');
-        return {
-          index: idx,
-          className: el.className,
-          innerText: el.innerText,
-          buttonCount: buttons.length,
-          buttons: Array.from(buttons).map(b => ({
-            className: b.className,
-            title: b.title || 'no title',
-            innerText: b.innerText
-          }))
-        };
-      }, { args: [i] } as any);
+      const itemInfo = await listItems[i].evaluate(
+        (el: HTMLElement, idx: number) => {
+          const buttons = el.querySelectorAll("button");
+          return {
+            index: idx,
+            className: el.className,
+            innerText: el.innerText,
+            buttonCount: buttons.length,
+            buttons: Array.from(buttons).map((b) => ({
+              className: b.className,
+              title: b.title || "no title",
+              innerText: b.innerText,
+            })),
+          };
+        },
+        { args: [i] } as any,
+      );
       console.log(`Item ${i}:`, itemInfo);
     }
 
@@ -124,19 +127,22 @@ describe("simple-list integration test", () => {
 
     // Verify item content
     const firstItemText = await listItems[0].evaluate((el: HTMLElement) => {
-      const content = el.querySelector('.item-content') || el.querySelector('div.item-content');
+      const content = el.querySelector(".item-content") ||
+        el.querySelector("div.item-content");
       return content?.textContent || el.textContent;
     });
     assertEquals(firstItemText?.trim(), "First item");
 
     const secondItemText = await listItems[1].evaluate((el: HTMLElement) => {
-      const content = el.querySelector('.item-content') || el.querySelector('div.item-content');
+      const content = el.querySelector(".item-content") ||
+        el.querySelector("div.item-content");
       return content?.textContent || el.textContent;
     });
     assertEquals(secondItemText?.trim(), "Second item");
 
     const thirdItemText = await listItems[2].evaluate((el: HTMLElement) => {
-      const content = el.querySelector('.item-content') || el.querySelector('div.item-content');
+      const content = el.querySelector(".item-content") ||
+        el.querySelector("div.item-content");
       return content?.textContent || el.textContent;
     });
     assertEquals(thirdItemText?.trim(), "Third item");
@@ -146,7 +152,9 @@ describe("simple-list integration test", () => {
     const { page } = shell.get();
 
     // Find the title input
-    const titleInput = await page.$("pierce/input[placeholder='List title']");
+    const titleInput = await page.$("input[placeholder='List title']", {
+      strategy: "pierce",
+    });
     assert(titleInput, "Should find title input");
 
     // Clear the existing text first
@@ -158,14 +166,16 @@ describe("simple-list integration test", () => {
     await sleep(500);
 
     // Verify title was updated
-    const titleValue = await titleInput.evaluate((el: HTMLInputElement) => el.value);
+    const titleValue = await titleInput.evaluate((el: HTMLInputElement) =>
+      el.value
+    );
     assertEquals(titleValue, "My Shopping List");
   });
 
   // TODO(#CT-703): Fix this test - there's a bug where programmatic clicks on the remove button
   // remove ALL items instead of just one. Manual clicking works correctly.
   // This appears to be an issue with how ct-list handles synthetic click events
-  // versus real user clicks. 
+  // versus real user clicks.
   it.skip("should remove items from the list", async () => {
     const { page } = shell.get();
 
@@ -174,13 +184,15 @@ describe("simple-list integration test", () => {
     await sleep(2000);
 
     // Get initial count
-    const initialItems = await page.$$("pierce/.list-item");
+    const initialItems = await page.$$(".list-item", { strategy: "pierce" });
     const initialCount = initialItems.length;
     console.log(`Initial item count: ${initialCount}`);
     assert(initialCount > 0, "Should have items to remove");
 
     // Find and click the first remove button
-    const removeButtons = await page.$$("pierce/button.item-action.remove");
+    const removeButtons = await page.$$("button.item-action.remove", {
+      strategy: "pierce",
+    });
     console.log(`Found ${removeButtons.length} remove buttons`);
     assert(removeButtons.length > 0, "Should find remove buttons");
 
@@ -190,7 +202,7 @@ describe("simple-list integration test", () => {
         className: el.className,
         title: el.title,
         innerText: el.innerText,
-        parentText: el.parentElement?.innerText || 'no parent'
+        parentText: el.parentElement?.innerText || "no parent",
       };
     });
     console.log("About to click button:", buttonText);
@@ -198,47 +210,64 @@ describe("simple-list integration test", () => {
     // Try clicking more carefully
     console.log("Waiting before click...");
     await sleep(500);
-    
+
     // Alternative approach: dispatch click event
     await removeButtons[0].evaluate((button: HTMLElement) => {
       console.log("About to dispatch click event on button:", button);
-      button.dispatchEvent(new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        view: window
-      }));
+      button.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
     });
     console.log("Dispatched click event on first remove button");
 
     // Check immediately after click
     await sleep(100);
-    const immediateItems = await page.$$("pierce/.list-item");
-    console.log(`Immediately after click, found ${immediateItems.length} items`);
+    const immediateItems = await page.$$(".list-item", { strategy: "pierce" });
+    console.log(
+      `Immediately after click, found ${immediateItems.length} items`,
+    );
 
     // Wait longer for the DOM to update after removal
     await sleep(2000);
 
     // Verify item was removed - try multiple times
-    let remainingItems = await page.$$("pierce/.list-item");
+    let remainingItems = await page.$$(".list-item", { strategy: "pierce" });
     console.log(`After removal, found ${remainingItems.length} items`);
 
     // If still showing same count, wait a bit more and try again
     if (remainingItems.length === initialCount) {
       console.log("DOM not updated yet, waiting more...");
       await sleep(2000);
-      remainingItems = await page.$$("pierce/.list-item");
-      console.log(`After additional wait, found ${remainingItems.length} items`);
+      remainingItems = await page.$$(".list-item", { strategy: "pierce" });
+      console.log(
+        `After additional wait, found ${remainingItems.length} items`,
+      );
     }
 
-    assertEquals(remainingItems.length, initialCount - 1, "Should have one less item after removal");
+    assertEquals(
+      remainingItems.length,
+      initialCount - 1,
+      "Should have one less item after removal",
+    );
 
     // Verify the first item is now what was the second item
     if (remainingItems.length > 0) {
-      const firstRemainingText = await remainingItems[0].evaluate((el: HTMLElement) => {
-        const content = el.querySelector('.item-content') || el.querySelector('div.item-content');
-        return content?.textContent || el.textContent;
-      });
-      assertEquals(firstRemainingText?.trim(), "Second item", "First item should now be the second item");
+      const firstRemainingText = await remainingItems[0].evaluate(
+        (el: HTMLElement) => {
+          const content = el.querySelector(".item-content") ||
+            el.querySelector("div.item-content");
+          return content?.textContent || el.textContent;
+        },
+      );
+      assertEquals(
+        firstRemainingText?.trim(),
+        "Second item",
+        "First item should now be the second item",
+      );
     }
   });
 
@@ -253,5 +282,4 @@ describe("simple-list integration test", () => {
     // Similar to the delete test, this appears to be a limitation of
     // programmatic interaction with the ct-list component
   });
-
 });
