@@ -20,3 +20,5 @@ dist/
 claude-research.key
 *.key
 .page-agent-config.json
+.common.json
+.knowledge
