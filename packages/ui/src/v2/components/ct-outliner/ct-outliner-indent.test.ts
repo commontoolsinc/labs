@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CTOutliner } from "./ct-outliner.ts";
-import { createMockTreeCell, waitForCellUpdate } from "./test-utils.ts";
+import { createMockTreeCell, waitForCellUpdate, waitForOutlinerUpdate } from "./test-utils.ts";
 import type { Tree } from "./types.ts";
 
 describe("CTOutliner Indentation Operations (CT-693)", () => {
@@ -42,8 +42,8 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       
       // Indent Item 2 (index 1)
       await outliner.indentNodeByPath([1]);
-      await waitForCellUpdate();
-
+      await waitForOutlinerUpdate(outliner);
+      
       // Verify structure
       expect(outliner.tree.root.children.length).toBe(2); // Item 1 and Item 3 at root
       expect(outliner.tree.root.children[0].body).toBe("Item 1");

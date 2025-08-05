@@ -1018,10 +1018,16 @@ export class CTOutliner extends BaseElement {
     const nodeIndex = TreeOperations.getNodeIndex(parentNode, node);
     const newNode = TreeOperations.createNode({ body: "" });
 
-    // Calculate the expected path for the new node before mutation
-    const parentPath = getNodePath(this.tree, parentNode);
-    if (!parentPath) return;
+    // Find parent path by working backwards from the current node path
+    // First get the current node's path by finding it in the tree structure
+    const currentNodeValue = node.getAsQueryResult();
+    const currentNodePath = this.findNodePathInTree(currentNodeValue);
+    if (!currentNodePath) {
+      console.error("Cannot find current node path in tree");
+      return;
+    }
 
+    const parentPath = currentNodePath.slice(0, -1); // Remove last index to get parent path
     const newNodePath = [...parentPath, nodeIndex + 1]; // Insert after current node
 
     const parentChildrenCell = getNodeChildrenCell(this.value, this.tree, parentNode);
@@ -1063,6 +1069,14 @@ export class CTOutliner extends BaseElement {
         OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
       }
     }, 0);
+  }
+
+  /**
+   * Find the path to a node by searching through the tree structure
+   * This is more reliable than trying to get paths from Cell references
+   */
+  private findNodePathInTree(targetNode: OutlineTreeNode): number[] | null {
+    return getNodePath(this.tree, targetNode);
   }
 
   /**

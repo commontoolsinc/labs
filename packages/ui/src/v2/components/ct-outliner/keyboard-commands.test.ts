@@ -29,7 +29,7 @@ describe("Keyboard Commands", () => {
   }
 
   describe("Basic Commands", () => {
-    it.skip("should handle Enter key to create new node", async () => {
+    it("should handle Enter key to create new node", async () => {
       await setupOutliner();
       const initialChildCount = outliner.tree.root.children.length;
 
@@ -364,7 +364,7 @@ describe("Keyboard Commands", () => {
   });
 
   describe("Command Integration", () => {
-    it.skip("should execute keyboard commands via executeKeyboardCommand", async () => {
+    it("should execute keyboard commands via executeKeyboardCommand", async () => {
       await setupOutliner();
       const initialChildCount = outliner.tree.root.children.length;
 

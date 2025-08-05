@@ -510,32 +510,33 @@ export const TreeOperations = {
     // Navigate to sibling's children Cell
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
 
-    // Get values and create clean copies instead of moving proxy objects
-    const parentChildren = parentChildrenCell.get();
-    const siblingChildren = siblingChildrenCell.get();
-    const nodeToMove = parentChildren[nodeIndex];
-    
-    // Create a clean deep copy of the node to avoid proxy issues
-    const cleanNodeCopy = createCleanNodeCopy(nodeToMove);
+    // Get the node to move before we start modifying anything
+    const nodeToMove = parentChildrenCell.get()[nodeIndex];
 
-    const tx = rootCell.runtime.edit();
+    // Use the simpler V-DOM style pattern like moveNodeUpCell
+    await mutateCell(parentChildrenCell, (parentCell) => {
+      const currentParentChildren = parentCell.get();
+      
+      // Remove node from parent children
+      const newParentChildren = [
+        ...currentParentChildren.slice(0, nodeIndex),
+        ...currentParentChildren.slice(nodeIndex + 1),
+      ];
+      
+      parentCell.set(newParentChildren);
+    });
 
-    // Remove from parent children
-    const newParentChildren = [
-      ...parentChildren.slice(0, nodeIndex),
-      ...parentChildren.slice(nodeIndex + 1),
-    ];
-    parentChildrenCell.withTx(tx).set(newParentChildren);
-
-    // Add clean copy to sibling children
-    const newSiblingChildren = [...siblingChildren, cleanNodeCopy];
-    siblingChildrenCell.withTx(tx).set(newSiblingChildren);
-
-    await tx.commit();
+    // Add node to sibling children
+    await mutateCell(siblingChildrenCell, (siblingCell) => {
+      const currentSiblingChildren = siblingCell.get();
+      const newSiblingChildren = [...currentSiblingChildren, nodeToMove];
+      siblingCell.set(newSiblingChildren);
+    });
 
     // Return new focused path
     const siblingPath = [...parentPath, previousSiblingIndex];
-    return [...siblingPath, siblingChildren.length];
+    const updatedSiblingChildren = siblingChildrenCell.get();
+    return [...siblingPath, updatedSiblingChildren.length - 1]; // -1 because we just added the node
   },
 
   /**

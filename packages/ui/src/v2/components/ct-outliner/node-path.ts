@@ -43,31 +43,11 @@ export function getNodeByPath(tree: Tree, path: number[]): OutlineTreeNode | nul
  * Get the path to a node as an array of indices from root.children
  */
 export function getNodePath(tree: Tree, targetNode: OutlineTreeNode | Cell<OutlineTreeNode>): number[] | null {
-  // If it's a Cell, we need to find it in the tree
+  // If it's a Cell, we can't reliably find its path in the tree without a tree Cell
+  // This function needs to be redesigned to work with Cell-based paths
   if ('equals' in targetNode) {
-    if (!tree) return null;
-
-    const findCellPath = (
-      currentCell: Cell<OutlineTreeNode>,
-      currentPath: number[],
-    ): number[] | null => {
-      if (currentCell.equals(targetNode)) {
-        return currentPath;
-      }
-
-      const children = currentCell.key("children").getAsQueryResult();
-      for (let i = 0; i < children.length; i++) {
-        const childCell = currentCell.key("children").key(i);
-        const result = findCellPath(childCell, [...currentPath, i]);
-        if (result) return result;
-      }
-
-      return null;
-    };
-
-    // For Cell-based finding, we need access to the tree Cell
-    // This function signature may need to be adjusted based on usage
-    return null; // Placeholder - will need tree Cell access
+    console.error("getNodePath: Cell-based path finding not properly implemented");
+    return null;
   }
 
   // Original logic for regular nodes
