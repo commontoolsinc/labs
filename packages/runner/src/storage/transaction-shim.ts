@@ -111,6 +111,15 @@ function validateParentPath(
   const lastIndex = pathLength - 1;
   let parentValue = value;
 
+  // Check if the document exists for multi-level paths
+  if (value === undefined) {
+    const pathError: INotFoundError = new Error(
+      `Cannot access path [${path.join(", ")}] - document does not exist`,
+    ) as INotFoundError;
+    pathError.name = "NotFoundError";
+    return pathError;
+  }
+
   let parentIndex = 0;
   for (parentIndex = 0; parentIndex < lastIndex; parentIndex++) {
     if (!isRecord(parentValue)) {

@@ -80,3 +80,17 @@ describe("parsePath", () => {
     expect(parsePath("0")).toEqual([0]);
   });
 });
+
+describe("Array Index Setting (CT-731)", () => {
+  it("should correctly parse array index paths", () => {
+    // These are the types of paths that should work for array index setting
+    expect(parsePath("items/0")).toEqual(["items", 0]);
+    expect(parsePath("data/users/5/tags/2")).toEqual(["data", "users", 5, "tags", 2]);
+    expect(parsePath("arr/0/0")).toEqual(["arr", 0, 0]);
+  });
+  
+  it("should handle paths that mix objects and arrays", () => {
+    expect(parsePath("config/themes/0/name")).toEqual(["config", "themes", 0, "name"]);
+    expect(parsePath("users/0/preferences/colors/1")).toEqual(["users", 0, "preferences", "colors", 1]);
+  });
+});
