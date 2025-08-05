@@ -101,14 +101,14 @@ The command handles common failure scenarios:
    ✓ Created fetcher for https://github.com/org/repo2 (charm-new002)
    ✓ Created fetcher for https://github.com/team/repo3 (charm-new003)
 
-🔗 Linking charms to attachment points...
-   ✓ Linked charm-new001 → charm-abc123/outline/root/children/0/attachments/0
-   ✓ Linked charm-new002 → charm-abc123/outline/root/children/1/children/0/attachments/0
-   ✓ Linked charm-new003 → charm-def456/outline/root/children/2/attachments/0
+🔗 Creating child nodes with GitHub attachments...
+   ✓ Created child "→ user/repo1" under charm-abc123/outline/root/children/0/children/0
+   ✓ Created child "→ org/repo2" under charm-abc123/outline/root/children/1/children/1
+   ✓ Created child "→ team/repo3" under charm-def456/outline/root/children/2/children/0
 
 ✅ Successfully processed 3 GitHub URLs across 2 page charms
    Created 3 new GitHub fetcher charms
-   Established 3 attachment links
+   Created 3 child nodes with GitHub repository data
 ```
 
 ## Technical Notes
@@ -118,26 +118,53 @@ The command uses regex pattern: `https://github\.com/[^/\s]+/[^/\s]+(?:/[^\s]*)?
 
 ### Attachment Linking Process
 
-**⚠️ Known Issue**: The `ct charm link` command has a bug when linking to array indices - it incorrectly reports "attachments is not a record" when trying to access array paths.
+**⚠️ Current Limitation**: Due to CommonTools bug [CT-731](https://linear.app/common-tools/issue/CT-731/ct-charm-set-fails-when-setting-array-indices-directly), both `ct charm link` and direct array index setting fail when working with existing nodes. This affects:
+- `ct charm link` command with array paths
+- `ct charm set` with array indices (e.g., `attachments/0`) 
+- Adding attachments to UI-created nodes
 
-**Working Manual Approach**:
-Instead of using `ct charm link`, manually create the link by writing the link JSON structure directly:
+**Recommended Workaround - Child Node Pattern**:
+Instead of modifying existing nodes, create child nodes that contain the GitHub attachments:
 
 ```bash
-# Create node with GitHub link in attachments
+# Get the space DID (needed for links)
+SPACE_DID=$(./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [ANY_CHARM_ID] | grep -A5 -B5 'did:key' | grep 'did:key' | head -1 | cut -d'"' -f4)
+
+# Create child node with GitHub attachment
 echo '{
-  "body": "Node text here",
+  "body": "→ [Repository Name]",
+  "children": [],
+  "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "'${SPACE_DID}'"}}}]
+}' | ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_PARENT]/children/[NEW_INDEX]
+```
+
+**Getting Space DID**:
+The space DID can be extracted from any charm's cycle detection warnings or from charm inspection output. Look for strings matching `did:key:z6Mk...` in the CT command output.
+
+**Alternative - New Node Creation**:
+For new content, create nodes with attachments in one step:
+```bash
+echo '{
+  "body": "GitHub Repository",
   "children": [],
   "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]
-}' | ct charm set ... [PATH_TO_NODE]
+}' | ct charm set ... [PATH_TO_NEW_NODE]
 ```
 
-Or for existing nodes, set the entire attachments array:
-```bash
-echo '[{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]' | ct charm set ... [PATH_TO_ATTACHMENTS]
-```
+**Benefits of Child Node Approach**:
+- ✅ Bypasses CT-731 array index limitations
+- ✅ Works with any existing node (UI-created or programmatic)
+- ✅ Creates clean visual hierarchy with "→" indicators
+- ✅ Preserves original node content unchanged
+- ✅ Allows multiple GitHub repositories per node
 
-Note: Setting individual array indices (e.g., `attachments/0`) does not work with the current implementation.
+**What Still Doesn't Work**:
+- ❌ Direct array index setting: `attachments/0` 
+- ❌ `ct charm link` with array paths
+- ❌ Adding attachments to most UI-created nodes
+
+**When CT-731 is Fixed**:
+Once the underlying array index bug is resolved, we can return to using `ct charm link` for simpler attachment workflows.
 
 ### Data Structures
 The command maintains internal state tracking:
@@ -230,21 +257,20 @@ Implementation Plan:
    b. Set the repoUrl input: `echo '\"[GITHUB_URL]\"' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [NEW_CHARM_ID] repoUrl --input`
    c. Record the new charm ID for linking
 
-2. For each attachment insertion point:
-   a. Get the space DID: `./dist/ct space info --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] | grep "did:key"`
-   b. Create the link manually due to ct charm link bug with array indices:
-      - For new nodes: Create node with link in attachments:
-        ```
-        echo '{
-          "body": "[NODE_BODY_TEXT]",
-          "children": [],
-          "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]
-        }' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_NODE]
-        ```
-      - For existing nodes: Set the entire attachments array:
-        ```
-        echo '[{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_ATTACHMENTS]
-        ```
+2. For each GitHub URL found in existing nodes:
+   a. Get the space DID from CT command output (look for cycle warnings or use any existing charm):
+      ```
+      SPACE_DID=$(./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [EXISTING_CHARM_ID] | grep -o 'did:key:z6Mk[^"]*' | head -1)
+      ```
+   b. Use the child node workaround to bypass CT-731 array index limitations:
+      ```
+      echo '{
+        "body": "→ [Repository Name from GitHub API]",
+        "children": [],
+        "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "'${SPACE_DID}'"}}}]
+      }' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_PARENT_NODE]/children/[NEXT_INDEX]
+      ```
+   c. This creates a child node under the node containing the GitHub URL, with rich repository data attached
 
 3. Verify all links are working by inspecting the final attachment structures
 
