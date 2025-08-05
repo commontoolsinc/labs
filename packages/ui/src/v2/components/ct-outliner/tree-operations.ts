@@ -433,7 +433,7 @@ export const TreeOperations = {
       const currentChildren = cell.get();
 
       // Build new children array without the deleted node
-      let newChildren: Node[] = [];
+      const newChildren: Node[] = [];
 
       // Add nodes before the deleted one
       newChildren.push(...currentChildren.slice(0, nodeIndex));

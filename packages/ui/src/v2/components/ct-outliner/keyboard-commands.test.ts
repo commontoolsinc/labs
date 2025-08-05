@@ -176,7 +176,7 @@ describe("Keyboard Commands", () => {
 
   describe("Navigation Commands", () => {
     it.skip("should handle Tab key for indentation", async () => {
-      // TODO: This test is currently failing due to a component-level issue
+      // TODO(#ct-outliner): This test is currently failing due to a component-level issue
       // with path-based indentation operations causing runtime errors in the Cell system
       await setupOutliner();
       const secondNodeBody = outliner.tree.root.children[1].body;
@@ -229,7 +229,7 @@ describe("Keyboard Commands", () => {
     });
 
     it.skip("should handle arrow key navigation", async () => {
-      // TODO: This test is failing because the path-based ArrowDown command
+      // TODO(#ct-outliner): This test is failing because the path-based ArrowDown command
       // relies on getNodePath() which doesn't work reliably with Cell-based nodes
       await setupOutliner();
       const firstNodePath = [0];
@@ -249,7 +249,7 @@ describe("Keyboard Commands", () => {
     });
 
     it.skip("should handle cmd/ctrl+] for indentation", async () => {
-      // TODO: This test is failing due to the same indentation issue as the Tab test
+      // TODO(#ct-outliner): This test is failing due to the same indentation issue as the Tab test
       await setupOutliner();
       const secondNodeBody = outliner.tree.root.children[1].body;
       outliner.focusedNodePath = [1]; // Focus on the second node
@@ -417,7 +417,7 @@ describe("Keyboard Commands", () => {
     });
 
     it.skip("should handle cmd/ctrl+[ and ] in edit mode", async () => {
-      // TODO: This test needs to be updated for the path-based API
+      // TODO(#ct-outliner): This test needs to be updated for the path-based API
       // Currently uses outliner.startEditing() which doesn't exist in the new API
       await setupOutliner();
       const secondNodeBody = outliner.tree.root.children[1].body;
@@ -475,7 +475,7 @@ describe("Keyboard Commands", () => {
     });
 
     it.skip("should preserve edit mode after indent/outdent operations", async () => {
-      // TODO: This test needs to be updated for the path-based API
+      // TODO(#ct-outliner): This test needs to be updated for the path-based API
       // Currently uses outliner.startEditingWithInitialText() which doesn't exist in the new API
       await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
@@ -541,7 +541,7 @@ describe("Keyboard Commands", () => {
     });
 
     it.skip("should preserve cursor position and content during edit mode indentation", async () => {
-      // TODO: This test needs to be updated for the path-based API 
+      // TODO(#ct-outliner): This test needs to be updated for the path-based API 
       // Currently uses outliner.startEditingWithInitialText() which doesn't exist in the new API
       await setupOutliner();
       const secondNode = outliner.tree.root.children[1];

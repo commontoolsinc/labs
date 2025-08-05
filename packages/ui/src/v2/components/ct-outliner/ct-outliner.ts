@@ -1849,7 +1849,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       !instance || typeof instance !== "object" ||
       !Array.isArray(instance.children)
     ) {
-      debugger;
       console.error("Corrupted node in renderNode:", instance);
       return html`
         <div class="error">Corrupted node</div>

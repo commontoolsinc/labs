@@ -436,7 +436,7 @@ export class PathDiffApplier {
           }
           break;
 
-        case "delete":
+        case "delete": {
           // Clear focused/editing if they were the deleted node
           if (newFocused && this.pathsEqual(newFocused, change.path)) {
             newFocused = null;
@@ -449,6 +449,7 @@ export class PathDiffApplier {
           const deletedPathStr = change.path.join(",");
           newCollapsed.delete(deletedPathStr);
           break;
+        }
       }
     }
 
