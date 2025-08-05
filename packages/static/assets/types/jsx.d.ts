@@ -29,7 +29,7 @@ declare global {
       [elemName: string]: any;
       "ct-outliner": {
               $value: Cell<{ root: OutlinerNode }>,
-              $mentionable: Cell<Charm[]>
+              $mentionable?: Cell<Charm[]>
               'oncharm-link-click'?: any,
             } & Child;
     }
