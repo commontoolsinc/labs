@@ -437,7 +437,10 @@ export const TreeOperations = {
     }
 
     const parentChildrenCell = parentNode.key("children") as Cell<Node[]>;
-    const node = nodeCell.get();
+    
+    // Get the children to promote before modifying anything
+    const nodeChildrenCell = nodeCell.key("children") as Cell<Node[]>;
+    const childrenToPromote = nodeChildrenCell.get();
 
     await mutateCell(parentChildrenCell, (cell) => {
       const currentChildren = cell.get();
@@ -448,9 +451,9 @@ export const TreeOperations = {
       // Add nodes before the deleted one
       newChildren.push(...currentChildren.slice(0, nodeIndex));
       
-      // Add promoted children if any (they already have [ID])
-      if (node.children.length > 0) {
-        newChildren.push(...node.children);
+      // Add promoted children if any
+      if (childrenToPromote.length > 0) {
+        newChildren.push(...childrenToPromote);
       }
       
       // Add nodes after the deleted one
@@ -504,25 +507,24 @@ export const TreeOperations = {
     // Navigate to sibling's children Cell
     const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
 
-    // Get the node to move
+    // Get the node to move before any modifications
     const parentChildren = parentChildrenCell.get();
     const nodeToMove = parentChildren[nodeIndex];
 
-    // Use transactions for atomic updates
-    const tx = rootCell.runtime.edit();
-
-    // Remove node from parent children - keep original references for siblings
+    // First transaction: Remove from parent
+    let tx = rootCell.runtime.edit();
     const newParentChildren = [
       ...parentChildren.slice(0, nodeIndex),
       ...parentChildren.slice(nodeIndex + 1),
     ];
     parentChildrenCell.withTx(tx).set(newParentChildren);
+    await tx.commit();
 
-    // Add original node to sibling children (works because nodes have [ID])
-    const currentSiblingChildren = siblingChildrenCell.get();
-    const newSiblingChildren = [...currentSiblingChildren, nodeToMove];
+    // Second transaction: Add to sibling
+    tx = rootCell.runtime.edit();
+    const siblingChildren = siblingChildrenCell.get();
+    const newSiblingChildren = [...siblingChildren, nodeToMove];
     siblingChildrenCell.withTx(tx).set(newSiblingChildren);
-
     await tx.commit();
 
     // Return new focused path
@@ -558,28 +560,28 @@ export const TreeOperations = {
     // Navigate to grandparent's children Cell (destination)
     const grandParentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, grandParentPath);
 
-    // Get the node to move
+    // Get the node to move before any modifications
     const parentChildren = parentChildrenCell.get();
-    const grandParentChildren = grandParentChildrenCell.get();
     const nodeToMove = parentChildren[nodeIndex];
 
-    const tx = rootCell.runtime.edit();
-
-    // Remove from parent children
+    // First transaction: Remove from parent
+    let tx = rootCell.runtime.edit();
     const newParentChildren = [
       ...parentChildren.slice(0, nodeIndex),
       ...parentChildren.slice(nodeIndex + 1),
     ];
     parentChildrenCell.withTx(tx).set(newParentChildren);
+    await tx.commit();
 
-    // Insert original node into grandparent children after parent
+    // Second transaction: Add to grandparent
+    tx = rootCell.runtime.edit();
+    const grandParentChildren = grandParentChildrenCell.get();
     const newGrandParentChildren = [
       ...grandParentChildren.slice(0, parentIndex + 1),
       nodeToMove,
       ...grandParentChildren.slice(parentIndex + 1),
     ];
     grandParentChildrenCell.withTx(tx).set(newGrandParentChildren);
-
     await tx.commit();
 
     // Return new focused path

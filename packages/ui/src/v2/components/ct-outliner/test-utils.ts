@@ -69,33 +69,30 @@ export const createMockShadowRoot = () => ({
  * Create a standard test tree structure
  */
 export const createTestTree = (): Tree => ({
-  root: {
+  root: TreeOperations.createNode({
     body: "",
     children: [
-      { body: "First item", children: [], attachments: [] },
-      { body: "Second item", children: [], attachments: [] },
+      TreeOperations.createNode({ body: "First item" }),
+      TreeOperations.createNode({ body: "Second item" }),
     ],
-    attachments: [],
-  },
+  }),
 });
 
 /**
  * Create a nested test tree structure
  */
 export const createNestedTestTree = (): Tree => ({
-  root: {
+  root: TreeOperations.createNode({
     body: "",
-    children: [{
-      body: "Parent",
-      children: [{
-        body: "Child",
-        children: [],
-        attachments: [],
-      }],
-      attachments: [],
-    }],
-    attachments: [],
-  },
+    children: [
+      TreeOperations.createNode({
+        body: "Parent",
+        children: [
+          TreeOperations.createNode({ body: "Child" }),
+        ],
+      }),
+    ],
+  }),
 });
 
 /**

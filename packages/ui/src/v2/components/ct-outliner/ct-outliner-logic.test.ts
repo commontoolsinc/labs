@@ -134,19 +134,17 @@ describe("CTOutliner Logic Tests", () => {
 
     it("should outdent nodes", async () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
-          children: [{
-            body: "Parent",
-            children: [{
-              body: "Child",
-              children: [],
-              attachments: [],
-            }],
-            attachments: [],
-          }],
-          attachments: [],
-        },
+          children: [
+            TreeOperations.createNode({
+              body: "Parent",
+              children: [
+                TreeOperations.createNode({ body: "Child" }),
+              ],
+            }),
+          ],
+        }),
       };
 
       const treeCell = await createMockTreeCell(tree);
@@ -168,23 +166,18 @@ describe("CTOutliner Logic Tests", () => {
 
     it("should convert to markdown", () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
-          children: [{
-            body: "Item 1",
-            children: [{
-              body: "Sub-item 1.1",
-              children: [],
-              attachments: [],
-            }],
-            attachments: [],
-          }, {
-            body: "Item 2",
-            children: [],
-            attachments: [],
-          }],
-          attachments: [],
-        },
+          children: [
+            TreeOperations.createNode({
+              body: "Item 1",
+              children: [
+                TreeOperations.createNode({ body: "Sub-item 1.1" }),
+              ],
+            }),
+            TreeOperations.createNode({ body: "Item 2" }),
+          ],
+        }),
       };
 
       const markdown = TreeOperations.toMarkdown(tree);
