@@ -7,12 +7,15 @@ import {
 } from "@commontools/integration";
 import { ANYONE, Identity, InsecureCryptoKeyPair } from "@commontools/identity";
 import { afterAll, afterEach, beforeAll } from "@std/testing/bdd";
-import { AppState } from "../src/lib/app/mod.ts";
+import { AppState } from "../shell/src/lib/app/mod.ts";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache";
 import { CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
 import { PageErrorEvent } from "@astral/astral";
+
+import "../shell/src/globals.ts";
+import { sleep } from "@commontools/utils/sleep";
 
 // Pass the key over the boundary. When the state is returned,
 // the key is serialized to Uint8Arrays, and then turned into regular arrays,
@@ -150,4 +153,18 @@ export class ShellIntegration {
       throw new Error(`Exceptions recorded: \n${this.exceptions.join("\n")}`);
     }
   };
+
+  async waitForSelector(selector: string, options?: { timeout?: number }) {
+    const { page } = this.get();
+    const timeout = options?.timeout ?? 30000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeout) {
+      const handle = await page.$(selector);
+      if (handle) return handle;
+      await sleep(100);
+    }
+
+    throw new Error(`Timeout waiting for selector: ${selector}`);
+  }
 }

@@ -5,6 +5,7 @@
   },
   "exports": {
     ".": "./index.ts",
-    "./jumble": "./jumble.ts"
+    "./jumble": "./jumble.ts",
+    "./shell-utils": "./shell-utils.ts"
   }
 }

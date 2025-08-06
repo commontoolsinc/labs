@@ -1,6 +1,9 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { registerCharm, ShellIntegration } from "./utils.ts";
+import {
+  registerCharm,
+  ShellIntegration,
+} from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
@@ -32,8 +35,7 @@ describe("shell charm tests", () => {
       ),
     });
 
-    // TODO(js): Remove /shell when no longer prefixed
-    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
     const state = await shell.login();

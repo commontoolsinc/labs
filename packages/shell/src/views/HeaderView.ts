@@ -3,13 +3,12 @@ import { property, state } from "lit/decorators.js";
 import { Identity, KeyStore } from "@commontools/identity";
 import { BaseView } from "./BaseView.ts";
 import { Task } from "@lit/task";
-import { getNavigationHref } from "../lib/navigate.ts";
 import { styleMap } from "lit/directives/style-map.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import {
   StorageInspectorConflicts,
   StorageInspectorUpdateEvent,
-} from "../lib/inspector.ts";
+} from "../lib/storage-inspector.ts";
 import "../components/Flex.ts";
 import { CharmController } from "@commontools/charm/ops";
 
@@ -86,10 +85,6 @@ export class XHeaderView extends BaseView {
 
     ct-logo:hover {
       transform: scale(1.05);
-    }
-
-    a, a:visited {
-      color: var(--primary-font, "#000");
     }
   `;
 
@@ -211,16 +206,17 @@ export class XHeaderView extends BaseView {
       : undefined;
     const spaceLink = this.spaceName
       ? html`
-        <a class="space-link" href="${getNavigationHref(this.spaceName)}">${this
-          .spaceName}</a>
+        <x-charm-link
+          .spaceName="${this.spaceName}"
+        >${this.spaceName}</x-charm-link>
       `
       : null;
     const charmLink = activeCharmName && this.spaceName && this.activeCharm
       ? html`
-        <a class="charm-link" href="${getNavigationHref(
-          this.spaceName,
-          this.activeCharm.id,
-        )}">${activeCharmName}</a>
+        <x-charm-link
+          .charmId="${this.activeCharm.id}"
+          .spaceName="${this.spaceName}"
+        >${activeCharmName}</x-charm-link>
       `
       : null;
     const title = html`

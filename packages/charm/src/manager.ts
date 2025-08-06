@@ -1011,8 +1011,10 @@ export class CharmManager {
         "Target",
       );
 
+    const tx = this.runtime.edit();
+
     // Navigate to the source path
-    let sourceResultCell = sourceCell;
+    let sourceResultCell = sourceCell.withTx(tx);
     // For charms, manager.get() already returns the result cell, so no need to add "result"
 
     for (const segment of sourcePath) {
@@ -1025,22 +1027,21 @@ export class CharmManager {
       throw new Error("Target path cannot be empty");
     }
 
-    let targetInputCell = targetCell;
+    let targetInputCell = targetCell.withTx(tx);
     if (targetIsCharm) {
       // For charms, target fields are in the source cell's argument
       const sourceCell = targetCell.getSourceCell(processSchema);
       if (!sourceCell) {
         throw new Error("Target charm has no source cell");
       }
-      targetInputCell = sourceCell.key("argument");
+      targetInputCell = sourceCell.key("argument").withTx(tx);
     }
 
     for (const segment of targetPath) {
       targetInputCell = targetInputCell.key(segment);
     }
 
-    const tx = this.runtime.edit();
-    targetInputCell.key(targetKey).withTx(tx).set(sourceResultCell);
+    targetInputCell.key(targetKey).set(sourceResultCell);
     await tx.commit();
     await this.runtime.idle();
     await this.synced();

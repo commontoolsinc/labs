@@ -4,8 +4,7 @@
 
 The `ct-outliner` is a hierarchical tree-based outliner component built with Lit
 that provides keyboard-driven navigation and editing capabilities. It uses a
-mutable tree data structure for live manipulation while maintaining node
-reference equality.
+Cell-based reactive data structure with proper link resolution support.
 
 ## Data Structure
 
@@ -14,8 +13,9 @@ reference equality.
 ```typescript
 interface Node {
   body: string; // Text content of the node
-  children: Node[]; // Child nodes (mutable array)
+  children: Node[]; // Child nodes
   attachments: Attachment[]; // File/charm attachments
+  [ID]: string; // Required for Cell array operations
 }
 ```
 
@@ -27,18 +27,19 @@ interface Tree {
 }
 ```
 
-**Key Design Decision**: The tree structure is intentionally mutable to preserve
-object references for focus management and UI consistency. This differs from
-typical immutable patterns in the codebase.
+**Key Design Decision**: The component uses CommonTools' Cell reactive data 
+structure. All nodes must have `[ID]` properties to work correctly with Cell 
+array operations. The component properly uses `.getAsQueryResult()` for reading 
+data to ensure link resolution works correctly.
 
 ## Component Properties
 
-- `value: Tree` - The tree data structure
+- `value: Cell<Tree>` - The reactive tree data structure
 - `readonly: boolean` - Whether editing is disabled
 - `mentionable: MentionableItem[]` - Items available for @ mentions
-- `tree: Tree` (internal state) - Working copy of the tree
-- `focusedNode: Node | null` - Currently focused node
-- `collapsedNodes: Set<Node>` - Nodes that are collapsed in the UI
+- `tree: Tree` (getter) - Current tree value from Cell
+- `focusedNodePath: number[] | null` - Path to currently focused node
+- `collapsedNodePaths: Set<string>` - Paths to collapsed nodes
 
 ## Keyboard Commands
 
@@ -122,19 +123,22 @@ typical immutable patterns in the codebase.
 
 ## Tree Operations
 
-All tree operations maintain object references where possible and only create
-new objects when necessary.
+All tree operations use path-based APIs and return TreeOperationResult with 
+diffs describing what changed. Operations properly use Cell's transactional 
+updates and `.getAsQueryResult()` for link resolution.
 
 ### Node Creation
 
-- `createNewNodeAfter(node)`: Insert sibling after specified node
-- `createChildNode(node)`: Insert as first child of specified node
+- `createNodeAfterPath(path)`: Insert sibling after specified path
+- `createChildNodeAtPath(path)`: Insert as first child at specified path
 
 ### Node Manipulation
 
-- `deleteNode(node)`: Remove node, promote children to parent level
-- `indentNode(node)`: Make node a child of previous sibling
-- `outdentNode(node)`: Move node up to parent's level
+- `deleteNodeByPath(path)`: Remove node, promote children to parent level
+- `indentNodeByPath(path)`: Make node a child of previous sibling
+- `outdentNodeByPath(path)`: Move node up to parent's level
+- `moveNodeUpByPath(path)`: Move node up among siblings
+- `moveNodeDownByPath(path)`: Move node down among siblings
 
 ### Tree Integrity Rules
 
@@ -147,13 +151,13 @@ new objects when necessary.
 
 ### Focus Management
 
-- `focusedNode`: Currently selected node (has visual focus ring)
-- Focus persists through tree operations
+- `focusedNodePath`: Path to currently selected node (has visual focus ring)
+- Focus persists through tree operations using path-based tracking
 - Focus is automatically moved when deleting focused node
 
 ### Collapse/Expand
 
-- `collapsedNodes`: Set of nodes that are visually collapsed
+- `collapsedNodePaths`: Set of node paths that are visually collapsed
 - Collapsed nodes hide their children in the UI
 - Arrow keys can expand/collapse nodes
 
@@ -181,42 +185,48 @@ new objects when necessary.
 ### Internal Event Flow
 
 1. **Keyboard events**: Routed through different handlers based on mode
-   - Read mode: `handleKeyDown()` → `executeKeyboardCommand()`
+   - Read mode: `handleKeyDown()` → `executePathBasedKeyboardCommand()`
    - Edit mode: `handleEditorKeyDown()` → `handleNormalEditorKeyDown()`
-2. **Tree mutations**: Operations modify tree in place, then `emitChange()` and
-   `requestUpdate()`
+2. **Tree mutations**: Operations use Cell transactions, automatic reactivity
+   triggers updates without manual `emitChange()` calls
 
 ## Testing Architecture
 
 ### Test Coverage
 
-- **82 test cases** across 3 test files ensure comprehensive coverage
+- **92 test cases** across 6 test files ensure comprehensive coverage
 - **component-integration.test.ts**: End-to-end component behavior
 - **ct-outliner-logic.test.ts**: Tree operations and business logic
 - **keyboard-commands.test.ts**: Keyboard command execution
+- **ct-outliner-indent.test.ts**: Indentation operations
+- **ct-outliner-path.test.ts**: Path-based node navigation
+- **link-resolution.test.ts**: Cell link resolution behavior
 
 ### Test Patterns
 
-- Mutable tree operations are tested by checking direct node references
+- Cell-based operations tested with real Runtime instances
 - Mock DOM environment for textarea and focus management
 - Keyboard events are simulated with mock event objects
+- Link resolution tested with scenarios involving Cell references
 
 ## Implementation Notes
 
-### Mutable vs Immutable Design
+### Cell-based Reactive Design
 
-Unlike most of the codebase, this component uses mutable tree operations for
-performance and reference equality. This design choice enables:
+The component uses CommonTools' Cell reactive data structure for automatic 
+change propagation and link resolution:
 
-- Consistent focus management (focused node references remain valid)
-- Efficient tree operations (no object copying overhead)
-- Simplified component logic (no tree reassignments needed)
+- All nodes must have `[ID]` properties for Cell array operations
+- Uses `.getAsQueryResult()` for reading data to resolve links
+- Uses `mutateCell()` for safe mutations within transactions
+- Path-based operations avoid node reference issues
 
 ### Performance Considerations
 
-- Tree operations mutate in place - O(1) for most operations
-- Node index caching using WeakMap for editor IDs
+- Tree operations use Cell transactions for consistency
+- Path-based tracking avoids stale node references
 - Incremental DOM updates via Lit's change detection
+- Automatic reactivity through Cell subscriptions
 
 ### Browser Compatibility
 
@@ -243,14 +253,15 @@ performance and reference equality. This design choice enables:
 
 ## Migration Notes
 
-This component underwent a major refactoring to:
+This component underwent major refactoring to:
 
-1. **Simplify data structure**: Removed Node/Block separation, eliminated ID
-   management
-2. **Adopt mutable operations**: Changed from immutable tree transformations
-3. **Fix keyboard regressions**: Restored all expected keyboard behaviors
-4. **Improve test coverage**: Added comprehensive test suite to prevent future
-   regressions
+1. **Fix Cell API usage**: Properly use `.getAsQueryResult()` for link resolution
+2. **Add [ID] properties**: All nodes now have required IDs for Cell operations
+3. **Path-based operations**: Moved from node references to path-based tracking
+4. **Comprehensive testing**: Added link resolution tests and improved coverage
 
-The refactoring maintains the same public API while improving internal
-consistency and performance.
+Recent fixes (December 2024):
+- Fixed all `.get()` calls to use `.getAsQueryResult()` for proper link resolution
+- Added type casting for Charm[] in attachment rendering
+- Removed unused debug files and utilities
+- Updated to follow Cell API best practices
