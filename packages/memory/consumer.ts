@@ -398,6 +398,8 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
 
   return: (input: ConsumerResultFor<Ability, Protocol>) => boolean;
 
+  source: ConsumerInvocationFor<Ability, Protocol>;
+
   #reference: Reference<Invocation>;
 
   static create<Ability extends The, Protocol extends Proto>(
