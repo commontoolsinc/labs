@@ -80,7 +80,7 @@ describe("instantiate-recipe integration test", () => {
     await sleep(500);
 
     // Store the current URL before any action
-    const urlBefore = await page.evaluate(() => window.location.href);
+    const urlBefore = await page.evaluate(() => globalThis.location.href);
     console.log("URL before action:", urlBefore);
 
     // Type in the input field
@@ -96,7 +96,7 @@ describe("instantiate-recipe integration test", () => {
     await sleep(500);
 
     // Check if we navigated to a new counter instance
-    const urlAfter = await page.evaluate(() => window.location.href);
+    const urlAfter = await page.evaluate(() => globalThis.location.href);
     console.log("URL after clicking:", urlAfter);
 
     // Verify navigation happened (URL should have changed)

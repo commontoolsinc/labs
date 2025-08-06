@@ -95,7 +95,7 @@ const newCounter = handler(
   },
 );
 
-export default recipe(InputSchema, OutputSchema, ({ }) => {
+export default recipe(InputSchema, OutputSchema, (_) => {
   return {
     [NAME]: "Counter Factory",
     [UI]: (

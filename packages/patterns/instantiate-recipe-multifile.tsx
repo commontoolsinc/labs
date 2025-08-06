@@ -45,7 +45,7 @@ const newPage = handler(
   },
 );
 
-export default recipe(InputSchema, OutputSchema, ({ }) => {
+export default recipe(InputSchema, OutputSchema, (_) => {
   return {
     [NAME]: "Page Factory",
     [UI]: (
