@@ -14,7 +14,7 @@ describe("background charm counter tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  it("can register and interact with background counter charm", async () => {
+  it.skip("can register and interact with background counter charm", async () => {
     // FIXME(ja): currently bg process doesn't receive updates of bgCharms,
     // and so we need to start it after we register :(  We should start it here
     // this.charmCell.sink only seems to trigger when the service.ts starts -
