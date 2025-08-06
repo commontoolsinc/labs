@@ -175,7 +175,7 @@ export class ContextualFlowControl {
     joined: Set<string>,
     schema: JSONSchema | boolean,
     rootSchema: JSONSchema | boolean,
-    cycleTracker: CycleTracker<JSONSchema> = new CycleTracker<JSONSchema>(),
+    cycleTracker: CycleTracker<JSONSchema> = new CycleTracker<JSONSchema>(true),
   ): Set<string> {
     if (typeof schema === "boolean") {
       return joined;
