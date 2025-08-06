@@ -261,6 +261,14 @@ class MemoryProviderSession<
     );
 
     if (error) {
+      logger.error(
+        () => [
+          "Authorization error:",
+          error,
+          ", failed invocation:",
+          invocation,
+        ],
+      );
       return this.perform({
         the: "task/return",
         of: `job:${refer(invocation)}` as InvocationURL<
