@@ -20,10 +20,9 @@ export default recipe(model, model, (cell) => {
     const doubled = derive(cell.value, (v) => v * 2);
     return {
         [UI]: (<div>
-        <p>Value: {commontools_1.derive(cell, cell => cell.value)}</p>
+        <p>Value: {(globalThis.__CT_COMMONTOOLS).derive(cell, cell => cell.value)}</p>
         <p>Doubled: {doubled}</p>
       </div>),
         value: cell.value,
     };
 });
-

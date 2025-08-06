@@ -6,6 +6,7 @@ const MAIN = "$MAIN";
 const BUNDLE_PRE = stripNewLines(`
 ((runtimeDeps={}) => {
   const { define, require } = (${getAMDLoader.toString()})();
+  globalThis.__CT_COMMONTOOLS = runtimeDeps.commontools;
   for (const [name, dep] of Object.entries(runtimeDeps)) {
     define(name, ["exports"], exports => Object.assign(exports, dep));
   }`);
