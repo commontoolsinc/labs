@@ -158,13 +158,7 @@ class MemoryConsumerSession<
     this.controller = controller;
   }
   send(command: UCAN<ConsumerCommandInvocation<MemoryProtocol>>) {
-    // Strip undefined values before sending to ensure consistent serialization
-    // This is needed because refer() throws on undefined values
-    const cleanedCommand = {
-      ...command,
-      invocation: JSON.parse(JSON.stringify(command.invocation)),
-    };
-    this.controller?.enqueue(cleanedCommand);
+    this.controller?.enqueue(command);
   }
   receive(command: ProviderCommand<MemoryProtocol>) {
     const id = command.of;
@@ -424,9 +418,10 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
     } as ConsumerInvocationFor<Ability, Protocol>);
   }
 
-  constructor(public source: ConsumerInvocationFor<Ability, Protocol>) {
-    // JSON.parse(JSON.stringify) is used to strip `undefined` values
-    this.#reference = refer(JSON.parse(JSON.stringify(source)));
+  constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
+    // JSON.parse(JSON.stringify) is used to strip `undefined` values and ensure consistent serialization
+    this.source = JSON.parse(JSON.stringify(source));
+    this.#reference = refer(this.source);
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
       (resolve) => (receive = resolve),
