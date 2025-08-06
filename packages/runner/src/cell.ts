@@ -1,5 +1,5 @@
-import { isObject, isRecord } from "@commontools/utils/types";
-import { type MemorySpace } from "@commontools/memory/interface";
+import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
+import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
 import {
   type Cell,
@@ -13,7 +13,7 @@ import {
   TYPE,
 } from "./builder/types.ts";
 import { toOpaqueRef } from "./back-to-cell.ts";
-import { type DeepKeyLookup, type DocImpl } from "./doc.ts";
+import type { DeepKeyLookup, DocImpl } from "./doc.ts";
 import {
   createQueryResultProxy,
   getCellOrThrow,
@@ -35,7 +35,7 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import { areLinksSame, isLink } from "./link-utils.ts";
-import { type IRuntime } from "./runtime.ts";
+import type { IRuntime } from "./runtime.ts";
 import {
   createSigilLinkFromParsedLink,
   type NormalizedFullLink,
@@ -43,6 +43,7 @@ import {
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
+  JSONValue,
 } from "./storage/interface.ts";
 import { fromURI } from "./uri-utils.ts";
 import { getEntityId } from "./doc-map.ts";
@@ -111,7 +112,7 @@ import { getEntityId } from "./doc-map.ts";
  * @method getRaw Raw access method, without following aliases (which would
  * write to the destination instead of the cell itself).
  * @param {IReadOptions} options - Optional read options.
- * @returns {any} - Raw document data
+ * @returns {Immutable<JSONValue> | undefined} - Raw readonly document data
  *
  * @method setRaw Raw write method that bypasses Cell validation,
  * transformation, and alias resolution. Writes directly to the cell without
@@ -206,7 +207,7 @@ declare module "@commontools/api" {
       },
     ): SigilWriteRedirectLink;
     getDoc(): DocImpl<any>;
-    getRaw(options?: IReadOptions): any;
+    getRaw(options?: IReadOptions): Immutable<T> | undefined;
     setRaw(value: any): void;
     getSourceCell<T>(
       schema?: JSONSchema,
@@ -374,8 +375,12 @@ class StreamCell<T> implements Stream<T> {
     return this;
   }
 
-  getRaw(options?: IReadOptions): any {
-    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
+  getRaw(options?: IReadOptions): Immutable<T> | undefined {
+    // readValueOrThrow requires JSONValue, while we require T
+    return this.runtime.readTx(this.tx).readValueOrThrow(
+      this.link,
+      options,
+    ) as Immutable<T> | undefined;
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
@@ -671,9 +676,11 @@ export class RegularCell<T> implements Cell<T> {
     );
   }
 
-  getRaw(options?: IReadOptions): any {
+  getRaw(options?: IReadOptions): Immutable<T> | undefined {
     if (!this.synced) this.sync(); // No await, just kicking this off
-    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options);
+    return this.runtime.readTx(this.tx).readValueOrThrow(this.link, options) as
+      | Immutable<T>
+      | undefined;
   }
 
   setRaw(value: any): void {
