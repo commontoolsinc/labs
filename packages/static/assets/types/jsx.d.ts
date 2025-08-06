@@ -46,6 +46,43 @@ declare global {
         title?: string,
         'onct-remove-item'?: any,
       } & Child;
+      "ct-input": {
+        $value?: Cell<string>,
+        customStyle?: string, // bf: I think this is going to go away one day soon
+        type?: string,
+        placeholder?: string,
+        value?: string,
+        disabled?: boolean,
+        readonly?: boolean,
+        error?: boolean,
+        name?: string,
+        required?: boolean,
+        autofocus?: boolean,
+        autocomplete?: string,
+        min?: string,
+        max?: string,
+        step?: string,
+        pattern?: string,
+        maxlength?: string,
+        minlength?: string,
+        inputmode?: string,
+        size?: number,
+        multiple?: boolean,
+        accept?: string,
+        list?: string,
+        spellcheck?: boolean,
+        validationPattern?: string,
+        showValidation?: boolean,
+        timingStrategy?: string,
+        timingDelay?: number,
+
+        'onct-change'?: any,
+        'onct-focus'?: any,
+        'onct-blur'?: any,
+        'onct-keydown'?: any,
+        'onct-submit'?: any,
+        'onct-invalid'?: any,
+      } & Child;
     }
   }
 }
