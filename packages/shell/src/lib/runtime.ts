@@ -168,7 +168,7 @@ export class RuntimeInternals extends EventTarget {
           // If the charm doesn't exist in the list, add it
           if (!existingCharm) {
             // FIXME(jake): This feels, perhaps, like an incorrect mix of
-            // concerns, but this gets us to parity with jumble. If `navigateTo`
+            // concerns. If `navigateTo`
             // should be managing/updating the charms list cell, that should be
             // happening as part of the runtime built-in function, not up in
             // the shell layer...
