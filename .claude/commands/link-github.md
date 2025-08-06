@@ -35,10 +35,13 @@ This command finds GitHub URLs in page.tsx charms and creates linked GitHub repo
 ### Step 2: Extract GitHub URLs from Outline
 For each page charm:
 ```bash
-# Get the full outline data
-./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [CHARM_ID] outline
+# IMPORTANT: For efficiency, especially when re-scanning, use jq to avoid pulling massive attachment data
+# Get only nodes with empty attachments (unlinked URLs)
+./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [CHARM_ID] outline | jq '.root.children[].children[] | select(.attachments == []) | {body: .body, path: path(.)}'
 
-# Manually search through the JSON for any GitHub URLs in 'body' fields
+# Or for a specific path to avoid large JSON responses:
+./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [CHARM_ID] outline | jq '.root.children[0].children[3]'
+
 # Look for patterns like: https://github.com/[owner]/[repo]
 ```
 
@@ -92,7 +95,7 @@ When searching:
 
 - **Non-page charms**: Skip silently if `ct charm get outline` fails
 - **404 GitHub URLs**: Skip and continue with other URLs
-- **Existing attachments**: Link to the next available index (attachments/1, attachments/2, etc.)
+- **Existing attachments**: Skip nodes that already have attachments (check with `attachments != []`)
 
 ## Complete Example
 
@@ -142,3 +145,25 @@ When this command is invoked, Claude should:
 5. **Report results** concisely
 
 Do NOT use subagents unless dealing with 10+ page charms. Just follow the steps directly.
+
+## Re-scanning Best Practices
+
+When re-scanning for new URLs:
+
+1. **Use precise jq queries** to filter only unlinked nodes:
+   ```bash
+   jq '.root.children[].children[] | select(.attachments == [])'
+   ```
+
+2. **Target specific paths** when you know where new URLs might be:
+   ```bash
+   jq '.root.children[0].children[3]'
+   ```
+
+3. **Avoid pulling full outline** when attachments contain large JSON data
+   - Each linked GitHub repo adds ~200+ lines of JSON to the attachment
+   - Use filtering to get only what you need
+
+4. **Check attachment status** before creating new fetchers:
+   - Only process nodes where `attachments == []`
+   - This prevents duplicate fetchers for already-linked URLs
