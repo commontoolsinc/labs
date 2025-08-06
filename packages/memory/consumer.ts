@@ -66,6 +66,12 @@ import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { SchemaNone } from "./schema.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("memory-consumer", {
+  enabled: true,
+  level: "info",
+});
 
 export const connect = ({
   address,
@@ -151,9 +157,23 @@ class MemoryConsumerSession<
       start: (control) => {
         controller = control as typeof this.controller;
       },
-      transform: (command) =>
-        this.receive(command as ProviderCommand<MemoryProtocol>),
-      flush: () => this.close(),
+      transform: (command) => {
+        try {
+          return this.receive(command as ProviderCommand<MemoryProtocol>);
+        } catch (error) {
+          logger.error(() => ["TransformStream transform error:", error]);
+          logger.error(() => ["Failed command:", JSON.stringify(command)]);
+          throw error;
+        }
+      },
+      flush: () => {
+        try {
+          return this.close();
+        } catch (error) {
+          logger.error(() => ["TransformStream flush error:", error]);
+          throw error;
+        }
+      },
     });
     this.controller = controller;
   }
@@ -398,6 +418,8 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
 
   return: (input: ConsumerResultFor<Ability, Protocol>) => boolean;
 
+  source: ConsumerInvocationFor<Ability, Protocol>;
+
   #reference: Reference<Invocation>;
 
   static create<Ability extends The, Protocol extends Proto>(
@@ -418,9 +440,10 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
     } as ConsumerInvocationFor<Ability, Protocol>);
   }
 
-  constructor(public source: ConsumerInvocationFor<Ability, Protocol>) {
-    // JSON.parse(JSON.stringify) is used to strip `undefined` values
-    this.#reference = refer(JSON.parse(JSON.stringify(source)));
+  constructor(source: ConsumerInvocationFor<Ability, Protocol>) {
+    // JSON.parse(JSON.stringify) is used to strip `undefined` values and ensure consistent serialization
+    this.source = JSON.parse(JSON.stringify(source));
+    this.#reference = refer(this.source);
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol>>(
       (resolve) => (receive = resolve),
