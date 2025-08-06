@@ -113,14 +113,14 @@ export async function setCharmInput(
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
 
+  const tx = manager.runtime.edit();
   const inputCell = manager.getArgument(charmCell);
-  let targetCell = inputCell;
+  let targetCell = inputCell.withTx(tx);
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
 
-  const tx = manager.runtime.edit();
-  targetCell.withTx(tx).set(value as any);
+  targetCell.set(value as any);
   await tx.commit();
 
   await manager.runtime.idle();
@@ -138,13 +138,13 @@ export async function setCharmResult(
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
 
-  let targetCell = charmCell;
+  const tx = manager.runtime.edit();
+  let targetCell = charmCell.withTx(tx);
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
 
-  const tx = manager.runtime.edit();
-  targetCell.withTx(tx).set(value as any);
+  targetCell.set(value as any);
   await tx.commit();
 
   await manager.runtime.idle();
