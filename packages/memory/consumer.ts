@@ -158,7 +158,13 @@ class MemoryConsumerSession<
     this.controller = controller;
   }
   send(command: UCAN<ConsumerCommandInvocation<MemoryProtocol>>) {
-    this.controller?.enqueue(command);
+    // Strip undefined values before sending to ensure consistent serialization
+    // This is needed because refer() throws on undefined values
+    const cleanedCommand = {
+      ...command,
+      invocation: JSON.parse(JSON.stringify(command.invocation)),
+    };
+    this.controller?.enqueue(cleanedCommand);
   }
   receive(command: ProviderCommand<MemoryProtocol>) {
     const id = command.of;
