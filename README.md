@@ -11,8 +11,8 @@ There's a frontend, and a backend.
 All of the backend code lives within [Toolshed](./packages/toolshed), and is written in
 Deno2.
 
-All of the user-facing frontend code lives within [Jumble](./packages/jumble), and is
-written with React.
+All of the user-facing frontend code lives within [Shell](./packages/shell), and is
+written with Lit Web Components.
 
 ## Running the backend
 
@@ -30,7 +30,7 @@ By default the backend will run at <http://localhost:8000>
 Run the dev server
 
 ```bash
-cd ./packages/jumble
+cd ./packages/shell
 deno task dev
 ```
 

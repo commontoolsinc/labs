@@ -4,7 +4,6 @@
     "./packages/background-charm-service",
     "./packages/charm",
     "./packages/cli",
-    "./packages/deno-vite-plugin",
     "./packages/deno-web-test",
     "./packages/felt",
     "./packages/html",
@@ -12,7 +11,6 @@
     "./packages/iframe-sandbox",
     "./packages/integration",
     "./packages/js-runtime",
-    "./packages/jumble",
     "./packages/llm",
     "./packages/memory",
     "./packages/patterns",
@@ -42,13 +40,9 @@
       "dom.asynciterable",
       "esnext"
     ],
-    "types": [
-      "./packages/jumble/src/global.d.ts"
-    ],
     "experimentalDecorators": true
   },
   "exclude": [
-    "packages/jumble/.vite/deps/",
     "**/node_modules/",
     "**/.vite/",
     "**/dist/",
@@ -59,7 +53,6 @@
   "lint": {
     "exclude": [
       "./packages/static/assets",
-      "./packages/deno-vite-plugin",
       "./packages/vendor-astral"
     ],
     "rules": {
@@ -84,7 +77,6 @@
     "singleQuote": false,
     "proseWrap": "always",
     "exclude": [
-      "packages/jumble/integration/cache/llm-api-cache/",
       "packages/seeder/templates/",
       "packages/static/assets/",
       "packages/js-runtime/test/fixtures",
