@@ -596,7 +596,7 @@ export class Replica {
         return { error };
       }
       fetchedEntries = query.schemaFacts;
-      // FIXME(@ubik2) we're not actually handling the data from this
+      // TODO(@ubik2) we're not actually handling the data from this
       // subscription properly. We get the data through the commit changes,
       // because the server knows we're watching, but we should be able
       // to use the data from the subscription instead.
@@ -612,7 +612,7 @@ export class Replica {
       fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
     }
     const allFetched = fetchedEntries.map(([fact, _selector]) => fact);
-    const localFacts = this.getLocalFacts(allFetched);
+    const localFacts = this.updateLocalFacts(allFetched);
     const fetched = allFetched.filter((fact) =>
       fact === undefined || !localFacts.has(fact)
     );
@@ -912,7 +912,7 @@ export class Replica {
       ];
       // Avoid sending out updates to subscribers if it's a fact we already
       // know about in the nursery.
-      const localFacts = this.getLocalFacts(revisions);
+      const localFacts = this.updateLocalFacts(revisions);
       // Turn facts into revisions corresponding with the commit.
       this.heap.merge(
         revisions,
@@ -955,14 +955,14 @@ export class Replica {
     // It's possible to get the same fact (including cause) twice, but we
     // should have the same since on the second, so we can clear them from
     // tracking when we see them.
-    const resolvedFacts = this.getLocalFacts(revisions);
+    const localFacts = this.updateLocalFacts(revisions);
     const checkout = Differential.checkout(this, revisions);
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
       revisions,
       Replica.put,
-      (state) => state === undefined || !resolvedFacts.has(state),
+      (state) => state === undefined || !localFacts.has(state),
     );
 
     this.subscription.next({
@@ -992,13 +992,19 @@ export class Replica {
   }
 
   /**
-   * Gets facts that have an entry in the pending or seen MapSet
-   * This will also update the pending and seen sets
+   * When we push a new fact, we keep track of it in a MapSet.
+   * When we receive that fact from the server, either as a result
+   * of a commit, or as an entry in a pull response, we no longer
+   * need to track it. However, if we receive a stale entry, we need
+   * to know that, so that we don't propagate the stale entry.
+   *
+   * This function removes pending entries when we see them, and
+   * returns a set containing the stale facts.
    *
    * @param revisions the facts we received from the server
-   * @returns the set of these facts that are in the pending or seen lists
+   * @returns the set of these facts that are stale.
    */
-  private getLocalFacts(
+  private updateLocalFacts(
     revisions: (Revision<State> | undefined)[],
   ) {
     const matches = new Set<Revision<State>>();
