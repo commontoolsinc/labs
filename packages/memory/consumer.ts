@@ -155,12 +155,7 @@ class MemoryConsumerSession<
       >;
     super({
       start: (control) => {
-        try {
-          controller = control as typeof this.controller;
-        } catch (error) {
-          logger.error(() => ["TransformStream start error:", error]);
-          throw error;
-        }
+        controller = control as typeof this.controller;
       },
       transform: (command) => {
         try {
