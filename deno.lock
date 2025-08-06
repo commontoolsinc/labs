@@ -98,9 +98,10 @@
     "npm:@scalar/hono-api-reference@~0.5.165": "0.5.184_hono@4.8.5",
     "npm:@scure/bip39@^1.5.4": "1.6.0",
     "npm:@sentry/deno@^9.3.0": "9.41.0",
-    "npm:@shoelace-style/shoelace@^2.19.1": "2.20.1",
+    "npm:@shoelace-style/shoelace@^2.19.1": "2.20.1_@types+react@18.3.23",
     "npm:@types/jsdom@^21.1.7": "21.1.7",
     "npm:@types/node@*": "22.15.15",
+    "npm:@types/react@^18.3.1": "18.3.23",
     "npm:@vercel/otel@^1.10.1": "1.13.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.57.2_@opentelemetry+instrumentation@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.57.2__@opentelemetry+api@1.9.0_@opentelemetry+sdk-metrics@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0",
     "npm:@web/test-runner@*": "0.20.2",
     "npm:ai@^4.3.10": "4.3.19_react@18.3.1_zod@3.25.76",
@@ -883,7 +884,7 @@
         "@lit/reactive-element"
       ]
     },
-    "@lit/react@1.0.8_@types+react@19.1.8": {
+    "@lit/react@1.0.8_@types+react@18.3.23": {
       "integrity": "sha512-p2+YcF+JE67SRX3mMlJ1TKCSTsgyOVdAwd/nxp3NuV1+Cb6MWALbN6nT7Ld4tpmYofcE5kcaSY1YBB9erY+6fw==",
       "dependencies": [
         "@types/react"
@@ -1339,7 +1340,7 @@
     "@shoelace-style/localize@3.2.1": {
       "integrity": "sha512-r4C9C/5kSfMBIr0D9imvpRdCNXtUNgyYThc4YlS6K5Hchv1UyxNQ9mxwj+BTRH2i1Neits260sR3OjKMnplsFA=="
     },
-    "@shoelace-style/shoelace@2.20.1": {
+    "@shoelace-style/shoelace@2.20.1_@types+react@18.3.23": {
       "integrity": "sha512-FSghU95jZPGbwr/mybVvk66qRZYpx5FkXL+vLNpy1Vp8UsdwSxXjIHE3fsvMbKWTKi9UFfewHTkc5e7jAqRYoQ==",
       "dependencies": [
         "@ctrl/tinycolor",
@@ -1491,15 +1492,19 @@
     "@types/parse5@6.0.3": {
       "integrity": "sha512-SuT16Q1K51EAVPz1K29DJ/sXjhSQ0zjvsypYJ6tlwVsRV9jwW5Adq2ch8Dq8kDBCkYnELS7N7VNCSB5nC56t/g=="
     },
+    "@types/prop-types@15.7.15": {
+      "integrity": "sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw=="
+    },
     "@types/qs@6.14.0": {
       "integrity": "sha512-eOunJqu0K1923aExK6y8p6fsihYEn/BYuQ4g0CxAAgFc4b/ZLN4CrsRZ55srTdqoiLzU2B2evC+apEIxprEzkQ=="
     },
     "@types/range-parser@1.2.7": {
       "integrity": "sha512-hKormJbkJqzQGhziax5PItDUTMAM9uE2XXQmM37dyd4hVM+5aVl7oVxMVUiVQn2oCQFN/LKCZdvSM0pFRqbSmQ=="
     },
-    "@types/react@19.1.8": {
-      "integrity": "sha512-AwAfQ2Wa5bCx9WP8nZL2uMZWod7J7/JSplxbTmBQ5ms6QpqNYm672H0Vu9ZVKVngQ+ii4R/byguVEUZQyeg44g==",
+    "@types/react@18.3.23": {
+      "integrity": "sha512-/LDXMQh55EzZQ0uVAZmKKhfENivEvWz6E+EYzh+/MCjMhNsotd+ZHhBGIjFDTi6+fz0OhQQQLbTgdQIxxCsC0w==",
       "dependencies": [
+        "@types/prop-types",
         "csstype"
       ]
     },
@@ -3911,6 +3916,7 @@
       "npm:@codemirror/lang-json@^6.0.1",
       "npm:@codemirror/lang-markdown@^6.3.2",
       "npm:@types/jsdom@^21.1.7",
+      "npm:@types/react@^18.3.1",
       "npm:@vercel/otel@^1.10.1",
       "npm:@web/test-runner@*",
       "npm:ai@^4.3.9",
