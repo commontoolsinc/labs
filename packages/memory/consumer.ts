@@ -66,6 +66,12 @@ import * as Settings from "./settings.ts";
 export * from "./interface.ts";
 import { toRevision } from "./commit.ts";
 import { SchemaNone } from "./schema.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("memory-consumer", {
+  enabled: true,
+  level: "info",
+});
 
 export const connect = ({
   address,
@@ -149,11 +155,30 @@ class MemoryConsumerSession<
       >;
     super({
       start: (control) => {
-        controller = control as typeof this.controller;
+        try {
+          controller = control as typeof this.controller;
+        } catch (error) {
+          logger.error(() => ["TransformStream start error:", error]);
+          throw error;
+        }
       },
-      transform: (command) =>
-        this.receive(command as ProviderCommand<MemoryProtocol>),
-      flush: () => this.close(),
+      transform: (command) => {
+        try {
+          return this.receive(command as ProviderCommand<MemoryProtocol>);
+        } catch (error) {
+          logger.error(() => ["TransformStream transform error:", error]);
+          logger.error(() => ["Failed command:", JSON.stringify(command)]);
+          throw error;
+        }
+      },
+      flush: () => {
+        try {
+          return this.close();
+        } catch (error) {
+          logger.error(() => ["TransformStream flush error:", error]);
+          throw error;
+        }
+      },
     });
     this.controller = controller;
   }

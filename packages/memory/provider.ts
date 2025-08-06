@@ -39,6 +39,12 @@ import { redactCommit } from "./space.ts";
 import * as Subscription from "./subscription.ts";
 import * as FactModule from "./fact.ts";
 import { setRevision } from "@commontools/memory/selection";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("memory-provider", {
+  enabled: true,
+  level: "info",
+});
 
 export * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -161,20 +167,58 @@ class MemoryProviderSession<
     public sessions: null | Set<ProviderSession<MemoryProtocol>>,
   ) {
     this.readable = new ReadableStream<ProviderCommand<MemoryProtocol>>({
-      start: (controller) => this.open(controller),
-      cancel: (_reason?) => this.cancel(),
+      start: (controller) => {
+        try {
+          return this.open(controller);
+        } catch (error) {
+          logger.error(() => ["ReadableStream start error:", error]);
+          throw error;
+        }
+      },
+      cancel: (reason) => {
+        try {
+          return this.cancel();
+        } catch (error) {
+          logger.error(
+            () => ["ReadableStream cancel error:", error, "Reason:", reason],
+          );
+          throw error;
+        }
+      },
     });
     this.writable = new WritableStream<
       UCAN<ConsumerCommandInvocation<MemoryProtocol>>
     >({
       write: async (command) => {
-        await this.invoke(command as UCAN<ConsumerCommandInvocation<Protocol>>);
+        try {
+          await this.invoke(
+            command as UCAN<ConsumerCommandInvocation<Protocol>>,
+          );
+        } catch (error) {
+          logger.error(() => ["WritableStream write error:", error]);
+          logger.error(() => ["Failed command:", JSON.stringify(command)]);
+          throw error;
+        }
       },
-      abort: async () => {
-        await this.close();
+      abort: async (reason) => {
+        try {
+          logger.debug(
+            () => ["WritableStream abort called with reason:", reason],
+          );
+          await this.close();
+        } catch (error) {
+          logger.error(() => ["WritableStream abort error:", error]);
+          throw error;
+        }
       },
       close: async () => {
-        await this.close();
+        try {
+          logger.debug(() => ["WritableStream close called"]);
+          await this.close();
+        } catch (error) {
+          logger.error(() => ["WritableStream close error:", error]);
+          throw error;
+        }
       },
     });
   }
