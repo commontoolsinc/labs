@@ -7,8 +7,36 @@ import {
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
+import {
+  clickShadowElement,
+  typeInShadowInput,
+} from "./shadow-dom-utils.ts";
 
 const { API_URL, FRONTEND_URL } = env;
+
+// Shadow DOM paths for ct-message-input in CommonTools shell
+const CT_MESSAGE_INPUT_PATH = [
+  "x-root-view",
+  "x-app-view",
+  "x-body-view",
+  "x-charm-view",
+  "common-charm",
+  "ct-render",
+  "ct-message-input",
+  "ct-input",
+  "input",
+];
+
+const CT_MESSAGE_INPUT_BUTTON_PATH = [
+  "x-root-view",
+  "x-app-view",
+  "x-body-view",
+  "x-charm-view",
+  "common-charm",
+  "ct-render",
+  "ct-message-input",
+  "ct-button",
+];
 
 describe("instantiate-recipe integration test", () => {
   const shell = new ShellIntegration();
@@ -21,7 +49,7 @@ describe("instantiate-recipe integration test", () => {
     const { identity } = shell.get();
     spaceName = globalThis.crypto.randomUUID();
 
-    // Register the instantiate-recipe charm once for all tests
+    // Register the instantiate-recipe charm
     charmId = await registerCharm({
       spaceName: spaceName,
       apiUrl: new URL(API_URL),
@@ -48,24 +76,24 @@ describe("instantiate-recipe integration test", () => {
     assertEquals(state.spaceName, spaceName);
     assertEquals(state.activeCharmId, charmId);
 
-    // Wait for charm to load
-    await sleep(2000);
+    // Wait for charm to load and render
+    await sleep(500);
 
-    // Find and click the Add button in ct-message-input
-    const addButton = await page.$("ct-message-input button", {
-      strategy: "pierce",
-    });
-    assert(addButton, "Should find Add button in ct-message-input");
-
-    // Store the current URL before clicking
+    // Store the current URL before any action
     const urlBefore = await page.evaluate(() => window.location.href);
-    console.log("URL before clicking:", urlBefore);
+    console.log("URL before action:", urlBefore);
 
-    // Click the button to create a new counter
-    await addButton.click();
+    // Type in the input field
+    await typeInShadowInput(page, CT_MESSAGE_INPUT_PATH, "New counter");
+
+    // Wait for input to be processed
+    await sleep(500);
+
+    // Click the send button
+    await clickShadowElement(page, CT_MESSAGE_INPUT_BUTTON_PATH);
 
     // Wait for navigation to complete
-    await sleep(2000);
+    await sleep(500);
 
     // Check if we navigated to a new counter instance
     const urlAfter = await page.evaluate(() => window.location.href);
@@ -85,5 +113,7 @@ describe("instantiate-recipe integration test", () => {
       counterResult,
       "Should find counter-result element after navigation",
     );
+
+    await sleep(500);
   });
 });
