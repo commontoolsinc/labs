@@ -2,9 +2,7 @@ import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema, type JSONValue } from "./builder/types.ts";
 import { createCell, isCell, isStream } from "./cell.ts";
-import { type ReactivityLog } from "./scheduler.ts";
 import { readMaybeLink, resolveLink } from "./link-resolution.ts";
-import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import { type IRuntime } from "./runtime.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -22,8 +20,6 @@ import { toCell, toOpaqueRef } from "./back-to-cell.ts";
  * One addition is `asCell`. When true, the `.get()` returns an instance of
  * `Cell`, i.e. a reactive reference to the value underneath. Some implications
  * this has:
- *  - If `log` is passed, it will be passed on to new cells, and unless that
- *    cell is read, no further reads are logged down this branch.
  *  - The cell reflects as closely as possible the current value. So it doesn't
  *    change when the underlying reference changes. This is useful to e.g. to
  *    read the current value of "currently selected item" and keep that constant
@@ -53,7 +49,19 @@ function resolveSchema(
     return undefined;
   }
 
-  let resolvedSchema = schema.$ref === "#" ? rootSchema : schema;
+  let resolvedSchema = schema;
+  if (typeof schema.$ref === "string" && rootSchema !== undefined) {
+    const resolved = ContextualFlowControl.resolveSchemaRef(
+      rootSchema,
+      schema.$ref,
+    );
+    if (!isObject(resolved)) {
+      // For boolean schema or the default `{}` schema, we don't have any
+      // meaningful information in the schema, so just return undefined.
+      return undefined;
+    }
+    resolvedSchema = resolved;
+  }
 
   // Remove asCell flag from schema, so it's describing the destination
   // schema. That means we can't describe a schema that points to top-level
