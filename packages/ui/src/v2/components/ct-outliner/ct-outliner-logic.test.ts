@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { TreeOperations } from "./tree-operations.ts";
 import { KeyboardCommands } from "./keyboard-commands.ts";
-import { createNestedTestTree, createTestTree } from "./test-utils.ts";
+import { createMockTreeCell, createNestedTestTree, createTestTree, waitForCellUpdate } from "./test-utils.ts";
 import type { Node, Tree } from "./types.ts";
 
 // Test the core logic without DOM dependencies
@@ -35,37 +35,67 @@ describe("CTOutliner Logic Tests", () => {
       expect(updatedNode.body).toBe("Updated content");
     });
 
-    it("should move nodes up", () => {
+    it("should move nodes up", async () => {
       const tree = createTestTree();
-      const secondChild = tree.root.children[1];
+      const treeCell = await createMockTreeCell(tree);
       
-      // moveNodeUp now modifies tree in place and returns void
-      TreeOperations.moveNodeUp(tree, secondChild);
-
-      expect(tree.root.children[0].body).toBe("Second item");
-      expect(tree.root.children[1].body).toBe("First item");
+      // Get the Cell for the root and its children
+      const rootCell = treeCell.key("root");
+      const childrenCell = rootCell.key("children");
+      const secondChildCell = childrenCell.key(1); // second child
+      
+      // Move the second child up
+      const success = await TreeOperations.moveNodeUpCell(rootCell, secondChildCell, [1]);
+      expect(success).toBe(true);
+      
+      await waitForCellUpdate();
+      
+      // Read the updated tree
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children[0].body).toBe("Second item");
+      expect(updatedTree.root.children[1].body).toBe("First item");
     });
 
-    it("should move nodes down", () => {
+    it("should move nodes down", async () => {
       const tree = createTestTree();
-      const firstChild = tree.root.children[0];
+      const treeCell = await createMockTreeCell(tree);
       
-      // moveNodeDown now modifies tree in place and returns void
-      TreeOperations.moveNodeDown(tree, firstChild);
-
-      expect(tree.root.children[0].body).toBe("Second item");
-      expect(tree.root.children[1].body).toBe("First item");
+      // Get the Cell for the root and its children
+      const rootCell = treeCell.key("root");
+      const childrenCell = rootCell.key("children");
+      const firstChildCell = childrenCell.key(0); // first child
+      
+      // Move the first child down
+      const success = await TreeOperations.moveNodeDownCell(rootCell, firstChildCell, [0]);
+      expect(success).toBe(true);
+      
+      await waitForCellUpdate();
+      
+      // Read the updated tree
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children[0].body).toBe("Second item");
+      expect(updatedTree.root.children[1].body).toBe("First item");
     });
 
-    it("should delete nodes", () => {
+    it("should delete nodes", async () => {
       const tree = createTestTree();
-      const child1 = tree.root.children[0];
+      const treeCell = await createMockTreeCell(tree);
       
-      // deleteNode now modifies tree in place and returns void
-      TreeOperations.deleteNode(tree, child1);
-
-      expect(tree.root.children).toHaveLength(1);
-      expect(tree.root.children[0].body).toBe("Second item");
+      // Get the Cell for the root and its children
+      const rootCell = treeCell.key("root");
+      const childrenCell = rootCell.key("children");
+      const firstChildCell = childrenCell.key(0); // first child
+      
+      // Delete the first child
+      const newFocusPath = await TreeOperations.deleteNodeCell(rootCell, firstChildCell, [0]);
+      expect(newFocusPath).not.toBe(null);
+      
+      await waitForCellUpdate();
+      
+      // Read the updated tree
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children).toHaveLength(1);
+      expect(updatedTree.root.children[0].body).toBe("Second item");
     });
 
     it("should handle transformTree utility", () => {
@@ -82,64 +112,72 @@ describe("CTOutliner Logic Tests", () => {
       expect(result.root.children[1].body).toBe("Second item");
     });
 
-    it("should indent nodes", () => {
+    it("should indent nodes", async () => {
       const tree = createTestTree();
-      const secondChild = tree.root.children[1];
-      const firstChild = tree.root.children[0];
+      const treeCell = await createMockTreeCell(tree);
       
-      // indentNode now modifies tree in place and returns void
-      TreeOperations.indentNode(tree, secondChild);
-
-      expect(tree.root.children).toHaveLength(1);
-      expect(firstChild.children).toHaveLength(1);
-      expect((firstChild.children[0] as Node).body).toBe("Second item");
+      // Get the Cell for the root
+      const rootCell = treeCell.key("root");
+      
+      // Indent the second child (index 1) under the first child (index 0)
+      const newFocusPath = await TreeOperations.indentNodeCell(rootCell, [1]);
+      expect(newFocusPath).not.toBe(null);
+      
+      await waitForCellUpdate();
+      
+      // Read the updated tree
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children).toHaveLength(1);
+      expect(updatedTree.root.children[0].children).toHaveLength(1);
+      expect(updatedTree.root.children[0].children[0].body).toBe("Second item");
     });
 
-    it("should outdent nodes", () => {
+    it("should outdent nodes", async () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
-          children: [{
-            body: "Parent",
-            children: [{
-              body: "Child",
-              children: [],
-              attachments: [],
-            }],
-            attachments: [],
-          }],
-          attachments: [],
-        },
+          children: [
+            TreeOperations.createNode({
+              body: "Parent",
+              children: [
+                TreeOperations.createNode({ body: "Child" }),
+              ],
+            }),
+          ],
+        }),
       };
 
-      const childNode = tree.root.children[0].children[0];
+      const treeCell = await createMockTreeCell(tree);
       
-      // outdentNode now modifies tree in place and returns void
-      TreeOperations.outdentNode(tree, childNode);
-
-      expect(tree.root.children).toHaveLength(2);
-      expect(tree.root.children[1].body).toBe("Child");
+      // Get the Cell for the root
+      const rootCell = treeCell.key("root");
+      
+      // Outdent the child (path [0, 0] - first child of first parent)
+      const newFocusPath = await TreeOperations.outdentNodeCell(rootCell, [0, 0]);
+      expect(newFocusPath).not.toBe(null);
+      
+      await waitForCellUpdate();
+      
+      // Read the updated tree
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children).toHaveLength(2);
+      expect(updatedTree.root.children[1].body).toBe("Child");
     });
 
     it("should convert to markdown", () => {
       const tree: Tree = {
-        root: {
+        root: TreeOperations.createNode({
           body: "",
-          children: [{
-            body: "Item 1",
-            children: [{
-              body: "Sub-item 1.1",
-              children: [],
-              attachments: [],
-            }],
-            attachments: [],
-          }, {
-            body: "Item 2",
-            children: [],
-            attachments: [],
-          }],
-          attachments: [],
-        },
+          children: [
+            TreeOperations.createNode({
+              body: "Item 1",
+              children: [
+                TreeOperations.createNode({ body: "Sub-item 1.1" }),
+              ],
+            }),
+            TreeOperations.createNode({ body: "Item 2" }),
+          ],
+        }),
       };
 
       const markdown = TreeOperations.toMarkdown(tree);
@@ -301,7 +339,7 @@ describe("CTOutliner Logic Tests", () => {
 
   // Test node operations preserve tree integrity
   describe("Tree Integrity", () => {
-    it("should preserve children when deleting node with children", () => {
+    it("should preserve children when deleting node with children", async () => {
       const tree: Tree = {
         root: {
           body: "",
@@ -322,43 +360,85 @@ describe("CTOutliner Logic Tests", () => {
         },
       };
 
-      const parentNode = tree.root.children[0];
+      const treeCell = await createMockTreeCell(tree);
       
-      // deleteNode now modifies tree in place and returns void
-      TreeOperations.deleteNode(tree, parentNode);
-
-      expect(tree.root.children).toHaveLength(2);
-      expect(tree.root.children[0].body).toBe("Child 1");
-      expect(tree.root.children[1].body).toBe("Child 2");
+      // Get the Cell for the root and the parent node
+      const rootCell = treeCell.key("root");
+      const childrenCell = rootCell.key("children");
+      const parentNodeCell = childrenCell.key(0); // parent node
+      
+      // Delete the parent node (should preserve its children)
+      const newFocusPath = await TreeOperations.deleteNodeCell(rootCell, parentNodeCell, [0]);
+      expect(newFocusPath).not.toBe(null);
+      
+      await waitForCellUpdate();
+      
+      // Read the updated tree
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children).toHaveLength(2);
+      expect(updatedTree.root.children[0].body).toBe("Child 1");
+      expect(updatedTree.root.children[1].body).toBe("Child 2");
     });
 
-    it("should not allow deleting root node", () => {
+    it("should not allow deleting root node", async () => {
       const tree = createTestTree();
+      const treeCell = await createMockTreeCell(tree);
       
-      // deleteNode now throws errors instead of returning failure results
-      expect(() => {
-        TreeOperations.deleteNode(tree, tree.root);
-      }).toThrow("Cannot delete root node");
+      // Get the Cell for the root
+      const rootCell = treeCell.key("root");
+      
+      // Try to delete the root node - should return null (failure)
+      const newFocusPath = await TreeOperations.deleteNodeCell(rootCell, rootCell, []);
+      expect(newFocusPath).toBe(null);
+      
+      await waitForCellUpdate();
+      
+      // Tree should remain unchanged
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children).toHaveLength(2);
+      expect(updatedTree.root.children[0].body).toBe("First item");
+      expect(updatedTree.root.children[1].body).toBe("Second item");
     });
 
-    it("should not indent first child", () => {
+    it("should not indent first child", async () => {
       const tree = createTestTree();
-      const firstChild = tree.root.children[0];
+      const treeCell = await createMockTreeCell(tree);
       
-      // indentNode now throws errors instead of returning failure results
-      expect(() => {
-        TreeOperations.indentNode(tree, firstChild);
-      }).toThrow("Cannot indent first child node");
+      // Get the Cell for the root
+      const rootCell = treeCell.key("root");
+      
+      // Try to indent the first child (index 0) - should return null (failure)
+      const newFocusPath = await TreeOperations.indentNodeCell(rootCell, [0]);
+      expect(newFocusPath).toBe(null);
+      
+      await waitForCellUpdate();
+      
+      // Tree should remain unchanged
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children).toHaveLength(2);
+      expect(updatedTree.root.children[0].body).toBe("First item");
+      expect(updatedTree.root.children[1].body).toBe("Second item");
+      expect(updatedTree.root.children[0].children).toHaveLength(0);
     });
 
-    it("should not outdent root-level nodes", () => {
+    it("should not outdent root-level nodes", async () => {
       const tree = createTestTree();
-      const firstChild = tree.root.children[0];
+      const treeCell = await createMockTreeCell(tree);
       
-      // outdentNode now throws errors instead of returning failure results
-      expect(() => {
-        TreeOperations.outdentNode(tree, firstChild);
-      }).toThrow("Cannot outdent node: already at root level");
+      // Get the Cell for the root
+      const rootCell = treeCell.key("root");
+      
+      // Try to outdent a root-level child (path [0]) - should return null (failure)
+      const newFocusPath = await TreeOperations.outdentNodeCell(rootCell, [0]);
+      expect(newFocusPath).toBe(null);
+      
+      await waitForCellUpdate();
+      
+      // Tree should remain unchanged
+      const updatedTree = treeCell.getAsQueryResult();
+      expect(updatedTree.root.children).toHaveLength(2);
+      expect(updatedTree.root.children[0].body).toBe("First item");
+      expect(updatedTree.root.children[1].body).toBe("Second item");
     });
   });
 });

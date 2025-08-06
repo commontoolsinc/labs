@@ -14,7 +14,10 @@
 
 import { env, Page } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { registerCharm, ShellIntegration } from "./utils.ts";
+import {
+  registerCharm,
+  ShellIntegration,
+} from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
@@ -106,7 +109,7 @@ describe("shell iframe counter tests", () => {
     });
 
     // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
     // Login and verify state
@@ -159,7 +162,7 @@ describe("shell iframe counter tests", () => {
 
     // Reload the page to test persistence
     console.log("\nReloading page to test persistence...");
-    await page.goto(`${FRONTEND_URL}shell/${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
     // Need to login again after reload

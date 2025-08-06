@@ -29,9 +29,9 @@ deno check \
   packages/js-runtime/runtime \
   packages/js-runtime/typescript \
   packages/js-runtime/test/*.ts \
-  packages/jumble \
   packages/llm \
   packages/memory \
+  packages/patterns \
   packages/runner \
   packages/seeder \
   packages/shell \

@@ -43,14 +43,6 @@ class BuildConfig {
     return this.path("_deno.lock");
   }
 
-  jumbleProjectPath() {
-    return this.path("packages", "jumble");
-  }
-
-  jumbleOutPath() {
-    return this.path("packages", "jumble", "dist");
-  }
-
   shellProjectPath() {
     return this.path("packages", "shell");
   }
@@ -61,10 +53,6 @@ class BuildConfig {
 
   toolshedProjectPath() {
     return this.path("packages", "toolshed");
-  }
-
-  toolshedFrontendPath() {
-    return this.path("packages", "toolshed", "jumble-frontend");
   }
 
   toolshedShellFrontendPath() {
@@ -119,9 +107,6 @@ async function build(config: BuildConfig): Promise<void> {
     // Ensure dist directory exists
     await ensureDistDir(config);
 
-    // Build jumble first, do not remove deno.lock
-    // until after this.
-    if (!config.cliOnly) await buildJumble(config);
     if (!config.cliOnly) await buildShell(config);
     await prepareWorkspace(config);
     if (!config.cliOnly) await buildToolshed(config);
@@ -142,32 +127,6 @@ async function ensureDistDir(config: BuildConfig): Promise<void> {
   if (!(await exists(distDir))) {
     await Deno.mkdir(distDir, { recursive: true });
   }
-}
-
-async function buildJumble(config: BuildConfig): Promise<void> {
-  const { success } = await new Deno.Command(Deno.execPath(), {
-    args: [
-      "task",
-      "build",
-    ],
-    cwd: config.jumbleProjectPath(),
-    stdout: "inherit",
-    stderr: "inherit",
-  }).output();
-  if (!success) {
-    Deno.exit(1);
-    return;
-  }
-
-  // Move built jumble into toolshed so that the relative
-  // path to the frontend in compiled code is within toolshed
-  // https://docs.deno.com/runtime/reference/cli/compile/#including-data-files-or-directories
-  const jumbleOut = config.jumbleOutPath();
-  const toolshedFrontend = config.toolshedFrontendPath();
-  if ((await exists(toolshedFrontend))) {
-    await Deno.remove(toolshedFrontend, { recursive: true });
-  }
-  await Deno.rename(jumbleOut, toolshedFrontend);
 }
 
 async function buildShell(config: BuildConfig): Promise<void> {
@@ -191,17 +150,10 @@ async function buildShell(config: BuildConfig): Promise<void> {
   }
 
   const indexPath = path.join(config.shellOutPath(), "index.html");
-  let html = await Deno.readTextFile(indexPath);
+  const html = await Deno.readTextFile(indexPath);
 
-  // NOTE(jake): In Toolshed, once we move from /shell to /, and finally
-  // replace Jumble, we can remove this rewrite.
-  html = html
-    .replace('href="/assets/', 'href="/shell/assets/')
-    .replace('href="/styles/', 'href="/shell/styles/')
-    .replace('src="/scripts/', 'src="/shell/scripts/');
-
-  await Deno.writeTextFile(indexPath, html);
-  console.log("Updated shell app paths for /shell prefix");
+  // Shell now serves at root path
+  console.log("Shell app built for root path");
 
   const shellOut = config.shellOutPath();
   const toolshedShellFrontend = config.toolshedShellFrontendPath();
@@ -228,8 +180,6 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       "--unstable-otel",
       "--output",
       config.distPath("toolshed"),
-      "--include",
-      config.toolshedFrontendPath(),
       "--include",
       config.toolshedShellFrontendPath(),
       "--include",

@@ -2,8 +2,7 @@ import { env } from "@commontools/integration";
 import { describe, it } from "@std/testing/bdd";
 import { assert, assertObjectMatch } from "@std/assert";
 import { sleep } from "@commontools/utils/sleep";
-import "../src/globals.ts";
-import { ShellIntegration } from "./utils.ts";
+import { ShellIntegration } from "../../integration/shell-utils.ts";
 
 const { FRONTEND_URL } = env;
 
@@ -14,7 +13,7 @@ describe("shell login tests", () => {
   it("can create a new user via passphrase", async () => {
     const { page } = shell.get();
     const spaceName = "common-knowledge";
-    await page.goto(`${FRONTEND_URL}shell`);
+    await page.goto(`${FRONTEND_URL}`);
     await page.applyConsoleFormatter();
     const state = await page.evaluate(() => {
       return globalThis.app.state();

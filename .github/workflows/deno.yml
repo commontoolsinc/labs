@@ -105,37 +105,6 @@ jobs:
           VITE_BUILD_SOURCEMAPS: "true"
           VITE_STORAGE_TYPE: "schema"
 
-      # Archive source maps for later use in deployments
-      - name: 📤 Archive Jumble frontend artifacts
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: jumble-artifacts
-          path: ./packages/toolshed/jumble-frontend
-
-      # NOTE(jake): We need to upload the frontend artifacts to R2, to enable
-      # localhost:8000 toolshed proxying of jumble.
-      - name: 📤 Upload frontend artifacts to R2 /jumble/latest
-        uses: ryand56/r2-upload-action@v1.4
-        if: github.ref == 'refs/heads/main'
-        with:
-          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: ./packages/toolshed/jumble-frontend
-          destination-dir: jumble/latest
-
-      - name: 📤 Upload backend artifacts to R2 /jumble/${{ github.sha }}
-        uses: ryand56/r2-upload-action@v1.4
-        if: github.ref == 'refs/heads/main'
-        with:
-          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
-          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
-          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          r2-bucket: ${{ secrets.R2_BUCKET }}
-          source-dir: ./packages/toolshed/jumble-frontend
-          destination-dir: jumble/${{ github.sha }}
 
       - name: 🔐 Process & sign binaries
         if: github.ref == 'refs/heads/main'
@@ -339,7 +308,6 @@ jobs:
         run: |
           chmod +x ./common-binaries/toolshed
           CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          CACHE_DIR=${GITHUB_WORKSPACE}/packages/jumble/integration/cache \
           ./common-binaries/toolshed &
 
       # For Astral
@@ -351,6 +319,14 @@ jobs:
         working-directory: packages/runner
         run: |
           API_URL=http://localhost:8000/ \
+          deno task integration
+
+      - name: 🧪 Run background worker integration tests
+        working-directory: packages/background-charm-service
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          FRONTEND_URL=http://localhost:8000/ \
           deno task integration
 
   cli-integration-test:
@@ -401,13 +377,20 @@ jobs:
         run: |
           chmod +x ./common-binaries/toolshed
           CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          CACHE_DIR=${GITHUB_WORKSPACE}/packages/jumble/integration/cache \
           ./common-binaries/toolshed &
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
       - name: 🛡️ Disable AppArmor for browser tests
         run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: 🧩 Run end-to-end patterns integration tests
+        working-directory: packages/patterns
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          FRONTEND_URL=http://localhost:8000/ \
+          deno task integration
 
       - name: 🧪 Run end-to-end shell integration tests
         working-directory: packages/shell
@@ -431,11 +414,6 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 📥 Download frontend artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: jumble-artifacts
-          path: ./jumble-artifacts
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
         with:
@@ -447,23 +425,6 @@ jobs:
           deno run --allow-all npm:@sentry/cli --version
           echo "::endgroup::"
 
-      - name: 📊 Create Jumble Sentry release & upload source maps
-        run: |
-          # Create a release with version based on commit SHA
-          deno run --allow-all npm:@sentry/cli releases new ${{ github.sha }}
-
-          # Associate commits with the release
-          deno run --allow-all npm:@sentry/cli releases set-commits ${{ github.sha }} --auto
-
-          # Upload source maps
-          deno run --allow-all npm:@sentry/cli releases files ${{ github.sha }} upload-sourcemaps ./jumble-artifacts --rewrite
-
-          # Finalize the release
-          deno run --allow-all npm:@sentry/cli releases finalize ${{ github.sha }}
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_JUMBLE_PROJECT }}
 
       - name: 📊 Create Toolshed server Sentry release
         run: |
