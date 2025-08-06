@@ -115,11 +115,14 @@ export async function setCharmInput(
 
   const tx = manager.runtime.edit();
   const inputCell = manager.getArgument(charmCell);
+  
+  // Build the path with transaction context
   let targetCell = inputCell.withTx(tx);
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
-
+  
+  // Set the value
   targetCell.set(value as any);
   await tx.commit();
 
@@ -139,11 +142,14 @@ export async function setCharmResult(
   }
 
   const tx = manager.runtime.edit();
+  
+  // Build the path with transaction context
   let targetCell = charmCell.withTx(tx);
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
-
+  
+  // Set the value
   targetCell.set(value as any);
   await tx.commit();
 
