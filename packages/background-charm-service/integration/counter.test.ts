@@ -102,6 +102,7 @@ describe("background charm counter tests", () => {
     } finally {
       try {
         bgProcess.kill("SIGTERM");
+        bgProcess.unref();
       } catch (_) {
         // ignore if already exited
       }
