@@ -1,6 +1,10 @@
 # GitHub Auto-Linking Command
 
-This command automatically detects GitHub URLs in page.tsx charm outliner trees and creates linked GitHub repository fetcher charms for each discovered URL.
+This command finds GitHub URLs in page.tsx charms and creates linked GitHub repository fetcher charms for each URL.
+
+## Prerequisites
+
+- **Recipe Required**: The `github-repo-fetcher.tsx` recipe must exist in your recipes directory
 
 ## Usage
 
@@ -9,340 +13,157 @@ This command automatically detects GitHub URLs in page.tsx charm outliner trees 
 ```
 
 **Parameters:**
-- `API_URL`: CommonTools API endpoint (e.g., `https://toolshed.saga-castor.ts.net/`)
+- `API_URL`: CommonTools API endpoint 
 - `SPACE_NAME`: Target space name
 - `IDENTITY_FILE`: Path to CT identity key file
 - `RECIPES_PATH`: Path to recipes directory containing `github-repo-fetcher.tsx`
-- `PAGE_CHARM_ID`: Specific page charm ID to process (optional - if not provided, scans all page charms)
+- `PAGE_CHARM_ID`: Specific page charm ID to process (optional)
 
-### Example Usage
+## Direct Execution Steps
 
+### Step 1: Find Page Charms
 ```bash
-# Process all page charms in a space
-/link-github https://toolshed.saga-castor.ts.net/ space ~/dev/.ct.key /Users/ben/code/recipes/recipes
+# List all charms
+./dist/ct charm ls --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME]
 
-# Process a specific page charm
-/link-github https://toolshed.saga-castor.ts.net/ space ~/dev/.ct.key /Users/ben/code/recipes/recipes baedreieh2l6lhin5p4avk7hloirv75fllarf6di47vhnsfclwexn26jnfm
+# For each charm, check if it's a page by trying to get its outline
+./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [CHARM_ID] outline
+
+# If this returns data with a 'root' structure, it's a page charm
 ```
 
-### Test Results
+### Step 2: Extract GitHub URLs from Outline
+For each page charm:
+```bash
+# IMPORTANT: For efficiency, especially when re-scanning, use jq to avoid pulling massive attachment data
+# Get only nodes with empty attachments (unlinked URLs)
+./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [CHARM_ID] outline | jq '.root.children[].children[] | select(.attachments == []) | {body: .body, path: path(.)}'
 
-The command has been validated with the following test case:
-- **Detected GitHub URL**: `https://github.com/vercel/next.js` in page charm `baedreieh2l...`
-- **Created GitHub fetcher charm**: `baedreifiv7...` configured for vercel/next.js repository
-- **Successfully linked**: GitHub fetcher attached to `outline/root/children/0/children/0/attachments/0`
-- **Data verification**: Attachment contains complete Next.js repository metadata (133,486 stars, 28,954 forks, MIT license, etc.)
+# Or for a specific path to avoid large JSON responses:
+./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [CHARM_ID] outline | jq '.root.children[0].children[3]'
 
-## Workflow
+# Look for patterns like: https://github.com/[owner]/[repo]
+```
 
-This command orchestrates a complex multi-step process using subagents and parallel execution:
+### Step 3: Create GitHub Fetcher Charms
+For each unique GitHub URL found:
+```bash
+# Create new github-repo-fetcher charm
+./dist/ct charm new --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [RECIPES_PATH]/github-repo-fetcher.tsx
 
-### Phase 1: Discovery and Analysis
-1. **Find Page Charms**: Scan space for page.tsx-based charms
-2. **Extract Outline Trees**: Get the complete outliner structure from each page
-3. **Detect GitHub URLs**: Parse through all nodes and their body text to find GitHub repository URLs
-4. **Map Insertion Points**: Identify exactly where attachments should be linked
+# Set the repoUrl input (note the double quotes in the echo)
+echo '"https://github.com/owner/repo"' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [NEW_CHARM_ID] repoUrl --input
+```
 
-### Phase 2: Preparation and Creation
-1. **Create GitHub Fetcher Charms**: Deploy new github-repo-fetcher.tsx instances for each unique URL
-2. **Prepare Attachment Slots**: Insert `[null]` placeholders in the attachment arrays
-3. **Configure Repository URLs**: Set the repoUrl input for each GitHub fetcher charm
+### Step 4: Link to Page Attachments
+For each node containing a GitHub URL:
+```bash
+# Link the github fetcher charm to the node's attachments array at index 0
+./dist/ct charm link --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [GITHUB_FETCHER_CHARM_ID] [PAGE_CHARM_ID]/page/[PATH_TO_NODE]/attachments/0
 
-### Phase 3: Linking and Verification
-1. **Execute Charm Links**: Connect GitHub fetcher charms to their attachment slots
-2. **Verify Links**: Ensure all connections are established correctly
-3. **Report Results**: Provide summary of created charms and established links
+# Example path: charm1/page/outline/root/children/1/attachments/0
+```
 
-## Implementation Strategy
+**Important Note**: The path requires the `page/` prefix because the input and output data shapes differ for page charms. While `ct charm get` returns the outline directly, when linking you must specify the `page/` prefix to target the correct input structure. You can verify this difference using `ct charm inspect [PAGE_CHARM_ID]` which shows the full input/output schema.
 
-The command uses specialized subagents for different phases:
+## How to Traverse the Outline
 
-- **`codebase-researcher`**: For analyzing existing page structures and finding GitHub URLs
-- **`plan-implementer`**: For executing the systematic charm creation and linking process
-- **`systematic-debugger`**: For troubleshooting any linking failures
+The outline structure looks like:
+```json
+{
+  "root": {
+    "body": "text that might contain https://github.com/user/repo",
+    "children": [
+      {
+        "body": "more text",
+        "children": [],
+        "attachments": []
+      }
+    ],
+    "attachments": []
+  }
+}
+```
 
-## Parallelization
-
-To optimize performance, the command:
-- Processes multiple page charms simultaneously
-- Creates GitHub fetcher charms in parallel batches
-- Executes multiple link operations concurrently
-- Uses efficient CT operations to minimize API calls
-
-## Context Management
-
-Since this process involves many operations across multiple charms:
-- Maintains a working state file during execution
-- Batches CT operations to reduce context overhead
-- Uses incremental processing to handle large spaces
-- Provides progress reporting throughout execution
+When searching:
+1. Check the `body` field of each node
+2. Recursively check all `children` 
+3. Record the path to any node containing a GitHub URL
+4. Only link to nodes that actually contain the URL (not parent/child nodes)
 
 ## Error Handling
 
-The command handles common failure scenarios:
-- Invalid GitHub URLs (skips with warning)
-- Charm creation failures (retries with different approaches)
-- Link operation failures (provides detailed diagnostics)
-- Network timeouts (implements retry logic)
+- **Non-page charms**: Skip silently if `ct charm get outline` fails
+- **404 GitHub URLs**: Skip and continue with other URLs
+- **Existing attachments**: Skip nodes that already have attachments (check with `attachments != []`)
 
-## Example Output
-
-```
-🔍 Scanning space 'project-docs' for page charms...
-   Found 3 page charms to analyze
-
-📖 Analyzing outliner trees for GitHub URLs...
-   charm-abc123: Found 2 GitHub URLs
-   charm-def456: Found 1 GitHub URL  
-   charm-ghi789: No GitHub URLs found
-
-🛠️  Creating GitHub fetcher charms...
-   ✓ Created fetcher for https://github.com/user/repo1 (charm-new001)
-   ✓ Created fetcher for https://github.com/org/repo2 (charm-new002)
-   ✓ Created fetcher for https://github.com/team/repo3 (charm-new003)
-
-🔗 Creating child nodes with GitHub attachments...
-   ✓ Created child "→ user/repo1" under charm-abc123/outline/root/children/0/children/0
-   ✓ Created child "→ org/repo2" under charm-abc123/outline/root/children/1/children/1
-   ✓ Created child "→ team/repo3" under charm-def456/outline/root/children/2/children/0
-
-✅ Successfully processed 3 GitHub URLs across 2 page charms
-   Created 3 new GitHub fetcher charms
-   Created 3 child nodes with GitHub repository data
-```
-
-## Technical Notes
-
-### GitHub URL Detection Pattern
-The command uses regex pattern: `https://github\.com/[^/\s]+/[^/\s]+(?:/[^\s]*)?`
-
-### Attachment Linking Process
-
-**⚠️ Current Limitation**: Due to CommonTools bug [CT-731](https://linear.app/common-tools/issue/CT-731/ct-charm-set-fails-when-setting-array-indices-directly), both `ct charm link` and direct array index setting fail when working with existing nodes. This affects:
-- `ct charm link` command with array paths
-- `ct charm set` with array indices (e.g., `attachments/0`) 
-- Adding attachments to UI-created nodes
-
-**Recommended Workaround - Child Node Pattern**:
-Instead of modifying existing nodes, create child nodes that contain the GitHub attachments:
+## Complete Example
 
 ```bash
-# Get the space DID (needed for links)
-SPACE_DID=$(./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [ANY_CHARM_ID] | grep -A5 -B5 'did:key' | grep 'did:key' | head -1 | cut -d'"' -f4)
+# Step 1: List charms
+./dist/ct charm ls --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev
+# Returns: charm1, charm2, charm3
 
-# Create child node with GitHub attachment
-echo '{
-  "body": "→ [Repository Name]",
-  "children": [],
-  "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "'${SPACE_DID}'"}}}]
-}' | ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_PARENT]/children/[NEW_INDEX]
+# Step 2: Check each for outline
+./dist/ct charm get --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev --charm charm1 outline
+# Returns outline data - this is a page charm!
+
+# Step 3: Found https://github.com/vercel/next.js in outline/root/children/0/body
+
+# Step 4: Create fetcher
+./dist/ct charm new --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev ~/code/recipes/recipes/github-repo-fetcher.tsx
+# Returns: newcharm123
+
+# Step 5: Configure fetcher
+echo '"https://github.com/vercel/next.js"' | ./dist/ct charm set --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev --charm newcharm123 repoUrl --input
+
+# Step 6: Link to page
+./dist/ct charm link --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev newcharm123 charm1/page/outline/root/children/0/attachments/0
 ```
 
-**Getting Space DID**:
-The space DID can be extracted from any charm's cycle detection warnings or from charm inspection output. Look for strings matching `did:key:z6Mk...` in the CT command output.
+## Summary Output
 
-**Alternative - New Node Creation**:
-For new content, create nodes with attachments in one step:
-```bash
-echo '{
-  "body": "GitHub Repository",
-  "children": [],
-  "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "[SPACE_DID]"}}}]
-}' | ct charm set ... [PATH_TO_NEW_NODE]
 ```
-
-**Benefits of Child Node Approach**:
-- ✅ Bypasses CT-731 array index limitations
-- ✅ Works with any existing node (UI-created or programmatic)
-- ✅ Creates clean visual hierarchy with "→" indicators
-- ✅ Preserves original node content unchanged
-- ✅ Allows multiple GitHub repositories per node
-
-**What Still Doesn't Work**:
-- ❌ Direct array index setting: `attachments/0` 
-- ❌ `ct charm link` with array paths
-- ❌ Adding attachments to most UI-created nodes
-
-**When CT-731 is Fixed**:
-Once the underlying array index bug is resolved, we can return to using `ct charm link` for simpler attachment workflows.
-
-### Data Structures
-The command maintains internal state tracking:
-- `pageCharms`: Map of charm IDs to their outliner structures
-- `githubUrls`: Array of discovered URLs with their insertion points
-- `createdCharms`: Map of GitHub URLs to their fetcher charm IDs
-- `linkOperations`: Array of pending/completed link operations
-
-### Performance Optimizations
-- Uses CT's batch operations where possible
-- Implements intelligent caching of charm data
-- Parallelizes independent operations
-- Minimizes redundant API calls through smart state management
-
-## Future Enhancements
-
-- Support for other repository platforms (GitLab, Bitbucket)
-- Configurable attachment insertion strategies
-- Integration with existing GitHub fetcher charms (reuse instead of create new)
-- Advanced GitHub URL parsing (branches, commits, issues)
-- Dry-run mode for testing without making changes
+Found 3 page charms
+Found 2 GitHub URLs:
+  - https://github.com/vercel/next.js at charm1/page/outline/root/children/0
+  - https://github.com/facebook/react at charm2/page/outline/root/children/1
+Created 2 github-repo-fetcher charms
+Successfully linked all GitHub repositories
+```
 
 ---
 
 # CLAUDE IMPLEMENTATION
 
-When this command is invoked, Claude should execute the following workflow:
+When this command is invoked, Claude should:
 
-## Step 1: Parameter Setup and Validation
+1. **Parse arguments** from .common.json or command line
+2. **Verify prerequisites** (recipes directory, CT binary)
+3. **Execute the Direct Execution Steps** as documented above
+4. **Track progress** using TodoWrite tool
+5. **Report results** concisely
 
-```markdown
-Parse command arguments and set up CT parameters:
-- API_URL (required)
-- SPACE_NAME (required) 
-- IDENTITY_FILE (required)
-- RECIPES_PATH (required)
-- PAGE_CHARM_ID (optional)
+Do NOT use subagents unless dealing with 10+ page charms. Just follow the steps directly.
 
-Verify CT binary and identity file exist.
-Verify recipes path contains github-repo-fetcher.tsx.
-```
+## Re-scanning Best Practices
 
-## Step 2: Launch Discovery Subagent
+When re-scanning for new URLs:
 
-```markdown
-Use Task tool with codebase-researcher agent:
+1. **Use precise jq queries** to filter only unlinked nodes:
+   ```bash
+   jq '.root.children[].children[] | select(.attachments == [])'
+   ```
 
-"I need you to discover and analyze page charms in a CommonTools space to find GitHub URLs for automated linking.
+2. **Target specific paths** when you know where new URLs might be:
+   ```bash
+   jq '.root.children[0].children[3]'
+   ```
 
-Parameters:
-- API URL: [API_URL]
-- Space: [SPACE_NAME] 
-- Identity: [IDENTITY_FILE]
-- Target charm ID: [PAGE_CHARM_ID] (if specified)
+3. **Avoid pulling full outline** when attachments contain large JSON data
+   - Each linked GitHub repo adds ~200+ lines of JSON to the attachment
+   - Use filtering to get only what you need
 
-Tasks:
-1. List all charms in the space using: `./dist/ct charm ls --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME]`
-
-2. Filter for page charms (either by name pattern or by inspecting charm structure)
-
-3. For each page charm, extract the complete outliner tree using: `./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [CHARM_ID] outline`
-
-4. Scan through all nodes recursively to find GitHub URLs in body text using pattern: `https://github\.com/[^/\s]+/[^/\s]+`
-
-5. For each GitHub URL found, record:
-   - The URL itself
-   - The exact path to the node containing it (e.g., 'outline/root/children/0/children/1')
-   - Whether there's already an attachments array at that location
-   - The index where a new attachment should be inserted
-
-Return a detailed analysis with:
-- Total page charms found
-- GitHub URLs discovered (URL, location path, insertion point)
-- Any existing attachments that might need to be preserved
-- Recommended attachment insertion strategy for each URL"
-```
-
-## Step 3: Launch Creation and Linking Subagent
-
-```markdown
-Use Task tool with plan-implementer agent:
-
-"Based on the GitHub URL analysis, systematically create GitHub fetcher charms and link them to page outliner attachments.
-
-Analysis Data: [Pass results from Step 2]
-
-Implementation Plan:
-1. For each unique GitHub URL discovered:
-   a. Create a new GitHub fetcher charm using: `./dist/ct charm new --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [RECIPES_PATH]/github-repo-fetcher.tsx`
-   b. Set the repoUrl input: `echo '\"[GITHUB_URL]\"' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [NEW_CHARM_ID] repoUrl --input`
-   c. Record the new charm ID for linking
-
-2. For each GitHub URL found in existing nodes:
-   a. Get the space DID from CT command output (look for cycle warnings or use any existing charm):
-      ```
-      SPACE_DID=$(./dist/ct charm get --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [EXISTING_CHARM_ID] | grep -o 'did:key:z6Mk[^"]*' | head -1)
-      ```
-   b. Use the child node workaround to bypass CT-731 array index limitations:
-      ```
-      echo '{
-        "body": "→ [Repository Name from GitHub API]",
-        "children": [],
-        "attachments": [{"/": {"link@1": {"path": [], "id": "of:[GITHUB_FETCHER_CHARM_ID]", "space": "'${SPACE_DID}'"}}}]
-      }' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] --charm [PAGE_CHARM_ID] [PATH_TO_PARENT_NODE]/children/[NEXT_INDEX]
-      ```
-   c. This creates a child node under the node containing the GitHub URL, with rich repository data attached
-
-3. Verify all links are working by inspecting the final attachment structures
-
-Execute this plan systematically, providing progress updates and handling any errors that occur. Use parallel execution where possible for creating multiple GitHub fetcher charms simultaneously."
-```
-
-## Step 4: Results Processing and Reporting
-
-```markdown
-After both subagents complete:
-
-1. Collect and summarize results:
-   - Number of page charms processed
-   - Number of GitHub URLs found and processed
-   - Number of new GitHub fetcher charms created
-   - Number of successful attachment links established
-   - Any errors or warnings encountered
-
-2. Display formatted results showing:
-   - Each GitHub URL and its linked location
-   - New charm IDs created
-   - Links established
-
-3. Optionally verify a few links by checking the attachment structures contain the expected GitHub fetcher data
-```
-
-## Error Handling Strategy
-
-```markdown
-If Step 2 (Discovery) fails:
-- Use systematic-debugger agent to diagnose CT connection issues
-- Retry with simpler charm listing approaches
-- Provide meaningful error messages about space access or identity problems
-
-If Step 3 (Implementation) fails:
-- Use systematic-debugger agent to identify specific failures
-- Implement retry logic for failed charm creations
-- Provide recovery suggestions for partial completion scenarios
-- Ensure no orphaned charms are left in invalid states
-
-For any network or CT operation failures:
-- Implement exponential backoff retry logic
-- Provide clear diagnostic information
-- Suggest manual recovery steps if automated retry fails
-```
-
-## Context Management
-
-```markdown
-To manage context efficiently:
-1. Store intermediate results in TodoWrite tool for tracking progress
-2. Use concise data structures when passing information between subagents
-3. Focus subagent prompts on specific, actionable tasks
-4. Minimize redundant CT operations by caching charm data where possible
-5. Use parallel Task tool invocations for independent operations
-```
-
-## Performance Optimizations
-
-```markdown
-1. Batch CT operations where possible:
-   - Group multiple `ct charm get` operations into parallel bash commands
-   - Create multiple GitHub fetcher charms simultaneously
-
-2. Use smart caching:
-   - Cache outliner tree data to avoid re-fetching
-   - Reuse GitHub fetcher charms for duplicate URLs (future enhancement)
-
-3. Intelligent parallelization:
-   - Process multiple page charms simultaneously during discovery
-   - Create GitHub fetcher charms in parallel batches
-   - Execute link operations concurrently where safe
-```
-
-This implementation provides a robust, maintainable approach to automated GitHub URL linking that can handle complex scenarios while providing clear feedback and error recovery.
+4. **Check attachment status** before creating new fetchers:
+   - Only process nodes where `attachments == []`
+   - This prevents duplicate fetchers for already-linked URLs
