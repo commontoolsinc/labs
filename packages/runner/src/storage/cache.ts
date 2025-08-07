@@ -16,7 +16,6 @@ import type {
   QueryError,
   Result,
   Revision,
-  SchemaContext,
   SchemaPathSelector,
   SchemaQueryArgs,
   Signer,
@@ -49,12 +48,12 @@ import type {
   IStorageProvider,
   IStorageProviderWithReplica,
   IStorageSubscription,
-  IStorageSubscriptionCapability,
   IStorageTransaction,
   IStoreError,
   ITransaction,
   PushError,
   Retract,
+  StorageNotification,
   StorageValue,
   URI,
 } from "./interface.ts";
@@ -955,7 +954,7 @@ export class Replica {
     // tracking when we see them.
     const localFacts = this.updateLocalFacts(revisions);
     const freshFacts = revisions.filter(this.isFresh);
-    const checkout = Differential.checkout(this, freshFacts);
+    const changes = Differential.checkout(this, freshFacts).compare(this);
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
@@ -967,7 +966,7 @@ export class Replica {
     this.subscription.next({
       type: "integrate",
       space: this.did(),
-      changes: checkout.compare(this),
+      changes: changes,
     });
     return this.cache.merge(revisions, Replica.update);
   }
