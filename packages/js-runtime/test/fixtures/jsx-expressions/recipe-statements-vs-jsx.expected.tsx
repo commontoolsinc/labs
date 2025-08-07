@@ -64,13 +64,13 @@ export default recipe({
           {/* These SHOULD be transformed (JSX expression context) */}
           Current: {state.value}
           <br />
-          Next number: {commontools_1.derive(state.value, _v1 => _v1 + 1)}
+          Next number: {(globalThis.__CT_COMMONTOOLS).derive(state.value, _v1 => _v1 + 1)}
           <br />
-          Previous: {commontools_1.derive(state.value, _v1 => _v1 - 1)}
+          Previous: {(globalThis.__CT_COMMONTOOLS).derive(state.value, _v1 => _v1 - 1)}
           <br />
-          Doubled: {commontools_1.derive(state.value, _v1 => _v1 * 2)}
+          Doubled: {(globalThis.__CT_COMMONTOOLS).derive(state.value, _v1 => _v1 * 2)}
           <br />
-          Status: {commontools_1.ifElse(commontools_1.derive(state.value, _v1 => _v1 > 10), "High", "Low")}
+          Status: {(globalThis.__CT_COMMONTOOLS).ifElse((globalThis.__CT_COMMONTOOLS).derive(state.value, _v1 => _v1 > 10), "High", "Low")}
         </p>
         <ct-button onClick={increment({ value: state.value })}>+</ct-button>
       </div>),

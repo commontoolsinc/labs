@@ -8,8 +8,8 @@ import ts from "typescript";
 export function getCommonToolsModuleAlias(
   sourceFile: ts.SourceFile,
 ): string | null {
-  // In AMD output, TypeScript transforms module imports to parameters
-  // For imports from "commontools", it typically becomes "commontools_1"
+  // Always use the global reference to avoid scope issues
+  // This is set up by the bundle wrapper and will always be available
   for (const statement of sourceFile.statements) {
     if (ts.isImportDeclaration(statement)) {
       const moduleSpecifier = statement.moduleSpecifier;
@@ -17,11 +17,8 @@ export function getCommonToolsModuleAlias(
         ts.isStringLiteral(moduleSpecifier) &&
         moduleSpecifier.text === "commontools"
       ) {
-        // For named imports in AMD, TypeScript generates a module parameter
-        // like "commontools_1". Since we're working at the AST level before
-        // AMD transformation, we need to anticipate this pattern.
-        // Return the expected AMD module alias
-        return "commontools_1";
+        // Use global reference that's always available
+        return "(globalThis.__CT_COMMONTOOLS)";
       }
     }
   }

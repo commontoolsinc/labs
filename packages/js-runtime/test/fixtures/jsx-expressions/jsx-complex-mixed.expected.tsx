@@ -51,34 +51,34 @@ export default recipe({
     return {
         [UI]: (<div>
         <h3>Array Operations</h3>
-        <p>Total items: {commontools_1.derive(state.items, _v1 => _v1.length)}</p>
-        <p>Filtered count: {commontools_1.derive({ state_items: state.items, state_filter: state.filter }, ({ state_items: _v1, state_filter: _v2 }) => _v1.filter(i => i.name.includes(_v2)).length)}</p>
+        <p>Total items: {(globalThis.__CT_COMMONTOOLS).derive(state.items, _v1 => _v1.length)}</p>
+        <p>Filtered count: {(globalThis.__CT_COMMONTOOLS).derive({ state_items: state.items, state_filter: state.filter }, ({ state_items: _v1, state_filter: _v2 }) => _v1.filter(i => i.name.includes(_v2)).length)}</p>
         
         <h3>Array with Complex Expressions</h3>
         <ul>
           {state.items.map(item => (<li key={item.id}>
               <span>{item.name}</span>
               <span> - Original: ${item.price}</span>
-              <span> - Discounted: ${commontools_1.derive(state.discount, _v1 => (item.price * (1 - _v1)).toFixed(2))}</span>
-              <span> - With tax: ${commontools_1.derive({ state_discount: state.discount, state_taxRate: state.taxRate }, ({ state_discount: _v1, state_taxRate: _v2 }) => (item.price * (1 - _v1) * (1 + _v2)).toFixed(2))}</span>
+              <span> - Discounted: ${(globalThis.__CT_COMMONTOOLS).derive(state.discount, _v1 => (item.price * (1 - _v1)).toFixed(2))}</span>
+              <span> - With tax: ${(globalThis.__CT_COMMONTOOLS).derive({ state_discount: state.discount, state_taxRate: state.taxRate }, ({ state_discount: _v1, state_taxRate: _v2 }) => (item.price * (1 - _v1) * (1 + _v2)).toFixed(2))}</span>
             </li>))}
         </ul>
         
         <h3>Array Methods</h3>
-        <p>Item count: {commontools_1.derive(state.items, _v1 => _v1.length)}</p>
-        <p>Active items: {commontools_1.derive(state.items, _v1 => _v1.filter(i => i.active).length)}</p>
+        <p>Item count: {(globalThis.__CT_COMMONTOOLS).derive(state.items, _v1 => _v1.length)}</p>
+        <p>Active items: {(globalThis.__CT_COMMONTOOLS).derive(state.items, _v1 => _v1.filter(i => i.active).length)}</p>
         
         <h3>Simple Operations</h3>
-        <p>Discount percent: {commontools_1.derive(state.discount, _v1 => _v1 * 100)}%</p>
-        <p>Tax percent: {commontools_1.derive(state.taxRate, _v1 => _v1 * 100)}%</p>
+        <p>Discount percent: {(globalThis.__CT_COMMONTOOLS).derive(state.discount, _v1 => _v1 * 100)}%</p>
+        <p>Tax percent: {(globalThis.__CT_COMMONTOOLS).derive(state.taxRate, _v1 => _v1 * 100)}%</p>
         
         <h3>Array Predicates</h3>
-        <p>All active: {commontools_1.ifElse(commontools_1.derive(state.items, _v1 => _v1.every(i => i.active)), "Yes", "No")}</p>
-        <p>Any active: {commontools_1.ifElse(commontools_1.derive(state.items, _v1 => _v1.some(i => i.active)), "Yes", "No")}</p>
-        <p>Has expensive (gt 100): {commontools_1.ifElse(commontools_1.derive(state.items, _v1 => _v1.some(i => i.price > 100)), "Yes", "No")}</p>
+        <p>All active: {(globalThis.__CT_COMMONTOOLS).ifElse((globalThis.__CT_COMMONTOOLS).derive(state.items, _v1 => _v1.every(i => i.active)), "Yes", "No")}</p>
+        <p>Any active: {(globalThis.__CT_COMMONTOOLS).ifElse((globalThis.__CT_COMMONTOOLS).derive(state.items, _v1 => _v1.some(i => i.active)), "Yes", "No")}</p>
+        <p>Has expensive (gt 100): {(globalThis.__CT_COMMONTOOLS).ifElse((globalThis.__CT_COMMONTOOLS).derive(state.items, _v1 => _v1.some(i => i.price > 100)), "Yes", "No")}</p>
         
         <h3>Object Operations</h3>
-        <div data-item-count={commontools_1.derive(state.items, _v1 => _v1.length)} data-has-filter={commontools_1.derive(state.filter, _v1 => _v1.length > 0)} data-discount={state.discount}>
+        <div data-item-count={(globalThis.__CT_COMMONTOOLS).derive(state.items, _v1 => _v1.length)} data-has-filter={(globalThis.__CT_COMMONTOOLS).derive(state.filter, _v1 => _v1.length > 0)} data-discount={state.discount}>
           Object attributes
         </div>
       </div>),
