@@ -169,6 +169,32 @@ ORDER BY
   since ASC
 `;
 
+// Needs `of` and `the`
+const CAUSE_CHAIN = `WITH RECURSIVE cause_of(c, f) AS (
+    SELECT cause, this FROM fact WHERE fact.of = :of AND fact.the = :the
+    UNION
+    SELECT cause, this FROM fact, cause_of WHERE fact.this = cause_of.c
+  )
+  SELECT c as cause, f as fact FROM cause_of
+`;
+
+// Needs `fact`
+const GET_FACT = `SELECT
+  fact.the AS the,
+  fact.of AS of,
+  datum.source AS 'is',
+  fact.cause AS cause,
+  fact.this AS fact,
+  datum.this AS proof,
+  fact.since AS since
+FROM
+  fact
+JOIN
+  datum ON datum.this = fact.'is'
+WHERE
+  fact.this = :fact;
+`;
+
 export type Options = {
   url: URL;
 };
@@ -408,6 +434,41 @@ const recall = <Space extends MemorySpace>(
   }
 };
 
+type CauseRow = {
+  cause: string;
+  fact: string;
+};
+
+const causeChain = <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { the, of }: { the: The; of: Entity },
+): Revision<Fact>[] => {
+  const rows = store.prepare(CAUSE_CHAIN).all({ of, the }) as CauseRow[];
+  const revisions = [];
+  if (rows && rows.length) {
+    for (const result of rows) {
+      const row = store.prepare(GET_FACT).get({ fact: result.fact }) as
+        | StateRow
+        | undefined;
+      if (row) {
+        const revision: Revision<Fact> = {
+          the,
+          of,
+          cause: row.cause
+            ? (fromString(row.cause) as Reference<Assertion>)
+            : refer(unclaimed(row)),
+          since: row.since,
+        };
+        if (row.is) {
+          revision.is = JSON.parse(row.is);
+        }
+        revisions.push(revision);
+      }
+    }
+  }
+  return revisions;
+};
+
 const select = <Space extends MemorySpace>(
   session: Session<Space>,
   { since, select }: Query["args"],
@@ -627,12 +688,14 @@ const swap = <Space extends MemorySpace>(
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
     if (refer(actual).toString() !== fact) {
+      const revisions = causeChain(session, { the, of });
       throw Error.conflict(transaction, {
         space: transaction.sub,
         the,
         of,
         expected,
         actual: revision as Revision<Fact>,
+        history: revisions,
       });
     }
   }

@@ -14,7 +14,7 @@ This script guides Claude through setting up a complete space with the `ct` util
   - Identity keyfile management
   - Environment variable setup (CT_API_URL and CT_IDENTITY)
   - API URL collection and connectivity test
-  - Recipe development TypeScript setup (user should run `ct init` in recipes directory)
+  - **Note:** Claude Code cannot cd into directories. User should run `ct init` manually in their recipes directory for TypeScript setup
 
 ### STEP 2: Space-Specific Setup
 
@@ -24,10 +24,10 @@ This script guides Claude through setting up a complete space with the `ct` util
 
 **Find recipe path:**
 - Follow the recipe path discovery process from common/ct.md
-- Once recipe path is found, user should run `ct init` in the recipes directory to set up TypeScript types
-- Additionally, look specifically for these key recipes:
-  - `find [user-provided-path] -name "*gmail*" -o -name "*email*" -o -name "*list*" | head -5`
-  - Verify key recipes exist: `ls -la [user-provided-path]/coralreef/gmail.tsx` (or find where gmail.tsx is located)
+- **Important:** User must run `ct init` manually in their recipes directory (Claude Code cannot cd into directories)
+- Look specifically for these key recipes:
+  - `find [user-provided-path] -name "*gmail*" -o -name "*simple-list*" -o -name "*page*" -o -name "*factory*" | head -10`
+  - Verify key recipes exist: `ls -la [user-provided-path]/gmail.tsx [user-provided-path]/simple-list.tsx [user-provided-path]/page.tsx [user-provided-path]/factory.tsx`
   - If recipes are in a subfolder, help them find the right path: `find [user-provided-path] -name "recipes" -type d`
 
 ### STEP 3: Execute Space Setup Workflow
@@ -39,45 +39,30 @@ This script guides Claude through setting up a complete space with the `ct` util
 4. Verify the operation worked
 5. Store charm IDs for later linking
 
-**Create gmail charm:**
-- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/coralreef/gmail.tsx`
-- Extract and record the GMAIL_CHARM_ID from output
+**Create simple-list charm:**
+- Verify recipe exists: `ls -la [recipe-path]/simple-list.tsx`
+- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/simple-list.tsx`
+- Extract and record the SIMPLE_LIST_CHARM_ID from output
 - Verify: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
 
-**Create email-list charm:**
-- Verify recipe exists: `ls -la [recipe-path]/email-list.tsx`
-- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/email-list.tsx`
-- Record EMAIL_LIST_CHARM_ID
-- Link gmail results to email-list input: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [GMAIL_CHARM_ID]/emails [EMAIL_LIST_CHARM_ID]/emails`
+**Create gmail charm:**
+- Verify recipe exists: `ls -la [recipe-path]/gmail.tsx`
+- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/gmail.tsx`
+- Record GMAIL_CHARM_ID
 
-**Create all-lists charm:**
-- Verify recipe exists: `ls -la [recipe-path]/all-lists.tsx`
-- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/all-lists.tsx`
-- Record ALL_LISTS_CHARM_ID
-- Link to well-known charms list: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [ALL_LISTS_CHARM_ID]/allCharms`
-
-**Create all-pages charm:**
-- Verify recipe exists: `ls -la [recipe-path]/all-pages.tsx`
-- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/all-pages.tsx`
-- Record ALL_PAGES_CHARM_ID
-- Link to well-known charms list: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [ALL_PAGES_CHARM_ID]/allCharms`
-
-**Create custom list charm:**
-- Verify recipe exists: `ls -la [recipe-path]/list.tsx`
-- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/list.tsx`
-- Record LIST_CHARM_ID
-
-**Create custom page charm:**
+**Create page charm:**
 - Verify recipe exists: `ls -la [recipe-path]/page.tsx`
 - Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/page.tsx`
 - Record PAGE_CHARM_ID
+- Link well-known charms list to page allCharms input: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [PAGE_CHARM_ID]/allCharms`
+- Link well-known charms list to page mentionable input: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [PAGE_CHARM_ID]/mentionable`
 
-**Create page manager charm:**
-- Verify recipe exists: `ls -la [recipe-path]/page-manager.tsx`
-- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/page-manager.tsx`
-- Record PAGE_MANAGER_CHARM_ID
-- Link lists: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [ALL_LISTS_CHARM_ID]/lists [PAGE_MANAGER_CHARM_ID]/lists`
-- Link pages: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [ALL_PAGES_CHARM_ID]/pages [PAGE_MANAGER_CHARM_ID]/pages`
+**Create factory charm:**
+- Verify recipe exists: `ls -la [recipe-path]/factory.tsx`
+- Run: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-path]/factory.tsx`
+- Record FACTORY_CHARM_ID
+- Link well-known charms list to factory allCharms input: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [FACTORY_CHARM_ID]/allCharms`
+- Link well-known charms list to factory mentionable input: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [FACTORY_CHARM_ID]/mentionable`
 
 ### STEP 4: Final Verification and Optional Setup
 
@@ -103,7 +88,7 @@ This script guides Claude through setting up a complete space with the `ct` util
 - Help user locate them: `find [user-provided-path] -name "*.tsx" -type f`
 - Look in common subdirectories: `find [user-provided-path] -name "recipes" -type d`
 - Ask user to provide the correct path to their recipe repository
-- Verify files exist before proceeding: `ls -la [corrected-path]/gmail.tsx`
+- Verify all required files exist before proceeding: `ls -la [corrected-path]/simple-list.tsx [corrected-path]/gmail.tsx [corrected-path]/page.tsx [corrected-path]/factory.tsx`
 
 **If charm creation fails:**
 - Test recipe syntax with `./dist/ct dev [recipe] --no-run`
@@ -170,13 +155,10 @@ echo '[{"name": "Item 1"}, {"name": "Item 2"}]' | ./dist/ct charm set --identity
   - Examples of charm-to-charm and well-known ID linking
 
 ### Expected Workflow:
-1. Gmail charm → extract emails field
-2. Email-list charm → link to gmail/emails
-3. All-lists charm → link to well-known charms list (baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye)
-4. All-pages charm → link to well-known charms list
-5. Custom list charm → standalone
-6. Custom page charm → standalone
-7. Page manager charm → link to all-lists/lists and all-pages/pages
+1. Simple-list charm → standalone list for basic items
+2. Gmail charm → standalone email fetcher
+3. Page charm → link well-known charms list to its allCharms and mentionable inputs
+4. Factory charm → link well-known charms list to its allCharms and mentionable inputs
 
 ### Well-Known IDs:
 - Charms list in any space: `baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye`
@@ -184,11 +166,9 @@ echo '[{"name": "Item 1"}, {"name": "Item 2"}]' | ./dist/ct charm set --identity
 ### Space Setup Specific Notes:
 - See `.claude/commands/common/ct.md` for general troubleshooting
 - Recipe files needed for initial setup:
-  - gmail.tsx (in coralreef subfolder)
-  - email-list.tsx
-  - all-lists.tsx
-  - all-pages.tsx
-  - list.tsx
+  - simple-list.tsx
+  - gmail.tsx
   - page.tsx
-  - page-manager.tsx
+  - factory.tsx
 - Verify all these recipes exist before starting the setup workflow
+- Remember: Claude Code cannot cd into directories - user must manually run `ct init` in their recipes directory

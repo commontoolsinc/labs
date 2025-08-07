@@ -202,6 +202,7 @@ export class CTButton extends BaseElement {
         type="${this.type}"
         @click="${this._handleClick}"
         part="button"
+        data-ct-button
       >
         <slot></slot>
       </button>
