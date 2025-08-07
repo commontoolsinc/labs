@@ -9,6 +9,9 @@ import { StorageInspectorController } from "../lib/inspector-controller.ts";
 import "./InspectorView.ts";
 import { Task } from "@lit/task";
 import { CharmController } from "@commontools/charm/ops";
+import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
+import { NAME } from "@commontools/runner";
+import { updatePageTitle } from "../lib/navigate.ts";
 
 export class XAppView extends BaseView {
   static override styles = css`
@@ -35,17 +38,26 @@ export class XAppView extends BaseView {
   `;
 
   @property({ attribute: false })
-  private app?: AppState;
+  app?: AppState;
 
   @property({ attribute: false })
-  private rt?: RuntimeInternals;
+  rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  private keyStore?: KeyStore;
+  keyStore?: KeyStore;
+
+  @property({ attribute: false })
+  charmTitle?: string;
+
+  @property({ attribute: false })
+  private titleSubscription?: CellEventTarget<string | undefined>;
+
+  private inspectorController = new StorageInspectorController(this);
 
   private _activeCharm = new Task(this, {
     task: async ([app, rt]): Promise<CharmController | undefined> => {
       if (!app || !app.activeCharmId || !rt) {
+        this.#setTitleSubscription();
         return;
       }
       const current: CharmController | undefined = this._activeCharm.value;
@@ -54,15 +66,55 @@ export class XAppView extends BaseView {
       ) {
         return current;
       }
-      return await rt.cc().get(app.activeCharmId);
+      const activeCharm = await rt.cc().get(app.activeCharmId);
+      this.#setTitleSubscription(activeCharm);
+
+      return activeCharm;
     },
     args: () => [this.app, this.rt],
   });
 
-  private inspectorController = new StorageInspectorController(this);
+  #setTitleSubscription(activeCharm?: CharmController) {
+    if (!activeCharm) {
+      if (this.titleSubscription) {
+        this.titleSubscription.removeEventListener(
+          "update",
+          this.#onCharmTitleChange,
+        );
+      }
+      this.titleSubscription = undefined;
+      this.charmTitle = this.app?.spaceName ?? "Common Tools";
+    } else {
+      const cell = activeCharm.getCell();
+      this.titleSubscription = new CellEventTarget(cell.key(NAME));
+      this.charmTitle = cell.get()[NAME];
+    }
+  }
+
+  #onCharmTitleChange = (e: Event) => {
+    const event = e as CellUpdateEvent<string | undefined>;
+    this.charmTitle = event.detail ?? "";
+  };
 
   override updated(changedProperties: Map<string, unknown>) {
     super.updated(changedProperties);
+
+    if (changedProperties.has("charmTitle")) {
+      updatePageTitle(this.charmTitle ?? "");
+    }
+
+    if (changedProperties.has("titleSubscription")) {
+      const current = this.titleSubscription;
+      const prev = changedProperties.get(
+        "titleSubscription",
+      ) as CellEventTarget<string | undefined> | undefined;
+      if (prev) {
+        prev.removeEventListener("update", this.#onCharmTitleChange);
+      }
+      if (current) {
+        current.addEventListener("update", this.#onCharmTitleChange);
+      }
+    }
 
     // Update inspector controller with runtime
     if (changedProperties.has("rt") && this.rt) {
@@ -98,7 +150,8 @@ export class XAppView extends BaseView {
           .spaceName="${app.spaceName}"
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"
-          .activeCharm="${this._activeCharm.value}"
+          .charmTitle="${this.charmTitle}"
+          .charmId="${this._activeCharm.value?.id}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
           .showInspectorView="${app.showInspectorView ?? false}"
         ></x-header-view>
