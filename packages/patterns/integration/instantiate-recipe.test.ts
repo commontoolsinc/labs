@@ -7,36 +7,8 @@ import {
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import {
-  clickShadowElement,
-  typeInShadowInput,
-} from "./shadow-dom-utils.ts";
 
 const { API_URL, FRONTEND_URL } = env;
-
-// Shadow DOM paths for ct-message-input in CommonTools shell
-const CT_MESSAGE_INPUT_PATH = [
-  "x-root-view",
-  "x-app-view",
-  "x-body-view",
-  "x-charm-view",
-  "common-charm",
-  "ct-render",
-  "ct-message-input",
-  "ct-input",
-  "input",
-];
-
-const CT_MESSAGE_INPUT_BUTTON_PATH = [
-  "x-root-view",
-  "x-app-view",
-  "x-body-view",
-  "x-charm-view",
-  "common-charm",
-  "ct-render",
-  "ct-message-input",
-  "ct-button",
-];
 
 describe("instantiate-recipe integration test", () => {
   const shell = new ShellIntegration();
@@ -83,14 +55,24 @@ describe("instantiate-recipe integration test", () => {
     const urlBefore = await page.evaluate(() => globalThis.location.href);
     console.log("URL before action:", urlBefore);
 
-    // Type in the input field
-    await typeInShadowInput(page, CT_MESSAGE_INPUT_PATH, "New counter");
+    // Find and type in the input using data attribute with pierce strategy
+    const input = await page.$("[data-ct-input]", {
+      strategy: "pierce",
+    });
+    assert(input, "Should find input element");
+    
+    await input.type("New counter");
 
     // Wait for input to be processed
-    await sleep(500);
+    await sleep(200);
 
-    // Click the send button
-    await clickShadowElement(page, CT_MESSAGE_INPUT_BUTTON_PATH);
+    // Find and click the button using data attribute with pierce strategy
+    const button = await page.$("[data-ct-button]", {
+      strategy: "pierce",
+    });
+    assert(button, "Should find button element");
+    
+    await button.click();
 
     // Wait for navigation to complete
     await sleep(500);
