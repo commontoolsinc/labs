@@ -1,7 +1,10 @@
 import { App } from "./app/controller.ts";
 import { getLogger } from "@commontools/utils/logger";
 
-const logger = getLogger("shell.navigation");
+const logger = getLogger("shell.navigation", {
+  enabled: false,
+  level: "debug",
+});
 
 // Could contain other nav types, like external pages,
 // or viewing a User's "Settings" etc.
