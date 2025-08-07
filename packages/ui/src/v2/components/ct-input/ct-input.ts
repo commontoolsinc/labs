@@ -526,6 +526,7 @@ export class CTInput extends BaseElement {
     return html`
       <input
         type="${this.type}"
+        data-ct-input
         class="${validationClass}"
         placeholder="${ifDefined(this.placeholder || undefined)}"
         .value="${ifDefined(inputValue)}"
