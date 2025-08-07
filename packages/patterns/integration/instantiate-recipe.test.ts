@@ -49,7 +49,7 @@ describe("instantiate-recipe integration test", () => {
     assertEquals(state.activeCharmId, charmId);
 
     // Wait for charm to load and render
-    await sleep(500);
+    await sleep(1500);
 
     // Store the current URL before any action
     const urlBefore = await page.evaluate(() => globalThis.location.href);
@@ -60,7 +60,7 @@ describe("instantiate-recipe integration test", () => {
       strategy: "pierce",
     });
     assert(input, "Should find input element");
-    
+
     await input.type("New counter");
 
     // Wait for input to be processed
@@ -71,7 +71,7 @@ describe("instantiate-recipe integration test", () => {
       strategy: "pierce",
     });
     assert(button, "Should find button element");
-    
+
     await button.click();
 
     // Wait for navigation to complete
