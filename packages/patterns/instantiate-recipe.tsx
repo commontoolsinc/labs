@@ -101,7 +101,7 @@ export default recipe(InputSchema, OutputSchema, (_) => {
     [UI]: (
       <div>
         <ct-message-input
-          name="Add"
+          button-text="Add"
           placeholder="New counter"
           appearance="rounded"
           onct-send={newCounter({ })}

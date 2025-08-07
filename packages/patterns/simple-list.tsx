@@ -1,3 +1,4 @@
+/// <cts-enable />
 import { h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
 
 const ItemSchema = {
