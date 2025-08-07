@@ -155,13 +155,13 @@ export class Scheduler implements IScheduler {
   subscribe(action: Action, log: ReactivityLog): Cancel {
     const reads = this.setDependencies(action, log);
     const pathsByEntity = addressesToPathByEntity(reads);
-    
+
     logger.debug(() => [
       `[SUBSCRIBE] Action: ${action.name || "anonymous"}`,
       `Entities: ${pathsByEntity.size}`,
       `Reads: ${reads.length}`,
     ]);
-    
+
     const entities = new Set<SpaceAndURI>();
 
     for (const [spaceAndURI, paths] of pathsByEntity) {
@@ -176,13 +176,13 @@ export class Scheduler implements IScheduler {
         ] as readonly MemoryAddressPathComponent[]
       );
       this.triggers.get(spaceAndURI)!.set(action, pathsWithValues);
-      
+
       logger.debug(() => [
         `[SUBSCRIBE] Registered action for ${spaceAndURI}`,
-        `Paths: ${pathsWithValues.map(p => p.join("/")).join(", ")}`,
+        `Paths: ${pathsWithValues.map((p) => p.join("/")).join(", ")}`,
       ]);
     }
-    
+
     this.cancels.set(action, () => {
       logger.debug(() => [
         `[UNSUBSCRIBE] Action: ${action.name || "anonymous"}`,
@@ -201,11 +201,11 @@ export class Scheduler implements IScheduler {
       type: "scheduler.run",
       action: action.toString(),
     });
-    
+
     logger.debug(() => [
       `[RUN] Starting action: ${action.name || "anonymous"}`,
     ]);
-    
+
     if (this.runningPromise) await this.runningPromise;
 
     const tx = this.runtime.edit();
@@ -226,13 +226,13 @@ export class Scheduler implements IScheduler {
           // This matches the original scheduler behavior
           tx.commit();
           const log = txToReactivityLog(tx);
-          
+
           logger.debug(() => [
             `[RUN] Action completed: ${action.name || "anonymous"}`,
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
           ]);
-          
+
           this.subscribe(action, log);
           resolve(result);
         }
@@ -308,23 +308,18 @@ export class Scheduler implements IScheduler {
     return {
       next: (notification) => {
         const space = notification.space;
-        
+
         // Log notification details
         logger.debug(() => [
           `[NOTIFICATION] Type: ${notification.type}`,
           `Space: ${space}`,
-          `Has source: ${"source" in notification ? notification.source : "none"}`,
-          `Changes: ${"changes" in notification ? [...notification.changes].length : 0}`,
+          `Has source: ${
+            "source" in notification ? notification.source : "none"
+          }`,
+          `Changes: ${
+            "changes" in notification ? [...notification.changes].length : 0
+          }`,
         ]);
-
-        // Only process commit notifications to avoid self-triggering
-        // from async notifications that lack source tracking
-        if (notification.type !== "commit") {
-          logger.debug(() => [
-            `[NOTIFICATION] Skipping non-commit notification: ${notification.type}`,
-          ]);
-          return { done: false };
-        }
 
         if ("changes" in notification) {
           let changeIndex = 0;
@@ -336,33 +331,33 @@ export class Scheduler implements IScheduler {
               `Before: ${JSON.stringify(change.before)}`,
               `After: ${JSON.stringify(change.after)}`,
             ]);
-            
+
             if (change.address.type !== "application/json") {
               logger.debug(() => [
                 `[CHANGE ${changeIndex}] Skipping non-JSON type: ${change.address.type}`,
               ]);
               continue;
             }
-            
+
             const spaceAndURI = `${space}/${change.address.id}` as SpaceAndURI;
             const paths = this.triggers.get(spaceAndURI);
-            
+
             if (paths) {
               logger.debug(() => [
                 `[CHANGE ${changeIndex}] Found ${paths.size} registered actions for ${spaceAndURI}`,
               ]);
-              
+
               const triggeredActions = determineTriggeredActions(
                 paths,
                 change.before,
                 change.after,
                 change.address.path,
               );
-              
+
               logger.debug(() => [
                 `[CHANGE ${changeIndex}] Triggered ${triggeredActions.length} actions`,
               ]);
-              
+
               for (const action of triggeredActions) {
                 logger.debug(() => [
                   `[TRIGGERED] Action for ${spaceAndURI}/${
@@ -464,11 +459,11 @@ export class Scheduler implements IScheduler {
     // scheduled actions.
     this.pending.clear();
     this.dirty.clear();
-    
+
     logger.debug(() => [
       `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
     ]);
-    
+
     for (const fn of order) {
       this.cancels.get(fn)?.();
     }

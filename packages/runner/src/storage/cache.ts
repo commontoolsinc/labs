@@ -491,6 +491,7 @@ export class Replica {
     private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);
+    this.isFresh = this.isFresh.bind(this);
   }
 
   did(): MemorySpace {
@@ -539,7 +540,7 @@ export class Replica {
     entries: [FactAddress, SchemaPathSelector?][] = this.queue.consume(),
   ): Promise<
     Result<
-      Selection<FactAddress, Revision<State>>,
+      Unit,
       IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
@@ -615,16 +616,17 @@ export class Replica {
       }
       fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
     }
-    const allFetched = fetchedEntries.map(([fact, _selector]) => fact);
-    const localFacts = this.updateLocalFacts(allFetched);
-    const fetched = allFetched.filter((fact) =>
-      fact === undefined || !localFacts.has(fact)
-    );
+    const revisions = fetchedEntries.map(([revision, _selector]) => revision);
+    const localFacts = this.updateLocalFacts(revisions);
+    const freshFacts = revisions.filter(this.isFresh);
 
-    const changes = Differential.create().update(this, fetched);
-    // We can put stale facts in the heap, but not in the nursery
+    // We limit changes to the non-stale changes, since we don't have a good
+    // way of determining that in the "pull" event handler.
+    const changes = Differential.create().update(this, freshFacts);
+    // We can put stale facts in the heap, but not in the nursery.
+    // We also don't want to update the document map with the stale version.
     this.heap.merge(
-      allFetched,
+      revisions,
       Replica.put,
       (revision) => revision === undefined || !localFacts.has(revision),
     );
@@ -634,28 +636,20 @@ export class Replica {
     // `unclaimed` revisions for those that we store. By doing this we can avoid
     // network round trips if such are pulled again in the future.
     const notFound = [];
-    const revisions = new Map<FactAddress, Revision<State>>();
-    if (fetched.length < entries.length) {
-      for (const [entry, _selector] of entries) {
-        if (!this.get(entry)) {
-          // Note we use `-1` as `since` timestamp so that any change will appear greater.
-          const revision = { ...unclaimed(entry), since: -1 };
-          notFound.push(revision);
-          revisions.set(entry, revision);
-        }
+    for (const [entry, _selector] of entries) {
+      if (!this.get(entry)) {
+        // Note we use `-1` as `since` timestamp so that any change will appear greater.
+        const revision = { ...unclaimed(entry), since: -1 };
+        notFound.push(revision);
       }
-    }
-
-    for (const [revision, _selector] of fetchedEntries) {
-      const factAddress = { the: revision.the, of: revision.of };
-      revisions.set(factAddress, revision);
     }
 
     // Add notFound entries to the heap and also persist them in the cache.
     // Don't notify subscribers as if this were a server update.
-    this.heap.merge(notFound, Replica.put, (val) => false);
+    this.heap.merge(notFound, Replica.put, (_val) => false);
     // Add entries for the facts we have not found we don't need to compare
     // those as we already know we don't have them in the replica.
+    // This method is really an "addAll"
     changes.set(notFound);
 
     // Notify storage subscription about changes that were pulled from the remote
@@ -665,7 +659,8 @@ export class Replica {
       changes: changes.close(),
     });
 
-    const result = await this.cache.merge(revisions.values(), Replica.put);
+    // Store the revisions we got from the server in the cache
+    const result = await this.cache.merge(revisions, Replica.put);
 
     for (const [revision, selector] of fetchedEntries) {
       const factAddress = { the: revision.the, of: revision.of };
@@ -675,7 +670,7 @@ export class Replica {
     if (result.error) {
       return result;
     } else {
-      return { ok: revisions };
+      return { ok: {} };
     }
   }
 
@@ -688,7 +683,7 @@ export class Replica {
     entries: [FactAddress, SchemaPathSelector?][],
   ): Promise<
     Result<
-      Selection<FactAddress, Revision<State>>,
+      Unit,
       IStoreError | QueryError | AuthorizationError | ConnectionError
     >
   > {
@@ -761,7 +756,7 @@ export class Replica {
         // schedule an update for any entries without a schema.
         this.queue.add(simple);
         this.sync();
-        return { ok: pulled };
+        return { ok: {} };
       }
     }
   }
@@ -925,16 +920,15 @@ export class Replica {
       );
 
       // We only delete from the nursery when we've seen all of our pending
-      // facts (or gotten a conflict).
-      // Server facts may have newer nursery changes that we want to keep.
-      const freshFacts = revisions.filter((revision) =>
-        (this.pendingNurseryChanges.get(toKey(revision))?.size ?? 0) === 0
-      );
+      // facts (or gotten a fact that did or will conflict).
+      const freshFacts = revisions.filter(this.isFresh);
 
       // Evict redundant facts which we just merged into `heap` so that reads
-      // will occur from `heap`. This way future changes upstream we not get
+      // will occur from `heap`. This way future changes upstream will not get
       // shadowed by prior local changes.
-      this.nursery.merge(facts, Nursery.evict);
+      // I only evict the fresh facts, but if you never have more than one
+      // call of commit, you could evict all of them.
+      this.nursery.merge(freshFacts, Nursery.evict);
 
       for (const fact of freshFacts) {
         this.pendingNurseryChanges.delete(toKey(fact));
@@ -960,7 +954,8 @@ export class Replica {
     // should have the same since on the second, so we can clear them from
     // tracking when we see them.
     const localFacts = this.updateLocalFacts(revisions);
-    const checkout = Differential.checkout(this, revisions);
+    const freshFacts = revisions.filter(this.isFresh);
+    const checkout = Differential.checkout(this, freshFacts);
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
@@ -1024,6 +1019,26 @@ export class Replica {
       }
     }
     return matches;
+  }
+
+  /**
+   * If the revision is something that can't be properly compared, it's fresh.
+   * If we have a version that's at least as new in the heap, it's not fresh.
+   * If we expected this fact because we have sent it, but not received it,
+   * then this isn't a fresh fact.
+   */
+  private isFresh(revision: Revision<State> | undefined): boolean {
+    if (revision === undefined || revision.cause === undefined) {
+      return true;
+    }
+    const heapVersion = this.heap.get(revision);
+    if (heapVersion !== undefined && revision.since <= heapVersion.since) {
+      return false;
+    }
+    return !this.pendingNurseryChanges.hasValue(
+      toKey(revision),
+      revision.cause.toString(),
+    );
   }
 
   /**
