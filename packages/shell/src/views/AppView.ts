@@ -6,7 +6,9 @@ import { BaseView } from "./BaseView.ts";
 import { KeyStore } from "@commontools/identity";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import { StorageInspectorController } from "../lib/inspector-controller.ts";
+import { DebuggerController } from "../lib/debugger-controller.ts";
 import "./InspectorView.ts";
+import "./DebuggerView.ts";
 import { Task } from "@lit/task";
 import { CharmController } from "@commontools/charm/ops";
 import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
@@ -53,6 +55,22 @@ export class XAppView extends BaseView {
   private titleSubscription?: CellEventTarget<string | undefined>;
 
   private inspectorController = new StorageInspectorController(this);
+  private debuggerController = new DebuggerController(this);
+
+  override connectedCallback() {
+    super.connectedCallback();
+    // Listen for clear telemetry events
+    this.addEventListener("clear-telemetry", this.handleClearTelemetry);
+  }
+
+  override disconnectedCallback() {
+    this.removeEventListener("clear-telemetry", this.handleClearTelemetry);
+    super.disconnectedCallback();
+  }
+
+  private handleClearTelemetry = () => {
+    this.debuggerController.clearTelemetry();
+  };
 
   private _activeCharm = new Task(this, {
     task: async ([app, rt]): Promise<CharmController | undefined> => {
@@ -119,12 +137,16 @@ export class XAppView extends BaseView {
     // Update inspector controller with runtime
     if (changedProperties.has("rt") && this.rt) {
       this.inspectorController.setRuntime(this.rt);
+      this.debuggerController.setRuntime(this.rt);
     }
 
     // Update inspector visibility from app state
     if (changedProperties.has("app") && this.app) {
       this.inspectorController.setVisibility(
         this.app.showInspectorView ?? false,
+      );
+      this.debuggerController.setVisibility(
+        this.app.showDebuggerView ?? false,
       );
     }
   }
@@ -154,6 +176,7 @@ export class XAppView extends BaseView {
           .charmId="${this._activeCharm.value?.id}"
           .showShellCharmListView="${app.showShellCharmListView ?? false}"
           .showInspectorView="${app.showInspectorView ?? false}"
+          .showDebuggerView="${app.showDebuggerView ?? false}"
         ></x-header-view>
         <div class="content-area">
           ${content}
@@ -166,6 +189,10 @@ export class XAppView extends BaseView {
             .inspectorState="${this.inspectorController.getState()}"
             .updateVersion="${this.inspectorController.getUpdateVersion()}"
           ></x-inspector-view>
+          <x-debugger-view
+            .visible="${this.debuggerController.isVisible()}"
+            .telemetryMarkers="${this.debuggerController.getTelemetryMarkers()}"
+          ></x-debugger-view>
         `
         : ""}
     `;

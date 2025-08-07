@@ -14,6 +14,7 @@ export interface AppState {
   apiUrl: URL;
   showShellCharmListView?: boolean;
   showInspectorView?: boolean;
+  showDebuggerView?: boolean;
 }
 
 export type AppStateSerialized = Omit<AppState, "identity" | "apiUrl"> & {
@@ -53,6 +54,10 @@ export function applyCommand(
     }
     case "set-show-inspector-view": {
       next.showInspectorView = command.show;
+      break;
+    }
+    case "set-show-debugger-view": {
+      next.showDebuggerView = command.show;
       break;
     }
   }

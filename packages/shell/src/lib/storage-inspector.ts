@@ -1,4 +1,6 @@
 import * as Inspector from "@commontools/runner/storage/inspector";
+import { StorageTelemetry } from "@commontools/runner/storage/telemetry";
+import type { RuntimeTelemetry } from "@commontools/runner";
 
 export class StorageInspectorUpdateEvent
   extends CustomEvent<{ model: StorageInspectorState }> {
@@ -25,13 +27,21 @@ export class StorageInspectorState extends Inspector.Model {
   // Track creation times for operations
   private operationTimes: Map<string, number> = new Map();
 
-  constructor(time = Date.now()) {
+  // Optional telemetry integration
+  private storageTelemetry?: StorageTelemetry;
+
+  constructor(time = Date.now(), telemetry?: RuntimeTelemetry) {
     super(
       { pending: { ok: { attempt: 0 } }, time },
       {},
       {},
       {},
     );
+    
+    // Initialize telemetry if provided
+    if (telemetry) {
+      this.storageTelemetry = new StorageTelemetry(telemetry);
+    }
   }
 
   update(command: Inspector.BroadcastCommand) {
@@ -46,7 +56,18 @@ export class StorageInspectorState extends Inspector.Model {
       this.operationTimes.set(url, command.time);
     }
 
+    const beforeState = {
+      connection: this.connection,
+      push: { ...this.push },
+      pull: { ...this.pull },
+      subscriptions: { ...this.subscriptions },
+    };
+
     const updatedState = Inspector.update(this, command);
+
+    if (this.storageTelemetry) {
+      this.storageTelemetry.trackStateChange(beforeState, updatedState, command);
+    }
 
     // Check for completed operations (ones that were removed)
     for (const [id, value] of Object.entries(beforePush)) {
@@ -148,7 +169,10 @@ export class StorageInspectorState extends Inspector.Model {
     this.push = {};
     this.pull = {};
 
-    // Clear all operation times
     this.operationTimes.clear();
+    
+    if (this.storageTelemetry) {
+      this.storageTelemetry.clear();
+    }
   }
 }

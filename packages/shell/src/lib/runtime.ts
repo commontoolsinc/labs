@@ -50,7 +50,7 @@ export class RuntimeInternals extends EventTarget {
   #telemetry: RuntimeTelemetry;
   #telemetryMarkers: RuntimeTelemetryMarkerResult[];
   #inspector: Inspector.Channel;
-  #inspectorState = new StorageInspectorState();
+  #inspectorState: StorageInspectorState;
   #disposed = false;
 
   private constructor(cc: CharmsController, telemetry: RuntimeTelemetry) {
@@ -64,6 +64,8 @@ export class RuntimeInternals extends EventTarget {
     this.#telemetry = telemetry;
     this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
     this.#telemetryMarkers = [];
+    // Initialize StorageInspectorState with telemetry integration
+    this.#inspectorState = new StorageInspectorState(Date.now(), telemetry);
   }
 
   telemetry(): RuntimeTelemetryMarkerResult[] {

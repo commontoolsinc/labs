@@ -113,6 +113,9 @@ export class XHeaderView extends BaseView {
   @property()
   showInspectorView = false;
 
+  @property()
+  showDebuggerView = false;
+
   private _inspectorListener = new Task(this, {
     args: () => [this.rt],
     task: ([rt]) => {
@@ -175,6 +178,15 @@ export class XHeaderView extends BaseView {
     this.command({
       type: "set-show-inspector-view",
       show: !this.showInspectorView,
+    });
+  }
+
+  private handleDebuggerToggleClick(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.command({
+      type: "set-show-debugger-view",
+      show: !this.showDebuggerView,
     });
   }
 
@@ -242,6 +254,16 @@ export class XHeaderView extends BaseView {
             : "Show Inspector"}"
             >
               ${this.showInspectorView ? "🔧" : "🛠️"}
+            </x-button>
+            <x-button
+              class="emoji-button"
+              size="small"
+              @click="${this.handleDebuggerToggleClick}"
+              title="${this.showDebuggerView
+            ? "Hide Debugger"
+            : "Show Debugger"}"
+            >
+              ${this.showDebuggerView ? "🐛" : "🪲"}
             </x-button>
             <x-button
               class="auth-button"
