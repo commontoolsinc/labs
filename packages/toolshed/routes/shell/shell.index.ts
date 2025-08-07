@@ -3,6 +3,7 @@ import * as path from "@std/path";
 import { createRouter } from "@/lib/create-app.ts";
 import { cors } from "@hono/hono/cors";
 import { getMimeType } from "@/lib/mime-type.ts";
+import env from "@/env.ts";
 
 const router = createRouter();
 
@@ -19,7 +20,10 @@ if (!dirname) {
   throw new Error("File does not have dirname in toolshed.");
 }
 const projectRoot = path.join(dirname, "..", "..");
-const shellStaticRoot = path.join(projectRoot, "shell-frontend");
+const shellStaticRoot = path.join(
+  projectRoot,
+  env.ENV === "production" ? "shell-frontend" : "shell-frontend-dev",
+);
 const COMPILED = await exists(path.join(projectRoot, "COMPILED"));
 const SHELL_URL = Deno.env.get("SHELL_URL");
 

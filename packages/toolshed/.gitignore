@@ -1,4 +1,5 @@
 shell-frontend
+shell-frontend-dev
 llm-api-cache
 cache
 .env

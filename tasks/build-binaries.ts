@@ -59,6 +59,10 @@ class BuildConfig {
     return this.path("packages", "toolshed", "shell-frontend");
   }
 
+  toolshedShellFrontendPathDev() {
+    return this.path("packages", "toolshed", "shell-frontend-dev");
+  }
+
   toolshedEntryPath() {
     return this.path("packages", "toolshed", "index.ts");
   }
@@ -130,37 +134,39 @@ async function ensureDistDir(config: BuildConfig): Promise<void> {
 }
 
 async function buildShell(config: BuildConfig): Promise<void> {
-  console.log("Building shell app...");
-  const { success } = await new Deno.Command(Deno.execPath(), {
-    args: [
-      "task",
-      "production",
-    ],
-    cwd: config.shellProjectPath(),
-    stdout: "inherit",
-    stderr: "inherit",
-    env: {
-      COMMIT_SHA: Deno.env.get("COMMIT_SHA") || "development",
-    },
-  }).output();
-  if (!success) {
-    console.error("Failed to build shell app");
-    Deno.exit(1);
-    return;
+  for (const mode of ["development", "production"]) {
+    console.log(`Building shell app in ${mode}...`);
+    const task = mode === "production" ? "production" : "build";
+    const toolshedShellFrontend = mode === "production"
+      ? config.toolshedShellFrontendPath()
+      : config.toolshedShellFrontendPathDev();
+    const { success } = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "task",
+        task,
+      ],
+      cwd: config.shellProjectPath(),
+      stdout: "inherit",
+      stderr: "inherit",
+      env: {
+        COMMIT_SHA: Deno.env.get("COMMIT_SHA") || mode,
+      },
+    }).output();
+    if (!success) {
+      console.error("Failed to build shell app");
+      Deno.exit(1);
+      return;
+    }
+
+    // Shell now serves at root path
+    console.log(`Shell app ${mode} built for root path`);
+
+    const shellOut = config.shellOutPath();
+    if ((await exists(toolshedShellFrontend))) {
+      await Deno.remove(toolshedShellFrontend, { recursive: true });
+    }
+    await Deno.rename(shellOut, toolshedShellFrontend);
   }
-
-  const indexPath = path.join(config.shellOutPath(), "index.html");
-  const html = await Deno.readTextFile(indexPath);
-
-  // Shell now serves at root path
-  console.log("Shell app built for root path");
-
-  const shellOut = config.shellOutPath();
-  const toolshedShellFrontend = config.toolshedShellFrontendPath();
-  if ((await exists(toolshedShellFrontend))) {
-    await Deno.remove(toolshedShellFrontend, { recursive: true });
-  }
-  await Deno.rename(shellOut, toolshedShellFrontend);
   console.log("Shell app built successfully");
 }
 
@@ -182,6 +188,8 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       config.distPath("toolshed"),
       "--include",
       config.toolshedShellFrontendPath(),
+      "--include",
+      config.toolshedShellFrontendPathDev(),
       "--include",
       config.toolshedEnvPath(),
       "--include",
