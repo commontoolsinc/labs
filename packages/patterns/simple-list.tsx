@@ -1,4 +1,3 @@
-/// <cts-enable />
 import { h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
 
 const ItemSchema = {
@@ -15,7 +14,7 @@ const ListSchema = {
     title: {
       type: "string",
       default: "My List",
-      asCell: true,
+    asCell: true,
     },
     items: {
       type: "array",
