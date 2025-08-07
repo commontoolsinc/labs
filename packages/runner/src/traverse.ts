@@ -93,16 +93,20 @@ export const MinimalSchemaSelector = {
 
 export class CycleTracker<K> {
   private partial: Set<K>;
-  constructor() {
+  private expectCycles: boolean;
+  constructor(expectCycles = false) {
+    this.expectCycles = expectCycles;
     this.partial = new Set<K>();
   }
   include(k: K, context?: unknown): Disposable | null {
     if (this.partial.has(k)) {
-      logger.warn(() => [
-        "Cycle Detected!",
-        k,
-        context,
-      ]);
+      if (!this.expectCycles) {
+        logger.warn(() => [
+          "Cycle Detected!",
+          k,
+          context,
+        ]);
+      }
       return null;
     }
     this.partial.add(k);
