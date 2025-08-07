@@ -14,7 +14,7 @@ const ListSchema = {
     title: {
       type: "string",
       default: "My List",
-    asCell: true,
+      asCell: true,
     },
     items: {
       type: "array",
