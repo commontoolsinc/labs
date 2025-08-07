@@ -18,17 +18,6 @@ guideline:
 
 ### Plugin Files
 
-- `packages/deno-vite-plugin/src/index.ts`
-- `packages/deno-vite-plugin/src/resolvePlugin.ts`
-- `packages/deno-vite-plugin/src/prefixPlugin.ts`
-
-### View Components
-
-- `packages/jumble/src/assets/ShapeLogo.tsx`
-- `packages/jumble/src/views/CharmView.tsx`
-- `packages/jumble/src/views/ErrorBoundaryView.tsx`
-- `packages/jumble/src/views/DebugView.tsx`
-- Multiple other view files in `packages/jumble/src/views/`
 
 **Example Fix**:
 
@@ -53,25 +42,6 @@ export function createClock(): Clock { ... }
 The following files don't follow the import grouping convention (standard
 library → external → internal):
 
-### `packages/jumble/src/components/CharmRunner.tsx`
-
-```typescript
-// Current (mixed imports)
-import { html } from "lit";
-import { Recipe } from "@commontools/common-runner";
-import { SpellRunner } from "./SpellRunner.js";
-
-// Should be:
-// Standard library
-import { html } from "lit";
-
-// External
-// (none in this case)
-
-// Internal
-import { Recipe } from "@commontools/common-runner";
-import { SpellRunner } from "./SpellRunner.js";
-```
 
 ### `packages/builder/src/utils.ts`
 

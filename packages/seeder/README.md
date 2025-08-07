@@ -16,12 +16,12 @@ You can run the seeder on your local branch
 
 local:
 
-You will need to run the toolshed and jumble in other tabs, you will want to
+You will need to run the toolshed and shell in other tabs, you will want to
 have an `.env` file for toolshed with keys for LLMs and API/project setup for
 phoenix.
 
     cd toolshed; deno task dev
-    cd jumble; deno task dev-local
+    cd shell; deno task dev
 
     TOOLSHED_API_URL=http://localhost:8000 deno task start --name blue42
 
