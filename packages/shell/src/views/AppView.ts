@@ -146,7 +146,7 @@ export class XAppView extends BaseView {
     return html`
       <div class="shell-container">
         <x-header-view
-          .identity="${app.identity}"
+          .isLoggedIn="${!!app.identity}"
           .spaceName="${app.spaceName}"
           .rt="${this.rt}"
           .keyStore="${this.keyStore}"

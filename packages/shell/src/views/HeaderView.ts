@@ -1,9 +1,8 @@
 import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
-import { Identity, KeyStore } from "@commontools/identity";
+import { KeyStore } from "@commontools/identity";
 import { BaseView } from "./BaseView.ts";
 import { Task } from "@lit/task";
-import { styleMap } from "lit/directives/style-map.js";
 import { RuntimeInternals } from "../lib/runtime.ts";
 import {
   StorageInspectorConflicts,
@@ -103,7 +102,7 @@ export class XHeaderView extends BaseView {
   spaceName?: string;
 
   @property({ attribute: false })
-  identity?: Identity;
+  isLoggedIn = false;
 
   @state()
   private _conflicts?: StorageInspectorConflicts;
@@ -149,17 +148,6 @@ export class XHeaderView extends BaseView {
     }
     super.disconnectedCallback();
   }
-
-  @state()
-  private headerColor = "#f9fafb";
-
-  private handleHeaderClick = (e: Event): void => {
-    const target = e.target as HTMLElement;
-    if (target.closest("ct-logo")) {
-      return;
-    }
-    this.headerColor = generateRandomColor();
-  };
 
   private handleAuthClick(e: Event) {
     e.preventDefault();
@@ -225,19 +213,14 @@ export class XHeaderView extends BaseView {
 
     const connectionStatus = this.getConnectionStatus();
     const connectionColor = getConnectionColor(connectionStatus);
-    const styles = { "--header-bg-color": this.headerColor };
 
     return html`
-      <div id="header" style="${styleMap(styles)}" @click="${this
-        .handleHeaderClick}">
+      <div id="header">
         <div class="left-section">
-          <ct-logo
-            .backgroundColor="${connectionColor}"
-            .shapeColor="${this.headerColor}"
-          ></ct-logo>
+          <ct-logo .backgroundColor="${connectionColor}"></ct-logo>
           ${title}
         </div>
-        ${this.identity
+        ${this.isLoggedIn
         ? html`
           <div class="button-group">
             <x-button
@@ -290,12 +273,5 @@ function getConnectionColor(connectionStatus: ConnectionStatus): string {
   };
 
   const hue = colorMap[connectionStatus] ?? 60; // Default to yellow
-  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-}
-
-function generateRandomColor(): string {
-  const hue = Math.floor(Math.random() * 360);
-  const saturation = Math.floor(Math.random() * 30) + 15;
-  const lightness = Math.floor(Math.random() * 20) + 70;
   return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
