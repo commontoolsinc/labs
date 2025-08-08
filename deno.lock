@@ -6850,6 +6850,13 @@
           "npm:@lit/task@^1.0.2"
         ]
       },
+      "packages/storage": {
+        "dependencies": [
+          "jsr:@std/assert@1",
+          "jsr:@std/expect@1",
+          "jsr:@std/testing@1"
+        ]
+      },
       "packages/toolshed": {
         "dependencies": [
           "jsr:@std/cli@^1.0.12",
