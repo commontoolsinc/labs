@@ -15,7 +15,7 @@ import type {
 // Minimal in-memory storage engine following the spec semantics.
 // Heads logic, seq numbers, and simple epoch counter per space.
 
-function canonicalHeads(heads: Heads): Heads {
+function canonicalHeads(heads: string[]): string[] {
   return [...new Set(heads)].sort();
 }
 
@@ -107,7 +107,7 @@ export class InMemorySpaceStorage implements SpaceStorage {
 
       const branchData = this.docs.get(w.ref.docId)!.branches.get(w.ref.branch)!;
 
-      let newHeads = [...branchData.heads];
+      let newHeads: string[] = [...branchData.heads];
       let applied = 0;
 
       for (const ch of w.changes) {
@@ -166,11 +166,17 @@ function equalHeads(a: Heads, b: Heads): boolean {
   return true;
 }
 
-function decodeChangeHeader(change: SubmittedChange) {
+function decodeChangeHeader(change: SubmittedChange): {
+  changeHash: string;
+  deps: string[];
+  actorId: string;
+  seq: number;
+} {
   // Placeholder: in full impl we'd parse Automerge change bytes to get header
   // For now, we derive a pseudo-hash from bytes and assume no deps.
   const hash = pseudoHash(change.bytes);
-  return { changeHash: hash, deps: [], actorId: "", seq: 0 };
+  const deps: string[] = [];
+  return { changeHash: hash, deps, actorId: "", seq: 0 };
 }
 
 function pseudoHash(bytes: Uint8Array): string {
