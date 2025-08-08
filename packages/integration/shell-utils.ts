@@ -112,6 +112,8 @@ export class ShellIntegration {
   browser?: Browser;
   page?: Page;
   identity?: Identity;
+  manager?: CharmManager;
+  runtime?: Runtime;
   exceptions: Array<string> = [];
 
   bindLifecycle() {
@@ -131,6 +133,34 @@ export class ShellIntegration {
     return await login(page, identity);
   }
 
+  async setupManager(spaceName: string, apiUrl: string): Promise<CharmManager> {
+    if (this.manager) return this.manager;
+    
+    const { identity } = this.get();
+    const account = spaceName.startsWith("~")
+      ? identity
+      : await Identity.fromPassphrase(ANYONE);
+    const user = await account.derive(spaceName);
+    const session = {
+      private: account.did() === identity.did(),
+      name: spaceName,
+      space: user.did(),
+      as: user,
+    };
+
+    this.runtime = new Runtime({
+      storageManager: StorageManager.open({
+        as: session.as,
+        address: new URL("/api/storage/memory", apiUrl),
+      }),
+      blobbyServerUrl: apiUrl,
+    });
+
+    this.manager = new CharmManager(session, this.runtime);
+    await this.manager.synced();
+    return this.manager;
+  }
+
   beforeAll = async () => {
     this.browser = await Browser.launch({ headless: env.HEADLESS });
     this.page = await this.browser.newPage();
@@ -144,6 +174,7 @@ export class ShellIntegration {
   };
 
   afterAll = async () => {
+    await this.runtime?.dispose();
     await this.page?.close();
     await this.browser?.close();
   };
