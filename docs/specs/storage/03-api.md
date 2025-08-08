@@ -7,7 +7,7 @@ All endpoints are **scoped by `:spaceDid`**.
 ### POST `/v1/:space/docs` — Create a doc (and optional initial branch)
 
 ```json
-{ "docId": "doc:<mh>", "branch": "main" }
+{ "docId": "doc:<ref>", "branch": "main" }
 ```
 
 Creates the doc entry and the branch if they don't exist.
@@ -16,7 +16,7 @@ Creates the doc entry and the branch if they don't exist.
 
 ```json
 {
-  "docId": "doc:<mh>",
+  "docId": "doc:<ref>",
   "name": "feature-x",
   "from": { "branch": "main", "heads": ["h1","h2"] }
 }
@@ -65,11 +65,11 @@ Query params:
   "clientTxId": "uuid-from-client",
   "ucan": "<compact-ucan-jwt>",
   "reads": [
-    { "docId": "doc:<mh>", "branch": "main", "heads": ["h1","h2"] }
+    { "docId": "doc:<ref>", "branch": "main", "heads": ["h1","h2"] }
   ],
   "writes": [
     {
-      "docId": "doc:<mh>",
+      "docId": "doc:<ref>",
       "branch": "main",
       "baseHeads": ["h1","h2"],
       "changes": ["base64Change1", "base64Change2"],     
@@ -123,13 +123,13 @@ Text frames (JSON) multiplexed across docs.
 ```jsonc
 { "op": "hello", "protocol": "v1", "clientId": "xyz" }
 
-{ "op": "subscribe", "docId": "doc:<mh>", "branch": "main", "fromEpoch": 12000 }
-{ "op": "unsubscribe", "docId": "doc:<mh>", "branch": "main" }
+{ "op": "subscribe", "docId": "doc:<ref>", "branch": "main", "fromEpoch": 12000 }
+{ "op": "unsubscribe", "docId": "doc:<ref>", "branch": "main" }
 
-{ "op": "ack", "docId": "doc:<mh>", "branch": "main", "epoch": 12345 }
+{ "op": "ack", "docId": "doc:<ref>", "branch": "main", "epoch": 12345 }
 
 // Optional: direct AM Sync messages
-{ "op": "sync", "docId": "doc:<mh>", "branch": "main", "message": "base64SyncMsg" }
+{ "op": "sync", "docId": "doc:<ref>", "branch": "main", "message": "base64SyncMsg" }
 ```
 
 **Server → Client:**
@@ -137,15 +137,15 @@ Text frames (JSON) multiplexed across docs.
 ```jsonc
 { "op": "hello", "serverId": "…" }
 
-{ "op": "subscribed", "docId": "doc:<mh>", "branch": "main", "catchingUp": true }
+{ "op": "subscribed", "docId": "doc:<ref>", "branch": "main", "catchingUp": true }
 
-{ "op": "changes", "docId": "doc:<mh>", "branch": "main",
+{ "op": "changes", "docId": "doc:<ref>", "branch": "main",
   "epoch": 12345, "txHash": "<hex>", "serverSig": "<b64>", "committedAt": "…",
   "changes": ["base64Change1","base64Change2"],
   "newHeads": ["h3"]
 }
 
-{ "op": "idle", "docId": "doc:<mh>", "branch": "main" }
+{ "op": "idle", "docId": "doc:<ref>", "branch": "main" }
 
 { "op": "error", "code": "ReadConflict", "details": { /* ... */ } }
 ```

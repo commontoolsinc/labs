@@ -8,7 +8,7 @@ Each transaction request is bound to a UCAN capability that specifies **exactly 
 
 ```json
 {
-  "with": "doc:<mh>/branch/main",
+  "with": "doc:<ref>/branch/main",
   "can": "commit",
   "nb": {
     "baseHeadsRoot": "mr:<...>",   // merkle-reference over sorted base heads

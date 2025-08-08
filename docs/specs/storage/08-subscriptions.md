@@ -73,7 +73,7 @@ built around three core ideas:
 { "op": "hello", "protocol": "v1", "clientId": "xyz" }
 
 { "op": "subscribe", "queryId": "uuid", "spaceDid": "did:key:...", 
-  "docId": "doc:<mh>", "path": "/users", "schema": {...}, "maxLinkDepth": 3 }
+  "docId": "doc:<ref>", "path": "/users", "schema": {...}, "maxLinkDepth": 3 }
 
 { "op": "unsubscribe", "queryId": "uuid" }
 
@@ -89,8 +89,8 @@ built around three core ideas:
 
 { "op": "query-update", "queryId": "uuid", "epoch": 12345, "txHash": "<hex>", 
   "reason": "root-verdict-changed" | "touch-set-expanded" | "touch-set-shrunk" | "touched-doc-updated",
-  "docsToRefresh": ["doc:<mh1>", "doc:<mh2>"],
-  "sourceDocsToSync": ["doc:<mh3>", "doc:<mh4>"],
+  "docsToRefresh": ["doc:<ref1>", "doc:<ref2>"],
+  "sourceDocsToSync": ["doc:<ref3>", "doc:<ref4>"],
   "summary": { "oldVerdict": "Yes", "newVerdict": "No", 
                "deltaTouched": {"added": [], "removed": []} } }
 
