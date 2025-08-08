@@ -81,6 +81,21 @@
 - **Point-in-time queries**: Test queries on historical document states
 - **Branch queries**: Test queries on different branches of the same document
 
+### Document Structure Testing
+
+- **Value field handling**: Test queries against `doc.value` when path is `/` or
+  empty
+- **Undefined value**: Test behavior when `doc.value` is omitted (undefined)
+- **Source metadata**: Test queries against `/source` path to access metadata
+- **Source document sync**: Verify source documents are included in
+  `sourceDocsToSync`
+- **Recursive source sync**: Test that source documents with their own `source`
+  fields are also synced
+- **Source link validation**: Test handling of invalid or malformed source links
+- **Source space isolation**: Verify source documents from different spaces are
+  handled correctly
+- **Source path resolution**: Test source links with and without path components
+
 ### Stress Testing
 
 - **Many concurrent queries**: Test system with hundreds of active queries

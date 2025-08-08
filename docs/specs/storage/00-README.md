@@ -42,6 +42,10 @@ with spaces, CIDs, and cryptographic transaction chain.
 - **Invariant system**: Pluggable business rule validation
 - **Query-based subscriptions**: Incremental, link-aware, schema-driven queries
   over document graphs
+- **Document structure**: All Automerge documents have a standardized structure
+  with `value` field for content and optional `source` field for metadata
+- **Source synchronization**: Automatic recursive syncing of source documents
+  when documents with source links are included in query results
 
 ## Implementation Notes
 
