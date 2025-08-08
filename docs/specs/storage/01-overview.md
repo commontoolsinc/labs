@@ -1,52 +1,66 @@
-# Overview
+# High-Level Architecture
+
+## Core Components
+
+- **Runtime:** Deno 2
+- **Web framework:** Hono (HTTP + WS)
+- **DB:** SQLite via `npm:better-sqlite3` (fast, sync).
+
+  - **One database per space** (see §1.1).
+  - Fallback: `npm:sqlite3` if async I/O is required.
+- **Automerge libs on server:** `npm:@automerge/automerge` (or compatible) for
+  validating/deriving heads and optionally computing snapshots.
+
+  - Avoid full doc materialization when possible — accept/apply changes by
+    hash+deps.
+  - Materialize only for invariants or snapshot creation.
+- **Concurrency model:** Single writer per space DB, many readers; **WAL** mode
+  with tuned pragmas.
+- **Change storage model:** **Content-addressed**, append-only per
+  `(doc, branch)`.
+
+  - Raw change bytes stored **once** in a CAS table.
+  - Per-branch sequence order stored separately.
+  - Periodic **snapshots** and **incremental chunks** accelerate reads.
+  - Heads maintained explicitly.
+- **Transactions:** Optimistic concurrency using **heads** (or per-doc epoch) in
+  client read set. Server:
+
+  - Validates read assumptions
+  - Runs declared invariants
+  - Appends all changes atomically for all docs in the tx
+  - Assigns a **global epoch** (`tx_id`)
+  - Stamps with a `committed_at` timestamp
+  - Extends a **BLAKE3-based, Ed25519-signed transaction chain** (see §4)
+- **Subscriptions:** WebSocket multiplexed channels; clients subscribe to
+  `(doc, branch)` and receive change notifications with **at-least-once**
+  delivery and client acks by `tx_id`.
 
 ## Spaces
 
-- A **space** is a totally separate database keyed by its **space DID**:
-  `did:key:...`.
-- One SQLite DB **per space** (recommended) for isolation and easier backups.
-- The **space DID** is the default **owner**; future delegation is stored in a
-  canonical doc.
+The system supports multiple independent **spaces**:
+
+- Each space identified by a **space DID**: `did:key:...`.
+- Spaces are **fully isolated** — docs, branches, transactions, and changes
+  stored in a dedicated SQLite DB file.
+- Authorization: only the space's DID or UCAN-delegated identities can act
+  within the space.
+- **Bootstrap:**
+
+  - First tx in a space should be a _delegation doc_:
+
+    - Doc URI: `doc:${BLAKE3({delegation: spaceDID})}` (multihash, base58btc)
+    - Content: `{ "delegation": "<space DID>" }`
+    - Written by client in tx #1.
 
 ## Document URIs
 
-- **Automerge docs**: `doc:<BLAKE3-multihash>[/optional_path]`
-  - Normal CRDT documents with branches/changes/snapshots.
-  - Canonical **delegation doc** for a space is:
+Two URI types:
 
-    ```json
-    { "delegation": "<space DID>" }
-    ```
+- **Automerge docs:** `doc:<multihash-blake3>[/optional_path]`
 
-    Its `doc:` ID is `doc:${blake3_multihash(json)}`. The **first tx** in a new
-    space should write this doc (client-provided).
-- **Immutable blobs**: `cid:<BLAKE3-multihash>`
-  - Content-addressed, immutable bytes (no branches, no changes).
+  - CRDT docs with branches, changes, and snapshots.
+  - Optional path for sub-resource addressing or ordering.
+- **Immutable blobs:** `cid:<multihash-blake3>`
 
-## Hashing & Crypto
-
-- **Hash**: Prefer **BLAKE3** everywhere. Only use SHA-256 if an external
-  standard forces it.
-- **Encodings**:
-  - Internal columns store raw 32 bytes (BLOB).
-  - URIs use **multihash** (base58btc).
-- **Tx chain**:
-  - `tx_body_hash = BLAKE3(CBOR(TxBody))`
-  - `tx_hash = BLAKE3( prev_tx_hash || tx_body_hash )`
-  - Server signs **`tx_hash`** with **Ed25519** → `server_sig`.
-- **UCAN invocations**:
-  - Client sends a UCAN JWT with a **capability invocation**.
-  - UCAN `nb` holds **digests** of the proposed commit (see `07-ucan.md`).
-  - Server verifies UCAN and enforces equality between digests and submitted
-    bytes.
-
-## Concurrency & Storage
-
-- **Optimistic**: read assertions on **heads** per (doc,branch).
-- **CAS changes**:
-  - `am_change_blobs(bytes_hash, bytes)` is the **only** copy of raw change
-    bytes.
-  - `am_change_index` provides per-(doc,branch) **ordering** and links to blobs.
-- **Acceleration**:
-  - `am_snapshots` store periodic `save()` results.
-  - `am_chunks` store `saveIncremental()` deltas per `seq_no` (or batched).
+  - Immutable, content-addressed bytes — no branches/change history.

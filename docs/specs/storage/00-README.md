@@ -1,31 +1,46 @@
-# Automerge Backend (Deno 2 + Hono + SQLite) — Verifiable, Multi-Space
+# Storage Specification
 
-This is a production-ready spec for a Deno 2 + Hono Automerge backend that:
+This directory contains the complete specification for the Automerge backend
+with spaces, CIDs, and cryptographic transaction chain.
 
-- Stores **tens of thousands** of docs
-- Supports **multi-doc atomic transactions**
-- Uses **SQLite** (npm:better-sqlite3), WAL mode
-- Provides **WebSocket subscriptions**
-- Offers **point-in-time reads** (epochs/timestamps)
-- Supports **branching/merging**
-- Implements **cryptographically verifiable tx chain** (BLAKE3 + Ed25519)
-- Auth via **UCAN invocations** that **bind** to the exact change set
-- Uses a **CAS-backed change log** with **snapshots** and **incremental chunks**
-- Is **multi-space** (each space is a DID and a separate DB)
-- Introduces **URI docs**: `doc:<hash>` (Automerge) and `cid:<hash>` (immutable)
+## Document Structure
 
-> The crypto layer is an **add-on** to the original architecture. Core
-> data/flows are preserved.
+- **[01-overview.md](01-overview.md)** - High-level architecture and spaces
+  concept
+- **[02-schema.md](02-schema.md)** - Core data model and SQLite schema
+- **[03-api.md](03-api.md)** - API surface and endpoints
+- **[04-tx-processing.md](04-tx-processing.md)** - Transaction semantics and
+  validation
+- **[05-point-in-time.md](05-point-in-time.md)** - Point-in-time retrieval
+  algorithms
+- **[06-branching.md](06-branching.md)** - Branching and merging operations
+- **[07-snapshots.md](07-snapshots.md)** - Snapshots and chunking policy
+- **[08-subscriptions.md](08-subscriptions.md)** - WebSocket subscriptions and
+  delivery
+- **[09-ucan.md](09-ucan.md)** - UCAN invocation binding
+- **[10-invariants.md](10-invariants.md)** - Invariants and plugin API
+- **[11-errors.md](11-errors.md)** - Error taxonomy
+- **[12-operations.md](12-operations.md)** - Operational guidance
+- **[13-client-types.md](13-client-types.md)** - Client transaction types
+- **[14-migration.md](14-migration.md)** - Migration and bootstrap
+- **[15-testing.md](15-testing.md)** - Testing checklist
 
-## Contents
+## Key Concepts
 
-- `01-overview.md` — Core ideas, spaces, URIs, hash choices
-- `02-api.md` — HTTP + WS API surface
-- `03-schema.md` — SQLite schema per space
-- `04-tx-processing.md` — Transaction lifecycle, validation, crypto
-- `05-storage-and-replay.md` — CAS changes, snapshots, chunks, PIT
-  reconstruction
-- `06-branching-merging.md` — Branch semantics
-- `07-ucan.md` — UCAN invocation binding
-- `08-background.md` — Background tasks (chunks/snapshots)
-- `09-ops.md` — Pragmas, perf, observability
+- **Spaces**: Independent, isolated storage domains identified by DIDs
+- **Content-addressed storage**: Changes stored once in CAS tables
+- **Cryptographic transaction chain**: BLAKE3-based, Ed25519-signed transaction
+  history
+- **Point-in-time retrieval**: Access any branch state at any historical point
+- **UCAN-based authorization**: Fine-grained capabilities with cryptographic
+  verification
+- **Invariant system**: Pluggable business rule validation
+
+## Implementation Notes
+
+- Runtime: Deno 2
+- Web framework: Hono (HTTP + WS)
+- Database: SQLite via `npm:better-sqlite3`
+- Automerge: `npm:@automerge/automerge`
+- Concurrency: Single writer per space, many readers
+- Storage: WAL mode with tuned pragmas
