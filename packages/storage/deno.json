@@ -1,0 +1,32 @@
+{
+  "name": "@commontools/storage",
+  "tasks": {
+    "dev": "deno run -A deno.ts",
+    "check": "deno check .",
+    "just-test": {
+      "description": "Just run unit tests without type checking",
+      "command": "deno test -A --no-check"
+    },
+    "test": {
+      "description": "Type check & run tests",
+      "dependencies": [
+        "check",
+        "just-test"
+      ]
+    }
+  },
+  "test": {
+    "include": [
+      "test/*-test.ts"
+    ]
+  },
+  "exports": {
+    ".": "./mod.ts",
+    "./interface": "./interface.ts"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1",
+    "@std/expect": "jsr:@std/expect@^1",
+    "@std/testing": "jsr:@std/testing@^1"
+  }
+}
