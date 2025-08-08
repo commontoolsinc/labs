@@ -10,7 +10,6 @@ import {
   StorageInspectorUpdateEvent,
 } from "../lib/storage-inspector.ts";
 import "../components/Flex.ts";
-import { CharmController } from "@commontools/charm/ops";
 
 type ConnectionStatus =
   | "connecting"

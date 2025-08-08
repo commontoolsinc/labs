@@ -1,6 +1,6 @@
-import { css, html, LitElement, PropertyValues } from "lit";
+import { css, html, PropertyValues } from "lit";
 import { applyCommand, AppState } from "../lib/app/mod.ts";
-import { SHELL_COMMAND } from "./BaseView.ts";
+import { BaseView, SHELL_COMMAND } from "./BaseView.ts";
 import { Command, isCommand } from "../lib/app/commands.ts";
 import { API_URL } from "../lib/env.ts";
 import { AppUpdateEvent } from "../lib/app/events.ts";
@@ -14,7 +14,7 @@ import { RuntimeInternals } from "../lib/runtime.ts";
 // Handles processing `Command`s from children elements,
 // updating the `AppState`, and providing changes
 // to children elements.
-export class XRootView extends LitElement {
+export class XRootView extends BaseView {
   static override styles = css`
     :host {
       display: block;

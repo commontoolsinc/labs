@@ -1,7 +1,8 @@
-import { css, html, LitElement } from "lit";
+import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { StorageInspectorState } from "../lib/storage-inspector.ts";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
+import { BaseView } from "./BaseView.ts";
 
 /**
  * Network inspector view for monitoring storage operations in real-time.
@@ -15,7 +16,7 @@ import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts
  * Features a resizable drawer interface with keyboard shortcuts
  * and operation counters for tracking activity.
  */
-export class XInspectorView extends LitElement {
+export class XInspectorView extends BaseView {
   static override styles = css`
     :host {
       position: fixed;
