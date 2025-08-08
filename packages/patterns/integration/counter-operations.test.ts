@@ -7,7 +7,7 @@ import {
 import { beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import { setCharmResult, getCharmResult } from "@commontools/charm/ops";
+import { getCharmResult, setCharmResult } from "@commontools/charm/ops";
 
 const { API_URL, FRONTEND_URL } = env;
 
@@ -71,7 +71,7 @@ describe("counter direct operations test", () => {
     assertEquals(value, 0);
   });
 
-  // TODO: Live updates across sessions don't work currently
+  // Bug Reproduction for CT-753: Live updates across sessions don't work currently
   // The browser has its own runtime/session that doesn't receive
   // live updates from our test CharmManager's operations
   it.skip("should update counter value via direct operation (live)", async () => {
@@ -121,10 +121,10 @@ describe("counter direct operations test", () => {
     // Now refresh the page by navigating to the same URL
     console.log("Refreshing the page...");
     await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    
+
     // Need to login again after navigation
     await shell.login();
-    
+
     // Wait for charm to fully load
     await sleep(5000);
 
