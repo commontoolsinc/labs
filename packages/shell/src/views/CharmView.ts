@@ -1,7 +1,6 @@
 import { css, html } from "lit";
 import { property } from "lit/decorators.js";
 import { BaseView } from "./BaseView.ts";
-import { RuntimeInternals } from "../lib/runtime.ts";
 import { CharmController } from "@commontools/charm/ops";
 
 export class XCharmView extends BaseView {
