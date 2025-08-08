@@ -12,7 +12,6 @@ import type {
   MemorySpace,
   QueryError as IQueryError,
   Result,
-  Retraction,
   SchemaPathSelector,
   Signer,
   State,

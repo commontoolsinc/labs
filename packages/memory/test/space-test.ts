@@ -8,7 +8,7 @@ import * as Selection from "../selection.ts";
 import * as Space from "../space.ts";
 import * as Transaction from "../transaction.ts";
 import { createTemporaryDirectory } from "../util.ts";
-import { AssertFact } from "../interface.ts";
+import { AssertFact, Conflict } from "../interface.ts";
 import { SchemaSelector } from "../space.ts";
 import { alice, space } from "./principal.ts";
 
@@ -39,6 +39,14 @@ function getResultAtPath(
     assertEquals(current.length, 1);
     return current[0];
   }
+}
+
+function assertConflictEquals(
+  conflict1: Conflict,
+  conflict2: Omit<Conflict, "history">,
+) {
+  const { history, ...baseConflict } = conflict1;
+  assertEquals(baseConflict, conflict2);
 }
 
 function getResultForDoc(
@@ -334,7 +342,7 @@ test("fails updating non-existing memory", DB, async (session) => {
 
   assert(result.error, "Update should fail if document does not exists");
   assert(result.error.name === "ConflictError");
-  assertEquals(result.error.conflict, {
+  assertConflictEquals(result.error.conflict, {
     space: space.did(),
     the,
     of: doc,
@@ -369,7 +377,7 @@ test("create memory fails if already exists", DB, async (session) => {
 
   assert(conflict.error, "Create fail when already exists");
   assert(conflict.error.name === "ConflictError");
-  assertEquals(conflict.error.conflict, {
+  assertConflictEquals(conflict.error.conflict, {
     space: space.did(),
     the,
     of: doc,
@@ -406,7 +414,7 @@ test("update does not confuse the/of", DB, async (session) => {
   const update = await Space.transact(session, change);
   assert(update.error);
   assert(update.error.name === "ConflictError");
-  assertEquals(update.error.conflict, {
+  assertConflictEquals(update.error.conflict, {
     space: space.did(),
     the,
     of: malformed.of,
@@ -460,7 +468,7 @@ test("concurrent update fails", DB, async (session) => {
   assert(r3.error, "Concurrent update was rejected");
   assert(r3.error.name === "ConflictError");
 
-  assertEquals(r3.error.conflict, {
+  assertConflictEquals(r3.error.conflict, {
     space: space.did(),
     the,
     of: doc,
@@ -732,7 +740,7 @@ test(
 
     assert(result.error, "Retract fails if expected version is out of date");
     assert(result.error.name === "ConflictError");
-    assertEquals(result.error.conflict, {
+    assertConflictEquals(result.error.conflict, {
       space: space.did(),
       the,
       of: doc,
@@ -803,7 +811,7 @@ test(
 
     assert(conflict.error, "Create fails if cause not specified");
     assert(conflict.error.name === "ConflictError");
-    assertEquals(conflict.error.conflict, {
+    assertConflictEquals(conflict.error.conflict, {
       space: space.did(),
       the,
       of: doc,
@@ -974,7 +982,7 @@ test("batch updates", DB, async (session) => {
   const badInvariant = session.transact(tr3);
   assert(badInvariant.error);
   assert(badInvariant.error.name == "ConflictError");
-  assertEquals(badInvariant.error.conflict, {
+  assertConflictEquals(badInvariant.error.conflict, {
     space: space.did(),
     the,
     of: hi,

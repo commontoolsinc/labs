@@ -28,7 +28,12 @@ import type {
 } from "@commontools/memory/interface";
 import { set, setSelector } from "@commontools/memory/selection";
 import type { MemorySpaceSession } from "@commontools/memory/consumer";
-import { assert, retract, unclaimed } from "@commontools/memory/fact";
+import {
+  assert,
+  claimState,
+  retract,
+  unclaimed,
+} from "@commontools/memory/fact";
 import { the, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
@@ -53,7 +58,6 @@ import type {
   ITransaction,
   PushError,
   Retract,
-  StorageNotification,
   StorageValue,
   URI,
 } from "./interface.ts";
@@ -811,11 +815,7 @@ export class Replica {
         const fact = this.get({ the, of });
 
         if (claim) {
-          claims.push({
-            the,
-            of,
-            fact: refer(fact),
-          });
+          claims.push(claimState(fact ?? unclaimed({ the, of })));
         } else if (is === undefined) {
           // If `is` is `undefined` we want to retract the fact.
           // If local `is` in the local state is also `undefined` desired state
@@ -877,11 +877,12 @@ export class Replica {
         );
       }
 
+      this.nursery.merge(facts, Nursery.delete);
+
       // Checkout current state of facts so we can compute
       // changes after we update underlying stores.
       const checkout = Differential.checkout(this, facts);
 
-      this.nursery.merge(facts, Nursery.delete);
       const fact = result.error.name === "ConflictError" &&
         result.error.conflict.actual;
       // We also update heap so it holds latest record
@@ -954,7 +955,11 @@ export class Replica {
     // tracking when we see them.
     const localFacts = this.updateLocalFacts(revisions);
     const freshFacts = revisions.filter(this.isFresh);
-    const changes = Differential.checkout(this, freshFacts).compare(this);
+
+    // Remove "fresh" facts which we are about to merge into `heap`
+    this.nursery.merge(freshFacts, Nursery.delete);
+
+    const checkout = Differential.checkout(this, freshFacts);
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
@@ -966,7 +971,7 @@ export class Replica {
     this.subscription.next({
       type: "integrate",
       space: this.did(),
-      changes: changes,
+      changes: checkout.compare(this),
     });
     return this.cache.merge(revisions, Replica.update);
   }

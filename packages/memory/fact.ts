@@ -8,6 +8,7 @@ import {
   Reference,
   Retraction,
   Revision,
+  State,
   The,
   Unclaimed,
 } from "./interface.ts";
@@ -65,6 +66,12 @@ export const claim = (fact: Fact): Invariant => ({
   the: fact.the,
   of: fact.of,
   fact: refer(normalizeFact(fact)),
+});
+
+export const claimState = (state: State): Invariant => ({
+  the: state.the,
+  of: state.of,
+  fact: refer(state.cause ? normalizeFact(state) : unclaimed(state)),
 });
 
 export const iterate = function* (

@@ -1,3 +1,4 @@
+import { claimState, retract } from "@commontools/memory/fact";
 import type {
   Assertion,
   Fact,
@@ -5,8 +6,6 @@ import type {
   ITransaction,
   State,
 } from "../interface.ts";
-import { normalizeFact, retract } from "@commontools/memory/fact";
-import { refer } from "merkle-reference";
 
 /**
  * Memory space atomic update builder.
@@ -15,15 +14,12 @@ export class Edit implements ITransaction {
   #claims: IClaim[] = [];
   #facts: Fact[] = [];
 
+  // TODO(@ubik2): avoid duplicates
   claim(state: State) {
-    this.#claims.push({
-      the: state.the,
-      of: state.of,
-      fact: refer(normalizeFact(state)),
-    });
+    this.#claims.push(claimState(state));
   }
   retract(fact: Assertion) {
-    this.#facts.push(retract(normalizeFact(fact)));
+    this.#facts.push(retract(fact));
   }
 
   assert(fact: Assertion) {
