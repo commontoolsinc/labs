@@ -5,8 +5,8 @@ This document tracks the implementation of the new storage backend described in
 
 ## Goals
 
-- Implement a content-addressed, append-only storage backend with spaces and
-  transactions, backed by Automerge.
+- Implement Automerge-backed `doc:` storage first (documents, branches, heads),
+  then layer content-addressed primitives where needed.
 - Provide query, subscription, and snapshot capabilities.
 - Integrate with Toolshed to expose HTTP endpoints for the storage API.
 
@@ -22,7 +22,7 @@ This document tracks the implementation of the new storage backend described in
 - Toolshed routes behind an `ENABLE_NEW_STORAGE=1` flag initially.
 - API surface documented and aligned to `docs/specs/storage/03-api.md`.
 
-## Detailed Task List
+## Detailed Task List (Automerge-first)
 
 ### 0. Package skeleton (done)
 - [x] Create `packages/storage` package with basic exports and placeholder
@@ -30,172 +30,123 @@ This document tracks the implementation of the new storage backend described in
 - [x] Add this plan document.
 - [x] Register package in root `deno.json` workspace.
 
-### 1. Domain model types and public interfaces
-- [ ] Define fundamental ids and hashes:
-  - [ ] `SpaceId` (DID), `BranchId`, `CommitId`, `ChangeId`, `SnapshotId`.
-  - [ ] Multihash support (prefer blake3 per specs); typed hash wrappers.
-  - [ ] Monotonic `Seq` types for per-branch change sequence.
-- [ ] Structural types per specs:
-  - [ ] `Fact`, `Reference`, `EntityId`, `SchemaRef`.
-  - [ ] `Change` (insert/update/delete/merge), `ChangeSet`.
-  - [ ] `Commit` (parents, branch, author, tx metadata, baseHeads, mergeOf).
-  - [ ] `SnapshotManifest` and `SnapshotChunk`.
-- [ ] Error taxonomy (`15-errors.md`):
-  - [ ] `ValidationError`, `InvariantError`, `NotFoundError`, `ConflictError`,
-        `UnauthorizedError` with codes/messages.
-- [ ] Provider interfaces:
-  - [ ] `ContentAddressableStore` (put/get/has, streaming, bytes in/out).
-  - [ ] `IndexStore` (by-entity, by-attribute, by-branch indices).
-  - [ ] `CommitLog` (append-only, parents, ancestry, heads).
-  - [ ] `SpaceCatalog` (create/list/get/delete spaces and branches).
-  - [ ] `SubscriptionHub` (publish/subscribe, cursor delivery).
-- [ ] Public API types (`03-api.md`, `17-client-types.md`):
-  - [ ] Request/response types for tx submit, query, subscribe, snapshot.
-  - [ ] Include `baseHeads`, `mergeOf`, `conflicts` structures.
+### 1. Automerge document core (heads-first)
+- [ ] Add `@automerge/automerge` dependency.
+- [ ] Define core Automerge types:
+  - [ ] `DocId = string` (string form `doc:<ref>`), `BranchId`, `ChangeId`.
+  - [ ] `Head = ChangeId` (Automerge change hash string).
+  - [ ] `Heads = Head[]` (set semantics; store sorted canonical for digests).
+  - [ ] `ActorId`, `Seq` (per-actor sequence), `Deps: ChangeId[]`.
+- [ ] Heads management per branch:
+  - [ ] Ingest submitted change bytes; decode header to get `hash`, `deps`.
+  - [ ] Verify each change `deps ⊆ currentHeads` for non-merge; for merges, allow
+        `deps` to reference multiple heads.
+  - [ ] Update heads = `(currentHeads − deps) ∪ {hash}`.
+  - [ ] Reject if any `dep` not found for the `(doc, branch)`.
+- [ ] Validation of actor/seq monotonicity per actor across branch history.
+- [ ] Store change bytes once; maintain per-branch sequence index for PIT.
 
 Acceptance:
-- Types compile, documented with JSDoc, exported via `@commontools/storage`.
-- Unit tests validate basic guards and type invariants.
+- Unit tests cover head updates (linear change, fork, merge), dep missing, and
+  actor/seq monotonicity.
 
-### 2. Minimal storage engine scaffolding (in-memory)
-- [ ] Implement in-memory CAS with multihash (blake3) and byte deduplication.
-- [ ] Implement simple index structures (Maps) for entity/attribute lookups.
-- [ ] Implement minimal commit log (append-only array per branch) with ancestry
-      and head tracking.
-- [ ] Implement space and branch catalog in-memory.
-- [ ] Provide a concrete `createStorageProvider()` returning in-memory impl.
-
-Acceptance:
-- Unit tests cover put/get/has for CAS and indices.
-- Commit log ancestry queries return correct lineage and heads.
-
-### 2a. Automerge core mechanics
-- [ ] Add `@automerge/automerge` dependency for server-side operations.
-- [ ] Define CAS record kinds:
-  - [ ] `am_change` (single Automerge change bytes + metadata + hash).
-  - [ ] `am_snapshot` (full Automerge save bytes + seq/base + hash).
-- [ ] Branch head tracking:
-  - [ ] Maintain `heads: ChangeId[]` per branch (DAG).
-  - [ ] `baseHeads` validation: incoming tx must match current heads unless
-        a merge tx.
-- [ ] PIT reconstruction (`05-point-in-time.md`):
-  - [ ] Load latest snapshot ≤ target seq, then apply subsequent changes by
-        `Automerge.applyChanges()` until target seq.
-  - [ ] `Accept: application/automerge` returns raw bytes; default returns JSON
-        by loading via `Automerge.load()` and optional path projection.
-- [ ] JSON projection:
-  - [ ] Implement `project(doc, paths)` helper (`14-invariants.md`), using
-        Automerge APIs to select subtrees.
-- [ ] Snapshotting (`07-snapshots.md`):
-  - [ ] Use `Automerge.save()` to produce full snapshot bytes.
-  - [ ] Store snapshot in CAS as `am_snapshot` with manifest.
+### 2. Point-in-time (PIT) and projection
+- [ ] Compute `upto_seq_no` for a given epoch/tx.
+- [ ] PIT reconstruction:
+  - [ ] Fast path: snapshot + incremental change chunk bytes → concatenate;
+        serve `application/automerge` bytes directly.
+  - [ ] Fallback: `Automerge.load()` latest snapshot then `applyChanges()`
+        through target seq.
+- [ ] JSON projection helper: `project(docBytes, paths[])` loads once and returns
+      selected subtrees; used for JSON responses.
 
 Acceptance:
-- Tests verify PIT bytes equality with client-generated docs.
-- Encoding/decoding round-trips for change and snapshot records.
+- PIT byte equality with a client-generated doc at the same point.
+- Projection tests for path subsets and root.
 
-### 3. Transaction processing and invariants
-- [ ] Validate and apply tx per `04-tx-processing.md`:
-  - [ ] Decode schema refs and entity ids; validate against schema.
-  - [ ] `baseHeads` check; reject non-merge concurrent writes.
-  - [ ] If merge tx: verify all `mergeOf.heads` exist; allow multiple sources.
-  - [ ] Compute content addresses (blake3 multihash) for each change/snapshot.
-  - [ ] Deterministic ordering of changes; produce commit and update heads.
-- [ ] Idempotency: re-applying same change sets is a no-op.
-- [ ] Receipts include commit id, new heads, conflicts summary, errors if any.
-
-Acceptance:
-- Tests: valid tx, invalid schema, concurrent write conflict, idempotent replay.
-
-### 4. Merging semantics
-- [ ] Preferred path: client supplies merge changes (`mergeOf`) inside a normal
-      tx (`06-branching.md`).
-- [ ] Server fallback (flagged): optional server-side 3-way merge using
-      `Automerge.merge` to synthesize change(s) if client did not supply; only
-      behind `ENABLE_SERVER_MERGE`.
-- [ ] After merge:
-  - [ ] Update target branch heads.
-  - [ ] Optionally mark source branches as merged (`merged_into_branch_id`).
-  - [ ] Support branch close endpoint (`/branches/:branchId/close`).
-- [ ] Conflict representation:
-  - [ ] Surface conflicts array per `03-api.md` when merging divergent values.
+### 3. Branching and merge semantics
+- [ ] Create/delete branches; lineage metadata.
+- [ ] Preferred merge: client supplies a merge change with deps = heads to
+      collapse branches; server verifies deps exist.
+- [ ] Optional server-side merge (flagged): `Automerge.merge` to synthesize a
+      merge change when client did not; behind `ENABLE_SERVER_MERGE`.
+- [ ] After merge, heads collapse to the new change hash; branch close endpoint
+      updates metadata.
 
 Acceptance:
-- Tests: concurrent edits on same key resolve; conflicting values reported.
-- Branch close sets metadata and heads correctly.
+- Tests: fork → concurrent edits → client-merge collapses heads; optional
+  server-merge path works under flag.
 
-### 5. Point-in-time reads and branching
-- [ ] Read views by commit id or branch head (`05-point-in-time.md`).
-- [ ] Create/delete branches; track lineage (`06-branching.md`).
-- [ ] Simple policy for merges (no auto-resolve beyond Automerge behavior).
-
-Acceptance:
-- Tests: historical reads stable; branch lineage traversal correct.
-
-### 6. Snapshots
-- [ ] Snapshot creation, retention, and restore mechanics (`07-snapshots.md`).
-- [ ] Manifest CAS encoding and integrity verification.
-- [ ] Hooks for future compaction (no-op in MVP).
+### 4. Snapshots
+- [ ] Implement snapshot cadence and storage:
+  - [ ] Full snapshots via `Automerge.save()` into CAS as `am_snapshot`.
+  - [ ] Optional incremental chunks to accelerate PIT.
+- [ ] Integrity: maintain `root_ref = referJSON({ heads: sorted(heads) })` in
+      heads table for verification.
 
 Acceptance:
-- Tests: create snapshot, mutate, restore, verify state equality.
+- Snapshot/restore tests; integrity check matches stored `root_ref`.
 
-### 7. Query IR and evaluation
-- [ ] Define Query IR types (`09-10-11-12` specs) with validators.
-- [ ] Evaluate queries over projected JSON at PIT.
-- [ ] Optimization stubs (predicate pushdown, index selection).
+### 5. Transactions (multi-doc) and invariants
+- [ ] Tx request format: reads (doc/branch/heads), writes (doc/branch/baseHeads,
+      change bytes, optional mergeOf), invariants, options.
+- [ ] Server pipeline:
+  - [ ] Validate read-set heads.
+  - [ ] Validate baseHeads match current (unless merge path).
+  - [ ] Validate each change: deps, actor/seq, no duplicate change hash.
+  - [ ] Update per-branch heads and append per-branch sequence rows.
+  - [ ] Compute digests with `merkle-reference` for UCAN nb fields where used.
+  - [ ] Run invariants (materialize/projection as needed), fail-closed.
+- [ ] Receipts: new heads, counts, optional conflicts summary.
+
+Acceptance:
+- Tests: valid tx, concurrent write conflict, idempotent replays.
+
+### 6. Content-addressed primitives (secondary)
+- [ ] CAS interface and in-memory impl:
+  - [ ] `put(bytes) -> ref`, `get(ref) -> bytes`, `has(ref)` using
+        `merkle-reference`.
+  - [ ] Record kinds: `am_change`, `am_snapshot`, optional `blob`.
+- [ ] Indexes: by `(docId, branchId, seqNo)`, by `(docId, branchId, txId)`.
+
+Acceptance:
+- Unit tests for CAS and indexes.
+
+### 7. Queries and subscriptions
+- [ ] Query IR types and evaluation over PIT-projected JSON.
+- [ ] Provenance/touch set tracking; link traversal rules per spec.
+- [ ] Subscriptions with cursors and SSE (JSON by default; optional binary
+      change stream later).
 
 Acceptance:
 - Query tests: filters, sorts, limits, joins/reference traversals.
+- Subscription tests: multiple consumers, ordering, no duplication.
 
-### 8. Subscriptions
-- [ ] Durable subscriptions (`08-subscriptions.md`).
-- [ ] Cursor encoding and backfill from last seen commit.
-- [ ] Delivery formats:
-  - [ ] SSE JSON events (projected changes and metadata).
-  - [ ] Optional binary stream of Automerge change bytes if requested.
+### 8. UCAN / Access control (MVP)
+- [ ] Minimal UCAN validation and capability checks.
+- [ ] Enforce space-level caps on tx and read endpoints.
 
 Acceptance:
-- Tests: multiple consumers with cursors; no duplication; ordered delivery.
+- Authorized vs unauthorized attempts covered by tests.
 
-### 9. UCAN / Access control (MVP)
-- [ ] Minimal UCAN validation (`13-ucan.md`).
-- [ ] Space-level capability checks for tx and read.
-- [ ] Pluggable auth provider interface.
-
-Acceptance:
-- Tests: authorized vs unauthorized tx/read attempts.
-
-### 10. Toolshed integration (flagged)
-- [ ] Add new `packages/toolshed/routes/storage/new/` with routes:
-  - [ ] POST /v1/:space/spaces
-  - [ ] GET /v1/:space/spaces/:id
-  - [ ] POST /v1/:space/branches/:branchId/tx
-  - [ ] GET /v1/:space/branches/:branchId/head
-  - [ ] GET /v1/:space/branches/:branchId/read?accept=application/automerge
-  - [ ] GET /v1/:space/query
-  - [ ] GET /v1/:space/subscribe (SSE)
-  - [ ] POST /v1/:space/snapshots
-  - [ ] GET /v1/:space/snapshots/:snapshotId
-  - [ ] POST /v1/:space/branches/:branchId/close
-- [ ] Wire provider instance gated by `ENABLE_NEW_STORAGE` env.
-- [ ] OpenAPI descriptions and response schemas.
+### 9. Toolshed integration (flagged)
+- [ ] Add routes under `packages/toolshed/routes/storage/new/` for docs/branches
+      heads, tx, PIT read, query, subscribe, snapshots; use `doc:<ref>` and
+      `root_ref` in responses.
+- [ ] Gate on `ENABLE_NEW_STORAGE`.
 
 Acceptance:
-- Route tests pass and feature can be toggled off/on.
+- Route tests passing; feature flag works.
 
-### 11. Migration & Tooling
-- [ ] CLI for snapshot export/import and space/branch listing.
+### 10. Migration & Tooling
 - [ ] Import existing Automerge files as `am_snapshot` (seq 0) or chunked.
-- [ ] Migration helpers per `18-migration.md`.
-- [ ] Docs and examples.
+- [ ] CLI for exporting/importing snapshots and listing spaces/branches.
 
 Acceptance:
 - Docs updated; happy-path flows verified in tests.
 
 ## Open Questions
 
-- Confirm hash algorithm (blake3) and multihash details across all tables.
-- Snapshot frequency and retention policy defaults.
-- Query index design trade-offs for early versions.
-- Scope and format of binary subscription stream for changes.
+- Snapshot cadence/retention defaults.
+- Server-side merge scope; when to synthesize merge changes.
+- Binary subscription stream format and ergonomics.
