@@ -277,7 +277,7 @@ export class Chronicle {
         edit.assert({
           ...loaded,
           is: merged.value,
-          cause: refer(normalizeFact(loaded)),
+          cause: refer(loaded.cause ? normalizeFact(loaded) : loaded),
         });
       }
     }
