@@ -22,7 +22,7 @@ This document tracks the implementation of the new storage backend described in
 - Toolshed routes behind an `ENABLE_NEW_STORAGE=1` flag initially.
 - API surface documented and aligned to `docs/specs/storage/03-api.md`.
 
-## Detailed Task List (Automerge-first)
+## Detailed Task List (SQLite-first)
 
 ### 0. Package skeleton (done)
 - [x] Create `packages/storage` package with basic exports and placeholder
@@ -30,35 +30,31 @@ This document tracks the implementation of the new storage backend described in
 - [x] Add this plan document.
 - [x] Register package in root `deno.json` workspace.
 
-### 1. Automerge document core (heads-first)
-- [ ] Add `@automerge/automerge` dependency.
-- [ ] Define core Automerge types:
-  - [ ] `DocId = string` (string form `doc:<ref>`), `BranchId`, `ChangeId`.
-  - [ ] `Head = ChangeId` (Automerge change hash string).
-  - [ ] `Heads = Head[]` (set semantics; store sorted canonical for digests).
-  - [ ] `ActorId`, `Seq` (per-actor sequence), `Deps: ChangeId[]`.
-- [ ] Heads management per branch:
-  - [ ] Ingest submitted change bytes; decode header to get `hash`, `deps`.
-  - [ ] Verify each change `deps ⊆ currentHeads` for non-merge; for merges, allow
-        `deps` to reference multiple heads.
-  - [ ] Update heads = `(currentHeads − deps) ∪ {hash}`.
-  - [ ] Reject if any `dep` not found for the `(doc, branch)`.
-- [ ] Validation of actor/seq monotonicity per actor across branch history.
-- [ ] Store change bytes once; maintain per-branch sequence index for PIT.
+### 1. SQLite core (schema + heads-first)
+- [ ] Add `@automerge/automerge` and `npm:better-sqlite3` dependencies.
+- [ ] Per-space SQLite lifecycle and PRAGMAs (`02-schema.md`).
+- [ ] Schema migrations to create all tables in `02-schema.md`.
+- [ ] Heads management persisted in `am_heads`:
+  - [ ] Decode submitted Automerge change bytes to get
+        `change_hash`, `deps`, `actor_id`, `seq`.
+  - [ ] Verify deps against current heads; update heads set
+        `(currentHeads − deps) ∪ {hash}`.
+  - [ ] Reject if any `dep` missing for the `(doc, branch)`.
+- [ ] Validation of `actor_id`/`seq` monotonicity per actor.
+- [ ] Store change bytes once in `am_change_blobs`; append rows in
+      `am_change_index`.
 
 Acceptance:
 - Unit tests cover head updates (linear change, fork, merge), dep missing, and
   actor/seq monotonicity.
 
 ### 2. Point-in-time (PIT) and projection
-- [ ] Compute `upto_seq_no` for a given epoch/tx.
-- [ ] PIT reconstruction:
-  - [ ] Fast path: snapshot + incremental change chunk bytes → concatenate;
-        serve `application/automerge` bytes directly.
-  - [ ] Fallback: `Automerge.load()` latest snapshot then `applyChanges()`
-        through target seq.
-- [ ] JSON projection helper: `project(docBytes, paths[])` loads once and returns
-      selected subtrees; used for JSON responses.
+- [ ] Compute `upto_seq_no` for a given epoch/tx via `am_change_index`.
+- [ ] PIT reconstruction (SQLite-backed):
+  - [ ] Fast path: `am_snapshots` + `am_chunks` concatenation →
+        `application/automerge` bytes.
+  - [ ] Fallback: load snapshot then `Automerge.applyChanges()` to target seq.
+- [ ] JSON projection helper `project(docBytes, paths[])` for selective subtrees.
 
 Acceptance:
 - PIT byte equality with a client-generated doc at the same point.
@@ -77,12 +73,12 @@ Acceptance:
 - Tests: fork → concurrent edits → client-merge collapses heads; optional
   server-merge path works under flag.
 
-### 4. Snapshots
-- [ ] Implement snapshot cadence and storage:
-  - [ ] Full snapshots via `Automerge.save()` into CAS as `am_snapshot`.
+### 4. Snapshots (SQLite-backed)
+- [ ] Implement snapshot cadence and storage in `am_snapshots` / `am_chunks`.
+  - [ ] Full snapshots via `Automerge.save()`.
   - [ ] Optional incremental chunks to accelerate PIT.
 - [ ] Integrity: maintain `root_ref = referJSON({ heads: sorted(heads) })` in
-      heads table for verification.
+      `am_heads` for verification.
 
 Acceptance:
 - Snapshot/restore tests; integrity check matches stored `root_ref`.
@@ -102,12 +98,12 @@ Acceptance:
 Acceptance:
 - Tests: valid tx, concurrent write conflict, idempotent replays.
 
-### 6. Content-addressed primitives (secondary)
-- [ ] CAS interface and in-memory impl:
+### 6. Content-addressed primitives (SQLite CAS)
+- [ ] CAS interface over SQLite tables:
   - [ ] `put(bytes) -> ref`, `get(ref) -> bytes`, `has(ref)` using
-        `merkle-reference`.
+        `merkle-reference` and `am_change_blobs`.
   - [ ] Record kinds: `am_change`, `am_snapshot`, optional `blob`.
-- [ ] Indexes: by `(docId, branchId, seqNo)`, by `(docId, branchId, txId)`.
+- [ ] Indexes: by `(docId, branchId, seqNo)` and `(docId, branchId, txId)`.
 
 Acceptance:
 - Unit tests for CAS and indexes.
