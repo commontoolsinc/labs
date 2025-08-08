@@ -58,15 +58,9 @@ This document tracks the implementation of the new storage backend described in
 - [x] Add this plan document.
 - [x] Register package in root `deno.json` workspace.
 
-### 0b. In-memory prototype
-
-- [ ] Skipped. Implement SQLite provider directly.
-- [x] Public types in `interface.ts` matching §03/§17 client-facing shapes.
-
 ### 1. SQLite core (schema + heads-first)
 
-- [ ] Dependencies: add `npm:@automerge/automerge`, `npm:better-sqlite3`,
-      `npm:merkle-reference`.
+- [ ] Dependencies: add `npm:@automerge/automerge`
 - [ ] DB lifecycle: per-space DB file management, PRAGMAs, and connection pool
       (single writer).
 - [ ] Migrations: implement `02-schema.md` tables and indexes; idempotent
@@ -222,8 +216,7 @@ packages/storage/src/
 ## Dependency additions
 
 - `npm:@automerge/automerge` — change parsing, apply/save.
-- `npm:better-sqlite3` — fast sync SQLite.
-- `npm:merkle-reference` — content-addressing of heads/changes/tx bodies.
+- use `node:sqlite` for sqlite
 - Reuse `identity` package for Ed25519 where possible.
 
 ## Testing & CI
