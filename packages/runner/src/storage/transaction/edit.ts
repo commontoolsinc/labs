@@ -5,13 +5,13 @@ import type {
   ITransaction,
   State,
 } from "../interface.ts";
-import { retract } from "@commontools/memory/fact";
+import { normalizeFact, retract } from "@commontools/memory/fact";
 import { refer } from "merkle-reference";
 
 /**
  * Memory space atomic update builder.
  */
-class Edit implements ITransaction {
+export class Edit implements ITransaction {
   #claims: IClaim[] = [];
   #facts: Fact[] = [];
 
@@ -19,11 +19,11 @@ class Edit implements ITransaction {
     this.#claims.push({
       the: state.the,
       of: state.of,
-      fact: refer(state),
+      fact: refer(normalizeFact(state)),
     });
   }
   retract(fact: Assertion) {
-    this.#facts.push(retract(fact));
+    this.#facts.push(retract(normalizeFact(fact)));
   }
 
   assert(fact: Assertion) {

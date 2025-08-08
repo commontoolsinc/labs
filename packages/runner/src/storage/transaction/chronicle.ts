@@ -1,3 +1,4 @@
+import { normalizeFact, unclaimed } from "@commontools/memory/fact";
 import type {
   IAttestation,
   IInvalidDataURIError,
@@ -27,7 +28,6 @@ import {
   UnsupportedMediaTypeError,
   write,
 } from "./attestation.ts";
-import { unclaimed } from "@commontools/memory/fact";
 import { refer } from "merkle-reference";
 import * as Edit from "./edit.ts";
 
@@ -277,7 +277,7 @@ export class Chronicle {
         edit.assert({
           ...loaded,
           is: merged.value,
-          cause: refer(loaded),
+          cause: refer(normalizeFact(loaded)),
         });
       }
     }

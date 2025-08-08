@@ -11,7 +11,12 @@ import {
   The,
   Unclaimed,
 } from "./interface.ts";
-import { fromString, is as isReference, refer } from "merkle-reference";
+import {
+  fromJSON,
+  fromString,
+  is as isReference,
+  refer,
+} from "merkle-reference";
 
 /**
  * Creates an unclaimed fact.
@@ -53,13 +58,13 @@ export const assert = <Is extends JSONValue, T extends The, Of extends Entity>({
 export const retract = (assertion: Assertion): Retraction => ({
   the: assertion.the,
   of: assertion.of,
-  cause: refer(assertion),
+  cause: refer(normalizeFact(assertion)),
 });
 
 export const claim = (fact: Fact): Invariant => ({
   the: fact.the,
   of: fact.of,
-  fact: refer(fact),
+  fact: refer(normalizeFact(fact)),
 });
 
 export const iterate = function* (
@@ -80,4 +85,91 @@ export const iterate = function* (
       }
     }
   }
+};
+
+// Take an object that is loosely a fact (specifically, its cause might not
+// conform), and convert it to a proper fact.
+
+export function normalizeFact<
+  T extends The,
+  Of extends Entity,
+  Is extends JSONValue,
+>(
+  arg: {
+    the: T;
+    of: Of;
+    is: Is;
+    cause?:
+      | Reference<Assertion<T, Of, Is>>
+      | Reference<Retraction<T, Of, Is>>
+      | Reference<Unclaimed<T, Of>>
+      | Fact
+      | { "/": string };
+  },
+): Assertion<T, Of, Is>;
+
+export function normalizeFact<
+  T extends The,
+  Of extends Entity,
+  Is extends JSONValue,
+>(
+  arg: {
+    the: T;
+    of: Of;
+    cause?:
+      | Reference<Assertion<T, Of, Is>>
+      | Reference<Retraction<T, Of, Is>>
+      | Reference<Unclaimed<T, Of>>
+      | Fact
+      | { "/": string };
+  },
+): Retraction<T, Of, Is>;
+
+export function normalizeFact<
+  T extends The,
+  Of extends Entity,
+  Is extends JSONValue,
+>(
+  arg: {
+    the: T;
+    of: Of;
+    is?: Is;
+    cause?:
+      | Reference<Assertion<T, Of, Is>>
+      | Reference<Retraction<T, Of, Is>>
+      | Reference<Unclaimed<T, Of>>
+      | Fact
+      | { "/": string };
+  },
+): Assertion<T, Of, Is> | Retraction<T, Of, Is> {
+  const newCause = isReference(arg.cause)
+    ? arg.cause
+    : arg.cause == null
+    ? refer(unclaimed({ the: arg.the, of: arg.of }))
+    : "/" in arg.cause
+    ? fromJSON(arg.cause as unknown as { "/": string })
+    : refer({
+      the: arg.cause.the,
+      of: arg.cause.of,
+      cause: arg.cause.cause,
+      ...(arg.cause.is ? { is: arg.cause.is } : undefined),
+    });
+  if (arg.is !== undefined) {
+    return ({
+      the: arg.the,
+      of: arg.of,
+      is: arg.is,
+      cause: newCause,
+    }) as Assertion<T, Of, Is>;
+  } else {
+    return ({
+      the: arg.the,
+      of: arg.of,
+      cause: newCause,
+    }) as Retraction<T, Of, Is>;
+  }
+}
+
+export const factReference = (fact: Fact): Reference<Fact> => {
+  return refer(normalizeFact(fact));
 };
