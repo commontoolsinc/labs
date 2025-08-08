@@ -20,6 +20,7 @@
     "./packages/seeder",
     "./packages/shell",
     "./packages/static",
+    "./packages/storage",
     "./packages/toolshed",
     "./packages/ui",
     "./packages/utils",
