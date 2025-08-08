@@ -11,8 +11,8 @@ Each transaction request is bound to a UCAN capability that specifies **exactly 
   "with": "doc:<mh>/branch/main",
   "can": "commit",
   "nb": {
-    "baseHeadsRoot": "b3:<hex>",   // BLAKE3 over sorted base heads
-    "changesRoot": "b3:<hex>",     // BLAKE3 over concatenated per-change BLAKE3s
+    "baseHeadsRoot": "mr:<...>",   // merkle-reference over sorted base heads
+    "changesRoot": "mr:<...>",     // merkle-reference over per-change refs
     "changeCount": 5               // number of changes in this commit
   }
 }

@@ -41,7 +41,7 @@ Returns:
   "heads": ["..."],
   "seq_no": 123,
   "epoch": 456,
-  "root_hash": "b3:<hex>"
+  "root_ref": "mr:<...>"
 }
 ```
 
