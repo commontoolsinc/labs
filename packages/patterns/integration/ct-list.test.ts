@@ -19,7 +19,8 @@ describe("ct-list integration test", () => {
 
   beforeAll(async () => {
     const { identity } = shell.get();
-    spaceName = globalThis.crypto.randomUUID();
+    spaceName = Deno.env.get("SPACE_NAME") ??
+      globalThis.crypto.randomUUID();
 
     // Register the ct-list charm once for all tests
     charmId = await registerCharm({
