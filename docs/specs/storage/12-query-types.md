@@ -35,6 +35,7 @@ type EvalResult = {
   touches: Set<Link>;
   linkEdges: Set<LinkEdge>;
   deps: Set<EvalKey>;
+  sourceDocsToSync: Set<DocId>;
 };
 ```
 
@@ -144,6 +145,7 @@ type QueryNotification = {
     | "touch-set-shrunk"
     | "touched-doc-updated";
   docsToRefresh: DocId[];
+  sourceDocsToSync: DocId[];
   summary: {
     oldVerdict?: Verdict;
     newVerdict?: Verdict;
@@ -218,6 +220,7 @@ type QueryUpdateMessage = {
   txHash: string;
   reason: QueryNotification["reason"];
   docsToRefresh: DocId[];
+  sourceDocsToSync: DocId[];
   summary: QueryNotification["summary"];
 };
 
