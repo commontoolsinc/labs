@@ -1,33 +1,96 @@
-# Subscriptions (WebSocket) Details
+# Query-Based Subscriptions
 
-## Subscribe
+This system provides **incremental, link-aware, schema-driven queries** over a
+graph of JSON documents, without re-running every query on every change. It's
+built around three core ideas:
 
-**Subscribe** with either:
+1. **Compile JSON Schema to a small IR** that behaves like a tree/graph
+   automaton
+2. **Evaluate on demand with memoization** and record fine-grained _provenance_
+   (exact doc links that were inspected/followed)
+3. **Incrementally maintain a dependency graph** from _doc links → IR states →
+   query subscriptions_, so a doc change only rechecks the minimal affected
+   subgraph
 
-* `fromEpoch` (fast, server can query directly by `tx_id`), or
-* `fromHeads` (server computes missing frontier from heads).
+## Query Semantics
 
-## Catch-up
+- **Query = (spaceDid, docId, path, schema, maxLinkDepth)**
+- Documents can contain **links** with exact shape:
+  ```json
+  {
+    "/": {
+      "link@1": {
+        "id": "<docId>",
+        "path": ["users", "123", "profile"],
+        "space": "did:key:..."
+      }
+    }
+  }
+  ```
+  - `path` is an array of strings
+  - `id` is optional; if omitted, link is within the same document
+  - `space` is optional; if omitted, link is within the same space
+  - When evaluating queries, links to other spaces are not followed and assumed
+    to match
+- **Depth bound**: `maxLinkDepth` caps total link dereferences per evaluation;
+  cycles allowed but cut off at budget
+- **Schema truthiness**:
+  - `true`: match anything; **follow links** on any value that is a link
+    (subject to depth)
+  - `false`: match nothing, **but root doc is still "touched"** (client should
+    refresh that doc)
+- **additionalProperties (AP)**:
+  - **Omitted**: treat as "ignore non-listed properties" - do not inspect any
+    property except those explicitly listed
+  - **`false`**: same effect as omitted
+  - **`true|schema`**: inspect non-listed properties; for `schema`, they must
+    satisfy that schema
+- **Combinators**:
+  - `allOf`: value matches if **all branches** match
+  - `anyOf`: value matches if **at least one branch** matches (handles parallel
+    speculative branches)
+- **Result semantics**: server maintains per subscription a **Touch Set** =
+  exact set of `(docId, path)` links that were read, where `path` is an array of
+  strings
 
-1. Server queries `am_change_index` joined to `am_change_blobs` where `tx_id > fromEpoch` (or by seq range if using heads).
-2. Groups changes by `(doc_id, branch_id)`.
-3. Streams them in order of `tx_id` and within branch by `seq_no`.
+## WebSocket API
 
-## Batching
+### Client → Server
 
-* Coalesce multiple changes into a single frame until ~64–256 KB to reduce WS chatter.
+```jsonc
+{ "op": "hello", "protocol": "v1", "clientId": "xyz" }
 
-## Ack Model
+{ "op": "subscribe", "queryId": "uuid", "spaceDid": "did:key:...", 
+  "docId": "doc:<mh>", "path": "/users", "schema": {...}, "maxLinkDepth": 3 }
 
-* Client acks with the **highest `epoch` (tx_id)** fully processed per subscription.
-* Server keeps a per-subscription ring buffer of unacked frames.
-* On reconnect, the client sends `fromEpoch` = last acked epoch, and server resumes from there.
+{ "op": "unsubscribe", "queryId": "uuid" }
 
-## Backpressure
+{ "op": "ack", "queryId": "uuid", "epoch": 12345 }
+```
 
-* If unacked frames exceed `N` MB, server pauses sending to that subscription until more acks arrive.
+### Server → Client
 
-## Delivery Semantics
+```jsonc
+{ "op": "hello", "serverId": "…" }
 
-* At-least-once delivery — client must be idempotent.
-* Optional: multiplex raw Automerge Sync v2/v3 messages instead of change arrays; server runs per-subscription sync state machines.
+{ "op": "subscribed", "queryId": "uuid", "catchingUp": true }
+
+{ "op": "query-update", "queryId": "uuid", "epoch": 12345, "txHash": "<hex>", 
+  "reason": "root-verdict-changed" | "touch-set-expanded" | "touch-set-shrunk" | "touched-doc-updated",
+  "docsToRefresh": ["doc:<mh1>", "doc:<mh2>"],
+  "summary": { "oldVerdict": "Yes", "newVerdict": "No", 
+               "deltaTouched": {"added": [], "removed": []} } }
+
+{ "op": "idle", "queryId": "uuid" }
+
+{ "op": "error", "code": "QueryError", "details": { /* ... */ } }
+```
+
+## Subscription Management
+
+- **Subscribe**: compile schema to IR, evaluate once, compute Touch Set,
+  register reverse indexes
+- **Unsubscribe**: remove from reverse indexes, optionally GC unused IR nodes
+- **Ack model**: client acks with highest `epoch` fully processed per query
+- **Backpressure**: if unacked updates exceed threshold, server pauses sending
+  to that subscription
