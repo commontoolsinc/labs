@@ -21,19 +21,8 @@ interface ListInput {
 
 interface ListOutput extends ListInput {}
 
-type MessageEvent = { detail: { message: string } };
-
-const addItem = handler<MessageEvent, { items: Cell<Item[]> }>((e, state) => {
-  const newItem = e.detail?.message?.trim();
-  if (newItem) {
-    const currentItems = state.items.get();
-    state.items.set([...currentItems, { title: newItem }]);
-  }
-});
-
-export default recipe(
-  toSchema<ListInput>(),
-  toSchema<ListOutput>(),
+export default recipe<ListInput, ListOutput>(
+  "ct-list demo",
   ({ title, items }) => {
     return {
       [NAME]: title,
@@ -46,13 +35,11 @@ export default recipe(
           />
 
           <ct-card>
-            <common-vstack gap="sm">
-              <ct-list
-                $value={items}
-                editable
-                title="Items"
-              />
-            </common-vstack>
+            <ct-list
+              $value={items}
+              editable
+              title="Items"
+            />
           </ct-card>
         </common-vstack>
       ),

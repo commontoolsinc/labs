@@ -8,7 +8,6 @@ import {
   navigateTo,
   recipe,
   str,
-  toSchema,
   UI,
 } from "commontools";
 
@@ -67,7 +66,10 @@ interface FactoryInput {
 }
 
 // No additional outputs beyond name and UI
-type FactoryOutput = Record<PropertyKey, never>;
+type FactoryOutput = {
+  [NAME]: string;
+  [UI]: any;
+};
 
 type InputEvent = { detail: { message: string } };
 
@@ -76,9 +78,8 @@ const newCounter = handler((_: InputEvent) => {
   return navigateTo(charm);
 });
 
-export default recipe(
-  toSchema<FactoryInput>(),
-  toSchema<FactoryOutput>(),
+export default recipe<FactoryInput, FactoryOutput>(
+  "Counter Factory",
   (_) => {
     return {
       [NAME]: "Counter Factory",

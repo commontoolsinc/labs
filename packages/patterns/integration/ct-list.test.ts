@@ -10,7 +10,7 @@ import { assert, assertEquals } from "@std/assert";
 
 const { API_URL, FRONTEND_URL } = env;
 
-describe("simple-list integration test", () => {
+describe("ct-list integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -21,7 +21,7 @@ describe("simple-list integration test", () => {
     const { identity } = shell.get();
     spaceName = globalThis.crypto.randomUUID();
 
-    // Register the simple-list charm once for all tests
+    // Register the ct-list charm once for all tests
     charmId = await registerCharm({
       spaceName: spaceName,
       apiUrl: new URL(API_URL),
@@ -30,13 +30,13 @@ describe("simple-list integration test", () => {
         join(
           import.meta.dirname!,
           "..",
-          "simple-list.tsx",
+          "ct-list.tsx",
         ),
       ),
     });
   });
 
-  it("should load the simple-list charm", async () => {
+  it("should load the ct-list charm", async () => {
     const { page } = shell.get();
 
     // Navigate to the charm
