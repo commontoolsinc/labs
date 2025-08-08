@@ -67,11 +67,11 @@ interface FactoryInput {
 }
 
 // No additional outputs beyond name and UI
-interface FactoryOutput {}
+type FactoryOutput = Record<PropertyKey, never>;
 
 type InputEvent = { detail: { message: string } };
 
-const newCounter = handler<InputEvent, {}>((_e, _state) => {
+const newCounter = handler((_: InputEvent) => {
   const charm = Counter({ value: Math.round(Math.random() * 10) });
   return navigateTo(charm);
 });
