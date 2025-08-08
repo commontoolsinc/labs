@@ -814,7 +814,8 @@ describe("Recipe Runner", () => {
     expect(errors).toBe(1);
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
 
-    const sourceCellValue = charm.getSourceCell()?.getRaw();
+    // Cast to any to avoid type checking
+    const sourceCellValue = charm.getSourceCell()?.getRaw() as any;
     const recipeId = sourceCellValue?.[TYPE];
     expect(recipeId).toBeDefined();
     expect(lastError?.recipeId).toBe(recipeId);

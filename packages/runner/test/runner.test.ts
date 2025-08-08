@@ -722,8 +722,9 @@ describe("runRecipe", () => {
     await runtime.idle();
 
     // Get the internal state objects
-    const internal1 = result1.getSourceCell()?.getRaw().internal;
-    const internal2 = result2.getSourceCell()?.getRaw().internal;
+    // We cast away our Immutable, so we can do this test
+    const internal1 = (result1.getSourceCell()?.getRaw() as any).internal;
+    const internal2 = (result2.getSourceCell()?.getRaw() as any).internal;
 
     // Verify they are different objects
     expect(internal1).not.toBe(internal2);

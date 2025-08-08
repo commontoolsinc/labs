@@ -251,7 +251,7 @@ describe("Cell", () => {
     expect(value.z.z.z).toBe(value.z.z);
 
     const raw = c.getRaw();
-    expect(raw.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
+    expect(raw?.z).toMatchObject({ "/": { [LINK_V1_TAG]: { path: [] } } });
   });
 
   it("should translate circular references into links across cells", () => {
@@ -1997,10 +1997,10 @@ describe("asCell with schema", () => {
     arrayCell.push(dCell);
     arrayCell.push(d.getAsQueryResult());
 
-    const rawItems = c.getRaw().items;
+    const rawItems = c.getRaw()?.items;
     const expectedCellLink = d.getAsNormalizedFullLink();
 
-    expect(rawItems.map((item: any) => parseLink(item, c))).toEqual([
+    expect(rawItems?.map((item) => parseLink(item, c))).toEqual([
       expectedCellLink,
       expectedCellLink,
       expectedCellLink,
@@ -2035,8 +2035,8 @@ describe("asCell with schema", () => {
     arrayCell.push({ [ID]: "test", value: 43 });
     expect(frame.generatedIdCounter).toEqual(1); // No increment = no ID generated from it
     popFrame(frame);
-    expect(isAnyCellLink(c.getRaw().items[0])).toBe(true);
-    expect(isAnyCellLink(c.getRaw().items[1])).toBe(true);
+    expect(isAnyCellLink(c.getRaw()?.items[0])).toBe(true);
+    expect(isAnyCellLink(c.getRaw()?.items[1])).toBe(true);
     expect(arrayCell.get()).toEqualIgnoringSymbols([
       { value: 42 },
       { value: 43 },

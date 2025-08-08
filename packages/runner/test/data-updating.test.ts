@@ -1132,12 +1132,12 @@ describe("data-updating", () => {
       );
 
       const result = testCell.getRaw();
-      expect(isAnyCellLink(result.items[0])).toBe(true);
-      expect(isAnyCellLink(result.items[1])).toBe(true);
-      expect(areLinksSame(result.items[0], result.items[1]))
+      expect(isAnyCellLink(result?.items[0])).toBe(true);
+      expect(isAnyCellLink(result?.items[1])).toBe(true);
+      expect(areLinksSame(result?.items[0], result?.items[1]))
         .toBe(true);
       expect(
-        (tx.readValueOrThrow(parseLink(result.items[1], testCell)!) as any)
+        (tx.readValueOrThrow(parseLink(result?.items[1], testCell)!) as any)
           .name,
       )
         .toBe("New Item");

@@ -240,7 +240,7 @@ describe.skip("Push conflict", () => {
     expect(name.get()).toEqual("bar");
     expect(list.get()).toEqual([{ n: 4 }]);
     expect(isAnyCellLink(list.getRaw()?.[0])).toBe(true);
-    const entry = list.getRaw()[0].cell?.asCell();
+    //const entry = list.getRaw()[0].cell?.asCell();
     expect(retryCalled).toEqual(0);
 
     await storage.synced();
