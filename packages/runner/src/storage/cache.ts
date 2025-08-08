@@ -815,7 +815,7 @@ export class Replica {
         const fact = this.get({ the, of });
 
         if (claim) {
-          claims.push(claimState(fact ?? unclaimed({ the, of })));
+          claims.push(claimState(fact!));
         } else if (is === undefined) {
           // If `is` is `undefined` we want to retract the fact.
           // If local `is` in the local state is also `undefined` desired state
@@ -877,11 +877,12 @@ export class Replica {
         );
       }
 
-      this.nursery.merge(facts, Nursery.delete);
-
       // Checkout current state of facts so we can compute
       // changes after we update underlying stores.
       const checkout = Differential.checkout(this, facts);
+
+      // Any returned facts should be purged from the nursery
+      this.nursery.merge(facts, Nursery.delete);
 
       const fact = result.error.name === "ConflictError" &&
         result.error.conflict.actual;
@@ -956,10 +957,11 @@ export class Replica {
     const localFacts = this.updateLocalFacts(revisions);
     const freshFacts = revisions.filter(this.isFresh);
 
+    const checkout = Differential.checkout(this, freshFacts);
+
     // Remove "fresh" facts which we are about to merge into `heap`
     this.nursery.merge(freshFacts, Nursery.delete);
 
-    const checkout = Differential.checkout(this, freshFacts);
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
