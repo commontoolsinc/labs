@@ -8,7 +8,8 @@ import { Identity } from "@commontools/identity";
 const { API_URL } = env;
 
 describe("Compile all recipes", () => {
-  const spaceName = globalThis.crypto.randomUUID();
+  const spaceName = Deno.env.get("SPACE_NAME") ??
+    globalThis.crypto.randomUUID();
 
   for (const file of Deno.readDirSync(join(import.meta.dirname!, ".."))) {
     const { name } = file;

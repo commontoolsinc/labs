@@ -19,7 +19,8 @@ describe("instantiate-recipe integration test", () => {
 
   beforeAll(async () => {
     const { identity } = shell.get();
-    spaceName = globalThis.crypto.randomUUID();
+    spaceName = Deno.env.get("SPACE_NAME") ??
+      globalThis.crypto.randomUUID();
 
     // Register the instantiate-recipe charm
     charmId = await registerCharm({
