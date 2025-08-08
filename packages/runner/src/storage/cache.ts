@@ -38,6 +38,7 @@ import { the, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import type { Cancel } from "@commontools/runner";
+import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
@@ -124,6 +125,8 @@ export interface SyncPush<Model> {
 export interface SyncStore<Model, Address>
   extends SyncPull<Model, Address>, SyncPush<Model> {
 }
+
+const logger = getLogger("storage.cache", { level: "info", enabled: true });
 
 interface NotFoundError extends Error {
   name: "NotFound";
@@ -600,7 +603,7 @@ export class Replica {
       const { error } = await query.promise;
       // If query fails we propagate the error.
       if (error) {
-        console.error("query failure", queryArgs, error);
+        logger.error(() => ["query failure", queryArgs, error]);
         return { error };
       }
       fetchedEntries = query.schemaFacts;
@@ -876,6 +879,8 @@ export class Replica {
           fact.cause.toString(),
         );
       }
+
+      logger.error(() => ["Transaction failed", result.error]);
 
       // Checkout current state of facts so we can compute
       // changes after we update underlying stores.
@@ -1256,7 +1261,7 @@ class ProviderConnection implements IStorageProvider {
       queueMicrotask(() => {
         this.provider.poll();
         this.provider.reestablishSubscriptions().catch((error) => {
-          console.error("Failed to reestablish subscriptions:", error);
+          logger.error(() => ["Failed to reestablish subscriptions:", error]);
         });
       });
     }
@@ -1643,7 +1648,7 @@ export class Provider implements IStorageProvider {
     try {
       await this.workspace.pull(need);
     } catch (error) {
-      console.error("Failed to re-establish subscriptions:", error);
+      logger.error(() => ["Failed to re-establish subscriptions:", error]);
     }
   }
 
