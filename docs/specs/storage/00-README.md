@@ -1,7 +1,8 @@
 # Storage Specification
 
 This directory contains the complete specification for the Automerge backend
-with spaces, CIDs, and cryptographic transaction chain.
+with spaces, merkle-references for addressing, and a cryptographic transaction
+chain.
 
 ## Document Structure
 
@@ -34,8 +35,8 @@ with spaces, CIDs, and cryptographic transaction chain.
 
 - **Spaces**: Independent, isolated storage domains identified by DIDs
 - **Content-addressed storage**: Changes stored once in CAS tables
-- **Cryptographic transaction chain**: BLAKE3-based, Ed25519-signed transaction
-  history
+- **Cryptographic transaction chain**: merkle-reference based digests and
+  Ed25519-signed transaction envelopes
 - **Point-in-time retrieval**: Access any branch state at any historical point
 - **UCAN-based authorization**: Fine-grained capabilities with cryptographic
   verification
@@ -53,5 +54,7 @@ with spaces, CIDs, and cryptographic transaction chain.
 - Web framework: Hono (HTTP + WS)
 - Database: SQLite via `npm:better-sqlite3`
 - Automerge: `npm:@automerge/automerge`
+- Addressing: `npm:merkle-reference` (default for doc ids and digests). Use
+  CIDs only where interop requires a specific multihash format.
 - Concurrency: Single writer per space, many readers
 - Storage: WAL mode with tuned pragmas
