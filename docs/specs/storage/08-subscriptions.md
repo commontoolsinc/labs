@@ -15,7 +15,13 @@ built around three core ideas:
 ## Query Semantics
 
 - **Query = (spaceDid, docId, path, schema, maxLinkDepth)**
+- **Query evaluation context**: Queries operate on the `value` field of
+  documents by default
+  - When `path` is `/` or omitted, the query evaluates against `doc.value`
+  - When `path` is `/some/path`, the query evaluates against
+    `doc.value.some.path` (links can only point to the value part of documents)
 - Documents can contain **links** with exact shape:
+
   ```json
   {
     "/": {
@@ -27,11 +33,17 @@ built around three core ideas:
     }
   }
   ```
+
   - `path` is an array of strings
   - `id` is optional; if omitted, link is within the same document
   - `space` is optional; if omitted, link is within the same space
   - When evaluating queries, links to other spaces are not followed and assumed
     to match
+- **Source document synchronization**: When a document with a `source` field is
+  included in query results:
+  - The referenced source document should be synced to the client
+  - This applies recursively for source documents that also have `source` fields
+  - Links within source documents are not automatically followed during sync
 - **Depth bound**: `maxLinkDepth` caps total link dereferences per evaluation;
   cycles allowed but cut off at budget
 - **Schema truthiness**:
@@ -78,6 +90,7 @@ built around three core ideas:
 { "op": "query-update", "queryId": "uuid", "epoch": 12345, "txHash": "<hex>", 
   "reason": "root-verdict-changed" | "touch-set-expanded" | "touch-set-shrunk" | "touched-doc-updated",
   "docsToRefresh": ["doc:<mh1>", "doc:<mh2>"],
+  "sourceDocsToSync": ["doc:<mh3>", "doc:<mh4>"],
   "summary": { "oldVerdict": "Yes", "newVerdict": "No", 
                "deltaTouched": {"added": [], "removed": []} } }
 

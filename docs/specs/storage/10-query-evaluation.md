@@ -9,6 +9,11 @@ Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
    strings:
    - Record a `DocLink` touch for the exact link and any constraints that read
      sublinks
+   - **Document structure handling**: If `path` is `/` or empty, evaluate
+     against `doc.value`
+     - If `doc.value` is undefined, the document has no current value
+     - Otherwise, evaluate against `doc.value` followed by the path segments
+       (links can only point to the value part of documents)
 3. **Apply local constraints** (`TypeCheck`, `Const`, etc.). Early exit to `No`
    if they fail
 4. **For Props on objects**:
@@ -46,8 +51,15 @@ Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
      - If exceeded, return `MaybeExceededDepth`
      - Else, resolve the definition IR node and recursively evaluate with
        `refDepth + 1`
-9. **Construct and store** `EvalResult` (verdict, touches, linkEdges, deps) in
-   memo; also construct provenance edges
+9. **Source document tracking**:
+   - If evaluating at document root (`path` is `/` or empty), check for `source`
+     field
+   - If `source` field exists and is a valid link, add the target document to
+     the `sourceDocsToSync` set for this evaluation
+   - This applies recursively: if the source document also has a `source` field,
+     add that document as well
+10. **Construct and store** `EvalResult` (verdict, touches, linkEdges, deps,
+    sourceDocsToSync) in memo; also construct provenance edges
 
 **Important**: because we watch only properties/array slots actually required by
 IR and AP, the **touch set is minimal**.
