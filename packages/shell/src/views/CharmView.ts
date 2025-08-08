@@ -21,9 +21,6 @@ export class XCharmView extends BaseView {
   `;
 
   @property({ attribute: false })
-  rt?: RuntimeInternals;
-
-  @property({ attribute: false })
   charm?: CharmController;
 
   override render() {

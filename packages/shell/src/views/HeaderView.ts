@@ -95,7 +95,10 @@ export class XHeaderView extends BaseView {
   private rt?: RuntimeInternals;
 
   @property({ attribute: false })
-  activeCharm?: CharmController;
+  charmTitle?: string;
+
+  @property({ attribute: false })
+  charmId?: string;
 
   @property({ attribute: false })
   spaceName?: string;
@@ -201,22 +204,18 @@ export class XHeaderView extends BaseView {
   };
 
   override render() {
-    const activeCharmName = this.activeCharm
-      ? this.activeCharm.name()
-      : undefined;
     const spaceLink = this.spaceName
       ? html`
-        <x-charm-link
-          .spaceName="${this.spaceName}"
-        >${this.spaceName}</x-charm-link>
+        <x-charm-link .spaceName="${this.spaceName}">${this
+          .spaceName}</x-charm-link>
       `
       : null;
-    const charmLink = activeCharmName && this.spaceName && this.activeCharm
+    const charmLink = this.charmId && this.spaceName
       ? html`
         <x-charm-link
-          .charmId="${this.activeCharm.id}"
+          .charmId="${this.charmId}"
           .spaceName="${this.spaceName}"
-        >${activeCharmName}</x-charm-link>
+        >${this.charmTitle || this.charmId}</x-charm-link>
       `
       : null;
     const title = html`

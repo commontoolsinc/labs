@@ -19,7 +19,7 @@ export class CharmLinkElement extends LitElement {
     e.preventDefault();
     e.stopPropagation();
     if (!this.spaceName) {
-      throw new Error("Cannot navigate with space name.");
+      throw new Error("Cannot navigate without space name.");
     }
     if (this.charmId) {
       navigate({
@@ -35,9 +35,18 @@ export class CharmLinkElement extends LitElement {
     }
   };
 
+  asHref(): string {
+    if (!this.spaceName) {
+      return "/";
+    }
+    return `/${this.spaceName}${this.charmId ? `/${this.charmId}` : ""}`;
+  }
+
   override render() {
+    const href = this.asHref();
     return html`
-      <a class="charm-link" href="#" @click="${this.#onClick}"><slot></slot></a>
+      <a class="charm-link" href="${href}" @click="${this
+        .#onClick}"><slot></slot></a>
     `;
   }
 }
