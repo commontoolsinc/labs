@@ -73,7 +73,7 @@ type FactoryOutput = {
 
 type InputEvent = { detail: { message: string } };
 
-const newCounter = handler((_: InputEvent) => {
+const newCounter = handler<InputEvent, Record<string, never>>((_, __) => {
   const charm = Counter({ value: Math.round(Math.random() * 10) });
   return navigateTo(charm);
 });
