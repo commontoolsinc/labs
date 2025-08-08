@@ -23,7 +23,7 @@ export class CTLogo extends LitElement {
   backgroundColor = "white";
 
   @property({ attribute: "shape-color" })
-  shapeColor = "black";
+  shapeColor = "#f9fafb";
 
   override render() {
     return html`

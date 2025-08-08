@@ -87,7 +87,7 @@ export class XCharmListView extends BaseView {
     }
 
     const list = charms.map((charm) => {
-      const name = charm.name();
+      const name = charm.name() ?? "Untitled Charm";
       const id = charm.id;
       return html`
         <li class="charm-item">
