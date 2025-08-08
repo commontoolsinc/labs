@@ -59,13 +59,15 @@ WHERE doc_id = ?
 
 ## Integrity Verification (Optional)
 
-When serving point-in-time retrieval, the server **can** recompute:
+When serving point-in-time retrieval, the server **can** recompute a
+`root_ref` using `merkle-reference` over the canonical heads set:
 
-* **root_hash** = `blake3(sorted(heads))` at that epoch.
-* Compare to stored `root_hash` in `am_heads` (if retrieving the current state)
+* **root_ref** = `referJSON({ heads: sorted(heads) })` at that epoch.
+* Compare to stored `root_ref` in `am_heads` (if retrieving the current state)
   or to a recomputed value from reconstructed heads at the target epoch.
 
-This allows the retrieval path to be consistent with the cryptographic chain in §4.
+This keeps retrieval consistent with the transaction digests (§4) without
+hard-coding a specific hash function.
 
 ## Performance Notes
 

@@ -49,7 +49,10 @@ The system supports multiple independent **spaces**:
 
   - First tx in a space should be a _delegation doc_:
 
-    - Doc URI: `doc:${BLAKE3({delegation: spaceDID})}` (multihash, base58btc)
+    - Doc URI: `doc:<merkle-reference>` where `<merkle-reference>` is produced
+      via `referJSON({ delegation: spaceDID })` from the `merkle-reference/json`
+      package. This avoids hard-coding a specific hash and yields a
+      self-describing content address.
     - Content: `{ "delegation": "<space DID>" }`
     - Written by client in tx #1.
 
@@ -57,11 +60,11 @@ The system supports multiple independent **spaces**:
 
 Two URI types:
 
-- **Automerge docs:** `doc:<multihash-blake3>[/optional_path]`
+- **Automerge docs:** `doc:<merkle-reference>[/optional_path]`
 
   - CRDT docs with branches, changes, and snapshots.
   - Optional path for sub-resource addressing or ordering.
-- **Immutable blobs:** `cid:<multihash-blake3>`
+- **Immutable blobs:** `cid:<cid>`
 
   - Immutable, content-addressed bytes — no branches/change history.
 
@@ -88,7 +91,7 @@ Two URI types:
     "content": "Hello world"
   },
   "source": {
-    "id": "doc:QmSource...",
+    "id": "doc:<ref>",
     "path": ["drafts", "v2"],
     "space": "did:key:..."
   }

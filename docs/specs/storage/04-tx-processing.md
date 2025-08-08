@@ -17,17 +17,18 @@
    - All deps present in base or prior accepted changes in this tx.
    - No duplicate `change_hash`.
    - `actor_id` / seq monotonicity per actor.
-7. **Compute digests**:
+7. **Compute digests (merkle-reference)**:
 
-   - `baseHeadsRoot = blake3(sorted(baseHeads))`
-   - `changesRoot = blake3(concat(blake3(change_bytes_i)))`
+   - `baseHeadsRoot = referJSON({ baseHeads: sorted(baseHeads) })`
+   - `changesRoot = referJSON({ changes: sorted(changeIds) })` where
+     `changeIds = changes.map(bytes => refer(bytes))`
    - `changeCount`
 8. **Verify UCAN nb** matches these digests/count exactly.
 9. **Insert provisional tx row**:
 
-   - `prev_tx_hash` from last committed tx in space
-   - CBOR TxBody, `tx_body_hash`, `tx_hash` =
-     `blake3(prev_tx_hash || tx_body_hash)`
+   - `prev_tx_ref` from last committed tx in space
+   - CBOR TxBody, `tx_body_ref`, `tx_ref` =
+     `refer(concat(prev_tx_ref || empty, tx_body_bytes))`
    - Sign `tx_hash` with server key (`server_sig`).
 10. **Insert CAS changes**:
 
