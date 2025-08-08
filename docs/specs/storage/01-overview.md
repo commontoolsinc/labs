@@ -64,3 +64,42 @@ Two URI types:
 - **Immutable blobs:** `cid:<multihash-blake3>`
 
   - Immutable, content-addressed bytes — no branches/change history.
+
+## Document Structure
+
+**Automerge documents (`doc:`) have a standardized internal structure:**
+
+- All documents are **objects at the root level**
+- **Required field:** `value` - contains the current document value
+  - If `value` is omitted, the current value is `undefined`
+- **Metadata field:** `source` - optional link to a source document
+  - When present, references another document that this document is derived from
+  - Format:
+    `{ "id": "<docId>", "path": ["optional", "path"], "space": "did:key:..." }`
+  - `path` is optional; if omitted, references the root of the source document
+  - `space` is optional; if omitted, references a document in the same space
+
+**Example document structure:**
+
+```json
+{
+  "value": {
+    "title": "My Document",
+    "content": "Hello world"
+  },
+  "source": {
+    "id": "doc:QmSource...",
+    "path": ["drafts", "v2"],
+    "space": "did:key:..."
+  }
+}
+```
+
+**Source document synchronization:**
+
+- When a document with a `source` field is synced to a client, the referenced
+  source document should also be synced
+- This applies recursively: if the source document also has a `source` field,
+  that document should be synced as well
+- Links within source documents are not automatically followed during this
+  recursive sync process
