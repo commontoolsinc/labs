@@ -300,6 +300,13 @@ export function collectOpaqueRefs(
   const processedNodes = new Set<ts.Node>();
 
   const visit = (n: ts.Node): void => {
+    // Do not traverse into JSX event handler attributes like onClick, onChange, etc.
+    if (ts.isJsxAttribute(n)) {
+      const name = n.name.getText();
+      if (name && name.startsWith("on")) {
+        return; // Skip children; event handlers shouldn't contribute OpaqueRefs for derive wrapping
+      }
+    }
     // Skip if already processed
     if (processedNodes.has(n)) return;
     processedNodes.add(n);
@@ -372,6 +379,16 @@ export function isSimpleOpaqueRefAccess(
   ) {
     const type = checker.getTypeAtLocation(expression);
     return isOpaqueRefType(type, checker);
+  }
+  return false;
+}
+
+export function isEventHandlerJsxAttribute(node: ts.Node): boolean {
+  if (!node || !node.parent) return false;
+  const parent = node.parent;
+  if (ts.isJsxAttribute(parent)) {
+    const attrName = parent.name.getText();
+    return attrName.startsWith("on");
   }
   return false;
 }
