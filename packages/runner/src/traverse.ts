@@ -64,7 +64,12 @@ export class MapSet<K, V> {
     if (!this.map.has(key)) {
       return false;
     } else {
-      return this.map.get(key)!.delete(value);
+      const values = this.map.get(key)!;
+      const rv = values.delete(value);
+      if (values.size === 0) {
+        this.map.delete(key);
+      }
+      return rv;
     }
   }
 

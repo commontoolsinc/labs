@@ -1,7 +1,6 @@
 import {
   IStorageSubscription,
   IStorageSubscriptionCapability,
-  State,
   StorageNotification,
 } from "./interface.ts";
 
@@ -21,7 +20,6 @@ class StorageSubscription
     this.#subscribers.add(subscription);
   }
   next(notification: StorageNotification) {
-    const cause = [];
     for (const subscriber of this.#subscribers) {
       try {
         if (subscriber.next(notification)?.done) {

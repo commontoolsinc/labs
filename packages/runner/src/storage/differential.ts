@@ -1,4 +1,5 @@
 import { FactAddress } from "@commontools/memory";
+import { unclaimed } from "@commontools/memory/fact";
 import { IMemoryChange, IMergedChanges, State } from "./interface.ts";
 import * as Address from "./transaction/address.ts";
 
@@ -22,7 +23,12 @@ const toAddress = (state: State) => ({
 export const checkout = (memory: Memory, facts: Iterable<State>) => {
   const checkout = new Checkout();
   for (const member of facts) {
-    checkout.add(member);
+    const existing = memory.get(member);
+    if (existing) {
+      checkout.add(existing);
+    } else {
+      checkout.add(unclaimed(member));
+    }
   }
   return checkout;
 };
