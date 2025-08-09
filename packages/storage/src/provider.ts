@@ -51,202 +51,38 @@ class SQLiteSpace implements SpaceStorage {
   }
 
   async submitTx(req: TxRequest): Promise<TxReceipt> {
+    // Delegate to sqlite/tx pipeline to preserve single-writer and BEGIN IMMEDIATE boundaries
+    const { submitTx: submitTxInternal } = await import("./sqlite/tx.ts");
     const db = this.handle.db;
-    const results: TxDocResult[] = [];
 
-    // Create a stub tx row to satisfy FKs when indexing changes
-    const txId = createStubTx(db);
+    // Translate public TxRequest → internal sqlite/tx TxRequest
+    const reads = (req.reads ?? []).map((r) => ({
+      docId: r.ref.docId,
+      branch: r.ref.branch,
+      heads: r.heads,
+    }));
+    const writes = req.writes.map((w) => ({
+      docId: w.ref.docId,
+      branch: w.ref.branch,
+      baseHeads: w.baseHeads,
+      changes: w.changes.map((c) => ({ bytes: c.bytes })),
+      allowServerMerge: isServerMergeEnabled(db),
+    }));
 
-    for (const write of req.writes) {
-      const { docId, branch } = write.ref;
-      await ensureBranch(db, docId, branch);
-      const current = readBranchState(db, docId, branch);
+    const receipt = await submitTxInternal(db, { reads, writes, txId: req.clientTxId });
 
-      if (JSON.stringify(current.heads) !== JSON.stringify(write.baseHeads)) {
-        // Divergence: optionally synthesize a server merge if enabled
-        if (!isServerMergeEnabled(db)) {
-          results.push({
-            ref: write.ref,
-            status: "conflict",
-            reason: "baseHeads mismatch",
-            newHeads: current.heads,
-          });
-          continue;
-        }
-        // Only attempt simple 2-head collapse for now
-        if (current.heads.length !== 2) {
-          results.push({
-            ref: write.ref,
-            status: "conflict",
-            reason: `cannot server-merge: expected 2 heads, got ${current.heads.length}`,
-            newHeads: current.heads,
-          });
-          continue;
-        }
-        // Load the current merged doc state (both heads applied)
-        const amBytes = getAutomergeBytesAtSeq(db, null, docId, current.branchId, current.seqNo);
-        let baseDoc = Automerge.load(amBytes);
-        // Synthesize a "merge change" authored by server with parents set to both head hashes.
-        // We create a net-zero change by setting and deleting a temporary key in a single change block.
-        const TMP_KEY = "__server_merge_marker";
-        const mergedDoc = Automerge.change(baseDoc, (d: any) => {
-          d[TMP_KEY] = true;
-          delete d[TMP_KEY];
-        });
-        const mergeBytes = Automerge.getLastLocalChange(mergedDoc);
-        if (!mergeBytes) {
-          results.push({
-            ref: write.ref,
-            status: "conflict",
-            reason: "failed to synthesize merge change",
-            newHeads: current.heads,
-          });
-          continue;
-        }
-        const header: DecodedChangeHeader = decodeChangeHeader(mergeBytes);
-        // Validate parents exactly equal to current heads (no unknown deps)
-        const depsSorted = [...header.deps].sort();
-        const headsSorted = [...current.heads].sort();
-        if (JSON.stringify(depsSorted) !== JSON.stringify(headsSorted)) {
-          results.push({
-            ref: write.ref,
-            status: "conflict",
-            reason: "synthesized merge deps do not match current heads",
-            newHeads: current.heads,
-          });
-          continue;
-        }
-        // Store change blob
-        const bytesHash = changeHashToBytes(header.changeHash);
-        db.run(
-          `INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`,
-          { bytes_hash: bytesHash, bytes: mergeBytes },
-        );
-        // Index change and update branch state
-        let newHeads = current.heads.filter((h) => !header.deps.includes(h));
-        let seqNo = current.seqNo + 1;
-        db.run(
-          `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-           VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
-          {
-            doc_id: docId,
-            branch_id: current.branchId,
-            seq_no: seqNo,
-            change_hash: header.changeHash,
-            bytes_hash: bytesHash,
-            deps_json: JSON.stringify(header.deps),
-            lamport: header.seq,
-            actor_id: header.actorId,
-            tx_id: txId,
-          },
-        );
-        newHeads.push(header.changeHash);
-        newHeads.sort();
-        updateHeads(db, current.branchId, newHeads, seqNo, txId);
-        const snap = maybeCreateSnapshot(db, docId, current.branchId, seqNo, newHeads, txId);
-        if (!snap) {
-          // emit chunks from last snapshot upto current seq
-          await maybeEmitChunks(db, docId, current.branchId, current.seqNo, seqNo);
-        }
-        results.push({ ref: write.ref, status: "ok", newHeads, applied: 0 });
-        continue;
-      }
+    // Map internal receipt → public receipt shape
+    const results: TxDocResult[] = receipt.results.map((r) => ({
+      ref: { docId: r.docId, branch: r.branch },
+      status: r.status,
+      newHeads: r.newHeads,
+      applied: r.applied,
+      reason: r.reason,
+    }));
 
-      let newHeads = current.heads.slice();
-      let seqNo = current.seqNo;
-      let applied = 0;
-      let rejectedReason: string | undefined;
-
-      for (const change of write.changes) {
-        const header: DecodedChangeHeader = decodeChangeHeader(change.bytes);
-        for (const dep of header.deps) {
-          if (!newHeads.includes(dep)) {
-            rejectedReason = `missing dep ${dep}`;
-            break;
-          }
-        }
-        if (rejectedReason) break;
-
-        // CAS store (dedup) and index
-        const bytesHash = changeHashToBytes(header.changeHash);
-        db.run(
-          `INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`,
-          { bytes_hash: bytesHash, bytes: change.bytes },
-        );
-
-        seqNo += 1;
-        // actor/seq monotonicity: ensure header.seq > last lamport for this actor on this branch
-        const last = db.prepare(
-          `SELECT lamport FROM am_change_index WHERE branch_id = :branch_id AND actor_id = :actor_id ORDER BY seq_no DESC LIMIT 1`,
-        ).get({ branch_id: current.branchId, actor_id: header.actorId }) as
-          | { lamport: number | null }
-          | undefined;
-        const lastLamport = last?.lamport ?? 0;
-        if (lastLamport >= header.seq) {
-          rejectedReason =
-            `non-monotonic seq for actor ${header.actorId}: ${header.seq} <= ${lastLamport}`;
-          break;
-        }
-
-        db.run(
-          `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-           VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
-          {
-            doc_id: docId,
-            branch_id: current.branchId,
-            seq_no: seqNo,
-            change_hash: header.changeHash,
-            bytes_hash: bytesHash,
-            deps_json: JSON.stringify(header.deps),
-            lamport: header.seq,
-            actor_id: header.actorId,
-            tx_id: txId,
-          },
-        );
-
-        // update heads: (heads - deps) ∪ {hash}
-        newHeads = newHeads.filter((h) => !header.deps.includes(h));
-        newHeads.push(header.changeHash);
-        newHeads.sort();
-        applied += 1;
-      }
-
-      if (rejectedReason) {
-        results.push({
-          ref: write.ref,
-          status: "rejected",
-          reason: rejectedReason,
-        });
-        continue;
-      }
-
-      // persist to am_heads
-      updateHeads(db, current.branchId, newHeads, seqNo, txId);
-      // maybe create a snapshot according to cadence
-      const snap = maybeCreateSnapshot(db, docId, current.branchId, seqNo, newHeads, txId);
-      if (!snap) {
-        await maybeEmitChunks(db, docId, current.branchId, current.seqNo, seqNo);
-      }
-
-      // If client-supplied merge collapsed heads to single head and provided mergeOf,
-      // mark source branches as closed.
-      if ((write.mergeOf?.length ?? 0) > 0 && newHeads.length === 1) {
-        for (const src of write.mergeOf!) {
-          try {
-            await closeBranch(db, docId, src.branch, { mergedInto: branch });
-          } catch {
-            // ignore close errors (e.g., already closed or missing)
-          }
-        }
-      }
-
-      results.push({ ref: write.ref, status: "ok", newHeads, applied });
-    }
-
-    const now = new Date().toISOString();
     return {
-      txId,
-      committedAt: now,
+      txId: receipt.txId,
+      committedAt: new Date().toISOString(),
       results,
       conflicts: results.filter((r) => r.status === "conflict"),
     };
