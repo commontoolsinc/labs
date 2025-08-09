@@ -17,6 +17,7 @@ import {
 } from "./sqlite/heads.ts";
 import { decodeChangeHeader } from "./sqlite/change.ts";
 import type { Database } from "@db/sqlite";
+import { refer as referJson, toDigest as refToDigest } from "merkle-reference/json";
 
 export interface SQLiteSpaceOptions {
   spacesDir: URL; // directory where per-space sqlite files live
@@ -200,10 +201,12 @@ function updateHeads(
   epoch: number,
 ): void {
   const headsJson = JSON.stringify(heads);
+  const rootRef = referJson({ heads: [...heads].sort() });
+  const rootHashBytes = new Uint8Array(refToDigest(rootRef));
   db.run(
-    `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = x'', committed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+    `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = :root_hash, committed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE branch_id = :branch_id`,
-    { heads_json: headsJson, seq_no: seqNo, tx_id: epoch, branch_id: branchId },
+    { heads_json: headsJson, seq_no: seqNo, tx_id: epoch, branch_id: branchId, root_hash: rootHashBytes },
   );
 }
 
@@ -213,6 +216,10 @@ function changeHashToBytes(hex: string): Uint8Array {
     bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
   }
   return bytes;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  return changeHashToBytes(hex);
 }
 
 function randomBytes(length: number): Uint8Array {
