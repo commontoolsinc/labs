@@ -1,6 +1,7 @@
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 import { getAutomergeBytesAtSeq } from "./pit.ts";
+import { createCas } from "./cas.ts";
 
 // Basic snapshot cadence policy: every N changes per branch
 const DEFAULT_CADENCE = 5;
@@ -44,6 +45,11 @@ export function maybeCreateSnapshot(
       tx_id: txId,
     },
   );
+
+  // Persist snapshot via CAS for content-addressability and future reuse
+  const cas = createCas(db);
+  cas.put('am_snapshot', snapshotBytes, { docId, branchId, seqNo, txId }).catch(() => {/* best-effort */});
+
   return true;
 }
 
