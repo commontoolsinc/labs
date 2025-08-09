@@ -27,7 +27,9 @@ async function runMigrations(db: Database): Promise<void> {
   await db.exec(schema);
 }
 
-export async function openSqlite({ url }: OpenDbOptions): Promise<SqliteHandle> {
+export async function openSqlite(
+  { url }: OpenDbOptions,
+): Promise<SqliteHandle> {
   const db = await new Database(url);
   try {
     await applyPragmas(db);
@@ -46,5 +48,3 @@ export async function openSqlite({ url }: OpenDbOptions): Promise<SqliteHandle> 
     },
   };
 }
-
-

@@ -27,7 +27,7 @@ Deno.test("reject change with missing dependency", async () => {
       {
         ref: { docId, branch },
         baseHeads: [missingDep], // mismatch with current heads [] → conflict
-        changes: [ { bytes: c1 } ],
+        changes: [{ bytes: c1 }],
       },
     ],
   });

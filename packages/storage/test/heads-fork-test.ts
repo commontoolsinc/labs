@@ -22,7 +22,14 @@ Deno.test("fork: two concurrent changes produce two heads", async () => {
   const c1 = Automerge.getLastLocalChange(a1)!;
   const h1 = decodeChangeHeader(c1).changeHash;
 
-  const r1 = await space.submitTx({ reads: [], writes: [ { ref: { docId, branch }, baseHeads: [], changes: [ { bytes: c1 } ] } ] });
+  const r1 = await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: [],
+      changes: [{ bytes: c1 }],
+    }],
+  });
   assertEquals(r1.results[0]?.status, "ok");
 
   const s1 = await space.getBranchState(docId, branch);
@@ -37,7 +44,14 @@ Deno.test("fork: two concurrent changes produce two heads", async () => {
   const h2 = decodeChangeHeader(c2).changeHash;
 
   // Submit with baseHeads equal to current heads [h1]
-  const r2 = await space.submitTx({ reads: [], writes: [ { ref: { docId, branch }, baseHeads: s1.heads, changes: [ { bytes: c2 } ] } ] });
+  const r2 = await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: s1.heads,
+      changes: [{ bytes: c2 }],
+    }],
+  });
   assertEquals(r2.results[0]?.status, "ok");
 
   const s2 = await space.getBranchState(docId, branch);
