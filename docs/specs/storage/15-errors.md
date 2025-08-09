@@ -1,10 +1,10 @@
 # Error Taxonomy
 
-* `ReadConflict`
-* `StaleBaseHeads`
-* `MissingDependency`
-* `DuplicateChange`
-* `InvariantFailed`
-* `BranchClosed`
-* `InvalidBranch`
-* `InvalidDoc`
+- `ReadConflict`
+- `StaleBaseHeads`
+- `MissingDependency`
+- `DuplicateChange`
+- `InvariantFailed`
+- `BranchClosed`
+- `InvalidBranch`
+- `InvalidDoc`
