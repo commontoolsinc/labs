@@ -2,6 +2,18 @@
 
 This document describes the migration for performance indexes and WS delivery hardening added in this iteration.
 
+Quick start (new backend enablement)
+- Set feature flag to enable the new routes in Toolshed (defaults shown below):
+  - ENABLE_NEW_STORAGE=1
+  - ENABLE_SERVER_MERGE=0
+- Start Toolshed with the flag:
+  - ENABLE_NEW_STORAGE=1 deno task -c packages/toolshed/deno.json dev
+- Try the CLI tools for spaces/branches and snapshots:
+  - deno task new-storage:list-spaces
+  - deno task new-storage:list-branches -- --space my-space
+  - deno task new-storage:export-snapshot -- --space my-space --doc my-doc --branch main --seq 12 --out ./my-doc-main-12.am
+  - deno task new-storage:import-snapshot -- --space my-space --doc my-doc --branch main --file ./my-doc-main-12.am
+
 What changed
 - Added indexes to speed up hot queries discovered via EXPLAIN QUERY PLAN:
   - am_change_index

@@ -1,4 +1,4 @@
-import { assertEquals, assert } from "jsr:@std/assert@1/assert";
+import { assertEquals, assert } from "jsr:@std/assert@^1";
 import { createTestApp } from "@/packages/toolshed/lib/create-app.ts";
 import storageNew from "@/packages/toolshed/routes/storage/new/new.index.ts";
 

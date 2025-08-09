@@ -3,6 +3,15 @@
 This document tracks the implementation of the new storage backend described in
 `docs/specs/storage/*`.
 
+Summary and code links
+- Status: Heads, PIT, Snapshots, Branching, CAS, Queries, basic UCAN, and Toolshed route scaffolding are implemented; remaining items are TX pipeline invariants and final route wiring behind a flag.
+- Flags (defaults): ENABLE_NEW_STORAGE=0, ENABLE_SERVER_MERGE=0.
+- Provider entry: packages/storage/src/provider.ts
+- SQLite modules: packages/storage/src/sqlite/db.ts, schema.sql, heads.ts, change.ts, pit.ts, projection.ts, snapshots.ts, branches.ts, cas.ts, query_ir.ts, query_eval.ts
+- Toolshed routes (flagged): packages/toolshed/routes/storage/new/* and flag plumbing in packages/toolshed/env.ts
+- CLI tasks: packages/storage/deno.json new-storage:* and packages/storage/cli/*
+- Specs: docs/specs/storage/*.md (API, PIT, branching, snapshots, tx processing, invariants, queries)
+
 ## Goals
 
 - Implement Automerge-backed `doc:` storage first (documents, branches, heads),
