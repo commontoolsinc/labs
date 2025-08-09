@@ -154,45 +154,38 @@ class SQLiteSpace implements SpaceStorage {
     opts?: {
       accept?: "automerge" | "json";
       epoch?: number;
+      at?: string;
       paths?: string[][];
     },
   ): Promise<Uint8Array> {
     const db = this.handle.db;
     const state = readBranchState(db, docId, branch);
-    // Load change bytes up to optional epoch
-    const rows = db.prepare(
-      `SELECT b.bytes AS bytes
-       FROM am_change_index i JOIN am_change_blobs b ON (i.bytes_hash = b.bytes_hash)
-       WHERE i.doc_id = :doc_id AND i.branch_id = :branch_id AND (:epoch IS NULL OR i.tx_id <= :epoch)
-       ORDER BY i.seq_no`,
-    ).all({
-      doc_id: docId,
-      branch_id: state.branchId,
-      epoch: opts?.epoch ?? null,
-    }) as Array<{ bytes: Uint8Array }>;
-    const changes = rows.map((r) => r.bytes);
-    // Fallback reconstruction via applyChanges
-    // deno-lint-ignore no-explicit-any
-    let doc: any = (globalThis as any).AutomergeInit
-      ? (globalThis as any).AutomergeInit()
-      : undefined;
-    // Always use our imported Automerge to avoid global ambiguity
-    // dynamic import to avoid circular import at top
-    const Automerge = await import("@automerge/automerge");
-    const applied = Automerge.applyChanges(Automerge.init(), changes);
-    const docRoot = Array.isArray(applied) ? applied[0] : applied;
+    const { getAutomergeBytesAtSeq, uptoSeqNo, epochForTimestamp } =
+      await import(
+        "./sqlite/pit.ts"
+      );
+    const { project } = await import("./sqlite/projection.ts");
+
+    let targetEpoch: number | undefined = opts?.epoch;
+    if (targetEpoch == null && opts?.at) {
+      targetEpoch = epochForTimestamp(db, opts.at);
+    }
+    const targetSeq = targetEpoch == null
+      ? state.seqNo
+      : uptoSeqNo(db, docId, state.branchId, targetEpoch);
+
+    const amBytes = getAutomergeBytesAtSeq(
+      db,
+      docId,
+      state.branchId,
+      targetSeq,
+    );
+
     const accept = opts?.accept ?? "automerge";
     if (accept === "json") {
-      const jsonObj = Automerge.toJS(docRoot);
-      const projected = opts?.paths && opts.paths.length > 0
-        ? projectJson(jsonObj, opts.paths)
-        : jsonObj;
-      const bytes = new TextEncoder().encode(JSON.stringify(projected));
-      return bytes;
+      return project(amBytes, opts?.paths);
     }
-    // default automerge bytes
-    const saved = Automerge.save(docRoot);
-    return saved;
+    return amBytes;
   }
 }
 
@@ -281,37 +274,4 @@ export async function openSpaceStorage(
   return new SQLiteSpace(handle);
 }
 
-function projectJson(root: unknown, paths: string[][]): unknown {
-  // Build a new object containing only the requested paths from root
-  const out: any = Array.isArray(root) ? [] : {};
-  for (const p of paths) {
-    setAtPath(out, p, getAtPath(root as any, p));
-  }
-  return out;
-}
-
-function getAtPath(obj: any, path: string[]): any {
-  let cur = obj;
-  for (const key of path) {
-    if (cur == null) return undefined;
-    cur = cur[key];
-  }
-  return cur;
-}
-
-function setAtPath(obj: any, path: string[], value: any): void {
-  let cur = obj;
-  for (let i = 0; i < path.length; i++) {
-    const key = path[i]!;
-    const isLast = i === path.length - 1;
-    if (isLast) {
-      cur[key] = value;
-    } else {
-      const next = cur[key];
-      if (next == null || typeof next !== "object") {
-        cur[key] = {};
-      }
-      cur = cur[key];
-    }
-  }
-}
+// JSON projection helpers moved to ./sqlite/projection.ts
