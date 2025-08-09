@@ -30,11 +30,11 @@ if (import.meta.main) {
   await Deno.mkdir(base, { recursive: true }).catch(() => {});
   const { db, close } = await openSqlite({ url: new URL(`./${space}.sqlite`, base) });
   try {
-    const bytes = await Deno.readFile(file);
+    const bytes = await Deno.readFile(file as string);
     const docObj = Automerge.load(bytes);
     // Infer sequence number by reconstructing changes count from heads via save/apply cycle.
     // Automerge doesn't expose seq directly; we'll store snapshot with upto_seq_no = current branch seqNo to align PIT expectations.
-    const st = getBranchState(db, doc, branch);
+    const st = getBranchState(db, doc as string, branch as string);
 
     db.run(
       `INSERT OR REPLACE INTO am_snapshots(snapshot_id, doc_id, branch_id, upto_seq_no, heads_json, root_hash, bytes, tx_id, committed_at)

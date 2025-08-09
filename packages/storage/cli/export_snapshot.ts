@@ -33,8 +33,8 @@ if (import.meta.main) {
   await Deno.mkdir(base, { recursive: true }).catch(() => {});
   const { db, close } = await openSqlite({ url: new URL(`./${space}.sqlite`, base) });
   try {
-    const bytes = getAutomergeBytesAtSeq(db, null, doc, branch, seq);
-    await Deno.writeFile(out, bytes);
+    const bytes = getAutomergeBytesAtSeq(db, null, doc as string, branch as string, seq);
+    await Deno.writeFile(out as string, bytes);
     console.log(`wrote ${bytes.length} bytes to ${out}`);
   } finally {
     await close();
