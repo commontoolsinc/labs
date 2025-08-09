@@ -96,4 +96,14 @@ export interface SpaceStorage {
       paths?: string[][];
     },
   ): Promise<Uint8Array>;
+  /**
+   * Explicitly merge `fromBranch` into `toBranch` for the given document.
+   * Returns the new head hash on the target branch.
+   */
+  mergeBranches(
+    docId: DocId,
+    fromBranch: BranchName,
+    toBranch: BranchName,
+    opts?: { closeSource?: boolean },
+  ): Promise<string>;
 }

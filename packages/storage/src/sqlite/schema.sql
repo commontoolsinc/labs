@@ -20,12 +20,16 @@ CREATE TABLE IF NOT EXISTS branches (
   doc_id TEXT NOT NULL,
   name TEXT NOT NULL,
   parent_branch_id TEXT,
-  is_closed INTEGER NOT NULL DEFAULT 0,
+  closed INTEGER NOT NULL DEFAULT 0,
+  closed_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   merged_into_branch_id TEXT,
   UNIQUE(doc_id, name),
   FOREIGN KEY(doc_id) REFERENCES docs(doc_id) ON DELETE CASCADE
 );
+-- Indexes to support merge/close queries
+CREATE INDEX IF NOT EXISTS idx_branches_merged_into ON branches(merged_into_branch_id);
+CREATE INDEX IF NOT EXISTS idx_branches_closed ON branches(doc_id, closed);
 
 -- Current Heads per Branch
 CREATE TABLE IF NOT EXISTS am_heads (
@@ -102,6 +106,12 @@ CREATE TABLE IF NOT EXISTS am_chunks (
   tx_id INTEGER NOT NULL,
   PRIMARY KEY(doc_id, branch_id, seq_no),
   FOREIGN KEY(tx_id) REFERENCES tx(tx_id) ON DELETE CASCADE
+);
+
+-- Space-level settings for feature flags and overrides
+CREATE TABLE IF NOT EXISTS space_settings (
+  key TEXT PRIMARY KEY,
+  value_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS am_snapshots (

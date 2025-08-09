@@ -1,6 +1,7 @@
 import type { BranchName, BranchState, DocId } from "../../interface.ts";
 import type { Database } from "@db/sqlite";
 import { getBranchState, getOrCreateBranch, getOrCreateDoc } from "./heads.ts";
+import { isServerMergeEnabled } from "./flags.ts";
 
 /**
  * Create a new branch for a document.
@@ -51,11 +52,16 @@ export async function closeBranch(
   const state = getBranchState(db, docId, name);
   let mergedIntoBranchId: string | null = null;
   if (opts?.mergedInto) {
-    const target = getBranchState(db, docId, opts.mergedInto);
-    mergedIntoBranchId = target.branchId;
+    // only allow server-side mark-as-merged if enabled for this space
+    if (isServerMergeEnabled(db)) {
+      const target = getBranchState(db, docId, opts.mergedInto);
+      mergedIntoBranchId = target.branchId;
+    }
   }
   db.run(
-    `UPDATE branches SET is_closed = 1, merged_into_branch_id = COALESCE(:merged_into, merged_into_branch_id)
+    `UPDATE branches SET closed = 1,
+                         closed_at = COALESCE(closed_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                         merged_into_branch_id = COALESCE(:merged_into, merged_into_branch_id)
      WHERE branch_id = :branch_id;`,
     { merged_into: mergedIntoBranchId, branch_id: state.branchId },
   );
