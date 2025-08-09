@@ -85,22 +85,30 @@ Acceptance:
 Current: linear, fork, and client-merge tests implemented; missing-dep covered;
 actor/seq monotonicity enforced; CAS write and indexing implemented.
 
-### 2. Point-in-time (PIT) and projection
+### 2. Point-in-time (PIT) and projection (DONE)
 
-- [ ] Compute `upto_seq_no` for epoch/tx via `am_change_index`.
-- [ ] PIT reconstruction:
-  - [ ] Fast path from `am_snapshots` + `am_chunks` → concatenated AM binary.
-  - [ ] Fallback from snapshot + apply changes via `Automerge.applyChanges()`.
-- [ ] Projection helper `project(docBytes, paths[])` for selective subtrees.
+- [x] Compute `upto_seq_no` for epoch/tx via `am_change_index`.
+- [x] PIT reconstruction:
+  - [x] Fast path from `am_snapshots` + `am_chunks` → concatenated AM binary.
+  - [x] Fallback from snapshot + apply changes via `Automerge.applyChanges()`.
+- [x] Projection helper `project(docBytes, paths[])` for selective subtrees.
 
 Acceptance:
 
-- PIT byte equality with a client-generated doc at the same point.
-- Projection tests for path subsets and root.
+- [x] PIT byte equality with a client-generated doc at the same point.
+- [x] Projection tests for path subsets and root.
+
+Implementation:
+
+- `packages/storage/src/sqlite/pit.ts` implements PIT reconstruction with both fast path and fallback
+- `packages/storage/src/sqlite/projection.ts` implements JSON projection for selective subtrees  
+- Updated `packages/storage/interface.ts` to include `at?: string` for timestamp-based PIT
+- Updated `packages/storage/src/provider.ts` to integrate PIT and projection functionality
+- Comprehensive test coverage in `packages/storage/test/pit-and-projection-test.ts`
 
 ### 3. Branching and merge semantics
 
-- [ ] Create/delete branches; lineage metadata.
+- [x] Create/close branches; lineage metadata.
 - [ ] Client-driven merge: accept merge change with deps = heads to collapse
       branches; validate sources.
 - [ ] Optional server merge (flagged) using `Automerge.merge` to synthesize
@@ -111,6 +119,11 @@ Acceptance:
 
 - Tests: fork → concurrent edits → client-merge collapses heads; optional
   server-merge path works under flag.
+
+Implementation:
+
+- Added `packages/storage/src/sqlite/branches.ts` with `createBranch()` and `closeBranch()` built on existing heads/doc helpers; records `parent_branch_id` and `merged_into_branch_id`.
+- Added `packages/storage/test/branches-basic-test.ts` covering creating a new branch and ensuring reads work after closing.
 
 ### 4. Snapshots (SQLite-backed)
 
