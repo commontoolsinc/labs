@@ -7,6 +7,7 @@ import { maybeCreateSnapshot } from "./snapshots.ts";
 import { maybeEmitChunks } from "./chunks.ts";
 import { getAutomergeBytesAtSeq } from "./pit.ts";
 import { refer as referJson, toDigest as refToDigest } from "merkle-reference/json";
+import { createCas } from "./cas.ts";
 
 // Local types for the SQLite tx pipeline (server-internal shape per §04/§06)
 export type DocId = string;
@@ -197,11 +198,9 @@ export async function submitTx(db: Database, req: TxRequest): Promise<TxReceipt>
         }
 
         // CAS: store blob and index
+        const cas = createCas(db);
+        await cas.put('am_change', change.bytes);
         const bytesHash = changeHashToBytes(header.changeHash);
-        db.run(
-          `INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`,
-          { bytes_hash: bytesHash, bytes: change.bytes },
-        );
 
         seqNo += 1;
         db.run(
@@ -401,9 +400,10 @@ function synthesizeAndApplyMerge(db: Database, current: { branchId: string; head
   const headsSorted = [...current.heads].sort();
   if (JSON.stringify(depsSorted) !== JSON.stringify(headsSorted)) return false;
 
-  // persist blob
+  // persist blob via CAS
+  const cas = createCas(db);
+  cas.put('am_change', mergeBytes).catch(() => {});
   const bytesHash = changeHashToBytes(hdr.hash);
-  db.run(`INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`, { bytes_hash: bytesHash, bytes: mergeBytes });
 
   // index
   const seqNo = current.seqNo + 1;

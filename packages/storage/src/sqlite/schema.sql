@@ -142,4 +142,24 @@ CREATE TABLE IF NOT EXISTS immutable_cids (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 
+-- Generic CAS blobs for non-change kinds (snapshots, generic blobs)
+CREATE TABLE IF NOT EXISTS cas_blobs (
+  digest TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN ('am_change','am_snapshot','blob')),
+  bytes BLOB NOT NULL,
+  meta_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cas_blobs_kind ON cas_blobs(kind);
+-- JSON meta indexes to speed up doc/branch/seqNo and doc/branch/txId lookups
+CREATE INDEX IF NOT EXISTS idx_cas_meta_seq ON cas_blobs(
+  json_extract(meta_json,'$.docId'),
+  json_extract(meta_json,'$.branchId'),
+  json_extract(meta_json,'$.seqNo')
+);
+CREATE INDEX IF NOT EXISTS idx_cas_meta_tx ON cas_blobs(
+  json_extract(meta_json,'$.docId'),
+  json_extract(meta_json,'$.branchId'),
+  json_extract(meta_json,'$.txId')
+);
 

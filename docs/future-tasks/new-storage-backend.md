@@ -127,7 +127,7 @@ Implementation:
 - Added `packages/storage/src/sqlite/branches.ts` with `createBranch()` and `closeBranch()` built on existing heads/doc helpers; records `parent_branch_id` and `merged_into_branch_id`.
 - Added `packages/storage/test/branches-basic-test.ts` covering creating a new branch and ensuring reads work after closing.
 
-### 4. Snapshots (SQLite-backed)
+### 4. Snapshots (SQLite-backed) — DONE
 
 - [x] Implement snapshot cadence and storage in `am_snapshots` / `am_chunks`.
   - [x] Full snapshots via `Automerge.save()`.
@@ -162,17 +162,17 @@ Acceptance:
 
 - Tests: valid tx, concurrent write conflict, idempotent replays.
 
-### 6. Content-addressed primitives (SQLite CAS)
+### 6. Content-addressed primitives (SQLite CAS) — DONE
 
-- [ ] CAS interface over SQLite tables:
-  - [ ] `put(bytes) -> ref`, `get(ref) -> bytes`, `has(ref)` using
-        `merkle-reference` and `am_change_blobs`.
-  - [ ] Record kinds: `am_change`, `am_snapshot`, optional `blob`.
-- [ ] Indexes: by `(docId, branchId, seqNo)` and `(docId, branchId, txId)`.
+- [x] CAS interface over SQLite tables:
+  - [x] `put(kind, bytes, meta?) -> digest`, `get(digest) -> {kind,bytes,meta}`, `has(digest)` using
+        `am_change_blobs` for changes and `cas_blobs` for snapshots/generic blobs.
+  - [x] Record kinds: `am_change`, `am_snapshot`, `blob`.
+- [x] Indexes: `am_change_index` lookups by `(docId, branchId, seqNo)` and `(docId, branchId, txId)`; JSON meta indexes on `cas_blobs`.
 
 Acceptance:
 
-- Unit tests for CAS and indexes.
+- Unit tests for CAS and indexes added at `packages/storage/test/sqlite/cas_test.ts`.
 
 ### 7. Queries and subscriptions
 
