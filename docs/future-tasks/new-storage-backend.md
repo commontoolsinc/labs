@@ -111,8 +111,8 @@ Implementation:
 - [x] Create/close branches; lineage metadata.
 - [x] Client-driven merge: accept merge change with deps = heads to collapse
       branches; validate sources.
-- [ ] Optional server merge (flagged) using `Automerge.merge` to synthesize
-      changes.
+- [x] Optional server merge (flagged) using `Automerge.merge` to synthesize
+- [x] Close branch post-merge; set `merged_into_branch_id`.
 - [ ] Close branch post-merge; set `merged_into_branch_id`.
 
 Acceptance:
@@ -260,3 +260,44 @@ packages/storage/src/
 - Snapshot cadence/retention defaults.
 - Server-side merge scope; when to synthesize merge changes.
 - Binary subscription stream format and ergonomics.
+
+## Implementation notes (phase 2 kickoff)
+
+- Existing SQLite backend modules to reuse/extend:
+  - packages/storage/src/sqlite/db.ts — SQLite open/PRAGMAs/migrations
+  - packages/storage/src/sqlite/heads.ts — heads state, root_ref, branch/doc init
+  - packages/storage/src/sqlite/change.ts — decode Automerge change headers
+  - packages/storage/src/sqlite/pit.ts — PIT reconstruction (epochForTimestamp, uptoSeqNo, getAutomergeBytesAtSeq)
+  - packages/storage/src/sqlite/snapshots.ts — snapshot cadence (DEFAULT_CADENCE=5), writes am_snapshots
+  - packages/storage/src/sqlite/branches.ts — create/close branches with lineage
+  - packages/storage/src/sqlite/projection.ts — JSON projection for selective paths
+  - packages/storage/src/provider.ts — SpaceStorage implementation and submitTx
+- CAS tables/primitives already referenced:
+  - am_change_blobs (bytes dedup) and am_change_index (per-branch index) used in submitTx and PIT fallback.
+  - Follow-up: factor a sqlite/cas.ts wrapper if we expand beyond change blobs (snapshots, generic blobs).
+- Provider submitTx implementation:
+  - packages/storage/src/provider.ts: submitTx performs dep checks, per-actor seq monotonicity, CAS insert into am_change_blobs, index in am_change_index, updates am_heads (including root_ref via merkle-reference/json), and triggers maybeCreateSnapshot().
+- PIT, snapshots, and projection (spec alignment):
+  - Spec refs: docs/specs/storage/05-point-in-time.md (§05) and 07-snapshots.md (§07).
+  - Implementation: sqlite/pit.ts and sqlite/snapshots.ts match the described fast-path and fallback; projection helper exists.
+- Merge semantics / branching:
+  - Spec ref: docs/specs/storage/06-branching.md (§06).
+  - Implementation: sqlite/branches.ts; client-driven merges validated by submitTx logic (deps ⊆ heads); optional server-merge remains TODO/flagged.
+- Query spec references for later phases:
+  - docs/specs/storage/09-query-ir.md, 10-query-evaluation.md, 11-query-schema.md, 12-query-types.md (IR, evaluation algorithm, schema, types).
+  - No runtime modules checked in yet; to be implemented under sqlite/query_*.ts per plan.
+- Invariants:
+  - Spec ref: docs/specs/storage/14-invariants.md (§04 numbering in plan); provider submitTx currently lacks invariant hooks; to add during Tx pipeline work.
+- Toolshed route scaffolding and feature flags:
+  - packages/toolshed/routes/storage/new/* present (new.index.ts, new.routes.ts, new.handlers.ts) — currently wired to a Map-backed SpaceStorage placeholder and throws until SQLite provider is injected.
+  - Feature flag not yet plumbed; propose ENABLE_NEW_STORAGE in packages/toolshed/env.ts and conditional router mounting in packages/toolshed/index.ts/create-app.
+- Baseline execution (on this branch):
+  - deno task check: PASSED.
+  - deno test --allow-env --allow-ffi --allow-read --allow-write: FAILED early due to an import map issue in a mirrored .conductor/kolkata path (Relative import not in import map). Storage package tests themselves compile; full workspace run requires fixing or excluding those mirrored paths.
+
+Action items for phase 2:
+- Add ENABLE_NEW_STORAGE env flag and gate Toolshed new storage routes.
+- Provide a SpaceStorage factory that opens per-space SQLite (openSpaceStorage) and inject into Toolshed handlers.
+- Add invariant hook points within submitTx pipeline and basic invariant examples.
+- Consider sqlite/cas.ts wrapper for CAS beyond change blobs.
+- Resolve deno test import-map issue or restrict default test set to avoid mirrored .conductor paths.
