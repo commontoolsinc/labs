@@ -163,3 +163,35 @@ CREATE INDEX IF NOT EXISTS idx_cas_meta_tx ON cas_blobs(
   json_extract(meta_json,'$.txId')
 );
 
+-- Subscriptions and at-least-once deliveries for query WS
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  space_id TEXT NOT NULL,
+  query_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  last_seen_at TEXT,
+  consumer_id TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_space_consumer ON subscriptions(space_id, consumer_id);
+
+CREATE TABLE IF NOT EXISTS subscription_cursors (
+  subscription_id INTEGER NOT NULL,
+  doc_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  seq_watermark INTEGER NOT NULL,
+  PRIMARY KEY (subscription_id, doc_id, branch_id),
+  FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS subscription_deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  subscription_id INTEGER NOT NULL,
+  delivery_no INTEGER NOT NULL,
+  payload BLOB NOT NULL,
+  acked INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(subscription_id, delivery_no),
+  FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_subscription_deliveries_sub_acked ON subscription_deliveries(subscription_id, acked);
+
