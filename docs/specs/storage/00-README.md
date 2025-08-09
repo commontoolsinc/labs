@@ -54,7 +54,7 @@ chain.
 - Web framework: Hono (HTTP + WS)
 - Database: SQLite via `npm:better-sqlite3`
 - Automerge: `npm:@automerge/automerge`
-- Addressing: `npm:merkle-reference` (default for doc ids and digests). Use
-  CIDs only where interop requires a specific multihash format.
+- Addressing: `npm:merkle-reference` (default for doc ids and digests). Use CIDs
+  only where interop requires a specific multihash format.
 - Concurrency: Single writer per space, many readers
 - Storage: WAL mode with tuned pragmas

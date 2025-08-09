@@ -5,13 +5,13 @@
     "check": "deno check .",
     "just-test": {
       "description": "Just run unit tests without type checking",
-      "command": "deno test -A --no-check"
+      "command": "deno test -A"
     },
     "test": {
       "description": "Type check & run tests",
       "dependencies": [
         "check",
-        "just-test"
+        "test"
       ]
     }
   },
@@ -29,6 +29,6 @@
     "@std/expect": "jsr:@std/expect@^1",
     "@std/testing": "jsr:@std/testing@^1",
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
-    "@automerge/automerge": "npm:@automerge/automerge@^2.1.0"
+    "@automerge/automerge": "npm:@automerge/automerge@^3.1.1"
   }
 }
