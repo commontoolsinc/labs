@@ -1,13 +1,13 @@
 import type {
   BranchName,
   BranchState,
-  DecodedChangeHeader,
   DocId,
   SpaceStorage,
   StorageProvider,
-  TxDocResult,
   TxReceipt,
   TxRequest,
+  DecodedChangeHeader,
+  TxDocResult,
 } from "../interface.ts";
 import { openSqlite, type SqliteHandle } from "./sqlite/db.ts";
 import {
@@ -44,6 +44,9 @@ class SQLiteSpace implements SpaceStorage {
     const db = this.handle.db;
     const results: TxDocResult[] = [];
 
+    // Create a stub tx row to satisfy FKs when indexing changes
+    const txId = createStubTx(db);
+
     for (const write of req.writes) {
       const { docId, branch } = write.ref;
       await ensureBranch(db, docId, branch);
@@ -66,7 +69,6 @@ class SQLiteSpace implements SpaceStorage {
 
       for (const change of write.changes) {
         const header: DecodedChangeHeader = decodeChangeHeader(change.bytes);
-        // verify deps subset of current heads
         for (const dep of header.deps) {
           if (!newHeads.includes(dep)) {
             rejectedReason = `missing dep ${dep}`;
@@ -75,16 +77,37 @@ class SQLiteSpace implements SpaceStorage {
         }
         if (rejectedReason) break;
 
+        // CAS store (dedup) and index
+        const bytesHash = changeHashToBytes(header.changeHash);
+        db.run(
+          `INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`,
+          { bytes_hash: bytesHash, bytes: change.bytes },
+        );
+
+        seqNo += 1;
+        db.run(
+          `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
+           VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, NULL, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
+          {
+            doc_id: docId,
+            branch_id: current.branchId,
+            seq_no: seqNo,
+            change_hash: header.changeHash,
+            bytes_hash: bytesHash,
+            deps_json: JSON.stringify(header.deps),
+            actor_id: header.actorId,
+            tx_id: txId,
+          },
+        );
+
         // update heads: (heads - deps) ∪ {hash}
         newHeads = newHeads.filter((h) => !header.deps.includes(h));
         newHeads.push(header.changeHash);
         newHeads.sort();
-        seqNo += 1;
         applied += 1;
       }
 
       if (rejectedReason) {
-        // do not persist, report rejection
         results.push({
           ref: write.ref,
           status: "rejected",
@@ -94,13 +117,13 @@ class SQLiteSpace implements SpaceStorage {
       }
 
       // persist to am_heads
-      updateHeads(db, current.branchId, newHeads, seqNo, current.epoch + 1);
+      updateHeads(db, current.branchId, newHeads, seqNo, txId);
       results.push({ ref: write.ref, status: "ok", newHeads, applied });
     }
 
     const now = new Date().toISOString();
     return {
-      txId: 0,
+      txId,
       committedAt: now,
       results,
       conflicts: results.filter((r) => r.status === "conflict"),
@@ -125,6 +148,46 @@ function updateHeads(
      WHERE branch_id = :branch_id`,
     { heads_json: headsJson, seq_no: seqNo, tx_id: epoch, branch_id: branchId },
   );
+}
+
+function changeHashToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+  }
+  return bytes;
+}
+
+function randomBytes(length: number): Uint8Array {
+  const arr = new Uint8Array(length);
+  crypto.getRandomValues(arr);
+  return arr;
+}
+
+function createStubTx(db: Database): number {
+  // Find previous tx hash if any
+  const prev = db.prepare(`SELECT tx_hash FROM tx ORDER BY tx_id DESC LIMIT 1`).get() as
+    | { tx_hash: Uint8Array }
+    | undefined;
+  const prevHash = prev?.tx_hash ?? new Uint8Array();
+  const txBodyHash = randomBytes(32);
+  const txHash = randomBytes(32);
+  const stmt = db.prepare(
+    `INSERT INTO tx(prev_tx_hash, tx_body_hash, tx_hash, server_sig, server_pubkey, client_sig, client_pubkey, ucan_jwt)
+     VALUES(:prev_tx_hash, :tx_body_hash, :tx_hash, :server_sig, :server_pubkey, :client_sig, :client_pubkey, :ucan_jwt)`,
+  );
+  stmt.run({
+    prev_tx_hash: prevHash,
+    tx_body_hash: txBodyHash,
+    tx_hash: txHash,
+    server_sig: randomBytes(64),
+    server_pubkey: randomBytes(32),
+    client_sig: randomBytes(64),
+    client_pubkey: randomBytes(32),
+    ucan_jwt: "stub",
+  });
+  const row = db.prepare(`SELECT tx_id FROM tx ORDER BY tx_id DESC LIMIT 1`).get() as { tx_id: number };
+  return row.tx_id;
 }
 
 export function createStorageProvider(): StorageProvider {
