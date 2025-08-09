@@ -10,6 +10,8 @@ be simplified away.
 Specifically we have:
 
 - I/O over iframe boundaries, typically with the iframes running React, which in
+
+Note: We will keep SQLite code under packages/storage/src/sqlite (do not split into packages/sqlite). Add a follow-up cleanup task to consolidate any stray directories if they appear.
   turn assumes synchronous state. So data can roundtrip through iframe/React and
   overwrite newer data that came in in the meantime based on outdated
   assumptions. E.g. a user event happens, state X is updated in React, while new

@@ -67,6 +67,19 @@ built around three core ideas:
 
 ## WebSocket API
 
+Single endpoint per space shared by tx and queries: /api/storage/new/v1/:space/ws
+
+- Client → Server
+  - subscribe { consumerId: string, query: JSON }
+  - ack { subscriptionId: number, deliveryNo: number }
+- Server → Client
+  - subscribed { subscriptionId: number }
+  - deliver { subscriptionId: number, deliveryNo: number, payload: any }
+
+At-least-once delivery: payloads are persisted in subscription_deliveries. Resume is based on last acked deliveryNo per (space, consumerId).
+
+Ordering: deliveries enqueued transactionally from the tx processor by commit order and am_change_index seq.
+
 ### Client → Server
 
 ```jsonc
