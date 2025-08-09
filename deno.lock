@@ -13,6 +13,7 @@
     "jsr:@deno/graph@0.86": "0.86.9",
     "jsr:@denosaurs/plug@1": "1.1.0",
     "jsr:@luca/esbuild-deno-loader@*": "0.11.1",
+    "jsr:@std/assert@*": "1.0.13",
     "jsr:@std/assert@0.217": "0.217.0",
     "jsr:@std/assert@1": "1.0.14",
     "jsr:@std/assert@^1.0.13": "1.0.14",
