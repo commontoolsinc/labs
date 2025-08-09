@@ -36,7 +36,7 @@ export class ChangeProcessor {
       path: q.path,
       budget: q.budget,
     };
-    const res = this.evaluator.evaluate(root);
+    const res = this.evaluator.evaluate(root, undefined, this.evaluator.newContext());
     const touches = this.collectTouches(root);
     this.subs.registerQuery(q, root, touches);
     this.queryVerdict.set(q.id, res.verdict);
@@ -100,12 +100,16 @@ export class ChangeProcessor {
     for (const ek of order) {
       const [ir, doc, pathKey, budgetStr] = ek.split("\u0001");
       this.evaluator.memo.delete(ek);
-      this.evaluator.evaluate({
-        ir,
-        doc,
-        path: JSON.parse(pathKey),
-        budget: Number(budgetStr),
-      });
+      this.evaluator.evaluate(
+        {
+          ir,
+          doc,
+          path: JSON.parse(pathKey),
+          budget: Number(budgetStr),
+        },
+        undefined,
+        this.evaluator.newContext(),
+      );
     }
 
     // Affected queries
@@ -127,7 +131,7 @@ export class ChangeProcessor {
         }
         if (!intersects) continue;
       }
-      const res = this.evaluator.evaluate(root);
+      const res = this.evaluator.evaluate(root, undefined, this.evaluator.newContext());
       const newTouches = this.collectTouches(root);
       const oldTouches = this.queryTouches.get(qid) || new Set<Link>();
 
