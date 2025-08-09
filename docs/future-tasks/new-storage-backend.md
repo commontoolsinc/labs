@@ -71,8 +71,8 @@ This document tracks the implementation of the new storage backend described in
   - [x] Verify deps subset of current heads; update heads
         `(heads − deps) ∪ {hash}`.
   - [x] Reject if any `dep` missing for `(doc, branch)`.
-  - [ ] Enforce `actor_id`/`seq` monotonicity per actor in branch history.
-  - [ ] CAS: store change bytes (dedup) in `am_change_blobs`; index rows in
+  - [x] Enforce `actor_id`/`seq` monotonicity per actor in branch history.
+  - [x] CAS: store change bytes (dedup) in `am_change_blobs`; index rows in
         `am_change_index`.
   - [x] Maintain `am_heads(seq_no, tx_id, heads_json, root_hash)` (root_hash
         placeholder for now).
@@ -83,7 +83,7 @@ Acceptance:
   actor/seq monotonicity.
 
 Current: linear, fork, and client-merge tests implemented; missing-dep covered;
-actor/seq monotonicity pending.
+actor/seq monotonicity enforced; CAS write and indexing implemented.
 
 ### 2. Point-in-time (PIT) and projection
 
