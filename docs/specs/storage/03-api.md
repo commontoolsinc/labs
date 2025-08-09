@@ -1,138 +1,45 @@
-# API Surface
+# API Surface (WebSocket only)
 
-All endpoints are **scoped by `:spaceDid`**.
-
-## Documents & Branches
-
-### POST `/v1/:space/docs` — Create a doc (and optional initial branch)
-
-```json
-{ "docId": "doc:<ref>", "branch": "main" }
-```
-
-Creates the doc entry and the branch if they don't exist.
-
-### POST `/v1/:space/branches` — Create branch from a point
-
-```json
-{
-  "docId": "doc:<ref>",
-  "name": "feature-x",
-  "from": { "branch": "main", "heads": ["h1","h2"] }
-}
-```
-
-Also supports `{ "epoch": 12093 }` or `{ "at": "2025-08-01T..." }` for historical branch points.
-
-### POST `/v1/:space/branches/:branchId/close` — Close branch (after merge)
-
-```json
-{ "mergedInto": { "branch": "main", "heads": ["h3"] } }
-```
-
-### GET `/v1/:space/heads/:docId?branch=main` — Current heads (and epoch)
-
-Returns:
-
-```json
-{
-  "docId": "...",
-  "branch": "...",
-  "heads": ["..."],
-  "seq_no": 123,
-  "epoch": 456,
-  "root_ref": "mr:<...>"
-}
-```
-
-### GET `/v1/:space/docs/:docId` — Retrieve a doc
-
-Query params:
-
-* `branch=main` (default)
-* Point-in-time: `epoch=<id>` or `at=<timestamp>`
-* Optional projection: `paths=a/b,c/d`
-* `Accept: application/automerge` → raw Automerge binary; default is JSON.
-
-## Transactions
-
-### POST `/v1/:space/tx` — Submit a multi-doc transaction
-
-**Request:**
-
-```json
-{
-  "clientTxId": "uuid-from-client",
-  "ucan": "<compact-ucan-jwt>",
-  "reads": [
-    { "docId": "doc:<ref>", "branch": "main", "heads": ["h1","h2"] }
-  ],
-  "writes": [
-    {
-      "docId": "doc:<ref>",
-      "branch": "main",
-      "baseHeads": ["h1","h2"],
-      "changes": ["base64Change1", "base64Change2"],     
-      "mergeOf": [
-        { "branch": "feature-x", "heads": ["hx1","hx2"] }
-      ]
-    }
-  ],
-  "invariants": [
-    { "type": "ifcPolicy", "params": { /* opaque */ } }
-  ],
-  "options": { "returnPatches": false, "returnHeads": true }
-}
-```
-
-**Response:**
-
-```json
-{
-  "txId": 12345,
-  "committedAt": "2025-08-08T17:22:51.123Z",
-  "txHash": "<hex>",
-  "prevTxHash": "<hex>",
-  "txBodyHash": "<hex>",
-  "serverSig": "<b64>",
-  "serverPubKey": "<b64>",
-  "clientPubKey": "<b64>",
-  "results": [
-    { "docId": "...", "branch": "...", "status": "ok", "newHeads": ["h3"], "applied": 2 }
-  ],
-  "rejections": [],
-  "conflicts": []
-}
-```
-
-### GET `/v1/:space/tx/:txId` — Fetch receipt/summary
-
-Returns crypto envelope plus CBOR-encoded TxBody for audit or replication.
-
-## Immutable Blobs
-
-* **PUT `/v1/:space/cid/:cid`** — body = raw bytes; returns `409` if the computed BLAKE3 CID doesn't match.
-* **GET `/v1/:space/cid/:cid`** — returns blob bytes.
+All interactions are scoped by `:spaceDid`. The API is provided exclusively over a single WebSocket endpoint. REST/HTTP endpoints are out of scope for the initial cut and may be added later if needed.
 
 ## WebSocket `/v1/:space/ws`
 
-Text frames (JSON) multiplexed across docs.
+Text frames (JSON) multiplexed across docs and queries.
 
-**Client → Server:**
+### Client → Server frames
 
 ```jsonc
 { "op": "hello", "protocol": "v1", "clientId": "xyz" }
 
+// Subscribe to a document branch. If fromEpoch is omitted, starts from current heads.
 { "op": "subscribe", "docId": "doc:<ref>", "branch": "main", "fromEpoch": 12000 }
+
+// Unsubscribe from a document branch
 { "op": "unsubscribe", "docId": "doc:<ref>", "branch": "main" }
 
+// Submit a multi-doc transaction (base64 encoded Automerge changes)
+{ "op": "tx",
+  "clientTxId": "uuid-from-client",
+  "ucan": "<compact-ucan-jwt>",
+  "reads": [ { "docId": "doc:<ref>", "branch": "main", "heads": ["h1","h2"] } ],
+  "writes": [
+    { "docId": "doc:<ref>", "branch": "main", "baseHeads": ["h1","h2"],
+      "changes": ["base64Change1", "base64Change2"],
+      "mergeOf": [ { "branch": "feature-x", "heads": ["hx1","hx2"] } ]
+    }
+  ],
+  "invariants": [ { "type": "ifcPolicy", "params": {} } ],
+  "options": { "returnPatches": false, "returnHeads": true }
+}
+
+// Acknowledge up to an epoch (at-least-once delivery)
 { "op": "ack", "docId": "doc:<ref>", "branch": "main", "epoch": 12345 }
 
-// Optional: direct AM Sync messages
+// Optional: direct Automerge sync messages
 { "op": "sync", "docId": "doc:<ref>", "branch": "main", "message": "base64SyncMsg" }
 ```
 
-**Server → Client:**
+### Server → Client frames
 
 ```jsonc
 { "op": "hello", "serverId": "…" }
@@ -145,7 +52,19 @@ Text frames (JSON) multiplexed across docs.
   "newHeads": ["h3"]
 }
 
+{ "op": "tx-receipt",
+  "clientTxId": "uuid-from-client",
+  "txId": 12345,
+  "results": [ { "docId": "...", "branch": "...", "status": "ok", "newHeads": ["h3"], "applied": 2 } ],
+  "conflicts": [],
+  "rejections": []
+}
+
 { "op": "idle", "docId": "doc:<ref>", "branch": "main" }
 
-{ "op": "error", "code": "ReadConflict", "details": { /* ... */ } }
+{ "op": "error", "code": "ReadConflict", "details": { } }
 ```
+
+Notes:
+- All document creation and branch management occur implicitly via transactions. A client can create a doc and branch by submitting a write with an empty read set; the server ensures records exist.
+- Retrieval of doc bytes occurs via subscription + changes stream, or via an optional future RPC if needed. Initial cut defers a standalone “GET doc” to keep scope minimal.

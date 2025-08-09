@@ -9,7 +9,7 @@ chain.
 - **[01-overview.md](01-overview.md)** - High-level architecture and spaces
   concept
 - **[02-schema.md](02-schema.md)** - Core data model and SQLite schema
-- **[03-api.md](03-api.md)** - API surface and endpoints
+- **[03-api.md](03-api.md)** - API surface (WebSocket protocol only)
 - **[04-tx-processing.md](04-tx-processing.md)** - Transaction semantics and
   validation
 - **[05-point-in-time.md](05-point-in-time.md)** - Point-in-time retrieval
