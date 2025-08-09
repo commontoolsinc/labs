@@ -147,7 +147,11 @@ class SQLiteSpace implements SpaceStorage {
   async getDocBytes(
     docId: DocId,
     branch: BranchName,
-    opts?: { accept?: "automerge" | "json"; epoch?: number; paths?: string[][] },
+    opts?: {
+      accept?: "automerge" | "json";
+      epoch?: number;
+      paths?: string[][];
+    },
   ): Promise<Uint8Array> {
     const db = this.handle.db;
     const state = readBranchState(db, docId, branch);
@@ -157,11 +161,17 @@ class SQLiteSpace implements SpaceStorage {
        FROM am_change_index i JOIN am_change_blobs b ON (i.bytes_hash = b.bytes_hash)
        WHERE i.doc_id = :doc_id AND i.branch_id = :branch_id AND (:epoch IS NULL OR i.tx_id <= :epoch)
        ORDER BY i.seq_no`,
-    ).all({ doc_id: docId, branch_id: state.branchId, epoch: opts?.epoch ?? null }) as Array<{ bytes: Uint8Array }>;
+    ).all({
+      doc_id: docId,
+      branch_id: state.branchId,
+      epoch: opts?.epoch ?? null,
+    }) as Array<{ bytes: Uint8Array }>;
     const changes = rows.map((r) => r.bytes);
     // Fallback reconstruction via applyChanges
     // deno-lint-ignore no-explicit-any
-    let doc: any = (globalThis as any).AutomergeInit ? (globalThis as any).AutomergeInit() : undefined;
+    let doc: any = (globalThis as any).AutomergeInit
+      ? (globalThis as any).AutomergeInit()
+      : undefined;
     // Always use our imported Automerge to avoid global ambiguity
     // dynamic import to avoid circular import at top
     const Automerge = await import("@automerge/automerge");
@@ -170,7 +180,10 @@ class SQLiteSpace implements SpaceStorage {
     const accept = opts?.accept ?? "automerge";
     if (accept === "json") {
       const jsonObj = Automerge.toJS(docRoot);
-      const bytes = new TextEncoder().encode(JSON.stringify(jsonObj));
+      const projected = opts?.paths && opts.paths.length > 0
+        ? projectJson(jsonObj, opts.paths)
+        : jsonObj;
+      const bytes = new TextEncoder().encode(JSON.stringify(projected));
       return bytes;
     }
     // default automerge bytes
@@ -250,4 +263,39 @@ export async function openSpaceStorage(
   await Deno.mkdir(opts.spacesDir, { recursive: true });
   const handle = await openSqlite({ url: file });
   return new SQLiteSpace(handle);
+}
+
+function projectJson(root: unknown, paths: string[][]): unknown {
+  // Build a new object containing only the requested paths from root
+  const out: any = Array.isArray(root) ? [] : {};
+  for (const p of paths) {
+    setAtPath(out, p, getAtPath(root as any, p));
+  }
+  return out;
+}
+
+function getAtPath(obj: any, path: string[]): any {
+  let cur = obj;
+  for (const key of path) {
+    if (cur == null) return undefined;
+    cur = cur[key];
+  }
+  return cur;
+}
+
+function setAtPath(obj: any, path: string[], value: any): void {
+  let cur = obj;
+  for (let i = 0; i < path.length; i++) {
+    const key = path[i]!;
+    const isLast = i === path.length - 1;
+    if (isLast) {
+      cur[key] = value;
+    } else {
+      const next = cur[key];
+      if (next == null || typeof next !== "object") {
+        cur[key] = {};
+      }
+      cur = cur[key];
+    }
+  }
 }
