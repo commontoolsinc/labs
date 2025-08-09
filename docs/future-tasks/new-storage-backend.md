@@ -109,14 +109,13 @@ Implementation:
 - Updated `packages/storage/src/provider.ts` to integrate PIT and projection functionality
 - Comprehensive test coverage in `packages/storage/test/pit-and-projection-test.ts`
 
-### 3. Branching and merge semantics
+### 3. Branching and merge semantics (DONE)
 
 - [x] Create/close branches; lineage metadata.
 - [x] Client-driven merge: accept merge change with deps = heads to collapse
       branches; validate sources.
 - [x] Optional server merge (flagged) using `Automerge.merge` to synthesize
 - [x] Close branch post-merge; set `merged_into_branch_id`.
-- [ ] Close branch post-merge; set `merged_into_branch_id`.
 
 Acceptance:
 
