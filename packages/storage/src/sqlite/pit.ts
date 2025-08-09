@@ -41,6 +41,7 @@ export function uptoSeqNo(
  */
 export function getAutomergeBytesAtSeq(
   db: Database,
+  spaceId: string | null,
   docId: DocId,
   branchId: BranchId,
   targetSeq: number,
@@ -64,6 +65,7 @@ export function getAutomergeBytesAtSeq(
          AND seq_no > :from_seq AND seq_no <= :to_seq
        ORDER BY seq_no`,
     ).all({
+      // space_id is currently optional; table stores it but queries are scoped per-space DB.
       doc_id: docId,
       branch_id: branchId,
       from_seq: snap.upto_seq_no,

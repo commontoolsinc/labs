@@ -22,6 +22,7 @@ import {
   toDigest as refToDigest,
 } from "merkle-reference/json";
 import { maybeCreateSnapshot } from "./sqlite/snapshots.ts";
+import { maybeEmitChunks } from "./sqlite/chunks.ts";
 import { isServerMergeEnabled } from "./sqlite/flags.ts";
 import { epochForTimestamp, getAutomergeBytesAtSeq } from "./sqlite/pit.ts";
 import * as Automerge from "@automerge/automerge";
@@ -83,7 +84,7 @@ class SQLiteSpace implements SpaceStorage {
           continue;
         }
         // Load the current merged doc state (both heads applied)
-        const amBytes = getAutomergeBytesAtSeq(db, docId, current.branchId, current.seqNo);
+        const amBytes = getAutomergeBytesAtSeq(db, null, docId, current.branchId, current.seqNo);
         let baseDoc = Automerge.load(amBytes);
         // Synthesize a "merge change" authored by server with parents set to both head hashes.
         // We create a net-zero change by setting and deleting a temporary key in a single change block.
@@ -142,7 +143,11 @@ class SQLiteSpace implements SpaceStorage {
         newHeads.push(header.changeHash);
         newHeads.sort();
         updateHeads(db, current.branchId, newHeads, seqNo, txId);
-        maybeCreateSnapshot(db, docId, current.branchId, seqNo, newHeads, txId);
+        const snap = maybeCreateSnapshot(db, docId, current.branchId, seqNo, newHeads, txId);
+        if (!snap) {
+          // emit chunks from last snapshot upto current seq
+          await maybeEmitChunks(db, docId, current.branchId, current.seqNo, seqNo);
+        }
         results.push({ ref: write.ref, status: "ok", newHeads, applied: 0 });
         continue;
       }
@@ -218,7 +223,10 @@ class SQLiteSpace implements SpaceStorage {
       // persist to am_heads
       updateHeads(db, current.branchId, newHeads, seqNo, txId);
       // maybe create a snapshot according to cadence
-      maybeCreateSnapshot(db, docId, current.branchId, seqNo, newHeads, txId);
+      const snap = maybeCreateSnapshot(db, docId, current.branchId, seqNo, newHeads, txId);
+      if (!snap) {
+        await maybeEmitChunks(db, docId, current.branchId, current.seqNo, seqNo);
+      }
 
       // If client-supplied merge collapsed heads to single head and provided mergeOf,
       // mark source branches as closed.
@@ -269,6 +277,7 @@ class SQLiteSpace implements SpaceStorage {
 
     const amBytes = getAutomergeBytesAtSeq(
       db,
+      null,
       docId,
       state.branchId,
       targetSeq,
@@ -295,8 +304,8 @@ class SQLiteSpace implements SpaceStorage {
     const to = readBranchState(db, docId, toBranch);
 
     // Load PIT docs for both branches at their current seq
-    const fromBytes = getAutomergeBytesAtSeq(db, docId, from.branchId, from.seqNo);
-    const toBytes = getAutomergeBytesAtSeq(db, docId, to.branchId, to.seqNo);
+    const fromBytes = getAutomergeBytesAtSeq(db, null, docId, from.branchId, from.seqNo);
+    const toBytes = getAutomergeBytesAtSeq(db, null, docId, to.branchId, to.seqNo);
 
     const a = Automerge.load(toBytes);
     const b = Automerge.load(fromBytes);
@@ -347,7 +356,10 @@ class SQLiteSpace implements SpaceStorage {
     newHeads.push(header.changeHash);
     newHeads.sort();
     updateHeads(db, to.branchId, newHeads, seqNo, 0);
-    maybeCreateSnapshot(db, docId, to.branchId, seqNo, newHeads, 0);
+    const snap = maybeCreateSnapshot(db, docId, to.branchId, seqNo, newHeads, 0);
+    if (!snap) {
+      await maybeEmitChunks(db, docId, to.branchId, to.seqNo, seqNo);
+    }
 
     // After successful merge collapse, close source branch if requested
     if (opts?.closeSource ?? true) {

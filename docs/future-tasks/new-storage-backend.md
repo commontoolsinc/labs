@@ -87,6 +87,9 @@ actor/seq monotonicity enforced; CAS write and indexing implemented.
 
 ### 2. Point-in-time (PIT) and projection (DONE)
 
+- [x] 2a) Full snapshot cadence and storage
+- [x] 2b) Emit incremental chunks on submit; PIT uses chunks after last snapshot
+
 - [x] Compute `upto_seq_no` for epoch/tx via `am_change_index`.
 - [x] PIT reconstruction:
   - [x] Fast path from `am_snapshots` + `am_chunks` → concatenated AM binary.
@@ -129,7 +132,7 @@ Implementation:
 
 - [x] Implement snapshot cadence and storage in `am_snapshots` / `am_chunks`.
   - [x] Full snapshots via `Automerge.save()`.
-  - [ ] Optional incremental chunks to accelerate PIT.
+  - [x] Optional incremental chunks to accelerate PIT.
 - [x] Integrity: maintain `root_ref = referJSON({ heads: sorted(heads) })` in
       `am_heads` for verification.
 
