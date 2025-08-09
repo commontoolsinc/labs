@@ -117,7 +117,7 @@ Acceptance:
 - [ ] Implement snapshot cadence and storage in `am_snapshots` / `am_chunks`.
   - [ ] Full snapshots via `Automerge.save()`.
   - [ ] Optional incremental chunks to accelerate PIT.
-- [ ] Integrity: maintain `root_ref = referJSON({ heads: sorted(heads) })` in
+- [x] Integrity: maintain `root_ref = referJSON({ heads: sorted(heads) })` in
       `am_heads` for verification.
 
 Acceptance:
