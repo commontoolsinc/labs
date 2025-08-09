@@ -30,7 +30,11 @@
     "test": "./tasks/test.ts",
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
-    "initialize-db": "./tasks/initialize-db.sh"
+    "initialize-db": "./tasks/initialize-db.sh",
+    "new-storage:export-snapshot": "deno task -c packages/storage/deno.json new-storage:export-snapshot",
+    "new-storage:import-snapshot": "deno task -c packages/storage/deno.json new-storage:import-snapshot",
+    "new-storage:list-spaces": "deno task -c packages/storage/deno.json new-storage:list-spaces",
+    "new-storage:list-branches": "deno task -c packages/storage/deno.json new-storage:list-branches"
   },
   "compilerOptions": {
     "types": [
