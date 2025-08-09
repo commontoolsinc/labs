@@ -41,6 +41,8 @@ export class Provenance {
   }
 }
 
+export type VisitContext = { seenIRDoc: Set<string> };
+
 export class Evaluator {
   constructor(
     private pool: IRPool,
@@ -49,7 +51,12 @@ export class Evaluator {
   ) {}
   memo = new Map<string, EvalResult>();
 
-  evaluate(key: EvalKey, at?: Version): EvalResult {
+  newContext(): VisitContext {
+    return { seenIRDoc: new Set<string>() };
+  }
+
+  evaluate(key: EvalKey, at?: Version, ctx?: VisitContext): EvalResult {
+    if (!ctx) ctx = this.newContext();
     const ek = Provenance.keyEval(key);
     const cached = this.memo.get(ek);
     if (cached) return cached;
@@ -127,7 +134,7 @@ export class Evaluator {
               budget: key.budget,
             };
             deps.add(childKey);
-            const res = this.evaluate(childKey, at).verdict;
+            const res = this.evaluate(childKey, at, ctx).verdict;
             if (res !== "Yes") return res;
           }
           if (ir.additional.mode === "omit") return "Yes";
@@ -143,7 +150,7 @@ export class Evaluator {
               budget: key.budget,
             };
             deps.add(childKey);
-            const res = this.evaluate(childKey, at).verdict;
+            const res = this.evaluate(childKey, at, ctx).verdict;
             if (res !== "Yes") return res;
           }
           return "Yes";
@@ -163,7 +170,7 @@ export class Evaluator {
                 budget: key.budget,
               };
               deps.add(childKey);
-              const res = this.evaluate(childKey, at).verdict;
+              const res = this.evaluate(childKey, at, ctx).verdict;
               if (res !== "Yes") return res;
             }
             return "Yes";
@@ -178,7 +185,7 @@ export class Evaluator {
                 budget: key.budget,
               };
               deps.add(childKey);
-              const res = this.evaluate(childKey, at).verdict;
+              const res = this.evaluate(childKey, at, ctx).verdict;
               if (res !== "Yes") return res;
             }
             return "Yes";
@@ -194,7 +201,7 @@ export class Evaluator {
               budget: key.budget,
             };
             deps.add(childKey);
-            const res = this.evaluate(childKey, at).verdict;
+            const res = this.evaluate(childKey, at, ctx).verdict;
             if (res !== "Yes") return res;
           }
           return "Yes";
@@ -209,7 +216,7 @@ export class Evaluator {
               budget: key.budget,
             };
             deps.add(childKey);
-            const res = this.evaluate(childKey, at).verdict;
+            const res = this.evaluate(childKey, at, ctx).verdict;
             if (res === "Yes") return "Yes";
             if (res === "MaybeExceededDepth") sawMaybe = true;
           }
@@ -221,32 +228,56 @@ export class Evaluator {
     let verdict = descend(key.ir, v);
 
     if (isLinkValue(v)) {
+      const tgt = v["/"]["link@1"];
+      const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
+      const from: Link = { doc: key.doc, path: key.path };
+
+      // record edge for explainability/provenance
+      linkEdges.add({ from, to });
+      const ekStr = Provenance.keyEval(key);
+      const toKey = Provenance.keyLink(to);
+      if (!this.prov.linkEdges.has(ekStr)) this.prov.linkEdges.set(ekStr, new Set());
+      this.prov.linkEdges.get(ekStr)!.add(toKey);
+
+      const visitKey = `${key.ir}\u0001${to.doc}`;
+      if (ctx.seenIRDoc.has(visitKey)) {
+        // Proper cycle revisit: do not recurse. Touch target entry path for invalidation.
+        // (Alternatively: readLink(to.doc, []); for doc-root coarse touch.)
+        readLink(to.doc, to.path);
+
+        // Preserve the existing verdict from local constraints.
+        const result: EvalResult = { verdict, touches, linkEdges, deps };
+
+        // Attach provenance edges for touches/deps we actually recorded:
+        for (const lnk of touches) {
+          const lk = Provenance.keyLink(lnk);
+          if (!this.prov.linkToEval.has(lk)) this.prov.linkToEval.set(lk, new Set());
+          this.prov.linkToEval.get(lk)!.add(ekStr);
+        }
+        for (const child of deps) {
+          const p = ekStr, c = Provenance.keyEval(child);
+          if (!this.prov.evalChildren.has(p)) this.prov.evalChildren.set(p, new Set());
+          if (!this.prov.evalParents.has(c)) this.prov.evalParents.set(c, new Set());
+          this.prov.evalChildren.get(p)!.add(c);
+          this.prov.evalParents.get(c)!.add(p);
+        }
+        return result; // no memo on context-specific short-circuit
+      }
+
+      // First time visiting this (IR, doc) in this evaluation
+      ctx.seenIRDoc.add(visitKey);
       if (key.budget <= 0) {
+        // True budget exhaustion (non-cycle deepness) → Maybe
         verdict = verdict === "Yes" ? "MaybeExceededDepth" : verdict;
       } else {
-        const tgt = v["/"]["link@1"];
-        const from: Link = { doc: key.doc, path: key.path };
-        const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
-        linkEdges.add({ from, to });
-        const ekStr = Provenance.keyEval(key);
-        const toKey = Provenance.keyLink(to);
-        if (!this.prov.linkEdges.has(ekStr)) {
-          this.prov.linkEdges.set(ekStr, new Set());
-        }
-        this.prov.linkEdges.get(ekStr)!.add(toKey);
-        const childKey: EvalKey = {
-          ir: key.ir,
-          doc: tgt.id,
-          path: toTokens(tgt.path),
-          budget: key.budget - 1,
-        };
+        const childKey: EvalKey = { ir: key.ir, doc: to.doc, path: to.path, budget: key.budget - 1 };
         deps.add(childKey);
-        const res = this.evaluate(childKey, at).verdict;
+        const res = this.evaluate(childKey, at, ctx).verdict;
         if (res === "No") verdict = "No";
-        else if (res === "MaybeExceededDepth" || verdict === "MaybeExceededDepth")
-          verdict = "MaybeExceededDepth";
+        else if (res === "MaybeExceededDepth" || verdict === "MaybeExceededDepth") verdict = "MaybeExceededDepth";
         else verdict = "Yes";
       }
+      ctx.seenIRDoc.delete(visitKey);
     }
 
     const result: EvalResult = { verdict, touches, linkEdges, deps };
