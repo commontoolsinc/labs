@@ -93,7 +93,8 @@ class SQLiteSpace implements SpaceStorage {
           | undefined;
         const lastLamport = last?.lamport ?? 0;
         if (lastLamport >= header.seq) {
-          rejectedReason = `non-monotonic seq for actor ${header.actorId}: ${header.seq} <= ${lastLamport}`;
+          rejectedReason =
+            `non-monotonic seq for actor ${header.actorId}: ${header.seq} <= ${lastLamport}`;
           break;
         }
 
@@ -143,8 +144,38 @@ class SQLiteSpace implements SpaceStorage {
     };
   }
 
-  getDocBytes(): Promise<Uint8Array> {
-    throw new Error("not implemented: getDocBytes");
+  async getDocBytes(
+    docId: DocId,
+    branch: BranchName,
+    opts?: { accept?: "automerge" | "json"; epoch?: number; paths?: string[][] },
+  ): Promise<Uint8Array> {
+    const db = this.handle.db;
+    const state = readBranchState(db, docId, branch);
+    // Load change bytes up to optional epoch
+    const rows = db.prepare(
+      `SELECT b.bytes AS bytes
+       FROM am_change_index i JOIN am_change_blobs b ON (i.bytes_hash = b.bytes_hash)
+       WHERE i.doc_id = :doc_id AND i.branch_id = :branch_id AND (:epoch IS NULL OR i.tx_id <= :epoch)
+       ORDER BY i.seq_no`,
+    ).all({ doc_id: docId, branch_id: state.branchId, epoch: opts?.epoch ?? null }) as Array<{ bytes: Uint8Array }>;
+    const changes = rows.map((r) => r.bytes);
+    // Fallback reconstruction via applyChanges
+    // deno-lint-ignore no-explicit-any
+    let doc: any = (globalThis as any).AutomergeInit ? (globalThis as any).AutomergeInit() : undefined;
+    // Always use our imported Automerge to avoid global ambiguity
+    // dynamic import to avoid circular import at top
+    const Automerge = await import("@automerge/automerge");
+    const applied = Automerge.applyChanges(Automerge.init(), changes);
+    const docRoot = Array.isArray(applied) ? applied[0] : applied;
+    const accept = opts?.accept ?? "automerge";
+    if (accept === "json") {
+      const jsonObj = Automerge.toJS(docRoot);
+      const bytes = new TextEncoder().encode(JSON.stringify(jsonObj));
+      return bytes;
+    }
+    // default automerge bytes
+    const saved = Automerge.save(docRoot);
+    return saved;
   }
 }
 
