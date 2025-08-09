@@ -92,6 +92,7 @@ export interface SpaceStorage {
     opts?: {
       accept?: "automerge" | "json";
       epoch?: number;
+      at?: string;
       paths?: string[][];
     },
   ): Promise<Uint8Array>;
