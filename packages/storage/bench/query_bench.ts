@@ -169,31 +169,22 @@ await seedOnce();
 // ---------------------------
 
 // --- VDOM benchmarks ---
-Deno.bench({ name: "vdom: validate VNode schema unrolled to depth 6", group: "queries", n: 1 }, () => {
-  // Build an acyclic, depth-unrolled recursive schema to avoid compile-time self-recursion
-  function vnodeAtDepth(d: number): any {
-    if (d <= 0) {
-      return {
+Deno.bench({ name: "vdom: validate VNode schema ($defs recursive)", group: "queries", n: 1 }, () => {
+  // Recursive VNode schema using $defs; evaluator must cap traversal via budget
+  const VNodeRecursive = {
+    $defs: {
+      VNode: {
         type: "object",
         properties: {
           tag: { enum: Array.from(TAGS) },
           props: { type: "object", additionalProperties: true },
-          children: { type: "array" },
+          children: { type: "array", items: { $ref: "#/$defs/VNode" } },
         },
-      };
-    }
-    const child = vnodeAtDepth(d - 1);
-    return {
-      type: "object",
-      properties: {
-        tag: { enum: Array.from(TAGS) },
-        props: { type: "object", additionalProperties: true },
-        children: { type: "array", items: child },
       },
-    };
-  }
-  const VNodeDepth = vnodeAtDepth(VDOM_DEPTH);
-  const ir = compileSchema(pool, VNodeDepth);
+    },
+    $ref: "#/$defs/VNode",
+  } as const;
+  const ir = compileSchema(pool, VNodeRecursive as any);
   const deadline = performance.now() + 2000; // 2s soft timeout
   let ok = 0;
   for (let i = 0; i < Math.min(20, VDOM_NODES); i++) {
