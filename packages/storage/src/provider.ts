@@ -1,16 +1,20 @@
 import type {
   BranchName,
   BranchState,
+  DecodedChangeHeader,
   DocId,
   SpaceStorage,
   StorageProvider,
+  TxDocResult,
   TxReceipt,
   TxRequest,
-  DecodedChangeHeader,
-  TxDocResult,
 } from "../interface.ts";
 import { openSqlite, type SqliteHandle } from "./sqlite/db.ts";
-import { getBranchState as readBranchState, getOrCreateBranch as ensureBranch, getOrCreateDoc as ensureDoc } from "./sqlite/heads.ts";
+import {
+  getBranchState as readBranchState,
+  getOrCreateBranch as ensureBranch,
+  getOrCreateDoc as ensureDoc,
+} from "./sqlite/heads.ts";
 import { decodeChangeHeader } from "./sqlite/change.ts";
 import type { Database } from "@db/sqlite";
 
@@ -25,7 +29,10 @@ class SQLiteSpace implements SpaceStorage {
     await ensureDoc(this.handle.db, docId);
   }
 
-  async getOrCreateBranch(docId: DocId, branch: BranchName): Promise<BranchState> {
+  async getOrCreateBranch(
+    docId: DocId,
+    branch: BranchName,
+  ): Promise<BranchState> {
     return await ensureBranch(this.handle.db, docId, branch);
   }
 
@@ -43,7 +50,12 @@ class SQLiteSpace implements SpaceStorage {
       const current = readBranchState(db, docId, branch);
 
       if (JSON.stringify(current.heads) !== JSON.stringify(write.baseHeads)) {
-        results.push({ ref: write.ref, status: "conflict", reason: "baseHeads mismatch", newHeads: current.heads });
+        results.push({
+          ref: write.ref,
+          status: "conflict",
+          reason: "baseHeads mismatch",
+          newHeads: current.heads,
+        });
         continue;
       }
 
@@ -73,7 +85,11 @@ class SQLiteSpace implements SpaceStorage {
 
       if (rejectedReason) {
         // do not persist, report rejection
-        results.push({ ref: write.ref, status: "rejected", reason: rejectedReason });
+        results.push({
+          ref: write.ref,
+          status: "rejected",
+          reason: rejectedReason,
+        });
         continue;
       }
 
@@ -96,7 +112,13 @@ class SQLiteSpace implements SpaceStorage {
   }
 }
 
-function updateHeads(db: Database, branchId: string, heads: string[], seqNo: number, epoch: number): void {
+function updateHeads(
+  db: Database,
+  branchId: string,
+  heads: string[],
+  seqNo: number,
+  epoch: number,
+): void {
   const headsJson = JSON.stringify(heads);
   db.run(
     `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = x'', committed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
