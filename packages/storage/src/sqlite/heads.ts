@@ -1,8 +1,14 @@
 import type { BranchName, BranchState, DocId, Heads } from "../../interface.ts";
+import {
+  refer as referJson,
+  toDigest as refToDigest,
+} from "merkle-reference/json";
 import type { Database } from "@db/sqlite";
 
 export function getOrCreateDoc(db: Database, docId: DocId): void {
-  db.run(`INSERT OR IGNORE INTO docs(doc_id) VALUES (:doc_id);`, { doc_id: docId });
+  db.run(`INSERT OR IGNORE INTO docs(doc_id) VALUES (:doc_id);`, {
+    doc_id: docId,
+  });
 }
 
 export async function getOrCreateBranch(
@@ -20,9 +26,13 @@ export async function getOrCreateBranch(
   // Insert default heads state if missing
   db.run(
     `INSERT OR IGNORE INTO am_heads(branch_id, heads_json, seq_no, tx_id, root_hash, committed_at)
-     SELECT b.branch_id, '[]', 0, 0, x'', strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     SELECT b.branch_id, '[]', 0, 0, :root_hash, strftime('%Y-%m-%dT%H:%M:%fZ','now')
      FROM branches b WHERE b.doc_id = :doc_id AND b.name = :name;`,
-    { doc_id: docId, name: branch },
+    {
+      doc_id: docId,
+      name: branch,
+      root_hash: new Uint8Array(refToDigest(referJson({ heads: [] }))),
+    },
   );
   return await getBranchState(db, docId, branch);
 }
@@ -38,7 +48,13 @@ export function getBranchState(
      WHERE b.doc_id = :doc_id AND b.name = :name`,
   );
   const row = stmt.get({ doc_id: docId, name: branch }) as
-    | { branch_id: string; heads_json: string; seq_no: number; tx_id: number; root_hash: Uint8Array | null }
+    | {
+      branch_id: string;
+      heads_json: string;
+      seq_no: number;
+      tx_id: number;
+      root_hash: Uint8Array | null;
+    }
     | undefined;
   if (!row) {
     throw new Error(`Branch not found for doc ${docId} / ${branch}`);
@@ -61,5 +77,3 @@ function bytesToHex(bytes: Uint8Array): string {
   }
   return hex.join("");
 }
-
-
