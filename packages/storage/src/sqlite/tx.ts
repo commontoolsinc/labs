@@ -82,6 +82,7 @@ export function createTxProcessor(db: Database, _opts?: TxProcessorOptions) {
   return { submitTx: (req: TxRequest) => submitTx(db, req) };
 }
 
+const MAX_DELIVERY_QUEUE = 1000; // bounded per-subscription buffer
 function enqueueSubscriptionDeliveries(db: Database, docId: string, branchId: string, seqNo: number, txId: number) {
   // Find all subscriptions in this space DB (space is implicit by DB file)
   const subs = db.prepare(`SELECT id FROM subscriptions`).all() as { id: number }[];
@@ -89,6 +90,21 @@ function enqueueSubscriptionDeliveries(db: Database, docId: string, branchId: st
   const payload = { kind: 'doc_update', docId, branchId, seqNo, txId, committedAt: new Date().toISOString() };
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
   for (const s of subs) {
+    // enforce bounded buffer: keep at most MAX_DELIVERY_QUEUE unacked rows
+    const counts = db.prepare(
+      `SELECT COUNT(1) AS unacked FROM subscription_deliveries WHERE subscription_id = :sid AND acked = 0`
+    ).get({ sid: s.id }) as { unacked: number } | undefined;
+    const unacked = counts?.unacked ?? 0;
+    if (unacked >= MAX_DELIVERY_QUEUE) {
+      // drop oldest unacked to make room (at-least-once semantics tolerate drops if consumer is too slow)
+      const toDrop = unacked - MAX_DELIVERY_QUEUE + 1;
+      db.run(
+        `DELETE FROM subscription_deliveries WHERE id IN (
+           SELECT id FROM subscription_deliveries WHERE subscription_id = :sid AND acked = 0 ORDER BY delivery_no ASC LIMIT :lim
+         )`,
+        { sid: s.id, lim: toDrop },
+      );
+    }
     // delivery_no = last + 1
     const last = db.prepare(`SELECT MAX(delivery_no) AS last FROM subscription_deliveries WHERE subscription_id = :sid`).get({ sid: s.id }) as { last: number } | undefined;
     const next = (last?.last ?? 0) + 1;

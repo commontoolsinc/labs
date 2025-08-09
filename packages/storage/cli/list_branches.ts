@@ -2,7 +2,7 @@
 
 // new-storage:list-branches --space <space>
 
-import { parse } from "jsr:@std/cli/parse";
+import { parseArgs } from "jsr:@std/cli/parse-args";
 import { openSqlite } from "../src/sqlite/db.ts";
 
 function usage() {
@@ -11,7 +11,7 @@ function usage() {
 }
 
 if (import.meta.main) {
-  const args = parse(Deno.args, { string: ["space"] });
+  const args = parseArgs(Deno.args, { string: ["space"] });
   const space = args.space as string | undefined;
   if (!space) usage();
 

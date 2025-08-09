@@ -123,3 +123,11 @@ backend running in the cloud, by running the following command:
 ```shell
 TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
 ```
+
+## Running tests
+
+Always use the workspace test runner:
+
+- deno task test
+
+This aggregates per-package test commands and avoids mirrored paths under .conductor that are not wired to the import map. Running plain deno test -A from the repo root may fail due to those mirrored files. If you need to run a specific package's tests, use its package-level task (see that package’s deno.json).
