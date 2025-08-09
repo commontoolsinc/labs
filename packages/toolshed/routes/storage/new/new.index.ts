@@ -5,10 +5,12 @@ import * as handlers from "./new.handlers.ts";
 const router = createRouter();
 
 const Router = router
-  .openapi(routes.createDoc, handlers.createDoc)
   .openapi(routes.heads, handlers.heads)
   .openapi(routes.tx, handlers.tx)
-  // WebSocket endpoint for storage (tx + query subscriptions share the same WS)
-  .get("/api/storage/new/v1/:space/ws", handlers.wsHandler);
+  .openapi(routes.pit, handlers.pit)
+  .openapi(routes.query, handlers.query)
+  .openapi(routes.snapshot, handlers.snapshot)
+  .openapi(routes.mergeInto, handlers.mergeInto)
+  .get("/spaces/:spaceId/subscribe", handlers.wsHandler);
 
 export default Router;

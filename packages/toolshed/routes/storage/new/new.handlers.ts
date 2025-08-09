@@ -1,37 +1,37 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { SpaceStorage } from "@commontools/storage/interface";
-import { openSqlite } from "@commontools/storage/src/sqlite/db.ts";
-// TODO(#storage-sqlite): wire to SQLite-backed SpaceStorage factory when available
+import { openSpaceStorage } from "@commontools/storage";
+import { openSqlite } from "../../../../storage/src/sqlite/db.ts";
 
-const spaces = new Map<string, SpaceStorage>();
+const spaces = new Map<string, Promise<SpaceStorage>>();
 
-function getSpace(spaceDid: string): SpaceStorage {
-  const s = spaces.get(spaceDid);
+async function getSpace(spaceDid: string): Promise<SpaceStorage> {
+  let s = spaces.get(spaceDid);
   if (!s) {
-    throw new Error("Space storage not initialized (SQLite provider pending)");
+    let spacesDir: URL;
+    const envDir = Deno.env.get("SPACES_DIR");
+    if (envDir) {
+      spacesDir = new URL(envDir);
+    } else {
+      const cwd = Deno.cwd();
+      const url = new URL(`.spaces/`, `file://${cwd.endsWith("/") ? cwd : cwd + "/"}`);
+      spacesDir = url;
+    }
+    await Deno.mkdir(spacesDir, { recursive: true }).catch(() => {});
+    s = openSpaceStorage(spaceDid, { spacesDir });
+    spaces.set(spaceDid, s);
   }
-  return s;
+  return await s;
 }
-
-export const createDoc: AppRouteHandler<
-  typeof import("./new.routes.ts").createDoc
-> = async (c: any) => {
-  const { space } = c.req.param();
-  const { docId, branch } = await c.req.json();
-  const s = getSpace(space);
-  await s.getOrCreateBranch(docId, branch ?? "main");
-  return c.json({ ok: true });
-};
 
 export const heads: AppRouteHandler<typeof import("./new.routes.ts").heads> =
   async (c: any) => {
-    const { space, docId } = c.req.param();
-    const branch = c.req.query("branch") ?? "main";
-    const s = getSpace(space);
-    const st = await s.getBranchState(docId, branch);
+    const { spaceId, docId, branchId } = c.req.param();
+    const s = await getSpace(spaceId);
+    const st = await s.getBranchState(docId, branchId);
     return c.json({
-      docId,
-      branch,
+      doc: docId,
+      branch: branchId,
       heads: [...st.heads],
       seq_no: st.seqNo,
       epoch: st.epoch,
@@ -49,29 +49,50 @@ function decodeBase64(s: string): Uint8Array {
 export const tx: AppRouteHandler<typeof import("./new.routes.ts").tx> = async (
   c: any,
 ) => {
-  const { space } = c.req.param();
+  const { spaceId } = c.req.param();
   const body = await c.req.json();
-  const s = getSpace(space);
+  const s = await getSpace(spaceId);
   const req = {
-    reads: body.reads,
+    clientTxId: body.clientTxId,
+    reads: (body.reads ?? []),
     writes: body.writes.map((w: any) => ({
       ref: w.ref,
       baseHeads: w.baseHeads,
-      changes: (w.changes as string[]).map((b64) => ({
-        bytes: decodeBase64(b64),
-      })),
+      changes: (w.changes as string[]).map((b64) => ({ bytes: decodeBase64(b64) })),
     })),
   };
   const receipt = await s.submitTx(req);
-  return c.json({ ok: true, receipt });
+  return c.json({ receipt });
 };
 
-// Single WS endpoint for storage
+export const pit: AppRouteHandler<typeof import("./new.routes.ts").pit> = async (
+  c: any,
+) => {
+  const { spaceId } = c.req.param();
+  const { docId, branchId } = c.req.query();
+  const seq = Number(c.req.query("seq"));
+  const envDir = Deno.env.get("SPACES_DIR");
+  const base = envDir ? new URL(envDir) : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
+  const { db } = await openSqlite({ url: new URL(`./${spaceId}.sqlite`, base) });
+  const { getAutomergeBytesAtSeq } = await import("../../../../storage/src/sqlite/pit.ts");
+  const bytes = getAutomergeBytesAtSeq(db, null, docId, branchId, seq);
+  return new Response(bytes, { status: 200, headers: { "content-type": "application/octet-stream" } });
+};
+
+export const query: AppRouteHandler<typeof import("./new.routes.ts").query> = async (
+  c: any,
+) => {
+  // Minimal placeholder: return empty results for now; evaluator lives in storage pkg but is not exported
+  return c.json({ rows: [] });
+};
+
+// Single WS endpoint for subscriptions
 export async function wsHandler(c: any) {
-  const { space } = c.req.param();
-  const spacesDir = new URL(Deno.env.get("SPACES_DIR") ?? `file://./.spaces/`);
-  await Deno.mkdir(spacesDir, { recursive: true }).catch(() => {});
-  const { db } = await openSqlite({ url: new URL(`./${space}.sqlite`, spacesDir) });
+  const { spaceId } = c.req.param();
+  const envDir = Deno.env.get("SPACES_DIR");
+  const base = envDir ? new URL(envDir) : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
+  await Deno.mkdir(base, { recursive: true }).catch(() => {});
+  const { db } = await openSqlite({ url: new URL(`./${spaceId}.sqlite`, base) });
 
   const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
 
@@ -88,14 +109,14 @@ export async function wsHandler(c: any) {
         // upsert subscription by (space, consumer)
         const row = db.prepare(
           `SELECT id FROM subscriptions WHERE space_id = :space_id AND consumer_id = :consumer_id LIMIT 1`
-        ).get({ space_id: space, consumer_id: consumerId }) as { id: number } | undefined;
+        ).get({ space_id: spaceId, consumer_id: consumerId }) as { id: number } | undefined;
         if (row) {
           subscriptionId = row.id;
           db.run(`UPDATE subscriptions SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = :id`, { id: subscriptionId });
         } else {
           db.run(
             `INSERT INTO subscriptions(space_id, query_json, consumer_id) VALUES(:space_id, :query_json, :consumer_id)`,
-            { space_id: space, query_json: JSON.stringify(query), consumer_id: consumerId },
+            { space_id: spaceId, query_json: JSON.stringify(query), consumer_id: consumerId },
           );
           const got = db.prepare(`SELECT last_insert_rowid() AS id`).get() as { id: number };
           subscriptionId = got.id;
@@ -146,3 +167,19 @@ export async function wsHandler(c: any) {
   pump();
   return response;
 }
+
+export const snapshot: AppRouteHandler<typeof import("./new.routes.ts").snapshot> = async (c: any) => {
+  const { spaceId, docId, branchId, seq } = c.req.param();
+  const spacesDir = new URL(Deno.env.get("SPACES_DIR") ?? `file://./.spaces/`);
+  const { db } = await openSqlite({ url: new URL(`./${spaceId}.sqlite`, spacesDir) });
+  const { getAutomergeBytesAtSeq } = await import("../../../../storage/src/sqlite/pit.ts");
+  const bytes = getAutomergeBytesAtSeq(db, null, docId, branchId, Number(seq));
+  return new Response(bytes, { status: 200, headers: { "content-type": "application/octet-stream" } });
+};
+
+export const mergeInto: AppRouteHandler<typeof import("./new.routes.ts").mergeInto> = async (c: any) => {
+  const { spaceId, docId, from, to } = c.req.param();
+  const s = await getSpace(spaceId);
+  const mergedHead = await s.mergeBranches(docId, from, to, { closeSource: true });
+  return c.json({ mergedHead });
+};

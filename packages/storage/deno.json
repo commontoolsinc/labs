@@ -13,7 +13,11 @@
         "check"
       ],
       "command": "deno test -A"
-    }
+    },
+    "new-storage:export-snapshot": "deno run -A ./cli/export_snapshot.ts",
+    "new-storage:import-snapshot": "deno run -A ./cli/import_snapshot.ts",
+    "new-storage:list-spaces": "deno run -A ./cli/list_spaces.ts",
+    "new-storage:list-branches": "deno run -A ./cli/list_branches.ts"
   },
   "test": {
     "include": [
