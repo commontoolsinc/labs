@@ -44,6 +44,7 @@ export interface WriteRequest {
   baseHeads: Heads;
   changes: ReadonlyArray<SubmittedChange>;
   mergeOf?: Array<{ branch: BranchName; heads: Heads }>;
+  allowServerMerge?: boolean; // optional per-write override
 }
 
 export interface ReadAssert {

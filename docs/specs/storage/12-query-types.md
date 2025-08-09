@@ -256,6 +256,13 @@ interface QueryIndexes {
 
 ## Function Signatures
 
+Note on recursive schemas: compileSchema must support self- and mutual-recursive $ref without unbounded recursion. The compiler should:
+- Track a memoization map of visited schema nodes.
+- For object-like schemas, insert a provisional local IR id into the memo before compiling child schemas. This breaks cycles so recursive references reuse the provisional id.
+- After compiling children, produce the final IR node and either bind it to the provisional id (if referenced) or return the canonical interned id.
+
+This ensures schemas like VNode whose children items are $ref back to VNode, or mutually recursive A/B schemas, compile to finite IR graphs and evaluate with a traversal budget.
+
 ```ts
 // Core evaluation function
 function evaluate(key: EvalKey): EvalResult;

@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import * as Automerge from "npm:@automerge/automerge";
-import { openSpaceStorage } from "../src/provider.ts";
+import { openSpaceStorage } from "../../src/provider.ts";
 
 Deno.test({ name: "single-writer hammer: 100 concurrent tx", permissions: { read: true, write: true, env: true, net: true } }, async () => {
   const tmpDir = await Deno.makeTempDir();

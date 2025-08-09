@@ -66,7 +66,7 @@ class SQLiteSpace implements SpaceStorage {
       branch: w.ref.branch,
       baseHeads: w.baseHeads,
       changes: w.changes.map((c) => ({ bytes: c.bytes })),
-      allowServerMerge: isServerMergeEnabled(db),
+      allowServerMerge: w.allowServerMerge ?? isServerMergeEnabled(db),
     }));
 
     const receipt = await submitTxInternal(db, { reads, writes, txId: req.clientTxId });
