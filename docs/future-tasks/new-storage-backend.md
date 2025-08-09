@@ -176,15 +176,15 @@ Acceptance:
 
 ### 7. Queries and subscriptions
 
-- [ ] Query IR compiler and evaluator with provenance/touch set tracking.
-- [ ] Link traversal semantics and depth budgeting.
-- [ ] Subscription tables from §11 and WS server handling; at-least-once with
-      acks.
+- [x] Query IR compiler and evaluator with provenance/touch set tracking.
+- [x] Link traversal semantics and depth budgeting.
+- [x] Subscription tables from §11 and WS server handling; at-least-once with
+      acks (single WS endpoint shared with tx at /api/storage/new/v1/:space/ws; resume via last acked).
 
 Acceptance:
 
 - Query tests: filters, sorts, limits, joins/reference traversals.
-- Subscription tests: multiple consumers, ordering, no duplication.
+- Subscription tests: multiple consumers, ordering, no duplication, reconnect resume.
 
 ### 8. UCAN / Access control (MVP)
 

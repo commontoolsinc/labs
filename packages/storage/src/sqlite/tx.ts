@@ -82,6 +82,23 @@ export function createTxProcessor(db: Database, _opts?: TxProcessorOptions) {
   return { submitTx: (req: TxRequest) => submitTx(db, req) };
 }
 
+function enqueueSubscriptionDeliveries(db: Database, docId: string, branchId: string, seqNo: number, txId: number) {
+  // Find all subscriptions in this space DB (space is implicit by DB file)
+  const subs = db.prepare(`SELECT id FROM subscriptions`).all() as { id: number }[];
+  if (!subs || subs.length === 0) return;
+  const payload = { kind: 'doc_update', docId, branchId, seqNo, txId, committedAt: new Date().toISOString() };
+  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  for (const s of subs) {
+    // delivery_no = last + 1
+    const last = db.prepare(`SELECT MAX(delivery_no) AS last FROM subscription_deliveries WHERE subscription_id = :sid`).get({ sid: s.id }) as { last: number } | undefined;
+    const next = (last?.last ?? 0) + 1;
+    db.run(
+      `INSERT OR IGNORE INTO subscription_deliveries(subscription_id, delivery_no, payload, acked) VALUES(:sid, :dno, :payload, 0)`,
+      { sid: s.id, dno: next, payload: bytes },
+    );
+  }
+}
+
 // Main entry: submit multi-doc tx with validations and invariants
 export async function submitTx(db: Database, req: TxRequest): Promise<TxReceipt> {
   // BEGIN IMMEDIATE for atomicity and to lock the space DB for writes
@@ -248,6 +265,14 @@ export async function submitTx(db: Database, req: TxRequest): Promise<TxReceipt>
       } catch (e) {
         results.push({ docId, branch, status: "conflict", reason: `invariant/materialize failed: ${(e as Error).message}` });
         continue;
+      }
+
+      // Emit subscription deliveries (at-least-once) for this doc change
+      try {
+        enqueueSubscriptionDeliveries(db, docId, write.branchId as string, seqNo, txId);
+      } catch (e) {
+        // Do not fail tx if notifications fail; at-least-once will catch up on next tx
+        console.warn('subscription delivery enqueue failed', e);
       }
 
       results.push({ docId, branch, status: "ok", newHeads, applied });
