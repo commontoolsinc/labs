@@ -19,7 +19,7 @@ try {
 }
 
 // Remove quoted strings before checking for node commands
-const cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, '');
+const cmdWithoutQuotes = cmd.replace(/(['"`])[^'"`]*?\1/g, "");
 
 if (/\b(npm|npx|yarn|pnpm|node)\b/.test(cmdWithoutQuotes)) {
   console.error(

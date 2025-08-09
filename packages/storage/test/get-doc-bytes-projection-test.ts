@@ -15,9 +15,19 @@ Deno.test("getDocBytes json supports path projection", async () => {
     doc.value = { a: 1, b: { c: 2, d: 3 } };
   });
   const c1 = Automerge.getLastLocalChange(d)!;
-  await space.submitTx({ reads: [], writes: [ { ref: { docId, branch }, baseHeads: [], changes: [ { bytes: c1 } ] } ] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: [],
+      changes: [{ bytes: c1 }],
+    }],
+  });
 
-  const bytes = await space.getDocBytes(docId, branch, { accept: "json", paths: [["value", "b", "c"]] });
+  const bytes = await space.getDocBytes(docId, branch, {
+    accept: "json",
+    paths: [["value", "b", "c"]],
+  });
   const json = JSON.parse(new TextDecoder().decode(bytes));
   assertEquals(json, { value: { b: { c: 2 } } });
 });

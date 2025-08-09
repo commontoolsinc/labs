@@ -25,3 +25,4 @@ type TxRequest = {
   invariants?: { type: string; name?: string; params?: any }[];
   options?: { returnPatches?: boolean; returnHeads?: boolean };
 };
+```

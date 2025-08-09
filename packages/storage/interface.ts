@@ -89,6 +89,10 @@ export interface SpaceStorage {
   getDocBytes(
     docId: DocId,
     branch: BranchName,
-    opts?: { accept?: "automerge" | "json"; epoch?: number; paths?: string[][] },
+    opts?: {
+      accept?: "automerge" | "json";
+      epoch?: number;
+      paths?: string[][];
+    },
   ): Promise<Uint8Array>;
 }

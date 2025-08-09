@@ -13,5 +13,3 @@ export function decodeChangeHeader(bytes: Uint8Array): DecodedChangeHeader {
     seq: change.seq,
   };
 }
-
-

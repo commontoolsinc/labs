@@ -17,7 +17,10 @@ import {
 } from "./sqlite/heads.ts";
 import { decodeChangeHeader } from "./sqlite/change.ts";
 import type { Database } from "@db/sqlite";
-import { refer as referJson, toDigest as refToDigest } from "merkle-reference/json";
+import {
+  refer as referJson,
+  toDigest as refToDigest,
+} from "merkle-reference/json";
 
 export interface SQLiteSpaceOptions {
   spacesDir: URL; // directory where per-space sqlite files live
@@ -206,7 +209,13 @@ function updateHeads(
   db.run(
     `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = :root_hash, committed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
      WHERE branch_id = :branch_id`,
-    { heads_json: headsJson, seq_no: seqNo, tx_id: epoch, branch_id: branchId, root_hash: rootHashBytes },
+    {
+      heads_json: headsJson,
+      seq_no: seqNo,
+      tx_id: epoch,
+      branch_id: branchId,
+      root_hash: rootHashBytes,
+    },
   );
 }
 

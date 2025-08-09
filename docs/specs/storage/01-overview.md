@@ -69,6 +69,7 @@ Two URI types:
   - Immutable, content-addressed bytes — no branches/change history.
   - When CID interop is not required, implementations MAY instead address
     immutable blobs with `merkle-reference`.
+
 ## Document Structure
 
 **Automerge documents (`doc:`) have a standardized internal structure:**

@@ -13,34 +13,61 @@ Deno.test("client merge collapses two heads into one", async () => {
 
   // Two independent changes from empty base
   let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => { doc.value = { n: 1 }; });
+  let d1 = Automerge.change(d0, (doc: any) => {
+    doc.value = { n: 1 };
+  });
   const c1 = Automerge.getLastLocalChange(d1)!;
   const h1 = decodeChangeHeader(c1).changeHash;
 
   let e0 = Automerge.init();
-  let e1 = Automerge.change(e0, (doc: any) => { doc.value = { n: 2 }; });
+  let e1 = Automerge.change(e0, (doc: any) => {
+    doc.value = { n: 2 };
+  });
   const c2 = Automerge.getLastLocalChange(e1)!;
   const h2 = decodeChangeHeader(c2).changeHash;
 
   // Submit first change
-  await space.submitTx({ reads: [], writes: [ { ref: { docId, branch }, baseHeads: [], changes: [ { bytes: c1 } ] } ] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: [],
+      changes: [{ bytes: c1 }],
+    }],
+  });
   const s1 = await space.getBranchState(docId, branch);
   assertEquals(s1.heads, [h1]);
 
   // Submit second change on top (creates fork: heads become [h1, h2])
-  await space.submitTx({ reads: [], writes: [ { ref: { docId, branch }, baseHeads: s1.heads, changes: [ { bytes: c2 } ] } ] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: s1.heads,
+      changes: [{ bytes: c2 }],
+    }],
+  });
   const s2 = await space.getBranchState(docId, branch);
   assertEquals(s2.heads, [h1, h2].sort());
 
   // Build a merge change with deps = [h1, h2]
   const applied = Automerge.applyChanges(Automerge.init(), [c1, c2]);
   const baseDoc = Array.isArray(applied) ? applied[0] : applied;
-  const mergedDoc = Automerge.change(baseDoc, (doc: any) => { doc.value.merged = true; });
+  const mergedDoc = Automerge.change(baseDoc, (doc: any) => {
+    doc.value.merged = true;
+  });
   const cm = Automerge.getLastLocalChange(mergedDoc)!;
   const hm = decodeChangeHeader(cm).changeHash;
 
   // Submit merge change with baseHeads equal to current heads
-  await space.submitTx({ reads: [], writes: [ { ref: { docId, branch }, baseHeads: s2.heads, changes: [ { bytes: cm } ] } ] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: s2.heads,
+      changes: [{ bytes: cm }],
+    }],
+  });
   const s3 = await space.getBranchState(docId, branch);
   assertEquals(s3.seqNo, 3);
   assertEquals(s3.heads, [hm]);

@@ -1,6 +1,8 @@
 # API Surface (WebSocket only)
 
-All interactions are scoped by `:spaceDid`. The API is provided exclusively over a single WebSocket endpoint. REST/HTTP endpoints are out of scope for the initial cut and may be added later if needed.
+All interactions are scoped by `:spaceDid`. The API is provided exclusively over
+a single WebSocket endpoint. REST/HTTP endpoints are out of scope for the
+initial cut and may be added later if needed.
 
 ## WebSocket `/v1/:space/ws`
 
@@ -66,5 +68,10 @@ Text frames (JSON) multiplexed across docs and queries.
 ```
 
 Notes:
-- All document creation and branch management occur implicitly via transactions. A client can create a doc and branch by submitting a write with an empty read set; the server ensures records exist.
-- Retrieval of doc bytes occurs via subscription + changes stream, or via an optional future RPC if needed. Initial cut defers a standalone “GET doc” to keep scope minimal.
+
+- All document creation and branch management occur implicitly via transactions.
+  A client can create a doc and branch by submitting a write with an empty read
+  set; the server ensures records exist.
+- Retrieval of doc bytes occurs via subscription + changes stream, or via an
+  optional future RPC if needed. Initial cut defers a standalone “GET doc” to
+  keep scope minimal.
