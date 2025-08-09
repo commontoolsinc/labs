@@ -188,8 +188,8 @@ Acceptance:
 
 ### 8. UCAN / Access control (MVP)
 
-- [ ] Minimal UCAN validation and capability checks.
-- [ ] Enforce space-level caps on tx and read endpoints.
+- [x] Minimal UCAN validation and capability checks.
+- [x] Enforce space-level caps on tx and read endpoints.
 
 Acceptance:
 
@@ -197,10 +197,10 @@ Acceptance:
 
 ### 9. Toolshed integration (flagged)
 
-- [ ] Add routes under `packages/toolshed/routes/storage/new/` for docs/branches
+- [x] Add routes under `packages/toolshed/routes/storage/new/` for docs/branches
       heads, tx, PIT read, query, subscribe, snapshots; use `doc:<ref>` and
       `root_ref` in responses.
-- [ ] Gate on `ENABLE_NEW_STORAGE`.
+- [x] Gate on `ENABLE_NEW_STORAGE`.
 
 Acceptance:
 
@@ -208,11 +208,25 @@ Acceptance:
 
 ### 10. Tooling (no migration needed)
 
-- [ ] CLI for exporting/importing snapshots and listing spaces/branches.
+- [x] CLI for exporting/importing snapshots and listing spaces/branches.
 
 Acceptance:
 
 - Docs updated; happy-path flows verified in tests.
+
+Usage examples:
+
+- List spaces (under $SPACES_DIR or ./.spaces):
+  deno task new-storage:list-spaces
+
+- List branches in a space:
+  deno task new-storage:list-branches -- --space my-space
+
+- Export a snapshot (Automerge binary) at a given seq to a file:
+  deno task new-storage:export-snapshot -- --space my-space --doc my-doc --branch main --seq 12 --out ./my-doc-main-12.am
+
+- Import a snapshot file for fast PIT (records in am_snapshots and CAS):
+  deno task new-storage:import-snapshot -- --space my-space --doc my-doc --branch main --file ./my-doc-main-12.am
 
 ## Module layout (proposed)
 
