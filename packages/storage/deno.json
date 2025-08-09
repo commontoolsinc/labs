@@ -10,9 +10,9 @@
     "test": {
       "description": "Type check & run tests",
       "dependencies": [
-        "check",
-        "test"
-      ]
+        "check"
+      ],
+      "command": "deno test -A"
     }
   },
   "test": {
