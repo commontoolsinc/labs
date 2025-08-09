@@ -1,13 +1,13 @@
 import type {
   BranchName,
   BranchState,
+  DecodedChangeHeader,
   DocId,
   SpaceStorage,
   StorageProvider,
+  TxDocResult,
   TxReceipt,
   TxRequest,
-  DecodedChangeHeader,
-  TxDocResult,
 } from "../interface.ts";
 import { openSqlite, type SqliteHandle } from "./sqlite/db.ts";
 import {
@@ -85,9 +85,21 @@ class SQLiteSpace implements SpaceStorage {
         );
 
         seqNo += 1;
+        // actor/seq monotonicity: ensure header.seq > last lamport for this actor on this branch
+        const last = db.prepare(
+          `SELECT lamport FROM am_change_index WHERE branch_id = :branch_id AND actor_id = :actor_id ORDER BY seq_no DESC LIMIT 1`,
+        ).get({ branch_id: current.branchId, actor_id: header.actorId }) as
+          | { lamport: number | null }
+          | undefined;
+        const lastLamport = last?.lamport ?? 0;
+        if (lastLamport >= header.seq) {
+          rejectedReason = `non-monotonic seq for actor ${header.actorId}: ${header.seq} <= ${lastLamport}`;
+          break;
+        }
+
         db.run(
           `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-           VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, NULL, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
+           VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
           {
             doc_id: docId,
             branch_id: current.branchId,
@@ -95,6 +107,7 @@ class SQLiteSpace implements SpaceStorage {
             change_hash: header.changeHash,
             bytes_hash: bytesHash,
             deps_json: JSON.stringify(header.deps),
+            lamport: header.seq,
             actor_id: header.actorId,
             tx_id: txId,
           },
@@ -166,9 +179,10 @@ function randomBytes(length: number): Uint8Array {
 
 function createStubTx(db: Database): number {
   // Find previous tx hash if any
-  const prev = db.prepare(`SELECT tx_hash FROM tx ORDER BY tx_id DESC LIMIT 1`).get() as
-    | { tx_hash: Uint8Array }
-    | undefined;
+  const prev = db.prepare(`SELECT tx_hash FROM tx ORDER BY tx_id DESC LIMIT 1`)
+    .get() as
+      | { tx_hash: Uint8Array }
+      | undefined;
   const prevHash = prev?.tx_hash ?? new Uint8Array();
   const txBodyHash = randomBytes(32);
   const txHash = randomBytes(32);
@@ -186,7 +200,8 @@ function createStubTx(db: Database): number {
     client_pubkey: randomBytes(32),
     ucan_jwt: "stub",
   });
-  const row = db.prepare(`SELECT tx_id FROM tx ORDER BY tx_id DESC LIMIT 1`).get() as { tx_id: number };
+  const row = db.prepare(`SELECT tx_id FROM tx ORDER BY tx_id DESC LIMIT 1`)
+    .get() as { tx_id: number };
   return row.tx_id;
 }
 
