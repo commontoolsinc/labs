@@ -109,7 +109,7 @@ Implementation:
 ### 3. Branching and merge semantics
 
 - [x] Create/close branches; lineage metadata.
-- [ ] Client-driven merge: accept merge change with deps = heads to collapse
+- [x] Client-driven merge: accept merge change with deps = heads to collapse
       branches; validate sources.
 - [ ] Optional server merge (flagged) using `Automerge.merge` to synthesize
       changes.
@@ -127,8 +127,8 @@ Implementation:
 
 ### 4. Snapshots (SQLite-backed)
 
-- [ ] Implement snapshot cadence and storage in `am_snapshots` / `am_chunks`.
-  - [ ] Full snapshots via `Automerge.save()`.
+- [x] Implement snapshot cadence and storage in `am_snapshots` / `am_chunks`.
+  - [x] Full snapshots via `Automerge.save()`.
   - [ ] Optional incremental chunks to accelerate PIT.
 - [x] Integrity: maintain `root_ref = referJSON({ heads: sorted(heads) })` in
       `am_heads` for verification.
@@ -136,6 +136,12 @@ Implementation:
 Acceptance:
 
 - Snapshot/restore tests; integrity check matches stored `root_ref`.
+
+Implementation:
+
+- Added `packages/storage/src/sqlite/snapshots.ts` with `maybeCreateSnapshot()` using a basic cadence (default 5 changes) and storing full snapshots with upto_seq_no.
+- Wired snapshot creation into submitTx() after heads update.
+- Added `packages/storage/test/snapshots-basic-test.ts` ensuring cadence triggers and PIT returns the latest state.
 
 ### 5. Transactions (multi-doc) and invariants
 

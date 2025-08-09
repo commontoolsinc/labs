@@ -21,6 +21,7 @@ import {
   refer as referJson,
   toDigest as refToDigest,
 } from "merkle-reference/json";
+import { maybeCreateSnapshot } from "./sqlite/snapshots.ts";
 
 export interface SQLiteSpaceOptions {
   spacesDir: URL; // directory where per-space sqlite files live
@@ -136,6 +137,8 @@ class SQLiteSpace implements SpaceStorage {
 
       // persist to am_heads
       updateHeads(db, current.branchId, newHeads, seqNo, txId);
+      // maybe create a snapshot according to cadence
+      maybeCreateSnapshot(db, docId, current.branchId, seqNo, newHeads, txId);
       results.push({ ref: write.ref, status: "ok", newHeads, applied });
     }
 
