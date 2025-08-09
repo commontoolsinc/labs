@@ -3,7 +3,7 @@
 ## Core Components
 
 - **Runtime:** Deno 2
-- **Web framework:** Hono (HTTP + WS)
+- **Web framework:** Hono (WebSocket-only for initial cut)
 - **DB:** SQLite via `npm:better-sqlite3` (fast, sync).
 
   - **One database per space** (see §1.1).
