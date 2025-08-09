@@ -37,11 +37,11 @@ class SQLiteSpace implements SpaceStorage {
     const db = this.handle.db;
     const results: TxDocResult[] = [];
 
-    // Minimal implementation: handle writes sequentially, validate baseHeads match current
     for (const write of req.writes) {
       const { docId, branch } = write.ref;
       await ensureBranch(db, docId, branch);
       const current = readBranchState(db, docId, branch);
+
       if (JSON.stringify(current.heads) !== JSON.stringify(write.baseHeads)) {
         results.push({ ref: write.ref, status: "conflict", reason: "baseHeads mismatch", newHeads: current.heads });
         continue;
@@ -49,27 +49,37 @@ class SQLiteSpace implements SpaceStorage {
 
       let newHeads = current.heads.slice();
       let seqNo = current.seqNo;
+      let applied = 0;
+      let rejectedReason: string | undefined;
 
       for (const change of write.changes) {
         const header: DecodedChangeHeader = decodeChangeHeader(change.bytes);
         // verify deps subset of current heads
         for (const dep of header.deps) {
           if (!newHeads.includes(dep)) {
-            results.push({ ref: write.ref, status: "rejected", reason: `missing dep ${dep}` });
-            continue;
+            rejectedReason = `missing dep ${dep}`;
+            break;
           }
         }
+        if (rejectedReason) break;
+
         // update heads: (heads - deps) ∪ {hash}
         newHeads = newHeads.filter((h) => !header.deps.includes(h));
         newHeads.push(header.changeHash);
-        // canonical sort for stability
         newHeads.sort();
         seqNo += 1;
+        applied += 1;
+      }
+
+      if (rejectedReason) {
+        // do not persist, report rejection
+        results.push({ ref: write.ref, status: "rejected", reason: rejectedReason });
+        continue;
       }
 
       // persist to am_heads
       updateHeads(db, current.branchId, newHeads, seqNo, current.epoch + 1);
-      results.push({ ref: write.ref, status: "ok", newHeads, applied: write.changes.length });
+      results.push({ ref: write.ref, status: "ok", newHeads, applied });
     }
 
     const now = new Date().toISOString();

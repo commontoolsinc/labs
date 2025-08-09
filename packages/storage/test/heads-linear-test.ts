@@ -31,7 +31,7 @@ Deno.test("linear changes update heads and seq", async () => {
       {
         ref: { docId, branch },
         baseHeads: [],
-        changes: [ { bytes: c1 } ],
+        changes: [{ bytes: c1 }],
       },
     ],
   });
@@ -54,7 +54,7 @@ Deno.test("linear changes update heads and seq", async () => {
       {
         ref: { docId, branch },
         baseHeads: s1.heads,
-        changes: [ { bytes: c2 } ],
+        changes: [{ bytes: c2 }],
       },
     ],
   });
