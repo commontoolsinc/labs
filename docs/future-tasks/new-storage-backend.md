@@ -60,26 +60,30 @@ This document tracks the implementation of the new storage backend described in
 
 ### 1. SQLite core (schema + heads-first)
 
-- [ ] Dependencies: add `npm:@automerge/automerge`
-- [ ] DB lifecycle: per-space DB file management, PRAGMAs, and connection pool
+- [x] Dependencies: add `npm:@automerge/automerge`
+- [x] DB lifecycle: per-space DB file management, PRAGMAs, and connection pool
       (single writer).
-- [ ] Migrations: implement `02-schema.md` tables and indexes; idempotent
+- [x] Migrations: implement `02-schema.md` tables and indexes; idempotent
       startup.
 - [ ] Heads path:
-  - [ ] Decode Automerge change bytes → `change_hash`, `deps`, `actor_id`,
+  - [x] Decode Automerge change bytes → `change_hash`, `deps`, `actor_id`,
         `seq`.
-  - [ ] Verify deps subset of current heads; update heads
+  - [x] Verify deps subset of current heads; update heads
         `(heads − deps) ∪ {hash}`.
-  - [ ] Reject if any `dep` missing for `(doc, branch)`.
+  - [x] Reject if any `dep` missing for `(doc, branch)`.
   - [ ] Enforce `actor_id`/`seq` monotonicity per actor in branch history.
   - [ ] CAS: store change bytes (dedup) in `am_change_blobs`; index rows in
         `am_change_index`.
-  - [ ] Maintain `am_heads(seq_no, tx_id, heads_json, root_hash)`.
+  - [x] Maintain `am_heads(seq_no, tx_id, heads_json, root_hash)` (root_hash
+        placeholder for now).
 
 Acceptance:
 
 - Unit tests cover head updates (linear change, fork, merge), dep missing, and
   actor/seq monotonicity.
+
+Current: linear, fork, and client-merge tests implemented; missing-dep covered;
+actor/seq monotonicity pending.
 
 ### 2. Point-in-time (PIT) and projection
 
@@ -216,7 +220,7 @@ packages/storage/src/
 ## Dependency additions
 
 - `npm:@automerge/automerge` — change parsing, apply/save.
-- use `node:sqlite` for sqlite
+- use `@db/sqlite` for SQLite in Deno (replaces earlier `node:sqlite` note)
 - Reuse `identity` package for Ed25519 where possible.
 
 ## Testing & CI
