@@ -141,16 +141,25 @@ export async function wsHandler(c: any) {
   };
 
   async function pump() {
+    const BATCH_LIMIT = 100; // max deliveries per tick
+    const MAX_BUFFERED = 1_000_000; // ~1MB buffered bytes threshold
     while (!closed) {
       try {
         if (subscriptionId) {
           const rows = db.prepare(
-            `SELECT delivery_no, payload FROM subscription_deliveries WHERE subscription_id = :sid AND delivery_no > :last ORDER BY delivery_no ASC`
-          ).all({ sid: subscriptionId, last: lastSentDelivery }) as { delivery_no: number; payload: Uint8Array }[];
+            `SELECT delivery_no, payload FROM subscription_deliveries WHERE subscription_id = :sid AND delivery_no > :last ORDER BY delivery_no ASC LIMIT :lim`
+          ).all({ sid: subscriptionId, last: lastSentDelivery, lim: BATCH_LIMIT }) as { delivery_no: number; payload: Uint8Array }[];
           for (const r of rows) {
+            if (closed) break;
             lastSentDelivery = r.delivery_no;
             const payloadStr = new TextDecoder().decode(r.payload);
-            socket.send(JSON.stringify({ type: 'deliver', subscriptionId, deliveryNo: r.delivery_no, payload: JSON.parse(payloadStr) }));
+            const msg = JSON.stringify({ type: 'deliver', subscriptionId, deliveryNo: r.delivery_no, payload: JSON.parse(payloadStr) });
+            // backpressure: if buffered too high, wait
+            const buffered = (socket as any).bufferedAmount ?? 0;
+            if (buffered > MAX_BUFFERED) {
+              await new Promise((res) => setTimeout(res, 50));
+            }
+            socket.send(msg);
           }
         }
         await new Promise((res) => setTimeout(res, 50));

@@ -3,7 +3,7 @@
 // new-storage:export-snapshot --space --doc --branch --seq --out
 // Exports Automerge binary for a document branch at a specific seq to a file.
 
-import { parse } from "jsr:@std/cli/parse";
+import { parseArgs } from "jsr:@std/cli/parse-args";
 import { openSqlite } from "../src/sqlite/db.ts";
 import { getAutomergeBytesAtSeq } from "../src/sqlite/pit.ts";
 
@@ -13,7 +13,7 @@ function usage() {
 }
 
 if (import.meta.main) {
-  const args = parse(Deno.args, {
+  const args = parseArgs(Deno.args, {
     string: ["space", "doc", "branch", "out", "seq"],
     alias: {},
     default: {},

@@ -6,7 +6,7 @@
 // - Also writes to CAS as am_snapshot.
 // Note: This does not rewrite history; it just stores a full snapshot for fast PIT.
 
-import { parse } from "jsr:@std/cli/parse";
+import { parseArgs } from "jsr:@std/cli/parse-args";
 import { openSqlite } from "../src/sqlite/db.ts";
 import { createCas } from "../src/sqlite/cas.ts";
 import { getBranchState } from "../src/sqlite/heads.ts";
@@ -18,7 +18,7 @@ function usage() {
 }
 
 if (import.meta.main) {
-  const args = parse(Deno.args, { string: ["space", "doc", "branch", "file"] });
+  const args = parseArgs(Deno.args, { string: ["space", "doc", "branch", "file"] });
   const space = args.space as string | undefined;
   const doc = args.doc as string | undefined;
   const branch = args.branch as string | undefined;

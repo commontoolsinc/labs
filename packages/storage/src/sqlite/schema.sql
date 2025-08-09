@@ -96,6 +96,10 @@ CREATE TABLE IF NOT EXISTS am_change_index (
 );
 CREATE INDEX IF NOT EXISTS idx_change_tx ON am_change_index(doc_id, branch_id, tx_id);
 CREATE INDEX IF NOT EXISTS idx_change_hash ON am_change_index(change_hash);
+-- Perf indexes for hot paths
+CREATE INDEX IF NOT EXISTS idx_change_actor_seq ON am_change_index(branch_id, actor_id, seq_no);
+CREATE INDEX IF NOT EXISTS idx_change_branch_hash ON am_change_index(branch_id, change_hash);
+CREATE INDEX IF NOT EXISTS idx_change_seq_range ON am_change_index(doc_id, branch_id, seq_no);
 
 -- Derived Caches
 CREATE TABLE IF NOT EXISTS am_chunks (
@@ -194,4 +198,5 @@ CREATE TABLE IF NOT EXISTS subscription_deliveries (
   FOREIGN KEY(subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_subscription_deliveries_sub_acked ON subscription_deliveries(subscription_id, acked);
+CREATE INDEX IF NOT EXISTS idx_subscription_deliveries_seq ON subscription_deliveries(subscription_id, delivery_no);
 
