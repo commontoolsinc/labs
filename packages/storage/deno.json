@@ -29,6 +29,6 @@
     "@std/expect": "jsr:@std/expect@^1",
     "@std/testing": "jsr:@std/testing@^1",
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
-    "@automerge/automerge": "npm:@automerge/automerge@^2.0.0-preview.7"
+    "@automerge/automerge": "npm:@automerge/automerge@^2.1.0"
   }
 }
