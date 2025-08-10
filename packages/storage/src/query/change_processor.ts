@@ -148,6 +148,9 @@ export class ChangeProcessor {
       const changedDocs = new Set<string>([
         ...new Set([...add, ...rem].map((c) => c.doc)),
       ]);
+      // If the delta intersects this query (directly or via dependency graph),
+      // include the delta doc in changedDocs to guarantee a notification.
+      changedDocs.add(delta.doc);
 
       if (verdictChanged || add.length || rem.length || changedDocs.has(delta.doc)) {
         events.push({
