@@ -5,18 +5,28 @@
 Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
 
 1. **Check memo** by `EvalKey`; if present, return cached `EvalResult`
-2. **Read current JSON value** at `(docId, path)` where `path` is an array of
-   strings:
-   - Record a `DocLink` touch for `(docId, path)` and any constraints that read
-     sublinks (only for nodes actually evaluated)
-   - **Document structure handling**: If `path` is `/` or empty, evaluate
-     against `doc.value`
-     - If `doc.value` is undefined, the document has no current value
-     - Otherwise, evaluate against `doc.value` followed by the path segments
-       (links can only point to the value part of documents)
-3. **Apply local constraints** (`TypeCheck`, `Const`, etc.). Early exit to `No`
-   if they fail
-4. **For Props on objects**:
+2. **Link-aware path normalization** at `(docId, path)` where `path` is an array
+   of strings:
+   - Walk the path tokens left-to-right, reading the current value at each
+     intermediate `(docId, subpath)`.
+   - If an intermediate value is a link, follow it immediately (subject to the
+     remaining `linkBudget`) and continue consuming the remaining path tokens on
+     the target document/path.
+   - Record touches for every intermediate `(docId, subpath)` actually read while
+     normalizing, including the final resolved `(docId, path)` pair.
+   - Decrement `linkBudget` for each link hop taken during normalization.
+   - If a link points to another space, do not follow; normalization stops and
+     evaluation proceeds locally for the remainder of the path.
+   - If `linkBudget == 0` when a hop is required, stop normalization and treat
+     the current value as a leaf; evaluation may yield `MaybeExceededDepth`.
+   - After normalization, refer to the resulting `(docId, path)` as the
+     normalized location for subsequent steps.
+3. **Read current JSON value** at the normalized location:
+   - For `/` or empty path, evaluate against `doc.value`.
+   - If `doc.value` is undefined, the document has no current value.
+4. **Apply local constraints** (`TypeCheck`, `Const`, etc.). Early exit to `No`
+   if they fail.
+5. **For Props on objects**:
    - **Required**: if missing → `No` (touch the missing property link)
    - For each known property in `props`, recursively evaluate child IR at
      subpath; collect deps, touches
@@ -24,47 +34,41 @@ Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
      dependency on them
    - **AP true**: enumerate other properties; for each, either accept (if AP is
      `true`) or recurse into AP schema
-5. **For Items on arrays**: enumerate items as needed (touches for indices read)
-6. **For AnyOf / AllOf**:
+6. **For Items on arrays**: enumerate items as needed (touches for indices read)
+7. **For AnyOf / AllOf**:
    - Evaluate branches **in parallel** conceptually, but with memoization it's
      just multiple recursive calls
    - `allOf`: conjoin verdicts; `anyOf`: disjoin verdicts
    - A single `Yes` in `anyOf` can short-circuit further branches at runtime,
      but we still keep the provenance for any branches we _actually started_
-7. **Link follow**:
-   - If the current value is a link **and** (a) schema is `true`, or (b) we're
-     in a context where we are exploring values:
-     - If link points to a different space: assume it matches and continue
-       (don't follow)
-     - If `linkBudget == 0`: return `MaybeExceededDepth` OR treat as leaf
-       (configurable)
-     - Else, resolve target `(docId, path)`:
-       - If `id` is omitted, use current `docId`
-       - If `space` is omitted, use current space
-       - Then `evaluate(IR, targetId, targetPath, linkBudget-1)` and union its
-         touches/deps into the current node
+8. **Link follow at value nodes**:
+   - If the current value itself (post-normalization) is a link and the context
+     requires exploring values (e.g., schema `true`), follow as above, consuming
+     budget, and merge touches/deps.
    - Touches are recorded for nodes actually evaluated; encountering a link does
      not, by itself, record a touch for its target unless evaluation descends.
-   - If **not** a link, continue locally
-8. **Handle $ref nodes**:
+9. **Handle $ref nodes**:
    - If current IR node is `Ref(name)`:
      - Check if `refDepth > MAX_REF_DEPTH` (e.g., 100) to prevent infinite
        recursion
      - If exceeded, return `MaybeExceededDepth`
      - Else, resolve the definition IR node and recursively evaluate with
        `refDepth + 1`
-9. **Source document tracking**:
-   - If evaluating at document root (`path` is `/` or empty), check for `source`
-     field
-   - If `source` field exists and is a valid link, add the target document to
-     the `sourceDocsToSync` set for this evaluation
-   - This applies recursively: if the source document also has a `source` field,
-     add that document as well
-10. **Construct and store** `EvalResult` (verdict, touches, linkEdges, deps,
-    sourceDocsToSync) in memo; also construct provenance edges
+10. **Source document tracking**:
+    - If evaluating at document root (`path` is `/` or empty), check for `source`
+      field
+    - If `source` field exists and is a valid link, add the target document to
+      the `sourceDocsToSync` set for this evaluation
+    - This applies recursively: if the source document also has a `source` field,
+      add that document as well
+11. **Construct and store** `EvalResult` (verdict, touches, linkEdges, deps,
+    sourceDocsToSync) in memo; also construct provenance edges:
+    - Include provenance edges for all intermediate link hops observed during
+      path normalization.
 
 **Important**: because we watch only properties/array slots actually required by
-IR and AP, the **touch set is minimal**.
+IR and AP, plus intermediate paths followed during normalization, the **touch set
+is minimal yet precise**.
 
 ## Invalidation & Incremental Maintenance
 
@@ -145,21 +149,27 @@ Given a change event `Δ = { changedLinks, addedLinks, removedLinks }` for
   consider:
   - A per-query **work queue** that explores one more link layer in idle time
   - Opportunistic deepening when related docs change
+## Edge Cases  Correctness
 
-## Edge Cases & Correctness
-
-- **Cycles**: handled by `(IRNodeId, docId, path)` visited set within a single
-  evaluation run and the `(docId, path, IRNodeId, linkBudget, refDepth)` memo
-  key. If re-entered at the same `(IRNodeId, docId, path)` within the run,
-  short-circuit without producing `MaybeExceededDepth`. If re-evaluated with the
-  same or higher `linkBudget` and `refDepth`, the memo may also return a cached
-  result.
+- **Cycles**: handled by a per-evaluation visited set keyed by
+  `(IRNodeId, docId, path)`. Re-entering the same key within a single evaluation
+  short-circuits to prevent infinite recursion without emitting
+  `MaybeExceededDepth`. The memo key includes
+  `(docId, path, IRNodeId, linkBudget, refDepth)` to reuse results across calls.
+- **Budget during path normalization**: each link hop taken while consuming path
+  tokens decrements `linkBudget`. If the budget is exhausted mid-path, the
+  remaining path is treated as unresolved and evaluation proceeds on the current
+  value as a leaf, potentially yielding `MaybeExceededDepth`.
+- **Provenance of intermediate paths**: touches include all intermediate
+  `(docId, subpath)` inspected during normalization so changes at those points
+  invalidate affected queries precisely.
 - **"False but touch root"**: register a touch on `(docId, path)` even when
-  schema is `False`
+  schema is `False`.
 - **Missing properties**: touching a missing property means watching its
-  **existence bit**
+  **existence bit**.
 - **Arrays**: watch item indices you read; for AP-like "all items matter", you
   can represent **"all items under current array"** as a wildcard watch and
+  expand lazily on change.
   expand lazily on change
 
 ## Complexity Notes

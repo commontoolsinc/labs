@@ -57,7 +57,7 @@ Deno.test("path-walking: middle doc is touched, so its change invalidates", () =
   }, { seq: 2 });
 
   const ev = proc.onDelta(d2);
-  assert(ev.some((e) => e.queryId === "q"));
+  assert(ev.some((e: any) => e.queryId === "q"));
 });
 
 Deno.test("path-walking: budget counts link hops during normalization", () => {
