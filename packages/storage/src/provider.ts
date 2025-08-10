@@ -46,8 +46,8 @@ class SQLiteSpace implements SpaceStorage {
     return await ensureBranch(this.handle.db, docId, branch);
   }
 
-  async getBranchState(docId: DocId, branch: BranchName): Promise<BranchState> {
-    return readBranchState(this.handle.db, docId, branch);
+  getBranchState(docId: DocId, branch: BranchName): Promise<BranchState> {
+    return Promise.resolve(readBranchState(this.handle.db, docId, branch));
   }
 
   async submitTx(req: TxRequest): Promise<TxReceipt> {
@@ -206,7 +206,7 @@ class SQLiteSpace implements SpaceStorage {
         tx_id: createStubTx(db),
       },
     );
-    let newHeads = to.heads.filter((h) => !header.deps.includes(h));
+    const newHeads = to.heads.filter((h) => !header.deps.includes(h));
     newHeads.push(header.changeHash);
     newHeads.sort();
     updateHeads(db, to.branchId, newHeads, seqNo, 0);
@@ -228,6 +228,11 @@ class SQLiteSpace implements SpaceStorage {
     }
 
     return header.changeHash;
+  }
+
+  // Non-interface helper for tests and graceful shutdown
+  async close(): Promise<void> {
+    await this.handle.close();
   }
 }
 

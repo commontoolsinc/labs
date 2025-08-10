@@ -100,6 +100,13 @@ function enqueueSubscriptionDeliveries(
     id: number;
   }[];
   if (!subs || subs.length === 0) return;
+  try {
+    console.log(
+      `[enqueue] doc=${docId} branch=${branchId} seq=${seqNo} tx=${txId} subs=${subs.length}`,
+    );
+  } catch {
+    // ignore logging failures (non-fatal)
+  }
   const payload = {
     kind: "doc_update",
     docId,
@@ -130,10 +137,23 @@ function enqueueSubscriptionDeliveries(
       `SELECT MAX(delivery_no) AS last FROM subscription_deliveries WHERE subscription_id = :sid`,
     ).get({ sid: s.id }) as { last: number } | undefined;
     const next = (last?.last ?? 0) + 1;
+    try {
+      console.log(`[enqueue] sid=${s.id} last=${last?.last ?? 0} next=${next}`);
+    } catch {
+      // ignore logging failures (non-fatal)
+    }
     db.run(
       `INSERT OR IGNORE INTO subscription_deliveries(subscription_id, delivery_no, payload, acked) VALUES(:sid, :dno, :payload, 0)`,
       { sid: s.id, dno: next, payload: bytes },
     );
+    try {
+      const cnt = db.prepare(
+        `SELECT COUNT(1) AS c FROM subscription_deliveries WHERE subscription_id = :sid`,
+      ).get({ sid: s.id }) as { c: number };
+      console.log(`[enqueue] sid=${s.id} total=${cnt.c}`);
+    } catch {
+      // ignore logging failures (non-fatal)
+    }
   }
 }
 
@@ -298,6 +318,11 @@ export async function submitTx(
       }
 
       if (rejectedReason) {
+        try {
+          console.warn(
+            `[tx] rejected doc=${docId} branch=${branch} reason=${rejectedReason}`,
+          );
+        } catch {}
         results.push({
           docId,
           branch,

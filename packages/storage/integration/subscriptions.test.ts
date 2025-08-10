@@ -4,40 +4,57 @@ import { openSpaceStorage } from "../src/provider.ts";
 
 Deno.test({
   name: "WS subscriptions: ordering, acks, resume, multi-consumer",
-  permissions: { net: true, env: true, read: true, write: true },
+  permissions: {
+    net: true,
+    env: true,
+    read: true,
+    write: true,
+    run: true,
+    ffi: true,
+  },
 }, async () => {
   const tmpDir = await Deno.makeTempDir();
   const spacesDir = new URL(`file://${tmpDir}/`);
   Deno.env.set("SPACES_DIR", spacesDir.toString());
   Deno.env.set("ENABLE_NEW_STORAGE", "1");
+  Deno.env.set("ENABLE_SERVER_MERGE", "1");
 
-  // Start toolshed server
+  // Start toolshed server (explicit entry that calls Deno.serve)
   const p = new Deno.Command(Deno.execPath(), {
-    args: ["run", "-A", "../../toolshed/index.ts"],
+    args: ["run", "-A", "./index.ts"],
     cwd: new URL("../../toolshed/", import.meta.url),
+    env: {
+      SPACES_DIR: spacesDir.toString(),
+      ENABLE_NEW_STORAGE: "1",
+      ENABLE_SERVER_MERGE: "1",
+    },
   }).spawn();
 
   // Small delay to boot
   await new Promise((r) => setTimeout(r, 500));
 
+  let space: Awaited<ReturnType<typeof openSpaceStorage>> | null = null;
+  // Global test timeout to fail fast on hangs
+  const testTimeoutMs = 20000;
+  const testTimeout = setTimeout(() => {
+    throw new Error("integration test timeout");
+  }, testTimeoutMs);
   try {
     const spaceDid = "did:key:ws-sub-test";
-    const space = await openSpaceStorage(spaceDid, { spacesDir });
+    space = await openSpaceStorage(spaceDid, { spacesDir });
 
     // Create doc and submit changes
     const docId = "doc:s1";
     const branch = "main";
     await space.getOrCreateBranch(docId, branch);
-    let d = Automerge.change(Automerge.init<any>(), (x) => {
+    let d = Automerge.init<any>();
+    d = Automerge.change(d, (x: any) => {
       x.value = 1;
     });
     const c1 = Automerge.getLastLocalChange(d)!;
-    d = Automerge.change(
-      Automerge.load(Automerge.save(Automerge.from({ value: 1 }) as any)),
-      (x: any) => {
-        x.value = 2;
-      },
-    );
+    d = Automerge.change(d, (x: any) => {
+      x.value = 2;
+    });
     const c2 = Automerge.getLastLocalChange(d)!;
 
     // Connect two consumers
@@ -55,7 +72,7 @@ Deno.test({
     const deliveries1: any[] = [];
     const deliveries2: any[] = [];
 
-    await new Promise<void>((resolve) => {
+    const subscribeReady = new Promise<void>((resolve) => {
       let ready = 0;
       function readyInc() {
         ready += 1;
@@ -80,22 +97,41 @@ Deno.test({
         if (m.type === "subscribed") readyInc();
       };
     });
+    let subscribeTimeoutId: number | undefined;
+    const subscribeTimeout = new Promise<never>((_, rej) => {
+      // deno-lint-ignore no-explicit-any
+      subscribeTimeoutId = setTimeout(
+        () => rej(new Error("subscribe timeout")),
+        10000,
+      ) as any;
+    });
+    try {
+      await Promise.race([
+        subscribeReady,
+        subscribeTimeout,
+      ]);
+    } finally {
+      if (subscribeTimeoutId !== undefined) clearTimeout(subscribeTimeoutId);
+    }
 
     // Submit two txs
-    await space.submitTx({
+    const r1 = await space.submitTx({
       reads: [],
       writes: [{
         ref: { docId, branch },
         baseHeads: [],
         changes: [{ bytes: c1 }],
+        allowServerMerge: true,
       }],
     });
+    const st1 = await space.getBranchState(docId, branch);
     await space.submitTx({
       reads: [],
       writes: [{
         ref: { docId, branch },
-        baseHeads: [],
+        baseHeads: st1.heads,
         changes: [{ bytes: c2 }],
+        allowServerMerge: true,
       }],
     });
 
@@ -138,12 +174,17 @@ Deno.test({
       };
     });
 
-    await Promise.race([
-      done,
-      new Promise((_, rej) =>
-        setTimeout(() => rej(new Error("timeout")), 5000)
-      ),
-    ]);
+    // Race with timeout but ensure the timer is cleared if `done` resolves first
+    let timeoutId: number | undefined;
+    const timeoutPromise = new Promise<never>((_, rej) => {
+      // deno-lint-ignore no-explicit-any
+      timeoutId = setTimeout(() => rej(new Error("timeout")), 5000) as any;
+    });
+    try {
+      await Promise.race([done, timeoutPromise]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
 
     // Verify ordering and no duplication
     const nos1 = deliveries1.map((d) => d.deliveryNo);
@@ -152,7 +193,13 @@ Deno.test({
     assertEquals(nos2, [...nos2].sort((a, b) => a - b));
 
     // Close ws1 and reconnect to test resume
+    const awaitClosed = (ws: WebSocket) =>
+      new Promise<void>((resolve) => {
+        ws.addEventListener("close", () => resolve(), { once: true });
+      });
+
     ws1.close();
+    await awaitClosed(ws1);
     const ws1b = new WebSocket(
       `ws://localhost:8000/api/storage/new/v1/${
         encodeURIComponent(spaceDid)
@@ -171,15 +218,16 @@ Deno.test({
     });
 
     // Write third change
-    let d3 = Automerge.change(Automerge.init<any>(), (x) => {
+    d = Automerge.change(d, (x: any) => {
       x.value = 3;
     });
-    const c3 = Automerge.getLastLocalChange(d3)!;
+    const c3 = Automerge.getLastLocalChange(d)!;
+    const st2 = await space.getBranchState(docId, branch);
     await space.submitTx({
       reads: [],
       writes: [{
         ref: { docId, branch },
-        baseHeads: [],
+        baseHeads: st2.heads,
         changes: [{ bytes: c3 }],
       }],
     });
@@ -199,9 +247,21 @@ Deno.test({
 
     ws1b.close();
     ws2.close();
+    await Promise.all([awaitClosed(ws1b), awaitClosed(ws2)]);
   } finally {
+    clearTimeout(testTimeout);
+    try {
+      // Close underlying sqlite handle to avoid FFI resource leaks
+      await (space as any)?.close?.();
+    } catch {
+      // ignore
+    }
     try {
       p.kill();
-    } catch {}
+      // Ensure the child process is reaped to avoid lingering resources
+      await p.status;
+    } catch {
+      /* ignore: server may already be closed */
+    }
   }
 });
