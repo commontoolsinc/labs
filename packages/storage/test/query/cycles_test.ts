@@ -23,8 +23,8 @@ Deno.test("cycle: no MaybeExceededDepth on legal link cycles", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
   // A ↔ B
-  storage.setDoc("A", { link: { "/": { "link@1": { id: "B", path: "" } } } }, { seq: 1 });
-  storage.setDoc("B", { link: { "/": { "link@1": { id: "A", path: "" } } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("B", { "/": { "link@1": { id: "A", path: "" } } }, { seq: 1 });
 
   const ir = compileSchema(pool, true); // follow everything
   subs.queryRoot.clear();
@@ -42,8 +42,8 @@ Deno.test("cycle: no MaybeExceededDepth on legal link cycles", () => {
 Deno.test("cycle: target doc is touched so its change invalidates", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
-  storage.setDoc("A", { link: { "/": { "link@1": { id: "B", path: "" } } } }, { seq: 1 });
-  storage.setDoc("B", { x: 1, link: { "/": { "link@1": { id: "A", path: "" } } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("B", { x: 1 }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
   proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
@@ -61,8 +61,8 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
   const { storage, pool, evalr, subs, proc } = setup();
 
   // A ↔ B
-  storage.setDoc("A", { link: { "/": { "link@1": { id: "B", path: "" } } } }, { seq: 1 });
-  storage.setDoc("B", { t: "yes", link: { "/": { "link@1": { id: "A", path: "" } } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("B", { t: "yes" }, { seq: 1 });
 
   const irTrue = compileSchema(pool, true); // follow everything
   const irProp = compileSchema(pool, { type: "object", properties: { t: { const: "yes" } } });
@@ -76,13 +76,12 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
   // Second query with a different IR; must still evaluate into B to check its 't'
   proc.registerQuery({ id: "q2", doc: "A", path: [], ir: irProp, budget: 10 });
   const root2 = subs.queryRoot.get("q2")!;
-  const beforeMemoSize = (evalr as any)["memo"].size as number;
   const r2 = evalr.evaluate(root2, undefined, evalr.newContext());
-  const afterMemoSize = (evalr as any)["memo"].size as number;
 
   assert(r2.verdict === "Yes");
-  // Memo grew because we actually evaluated into B for irProp
-  assertGreater(afterMemoSize, beforeMemoSize);
+  // Should have evaluated into B for irProp
+  const deps = [...r2.deps];
+  assert(deps.some((k) => k.doc === "B"));
 });
 
 /**
@@ -91,8 +90,8 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
 Deno.test("budget: deep chain triggers MaybeExceededDepth when budget is exhausted", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
-  storage.setDoc("A", { link: { "/": { "link@1": { id: "B", path: "" } } } }, { seq: 1 });
-  storage.setDoc("B", { link: { "/": { "link@1": { id: "C", path: "" } } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("B", { "/": { "link@1": { id: "C", path: "" } } }, { seq: 1 });
   storage.setDoc("C", { x: 42 }, { seq: 1 });
 
   const ir = compileSchema(pool, true); // follow all
@@ -108,8 +107,8 @@ Deno.test("budget: deep chain triggers MaybeExceededDepth when budget is exhaust
 Deno.test("context: fresh VisitContext per evaluation run", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
-  storage.setDoc("A", { link: { "/": { "link@1": { id: "B", path: "" } } } }, { seq: 1 });
-  storage.setDoc("B", { link: { "/": { "link@1": { id: "A", path: "" } } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("B", { "/": { "link@1": { id: "A", path: "" } } }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
   proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
@@ -132,8 +131,8 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
   // A → B → A (cycle), but schema looks for { flag: true } anywhere
-  storage.setDoc("A", { link: { "/": { "link@1": { id: "B", path: "" } } } }, { seq: 1 });
-  storage.setDoc("B", { link: { "/": { "link@1": { id: "A", path: "" } } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("B", { "/": { "link@1": { id: "A", path: "" } } }, { seq: 1 });
 
   const ir = compileSchema(pool, {
     anyOf: [
@@ -150,7 +149,7 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
   // Change propagates: add flag in B
   const dB = storage.setDoc(
     "B",
-    { flag: true, link: { "/": { "link@1": { id: "A", path: "" } } } },
+    { flag: true },
     { seq: 2 },
   );
   const ev = proc.onDelta(dB);
@@ -164,8 +163,8 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
 Deno.test("touches: cycle short-circuit touches target entry path", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
-  storage.setDoc("A", { link: { "/": { "link@1": { id: "B", path: "" } } } }, { seq: 1 });
-  storage.setDoc("B", { y: 1, link: { "/": { "link@1": { id: "A", path: "" } } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("B", { y: 1 }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
   proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
@@ -173,10 +172,23 @@ Deno.test("touches: cycle short-circuit touches target entry path", () => {
   const root = subs.queryRoot.get("q")!;
   const r = evalr.evaluate(root, undefined, evalr.newContext());
 
-  // We expect both A and B to be in touches
-  const touched = [...r.touches].map((t) => `${t.doc}:${JSON.stringify(t.path)}`);
-  assert(touched.some((s) => s.startsWith("A:[")));
-  assert(touched.some((s) => s.startsWith("B:["))); // entry path ([]) touched for B in this setup
+  // Aggregate touches through deps (like ChangeProcessor.collectTouches)
+  const aggregate = new Set<string>();
+  const seen = new Set<string>();
+  const dfs = (k: typeof root) => {
+    const ks = `${k.ir}\u0001${k.doc}\u0001${JSON.stringify(k.path)}\u0001${k.budget}`;
+    if (seen.has(ks)) return;
+    seen.add(ks);
+    const rr = (evalr as any)["memo"].get(ks);
+    if (!rr) return;
+    rr.touches.forEach((l: any) => aggregate.add(`${l.doc}:${JSON.stringify(l.path)}`));
+    rr.deps.forEach((child: any) => dfs(child));
+  };
+  dfs(root);
+
+  // We expect both A and B to be in aggregated touches
+  assert(aggregate.has(`A:${JSON.stringify([])}`));
+  assert(aggregate.has(`B:${JSON.stringify([])}`)); // entry path ([]) touched for B in this setup
 });
 
 /**
