@@ -1,5 +1,5 @@
 import { DocId, EngineEvent, Version } from "./types.ts";
-import { Storage } from "./storage.ts";
+import { Reader } from "./storage.ts";
 
 export type OutMsg =
   | { id: string; type: "DOC_UPDATE"; docId: DocId; version: Version; doc: any }
@@ -32,7 +32,7 @@ export type ClientSendState = {
 
 export class DeliveryManager {
   private clients = new Map<string, ClientSendState>();
-  constructor(private storage: Storage, private outbox: Outbox) {}
+  constructor(private storage: Reader, private outbox: Outbox) {}
   private ensureClient(id: string): ClientSendState {
     if (!this.clients.has(id)) {
       this.clients.set(id, {

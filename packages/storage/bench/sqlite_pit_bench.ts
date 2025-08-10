@@ -8,7 +8,7 @@ import { openSpaceStorage } from "../src/provider.ts";
 import { openSqlite } from "../src/sqlite/db.ts";
 import { getAutomergeBytesAtSeq, uptoSeqNo } from "../src/sqlite/pit.ts";
 import { getBranchState } from "../src/sqlite/heads.ts";
-import { SqliteStorage } from "../src/query/sqlite_storage.ts";
+import { SqliteStorageReader } from "../src/query/sqlite_storage.ts";
 
 // Config (override via env)
 const SEED = 123;
@@ -25,7 +25,7 @@ const sqliteHandle = await openSqlite({
   url: new URL(`./${spaceDid}.sqlite`, spacesDir),
 });
 const db: Database = sqliteHandle.db;
-const storage = new SqliteStorage(db);
+const storage = new SqliteStorageReader(db);
 
 function mulberry32(a: number) {
   return function () {
@@ -114,7 +114,7 @@ Deno.bench({
   group: "sqlite-pit",
   n: 1,
 }, () => {
-  const cold = new SqliteStorage(db);
+  const cold = new SqliteStorageReader(db);
   const r = cold.readDocAtVersion(PIT_DOC_ID as any, latest);
   if (!r.doc) throw new Error("no doc");
 });

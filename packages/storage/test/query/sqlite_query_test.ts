@@ -5,7 +5,7 @@ import { openSqlite } from "../../src/sqlite/db.ts";
 import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
-import { SqliteStorage } from "../../src/query/sqlite_storage.ts";
+import { SqliteStorageReader } from "../../src/query/sqlite_storage.ts";
 
 Deno.test("schema compile with #/definitions and evaluation over SQLite", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -68,7 +68,7 @@ Deno.test("schema compile with #/definitions and evaluation over SQLite", async 
     },
   };
   const ir = compileSchema(pool, schema);
-  const storage = new SqliteStorage(db);
+  const storage = new SqliteStorageReader(db);
   const evaluator = new Evaluator(pool, storage, new Provenance());
   const res = evaluator.evaluate({ ir, doc: taskId, path: [] });
   assertEquals(res.verdict, "Yes");
@@ -120,7 +120,7 @@ Deno.test("schema evaluator yields MaybeExceededDepth when visit limit is tiny",
   const ir = compileSchema(pool, schema);
   const evaluator = new Evaluator(
     pool,
-    new SqliteStorage(db),
+    new SqliteStorageReader(db),
     new Provenance(),
     { visitLimit: 0 }, // force immediate limit exhaustion
   );

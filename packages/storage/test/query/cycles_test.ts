@@ -7,15 +7,17 @@ import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
 import { SubscriptionIndex } from "../../src/query/subs.ts";
 import { ChangeProcessor } from "../../src/query/change_processor.ts";
-import { SqliteStorage } from "../../src/query/sqlite_storage.ts";
+import { SqliteStorageReader } from "../../src/query/sqlite_storage.ts";
 
 // Helpers
 async function setup() {
   const tmpDir = await Deno.makeTempDir();
   const spacesDir = new URL(`file://${tmpDir}/`);
   const space = await openSpaceStorage("did:key:cycles", { spacesDir });
-  const db: Database = (await openSqlite({ url: new URL("./did:key:cycles.sqlite", spacesDir) })).db;
-  const storage = new SqliteStorage(db);
+  const db: Database =
+    (await openSqlite({ url: new URL("./did:key:cycles.sqlite", spacesDir) }))
+      .db;
+  const storage = new SqliteStorageReader(db);
   const prov = new Provenance();
   const pool = new IRPool();
   const evalr = new Evaluator(pool, storage, prov);
@@ -37,7 +39,14 @@ Deno.test("cycle: no MaybeExceededDepth on legal link cycles", async () => {
       x["/"] = { "link@1": { id: other, path: [] } };
     });
     const c = Automerge.getLastLocalChange(d)!;
-    await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId, branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: c }],
+      }],
+    });
   }
 
   const ir = compileSchema(pool, true); // follow everything
@@ -62,11 +71,27 @@ Deno.test("cycle: target doc is touched so its change invalidates", async () => 
     const d = Automerge.change(Automerge.init<any>(), (x: any) => {
       x["/"] = { "link@1": { id: "B", path: [] } };
     });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "A", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
   {
-    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.x = 1; });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x.x = 1;
+    });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "B", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
 
   const ir = compileSchema(pool, true);
@@ -78,7 +103,14 @@ Deno.test("cycle: target doc is touched so its change invalidates", async () => 
     x.link = { "/": { "link@1": { id: "A", path: [] } } };
   });
   // synthesize a Delta equivalent is non-trivial; we trigger re-eval by re-registering (simpler)
-  await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(dB)! }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId: "B", branch: "main" },
+      baseHeads: [],
+      changes: [{ bytes: Automerge.getLastLocalChange(dB)! }],
+    }],
+  });
   const ev = [{ queryId: "q" }];
   assert(ev.some((e) => e.queryId === "q"));
 });
@@ -96,11 +128,27 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
     const d = Automerge.change(Automerge.init<any>(), (x: any) => {
       x["/"] = { "link@1": { id: "B", path: [] } };
     });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "A", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
   {
-    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.t = "yes"; });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x.t = "yes";
+    });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "B", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
 
   const irTrue = compileSchema(pool, true); // follow everything
@@ -144,11 +192,27 @@ Deno.test(
       const d = Automerge.change(Automerge.init<any>(), (x: any) => {
         x["/"] = { "link@1": { id: next, path: [] } };
       });
-      await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+      await space.submitTx({
+        reads: [],
+        writes: [{
+          ref: { docId, branch: "main" },
+          baseHeads: [],
+          changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+        }],
+      });
     }
     await space.getOrCreateBranch("C", "main");
-    const dC = Automerge.change(Automerge.init<any>(), (x: any) => { x.x = 42; });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "C", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(dC)! }] }] });
+    const dC = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x.x = 42;
+    });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "C", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(dC)! }],
+      }],
+    });
 
     const ir = compileSchema(pool, true);
     proc.registerQuery({ id: "q", doc: "A", path: [], ir });
@@ -174,13 +238,27 @@ Deno.test("context: fresh VisitContext per evaluation run", async () => {
     const d = Automerge.change(Automerge.init<any>(), (x: any) => {
       x["/"] = { "link@1": { id: "B", path: [] } };
     });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "A", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
   {
     const d = Automerge.change(Automerge.init<any>(), (x: any) => {
       x["/"] = { "link@1": { id: "A", path: [] } };
     });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "B", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
 
   const ir = compileSchema(pool, true);
@@ -210,13 +288,27 @@ Deno.test("invalidation: anyOf over cycle flips after target change", async () =
     const d = Automerge.change(Automerge.init<any>(), (x: any) => {
       x["/"] = { "link@1": { id: "B", path: [] } };
     });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "A", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
   {
     const d = Automerge.change(Automerge.init<any>(), (x: any) => {
       x["/"] = { "link@1": { id: "A", path: [] } };
     });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "B", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
 
   const ir = compileSchema(pool, {
@@ -236,8 +328,17 @@ Deno.test("invalidation: anyOf over cycle flips after target change", async () =
   );
   assert(r0.verdict !== "No");
   // Change propagates: add flag in B
-  const dB = Automerge.change(Automerge.init<any>(), (x: any) => { x.flag = true; });
-  await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(dB)! }] }] });
+  const dB = Automerge.change(Automerge.init<any>(), (x: any) => {
+    x.flag = true;
+  });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId: "B", branch: "main" },
+      baseHeads: [],
+      changes: [{ bytes: Automerge.getLastLocalChange(dB)! }],
+    }],
+  });
   const ev = [{ queryId: "q" }];
   assert(ev.some((e) => e.queryId === "q")); // query notified
 });
@@ -255,11 +356,27 @@ Deno.test("touches: cycle short-circuit touches target entry path", async () => 
     const d = Automerge.change(Automerge.init<any>(), (x: any) => {
       x["/"] = { "link@1": { id: "B", path: [] } };
     });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "A", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
   {
-    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.y = 1; });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x.y = 1;
+    });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "B", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
 
   const ir = compileSchema(pool, true);
@@ -297,8 +414,17 @@ Deno.test("memo: non-cycle path uses memo on second evaluation", async () => {
 
   await space.getOrCreateBranch("A", "main");
   {
-    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.obj = { n: 1 }; });
-    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x.obj = { n: 1 };
+    });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId: "A", branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: Automerge.getLastLocalChange(d)! }],
+      }],
+    });
   }
 
   const ir = compileSchema(pool, {

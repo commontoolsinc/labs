@@ -11,7 +11,7 @@ import { openSqlite } from "../src/sqlite/db.ts";
 import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../src/query/ir.ts";
 import { Evaluator, Provenance } from "../src/query/eval.ts";
-import { SqliteStorage } from "../src/query/sqlite_storage.ts";
+import { SqliteStorageReader } from "../src/query/sqlite_storage.ts";
 
 // ---------------------------
 // Config (defaults kept small for quick iteration; override via env vars)
@@ -178,7 +178,7 @@ async function seedVDOM(nodes: number, maxChildren: number) {
 }
 
 // Build evaluator over SQLite storage
-const storage = new SqliteStorage(db);
+const storage = new SqliteStorageReader(db);
 const pool = new IRPool();
 const prov = new Provenance();
 const evaluator = new Evaluator(pool, storage, prov);

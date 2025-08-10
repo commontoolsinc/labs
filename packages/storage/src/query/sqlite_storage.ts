@@ -2,6 +2,7 @@ import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 import { getAutomergeBytesAtSeq, uptoSeqNo } from "../sqlite/pit.ts";
 import { getBranchState } from "../sqlite/heads.ts";
+import type { Reader } from "./storage.ts";
 import type { Path, Version } from "./types.ts";
 
 function isObject(x: any): x is Record<string, any> {
@@ -16,7 +17,7 @@ function getAtPath(doc: any, path: Path): any {
   return cur;
 }
 
-export class SqliteStorage {
+export class SqliteStorageReader implements Reader {
   constructor(private db: Database, private defaultBranch = "main") {}
 
   private resolve(
