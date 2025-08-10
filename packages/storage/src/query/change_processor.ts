@@ -1,5 +1,5 @@
 import { Delta, EngineEvent, Link, Verdict } from "./types.ts";
-import { DEFAULT_LINK_BUDGET, EvalKey, Evaluator, Provenance } from "./eval.ts";
+import { EvalKey, Evaluator, Provenance } from "./eval.ts";
 import { SubscriptionIndex } from "./subs.ts";
 
 export class ChangeProcessor {
@@ -28,13 +28,12 @@ export class ChangeProcessor {
   }
 
   registerQuery(
-    q: { id: string; doc: string; path: string[]; ir: string; budget?: number },
+    q: { id: string; doc: string; path: string[]; ir: string },
   ) {
     const root: EvalKey = {
       ir: q.ir,
       doc: q.doc,
       path: q.path,
-      budget: q.budget ?? DEFAULT_LINK_BUDGET,
     };
     const res = this.evaluator.evaluate(
       root,
@@ -109,7 +108,6 @@ export class ChangeProcessor {
           ir,
           doc,
           path: JSON.parse(pathKey),
-          budget: Number(budgetStr),
         },
         undefined,
         this.evaluator.newContext(),
