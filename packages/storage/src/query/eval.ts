@@ -41,7 +41,7 @@ export class Provenance {
   }
 }
 
-export type VisitContext = { seenIRDoc: Set<string> };
+export type VisitContext = { seenIRDocPath: Set<string> };
 
 export class Evaluator {
   constructor(
@@ -52,7 +52,80 @@ export class Evaluator {
   memo = new Map<string, EvalResult>();
 
   newContext(): VisitContext {
-    return { seenIRDoc: new Set<string>() };
+    return { seenIRDocPath: new Set<string>() };
+  }
+
+  // Follow links encountered while consuming targetPath starting from (baseDoc, basePath).
+  // Records touches for each child step (parent/seg) and linkEdges for each hop.
+  private normalizePath(
+    baseDoc: DocId,
+    basePath: Path,
+    targetPath: Path,
+    budget: number,
+    at: Version | undefined,
+    ctx: VisitContext,
+    touches: Set<Link>,
+    linkEdges: Set<{ from: Link; to: Link }>,
+    ekStr: string,
+  ): { doc: DocId; path: Path; budget: number } {
+    let curDoc = baseDoc;
+    let curPath: Path = [];
+
+    // Bring curPath up to basePath, touching each step and following links encountered
+    for (const seg of basePath) {
+      const next = child(curPath, seg);
+      const l = { doc: curDoc, path: next } as Link;
+      touches.add(l);
+      const lk = Provenance.keyLink(l);
+      if (!this.prov.linkToEval.has(lk)) this.prov.linkToEval.set(lk, new Set());
+      this.prov.linkToEval.get(lk)!.add(ekStr);
+
+      curPath = next;
+      while (budget > 0) {
+        const val = this.storage.read(curDoc, curPath, at);
+        if (!isLinkValue(val)) break;
+        const tgt = val["/"]["link@1"];
+        const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
+        const from: Link = { doc: curDoc, path: curPath };
+        linkEdges.add({ from, to });
+        const toKey = Provenance.keyLink(to);
+        if (!this.prov.linkEdges.has(ekStr)) this.prov.linkEdges.set(ekStr, new Set());
+        this.prov.linkEdges.get(ekStr)!.add(toKey);
+        curDoc = to.doc;
+        curPath = to.path;
+        budget -= 1;
+      }
+    }
+
+    // Now consume the remaining targetPath segments from base
+    const remaining = [...targetPath];
+    while (remaining.length > 0) {
+      // Follow links at current location before stepping into next segment
+      while (budget > 0) {
+        const val = this.storage.read(curDoc, curPath, at);
+        if (!isLinkValue(val)) break;
+        const tgt = val["/"]["link@1"];
+        const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
+        const from: Link = { doc: curDoc, path: curPath };
+        linkEdges.add({ from, to });
+        const toKey = Provenance.keyLink(to);
+        if (!this.prov.linkEdges.has(ekStr)) this.prov.linkEdges.set(ekStr, new Set());
+        this.prov.linkEdges.get(ekStr)!.add(toKey);
+        curDoc = to.doc;
+        curPath = to.path;
+        budget -= 1;
+      }
+      const seg = remaining.shift()!;
+      const next = child(curPath, seg);
+      const l = { doc: curDoc, path: next } as Link;
+      touches.add(l);
+      const lk = Provenance.keyLink(l);
+      if (!this.prov.linkToEval.has(lk)) this.prov.linkToEval.set(lk, new Set());
+      this.prov.linkToEval.get(lk)!.add(ekStr);
+      curPath = next;
+    }
+
+    return { doc: curDoc, path: curPath, budget };
   }
 
   evaluate(key: EvalKey, at?: Version, ctx?: VisitContext): EvalResult {
@@ -77,8 +150,26 @@ export class Evaluator {
       this.prov.linkToEval.get(lk)!.add(ek);
     };
 
-    const v = this.storage.read(key.doc, key.path, at);
+    // Anchor touch on the original key path
     readLink(key.doc, key.path);
+
+    // Normalize path by following links encountered along the path tokens
+    const norm = this.normalizePath(
+      key.doc,
+      [],
+      key.path,
+      key.budget,
+      at,
+      ctx!,
+      touches,
+      linkEdges,
+      ek,
+    );
+    const effDoc = norm.doc;
+    const effPath = norm.path;
+    let effBudget = norm.budget;
+
+    const v = this.storage.read(effDoc, effPath, at);
 
     const descend = (irId: IRId, val: any): Verdict => {
       const ir = this.pool.get(irId);
@@ -120,18 +211,18 @@ export class Evaluator {
           if (!isObject(val)) return "No";
           for (const r of ir.required) {
             const has = Object.prototype.hasOwnProperty.call(val, r);
-            readLink(key.doc, child(key.path, r));
+            readLink(effDoc, child(effPath, r));
             if (!has) return "No";
           }
           for (const [name, childIR] of ir.props.entries()) {
             if (!Object.prototype.hasOwnProperty.call(val, name)) continue;
-            const childPath = child(key.path, name);
-            readLink(key.doc, childPath);
+            const childPath = child(effPath, name);
+            readLink(effDoc, childPath);
             const childKey: EvalKey = {
               ir: childIR,
-              doc: key.doc,
+              doc: effDoc,
               path: childPath,
-              budget: key.budget,
+              budget: effBudget,
             };
             deps.add(childKey);
             const res = this.evaluate(childKey, at, ctx).verdict;
@@ -140,14 +231,14 @@ export class Evaluator {
           if (ir.additional.mode === "omit") return "Yes";
           for (const n of Object.keys(val)) {
             if (ir.props.has(n)) continue;
-            const childPath = child(key.path, n);
-            readLink(key.doc, childPath);
+            const childPath = child(effPath, n);
+            readLink(effDoc, childPath);
             if (ir.additional.mode === "true") continue;
             const childKey: EvalKey = {
               ir: ir.additional.ir,
-              doc: key.doc,
+              doc: effDoc,
               path: childPath,
-              budget: key.budget,
+              budget: effBudget,
             };
             deps.add(childKey);
             const res = this.evaluate(childKey, at, ctx).verdict;
@@ -161,13 +252,13 @@ export class Evaluator {
           const len = Array.isArray(val) ? val.length : 0;
           if (ir.tuple) {
             for (let i = 0; i < ir.tuple.length && i < len; i++) {
-              const childPath = child(key.path, String(i));
-              readLink(key.doc, childPath);
+              const childPath = child(effPath, String(i));
+              readLink(effDoc, childPath);
               const childKey: EvalKey = {
                 ir: ir.tuple[i],
-                doc: key.doc,
+                doc: effDoc,
                 path: childPath,
-                budget: key.budget,
+                budget: effBudget,
               };
               deps.add(childKey);
               const res = this.evaluate(childKey, at, ctx).verdict;
@@ -176,13 +267,13 @@ export class Evaluator {
             return "Yes";
           } else if (ir.item) {
             for (let i = 0; i < len; i++) {
-              const childPath = child(key.path, String(i));
-              readLink(key.doc, childPath);
+              const childPath = child(effPath, String(i));
+              readLink(effDoc, childPath);
               const childKey: EvalKey = {
                 ir: ir.item,
-                doc: key.doc,
+                doc: effDoc,
                 path: childPath,
-                budget: key.budget,
+                budget: effBudget,
               };
               deps.add(childKey);
               const res = this.evaluate(childKey, at, ctx).verdict;
@@ -196,9 +287,9 @@ export class Evaluator {
           for (const n of ir.nodes) {
             const childKey: EvalKey = {
               ir: n,
-              doc: key.doc,
-              path: key.path,
-              budget: key.budget,
+              doc: effDoc,
+              path: effPath,
+              budget: effBudget,
             };
             deps.add(childKey);
             const res = this.evaluate(childKey, at, ctx).verdict;
@@ -230,7 +321,7 @@ export class Evaluator {
     if (isLinkValue(v)) {
       const tgt = v["/"]["link@1"];
       const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
-      const from: Link = { doc: key.doc, path: key.path };
+      const from: Link = { doc: effDoc, path: effPath };
 
       // record edge for explainability/provenance
       linkEdges.add({ from, to });
@@ -239,13 +330,9 @@ export class Evaluator {
       if (!this.prov.linkEdges.has(ekStr)) this.prov.linkEdges.set(ekStr, new Set());
       this.prov.linkEdges.get(ekStr)!.add(toKey);
 
-      const visitKey = `${key.ir}\u0001${to.doc}`;
-      if (ctx.seenIRDoc.has(visitKey)) {
-        // Proper cycle revisit: do not recurse. Touch target entry path for invalidation.
-        // (Alternatively: readLink(to.doc, []); for doc-root coarse touch.)
-        readLink(to.doc, to.path);
-
-        // Preserve the existing verdict from local constraints.
+      const visitKey = `${key.ir}\u0001${to.doc}\u0001${JSON.stringify(to.path)}`;
+      if (ctx.seenIRDocPath.has(visitKey)) {
+        // Proper cycle revisit at same (IR, doc, path): do not recurse.
         const result: EvalResult = { verdict, touches, linkEdges, deps };
 
         // Attach provenance edges for touches/deps we actually recorded:
@@ -264,20 +351,20 @@ export class Evaluator {
         return result; // no memo on context-specific short-circuit
       }
 
-      // First time visiting this (IR, doc) in this evaluation
-      ctx.seenIRDoc.add(visitKey);
-      if (key.budget <= 0) {
+      // First time visiting this (IR, doc, path) in this evaluation
+      ctx.seenIRDocPath.add(visitKey);
+      if (effBudget <= 0) {
         // True budget exhaustion (non-cycle deepness) → Maybe
         verdict = verdict === "Yes" ? "MaybeExceededDepth" : verdict;
       } else {
-        const childKey: EvalKey = { ir: key.ir, doc: to.doc, path: to.path, budget: key.budget - 1 };
+        const childKey: EvalKey = { ir: key.ir, doc: to.doc, path: to.path, budget: effBudget - 1 };
         deps.add(childKey);
         const res = this.evaluate(childKey, at, ctx).verdict;
         if (res === "No") verdict = "No";
         else if (res === "MaybeExceededDepth" || verdict === "MaybeExceededDepth") verdict = "MaybeExceededDepth";
         else verdict = "Yes";
       }
-      ctx.seenIRDoc.delete(visitKey);
+      ctx.seenIRDocPath.delete(visitKey);
     }
 
     const result: EvalResult = { verdict, touches, linkEdges, deps };
