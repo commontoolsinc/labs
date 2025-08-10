@@ -4,15 +4,30 @@ import * as handlers from "./new.handlers.ts";
 
 const router = createRouter();
 
-router
-  .openapi(routes.heads, handlers.heads)
-  .openapi(routes.tx, handlers.tx)
-  .openapi(routes.pit, handlers.pit)
-  .openapi(routes.query, handlers.query)
-  .openapi(routes.snapshot, handlers.snapshot)
-  .openapi(routes.mergeInto, handlers.mergeInto);
+const base = "/api/storage/new/v1" as const;
+router.openapi(
+  { ...routes.heads, path: `${base}${routes.heads.path}` },
+  handlers.heads,
+);
+router.openapi({ ...routes.tx, path: `${base}${routes.tx.path}` }, handlers.tx);
+router.openapi(
+  { ...routes.pit, path: `${base}${routes.pit.path}` },
+  handlers.pit,
+);
+router.openapi(
+  { ...routes.query, path: `${base}${routes.query.path}` },
+  handlers.query,
+);
+router.openapi(
+  { ...routes.snapshot, path: `${base}${routes.snapshot.path}` },
+  handlers.snapshot,
+);
+router.openapi(
+  { ...routes.mergeInto, path: `${base}${routes.mergeInto.path}` },
+  handlers.mergeInto,
+);
 
 // Non-OpenAPI WebSocket endpoint
-router.get("/spaces/:spaceId/subscribe", handlers.wsHandler);
+router.get(`${base}/:spaceId/ws`, handlers.wsHandler);
 
 export default router;

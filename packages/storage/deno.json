@@ -14,6 +14,7 @@
       ],
       "command": "deno test -A test"
     },
+    "integration": "deno test -A ./integration/*.test.ts ./integration/*_test.ts",
     "new-storage:export-snapshot": "deno run -A ./cli/export_snapshot.ts",
     "new-storage:import-snapshot": "deno run -A ./cli/import_snapshot.ts",
     "new-storage:list-spaces": "deno run -A ./cli/list_spaces.ts",

@@ -9,7 +9,11 @@ export const heads = createRoute({
   path: "/spaces/:spaceId/docs/:docId/branches/:branchId/heads",
   tags,
   request: {
-    params: z.object({ spaceId: z.string(), docId: z.string(), branchId: z.string() }),
+    params: z.object({
+      spaceId: z.string(),
+      docId: z.string(),
+      branchId: z.string(),
+    }),
   },
   responses: {
     200: jsonContent(
@@ -53,18 +57,20 @@ export const tx = createRoute({
   },
   responses: {
     200: jsonContent(
-      z.object({ receipt: z.object({
-        txId: z.number(),
-        committedAt: z.string(),
-        results: z.array(z.object({
-          ref: z.object({ docId: z.string(), branch: z.string() }),
-          status: z.enum(["ok", "conflict", "rejected"]),
-          newHeads: z.array(z.string()).optional(),
-          applied: z.number().optional(),
-          reason: z.string().optional(),
-        })),
-        conflicts: z.array(z.any()),
-      }) }),
+      z.object({
+        receipt: z.object({
+          txId: z.number(),
+          committedAt: z.string(),
+          results: z.array(z.object({
+            ref: z.object({ docId: z.string(), branch: z.string() }),
+            status: z.enum(["ok", "conflict", "rejected"]),
+            newHeads: z.array(z.string()).optional(),
+            applied: z.number().optional(),
+            reason: z.string().optional(),
+          })),
+          conflicts: z.array(z.any()),
+        }),
+      }),
       "Tx receipt",
     ),
   },
@@ -113,7 +119,7 @@ export const query = createRoute({
 
 export const subscribe = createRoute({
   method: "get",
-  path: "/spaces/:spaceId/subscribe",
+  path: "/:spaceId/ws",
   tags,
   request: {
     params: z.object({ spaceId: z.string() }),
@@ -128,7 +134,12 @@ export const snapshot = createRoute({
   path: "/spaces/:spaceId/snapshots/:docId/:branchId/:seq",
   tags,
   request: {
-    params: z.object({ spaceId: z.string(), docId: z.string(), branchId: z.string(), seq: z.coerce.number() }),
+    params: z.object({
+      spaceId: z.string(),
+      docId: z.string(),
+      branchId: z.string(),
+      seq: z.coerce.number(),
+    }),
   },
   responses: {
     200: { description: "Snapshot/PIT bytes" },
@@ -140,7 +151,12 @@ export const mergeInto = createRoute({
   path: "/spaces/:spaceId/docs/:docId/branches/:from/merge-into/:to",
   tags,
   request: {
-    params: z.object({ spaceId: z.string(), docId: z.string(), from: z.string(), to: z.string() }),
+    params: z.object({
+      spaceId: z.string(),
+      docId: z.string(),
+      from: z.string(),
+      to: z.string(),
+    }),
   },
   responses: {
     200: jsonContent(z.object({ mergedHead: z.string() }), "Merged head hash"),
