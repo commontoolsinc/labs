@@ -17,7 +17,7 @@ export function demo() {
 
   storage.setDoc("A", {
     foo: { bar: 1 },
-    link: { "/": { "link@1": { id: "B", path: "" } } },
+    link: { "/": { "link@1": { id: "B", path: [] } } },
   }, { seq: 1 });
   storage.setDoc("B", { name: "docB" }, { seq: 1 });
 
@@ -45,7 +45,7 @@ export function demo() {
 
   const dA = storage.setDoc("A", {
     foo: { bar: 2 },
-    link: { "/": { "link@1": { id: "B", path: "" } } },
+    link: { "/": { "link@1": { id: "B", path: [] } } },
   }, { seq: 2 });
   const evA = processor.onDelta(dA);
   delivery.handleEngineEvents("client1", evA);

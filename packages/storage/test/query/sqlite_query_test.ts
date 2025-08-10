@@ -38,7 +38,7 @@ Deno.test("schema compile with #/definitions and evaluation over SQLite", async 
   const t = Automerge.change(tInit, (d: any) => {
     d.value = {
       status: "open",
-      assignee: { "/": { "link@1": { id: userId, path: "/profile" } } },
+      assignee: { "/": { "link@1": { id: userId, path: ["profile"] } } },
     };
   });
   const tC = Automerge.getLastLocalChange(t)!;
@@ -98,7 +98,7 @@ Deno.test("schema evaluator yields MaybeExceededDepth when visit limit is tiny",
     }],
   });
   const a0 = Automerge.change(Automerge.init<any>(), (d: any) => {
-    d.ref = { "/": { "link@1": { id: B, path: "" } } };
+    d.ref = { "/": { "link@1": { id: B, path: [] } } };
   });
   await space.submitTx({
     reads: [],

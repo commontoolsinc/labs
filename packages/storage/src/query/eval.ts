@@ -1,7 +1,7 @@
 import { DocId, Link, Path, Verdict, Version } from "./types.ts";
 import { IRId, IRPool } from "./ir.ts";
 import { Storage } from "./storage.ts";
-import { child, toTokens } from "./path.ts";
+import { child } from "./path.ts";
 
 export const DEFAULT_VISIT_LIMIT = 16_384;
 
@@ -17,7 +17,7 @@ function isObject(x: any): x is Record<string, any> {
   return x !== null && typeof x === "object" && !Array.isArray(x);
 }
 
-export type LinkValue = { "/": { "link@1": { id: DocId; path: string } } };
+export type LinkValue = { "/": { "link@1": { id: DocId; path: string[] } } };
 
 export function isLinkValue(v: any): v is LinkValue {
   return (
@@ -25,7 +25,7 @@ export function isLinkValue(v: any): v is LinkValue {
     isObject(v["/"]) &&
     isObject(v["/"]["link@1"]) &&
     typeof v["/"]["link@1"].id === "string" &&
-    typeof v["/"]["link@1"].path === "string"
+    Array.isArray(v["/"]["link@1"].path)
   );
 }
 
@@ -106,7 +106,7 @@ export class Evaluator {
         }
         if (!isLinkValue(val)) break;
         const tgt = val["/"]["link@1"];
-        const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
+        const to: Link = { doc: tgt.id, path: tgt.path };
         const from: Link = { doc: curDoc, path: curPath };
         linkEdges.add({ from, to });
         const toKey = Provenance.keyLink(to);
@@ -134,7 +134,7 @@ export class Evaluator {
         }
         if (!isLinkValue(val)) break;
         const tgt = val["/"]["link@1"];
-        const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
+        const to: Link = { doc: tgt.id, path: tgt.path };
         const from: Link = { doc: curDoc, path: curPath };
         linkEdges.add({ from, to });
         const toKey = Provenance.keyLink(to);
@@ -354,7 +354,7 @@ export class Evaluator {
 
     if (isLinkValue(v)) {
       const tgt = v["/"]["link@1"];
-      const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
+      const to: Link = { doc: tgt.id, path: tgt.path };
       const from: Link = { doc: effDoc, path: effPath };
 
       // record edge for explainability/provenance

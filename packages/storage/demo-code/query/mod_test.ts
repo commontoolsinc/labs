@@ -23,7 +23,7 @@ Deno.test("Evaluation respects AP omitted (ignores other props and links)", () =
   const evalr = new Evaluator(pool, storage, prov);
   storage.setDoc("A", {
     a: 1,
-    link: { "/": { "link@1": { id: "B", path: "" } } },
+    link: { "/": { "link@1": { id: "B", path: [] } } },
   }, { seq: 1 });
   storage.setDoc("B", { name: "B" }, { seq: 1 });
   const ir = compileSchema(pool, {
