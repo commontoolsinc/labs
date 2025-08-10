@@ -423,6 +423,7 @@ Action items for phase 2:
 - [ ] Links are wrong, they are json pointer but should be string[]
 - [ ] Rationalize seqId vs txId use
 - [ ] Remove InMemoryStorage in query/
-  - [ ] First remove the dependency on it in cycle_test.ts
+  - [ ] First remove the dependency on it in cycle_test.ts and others
+- [ ] Can we use :memory; instead of temp directories?
 - [ ] Rename `Storage` class inside query to something more like ReadHelper
 - [ ] Rename `sqlite` directory into something more meaningful
