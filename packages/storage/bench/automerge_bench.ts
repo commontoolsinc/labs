@@ -278,23 +278,23 @@ for (const { cfg, data } of VARIANTS) {
   const nameApply = `am var (${cfg.label}): applyChanges`;
   const nameJsonStr = `json var (${cfg.label}): stringify`;
   const nameJsonParse = `json var (${cfg.label}): parse`;
-  Deno.bench({ name: nameLoad, group: "automerge-var" }, () => {
+  Deno.bench({ name: nameLoad, group: "automerge-var-load" }, () => {
     const d = Automerge.load(data.bytes);
     if (!d) throw new Error("load failed");
   });
-  Deno.bench({ name: nameApply, group: "automerge-var" }, () => {
+  Deno.bench({ name: nameApply, group: "automerge-var-applyChanges" }, () => {
     const base = Automerge.init();
     const r = Automerge.applyChanges(base, data.changes);
     const doc = Array.isArray(r) ? r[0] : r;
     if (!doc) throw new Error("applyChanges failed");
   });
-  Deno.bench({ name: nameJsonStr, group: "automerge-var" }, () => {
+  Deno.bench({ name: nameJsonStr, group: "automerge-var-stringify" }, () => {
     const d = Automerge.load(data.bytes);
     const js = Automerge.toJS(d);
     const s = JSON.stringify(js);
     if (!s) throw new Error("stringify failed");
   });
-  Deno.bench({ name: nameJsonParse, group: "automerge-var" }, () => {
+  Deno.bench({ name: nameJsonParse, group: "automerge-var-parse" }, () => {
     const obj = JSON.parse(data.json);
     if (!obj) throw new Error("parse failed");
   });

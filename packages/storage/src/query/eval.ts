@@ -43,7 +43,10 @@ export class Provenance {
   }
 }
 
-export type VisitContext = { seenIRDocPath: Set<string> };
+export type VisitContext = {
+  seenIRDocPath: Set<string>;
+  valueMemo: Map<string, any>;
+};
 
 export class Evaluator {
   constructor(
@@ -55,7 +58,10 @@ export class Evaluator {
   memo = new Map<string, EvalResult>();
 
   newContext(): VisitContext {
-    return { seenIRDocPath: new Set<string>() };
+    return {
+      seenIRDocPath: new Set<string>(),
+      valueMemo: new Map<string, any>(),
+    };
   }
 
   private get visitLimit(): number {
@@ -90,7 +96,14 @@ export class Evaluator {
 
       curPath = next;
       while (true) {
-        const val = this.storage.read(curDoc, curPath, at);
+        const memoKey = `${curDoc}\u0001${JSON.stringify(curPath)}\u0001${
+          JSON.stringify(at ?? {})
+        }`;
+        let val = ctx.valueMemo.get(memoKey);
+        if (val === undefined) {
+          val = this.storage.read(curDoc, curPath, at);
+          ctx.valueMemo.set(memoKey, val);
+        }
         if (!isLinkValue(val)) break;
         const tgt = val["/"]["link@1"];
         const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
@@ -111,7 +124,14 @@ export class Evaluator {
     while (remaining.length > 0) {
       // Follow links at current location before stepping into next segment
       while (true) {
-        const val = this.storage.read(curDoc, curPath, at);
+        const memoKey = `${curDoc}\u0001${JSON.stringify(curPath)}\u0001${
+          JSON.stringify(at ?? {})
+        }`;
+        let val = ctx.valueMemo.get(memoKey);
+        if (val === undefined) {
+          val = this.storage.read(curDoc, curPath, at);
+          ctx.valueMemo.set(memoKey, val);
+        }
         if (!isLinkValue(val)) break;
         const tgt = val["/"]["link@1"];
         const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
@@ -179,7 +199,14 @@ export class Evaluator {
     const effDoc = norm.doc;
     const effPath = norm.path;
 
-    const v = this.storage.read(effDoc, effPath, at);
+    const memoKey = `${effDoc}\u0001${JSON.stringify(effPath)}\u0001${
+      JSON.stringify(at ?? {})
+    }`;
+    let v = ctx.valueMemo.get(memoKey);
+    if (v === undefined) {
+      v = this.storage.read(effDoc, effPath, at);
+      ctx.valueMemo.set(memoKey, v);
+    }
 
     const descend = (irId: IRId, val: any): Verdict => {
       const ir = this.pool.get(irId);
@@ -373,11 +400,7 @@ export class Evaluator {
         verdict = verdict === "Yes" ? "MaybeExceededDepth" : verdict;
       } else {
         ctx.seenIRDocPath.add(visitKey);
-        const childKey: EvalKey = {
-          ir: key.ir,
-          doc: to.doc,
-          path: to.path,
-        };
+        const childKey: EvalKey = { ir: key.ir, doc: to.doc, path: to.path };
         deps.add(childKey);
         const res = this.evaluate(childKey, at, ctx).verdict;
         if (res === "No") verdict = "No";
