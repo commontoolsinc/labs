@@ -47,12 +47,12 @@ function link(doc: string, pathTokens: string[] = []): any {
   return { "/": { "link@1": { id: doc, path: pathTokens } } };
 }
 
-// Simple version counter per doc for InMemoryStorage
-const versionSeq = new Map<string, number>();
+// Simple epoch counter per doc for InMemoryStorage
+const versionEpoch = new Map<string, number>();
 function writeDoc(docId: string, docValue: any) {
-  const next = (versionSeq.get(docId) ?? 0) + 1;
-  versionSeq.set(docId, next);
-  storage.setDoc(docId, docValue, { seq: next });
+  const next = (versionEpoch.get(docId) ?? 0) + 1;
+  versionEpoch.set(docId, next);
+  storage.setDoc(docId, docValue, { epoch: next });
 }
 
 // Seed synthetic data set

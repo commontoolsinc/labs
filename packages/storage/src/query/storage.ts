@@ -38,13 +38,13 @@ export class InMemoryStorage implements Storage {
     return Array.isArray(v) ? v.length : 0;
   }
   currentVersion(doc: DocId): Version {
-    return this.docs.get(doc)?.version ?? { seq: 0 };
+    return this.docs.get(doc)?.version ?? { epoch: 0 };
   }
   readDocAtVersion(doc: DocId, at: Version): { version: Version; doc: any } {
     const d = this.docs.get(doc);
     return d
       ? { version: d.version, doc: d.doc }
-      : { version: { seq: 0 }, doc: undefined };
+      : { version: { epoch: 0 }, doc: undefined };
   }
 
   setDoc(doc: DocId, docValue: any, version: Version): Delta {
