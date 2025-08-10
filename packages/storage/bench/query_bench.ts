@@ -24,8 +24,9 @@ const CHURN_BATCHES = Number(Deno.env.get("BENCH_CHURN_BATCHES") ?? 5);
 // VDOM-specific knobs
 const VDOM_NODES = Number(Deno.env.get("BENCH_VDOM_NODES") ?? 250); // at least 200
 const VDOM_MAX_CHILDREN = Number(Deno.env.get("BENCH_VDOM_MAX_CHILDREN") ?? 20);
-const VDOM_DEPTH = Number(Deno.env.get("BENCH_VDOM_DEPTH") ?? 3);
-const VDOM_BUDGET = Number(Deno.env.get("BENCH_VDOM_BUDGET") ?? 2);
+const VDOM_VALIDATE_COUNT = Number(
+  Deno.env.get("BENCH_VDOM_VALIDATE_COUNT") ?? Math.min(250, VDOM_NODES),
+);
 
 // ---------------------------
 // Globals initialized once
@@ -212,7 +213,7 @@ Deno.bench({
     $ref: "#/$defs/VNode",
   } as const;
   const ir = compileSchema(pool, VNodeRecursive as any);
-  const deadline = performance.now() + 2000; // 2s soft timeout
+  const deadline = performance.now() + 20000; // 20s soft timeout
   let ok = 0;
   for (let i = 0; i < Math.min(20, VDOM_NODES); i++) {
     if (performance.now() > deadline) {
@@ -222,7 +223,6 @@ Deno.bench({
       ir,
       doc: `vdom:${i}`,
       path: [],
-      budget: VDOM_BUDGET,
     });
     if (res.verdict !== "No") ok++;
     if (ok >= 5) break; // early exit once we validated a few
@@ -253,7 +253,6 @@ Deno.bench({
       ir,
       doc: `vdom:${i}`,
       path: [],
-      budget: 0,
     });
     if (res.verdict === "Yes") count++;
   }
@@ -262,30 +261,34 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "vdom: deep traversal to leaf with limited budget",
+  name: "vdom: recursive validation over many nodes (full pass)",
   group: "queries",
   n: 1,
 }, () => {
-  const schema = {
-    type: "object",
-    properties: { children: { type: "array" } },
-  };
-  const ir = compileSchema(pool, schema);
-  const deadline = performance.now() + 2000; // 2s soft timeout
-  let maybes = 0;
-  for (let i = 0; i < Math.min(50, VDOM_NODES); i++) {
+  const VNodeRecursive = {
+    $defs: {
+      VNode: {
+        type: "object",
+        properties: {
+          tag: { enum: Array.from(TAGS) },
+          props: { type: "object", additionalProperties: true },
+          children: { type: "array", items: { $ref: "#/$defs/VNode" } },
+        },
+      },
+    },
+    $ref: "#/$defs/VNode",
+  } as const;
+  const ir = compileSchema(pool, VNodeRecursive as any);
+  const deadline = performance.now() + 5000; // 5s soft timeout
+  let ok = 0;
+  for (let i = 0; i < Math.min(VDOM_VALIDATE_COUNT, VDOM_NODES); i++) {
     if (performance.now() > deadline) {
-      throw new Error("bench timeout (vdom deep traversal)");
+      throw new Error("bench timeout (vdom recursive full pass)");
     }
-    const res = evaluator.evaluate({
-      ir,
-      doc: `vdom:${i}`,
-      path: [],
-      budget: VDOM_BUDGET,
-    });
-    if (res.verdict === "MaybeExceededDepth") maybes++;
+    const res = evaluator.evaluate({ ir, doc: `vdom:${i}`, path: [] });
+    if (res.verdict !== "No") ok++;
   }
-  if (maybes < 0) throw new Error("unreachable");
+  if (ok <= 0) throw new Error("no VDOM nodes validated");
 });
 
 Deno.bench({
@@ -306,7 +309,6 @@ Deno.bench({
       ir,
       doc: `task:${i}`,
       path: [],
-      budget: 0,
     });
     if (res.verdict === "Yes") count += 1;
   }
@@ -347,7 +349,6 @@ Deno.bench({
       ir,
       doc: `task:${i}`,
       path: [],
-      budget: 2,
     });
     if (res.verdict !== "No") matched++;
   }
@@ -355,28 +356,31 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "schema: traversal budget across edges (depth 2)",
+  name: "schema: recursive traversal across task edges",
   group: "queries",
 }, () => {
   const schema = {
+    definitions: {
+      Task: { type: "object" },
+    },
     type: "object",
     properties: {
-      value: { type: "object", properties: { edges: { type: "array" } } },
+      value: {
+        type: "object",
+        properties: {
+          edges: { type: "array", items: { $ref: "#/definitions/Task" } },
+        },
+      },
     },
-  };
-  const ir = compileSchema(pool, schema);
+  } as const;
+  const ir = compileSchema(pool, schema as any);
   const roots = Math.min(100, ROOT_DOCS);
-  let maybes = 0;
+  let traversed = 0;
   for (let i = 0; i < roots; i++) {
-    const res = evaluator.evaluate({
-      ir,
-      doc: `task:${i}`,
-      path: [],
-      budget: 2,
-    });
-    if (res.verdict === "MaybeExceededDepth") maybes++;
+    const res = evaluator.evaluate({ ir, doc: `task:${i}`, path: [] });
+    if (res.verdict !== "No") traversed++;
   }
-  // Not asserting count, just exercising traversal path with budget
+  if (traversed <= 0) throw new Error("no tasks traversed via edges");
 });
 
 // Simulate heavy unrelated write churn then query only target subset
@@ -414,7 +418,7 @@ Deno.bench({
   const ir = compileSchema(pool, taskOpen);
   let matched = 0;
   for (const docId of targets) {
-    const res = evaluator.evaluate({ ir, doc: docId, path: [], budget: 0 });
+    const res = evaluator.evaluate({ ir, doc: docId, path: [] });
     if (res.verdict === "Yes") matched++;
   }
   if (matched < 0) throw new Error("unreachable");

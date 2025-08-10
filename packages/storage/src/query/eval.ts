@@ -3,9 +3,9 @@ import { IRId, IRPool } from "./ir.ts";
 import { Storage } from "./storage.ts";
 import { child, toTokens } from "./path.ts";
 
-export const DEFAULT_LINK_BUDGET = 32;
+export const DEFAULT_VISIT_LIMIT = 16_384;
 
-export type EvalKey = { ir: IRId; doc: DocId; path: Path; budget: number };
+export type EvalKey = { ir: IRId; doc: DocId; path: Path };
 export type EvalResult = {
   verdict: Verdict;
   touches: Set<Link>;
@@ -39,9 +39,7 @@ export class Provenance {
     return `${c.doc}\u0001${JSON.stringify(c.path)}`;
   }
   static keyEval(k: EvalKey): string {
-    return `${k.ir}\u0001${k.doc}\u0001${
-      JSON.stringify(k.path)
-    }\u0001${k.budget}`;
+    return `${k.ir}\u0001${k.doc}\u0001${JSON.stringify(k.path)}`;
   }
 }
 
@@ -52,11 +50,16 @@ export class Evaluator {
     private pool: IRPool,
     private storage: Storage,
     private prov: Provenance,
+    private options: { visitLimit?: number } = {},
   ) {}
   memo = new Map<string, EvalResult>();
 
   newContext(): VisitContext {
     return { seenIRDocPath: new Set<string>() };
+  }
+
+  private get visitLimit(): number {
+    return this.options.visitLimit ?? DEFAULT_VISIT_LIMIT;
   }
 
   // Follow links encountered while consuming targetPath starting from (baseDoc, basePath).
@@ -65,13 +68,12 @@ export class Evaluator {
     baseDoc: DocId,
     basePath: Path,
     targetPath: Path,
-    budget: number,
     at: Version | undefined,
     ctx: VisitContext,
     touches: Set<Link>,
     linkEdges: Set<{ from: Link; to: Link }>,
     ekStr: string,
-  ): { doc: DocId; path: Path; budget: number } {
+  ): { doc: DocId; path: Path } {
     let curDoc = baseDoc;
     let curPath: Path = [];
 
@@ -87,7 +89,7 @@ export class Evaluator {
       this.prov.linkToEval.get(lk)!.add(ekStr);
 
       curPath = next;
-      while (budget > 0) {
+      while (true) {
         const val = this.storage.read(curDoc, curPath, at);
         if (!isLinkValue(val)) break;
         const tgt = val["/"]["link@1"];
@@ -101,7 +103,6 @@ export class Evaluator {
         this.prov.linkEdges.get(ekStr)!.add(toKey);
         curDoc = to.doc;
         curPath = to.path;
-        budget -= 1;
       }
     }
 
@@ -109,7 +110,7 @@ export class Evaluator {
     const remaining = [...targetPath];
     while (remaining.length > 0) {
       // Follow links at current location before stepping into next segment
-      while (budget > 0) {
+      while (true) {
         const val = this.storage.read(curDoc, curPath, at);
         if (!isLinkValue(val)) break;
         const tgt = val["/"]["link@1"];
@@ -123,7 +124,6 @@ export class Evaluator {
         this.prov.linkEdges.get(ekStr)!.add(toKey);
         curDoc = to.doc;
         curPath = to.path;
-        budget -= 1;
       }
       const seg = remaining.shift()!;
       const next = child(curPath, seg);
@@ -137,7 +137,7 @@ export class Evaluator {
       curPath = next;
     }
 
-    return { doc: curDoc, path: curPath, budget };
+    return { doc: curDoc, path: curPath };
   }
 
   evaluate(key: EvalKey, at?: Version, ctx?: VisitContext): EvalResult {
@@ -170,7 +170,6 @@ export class Evaluator {
       key.doc,
       [],
       key.path,
-      key.budget,
       at,
       ctx!,
       touches,
@@ -179,7 +178,6 @@ export class Evaluator {
     );
     const effDoc = norm.doc;
     const effPath = norm.path;
-    const effBudget = norm.budget;
 
     const v = this.storage.read(effDoc, effPath, at);
 
@@ -237,7 +235,6 @@ export class Evaluator {
               ir: childIR,
               doc: effDoc,
               path: childPath,
-              budget: effBudget,
             };
             deps.add(childKey);
             const res = this.evaluate(childKey, at, ctx).verdict;
@@ -253,7 +250,6 @@ export class Evaluator {
               ir: ir.additional.ir,
               doc: effDoc,
               path: childPath,
-              budget: effBudget,
             };
             deps.add(childKey);
             const res = this.evaluate(childKey, at, ctx).verdict;
@@ -273,7 +269,6 @@ export class Evaluator {
                 ir: ir.tuple[i],
                 doc: effDoc,
                 path: childPath,
-                budget: effBudget,
               };
               deps.add(childKey);
               const res = this.evaluate(childKey, at, ctx).verdict;
@@ -288,7 +283,6 @@ export class Evaluator {
                 ir: ir.item,
                 doc: effDoc,
                 path: childPath,
-                budget: effBudget,
               };
               deps.add(childKey);
               const res = this.evaluate(childKey, at, ctx).verdict;
@@ -304,7 +298,6 @@ export class Evaluator {
               ir: n,
               doc: effDoc,
               path: effPath,
-              budget: effBudget,
             };
             deps.add(childKey);
             const res = this.evaluate(childKey, at, ctx).verdict;
@@ -319,7 +312,6 @@ export class Evaluator {
               ir: n,
               doc: key.doc,
               path: key.path,
-              budget: key.budget,
             };
             deps.add(childKey);
             const res = this.evaluate(childKey, at, ctx).verdict;
@@ -377,16 +369,14 @@ export class Evaluator {
       }
 
       // First time visiting this (IR, doc, path) in this evaluation
-      ctx.seenIRDocPath.add(visitKey);
-      if (effBudget <= 0) {
-        // True budget exhaustion (non-cycle deepness) → Maybe
+      if (ctx.seenIRDocPath.size >= this.visitLimit) {
         verdict = verdict === "Yes" ? "MaybeExceededDepth" : verdict;
       } else {
+        ctx.seenIRDocPath.add(visitKey);
         const childKey: EvalKey = {
           ir: key.ir,
           doc: to.doc,
           path: to.path,
-          budget: effBudget - 1,
         };
         deps.add(childKey);
         const res = this.evaluate(childKey, at, ctx).verdict;
@@ -395,8 +385,8 @@ export class Evaluator {
           res === "MaybeExceededDepth" || verdict === "MaybeExceededDepth"
         ) verdict = "MaybeExceededDepth";
         else verdict = "Yes";
+        ctx.seenIRDocPath.delete(visitKey);
       }
-      ctx.seenIRDocPath.delete(visitKey);
     }
 
     const result: EvalResult = { verdict, touches, linkEdges, deps };
