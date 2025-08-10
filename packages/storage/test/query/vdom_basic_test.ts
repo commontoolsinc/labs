@@ -84,12 +84,17 @@ Deno.test({
   // Verify vdom:0 starts as div → No
   const before = evaluator.evaluate({ ir, doc: "vdom:0", path: [] });
   assertEquals(before.verdict, "No");
-  // Edit vdom:0 to span (direct doc evaluation)
-  const d = Automerge.change(Automerge.init<any>(), (x: any) => {
-    x.value = { tag: "span", props: { id: "n-0", idx: 0, visible: true }, children: [] };
+  // Edit vdom:0 to span at root, using current heads as deps
+  const heads = (await space.getBranchState("vdom:0", "main")).heads;
+  const curBytes = await space.getDocBytes("vdom:0", "main", { accept: "automerge" });
+  const curDoc = Automerge.load(curBytes);
+  const d = Automerge.change(curDoc, (x: any) => {
+    x.tag = "span";
+    x.props = { id: "n-0", idx: 0, visible: true };
+    x.children = [];
   });
   const c = Automerge.getLastLocalChange(d)!;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId: "vdom:0", branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
+  await space.submitTx({ reads: [], writes: [{ ref: { docId: "vdom:0", branch: "main" }, baseHeads: heads, changes: [{ bytes: c }] }] });
   (evaluator as any)["memo"].clear();
   const after = evaluator.evaluate({ ir, doc: "vdom:0", path: [] });
   assertEquals(after.verdict, "Yes");
