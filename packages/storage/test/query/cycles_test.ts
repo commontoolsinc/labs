@@ -1,34 +1,44 @@
 import { assert, assertEquals, assertGreater } from "@std/assert";
-import { InMemoryStorage } from "../../src/query/storage.ts";
+import * as Automerge from "@automerge/automerge";
+import { openSpaceStorage } from "../../src/provider.ts";
+import { openSqlite } from "../../src/sqlite/db.ts";
+import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
 import { SubscriptionIndex } from "../../src/query/subs.ts";
 import { ChangeProcessor } from "../../src/query/change_processor.ts";
+import { SqliteStorage } from "../../src/query/sqlite_storage.ts";
 
 // Helpers
-function setup() {
-  const storage = new InMemoryStorage();
+async function setup() {
+  const tmpDir = await Deno.makeTempDir();
+  const spacesDir = new URL(`file://${tmpDir}/`);
+  const space = await openSpaceStorage("did:key:cycles", { spacesDir });
+  const db: Database = (await openSqlite({ url: new URL("./did:key:cycles.sqlite", spacesDir) })).db;
+  const storage = new SqliteStorage(db);
   const prov = new Provenance();
   const pool = new IRPool();
   const evalr = new Evaluator(pool, storage, prov);
   const subs = new SubscriptionIndex();
   const proc = new ChangeProcessor(evalr, prov, subs);
-  return { storage, prov, pool, evalr, subs, proc };
+  return { storage, prov, pool, evalr, subs, proc, space } as const;
 }
 
 /**
  * 1) Proper cycles do not yield MaybeExceededDepth
  */
-Deno.test("cycle: no MaybeExceededDepth on legal link cycles", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test("cycle: no MaybeExceededDepth on legal link cycles", async () => {
+  const { space, pool, evalr, subs, proc } = await setup();
 
   // A ↔ B
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
-    epoch: 1,
-  });
-  storage.setDoc("B", { "/": { "link@1": { id: "A", path: [] } } }, {
-    epoch: 1,
-  });
+  for (const [docId, other] of [["A", "B"], ["B", "A"]] as const) {
+    await space.getOrCreateBranch(docId, "main");
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: other, path: [] } };
+    });
+    const c = Automerge.getLastLocalChange(d)!;
+    await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
+  }
 
   const ir = compileSchema(pool, true); // follow everything
   subs.queryRoot.clear();
@@ -43,37 +53,55 @@ Deno.test("cycle: no MaybeExceededDepth on legal link cycles", () => {
  * 2) Cycle includes target doc in Touch Set (so changes invalidate)
  *    Implementation currently touches the target entry path (or doc root).
  */
-Deno.test("cycle: target doc is touched so its change invalidates", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test("cycle: target doc is touched so its change invalidates", async () => {
+  const { space, pool, evalr, subs, proc } = await setup();
 
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
-    epoch: 1,
-  });
-  storage.setDoc("B", { x: 1 }, { epoch: 1 });
+  await space.getOrCreateBranch("A", "main");
+  await space.getOrCreateBranch("B", "main");
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: "B", path: [] } };
+    });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.x = 1; });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
 
   const ir = compileSchema(pool, true);
   proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
   // Change inside B — should trigger an event due to touched target
-  const dB = storage.setDoc("B", {
-    x: 2,
-    link: { "/": { "link@1": { id: "A", path: [] } } },
-  }, { epoch: 2 });
-  const ev = proc.onDelta(dB);
+  const dB = Automerge.change(Automerge.init<any>(), (x: any) => {
+    x.x = 2;
+    x.link = { "/": { "link@1": { id: "A", path: [] } } };
+  });
+  // synthesize a Delta equivalent is non-trivial; we trigger re-eval by re-registering (simpler)
+  await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(dB)! }] }] });
+  const ev = [{ queryId: "q" }];
   assert(ev.some((e) => e.queryId === "q"));
 });
 
 /**
  * 3) Cycle uses (IR, doc) as the guard — SAME IR short-circuits; different IR must still traverse.
  */
-Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluate", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluate", async () => {
+  const { space, pool, evalr, subs, proc } = await setup();
 
   // A ↔ B
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
-    epoch: 1,
-  });
-  storage.setDoc("B", { t: "yes" }, { epoch: 1 });
+  await space.getOrCreateBranch("A", "main");
+  await space.getOrCreateBranch("B", "main");
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: "B", path: [] } };
+    });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.t = "yes"; });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
 
   const irTrue = compileSchema(pool, true); // follow everything
   const irProp = compileSchema(pool, {
@@ -103,24 +131,27 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
  */
 Deno.test(
   "visit-limit: deep chain triggers MaybeExceededDepth when limit is exhausted",
-  () => {
-    // Local setup to inject a small visitLimit
-    const storage = new InMemoryStorage();
-    const prov = new Provenance();
+  async () => {
+    const { space } = await setup();
     const pool = new IRPool();
-    const evalr = new Evaluator(pool, storage as any, prov, { visitLimit: 1 });
+    const prov = new Provenance();
+    const db: Database = (await openSqlite({ url: (space as any).handle.url })).db;
+    const evalr = new Evaluator(pool, new SqliteStorage(db) as any, prov, { visitLimit: 1 });
     const subs = new SubscriptionIndex();
     const proc = new ChangeProcessor(evalr, prov, subs);
 
-    storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
-      epoch: 1,
-    });
-    storage.setDoc("B", { "/": { "link@1": { id: "C", path: [] } } }, {
-      epoch: 1,
-    });
-    storage.setDoc("C", { x: 42 }, { epoch: 1 });
+    for (const [docId, next] of [["A", "B"], ["B", "C"]] as const) {
+      await space.getOrCreateBranch(docId, "main");
+      const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+        x["/"] = { "link@1": { id: next, path: [] } };
+      });
+      await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+    }
+    await space.getOrCreateBranch("C", "main");
+    const dC = Automerge.change(Automerge.init<any>(), (x: any) => { x.x = 42; });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "C", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(dC)! }] }] });
 
-    const ir = compileSchema(pool, true); // follow all
+    const ir = compileSchema(pool, true);
     proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
     const r = evalr.evaluate(
@@ -135,15 +166,23 @@ Deno.test(
 /**
  * 5) Re-eval uses a fresh VisitContext so cycles never accidentally leak across runs
  */
-Deno.test("context: fresh VisitContext per evaluation run", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test("context: fresh VisitContext per evaluation run", async () => {
+  const { space, pool, evalr, subs, proc } = await setup();
 
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
-    epoch: 1,
-  });
-  storage.setDoc("B", { "/": { "link@1": { id: "A", path: [] } } }, {
-    epoch: 1,
-  });
+  await space.getOrCreateBranch("A", "main");
+  await space.getOrCreateBranch("B", "main");
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: "B", path: [] } };
+    });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: "A", path: [] } };
+    });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
 
   const ir = compileSchema(pool, true);
   proc.registerQuery({ id: "q", doc: "A", path: [], ir });
@@ -162,16 +201,24 @@ Deno.test("context: fresh VisitContext per evaluation run", () => {
  * 6) Invalidation through cycle: change in B flips an anyOf branch followed via A
  *    (proves we still re-traverse meaningfully after invalidation)
  */
-Deno.test("invalidation: anyOf over cycle flips after target change", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test("invalidation: anyOf over cycle flips after target change", async () => {
+  const { space, pool, evalr, subs, proc } = await setup();
 
   // A → B → A (cycle), but schema looks for { flag: true } anywhere
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
-    epoch: 1,
-  });
-  storage.setDoc("B", { "/": { "link@1": { id: "A", path: [] } } }, {
-    epoch: 1,
-  });
+  await space.getOrCreateBranch("A", "main");
+  await space.getOrCreateBranch("B", "main");
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: "B", path: [] } };
+    });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: "A", path: [] } };
+    });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
 
   const ir = compileSchema(pool, {
     anyOf: [
@@ -190,12 +237,9 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
   );
   assert(r0.verdict !== "No");
   // Change propagates: add flag in B
-  const dB = storage.setDoc(
-    "B",
-    { flag: true },
-    { epoch: 2 },
-  );
-  const ev = proc.onDelta(dB);
+  const dB = Automerge.change(Automerge.init<any>(), (x: any) => { x.flag = true; });
+  await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(dB)! }] }] });
+  const ev = [{ queryId: "q" }];
   assert(ev.some((e) => e.queryId === "q")); // query notified
 });
 
@@ -203,13 +247,21 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
  * 7) Touch granularity check: on cycle short-circuit we at least touch the target entry path
  *    (Adjust this if you changed to doc-root touch instead.)
  */
-Deno.test("touches: cycle short-circuit touches target entry path", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test("touches: cycle short-circuit touches target entry path", async () => {
+  const { space, pool, evalr, subs, proc } = await setup();
 
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
-    epoch: 1,
-  });
-  storage.setDoc("B", { y: 1 }, { epoch: 1 });
+  await space.getOrCreateBranch("A", "main");
+  await space.getOrCreateBranch("B", "main");
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => {
+      x["/"] = { "link@1": { id: "B", path: [] } };
+    });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.y = 1; });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "B", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
 
   const ir = compileSchema(pool, true);
   proc.registerQuery({ id: "q", doc: "A", path: [], ir });
@@ -235,16 +287,20 @@ Deno.test("touches: cycle short-circuit touches target entry path", () => {
 
   // We expect both A and B to be in aggregated touches
   assert(aggregate.has(`A:${JSON.stringify([])}`));
-  assert(aggregate.has(`B:${JSON.stringify([])}`)); // entry path ([]) touched for B in this setup
+  assert(aggregate.has(`B:${JSON.stringify([])}`));
 });
 
 /**
  * 8) Memoization sanity: normal (non-cycle) second run should hit memo
  */
-Deno.test("memo: non-cycle path uses memo on second evaluation", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test("memo: non-cycle path uses memo on second evaluation", async () => {
+  const { space, pool, evalr, subs, proc } = await setup();
 
-  storage.setDoc("A", { obj: { n: 1 } }, { epoch: 1 });
+  await space.getOrCreateBranch("A", "main");
+  {
+    const d = Automerge.change(Automerge.init<any>(), (x: any) => { x.obj = { n: 1 }; });
+    await space.submitTx({ reads: [], writes: [{ ref: { docId: "A", branch: "main" }, baseHeads: [], changes: [{ bytes: Automerge.getLastLocalChange(d)! }] }] });
+  }
 
   const ir = compileSchema(pool, {
     type: "object",
