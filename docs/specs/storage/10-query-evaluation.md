@@ -7,8 +7,8 @@ Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
 1. **Check memo** by `EvalKey`; if present, return cached `EvalResult`
 2. **Read current JSON value** at `(docId, path)` where `path` is an array of
    strings:
-   - Record a `DocLink` touch for the exact link and any constraints that read
-     sublinks
+   - Record a `DocLink` touch for `(docId, path)` and any constraints that read
+     sublinks (only for nodes actually evaluated)
    - **Document structure handling**: If `path` is `/` or empty, evaluate
      against `doc.value`
      - If `doc.value` is undefined, the document has no current value
@@ -43,6 +43,8 @@ Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
        - If `space` is omitted, use current space
        - Then `evaluate(IR, targetId, targetPath, linkBudget-1)` and union its
          touches/deps into the current node
+   - Touches are recorded for nodes actually evaluated; encountering a link does
+     not, by itself, record a touch for its target unless evaluation descends.
    - If **not** a link, continue locally
 8. **Handle $ref nodes**:
    - If current IR node is `Ref(name)`:
@@ -96,6 +98,9 @@ Given a change event `Δ = { changedLinks, addedLinks, removedLinks }` for
      - If nothing changed → no notification
      - If either the **root verdict** changed or the **Touch Set** changed,
        **notify**
+     - If the delta intersects the query (via dependency graph or touch
+       containment), implementations SHOULD include the delta's `docId` in
+       `changedDocs` for that notification to make the intersection explicit
 
 4. **Link topology changes**
    - If a link was added/removed:
@@ -143,9 +148,12 @@ Given a change event `Δ = { changedLinks, addedLinks, removedLinks }` for
 
 ## Edge Cases & Correctness
 
-- **Cycles**: handled by `(docId, path, IRNodeId, linkBudget, refDepth)` memo
-  key. If re-entered with same or higher `linkBudget` and `refDepth`, return
-  cached result immediately
+- **Cycles**: handled by `(IRNodeId, docId, path)` visited set within a single
+  evaluation run and the `(docId, path, IRNodeId, linkBudget, refDepth)` memo
+  key. If re-entered at the same `(IRNodeId, docId, path)` within the run,
+  short-circuit without producing `MaybeExceededDepth`. If re-evaluated with the
+  same or higher `linkBudget` and `refDepth`, the memo may also return a cached
+  result.
 - **"False but touch root"**: register a touch on `(docId, path)` even when
   schema is `False`
 - **Missing properties**: touching a missing property means watching its
