@@ -19,7 +19,7 @@ export class SubscriptionIndex {
     return `${l.doc}\u0001${keyPath(l.path)}`;
   }
   static keyEval(k: EvalKey) {
-    return `${k.ir}\u0001${k.doc}\u0001${keyPath(k.path)}\u0001${k.budget}`;
+    return `${k.ir}\u0001${k.doc}\u0001${keyPath(k.path)}`;
   }
 
   registerQuery(q: Query, root: EvalKey, initialTouches: Set<Link>) {
