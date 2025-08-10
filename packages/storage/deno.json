@@ -5,14 +5,14 @@
     "check": "deno check .",
     "just-test": {
       "description": "Just run unit tests without type checking",
-      "command": "deno test -A"
+      "command": "deno test -A test"
     },
     "test": {
       "description": "Type check & run tests",
       "dependencies": [
         "check"
       ],
-      "command": "deno test -A"
+      "command": "deno test -A test"
     },
     "new-storage:export-snapshot": "deno run -A ./cli/export_snapshot.ts",
     "new-storage:import-snapshot": "deno run -A ./cli/import_snapshot.ts",
