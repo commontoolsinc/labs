@@ -1,9 +1,19 @@
 import { assertEquals } from "@std/assert";
+import * as Automerge from "@automerge/automerge";
+import { openSpaceStorage } from "../../src/provider.ts";
+import { openSqlite } from "../../src/sqlite/db.ts";
+import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
-import { InMemoryStorage } from "../../src/query/storage.ts";
+import { SqliteStorage } from "../../src/query/sqlite_storage.ts";
 
-Deno.test("compileSchema handles self-recursive $ref", () => {
+Deno.test("compileSchema handles self-recursive $ref", async () => {
+  const tmpDir = await Deno.makeTempDir();
+  const spacesDir = new URL(`file://${tmpDir}/`);
+  const space = await openSpaceStorage("did:key:rr", { spacesDir });
+  const db: Database = (await openSqlite({
+    url: new URL("./did:key:rr.sqlite", spacesDir),
+  })).db;
   const pool = new IRPool();
   const schema = {
     definitions: {
@@ -21,12 +31,17 @@ Deno.test("compileSchema handles self-recursive $ref", () => {
   const node = pool.get(id);
   assertEquals(typeof node, "object");
 
-  // Evaluate over a small recursive doc graph
-  const storage = new InMemoryStorage();
-  storage.setDoc("root", {
-    tag: "div",
-    children: [{ tag: "span", children: [] }],
-  }, { epoch: 1 });
+  // Seed a small recursive doc graph
+  const docId = "root";
+  await space.getOrCreateBranch(docId, "main");
+  const init = Automerge.init<any>();
+  const d = Automerge.change(init, (x: any) => {
+    x.tag = "div";
+    x.children = [{ tag: "span", children: [] }];
+  });
+  const c = Automerge.getLastLocalChange(d)!;
+  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
+  const storage = new SqliteStorage(db);
   const ev = new Evaluator(pool, storage, new Provenance());
   const res = ev.evaluate({ ir: id, doc: "root", path: [] });
   assertEquals(
@@ -35,7 +50,13 @@ Deno.test("compileSchema handles self-recursive $ref", () => {
   );
 });
 
-Deno.test("compileSchema handles mutual recursion via $ref", () => {
+Deno.test("compileSchema handles mutual recursion via $ref", async () => {
+  const tmpDir = await Deno.makeTempDir();
+  const spacesDir = new URL(`file://${tmpDir}/`);
+  const space = await openSpaceStorage("did:key:rr2", { spacesDir });
+  const db: Database = (await openSqlite({
+    url: new URL("./did:key:rr2.sqlite", spacesDir),
+  })).db;
   const pool = new IRPool();
   const schema = {
     definitions: {
@@ -54,10 +75,15 @@ Deno.test("compileSchema handles mutual recursion via $ref", () => {
   const node = pool.get(id);
   assertEquals(typeof node, "object");
 
-  // Evaluate mutual recursion with shallow budget
-  const storage = new InMemoryStorage();
-  storage.setDoc("docA", { b: { a: { b: {} } } }, { epoch: 1 });
-  const ev = new Evaluator(pool, storage, new Provenance());
+  // Seed mutual recursion
+  const docId = "docA";
+  await space.getOrCreateBranch(docId, "main");
+  const d0 = Automerge.change(Automerge.init<any>(), (x: any) => {
+    x.b = { a: { b: {} } };
+  });
+  const c0 = Automerge.getLastLocalChange(d0)!;
+  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c0 }] }] });
+  const ev = new Evaluator(pool, new SqliteStorage(db), new Provenance());
   const res = ev.evaluate({ ir: id, doc: "docA", path: [] });
   assertEquals(
     ["Yes", "MaybeExceededDepth"].includes(res.verdict as any),
