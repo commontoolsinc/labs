@@ -8,7 +8,7 @@ import type {
   TxDocResult,
   TxReceipt,
   TxRequest,
-} from "../interface.ts";
+} from "./interface.ts";
 import { openSqlite, type SqliteHandle } from "./sqlite/db.ts";
 import {
   getBranchState as readBranchState,

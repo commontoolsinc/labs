@@ -1,5 +1,5 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type { SpaceStorage } from "@commontools/storage/interface";
+import type { SpaceStorage } from "../../../../storage/src/interface.ts";
 import { openSpaceStorage } from "@commontools/storage";
 import { openSqlite } from "../../../../storage/src/sqlite/db.ts";
 

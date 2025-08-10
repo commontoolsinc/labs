@@ -1,4 +1,4 @@
-import type { BranchId, DocId } from "../../interface.ts";
+import type { BranchId, DocId } from "../interface.ts";
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 

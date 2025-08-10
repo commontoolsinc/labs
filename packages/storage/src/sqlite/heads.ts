@@ -1,4 +1,4 @@
-import type { BranchName, BranchState, DocId, Heads } from "../../interface.ts";
+import type { BranchName, BranchState, DocId, Heads } from "../interface.ts";
 import {
   refer as referJson,
   toDigest as refToDigest,
