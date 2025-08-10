@@ -18,8 +18,8 @@ export function demo() {
   storage.setDoc("A", {
     foo: { bar: 1 },
     link: { "/": { "link@1": { id: "B", path: [] } } },
-  }, { seq: 1 });
-  storage.setDoc("B", { name: "docB" }, { seq: 1 });
+  }, { epoch: 1 });
+  storage.setDoc("B", { name: "docB" }, { epoch: 1 });
 
   const schema = {
     type: "object",
@@ -33,7 +33,7 @@ export function demo() {
   processor.registerQuery(q);
 
   const touches = new Set<string>(["A"]); // simplified doc set for backfill
-  delivery.startSubscription("client1", q.id, new Set(touches), { seq: 1 });
+  delivery.startSubscription("client1", q.id, new Set(touches), { epoch: 1 });
 
   console.log("-- Initial backfill --");
   outbox.drain("client1", (m) => {
@@ -46,7 +46,7 @@ export function demo() {
   const dA = storage.setDoc("A", {
     foo: { bar: 2 },
     link: { "/": { "link@1": { id: "B", path: [] } } },
-  }, { seq: 2 });
+  }, { epoch: 2 });
   const evA = processor.onDelta(dA);
   delivery.handleEngineEvents("client1", evA);
   outbox.drain("client1", (m) => {

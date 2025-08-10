@@ -20,7 +20,7 @@ function seedVDOM(storage: InMemoryStorage, N: number) {
     storage.setDoc(
       `vdom:${i}`,
       { tag, props: { id: `n-${i}`, idx: i, visible: true }, children: kids },
-      { seq: 1 },
+      { epoch: 1 },
     );
   }
 }
@@ -75,7 +75,7 @@ Deno.test({
   storage.setDoc(
     "vdom:0",
     { tag: "span", props: { id: "n-0", idx: 0, visible: true }, children: [] },
-    { seq: 2 },
+    { epoch: 2 },
   );
   (evaluator as any)["memo"].clear();
   const after = evaluator.evaluate({ ir, doc: "vdom:0", path: [] });

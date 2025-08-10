@@ -6,7 +6,7 @@ import * as Automerge from "@automerge/automerge";
 import type { Database } from "@db/sqlite";
 import { openSpaceStorage } from "../src/provider.ts";
 import { openSqlite } from "../src/sqlite/db.ts";
-import { getAutomergeBytesAtSeq } from "../src/sqlite/pit.ts";
+import { getAutomergeBytesAtSeq, uptoSeqNo } from "../src/sqlite/pit.ts";
 import { getBranchState } from "../src/sqlite/heads.ts";
 import { SqliteStorage } from "../src/query/sqlite_storage.ts";
 
@@ -21,7 +21,9 @@ const tmpDir = await Deno.makeTempDir();
 const spacesDir = new URL(`file://${tmpDir}/`);
 const spaceDid = "did:key:bench-space-pit";
 const space = await openSpaceStorage(spaceDid, { spacesDir });
-const sqliteHandle = await openSqlite({ url: new URL(`./${spaceDid}.sqlite`, spacesDir) });
+const sqliteHandle = await openSqlite({
+  url: new URL(`./${spaceDid}.sqlite`, spacesDir),
+});
 const db: Database = sqliteHandle.db;
 const storage = new SqliteStorage(db);
 
@@ -45,7 +47,12 @@ async function seedHeavyDoc() {
       // Grow both map and array shapes to produce non-trivial bytes
       if (d.meta === undefined) d.meta = { createdAt: Date.now() };
       if (d.journal === undefined) d.journal = [];
-      d.journal.push({ at: Date.now(), v: i, note: `n${i}`, r: Math.floor(rnd() * 1e6) });
+      d.journal.push({
+        at: Date.now(),
+        v: i,
+        note: `n${i}`,
+        r: Math.floor(rnd() * 1e6),
+      });
       if (d.counters === undefined) d.counters = {} as any;
       const k = `k${i % 32}`;
       d.counters[k] = (d.counters[k] ?? 0) + 1;
@@ -67,7 +74,14 @@ await seedHeavyDoc();
 // Resolve latest version and branchId
 const latest = storage.currentVersion(PIT_DOC_ID);
 const { branchId } = getBranchState(db, PIT_DOC_ID, latest.branch ?? "main");
-const latestBytes = getAutomergeBytesAtSeq(db, null, PIT_DOC_ID as any, branchId, latest.seq);
+const latestSeq = uptoSeqNo(db, PIT_DOC_ID as any, branchId, latest.epoch);
+const latestBytes = getAutomergeBytesAtSeq(
+  db,
+  null,
+  PIT_DOC_ID as any,
+  branchId,
+  latestSeq,
+);
 
 // Benchmarks
 Deno.bench({
@@ -75,7 +89,13 @@ Deno.bench({
   group: "sqlite-pit",
   n: 1,
 }, () => {
-  const bytes = getAutomergeBytesAtSeq(db, null, PIT_DOC_ID as any, branchId, latest.seq);
+  const bytes = getAutomergeBytesAtSeq(
+    db,
+    null,
+    PIT_DOC_ID as any,
+    branchId,
+    latestSeq,
+  );
   if (bytes.length === 0) throw new Error("empty PIT bytes");
 });
 
@@ -111,13 +131,17 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "sqlite PIT: reconstruct bytes at random mid-seq",
+  name: "sqlite PIT: reconstruct bytes at random mid-range",
   group: "sqlite-pit",
   n: 1,
 }, () => {
-  const mid = Math.max(1, Math.floor(latest.seq * 0.6));
-  const bytes = getAutomergeBytesAtSeq(db, null, PIT_DOC_ID as any, branchId, mid);
+  const mid = Math.max(1, Math.floor(latestSeq * 0.6));
+  const bytes = getAutomergeBytesAtSeq(
+    db,
+    null,
+    PIT_DOC_ID as any,
+    branchId,
+    mid,
+  );
   if (bytes.length === 0) throw new Error("empty PIT bytes (mid)");
 });
-
-

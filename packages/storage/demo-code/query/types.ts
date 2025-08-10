@@ -1,9 +1,7 @@
 export type DocId = string;
 export type Path = string[]; // internal path representation
 export type PathKey = string; // JSON.stringify(Path)
-export type Seq = number;
-
-export type Version = { seq: Seq; branch?: string };
+export type Version = { epoch: number; branch?: string };
 
 // Previously called Cell; now Link = (docId, path tokens)
 export type Link = { doc: DocId; path: Path };

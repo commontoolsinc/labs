@@ -55,10 +55,10 @@ export class DeliveryManager {
     for (const docId of touchedDocs) {
       const snap = this.storage.readDocAtVersion(docId, watermark);
       const last = st.sentVersionByDoc.get(docId);
-      if (!last || (snap.version.seq > (last.seq || 0))) {
+      if (!last || (snap.version.epoch > (last.epoch || 0))) {
         pending.add(docId);
         this.outbox.enqueue(clientId, {
-          id: `mu:${clientId}:${queryId}:${docId}:${snap.version.seq}`,
+          id: `mu:${clientId}:${queryId}:${docId}:${snap.version.epoch}`,
           type: "DOC_UPDATE",
           docId,
           version: snap.version,
@@ -68,7 +68,7 @@ export class DeliveryManager {
     }
     if (pending.size === 0) {
       this.outbox.enqueue(clientId, {
-        id: `qs:${clientId}:${queryId}:${watermark.seq}`,
+        id: `qs:${clientId}:${queryId}:${watermark.epoch}`,
         type: "QUERY_SYNCED",
         queryId,
         watermark,
@@ -79,13 +79,13 @@ export class DeliveryManager {
   onAckDoc(clientId: string, docId: DocId, version: Version) {
     const st = this.ensureClient(clientId);
     const prev = st.sentVersionByDoc.get(docId);
-    if (!prev || version.seq > (prev.seq || 0)) {
+    if (!prev || version.epoch > (prev.epoch || 0)) {
       st.sentVersionByDoc.set(docId, version);
     }
     for (const [qid, b] of st.initialBackfill) {
       if (b.pending.delete(docId) && b.pending.size === 0) {
         this.outbox.enqueue(clientId, {
-          id: `qs:${clientId}:${qid}:${b.watermark.seq}`,
+          id: `qs:${clientId}:${qid}:${b.watermark.epoch}`,
           type: "QUERY_SYNCED",
           queryId: qid,
           watermark: b.watermark,
@@ -105,9 +105,9 @@ export class DeliveryManager {
         this.storage.currentVersion(docId),
       );
       const last = st.sentVersionByDoc.get(docId);
-      if (!last || snap.version.seq > (last.seq || 0)) {
+      if (!last || snap.version.epoch > (last.epoch || 0)) {
         this.outbox.enqueue(clientId, {
-          id: `mu:${clientId}:live:${docId}:${snap.version.seq}`,
+          id: `mu:${clientId}:live:${docId}:${snap.version.epoch}`,
           type: "DOC_UPDATE",
           docId,
           version: snap.version,

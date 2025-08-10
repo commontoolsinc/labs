@@ -1,6 +1,6 @@
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
-import { getAutomergeBytesAtSeq } from "../sqlite/pit.ts";
+import { getAutomergeBytesAtSeq, uptoSeqNo } from "../sqlite/pit.ts";
 import { getBranchState } from "../sqlite/heads.ts";
 import type { Path, Version } from "./types.ts";
 
@@ -25,7 +25,9 @@ export class SqliteStorage {
   ): { branchId: string; seq: number } {
     const branchName = at?.branch ?? this.defaultBranch;
     const state = getBranchState(this.db, docId, branchName);
-    const seq = at?.seq ?? state.seqNo;
+    const seq = at?.epoch != null
+      ? uptoSeqNo(this.db, docId, state.branchId, at.epoch)
+      : state.seqNo;
     return { branchId: state.branchId, seq };
   }
 
@@ -48,7 +50,7 @@ export class SqliteStorage {
 
   currentVersion(docId: string): Version {
     const state = getBranchState(this.db, docId, this.defaultBranch);
-    return { seq: state.seqNo, branch: this.defaultBranch };
+    return { epoch: state.epoch, branch: this.defaultBranch };
   }
 
   readDocAtVersion(docId: string, at: Version): { version: Version; doc: any } {
@@ -56,7 +58,11 @@ export class SqliteStorage {
     const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
     const json = Automerge.toJS(Automerge.load(bytes));
     return {
-      version: { seq, branch: at.branch ?? this.defaultBranch },
+      version: {
+        epoch: at.epoch ??
+          getBranchState(this.db, docId, at.branch ?? this.defaultBranch).epoch,
+        branch: at.branch ?? this.defaultBranch,
+      },
       doc: json,
     };
   }

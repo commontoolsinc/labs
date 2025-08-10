@@ -26,7 +26,7 @@ Deno.test("compileSchema handles self-recursive $ref", () => {
   storage.setDoc("root", {
     tag: "div",
     children: [{ tag: "span", children: [] }],
-  }, { seq: 1 });
+  }, { epoch: 1 });
   const ev = new Evaluator(pool, storage, new Provenance());
   const res = ev.evaluate({ ir: id, doc: "root", path: [] });
   assertEquals(
@@ -56,7 +56,7 @@ Deno.test("compileSchema handles mutual recursion via $ref", () => {
 
   // Evaluate mutual recursion with shallow budget
   const storage = new InMemoryStorage();
-  storage.setDoc("docA", { b: { a: { b: {} } } }, { seq: 1 });
+  storage.setDoc("docA", { b: { a: { b: {} } } }, { epoch: 1 });
   const ev = new Evaluator(pool, storage, new Provenance());
   const res = ev.evaluate({ ir: id, doc: "docA", path: [] });
   assertEquals(
