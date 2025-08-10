@@ -420,6 +420,7 @@ Action items for phase 2:
 
 ## Cleanup tasks
 
+- [ ] Links are wrong, they are json pointer but should be string[]
 - [ ] Rationalize seqId vs txId use
 - [ ] Remove InMemoryStorage in query/
   - [ ] First remove the dependency on it in cycle_test.ts
