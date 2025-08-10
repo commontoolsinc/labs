@@ -132,11 +132,10 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
 Deno.test(
   "visit-limit: deep chain triggers MaybeExceededDepth when limit is exhausted",
   async () => {
-    const { space } = await setup();
+    const { space, storage } = await setup();
     const pool = new IRPool();
     const prov = new Provenance();
-    const db: Database = (await openSqlite({ url: (space as any).handle.url })).db;
-    const evalr = new Evaluator(pool, new SqliteStorage(db) as any, prov, { visitLimit: 1 });
+    const evalr = new Evaluator(pool, storage as any, prov, { visitLimit: 1 });
     const subs = new SubscriptionIndex();
     const proc = new ChangeProcessor(evalr, prov, subs);
 

@@ -86,9 +86,7 @@ Deno.test({
   assertEquals(before.verdict, "No");
   // Edit vdom:0 to span (direct doc evaluation)
   const d = Automerge.change(Automerge.init<any>(), (x: any) => {
-    x.tag = "span";
-    x.props = { id: "n-0", idx: 0, visible: true };
-    x.children = [];
+    x.value = { tag: "span", props: { id: "n-0", idx: 0, visible: true }, children: [] };
   });
   const c = Automerge.getLastLocalChange(d)!;
   await space.submitTx({ reads: [], writes: [{ ref: { docId: "vdom:0", branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
