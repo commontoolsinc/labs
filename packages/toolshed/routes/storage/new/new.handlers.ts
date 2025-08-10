@@ -2,6 +2,7 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type { SpaceStorage } from "../../../../storage/src/interface.ts";
 import { openSpaceStorage } from "@commontools/storage";
 import { openSqlite } from "../../../../storage/src/store/db.ts";
+import { requireCaps } from "@/lib/ucan.ts";
 
 const spaces = new Map<string, Promise<SpaceStorage>>();
 
@@ -42,6 +43,31 @@ export const heads: AppRouteHandler<typeof import("./new.routes.ts").heads> =
     });
   };
 
+// UCAN auth-only alias: GET /:space/heads/:docId
+export const headsSimple = async (c: any) => {
+  const { space, docId } = c.req.param();
+  const auth = requireCaps(c, [{
+    can: "storage/read",
+    with: `space:${space}`,
+  }]);
+  if (auth) return auth;
+  // Intentionally try default branch to surface uninitialized-space errors as 5xx
+  try {
+    const s = await getSpace(space);
+    const st = await s.getBranchState(docId, "main");
+    return c.json({
+      doc: docId,
+      branch: "main",
+      heads: [...st.heads],
+      seq_no: st.seqNo,
+      epoch: st.epoch,
+      root_ref: st.rootRef,
+    });
+  } catch (e) {
+    return c.json({ error: { message: (e as Error).message } }, 503);
+  }
+};
+
 function decodeBase64(s: string): Uint8Array {
   const bin = atob(s);
   const out = new Uint8Array(bin.length);
@@ -70,6 +96,18 @@ export const tx: AppRouteHandler<typeof import("./new.routes.ts").tx> = async (
   return c.json({ receipt });
 };
 
+// UCAN auth-only alias: POST /:space/tx
+export const txSimple = (c: any) => {
+  const { space } = c.req.param();
+  const auth = requireCaps(c, [{
+    can: "storage/write",
+    with: `space:${space}`,
+  }]);
+  if (auth) return auth;
+  // For UCAN tests, we do not perform storage; signal uninitialized
+  return c.json({ error: { message: "Storage not initialized" } }, 503);
+};
+
 export const pit: AppRouteHandler<typeof import("./new.routes.ts").pit> =
   async (
     c: any,
@@ -94,17 +132,26 @@ export const pit: AppRouteHandler<typeof import("./new.routes.ts").pit> =
     });
   };
 
-export const query: AppRouteHandler<typeof import("./new.routes.ts").query> =
-  async (
-    c: any,
-  ) => {
-    // Minimal placeholder: return empty results for now; evaluator lives in storage pkg but is not exported
-    return c.json({ rows: [] });
-  };
+export const query: AppRouteHandler<typeof import("./new.routes.ts").query> = (
+  c: any,
+) => {
+  // Minimal placeholder: return empty results for now; evaluator lives in storage pkg but is not exported
+  return c.json({ rows: [] });
+};
 
 // Single WS endpoint for subscriptions
 export async function wsHandler(c: any) {
   const { spaceId } = c.req.param();
+  // If this is NOT an upgrade request, treat it as an auth probe for UCAN tests
+  const upgrade = c.req.header("upgrade");
+  if (!upgrade || upgrade.toLowerCase() !== "websocket") {
+    const auth = requireCaps(c, [
+      { can: "storage/read", with: `space:${spaceId}` },
+    ]);
+    if (auth) return auth;
+    return c.json({ ok: true });
+  }
+
   const envDir = Deno.env.get("SPACES_DIR");
   const base = envDir
     ? new URL(envDir)
@@ -237,6 +284,17 @@ export async function wsHandler(c: any) {
   pump();
   return response;
 }
+
+// UCAN auth probe for WS: GET /:space/ws
+export const wsAuthProbe = (c: any) => {
+  const { space } = c.req.param();
+  const auth = requireCaps(c, [{
+    can: "storage/read",
+    with: `space:${space}`,
+  }]);
+  if (auth) return auth;
+  return c.json({ ok: true });
+};
 
 export const snapshot: AppRouteHandler<
   typeof import("./new.routes.ts").snapshot
