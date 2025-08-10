@@ -5,9 +5,9 @@
 import * as Automerge from "@automerge/automerge";
 import type { Database } from "@db/sqlite";
 import { openSpaceStorage } from "../src/provider.ts";
-import { openSqlite } from "../src/sqlite/db.ts";
-import { getAutomergeBytesAtSeq, uptoSeqNo } from "../src/sqlite/pit.ts";
-import { getBranchState } from "../src/sqlite/heads.ts";
+import { openSqlite } from "../src/store/db.ts";
+import { getAutomergeBytesAtSeq, uptoSeqNo } from "../src/store/pit.ts";
+import { getBranchState } from "../src/store/heads.ts";
 import { SqliteStorageReader } from "../src/query/sqlite_storage.ts";
 
 // Config (override via env)

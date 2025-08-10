@@ -2,8 +2,8 @@
 
 // new-storage:list-branches --space <space>
 
-import { parseArgs } from "jsr:@std/cli/parse-args";
-import { openSqlite } from "../src/sqlite/db.ts";
+import { parseArgs } from "@std/cli/parse-args";
+import { openSqlite } from "../src/store/db.ts";
 
 function usage() {
   console.error("Usage: list-branches --space <space>");

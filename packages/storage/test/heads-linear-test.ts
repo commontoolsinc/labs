@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../src/provider.ts";
-import { decodeChangeHeader } from "../src/sqlite/change.ts";
+import { decodeChangeHeader } from "../src/store/change.ts";
 
 Deno.test("linear changes update heads and seq", async () => {
   const tmpDir = await Deno.makeTempDir();

@@ -1,4 +1,4 @@
-import { Link, Path } from "./types.ts";
+import { Link, Path } from "../types.ts";
 import { EvalKey } from "./eval.ts";
 import { keyPath } from "./path.ts";
 

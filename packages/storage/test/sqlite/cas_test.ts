@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
-import { openSqlite } from "../../src/sqlite/db.ts";
-import { createCas } from "../../src/sqlite/cas.ts";
+import { openSqlite } from "../../src/store/db.ts";
+import { createCas } from "../../src/store/cas.ts";
 
 Deno.test("sqlite cas: put/get/has for am_change, am_snapshot, blob; and index helpers", async () => {
   const tmpDir = await Deno.makeTempDir();

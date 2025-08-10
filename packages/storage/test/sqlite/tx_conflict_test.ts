@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
-import { decodeChangeHeader } from "../../src/sqlite/change.ts";
+import { decodeChangeHeader } from "../../src/store/change.ts";
 
 Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async () => {
   const tmpDir = await Deno.makeTempDir();

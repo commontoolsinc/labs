@@ -22,7 +22,7 @@
   - Raw change bytes stored **once** in a CAS table.
   - Per-branch sequence order stored separately.
   - Periodic **snapshots** and **incremental chunks** accelerate reads.
-  - Heads maintained explicitly.
+  - Heads maintained explicitly (see `src/store/heads.ts`).
 - **Transactions:** Optimistic concurrency using **heads** (or per-doc epoch) in
   client read set. Server:
 
@@ -35,6 +35,12 @@
 - **Subscriptions:** WebSocket multiplexed channels; clients subscribe to
   `(doc, branch)` and receive change notifications with **at-least-once**
   delivery and client acks by `tx_id`.
+
+## Code structure (impl)
+
+- Storage provider lives in `src/provider.ts`
+- SQLite store modules live under `src/store/` (e.g., `pit.ts`, `tx.ts`)
+- Query engine lives in `src/query/` and reuses shared types from `src/types.ts`
 
 ## Spaces
 

@@ -1,4 +1,4 @@
-import { assertEquals, assert } from "jsr:@std/assert@^1";
+import { assertEquals } from "@std/assert";
 import { createTestApp } from "@/packages/toolshed/lib/create-app.ts";
 import storageNew from "@/packages/toolshed/routes/storage/new/new.index.ts";
 
@@ -16,7 +16,9 @@ function makeToken(payload: Record<string, unknown>) {
 
 Deno.test("UCAN: missing auth returns 401 on heads", async () => {
   const app = createTestApp(storageNew);
-  const res = await app.request("/api/storage/new/v1/did:space:test/heads/doc1");
+  const res = await app.request(
+    "/api/storage/new/v1/did:space:test/heads/doc1",
+  );
   assertEquals(res.status, 401);
 });
 
@@ -62,7 +64,14 @@ Deno.test("UCAN: tx requires write cap", async () => {
   };
   const res403 = await app.request(
     "/api/storage/new/v1/did:space:test/tx",
-    { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body) },
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    },
   );
   assertEquals(res403.status, 403);
 
@@ -73,7 +82,14 @@ Deno.test("UCAN: tx requires write cap", async () => {
   });
   const resAuth = await app.request(
     "/api/storage/new/v1/did:space:test/tx",
-    { method: "POST", headers: { "content-type": "application/json", Authorization: `Bearer ${tokenWrite}` }, body: JSON.stringify(body) },
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${tokenWrite}`,
+      },
+      body: JSON.stringify(body),
+    },
   );
   // passes auth, then storage not initialized
   assertEquals(resAuth.status >= 500, true);

@@ -3,7 +3,7 @@
 // It keeps the same in-memory Storage interface for now; a SQLite adapter can be added later.
 
 export * from "./path.ts";
-export * from "./types.ts";
+export * from "../types.ts";
 export * from "./ir.ts";
 export * from "./sqlite_storage.ts";
 export * from "./eval.ts";

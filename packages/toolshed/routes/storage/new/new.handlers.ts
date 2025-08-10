@@ -1,7 +1,7 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { SpaceStorage } from "../../../../storage/src/interface.ts";
 import { openSpaceStorage } from "@commontools/storage";
-import { openSqlite } from "../../../../storage/src/sqlite/db.ts";
+import { openSqlite } from "../../../../storage/src/store/db.ts";
 
 const spaces = new Map<string, Promise<SpaceStorage>>();
 
@@ -85,7 +85,7 @@ export const pit: AppRouteHandler<typeof import("./new.routes.ts").pit> =
       url: new URL(`./${spaceId}.sqlite`, base),
     });
     const { getAutomergeBytesAtSeq } = await import(
-      "../../../../storage/src/sqlite/pit.ts"
+      "../../../../storage/src/store/pit.ts"
     );
     const bytes = getAutomergeBytesAtSeq(db, null, docId, branchId, seq);
     return new Response(bytes, {
@@ -247,7 +247,7 @@ export const snapshot: AppRouteHandler<
     url: new URL(`./${spaceId}.sqlite`, spacesDir),
   });
   const { getAutomergeBytesAtSeq } = await import(
-    "../../../../storage/src/sqlite/pit.ts"
+    "../../../../storage/src/store/pit.ts"
   );
   const bytes = getAutomergeBytesAtSeq(db, null, docId, branchId, Number(seq));
   return new Response(bytes, {

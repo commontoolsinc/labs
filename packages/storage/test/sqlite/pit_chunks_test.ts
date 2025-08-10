@@ -76,10 +76,8 @@ Deno.test("test_pit_fallback_without_chunks", async () => {
   const branch = "main";
 
   // Disable chunking by writing a space_settings row
-  // Note: we can get DB handle only via internal import for test purposes.
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  const { openSqlite } = await import("../../src/sqlite/db.ts");
+  // Open space DB directly via store API
+  const { openSqlite } = await import("../../src/store/db.ts");
   const handle = await openSqlite({
     url: new URL(`./did:key:pit-no-chunks.sqlite`, spacesDir),
   });
