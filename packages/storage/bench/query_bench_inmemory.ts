@@ -1,28 +1,23 @@
-// Query benchmarks for the SQLite-backed storage engine
+// Query benchmarks using in-memory storage (no SQLite)
 // Run with:
-//   deno bench -A --no-prompt packages/storage/bench/query_bench.ts
+//   deno bench -A --no-prompt packages/storage/bench/query_bench_inmemory.ts
 //
-// This seeds a synthetic space with many docs, nested structures, and link graphs,
-// then exercises the IR compiler/evaluator with filters, joins, and traversals.
+// Mirrors `query_bench.ts` but uses `InMemoryStorage` for faster iteration
 
-import * as Automerge from "@automerge/automerge";
-import { openSpaceStorage } from "../src/provider.ts";
-import { openSqlite } from "../src/sqlite/db.ts";
-import type { Database } from "@db/sqlite";
+import { InMemoryStorage } from "../src/query/storage.ts";
 import { compileSchema, IRPool } from "../src/query/ir.ts";
 import { Evaluator, Provenance } from "../src/query/eval.ts";
-import { SqliteStorage } from "../src/query/sqlite_storage.ts";
 
 // ---------------------------
 // Config (defaults kept small for quick iteration; override via env vars)
 // ---------------------------
 const SEED = 42;
-const ROOT_DOCS = Number(Deno.env.get("BENCH_ROOT_DOCS") ?? 200); // default small for quick run
+const ROOT_DOCS = Number(Deno.env.get("BENCH_ROOT_DOCS") ?? 200);
 const USERS = Number(Deno.env.get("BENCH_USERS") ?? 100);
 const EDGES_PER_DOC = Number(Deno.env.get("BENCH_EDGES_PER_DOC") ?? 2);
 const CHURN_BATCHES = Number(Deno.env.get("BENCH_CHURN_BATCHES") ?? 5);
 // VDOM-specific knobs
-const VDOM_NODES = Number(Deno.env.get("BENCH_VDOM_NODES") ?? 250); // at least 200
+const VDOM_NODES = Number(Deno.env.get("BENCH_VDOM_NODES") ?? 250);
 const VDOM_MAX_CHILDREN = Number(Deno.env.get("BENCH_VDOM_MAX_CHILDREN") ?? 20);
 const VDOM_VALIDATE_COUNT = Number(
   Deno.env.get("BENCH_VDOM_VALIDATE_COUNT") ?? Math.min(250, VDOM_NODES),
@@ -31,14 +26,10 @@ const VDOM_VALIDATE_COUNT = Number(
 // ---------------------------
 // Globals initialized once
 // ---------------------------
-const tmpDir = await Deno.makeTempDir();
-const spacesDir = new URL(`file://${tmpDir}/`);
-const spaceDid = "did:key:bench-space";
-const space = await openSpaceStorage(spaceDid, { spacesDir });
-const sqliteHandle = await openSqlite({
-  url: new URL(`./${spaceDid}.sqlite`, spacesDir),
-});
-const db: Database = sqliteHandle.db;
+const storage = new InMemoryStorage();
+const pool = new IRPool();
+const prov = new Provenance();
+const evaluator = new Evaluator(pool, storage, prov);
 
 // rand helper with seed for reproducibility
 function mulberry32(a: number) {
@@ -56,23 +47,29 @@ function link(doc: string, pathTokens: string[] = []): any {
   return { "/": { "link@1": { id: doc, path: pathTokens } } };
 }
 
+// Simple version counter per doc for InMemoryStorage
+const versionSeq = new Map<string, number>();
+function writeDoc(docId: string, docValue: any) {
+  const next = (versionSeq.get(docId) ?? 0) + 1;
+  versionSeq.set(docId, next);
+  storage.setDoc(docId, docValue, { seq: next });
+}
+
 // Seed synthetic data set
-async function seedOnce() {
+function seedOnce() {
   // Users: user:0..USERS-1 each has { profile: { name, org, tags[] } }
   for (let i = 0; i < USERS; i++) {
     const docId = `user:${i}`;
-    await seedDoc(docId, (d: any) => {
-      d.profile = {
-        name: `user-${i}`,
-        org: `org-${i % 50}`,
-        tags: ["alpha", i % 2 === 0 ? "eng" : "design", `tier-${i % 5}`],
-      };
-    });
+    const d: any = {};
+    d.profile = {
+      name: `user-${i}`,
+      org: `org-${i % 50}`,
+      tags: ["alpha", i % 2 === 0 ? "eng" : "design", `tier-${i % 5}`],
+    };
+    writeDoc(docId, d);
   }
 
   // Root task docs: task:0..ROOT_DOCS-1
-  // Each has nested schema and refs to users via value.assignee = {doc, path}
-  // and a graph adjacency list at value.edges = [{doc, path}]
   for (let i = 0; i < ROOT_DOCS; i++) {
     const docId = `task:${i}`;
     const assigneeId = Math.floor(rnd() * USERS);
@@ -83,53 +80,37 @@ async function seedOnce() {
       if (tgt === i) continue;
       neighbors.push(link(`task:${tgt}`, []));
     }
-    await seedDoc(docId, (d: any) => {
-      d.value = {
-        title: `task-${i}`,
-        status: i % 3 === 0 ? "open" : i % 3 === 1 ? "in_progress" : "closed",
-        priority: (i % 5) + 1,
-        metrics: {
-          estHours: (i % 13) + Math.floor(rnd() * 3),
-          done: i % 7 === 0,
-        },
-        assignee: link(`user:${assigneeId}`, ["profile"]),
-        edges: neighbors,
-        // nested array of items with $ref-like owner links
-        items: Array.from({ length: (i % 4) }, (_, k) => ({
-          text: `sub-${k}`,
-          done: (i + k) % 2 === 0,
-          owner: link(`user:${(assigneeId + k) % USERS}`, ["profile"]),
-        })),
-      };
-    });
+    const d: any = {};
+    d.value = {
+      title: `task-${i}`,
+      status: i % 3 === 0 ? "open" : i % 3 === 1 ? "in_progress" : "closed",
+      priority: (i % 5) + 1,
+      metrics: {
+        estHours: (i % 13) + Math.floor(rnd() * 3),
+        done: i % 7 === 0,
+      },
+      assignee: link(`user:${assigneeId}`, ["profile"]),
+      edges: neighbors,
+      // nested array of items with $ref-like owner links
+      items: Array.from({ length: (i % 4) }, (_, k) => ({
+        text: `sub-${k}`,
+        done: (i + k) % 2 === 0,
+        owner: link(`user:${(assigneeId + k) % USERS}`, ["profile"]),
+      })),
+    };
+    writeDoc(docId, d);
   }
 
   // Background churn docs unrelated to task graph
   for (let b = 0; b < CHURN_BATCHES; b++) {
     const docId = `noise:${b}`;
-    await seedDoc(docId, (d: any) => {
-      d.journal = [{ at: Date.now(), note: `batch-${b}` }];
-    });
+    const d: any = {};
+    d.journal = [{ at: Date.now(), note: `batch-${b}` }];
+    writeDoc(docId, d);
   }
 
   // Seed a recursive VDOM of at least 200 nodes (configurable via env)
-  await seedVDOM(VDOM_NODES, VDOM_MAX_CHILDREN);
-}
-
-async function seedDoc(docId: string, mutate: (d: any) => void) {
-  const branch = "main";
-  await space.getOrCreateBranch(docId, branch);
-  const init = Automerge.init<any>();
-  const updated = Automerge.change(init, mutate);
-  const c = Automerge.getLastLocalChange(updated)!;
-  await space.submitTx({
-    reads: [],
-    writes: [{
-      ref: { docId, branch },
-      baseHeads: [],
-      changes: [{ bytes: c }],
-    }],
-  });
+  seedVDOM(VDOM_NODES, VDOM_MAX_CHILDREN);
 }
 
 // --- VDOM seeding ---
@@ -152,7 +133,7 @@ type VNode = {
   children: any[]; // links to other VNode docs
 };
 
-async function seedVDOM(nodes: number, maxChildren: number) {
+function seedVDOM(nodes: number, maxChildren: number) {
   // Pre-generate children adjacency to avoid cycles: only point to higher index
   const children: number[][] = Array.from({ length: nodes }, () => []);
   for (let i = 0; i < nodes; i++) {
@@ -168,26 +149,19 @@ async function seedVDOM(nodes: number, maxChildren: number) {
     const docId = `vdom:${i}`;
     const tag = TAGS[Math.floor(rnd() * TAGS.length)];
     const kidLinks = children[i].map((j) => link(`vdom:${j}`, []));
-    await seedDoc(docId, (d: any) => {
-      // Put VNode at document root so links can target "" path
-      d.tag = tag;
-      d.props = { id: `n-${i}`, idx: i, visible: i % 5 !== 0 };
-      d.children = kidLinks;
-    });
+    const d: any = {} as VNode;
+    d.tag = tag;
+    d.props = { id: `n-${i}`, idx: i, visible: i % 5 !== 0 } as any;
+    d.children = kidLinks;
+    writeDoc(docId, d);
   }
 }
 
-// Build evaluator over SQLite storage
-const storage = new SqliteStorage(db);
-const pool = new IRPool();
-const prov = new Provenance();
-const evaluator = new Evaluator(pool, storage, prov);
-
 // Seed dataset once before benchmarks
-await seedOnce();
+seedOnce();
 
 // ---------------------------
-// Benchmarks
+// Benchmarks (same as sqlite-backed file)
 // ---------------------------
 
 // --- VDOM benchmarks ---
@@ -196,7 +170,6 @@ Deno.bench({
   group: "queries",
   n: 1,
 }, () => {
-  // Recursive VNode schema using $defs; evaluator must cap traversal via budget
   const VNodeRecursive = {
     $defs: {
       VNode: {
@@ -229,7 +202,7 @@ Deno.bench({
 });
 
 Deno.bench({
-  name: "vdom: find nodes tag=div with \u003e=10 children",
+  name: "vdom: find nodes tag=div with >=10 children",
   group: "queries",
   n: 1,
 }, () => {
@@ -254,7 +227,6 @@ Deno.bench({
     });
     if (res.verdict === "Yes") count++;
   }
-  // OK if zero depending on random seed; just exercise path
   if (count < 0) throw new Error("unreachable");
 });
 
@@ -277,7 +249,7 @@ Deno.bench({
     $ref: "#/$defs/VNode",
   } as const;
   const ir = compileSchema(pool, VNodeRecursive as any);
-  const deadline = performance.now() + 5000; // 5s soft timeout
+  const deadline = performance.now() + 20000; // align with 20s soft timeout
   let ok = 0;
   for (let i = 0; i < Math.min(VDOM_VALIDATE_COUNT, VDOM_NODES); i++) {
     if (performance.now() > deadline) {
@@ -293,7 +265,6 @@ Deno.bench({
   name: "schema: match open tasks (const filter)",
   group: "queries",
 }, () => {
-  // Schema that selects only open tasks
   const taskOpen = {
     type: "object",
     properties: {
@@ -310,7 +281,6 @@ Deno.bench({
     });
     if (res.verdict === "Yes") count += 1;
   }
-  // sanity: some open tasks exist
   if (count <= 0) throw new Error("no open tasks matched");
 });
 
@@ -385,23 +355,15 @@ Deno.bench({
 Deno.bench({
   name: "schema: selective over churn (open tasks)",
   group: "queries",
-}, async () => {
+}, () => {
   // Apply unrelated changes to noise:* docs to stress PIT/chunk retrieval
   for (let b = 0; b < CHURN_BATCHES; b++) {
     const docId = `noise:${b}`;
-    const init = Automerge.init<any>();
-    const d1 = Automerge.change(init, (d: any) => {
-      d.tick = (d.tick ?? 0) + 1;
-    });
-    const c = Automerge.getLastLocalChange(d1)!;
-    await space.submitTx({
-      reads: [],
-      writes: [{
-        ref: { docId, branch: "main" },
-        baseHeads: [],
-        changes: [{ bytes: c }],
-      }],
-    });
+    const prev =
+      storage.readDocAtVersion(docId, storage.currentVersion(docId)).doc ?? {};
+    const d = { ...prev } as any;
+    d.tick = (d.tick ?? 0) + 1;
+    writeDoc(docId, d);
   }
 
   // Now query a narrow subset of task docs
