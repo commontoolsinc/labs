@@ -36,7 +36,11 @@ export class ChangeProcessor {
       path: q.path,
       budget: q.budget,
     };
-    const res = this.evaluator.evaluate(root, undefined, this.evaluator.newContext());
+    const res = this.evaluator.evaluate(
+      root,
+      undefined,
+      this.evaluator.newContext(),
+    );
     const touches = this.collectTouches(root);
     this.subs.registerQuery(q, root, touches);
     this.queryVerdict.set(q.id, res.verdict);
@@ -131,7 +135,11 @@ export class ChangeProcessor {
         }
         if (!intersects) continue;
       }
-      const res = this.evaluator.evaluate(root, undefined, this.evaluator.newContext());
+      const res = this.evaluator.evaluate(
+        root,
+        undefined,
+        this.evaluator.newContext(),
+      );
       const newTouches = this.collectTouches(root);
       const oldTouches = this.queryTouches.get(qid) || new Set<Link>();
 
@@ -139,7 +147,9 @@ export class ChangeProcessor {
       const rem: Link[] = [];
       const exists = (set: Set<Link>, l: Link) =>
         [...set].some(
-          (x) => x.doc === l.doc && JSON.stringify(x.path) === JSON.stringify(l.path),
+          (x) =>
+            x.doc === l.doc &&
+            JSON.stringify(x.path) === JSON.stringify(l.path),
         );
       for (const l of newTouches) if (!exists(oldTouches, l)) add.push(l);
       for (const l of oldTouches) if (!exists(newTouches, l)) rem.push(l);
@@ -152,7 +162,9 @@ export class ChangeProcessor {
       // include the delta doc in changedDocs to guarantee a notification.
       changedDocs.add(delta.doc);
 
-      if (verdictChanged || add.length || rem.length || changedDocs.has(delta.doc)) {
+      if (
+        verdictChanged || add.length || rem.length || changedDocs.has(delta.doc)
+      ) {
         events.push({
           queryId: qid,
           verdictChanged,
@@ -169,4 +181,3 @@ export class ChangeProcessor {
     return events;
   }
 }
-

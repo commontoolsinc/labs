@@ -10,10 +10,12 @@ export function isServerMergeEnabled(db: Database): boolean {
 
   try {
     const row = db.prepare(
-      `SELECT value_json FROM space_settings WHERE key = 'settings'`
+      `SELECT value_json FROM space_settings WHERE key = 'settings'`,
     ).get() as { value_json: string } | undefined;
     if (!row) return globalEnabled;
-    const settings = JSON.parse(row.value_json) as { enableServerMerge?: boolean };
+    const settings = JSON.parse(row.value_json) as {
+      enableServerMerge?: boolean;
+    };
     if (typeof settings.enableServerMerge === "boolean") {
       return settings.enableServerMerge;
     }
@@ -23,4 +25,3 @@ export function isServerMergeEnabled(db: Database): boolean {
     return globalEnabled;
   }
 }
-

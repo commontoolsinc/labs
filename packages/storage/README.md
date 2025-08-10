@@ -12,4 +12,6 @@ Testing: prefer running from the repo root with the workspace test runner:
 
 - deno task test
 
-This ensures import maps and env flags are applied consistently. Running plain deno test -A at the root will include mirrored .conductor paths and can fail outside of this package.
+This ensures import maps and env flags are applied consistently. Running plain
+deno test -A at the root will include mirrored .conductor paths and can fail
+outside of this package.

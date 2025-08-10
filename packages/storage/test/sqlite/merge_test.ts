@@ -22,24 +22,45 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
 
   // First change from empty base
   let a0 = Automerge.init();
-  let a1 = Automerge.change(a0, (doc: any) => { doc.x = 1; });
+  let a1 = Automerge.change(a0, (doc: any) => {
+    doc.x = 1;
+  });
   const c1 = Automerge.getLastLocalChange(a1)!;
   const h1 = decodeChangeHeader(c1).changeHash;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch }, baseHeads: [], changes: [{ bytes: c1 }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: [],
+      changes: [{ bytes: c1 }],
+    }],
+  });
   const s1 = await space.getBranchState(docId, branch);
   assertEquals(s1.heads, [h1]);
 
   // Second independent change derived from empty base (deps = []) to create fork
   let b0 = Automerge.init();
-  let b1 = Automerge.change(b0, (doc: any) => { doc.y = 2; });
+  let b1 = Automerge.change(b0, (doc: any) => {
+    doc.y = 2;
+  });
   const c2 = Automerge.getLastLocalChange(b1)!;
   const h2 = decodeChangeHeader(c2).changeHash;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch }, baseHeads: s1.heads, changes: [{ bytes: c2 }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: s1.heads,
+      changes: [{ bytes: c2 }],
+    }],
+  });
   const s2 = await space.getBranchState(docId, branch);
   assertEquals([...s2.heads].sort(), [h1, h2].sort());
 
   // Now submit with baseHeads mismatch and expect conflict (server merge disabled)
-  const r = await space.submitTx({ reads: [], writes: [{ ref: { docId, branch }, baseHeads: [], changes: [] }] });
+  const r = await space.submitTx({
+    reads: [],
+    writes: [{ ref: { docId, branch }, baseHeads: [], changes: [] }],
+  });
   assertEquals(r.results[0]?.status, "conflict");
   assertEquals(r.results[0]?.reason, "baseHeads mismatch");
   const s3 = await space.getBranchState(docId, branch);
@@ -60,23 +81,44 @@ Deno.test("test_server_merge_enabled", async () => {
 
   // Create two concurrent heads on main
   let a0 = Automerge.init();
-  let a1 = Automerge.change(a0, (doc: any) => { doc.a = 1; });
+  let a1 = Automerge.change(a0, (doc: any) => {
+    doc.a = 1;
+  });
   const c1 = Automerge.getLastLocalChange(a1)!;
   const h1 = decodeChangeHeader(c1).changeHash;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch }, baseHeads: [], changes: [{ bytes: c1 }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: [],
+      changes: [{ bytes: c1 }],
+    }],
+  });
   const s1 = await space.getBranchState(docId, branch);
   assertEquals(s1.heads, [h1]);
 
   let b0 = Automerge.init();
-  let b1 = Automerge.change(b0, (doc: any) => { doc.b = 2; });
+  let b1 = Automerge.change(b0, (doc: any) => {
+    doc.b = 2;
+  });
   const c2 = Automerge.getLastLocalChange(b1)!;
   const h2 = decodeChangeHeader(c2).changeHash;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch }, baseHeads: s1.heads, changes: [{ bytes: c2 }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: s1.heads,
+      changes: [{ bytes: c2 }],
+    }],
+  });
   const s2 = await space.getBranchState(docId, branch);
   assertEquals([...s2.heads].sort(), [h1, h2].sort());
 
   // Submit with baseHeads mismatch, expect server-merge to collapse to 1 head
-  const r = await space.submitTx({ reads: [], writes: [{ ref: { docId, branch }, baseHeads: [], changes: [] }] });
+  const r = await space.submitTx({
+    reads: [],
+    writes: [{ ref: { docId, branch }, baseHeads: [], changes: [] }],
+  });
   assertEquals(r.results[0]?.status, "ok");
   assertEquals(r.results[0]?.applied, 0); // synthesized merge only
   const s3 = await space.getBranchState(docId, branch);
@@ -100,15 +142,33 @@ Deno.test("test_close_branch_post_merge", async () => {
 
   // Put a change on feature
   let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => { doc.title = "feat"; });
+  let d1 = Automerge.change(d0, (doc: any) => {
+    doc.title = "feat";
+  });
   const cf = Automerge.getLastLocalChange(d1)!;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: feature }, baseHeads: [], changes: [{ bytes: cf }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch: feature },
+      baseHeads: [],
+      changes: [{ bytes: cf }],
+    }],
+  });
 
   // Put a base change on main too
   let e0 = Automerge.init();
-  let e1 = Automerge.change(e0, (doc: any) => { doc.base = true; });
+  let e1 = Automerge.change(e0, (doc: any) => {
+    doc.base = true;
+  });
   const cm = Automerge.getLastLocalChange(e1)!;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: main }, baseHeads: [], changes: [{ bytes: cm }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch: main },
+      baseHeads: [],
+      changes: [{ bytes: cm }],
+    }],
+  });
 
   // Merge feature into main via explicit API (should close feature)
   const head = await space.mergeBranches(docId, feature, main);
@@ -120,11 +180,17 @@ Deno.test("test_close_branch_post_merge", async () => {
   try {
     const row = db.prepare(
       `SELECT b.closed as closed, b.merged_into_branch_id as merged_into_branch_id
-       FROM branches b WHERE b.doc_id = :doc_id AND b.name = :name`
-    ).get({ doc_id: docId, name: feature }) as { closed: number; merged_into_branch_id: string | null } | undefined;
+       FROM branches b WHERE b.doc_id = :doc_id AND b.name = :name`,
+    ).get({ doc_id: docId, name: feature }) as {
+      closed: number;
+      merged_into_branch_id: string | null;
+    } | undefined;
     assert(row);
     assertEquals(row!.closed, 1);
-    assert(typeof row!.merged_into_branch_id === "string" && row!.merged_into_branch_id.length > 0);
+    assert(
+      typeof row!.merged_into_branch_id === "string" &&
+        row!.merged_into_branch_id.length > 0,
+    );
   } finally {
     await close();
   }
@@ -147,25 +213,47 @@ Deno.test("test_no_close_if_not_collapsed", async () => {
 
   // Create two heads on main
   let a0 = Automerge.init();
-  let a1 = Automerge.change(a0, (doc: any) => { doc.m = 1; });
+  let a1 = Automerge.change(a0, (doc: any) => {
+    doc.m = 1;
+  });
   const c1 = Automerge.getLastLocalChange(a1)!;
   const h1 = decodeChangeHeader(c1).changeHash;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: main }, baseHeads: [], changes: [{ bytes: c1 }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch: main },
+      baseHeads: [],
+      changes: [{ bytes: c1 }],
+    }],
+  });
   const s1 = await space.getBranchState(docId, main);
   assertEquals(s1.heads, [h1]);
 
   let b0 = Automerge.init();
-  let b1 = Automerge.change(b0, (doc: any) => { doc.n = 2; });
+  let b1 = Automerge.change(b0, (doc: any) => {
+    doc.n = 2;
+  });
   const c2 = Automerge.getLastLocalChange(b1)!;
   const h2 = decodeChangeHeader(c2).changeHash;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: main }, baseHeads: s1.heads, changes: [{ bytes: c2 }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch: main },
+      baseHeads: s1.heads,
+      changes: [{ bytes: c2 }],
+    }],
+  });
   const s2 = await space.getBranchState(docId, main);
   assertEquals([...s2.heads].sort(), [h1, h2].sort());
 
   // Now submit a change that references only h1 (leaving >1 heads), but provide mergeOf
-  const baseDoc = Automerge.applyChanges(Automerge.init(), [Automerge.getLastLocalChange(a1)!]);
+  const baseDoc = Automerge.applyChanges(Automerge.init(), [
+    Automerge.getLastLocalChange(a1)!,
+  ]);
   const baseApplied = Array.isArray(baseDoc) ? baseDoc[0] : baseDoc;
-  const m1 = Automerge.change(baseApplied, (doc: any) => { doc.extra = true; });
+  const m1 = Automerge.change(baseApplied, (doc: any) => {
+    doc.extra = true;
+  });
   const c3 = Automerge.getLastLocalChange(m1)!;
   const r = await space.submitTx({
     reads: [],
@@ -186,8 +274,11 @@ Deno.test("test_no_close_if_not_collapsed", async () => {
   try {
     const row = db.prepare(
       `SELECT b.closed as closed, b.merged_into_branch_id as merged_into_branch_id
-       FROM branches b WHERE b.doc_id = :doc_id AND b.name = :name`
-    ).get({ doc_id: docId, name: feature }) as { closed: number; merged_into_branch_id: string | null } | undefined;
+       FROM branches b WHERE b.doc_id = :doc_id AND b.name = :name`,
+    ).get({ doc_id: docId, name: feature }) as {
+      closed: number;
+      merged_into_branch_id: string | null;
+    } | undefined;
     assert(row);
     assertEquals(row!.closed, 0);
     assertEquals(row!.merged_into_branch_id, null);

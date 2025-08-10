@@ -37,7 +37,9 @@ export class Provenance {
     return `${c.doc}\u0001${JSON.stringify(c.path)}`;
   }
   static keyEval(k: EvalKey): string {
-    return `${k.ir}\u0001${k.doc}\u0001${JSON.stringify(k.path)}\u0001${k.budget}`;
+    return `${k.ir}\u0001${k.doc}\u0001${
+      JSON.stringify(k.path)
+    }\u0001${k.budget}`;
   }
 }
 
@@ -77,7 +79,9 @@ export class Evaluator {
       const l = { doc: curDoc, path: next } as Link;
       touches.add(l);
       const lk = Provenance.keyLink(l);
-      if (!this.prov.linkToEval.has(lk)) this.prov.linkToEval.set(lk, new Set());
+      if (!this.prov.linkToEval.has(lk)) {
+        this.prov.linkToEval.set(lk, new Set());
+      }
       this.prov.linkToEval.get(lk)!.add(ekStr);
 
       curPath = next;
@@ -89,7 +93,9 @@ export class Evaluator {
         const from: Link = { doc: curDoc, path: curPath };
         linkEdges.add({ from, to });
         const toKey = Provenance.keyLink(to);
-        if (!this.prov.linkEdges.has(ekStr)) this.prov.linkEdges.set(ekStr, new Set());
+        if (!this.prov.linkEdges.has(ekStr)) {
+          this.prov.linkEdges.set(ekStr, new Set());
+        }
         this.prov.linkEdges.get(ekStr)!.add(toKey);
         curDoc = to.doc;
         curPath = to.path;
@@ -109,7 +115,9 @@ export class Evaluator {
         const from: Link = { doc: curDoc, path: curPath };
         linkEdges.add({ from, to });
         const toKey = Provenance.keyLink(to);
-        if (!this.prov.linkEdges.has(ekStr)) this.prov.linkEdges.set(ekStr, new Set());
+        if (!this.prov.linkEdges.has(ekStr)) {
+          this.prov.linkEdges.set(ekStr, new Set());
+        }
         this.prov.linkEdges.get(ekStr)!.add(toKey);
         curDoc = to.doc;
         curPath = to.path;
@@ -120,7 +128,9 @@ export class Evaluator {
       const l = { doc: curDoc, path: next } as Link;
       touches.add(l);
       const lk = Provenance.keyLink(l);
-      if (!this.prov.linkToEval.has(lk)) this.prov.linkToEval.set(lk, new Set());
+      if (!this.prov.linkToEval.has(lk)) {
+        this.prov.linkToEval.set(lk, new Set());
+      }
       this.prov.linkToEval.get(lk)!.add(ekStr);
       curPath = next;
     }
@@ -180,8 +190,7 @@ export class Evaluator {
           return "No";
         case "TypeCheck": {
           const t = ir.t;
-          const ok =
-            (t === "object" && isObject(val)) ||
+          const ok = (t === "object" && isObject(val)) ||
             (t === "array" && Array.isArray(val)) ||
             (t === "string" && typeof val === "string") ||
             (t === "number" && typeof val === "number") ||
@@ -190,9 +199,13 @@ export class Evaluator {
           return ok ? "Yes" : "No";
         }
         case "Const":
-          return JSON.stringify(val) === JSON.stringify(ir.value) ? "Yes" : "No";
+          return JSON.stringify(val) === JSON.stringify(ir.value)
+            ? "Yes"
+            : "No";
         case "Enum":
-          return ir.values.some((x: any) => JSON.stringify(x) === JSON.stringify(val))
+          return ir.values.some((x: any) =>
+              JSON.stringify(x) === JSON.stringify(val)
+            )
             ? "Yes"
             : "No";
         case "Range": {
@@ -327,10 +340,14 @@ export class Evaluator {
       linkEdges.add({ from, to });
       const ekStr = Provenance.keyEval(key);
       const toKey = Provenance.keyLink(to);
-      if (!this.prov.linkEdges.has(ekStr)) this.prov.linkEdges.set(ekStr, new Set());
+      if (!this.prov.linkEdges.has(ekStr)) {
+        this.prov.linkEdges.set(ekStr, new Set());
+      }
       this.prov.linkEdges.get(ekStr)!.add(toKey);
 
-      const visitKey = `${key.ir}\u0001${to.doc}\u0001${JSON.stringify(to.path)}`;
+      const visitKey = `${key.ir}\u0001${to.doc}\u0001${
+        JSON.stringify(to.path)
+      }`;
       if (ctx.seenIRDocPath.has(visitKey)) {
         // Proper cycle revisit at same (IR, doc, path): do not recurse.
         const result: EvalResult = { verdict, touches, linkEdges, deps };
@@ -338,13 +355,19 @@ export class Evaluator {
         // Attach provenance edges for touches/deps we actually recorded:
         for (const lnk of touches) {
           const lk = Provenance.keyLink(lnk);
-          if (!this.prov.linkToEval.has(lk)) this.prov.linkToEval.set(lk, new Set());
+          if (!this.prov.linkToEval.has(lk)) {
+            this.prov.linkToEval.set(lk, new Set());
+          }
           this.prov.linkToEval.get(lk)!.add(ekStr);
         }
         for (const child of deps) {
           const p = ekStr, c = Provenance.keyEval(child);
-          if (!this.prov.evalChildren.has(p)) this.prov.evalChildren.set(p, new Set());
-          if (!this.prov.evalParents.has(c)) this.prov.evalParents.set(c, new Set());
+          if (!this.prov.evalChildren.has(p)) {
+            this.prov.evalChildren.set(p, new Set());
+          }
+          if (!this.prov.evalParents.has(c)) {
+            this.prov.evalParents.set(c, new Set());
+          }
           this.prov.evalChildren.get(p)!.add(c);
           this.prov.evalParents.get(c)!.add(p);
         }
@@ -357,11 +380,18 @@ export class Evaluator {
         // True budget exhaustion (non-cycle deepness) → Maybe
         verdict = verdict === "Yes" ? "MaybeExceededDepth" : verdict;
       } else {
-        const childKey: EvalKey = { ir: key.ir, doc: to.doc, path: to.path, budget: effBudget - 1 };
+        const childKey: EvalKey = {
+          ir: key.ir,
+          doc: to.doc,
+          path: to.path,
+          budget: effBudget - 1,
+        };
         deps.add(childKey);
         const res = this.evaluate(childKey, at, ctx).verdict;
         if (res === "No") verdict = "No";
-        else if (res === "MaybeExceededDepth" || verdict === "MaybeExceededDepth") verdict = "MaybeExceededDepth";
+        else if (
+          res === "MaybeExceededDepth" || verdict === "MaybeExceededDepth"
+        ) verdict = "MaybeExceededDepth";
         else verdict = "Yes";
       }
       ctx.seenIRDocPath.delete(visitKey);
@@ -393,4 +423,3 @@ export class Evaluator {
     return result;
   }
 }
-

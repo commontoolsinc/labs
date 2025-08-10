@@ -8,7 +8,9 @@ import { openSqlite } from "../src/sqlite/db.ts";
 import { getAutomergeBytesAtSeq } from "../src/sqlite/pit.ts";
 
 function usage() {
-  console.error("Usage: export-snapshot --space <space> --doc <doc> --branch <branch> --seq <n> --out <file>");
+  console.error(
+    "Usage: export-snapshot --space <space> --doc <doc> --branch <branch> --seq <n> --out <file>",
+  );
   Deno.exit(2);
 }
 
@@ -29,15 +31,24 @@ if (import.meta.main) {
   if (!Number.isFinite(seq) || seq < 0) usage();
 
   const envDir = Deno.env.get("SPACES_DIR");
-  const base = envDir ? new URL(envDir) : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
+  const base = envDir
+    ? new URL(envDir)
+    : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
   await Deno.mkdir(base, { recursive: true }).catch(() => {});
-  const { db, close } = await openSqlite({ url: new URL(`./${space}.sqlite`, base) });
+  const { db, close } = await openSqlite({
+    url: new URL(`./${space}.sqlite`, base),
+  });
   try {
-    const bytes = getAutomergeBytesAtSeq(db, null, doc as string, branch as string, seq);
+    const bytes = getAutomergeBytesAtSeq(
+      db,
+      null,
+      doc as string,
+      branch as string,
+      seq,
+    );
     await Deno.writeFile(out as string, bytes);
     console.log(`wrote ${bytes.length} bytes to ${out}`);
   } finally {
     await close();
   }
 }
-

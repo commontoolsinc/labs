@@ -126,15 +126,30 @@ export function compileQuery(q: UserQuery): IRPlan {
   const steps: IRNode[] = [];
   if (q.budget) steps.push({ kind: "Budget", linkBudget: q.budget.linkBudget });
   if (q.filter) steps.push({ kind: "Filter", op: q.filter });
-  if (q.join) steps.push({ kind: "Join", via: q.join.via, as: q.join.as, select: q.join.select });
-  if (q.traverse) steps.push({ kind: "Traverse", via: q.traverse.via, depth: q.traverse.depth, accumulate: q.traverse.accumulate });
+  if (q.join) {
+    steps.push({
+      kind: "Join",
+      via: q.join.via,
+      as: q.join.as,
+      select: q.join.select,
+    });
+  }
+  if (q.traverse) {
+    steps.push({
+      kind: "Traverse",
+      via: q.traverse.via,
+      depth: q.traverse.depth,
+      accumulate: q.traverse.accumulate,
+    });
+  }
   if (q.project) steps.push({ kind: "Project", fields: q.project });
   if (q.sort) steps.push({ kind: "Sort", by: q.sort });
-  if (q.limit) steps.push({ kind: "Limit", limit: q.limit.limit, offset: q.limit.offset });
+  if (q.limit) {
+    steps.push({ kind: "Limit", limit: q.limit.limit, offset: q.limit.offset });
+  }
 
   return {
     source: { kind: "Source", docs: q.source.docs, path: q.source.path ?? [] },
     steps,
   };
 }
-

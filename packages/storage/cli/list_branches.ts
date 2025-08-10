@@ -16,19 +16,22 @@ if (import.meta.main) {
   if (!space) usage();
 
   const envDir = Deno.env.get("SPACES_DIR");
-  const base = envDir ? new URL(envDir) : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
-  const { db, close } = await openSqlite({ url: new URL(`./${space}.sqlite`, base) });
+  const base = envDir
+    ? new URL(envDir)
+    : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
+  const { db, close } = await openSqlite({
+    url: new URL(`./${space}.sqlite`, base),
+  });
   try {
     const rows = db.prepare(
       `SELECT d.doc_id AS doc, b.name AS branch, h.seq_no AS seq_no
        FROM branches b
        JOIN docs d ON (b.doc_id = d.doc_id)
        JOIN am_heads h ON (h.branch_id = b.branch_id)
-       ORDER BY d.doc_id, b.name`
+       ORDER BY d.doc_id, b.name`,
     ).all() as Array<{ doc: string; branch: string; seq_no: number }>;
     for (const r of rows) console.log(`${r.doc}\t${r.branch}\t${r.seq_no}`);
   } finally {
     await close();
   }
 }
-

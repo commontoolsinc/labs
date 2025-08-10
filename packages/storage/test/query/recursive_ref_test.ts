@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { IRPool, compileSchema } from "../../src/query/ir.ts";
+import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
 import { InMemoryStorage } from "../../src/query/storage.ts";
 
@@ -23,10 +23,16 @@ Deno.test("compileSchema handles self-recursive $ref", () => {
 
   // Evaluate over a small recursive doc graph
   const storage = new InMemoryStorage();
-  storage.setDoc("root", { tag: "div", children: [ { tag: "span", children: [] } ] }, { seq: 1 });
+  storage.setDoc("root", {
+    tag: "div",
+    children: [{ tag: "span", children: [] }],
+  }, { seq: 1 });
   const ev = new Evaluator(pool, storage, new Provenance());
   const res = ev.evaluate({ ir: id, doc: "root", path: [], budget: 3 });
-  assertEquals(res.verdict === "Yes" || res.verdict === "MaybeExceededDepth", true);
+  assertEquals(
+    res.verdict === "Yes" || res.verdict === "MaybeExceededDepth",
+    true,
+  );
 });
 
 Deno.test("compileSchema handles mutual recursion via $ref", () => {
@@ -53,6 +59,8 @@ Deno.test("compileSchema handles mutual recursion via $ref", () => {
   storage.setDoc("docA", { b: { a: { b: {} } } }, { seq: 1 });
   const ev = new Evaluator(pool, storage, new Provenance());
   const res = ev.evaluate({ ir: id, doc: "docA", path: [], budget: 2 });
-  assertEquals(["Yes", "MaybeExceededDepth"].includes(res.verdict as any), true);
+  assertEquals(
+    ["Yes", "MaybeExceededDepth"].includes(res.verdict as any),
+    true,
+  );
 });
-
