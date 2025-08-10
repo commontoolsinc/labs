@@ -28,7 +28,7 @@ Deno.test("cycle: no MaybeExceededDepth on legal link cycles", () => {
 
   const ir = compileSchema(pool, true); // follow everything
   subs.queryRoot.clear();
-  proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
+  proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
   const root = subs.queryRoot.get("q")!;
   const r = evalr.evaluate(root, undefined, evalr.newContext());
@@ -46,7 +46,7 @@ Deno.test("cycle: target doc is touched so its change invalidates", () => {
   storage.setDoc("B", { x: 1 }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
-  proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
+  proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
   // Change inside B — should trigger an event due to touched target
   const dB = storage.setDoc("B", {
@@ -74,13 +74,13 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
   });
 
   // First query with irTrue
-  proc.registerQuery({ id: "q1", doc: "A", path: [], ir: irTrue, budget: 10 });
+  proc.registerQuery({ id: "q1", doc: "A", path: [], ir: irTrue });
   const root1 = subs.queryRoot.get("q1")!;
   const r1 = evalr.evaluate(root1, undefined, evalr.newContext());
   assert(r1.verdict !== "MaybeExceededDepth");
 
   // Second query with a different IR; must still evaluate into B to check its 't'
-  proc.registerQuery({ id: "q2", doc: "A", path: [], ir: irProp, budget: 10 });
+  proc.registerQuery({ id: "q2", doc: "A", path: [], ir: irProp });
   const root2 = subs.queryRoot.get("q2")!;
   const r2 = evalr.evaluate(root2, undefined, evalr.newContext());
 
@@ -91,25 +91,38 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
 });
 
 /**
- * 4) Budget exhaustion still yields MaybeExceededDepth for deep chains (non-cycles)
+ * 4) Visit-limit exhaustion yields MaybeExceededDepth for deep chains (non-cycles)
  */
-Deno.test("budget: deep chain triggers MaybeExceededDepth when budget is exhausted", () => {
-  const { storage, pool, evalr, subs, proc } = setup();
+Deno.test(
+  "visit-limit: deep chain triggers MaybeExceededDepth when limit is exhausted",
+  () => {
+    // Local setup to inject a small visitLimit
+    const storage = new InMemoryStorage();
+    const prov = new Provenance();
+    const pool = new IRPool();
+    const evalr = new Evaluator(pool, storage as any, prov, { visitLimit: 1 });
+    const subs = new SubscriptionIndex();
+    const proc = new ChangeProcessor(evalr, prov, subs);
 
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
-  storage.setDoc("B", { "/": { "link@1": { id: "C", path: "" } } }, { seq: 1 });
-  storage.setDoc("C", { x: 42 }, { seq: 1 });
+    storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, {
+      seq: 1,
+    });
+    storage.setDoc("B", { "/": { "link@1": { id: "C", path: "" } } }, {
+      seq: 1,
+    });
+    storage.setDoc("C", { x: 42 }, { seq: 1 });
 
-  const ir = compileSchema(pool, true); // follow all
-  proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 1 }); // not enough to reach C
+    const ir = compileSchema(pool, true); // follow all
+    proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
-  const r = evalr.evaluate(
-    subs.queryRoot.get("q")!,
-    undefined,
-    evalr.newContext(),
-  );
-  assertEquals(r.verdict, "MaybeExceededDepth");
-});
+    const r = evalr.evaluate(
+      subs.queryRoot.get("q")!,
+      undefined,
+      evalr.newContext(),
+    );
+    assertEquals(r.verdict, "MaybeExceededDepth");
+  },
+);
 
 /**
  * 5) Re-eval uses a fresh VisitContext so cycles never accidentally leak across runs
@@ -121,7 +134,7 @@ Deno.test("context: fresh VisitContext per evaluation run", () => {
   storage.setDoc("B", { "/": { "link@1": { id: "A", path: "" } } }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
-  proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
+  proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
   const root = subs.queryRoot.get("q")!;
 
@@ -151,7 +164,7 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
     ],
   });
 
-  proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
+  proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
   // Initially not No (true branch)
   const r0 = evalr.evaluate(
@@ -181,7 +194,7 @@ Deno.test("touches: cycle short-circuit touches target entry path", () => {
   storage.setDoc("B", { y: 1 }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
-  proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
+  proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
   const root = subs.queryRoot.get("q")!;
   const r = evalr.evaluate(root, undefined, evalr.newContext());
@@ -190,9 +203,7 @@ Deno.test("touches: cycle short-circuit touches target entry path", () => {
   const aggregate = new Set<string>();
   const seen = new Set<string>();
   const dfs = (k: typeof root) => {
-    const ks = `${k.ir}\u0001${k.doc}\u0001${
-      JSON.stringify(k.path)
-    }\u0001${k.budget}`;
+    const ks = `${k.ir}\u0001${k.doc}\u0001${JSON.stringify(k.path)}`;
     if (seen.has(ks)) return;
     seen.add(ks);
     const rr = (evalr as any)["memo"].get(ks);
@@ -223,7 +234,7 @@ Deno.test("memo: non-cycle path uses memo on second evaluation", () => {
       obj: { type: "object", properties: { n: { type: "number" } } },
     },
   });
-  proc.registerQuery({ id: "q", doc: "A", path: [], ir, budget: 10 });
+  proc.registerQuery({ id: "q", doc: "A", path: [], ir });
 
   const root = subs.queryRoot.get("q")!;
 

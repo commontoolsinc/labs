@@ -70,11 +70,11 @@ Deno.test("schema compile with #/definitions and evaluation over SQLite", async 
   const ir = compileSchema(pool, schema);
   const storage = new SqliteStorage(db);
   const evaluator = new Evaluator(pool, storage, new Provenance());
-  const res = evaluator.evaluate({ ir, doc: taskId, path: [], budget: 1 });
+  const res = evaluator.evaluate({ ir, doc: taskId, path: [] });
   assertEquals(res.verdict, "Yes");
 });
 
-Deno.test("schema evaluator budget yields MaybeExceededDepth at depth=0 for link", async () => {
+Deno.test("schema evaluator yields MaybeExceededDepth when visit limit is tiny", async () => {
   const tmpDir = await Deno.makeTempDir();
   const spacesDir = new URL(`file://${tmpDir}/`);
   const space = await openSpaceStorage("did:key:query-budget", { spacesDir });
@@ -110,15 +110,20 @@ Deno.test("schema evaluator budget yields MaybeExceededDepth at depth=0 for link
   });
 
   const pool = new IRPool();
-  const schema = { type: "object", properties: { ref: { type: "object" } } };
+  // Require traversing into B to read x
+  const schema = {
+    type: "object",
+    properties: {
+      ref: { type: "object", properties: { x: { type: "number" } } },
+    },
+  };
   const ir = compileSchema(pool, schema);
   const evaluator = new Evaluator(
     pool,
     new SqliteStorage(db),
     new Provenance(),
+    { visitLimit: 0 }, // force immediate limit exhaustion
   );
-  const res0 = evaluator.evaluate({ ir, doc: A, path: [], budget: 0 });
+  const res0 = evaluator.evaluate({ ir, doc: A, path: [] });
   assertEquals(res0.verdict, "MaybeExceededDepth");
-  const res1 = evaluator.evaluate({ ir, doc: A, path: [], budget: 1 });
-  assert(res1.verdict === "Yes" || res1.verdict === "No");
 });

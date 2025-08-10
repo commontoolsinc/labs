@@ -28,7 +28,7 @@ Deno.test("compileSchema handles self-recursive $ref", () => {
     children: [{ tag: "span", children: [] }],
   }, { seq: 1 });
   const ev = new Evaluator(pool, storage, new Provenance());
-  const res = ev.evaluate({ ir: id, doc: "root", path: [], budget: 3 });
+  const res = ev.evaluate({ ir: id, doc: "root", path: [] });
   assertEquals(
     res.verdict === "Yes" || res.verdict === "MaybeExceededDepth",
     true,
@@ -58,7 +58,7 @@ Deno.test("compileSchema handles mutual recursion via $ref", () => {
   const storage = new InMemoryStorage();
   storage.setDoc("docA", { b: { a: { b: {} } } }, { seq: 1 });
   const ev = new Evaluator(pool, storage, new Provenance());
-  const res = ev.evaluate({ ir: id, doc: "docA", path: [], budget: 2 });
+  const res = ev.evaluate({ ir: id, doc: "docA", path: [] });
   assertEquals(
     ["Yes", "MaybeExceededDepth"].includes(res.verdict as any),
     true,
