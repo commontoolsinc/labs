@@ -65,6 +65,44 @@ Summary and code links
 - Toolshed routes: `packages/toolshed/routes/storage/new/*` for HTTP and WS
   (§03, §08).
 
+### Runtime performance notes (query read path)
+
+- Added a per-version JSON cache in
+  `packages/storage/src/query/sqlite_storage.ts` for the `read()` and
+  `readDocAtVersion()` methods. The cache is keyed by
+  `${docId}\u0001${branchId}\u0001${seq}` and avoids repeatedly calling
+  `Automerge.load()`/`Automerge.toJS()` for the same document version during
+  query evaluation. This significantly reduces the cost of traversals with
+  higher link budgets and prevents superlinear slowdowns in recursive VDOM
+  validations observed in benchmarks.
+  - Follow-up: consider an LRU cap and/or invalidation hooks on write paths to
+    bound memory in long-lived server processes.
+
+### Query traversal/budgeting semantics (updated)
+
+- Replaced per-hop depth budgeting with a global visit cap enforced via the
+  evaluator's `VisitContext.seenIRDocPath` set. The cap prevents traversal
+  explosion across all dimensions (fanout, depth, cycles) without tying cache
+  keys to a numeric budget.
+  - Default: `DEFAULT_VISIT_LIMIT = 16,384` unique `(IR, doc, path)` visits per
+    evaluation.
+  - Behavior: When the limit is reached, the evaluator returns
+    `MaybeExceededDepth` (conservative) rather than recursing further.
+- `EvalKey` no longer includes a `budget` field, and provenance keys have been
+  simplified accordingly (now keyed by `(ir, doc, path)`).
+- Removed the previous budget-based fast-memoization path; the global visit cap
+  and standard memoization are sufficient and avoid key proliferation.
+
+### Benchmarks (updated)
+
+- Benchmarks in `packages/storage/bench/query_bench.ts` no longer vary a
+  traversal budget. Two recursive cases were added to better represent real
+  workloads under the global visit cap:
+  - "vdom: recursive validation over many nodes (full pass)": validates many
+    VDOM nodes against a recursive schema.
+  - "schema: recursive traversal across task edges": exercises recursive graph
+    traversal along `value.edges`.
+
 ## Detailed Task List (SQLite-first)
 
 ### 0. Package skeleton (done)

@@ -19,6 +19,14 @@ function getAtPath(doc: any, path: Path): any {
 export class SqliteStorage {
   constructor(private db: Database, private defaultBranch = "main") {}
 
+  // Simple per-version in-memory cache of decoded JSON documents.
+  // Keyed by `${docId}\u0001${branchId}\u0001${seq}` to ensure correctness across writes.
+  private docJsonCache = new Map<string, any>();
+
+  private cacheKey(docId: string, branchId: string, seq: number): string {
+    return `${docId}\u0001${branchId}\u0001${seq}`;
+  }
+
   private resolve(
     docId: string,
     at?: Version,
@@ -31,8 +39,13 @@ export class SqliteStorage {
 
   read(docId: string, path: Path, at?: Version): any {
     const { branchId, seq } = this.resolve(docId, at);
-    const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
-    const json = Automerge.toJS(Automerge.load(bytes));
+    const key = this.cacheKey(docId, branchId, seq);
+    let json = this.docJsonCache.get(key);
+    if (json === undefined) {
+      const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
+      json = Automerge.toJS(Automerge.load(bytes));
+      this.docJsonCache.set(key, json);
+    }
     return getAtPath(json, path);
   }
 
@@ -53,8 +66,13 @@ export class SqliteStorage {
 
   readDocAtVersion(docId: string, at: Version): { version: Version; doc: any } {
     const { branchId, seq } = this.resolve(docId, at);
-    const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
-    const json = Automerge.toJS(Automerge.load(bytes));
+    const key = this.cacheKey(docId, branchId, seq);
+    let json = this.docJsonCache.get(key);
+    if (json === undefined) {
+      const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
+      json = Automerge.toJS(Automerge.load(bytes));
+      this.docJsonCache.set(key, json);
+    }
     return {
       version: { seq, branch: at.branch ?? this.defaultBranch },
       doc: json,
