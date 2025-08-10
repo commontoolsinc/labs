@@ -33,6 +33,23 @@ export class SqliteStorage {
 
   read(docId: string, path: Path, at?: Version): any {
     const { branchId, seq } = this.resolve(docId, at);
+    // Fast path: if reading current tip (no historical epoch), use json_cache
+    if (at?.epoch == null) {
+      const row = this.db.prepare(
+        `SELECT json, seq_no FROM json_cache WHERE doc_id = :doc_id AND branch_id = :branch_id`,
+      ).get({ doc_id: docId, branch_id: branchId }) as
+        | { json: string; seq_no: number }
+        | undefined;
+      if (row && row.seq_no >= seq) {
+        try {
+          const json = JSON.parse(row.json);
+          return getAtPath(json, path);
+        } catch {
+          // fall through to PIT path on parse error
+        }
+      }
+    }
+    // PIT path (snapshot/chunk/changes → Automerge → JSON)
     const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
     const json = Automerge.toJS(Automerge.load(bytes));
     return getAtPath(json, path);
@@ -55,8 +72,25 @@ export class SqliteStorage {
 
   readDocAtVersion(docId: string, at: Version): { version: Version; doc: any } {
     const { branchId, seq } = this.resolve(docId, at);
-    const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
-    const json = Automerge.toJS(Automerge.load(bytes));
+    let json: any;
+    if (at?.epoch == null) {
+      const row = this.db.prepare(
+        `SELECT json, seq_no FROM json_cache WHERE doc_id = :doc_id AND branch_id = :branch_id`,
+      ).get({ doc_id: docId, branch_id: branchId }) as
+        | { json: string; seq_no: number }
+        | undefined;
+      if (row && row.seq_no >= seq) {
+        try {
+          json = JSON.parse(row.json);
+        } catch {
+          // ignore and fall back
+        }
+      }
+    }
+    if (json === undefined) {
+      const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
+      json = Automerge.toJS(Automerge.load(bytes));
+    }
     return {
       version: {
         epoch: at.epoch ??

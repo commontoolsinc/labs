@@ -79,6 +79,8 @@ export interface TxReceipt {
 
 export interface TxProcessorOptions {
   // future hooks: invariants, notifications, etc.
+  // Intentionally left with placeholder for forward compatibility
+  invariantHooks?: never;
 }
 
 export function createTxProcessor(db: Database, _opts?: TxProcessorOptions) {
@@ -328,6 +330,7 @@ export async function submitTx(
       // End-of-tx invariants (stub): load materialized doc and allow projection
       // Placeholder for plugin system per §14; fail-closed if needed.
       // For now, we just ensure we can materialize the doc bytes without error.
+      // Additionally, populate/update the latest JSON cache for (doc, branch).
       try {
         const amBytes = getAutomergeBytesAtSeq(
           db,
@@ -336,8 +339,25 @@ export async function submitTx(
           write.branchId as string,
           seqNo,
         );
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const _doc = Automerge.load(amBytes);
+        const materialized = Automerge.load(amBytes);
+        const json = Automerge.toJS(materialized);
+        const jsonStr = JSON.stringify(json);
+        // Upsert into json_cache only if this seq is newer or equal
+        db.run(
+          `INSERT INTO json_cache(doc_id, branch_id, seq_no, json, updated_at)
+           VALUES(:doc_id, :branch_id, :seq_no, :json, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+           ON CONFLICT(doc_id, branch_id) DO UPDATE SET
+             seq_no = excluded.seq_no,
+             json = excluded.json,
+             updated_at = excluded.updated_at
+           WHERE excluded.seq_no >= json_cache.seq_no;`,
+          {
+            doc_id: docId,
+            branch_id: write.branchId as string,
+            seq_no: seqNo,
+            json: jsonStr,
+          },
+        );
       } catch (e) {
         results.push({
           docId,
@@ -587,7 +607,7 @@ function synthesizeAndApplyMerge(
       tx_id: txId,
     },
   );
-  let newHeads = current.heads.filter((h) => !(hdr.deps ?? []).includes(h));
+  const newHeads = current.heads.filter((h) => !(hdr.deps ?? []).includes(h));
   newHeads.push(hdr.hash);
   newHeads.sort();
   updateHeads(db, current.branchId, newHeads, seqNo, txId);

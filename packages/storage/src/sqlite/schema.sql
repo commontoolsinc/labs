@@ -118,6 +118,20 @@ CREATE TABLE IF NOT EXISTS am_chunks (
 CREATE INDEX IF NOT EXISTS idx_am_chunks_seq ON am_chunks(doc_id, branch_id, seq_no);
 CREATE INDEX IF NOT EXISTS idx_am_chunks_from_snapshot ON am_chunks(doc_id, branch_id, from_snapshot_seq);
 
+-- Latest JSON cache (per doc/branch). Stores only the most recent materialized
+-- JSON value and associated seq_no to enable a fast path for queries that read
+-- the current document value. Historical reads still materialize via PIT.
+CREATE TABLE IF NOT EXISTS json_cache (
+  doc_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  seq_no INTEGER NOT NULL,
+  json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY(doc_id, branch_id),
+  FOREIGN KEY(branch_id) REFERENCES branches(branch_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_json_cache_branch_seq ON json_cache(branch_id, seq_no);
+
 -- Space-level settings for feature flags and overrides
 CREATE TABLE IF NOT EXISTS space_settings (
   key TEXT PRIMARY KEY,
