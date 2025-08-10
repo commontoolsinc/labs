@@ -5,6 +5,10 @@ import pretty from "pino-pretty";
 import env from "@/env.ts";
 
 export function pinoLogger() {
+  if (Deno.env.get("DISABLE_LOGGING") === "1") {
+    // No-op logger to avoid IO during tests
+    return (c: any, next: () => Promise<void>) => next();
+  }
   return logger({
     pino: pino({
       level: env.LOG_LEVEL || "info",
