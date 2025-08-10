@@ -1,7 +1,7 @@
 import { DocId, Link, Path, PathKey, Verdict, Version } from "./types.ts";
 import { IRId, IRPool } from "./ir.ts";
 import { Storage } from "./storage.ts";
-import { child, keyPath, toTokens } from "./path.ts";
+import { child, keyPath } from "./path.ts";
 
 export type EvalKey = { ir: IRId; doc: DocId; path: Path; budget: number };
 export type EvalResult = {
@@ -15,12 +15,12 @@ function isObject(x: any): x is Record<string, any> {
   return x !== null && typeof x === "object" && !Array.isArray(x);
 }
 
-export type LinkValue = { "/": { "link@1": { id: DocId; path: string } } }; // note: link path stays JSON Pointer at the boundary
+export type LinkValue = { "/": { "link@1": { id: DocId; path: string[] } } };
 
 export function isLinkValue(v: any): v is LinkValue {
   return isObject(v) && isObject(v["/"]) && isObject(v["/"]["link@1"]) &&
     typeof v["/"]["link@1"].id === "string" &&
-    typeof v["/"]["link@1"].path === "string";
+    Array.isArray(v["/"]["link@1"].path);
 }
 
 export class Provenance {
@@ -229,7 +229,7 @@ export class Evaluator {
       } else {
         const tgt = v["/"]["link@1"];
         const from: Link = { doc: key.doc, path: key.path };
-        const to: Link = { doc: tgt.id, path: toTokens(tgt.path) };
+        const to: Link = { doc: tgt.id, path: tgt.path };
         linkEdges.add({ from, to });
         const ekStr = Provenance.keyEval(key);
         const toKey = Provenance.keyLink(to);
@@ -240,7 +240,7 @@ export class Evaluator {
         const childKey: EvalKey = {
           ir: key.ir,
           doc: tgt.id,
-          path: toTokens(tgt.path),
+          path: tgt.path,
           budget: key.budget - 1,
         };
         deps.add(childKey);

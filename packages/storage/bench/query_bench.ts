@@ -51,10 +51,9 @@ function mulberry32(a: number) {
 }
 const rnd = mulberry32(SEED);
 
-// Link shape used throughout: LinkValue {"/":{"link@1":{id, path}}} with path as JSON Pointer
+// Link shape used throughout: LinkValue {"/":{"link@1":{id, path}}} with path as string[]
 function link(doc: string, pathTokens: string[] = []): any {
-  const ptr = pathTokens.length === 0 ? "" : "/" + pathTokens.join("/");
-  return { "/": { "link@1": { id: doc, path: ptr } } };
+  return { "/": { "link@1": { id: doc, path: pathTokens } } };
 }
 
 // Seed synthetic data set

@@ -2,7 +2,7 @@
 
 ## Single Run Evaluation
 
-Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
+Function `evaluate(IR, docId, path: string[], linkBudget, refDepth = 0)`:
 
 1. **Check memo** by `EvalKey`; if present, return cached `EvalResult`
 2. **Link-aware path normalization** at `(docId, path)` where `path` is an array
@@ -12,8 +12,8 @@ Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
    - If an intermediate value is a link, follow it immediately (subject to the
      remaining `linkBudget`) and continue consuming the remaining path tokens on
      the target document/path.
-   - Record touches for every intermediate `(docId, subpath)` actually read while
-     normalizing, including the final resolved `(docId, path)` pair.
+   - Record touches for every intermediate `(docId, subpath)` actually read
+     while normalizing, including the final resolved `(docId, path)` pair.
    - Decrement `linkBudget` for each link hop taken during normalization.
    - If a link points to another space, do not follow; normalization stops and
      evaluation proceeds locally for the remainder of the path.
@@ -55,20 +55,20 @@ Function `evaluate(IR, docId, path, linkBudget, refDepth = 0)`:
      - Else, resolve the definition IR node and recursively evaluate with
        `refDepth + 1`
 10. **Source document tracking**:
-    - If evaluating at document root (`path` is `/` or empty), check for `source`
-      field
+    - If evaluating at document root (`path` is `/` or empty), check for
+      `source` field
     - If `source` field exists and is a valid link, add the target document to
       the `sourceDocsToSync` set for this evaluation
-    - This applies recursively: if the source document also has a `source` field,
-      add that document as well
+    - This applies recursively: if the source document also has a `source`
+      field, add that document as well
 11. **Construct and store** `EvalResult` (verdict, touches, linkEdges, deps,
     sourceDocsToSync) in memo; also construct provenance edges:
     - Include provenance edges for all intermediate link hops observed during
       path normalization.
 
 **Important**: because we watch only properties/array slots actually required by
-IR and AP, plus intermediate paths followed during normalization, the **touch set
-is minimal yet precise**.
+IR and AP, plus intermediate paths followed during normalization, the **touch
+set is minimal yet precise**.
 
 ## Invalidation & Incremental Maintenance
 
@@ -149,6 +149,7 @@ Given a change event `Δ = { changedLinks, addedLinks, removedLinks }` for
   consider:
   - A per-query **work queue** that explores one more link layer in idle time
   - Opportunistic deepening when related docs change
+
 ## Edge Cases  Correctness
 
 - **Cycles**: handled by a per-evaluation visited set keyed by
@@ -169,8 +170,7 @@ Given a change event `Δ = { changedLinks, addedLinks, removedLinks }` for
   **existence bit**.
 - **Arrays**: watch item indices you read; for AP-like "all items matter", you
   can represent **"all items under current array"** as a wildcard watch and
-  expand lazily on change.
-  expand lazily on change
+  expand lazily on change. expand lazily on change
 
 ## Complexity Notes
 

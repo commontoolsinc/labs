@@ -17,8 +17,8 @@ built around three core ideas:
 - **Query = (spaceDid, docId, path, schema, maxLinkDepth)**
 - **Query evaluation context**: Queries operate on the `value` field of
   documents by default
-  - When `path` is `/` or omitted, the query evaluates against `doc.value`
-  - When `path` is `/some/path`, the query evaluates against
+  - When `path` is `[]` or omitted, the query evaluates against `doc.value`
+  - When `path` is `["some", "path"]`, the query evaluates against
     `doc.value.some.path` (links can only point to the value part of documents)
 - Documents can contain **links** with exact shape:
 
@@ -67,7 +67,8 @@ built around three core ideas:
 
 ## WebSocket API
 
-Single endpoint per space shared by tx and queries: /api/storage/new/v1/:space/ws
+Single endpoint per space shared by tx and queries:
+/api/storage/new/v1/:space/ws
 
 - Client → Server
   - subscribe { consumerId: string, query: JSON }
@@ -76,9 +77,11 @@ Single endpoint per space shared by tx and queries: /api/storage/new/v1/:space/w
   - subscribed { subscriptionId: number }
   - deliver { subscriptionId: number, deliveryNo: number, payload: any }
 
-At-least-once delivery: payloads are persisted in subscription_deliveries. Resume is based on last acked deliveryNo per (space, consumerId).
+At-least-once delivery: payloads are persisted in subscription_deliveries.
+Resume is based on last acked deliveryNo per (space, consumerId).
 
-Ordering: deliveries enqueued transactionally from the tx processor by commit order and am_change_index seq.
+Ordering: deliveries enqueued transactionally from the tx processor by commit
+order and am_change_index seq.
 
 ### Client → Server
 
@@ -86,7 +89,7 @@ Ordering: deliveries enqueued transactionally from the tx processor by commit or
 { "op": "hello", "protocol": "v1", "clientId": "xyz" }
 
 { "op": "subscribe", "queryId": "uuid", "spaceDid": "did:key:...", 
-  "docId": "doc:<ref>", "path": "/users", "schema": {...}, "maxLinkDepth": 3 }
+  "docId": "doc:<ref>", "path": ["users"], "schema": {...}, "maxLinkDepth": 3 }
 
 { "op": "unsubscribe", "queryId": "uuid" }
 

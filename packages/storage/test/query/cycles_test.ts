@@ -23,8 +23,8 @@ Deno.test("cycle: no MaybeExceededDepth on legal link cycles", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
   // A ↔ B
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
-  storage.setDoc("B", { "/": { "link@1": { id: "A", path: "" } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, { seq: 1 });
+  storage.setDoc("B", { "/": { "link@1": { id: "A", path: [] } } }, { seq: 1 });
 
   const ir = compileSchema(pool, true); // follow everything
   subs.queryRoot.clear();
@@ -42,7 +42,7 @@ Deno.test("cycle: no MaybeExceededDepth on legal link cycles", () => {
 Deno.test("cycle: target doc is touched so its change invalidates", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, { seq: 1 });
   storage.setDoc("B", { x: 1 }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
@@ -51,7 +51,7 @@ Deno.test("cycle: target doc is touched so its change invalidates", () => {
   // Change inside B — should trigger an event due to touched target
   const dB = storage.setDoc("B", {
     x: 2,
-    link: { "/": { "link@1": { id: "A", path: "" } } },
+    link: { "/": { "link@1": { id: "A", path: [] } } },
   }, { seq: 2 });
   const ev = proc.onDelta(dB);
   assert(ev.some((e) => e.queryId === "q"));
@@ -64,7 +64,7 @@ Deno.test("cycle: short-circuit keyed by (IR, doc) — different IR must evaluat
   const { storage, pool, evalr, subs, proc } = setup();
 
   // A ↔ B
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, { seq: 1 });
   storage.setDoc("B", { t: "yes" }, { seq: 1 });
 
   const irTrue = compileSchema(pool, true); // follow everything
@@ -104,10 +104,10 @@ Deno.test(
     const subs = new SubscriptionIndex();
     const proc = new ChangeProcessor(evalr, prov, subs);
 
-    storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, {
+    storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, {
       seq: 1,
     });
-    storage.setDoc("B", { "/": { "link@1": { id: "C", path: "" } } }, {
+    storage.setDoc("B", { "/": { "link@1": { id: "C", path: [] } } }, {
       seq: 1,
     });
     storage.setDoc("C", { x: 42 }, { seq: 1 });
@@ -130,8 +130,8 @@ Deno.test(
 Deno.test("context: fresh VisitContext per evaluation run", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
-  storage.setDoc("B", { "/": { "link@1": { id: "A", path: "" } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, { seq: 1 });
+  storage.setDoc("B", { "/": { "link@1": { id: "A", path: [] } } }, { seq: 1 });
 
   const ir = compileSchema(pool, true);
   proc.registerQuery({ id: "q", doc: "A", path: [], ir });
@@ -154,8 +154,8 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
   // A → B → A (cycle), but schema looks for { flag: true } anywhere
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
-  storage.setDoc("B", { "/": { "link@1": { id: "A", path: "" } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, { seq: 1 });
+  storage.setDoc("B", { "/": { "link@1": { id: "A", path: [] } } }, { seq: 1 });
 
   const ir = compileSchema(pool, {
     anyOf: [
@@ -190,7 +190,7 @@ Deno.test("invalidation: anyOf over cycle flips after target change", () => {
 Deno.test("touches: cycle short-circuit touches target entry path", () => {
   const { storage, pool, evalr, subs, proc } = setup();
 
-  storage.setDoc("A", { "/": { "link@1": { id: "B", path: "" } } }, { seq: 1 });
+  storage.setDoc("A", { "/": { "link@1": { id: "B", path: [] } } }, { seq: 1 });
   storage.setDoc("B", { y: 1 }, { seq: 1 });
 
   const ir = compileSchema(pool, true);

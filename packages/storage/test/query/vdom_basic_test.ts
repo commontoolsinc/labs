@@ -5,8 +5,7 @@ import { Evaluator, Provenance } from "../../src/query/eval.ts";
 
 // Helper to create LinkValue objects
 function link(doc: string, pathTokens: string[] = []): any {
-  const ptr = pathTokens.length === 0 ? "" : "/" + pathTokens.join("/");
-  return { "/": { "link@1": { id: doc, path: ptr } } };
+  return { "/": { "link@1": { id: doc, path: pathTokens } } };
 }
 
 // Seed a tiny, acyclic VDOM graph: vdom:0..N-1 with children pointing to higher index
