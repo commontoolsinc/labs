@@ -1,6 +1,6 @@
 import { DocId, Link, Path, Verdict, Version } from "./types.ts";
 import { IRId, IRPool } from "./ir.ts";
-import { Storage } from "./storage.ts";
+import { Reader } from "./storage.ts";
 import { child } from "./path.ts";
 
 export const DEFAULT_VISIT_LIMIT = 16_384;
@@ -51,7 +51,7 @@ export type VisitContext = {
 export class Evaluator {
   constructor(
     private pool: IRPool,
-    private storage: Storage,
+    private storage: Reader,
     private prov: Provenance,
     private options: { visitLimit?: number } = {},
   ) {}

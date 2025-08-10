@@ -5,7 +5,7 @@ import { openSqlite } from "../../src/sqlite/db.ts";
 import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
-import { SqliteStorage } from "../../src/query/sqlite_storage.ts";
+import { SqliteStorageReader } from "../../src/query/sqlite_storage.ts";
 
 // Helper to create LinkValue objects
 function link(doc: string, pathTokens: string[] = []): any {
@@ -13,7 +13,10 @@ function link(doc: string, pathTokens: string[] = []): any {
 }
 
 // Seed into SQLite: vdom:0..N-1 with children pointing to higher index
-async function seedVDOM(space: Awaited<ReturnType<typeof openSpaceStorage>>, N: number) {
+async function seedVDOM(
+  space: Awaited<ReturnType<typeof openSpaceStorage>>,
+  N: number,
+) {
   const TAGS = ["div", "span", "ul", "li", "p", "section"] as const;
   for (let i = 0; i < N; i++) {
     const tag = TAGS[i % TAGS.length] as any;
@@ -28,7 +31,14 @@ async function seedVDOM(space: Awaited<ReturnType<typeof openSpaceStorage>>, N: 
       x.children = kids;
     });
     const c = Automerge.getLastLocalChange(d)!;
-    await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId, branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: c }],
+      }],
+    });
   }
 }
 
@@ -36,10 +46,13 @@ Deno.test("vdom basic: recursive VNode schema validates small graph", async () =
   const tmpDir = await Deno.makeTempDir();
   const spacesDir = new URL(`file://${tmpDir}/`);
   const space = await openSpaceStorage("did:key:vdom", { spacesDir });
-  const db: Database = (await openSqlite({ url: new URL("./did:key:vdom.sqlite", spacesDir) })).db;
+  const db: Database =
+    (await openSqlite({ url: new URL("./did:key:vdom.sqlite", spacesDir) })).db;
   const prov = new Provenance();
   const pool = new IRPool();
-  const evaluator = new Evaluator(pool, new SqliteStorage(db), prov, { visitLimit: 1024 });
+  const evaluator = new Evaluator(pool, new SqliteStorageReader(db), prov, {
+    visitLimit: 1024,
+  });
 
   await seedVDOM(space, 10);
 
@@ -71,10 +84,14 @@ Deno.test({
   const tmpDir = await Deno.makeTempDir();
   const spacesDir = new URL(`file://${tmpDir}/`);
   const space = await openSpaceStorage("did:key:vdom2", { spacesDir });
-  const db: Database = (await openSqlite({ url: new URL("./did:key:vdom2.sqlite", spacesDir) })).db;
+  const db: Database =
+    (await openSqlite({ url: new URL("./did:key:vdom2.sqlite", spacesDir) }))
+      .db;
   const prov = new Provenance();
   const pool = new IRPool();
-  const evaluator = new Evaluator(pool, new SqliteStorage(db), prov, { visitLimit: 1024 });
+  const evaluator = new Evaluator(pool, new SqliteStorageReader(db), prov, {
+    visitLimit: 1024,
+  });
 
   await seedVDOM(space, 10);
 
@@ -86,7 +103,9 @@ Deno.test({
   assertEquals(before.verdict, "No");
   // Edit vdom:0 to span at root, using current heads as deps
   const heads = (await space.getBranchState("vdom:0", "main")).heads;
-  const curBytes = await space.getDocBytes("vdom:0", "main", { accept: "automerge" });
+  const curBytes = await space.getDocBytes("vdom:0", "main", {
+    accept: "automerge",
+  });
   const curDoc = Automerge.load(curBytes);
   const d = Automerge.change(curDoc, (x: any) => {
     x.tag = "span";
@@ -94,7 +113,14 @@ Deno.test({
     x.children = [];
   });
   const c = Automerge.getLastLocalChange(d)!;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId: "vdom:0", branch: "main" }, baseHeads: heads, changes: [{ bytes: c }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId: "vdom:0", branch: "main" },
+      baseHeads: heads,
+      changes: [{ bytes: c }],
+    }],
+  });
   (evaluator as any)["memo"].clear();
   const after = evaluator.evaluate({ ir, doc: "vdom:0", path: [] });
   assertEquals(after.verdict, "Yes");

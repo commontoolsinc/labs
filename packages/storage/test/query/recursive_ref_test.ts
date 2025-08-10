@@ -5,7 +5,7 @@ import { openSqlite } from "../../src/sqlite/db.ts";
 import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
-import { SqliteStorage } from "../../src/query/sqlite_storage.ts";
+import { SqliteStorageReader } from "../../src/query/sqlite_storage.ts";
 
 Deno.test("compileSchema handles self-recursive $ref", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -40,8 +40,15 @@ Deno.test("compileSchema handles self-recursive $ref", async () => {
     x.children = [{ tag: "span", children: [] }];
   });
   const c = Automerge.getLastLocalChange(d)!;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
-  const storage = new SqliteStorage(db);
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch: "main" },
+      baseHeads: [],
+      changes: [{ bytes: c }],
+    }],
+  });
+  const storage = new SqliteStorageReader(db);
   const ev = new Evaluator(pool, storage, new Provenance());
   const res = ev.evaluate({ ir: id, doc: "root", path: [] });
   assertEquals(
@@ -82,8 +89,15 @@ Deno.test("compileSchema handles mutual recursion via $ref", async () => {
     x.b = { a: { b: {} } };
   });
   const c0 = Automerge.getLastLocalChange(d0)!;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c0 }] }] });
-  const ev = new Evaluator(pool, new SqliteStorage(db), new Provenance());
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch: "main" },
+      baseHeads: [],
+      changes: [{ bytes: c0 }],
+    }],
+  });
+  const ev = new Evaluator(pool, new SqliteStorageReader(db), new Provenance());
   const res = ev.evaluate({ ir: id, doc: "docA", path: [] });
   assertEquals(
     ["Yes", "MaybeExceededDepth"].includes(res.verdict as any),
