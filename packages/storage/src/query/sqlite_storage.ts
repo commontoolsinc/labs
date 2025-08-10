@@ -34,7 +34,8 @@ export class SqliteStorage {
   read(docId: string, path: Path, at?: Version): any {
     const { branchId, seq } = this.resolve(docId, at);
     // Fast path: if reading current tip (no historical epoch), use json_cache
-    if (at?.epoch == null) {
+    const cacheDisabled = (Deno.env.get("DISABLE_JSON_CACHE") ?? "") === "1";
+    if (at?.epoch == null && !cacheDisabled) {
       const row = this.db.prepare(
         `SELECT json, seq_no FROM json_cache WHERE doc_id = :doc_id AND branch_id = :branch_id`,
       ).get({ doc_id: docId, branch_id: branchId }) as
@@ -73,7 +74,8 @@ export class SqliteStorage {
   readDocAtVersion(docId: string, at: Version): { version: Version; doc: any } {
     const { branchId, seq } = this.resolve(docId, at);
     let json: any;
-    if (at?.epoch == null) {
+    const cacheDisabled = (Deno.env.get("DISABLE_JSON_CACHE") ?? "") === "1";
+    if (at?.epoch == null && !cacheDisabled) {
       const row = this.db.prepare(
         `SELECT json, seq_no FROM json_cache WHERE doc_id = :doc_id AND branch_id = :branch_id`,
       ).get({ doc_id: docId, branch_id: branchId }) as

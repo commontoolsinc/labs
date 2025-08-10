@@ -126,6 +126,20 @@ CREATE TABLE am_chunks (
   FOREIGN KEY(tx_id) REFERENCES tx(tx_id) ON DELETE CASCADE
 );
 
+-- Latest JSON cache (per doc/branch). Stores only the most recent
+-- materialized JSON value to accelerate tip reads; historical reads still
+-- reconstruct via PIT using snapshots/chunks/changes.
+CREATE TABLE json_cache (
+  doc_id TEXT NOT NULL,
+  branch_id TEXT NOT NULL,
+  seq_no INTEGER NOT NULL,
+  json TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY(doc_id, branch_id),
+  FOREIGN KEY(branch_id) REFERENCES branches(branch_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_json_cache_branch_seq ON json_cache(branch_id, seq_no);
+
 CREATE TABLE am_snapshots (
   snapshot_id TEXT PRIMARY KEY,
   doc_id TEXT NOT NULL,
