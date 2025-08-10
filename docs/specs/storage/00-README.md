@@ -58,3 +58,19 @@ chain.
   only where interop requires a specific multihash format.
 - Concurrency: Single writer per space, many readers
 - Storage: WAL mode with tuned pragmas
+
+## Repository layout (implementation)
+
+The `@commontools/storage` package uses a small number of top-level modules:
+
+- `src/types.ts`: unified type definitions shared by provider, store, and query
+- `src/provider.ts`: space-scoped storage API and orchestration
+- `src/store/`: SQLite-backed store implementation (previously under `sqlite/`)
+  - Re-exports of concrete modules such as `heads`, `pit`, `tx`, `snapshots`,
+    `chunks`, `cas`
+- `src/query/`: query IR, evaluator, and subscription plumbing; imports shared
+  types from `src/types.ts`
+
+The previous `src/sqlite/` folder has been aliased to `src/store/` via re-export
+barrels to avoid breaking imports while transitioning. New code should import
+from `src/store/*` and shared types from `src/types.ts`.

@@ -1,4 +1,4 @@
-import { DocId, Path, Version } from "./types.ts";
+import { DocId, Path, Version } from "../types.ts";
 
 export interface Reader {
   read(doc: DocId, path: Path, at?: Version): any;

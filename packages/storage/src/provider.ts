@@ -9,24 +9,24 @@ import type {
   TxReceipt,
   TxRequest,
 } from "./interface.ts";
-import { openSqlite, type SqliteHandle } from "./sqlite/db.ts";
+import { openSqlite, type SqliteHandle } from "./store/db.ts";
 import {
   getBranchState as readBranchState,
   getOrCreateBranch as ensureBranch,
   getOrCreateDoc as ensureDoc,
-} from "./sqlite/heads.ts";
-import { decodeChangeHeader } from "./sqlite/change.ts";
+} from "./store/heads.ts";
+import { decodeChangeHeader } from "./store/change.ts";
 import type { Database } from "@db/sqlite";
 import {
   refer as referJson,
   toDigest as refToDigest,
 } from "merkle-reference/json";
-import { maybeCreateSnapshot } from "./sqlite/snapshots.ts";
-import { maybeEmitChunks } from "./sqlite/chunks.ts";
-import { isServerMergeEnabled } from "./sqlite/flags.ts";
-import { epochForTimestamp, getAutomergeBytesAtSeq } from "./sqlite/pit.ts";
+import { maybeCreateSnapshot } from "./store/snapshots.ts";
+import { maybeEmitChunks } from "./store/chunks.ts";
+import { isServerMergeEnabled } from "./store/flags.ts";
+import { epochForTimestamp, getAutomergeBytesAtSeq } from "./store/pit.ts";
 import * as Automerge from "@automerge/automerge";
-import { closeBranch } from "./sqlite/branches.ts";
+import { closeBranch } from "./store/branches.ts";
 
 export interface SQLiteSpaceOptions {
   spacesDir: URL; // directory where per-space sqlite files live
@@ -52,7 +52,7 @@ class SQLiteSpace implements SpaceStorage {
 
   async submitTx(req: TxRequest): Promise<TxReceipt> {
     // Delegate to sqlite/tx pipeline to preserve single-writer and BEGIN IMMEDIATE boundaries
-    const { submitTx: submitTxInternal } = await import("./sqlite/tx.ts");
+    const { submitTx: submitTxInternal } = await import("./store/tx.ts");
     const db = this.handle.db;
 
     // Translate public TxRequest → internal sqlite/tx TxRequest
@@ -76,7 +76,7 @@ class SQLiteSpace implements SpaceStorage {
     });
 
     // Map internal receipt → public receipt shape
-    const results: TxDocResult[] = receipt.results.map((r) => ({
+    const results: TxDocResult[] = receipt.results.map((r: any) => ({
       ref: { docId: r.docId, branch: r.branch },
       status: r.status,
       newHeads: r.newHeads,
@@ -104,8 +104,8 @@ class SQLiteSpace implements SpaceStorage {
   ): Promise<Uint8Array> {
     const db = this.handle.db;
     const state = readBranchState(db, docId, branch);
-    const { uptoSeqNo } = await import("./sqlite/pit.ts");
-    const { project } = await import("./sqlite/projection.ts");
+    const { uptoSeqNo } = await import("./store/pit.ts");
+    const { project } = await import("./store/projection.ts");
 
     let targetEpoch: number | undefined = opts?.epoch;
     if (targetEpoch == null && opts?.at) {
@@ -206,7 +206,7 @@ class SQLiteSpace implements SpaceStorage {
         tx_id: createStubTx(db),
       },
     );
-    const newHeads = to.heads.filter((h) => !header.deps.includes(h));
+    const newHeads = to.heads.filter((h: string) => !header.deps.includes(h));
     newHeads.push(header.changeHash);
     newHeads.sort();
     updateHeads(db, to.branchId, newHeads, seqNo, 0);

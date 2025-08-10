@@ -1,8 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
-import { decodeChangeHeader } from "../../src/sqlite/change.ts";
-import { openSqlite } from "../../src/sqlite/db.ts";
+import { decodeChangeHeader } from "../../src/store/change.ts";
+import { openSqlite } from "../../src/store/db.ts";
 
 Deno.test("test_server_merge_guarded_by_flag", async () => {
   // Ensure flag disabled

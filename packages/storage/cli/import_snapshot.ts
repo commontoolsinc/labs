@@ -6,10 +6,10 @@
 // - Also writes to CAS as am_snapshot.
 // Note: This does not rewrite history; it just stores a full snapshot for fast PIT.
 
-import { parseArgs } from "jsr:@std/cli/parse-args";
-import { openSqlite } from "../src/sqlite/db.ts";
-import { createCas } from "../src/sqlite/cas.ts";
-import { getBranchState } from "../src/sqlite/heads.ts";
+import { parseArgs } from "@std/cli/parse-args";
+import { openSqlite } from "../src/store/db.ts";
+import { createCas } from "../src/store/cas.ts";
+import { getBranchState } from "../src/store/heads.ts";
 import * as Automerge from "@automerge/automerge";
 
 function usage() {

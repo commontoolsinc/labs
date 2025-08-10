@@ -1,4 +1,4 @@
-import { DocId, Link, Path, Verdict, Version } from "./types.ts";
+import { DocId, Link, Path, Verdict, Version } from "../types.ts";
 import { IRId, IRPool } from "./ir.ts";
 import { Reader } from "./storage.ts";
 import { child } from "./path.ts";

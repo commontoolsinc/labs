@@ -1,4 +1,4 @@
-import { Delta, EngineEvent, Link, Verdict } from "./types.ts";
+import { Delta, EngineEvent, Link, Verdict } from "../types.ts";
 import { EvalKey, Evaluator, Provenance } from "./eval.ts";
 import { SubscriptionIndex } from "./subs.ts";
 

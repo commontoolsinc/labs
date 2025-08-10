@@ -3,9 +3,9 @@
 // new-storage:export-snapshot --space --doc --branch --seq --out
 // Exports Automerge binary for a document branch at a specific seq to a file.
 
-import { parseArgs } from "jsr:@std/cli/parse-args";
-import { openSqlite } from "../src/sqlite/db.ts";
-import { getAutomergeBytesAtSeq } from "../src/sqlite/pit.ts";
+import { parseArgs } from "@std/cli/parse-args";
+import { openSqlite } from "../src/store/db.ts";
+import { getAutomergeBytesAtSeq } from "../src/store/pit.ts";
 
 function usage() {
   console.error(

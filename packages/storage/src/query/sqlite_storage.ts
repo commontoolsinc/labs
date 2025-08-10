@@ -1,9 +1,9 @@
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
-import { getAutomergeBytesAtSeq, uptoSeqNo } from "../sqlite/pit.ts";
-import { getBranchState } from "../sqlite/heads.ts";
+import { getAutomergeBytesAtSeq, uptoSeqNo } from "../store/pit.ts";
+import { getBranchState } from "../store/heads.ts";
 import type { Reader } from "./storage.ts";
-import type { Path, Version } from "./types.ts";
+import type { Path, Version } from "../types.ts";
 
 function isObject(x: any): x is Record<string, any> {
   return x !== null && typeof x === "object" && !Array.isArray(x);

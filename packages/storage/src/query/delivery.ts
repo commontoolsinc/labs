@@ -1,4 +1,4 @@
-import { DocId, EngineEvent, Version } from "./types.ts";
+import { DocId, EngineEvent, Version } from "../types.ts";
 import { Reader } from "./storage.ts";
 
 export type OutMsg =

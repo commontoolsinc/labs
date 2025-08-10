@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
-import { openSqlite } from "../../src/sqlite/db.ts";
+import { openSqlite } from "../../src/store/db.ts";
 import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";

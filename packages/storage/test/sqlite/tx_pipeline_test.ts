@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
-import { decodeChangeHeader } from "../../src/sqlite/change.ts";
+import { decodeChangeHeader } from "../../src/store/change.ts";
 
 Deno.test("sqlite tx pipeline: valid multi-doc tx applies atomically", async () => {
   const tmpDir = await Deno.makeTempDir();
