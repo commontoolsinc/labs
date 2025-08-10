@@ -1,5 +1,5 @@
 import type { Database } from "@db/sqlite";
-import * as Automerge from "npm:@automerge/automerge";
+import * as Automerge from "@automerge/automerge";
 import { getAutomergeBytesAtSeq } from "../sqlite/pit.ts";
 import { getBranchState } from "../sqlite/heads.ts";
 import type { Path, Version } from "./types.ts";
@@ -19,7 +19,10 @@ function getAtPath(doc: any, path: Path): any {
 export class SqliteStorage {
   constructor(private db: Database, private defaultBranch = "main") {}
 
-  private resolve(docId: string, at?: Version): { branchId: string; seq: number } {
+  private resolve(
+    docId: string,
+    at?: Version,
+  ): { branchId: string; seq: number } {
     const branchName = at?.branch ?? this.defaultBranch;
     const state = getBranchState(this.db, docId, branchName);
     const seq = at?.seq ?? state.seqNo;
@@ -52,7 +55,9 @@ export class SqliteStorage {
     const { branchId, seq } = this.resolve(docId, at);
     const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
     const json = Automerge.toJS(Automerge.load(bytes));
-    return { version: { seq, branch: at.branch ?? this.defaultBranch }, doc: json };
+    return {
+      version: { seq, branch: at.branch ?? this.defaultBranch },
+      doc: json,
+    };
   }
 }
-

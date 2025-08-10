@@ -39,4 +39,3 @@ export function isAncestorPath(parent: string[], childPath: string[]): boolean {
   }
   return true; // equal => same node; shorter => ancestor
 }
-

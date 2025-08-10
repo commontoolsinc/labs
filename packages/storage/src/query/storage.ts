@@ -78,4 +78,3 @@ export class InMemoryStorage implements Storage {
     return { doc, changed, removed, newDoc: docValue, atVersion: version };
   }
 }
-

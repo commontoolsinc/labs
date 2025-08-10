@@ -2,9 +2,16 @@
 // This is a lightweight evaluator aimed at unit tests and does not persist provenance to DB.
 
 import { getAutomergeBytesAtSeq } from "./pit.ts";
-import * as Automerge from "npm:@automerge/automerge";
+import * as Automerge from "@automerge/automerge";
 import type { Database } from "@db/sqlite";
-import type { IRPlan, IRNode, SourceNode, FilterOp, Link, LinkEdge } from "./query_ir.ts";
+import type {
+  FilterOp,
+  IRNode,
+  IRPlan,
+  Link,
+  LinkEdge,
+  SourceNode,
+} from "./query_ir.ts";
 
 export type EvalRow = {
   doc: string;
@@ -30,7 +37,8 @@ export function evaluatePlan(plan: IRPlan, opts: EvalOptions): EvalRow[] {
   // Load all source docs at the requested seq
   let rows: EvalRow[] = [];
   for (const docId of plan.source.docs) {
-    const branchId = opts.branchIdByDoc?.[docId] ?? inferBranchId(opts.db, docId);
+    const branchId = opts.branchIdByDoc?.[docId] ??
+      inferBranchId(opts.db, docId);
     const seq = opts.seqByDoc?.[docId] ?? inferSeq(opts.db, docId, branchId);
     const bytes = getAutomergeBytesAtSeq(opts.db, null, docId, branchId, seq);
     const json = Automerge.toJS(Automerge.load(bytes));
@@ -41,12 +49,24 @@ export function evaluatePlan(plan: IRPlan, opts: EvalOptions): EvalRow[] {
         const itemPath = [...startPath, String(i)];
         const t = new Set<string>();
         t.add(linkKey(docId, itemPath));
-        rows.push({ doc: docId, path: itemPath, value: value[i], touches: t, linkEdges: [] });
+        rows.push({
+          doc: docId,
+          path: itemPath,
+          value: value[i],
+          touches: t,
+          linkEdges: [],
+        });
       }
     } else {
       const t = new Set<string>();
       t.add(linkKey(docId, startPath));
-      rows.push({ doc: docId, path: startPath, value, touches: t, linkEdges: [] });
+      rows.push({
+        doc: docId,
+        path: startPath,
+        value,
+        touches: t,
+        linkEdges: [],
+      });
     }
   }
 
@@ -64,7 +84,10 @@ export function evaluatePlan(plan: IRPlan, opts: EvalOptions): EvalRow[] {
         rows = rows.filter((r) => applyFilter(r.value, step.op));
         break;
       case "Project":
-        rows = rows.map((r) => ({ ...r, value: projectFields(r.value, step.fields) }));
+        rows = rows.map((r) => ({
+          ...r,
+          value: projectFields(r.value, step.fields),
+        }));
         break;
       case "Sort":
         // stable sort by decorating with index
@@ -79,18 +102,22 @@ export function evaluatePlan(plan: IRPlan, opts: EvalOptions): EvalRow[] {
         }
         break;
       case "Join":
-        rows = rows.flatMap((r) => joinVia(r, step.via, step.as, step.select, opts, () => {
-          if (globalBudget <= 0) return false;
-          globalBudget -= 1;
-          return true;
-        }));
+        rows = rows.flatMap((r) =>
+          joinVia(r, step.via, step.as, step.select, opts, () => {
+            if (globalBudget <= 0) return false;
+            globalBudget -= 1;
+            return true;
+          })
+        );
         break;
       case "Traverse":
-        rows = rows.flatMap((r) => traverseVia(r, step.via, step.depth, !!step.accumulate, opts, () => {
-          if (globalBudget <= 0) return false;
-          globalBudget -= 1;
-          return true;
-        }));
+        rows = rows.flatMap((r) =>
+          traverseVia(r, step.via, step.depth, !!step.accumulate, opts, () => {
+            if (globalBudget <= 0) return false;
+            globalBudget -= 1;
+            return true;
+          })
+        );
         break;
       default:
         throw new Error(`Unknown IR step ${(step as IRNode).kind}`);
@@ -118,7 +145,11 @@ function applyFilter(obj: any, op: FilterOp): boolean {
     case "in":
       return Array.isArray((op as any).value) && (op as any).value.includes(v);
     case "contains":
-      return Array.isArray(v) ? v.includes((op as any).value) : typeof v === "string" ? v.includes((op as any).value) : false;
+      return Array.isArray(v)
+        ? v.includes((op as any).value)
+        : typeof v === "string"
+        ? v.includes((op as any).value)
+        : false;
     default:
       return true;
   }
@@ -133,7 +164,11 @@ function projectFields(obj: any, fields: string[]): any {
   return out;
 }
 
-function compareBy(a: any, b: any, keys: { field: string; order?: "asc" | "desc" }[]): number {
+function compareBy(
+  a: any,
+  b: any,
+  keys: { field: string; order?: "asc" | "desc" }[],
+): number {
   for (const k of keys) {
     const av = getAtPathByDot(a, k.field);
     const bv = getAtPathByDot(b, k.field);
@@ -162,7 +197,8 @@ function setAtPathByDot(root: any, dotPath: string, value: any): void {
   for (let i = 0; i < segs.length; i++) {
     const k = segs[i]!;
     const last = i === segs.length - 1;
-    if (last) cur[k] = value; else {
+    if (last) cur[k] = value;
+    else {
       if (cur[k] == null || typeof cur[k] !== "object") cur[k] = {};
       cur = cur[k];
     }
@@ -171,7 +207,7 @@ function setAtPathByDot(root: any, dotPath: string, value: any): void {
 
 function inferBranchId(db: Database, docId: string): string {
   const row = db.prepare(
-    `SELECT branch_id FROM branches WHERE doc_id = :doc_id AND name = 'main'`
+    `SELECT branch_id FROM branches WHERE doc_id = :doc_id AND name = 'main'`,
   ).get({ doc_id: docId }) as { branch_id: string } | undefined;
   if (!row) throw new Error(`no branch for doc ${docId}`);
   return row.branch_id;
@@ -179,7 +215,7 @@ function inferBranchId(db: Database, docId: string): string {
 
 function inferSeq(db: Database, docId: string, branchId: string): number {
   const row = db.prepare(
-    `SELECT seq_no FROM am_heads WHERE branch_id = :branch_id`
+    `SELECT seq_no FROM am_heads WHERE branch_id = :branch_id`,
   ).get({ branch_id: branchId }) as { seq_no: number } | undefined;
   if (!row) return 0;
   return row.seq_no;
@@ -188,10 +224,20 @@ function inferSeq(db: Database, docId: string, branchId: string): number {
 function asLinks(x: any): { doc: string; path: string[] }[] {
   if (!x) return [];
   const arr = Array.isArray(x) ? x : [x];
-  return arr.filter((v) => v && typeof v === "object" && typeof v.doc === "string" && Array.isArray(v.path));
+  return arr.filter((v) =>
+    v && typeof v === "object" && typeof v.doc === "string" &&
+    Array.isArray(v.path)
+  );
 }
 
-function joinVia(row: EvalRow, via: string, as: string | undefined, select: string[] | undefined, opts: EvalOptions, consumeBudget: () => boolean): EvalRow[] {
+function joinVia(
+  row: EvalRow,
+  via: string,
+  as: string | undefined,
+  select: string[] | undefined,
+  opts: EvalOptions,
+  consumeBudget: () => boolean,
+): EvalRow[] {
   const links = asLinks(getAtPathByDot(row.value, via));
   if (links.length === 0) return [];
   const out: EvalRow[] = [];
@@ -210,14 +256,34 @@ function joinVia(row: EvalRow, via: string, as: string | undefined, select: stri
     const touches = new Set(row.touches);
     touches.add(linkKey(row.doc, row.path));
     touches.add(linkKey(l.doc, l.path));
-    const joined = select && select.length > 0 ? projectFields(value, select) : value;
-    const merged = as ? { ...row.value, [as]: joined } : { ...row.value, ...joined };
-    out.push({ doc: l.doc, path: l.path, value: merged, touches, linkEdges: [...row.linkEdges, { from: { doc: row.doc, path: row.path }, to: { doc: l.doc, path: l.path } }] });
+    const joined = select && select.length > 0
+      ? projectFields(value, select)
+      : value;
+    const merged = as
+      ? { ...row.value, [as]: joined }
+      : { ...row.value, ...joined };
+    out.push({
+      doc: l.doc,
+      path: l.path,
+      value: merged,
+      touches,
+      linkEdges: [...row.linkEdges, {
+        from: { doc: row.doc, path: row.path },
+        to: { doc: l.doc, path: l.path },
+      }],
+    });
   }
   return out;
 }
 
-function traverseVia(row: EvalRow, via: string, depth: number, accumulate: boolean, opts: EvalOptions, consumeBudget: () => boolean): EvalRow[] {
+function traverseVia(
+  row: EvalRow,
+  via: string,
+  depth: number,
+  accumulate: boolean,
+  opts: EvalOptions,
+  consumeBudget: () => boolean,
+): EvalRow[] {
   const result: EvalRow[] = [];
   const visited = new Set<string>();
   function dfs(doc: string, path: string[], value: any, d: number) {
@@ -227,7 +293,13 @@ function traverseVia(row: EvalRow, via: string, depth: number, accumulate: boole
     const links = asLinks(getAtPathByDot(value, via));
     const isLeaf = d === 0 || links.length === 0;
     if (accumulate || isLeaf) {
-      result.push({ doc, path, value, touches: new Set(row.touches).add(key), linkEdges: [] });
+      result.push({
+        doc,
+        path,
+        value,
+        touches: new Set(row.touches).add(key),
+        linkEdges: [],
+      });
     }
     if (d === 0) return;
     for (const l of links) {
@@ -243,4 +315,3 @@ function traverseVia(row: EvalRow, via: string, depth: number, accumulate: boole
   dfs(row.doc, row.path, row.value, depth);
   return result.length > 0 ? result : [row];
 }
-

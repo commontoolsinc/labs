@@ -11,4 +11,3 @@ export function getEnvBoolean(name: string, defaultValue = false): boolean {
 export function getGlobalServerMergeFlag(): boolean {
   return getEnvBoolean("ENABLE_SERVER_MERGE", false);
 }
-

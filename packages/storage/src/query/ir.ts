@@ -97,18 +97,36 @@ import { toTokens } from "./path.ts";
 
 type CompileCtx = { root: JsonSchema; memo: Map<any, IRId> };
 
-export function compileSchema(pool: IRPool, schema: JsonSchema, ctx?: Partial<CompileCtx>): IRId {
+export function compileSchema(
+  pool: IRPool,
+  schema: JsonSchema,
+  ctx?: Partial<CompileCtx>,
+): IRId {
   const root = ctx?.root ?? schema;
   const memo = ctx?.memo ?? new Map<any, IRId>();
   if (memo.has(schema)) return memo.get(schema)!;
-  if (schema === true) { const id = intern(pool, { kind: "True" }); memo.set(schema, id); return id; }
-  if (schema === false) { const id = intern(pool, { kind: "False" }); memo.set(schema, id); return id; }
-  if (!isObject(schema)) { const id = intern(pool, { kind: "True" }); memo.set(schema, id); return id; }
+  if (schema === true) {
+    const id = intern(pool, { kind: "True" });
+    memo.set(schema, id);
+    return id;
+  }
+  if (schema === false) {
+    const id = intern(pool, { kind: "False" });
+    memo.set(schema, id);
+    return id;
+  }
+  if (!isObject(schema)) {
+    const id = intern(pool, { kind: "True" });
+    memo.set(schema, id);
+    return id;
+  }
 
   // $ref support (local-only): "#/definitions/Name" or "#/$defs/Name" etc.
   if (typeof (schema as any).$ref === "string") {
     const ref = (schema as any).$ref as string;
-    if (!ref.startsWith("#")) throw new Error(`Only local $ref supported: ${ref}`);
+    if (!ref.startsWith("#")) {
+      throw new Error(`Only local $ref supported: ${ref}`);
+    }
     const ptr = ref.slice(1); // drop leading '#'
     const tokens = ptr === "" ? [] : toTokens(ptr);
     let target: any = root;
@@ -127,19 +145,32 @@ export function compileSchema(pool: IRPool, schema: JsonSchema, ctx?: Partial<Co
   memo.set(schema, localId);
 
   const usedIds: IRId[] = [];
-  const pushId = (id: IRId) => { usedIds.push(id); return id; };
+  const pushId = (id: IRId) => {
+    usedIds.push(id);
+    return id;
+  };
 
   const nodes: IRId[] = [];
   if ((schema as any).type && typeof (schema as any).type === "string") {
-    nodes.push(pushId(intern(pool, { kind: "TypeCheck", t: (schema as any).type } as any)));
+    nodes.push(
+      pushId(
+        intern(pool, { kind: "TypeCheck", t: (schema as any).type } as any),
+      ),
+    );
   }
   if ((schema as any).pattern) {
     nodes.push(
-      pushId(intern(pool, { kind: "Pattern", re: new RegExp((schema as any).pattern) })),
+      pushId(
+        intern(pool, {
+          kind: "Pattern",
+          re: new RegExp((schema as any).pattern),
+        }),
+      ),
     );
   }
   if (
-    (schema as any).minimum !== undefined || (schema as any).maximum !== undefined ||
+    (schema as any).minimum !== undefined ||
+    (schema as any).maximum !== undefined ||
     (schema as any).exclusiveMinimum || (schema as any).exclusiveMaximum
   ) {
     nodes.push(
@@ -168,17 +199,25 @@ export function compileSchema(pool: IRPool, schema: JsonSchema, ctx?: Partial<Co
     }
     let additional: AP = { mode: "omit" };
     if (Object.prototype.hasOwnProperty.call(schema, "additionalProperties")) {
-      if ((schema as any).additionalProperties === true) additional = { mode: "true" };
-      else if ((schema as any).additionalProperties === false) {
+      if ((schema as any).additionalProperties === true) {
+        additional = { mode: "true" };
+      } else if ((schema as any).additionalProperties === false) {
         additional = { mode: "omit" };
       } else {
         additional = {
           mode: "schema",
-          ir: pushId(compileSchema(pool, (schema as any).additionalProperties, { root, memo })),
+          ir: pushId(
+            compileSchema(pool, (schema as any).additionalProperties, {
+              root,
+              memo,
+            }),
+          ),
         };
       }
     }
-    nodes.push(pushId(intern(pool, { kind: "Props", required, props, additional })));
+    nodes.push(
+      pushId(intern(pool, { kind: "Props", required, props, additional })),
+    );
   }
 
   if ((schema as any).items !== undefined) {
@@ -186,7 +225,9 @@ export function compileSchema(pool: IRPool, schema: JsonSchema, ctx?: Partial<Co
       nodes.push(
         pushId(intern(pool, {
           kind: "Items",
-          tuple: (schema as any).items.map((s: any) => compileSchema(pool, s, { root, memo })),
+          tuple: (schema as any).items.map((s: any) =>
+            compileSchema(pool, s, { root, memo })
+          ),
         })),
       );
     } else {
@@ -202,13 +243,17 @@ export function compileSchema(pool: IRPool, schema: JsonSchema, ctx?: Partial<Co
   if (Array.isArray((schema as any).allOf)) {
     nodes.push(pushId(intern(pool, {
       kind: "AllOf",
-      nodes: (schema as any).allOf.map((s: any) => compileSchema(pool, s, { root, memo })),
+      nodes: (schema as any).allOf.map((s: any) =>
+        compileSchema(pool, s, { root, memo })
+      ),
     })));
   }
   if (Array.isArray((schema as any).anyOf)) {
     nodes.push(pushId(intern(pool, {
       kind: "AnyOf",
-      nodes: (schema as any).anyOf.map((s: any) => compileSchema(pool, s, { root, memo })),
+      nodes: (schema as any).anyOf.map((s: any) =>
+        compileSchema(pool, s, { root, memo })
+      ),
     })));
   }
 
@@ -226,4 +271,3 @@ export function compileSchema(pool: IRPool, schema: JsonSchema, ctx?: Partial<Co
   memo.set(schema, resultId);
   return resultId;
 }
-

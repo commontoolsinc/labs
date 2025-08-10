@@ -5,18 +5,22 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   const out = new Uint8Array(digest);
   const hex: string[] = new Array(out.length);
-  for (let i = 0; i < out.length; i++) hex[i] = out[i]!.toString(16).padStart(2, "0");
+  for (let i = 0; i < out.length; i++) {
+    hex[i] = out[i]!.toString(16).padStart(2, "0");
+  }
   return hex.join("");
 }
 
 export function isChunkingEnabled(db: Database): boolean {
   try {
     const row = db.prepare(
-      `SELECT value_json FROM space_settings WHERE key = 'settings'`
+      `SELECT value_json FROM space_settings WHERE key = 'settings'`,
     ).get() as { value_json: string } | undefined;
     if (!row) return true;
     const settings = JSON.parse(row.value_json) as { enableChunks?: boolean };
-    if (typeof settings.enableChunks === "boolean") return settings.enableChunks;
+    if (typeof settings.enableChunks === "boolean") {
+      return settings.enableChunks;
+    }
     return true;
   } catch {
     return true;
@@ -42,7 +46,7 @@ export async function maybeEmitChunks(
   const snap = db.prepare(
     `SELECT upto_seq_no, bytes FROM am_snapshots
      WHERE doc_id = :doc_id AND branch_id = :branch_id
-       ORDER BY upto_seq_no DESC LIMIT 1`
+       ORDER BY upto_seq_no DESC LIMIT 1`,
   ).get({ doc_id: docId, branch_id: branchId }) as
     | { upto_seq_no: number; bytes: Uint8Array }
     | undefined;
@@ -58,8 +62,13 @@ export async function maybeEmitChunks(
      JOIN am_change_blobs b ON (i.bytes_hash = b.bytes_hash)
      WHERE i.doc_id = :doc_id AND i.branch_id = :branch_id
        AND i.seq_no > :from_seq AND i.seq_no <= :to_seq
-     ORDER BY i.seq_no`
-  ).all({ doc_id: docId, branch_id: branchId, from_seq: snap.upto_seq_no, to_seq: seqNo }) as Array<{ seq_no: number; bytes: Uint8Array }>;
+     ORDER BY i.seq_no`,
+  ).all({
+    doc_id: docId,
+    branch_id: branchId,
+    from_seq: snap.upto_seq_no,
+    to_seq: seqNo,
+  }) as Array<{ seq_no: number; bytes: Uint8Array }>;
 
   // Apply changes one by one and emit saveIncremental as a chunk for each change
   for (const row of rows) {

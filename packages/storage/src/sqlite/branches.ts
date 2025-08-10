@@ -31,7 +31,12 @@ export async function createBranch(
   db.run(
     `INSERT OR IGNORE INTO branches(branch_id, doc_id, name, parent_branch_id)
      VALUES (:branch_id, :doc_id, :name, :parent_branch_id);`,
-    { branch_id: branchId, doc_id: docId, name, parent_branch_id: parentBranchId },
+    {
+      branch_id: branchId,
+      doc_id: docId,
+      name,
+      parent_branch_id: parentBranchId,
+    },
   );
 
   // Ensure default heads row exists for the new branch

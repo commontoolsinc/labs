@@ -5,11 +5,11 @@
 // This seeds a synthetic space with many docs, nested structures, and link graphs,
 // then exercises the IR compiler/evaluator with filters, joins, and traversals.
 
-import * as Automerge from "npm:@automerge/automerge";
+import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../src/provider.ts";
 import { openSqlite } from "../src/sqlite/db.ts";
 import type { Database } from "@db/sqlite";
-import { IRPool, compileSchema } from "../src/query/ir.ts";
+import { compileSchema, IRPool } from "../src/query/ir.ts";
 import { Evaluator, Provenance } from "../src/query/eval.ts";
 import { SqliteStorage } from "../src/query/sqlite_storage.ts";
 
@@ -34,7 +34,9 @@ const tmpDir = await Deno.makeTempDir();
 const spacesDir = new URL(`file://${tmpDir}/`);
 const spaceDid = "did:key:bench-space";
 const space = await openSpaceStorage(spaceDid, { spacesDir });
-const sqliteHandle = await openSqlite({ url: new URL(`./${spaceDid}.sqlite`, spacesDir) });
+const sqliteHandle = await openSqlite({
+  url: new URL(`./${spaceDid}.sqlite`, spacesDir),
+});
 const db: Database = sqliteHandle.db;
 
 // rand helper with seed for reproducibility
@@ -86,7 +88,10 @@ async function seedOnce() {
         title: `task-${i}`,
         status: i % 3 === 0 ? "open" : i % 3 === 1 ? "in_progress" : "closed",
         priority: (i % 5) + 1,
-        metrics: { estHours: (i % 13) + Math.floor(rnd() * 3), done: i % 7 === 0 },
+        metrics: {
+          estHours: (i % 13) + Math.floor(rnd() * 3),
+          done: i % 7 === 0,
+        },
         assignee: link(`user:${assigneeId}`, ["profile"]),
         edges: neighbors,
         // nested array of items with $ref-like owner links
@@ -117,11 +122,29 @@ async function seedDoc(docId: string, mutate: (d: any) => void) {
   const init = Automerge.init<any>();
   const updated = Automerge.change(init, mutate);
   const c = Automerge.getLastLocalChange(updated)!;
-  await space.submitTx({ reads: [], writes: [{ ref: { docId, branch }, baseHeads: [], changes: [{ bytes: c }] }] });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: [],
+      changes: [{ bytes: c }],
+    }],
+  });
 }
 
 // --- VDOM seeding ---
-const TAGS = ["div", "span", "ul", "li", "p", "section", "header", "footer", "main", "article"] as const;
+const TAGS = [
+  "div",
+  "span",
+  "ul",
+  "li",
+  "p",
+  "section",
+  "header",
+  "footer",
+  "main",
+  "article",
+] as const;
 
 type VNode = {
   tag: typeof TAGS[number];
@@ -169,7 +192,11 @@ await seedOnce();
 // ---------------------------
 
 // --- VDOM benchmarks ---
-Deno.bench({ name: "vdom: validate VNode schema ($defs recursive)", group: "queries", n: 1 }, () => {
+Deno.bench({
+  name: "vdom: validate VNode schema ($defs recursive)",
+  group: "queries",
+  n: 1,
+}, () => {
   // Recursive VNode schema using $defs; evaluator must cap traversal via budget
   const VNodeRecursive = {
     $defs: {
@@ -188,15 +215,26 @@ Deno.bench({ name: "vdom: validate VNode schema ($defs recursive)", group: "quer
   const deadline = performance.now() + 2000; // 2s soft timeout
   let ok = 0;
   for (let i = 0; i < Math.min(20, VDOM_NODES); i++) {
-    if (performance.now() > deadline) throw new Error("bench timeout (vdom validate)");
-    const res = evaluator.evaluate({ ir, doc: `vdom:${i}`, path: [], budget: VDOM_BUDGET });
+    if (performance.now() > deadline) {
+      throw new Error("bench timeout (vdom validate)");
+    }
+    const res = evaluator.evaluate({
+      ir,
+      doc: `vdom:${i}`,
+      path: [],
+      budget: VDOM_BUDGET,
+    });
     if (res.verdict !== "No") ok++;
     if (ok >= 5) break; // early exit once we validated a few
   }
   if (ok <= 0) throw new Error("no VDOM nodes validated");
 });
 
-Deno.bench({ name: "vdom: find nodes tag=div with \u003e=10 children", group: "queries", n: 1 }, () => {
+Deno.bench({
+  name: "vdom: find nodes tag=div with \u003e=10 children",
+  group: "queries",
+  n: 1,
+}, () => {
   const schema = {
     type: "object",
     properties: {
@@ -207,48 +245,89 @@ Deno.bench({ name: "vdom: find nodes tag=div with \u003e=10 children", group: "q
   const ir = compileSchema(pool, schema);
   const deadline = performance.now() + 2000; // 2s soft timeout
   let count = 0;
-for (let i = 0; i < Math.min(100, VDOM_NODES); i++) {
-    if (performance.now() > deadline) throw new Error("bench timeout (vdom find nodes)");
-    const res = evaluator.evaluate({ ir, doc: `vdom:${i}`, path: [], budget: 0 });
+  for (let i = 0; i < Math.min(100, VDOM_NODES); i++) {
+    if (performance.now() > deadline) {
+      throw new Error("bench timeout (vdom find nodes)");
+    }
+    const res = evaluator.evaluate({
+      ir,
+      doc: `vdom:${i}`,
+      path: [],
+      budget: 0,
+    });
     if (res.verdict === "Yes") count++;
   }
   // OK if zero depending on random seed; just exercise path
   if (count < 0) throw new Error("unreachable");
 });
 
-Deno.bench({ name: "vdom: deep traversal to leaf with limited budget", group: "queries", n: 1 }, () => {
-  const schema = { type: "object", properties: { children: { type: "array" } } };
+Deno.bench({
+  name: "vdom: deep traversal to leaf with limited budget",
+  group: "queries",
+  n: 1,
+}, () => {
+  const schema = {
+    type: "object",
+    properties: { children: { type: "array" } },
+  };
   const ir = compileSchema(pool, schema);
   const deadline = performance.now() + 2000; // 2s soft timeout
   let maybes = 0;
-for (let i = 0; i < Math.min(50, VDOM_NODES); i++) {
-    if (performance.now() > deadline) throw new Error("bench timeout (vdom deep traversal)");
-    const res = evaluator.evaluate({ ir, doc: `vdom:${i}`, path: [], budget: VDOM_BUDGET });
+  for (let i = 0; i < Math.min(50, VDOM_NODES); i++) {
+    if (performance.now() > deadline) {
+      throw new Error("bench timeout (vdom deep traversal)");
+    }
+    const res = evaluator.evaluate({
+      ir,
+      doc: `vdom:${i}`,
+      path: [],
+      budget: VDOM_BUDGET,
+    });
     if (res.verdict === "MaybeExceededDepth") maybes++;
   }
   if (maybes < 0) throw new Error("unreachable");
 });
 
-Deno.bench({ name: "schema: match open tasks (const filter)", group: "queries" }, () => {
+Deno.bench({
+  name: "schema: match open tasks (const filter)",
+  group: "queries",
+}, () => {
   // Schema that selects only open tasks
   const taskOpen = {
     type: "object",
-    properties: { value: { type: "object", properties: { status: { const: "open" } } } },
+    properties: {
+      value: { type: "object", properties: { status: { const: "open" } } },
+    },
   };
   const ir = compileSchema(pool, taskOpen);
   let count = 0;
   for (let i = 0; i < ROOT_DOCS; i++) {
-    const res = evaluator.evaluate({ ir, doc: `task:${i}`, path: [], budget: 0 });
+    const res = evaluator.evaluate({
+      ir,
+      doc: `task:${i}`,
+      path: [],
+      budget: 0,
+    });
     if (res.verdict === "Yes") count += 1;
   }
   // sanity: some open tasks exist
   if (count <= 0) throw new Error("no open tasks matched");
 });
 
-Deno.bench({ name: "schema: tasks requiring assignee.profile schema via link", group: "queries" }, () => {
+Deno.bench({
+  name: "schema: tasks requiring assignee.profile schema via link",
+  group: "queries",
+}, () => {
   const schema = {
     definitions: {
-      UserProfile: { type: "object", properties: { name: { type: "string" }, org: { type: "string" }, tags: { type: "array" } } },
+      UserProfile: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          org: { type: "string" },
+          tags: { type: "array" },
+        },
+      },
     },
     type: "object",
     properties: {
@@ -264,26 +343,47 @@ Deno.bench({ name: "schema: tasks requiring assignee.profile schema via link", g
   const ir = compileSchema(pool, schema);
   let matched = 0;
   for (let i = 0; i < ROOT_DOCS; i++) {
-    const res = evaluator.evaluate({ ir, doc: `task:${i}`, path: [], budget: 2 });
+    const res = evaluator.evaluate({
+      ir,
+      doc: `task:${i}`,
+      path: [],
+      budget: 2,
+    });
     if (res.verdict !== "No") matched++;
   }
   if (matched <= 0) throw new Error("no tasks matched join-like schema");
 });
 
-Deno.bench({ name: "schema: traversal budget across edges (depth 2)", group: "queries" }, () => {
-  const schema = { type: "object", properties: { value: { type: "object", properties: { edges: { type: "array" } } } } };
+Deno.bench({
+  name: "schema: traversal budget across edges (depth 2)",
+  group: "queries",
+}, () => {
+  const schema = {
+    type: "object",
+    properties: {
+      value: { type: "object", properties: { edges: { type: "array" } } },
+    },
+  };
   const ir = compileSchema(pool, schema);
   const roots = Math.min(100, ROOT_DOCS);
   let maybes = 0;
   for (let i = 0; i < roots; i++) {
-    const res = evaluator.evaluate({ ir, doc: `task:${i}`, path: [], budget: 2 });
+    const res = evaluator.evaluate({
+      ir,
+      doc: `task:${i}`,
+      path: [],
+      budget: 2,
+    });
     if (res.verdict === "MaybeExceededDepth") maybes++;
   }
   // Not asserting count, just exercising traversal path with budget
 });
 
 // Simulate heavy unrelated write churn then query only target subset
-Deno.bench({ name: "schema: selective over churn (open tasks)", group: "queries" }, async () => {
+Deno.bench({
+  name: "schema: selective over churn (open tasks)",
+  group: "queries",
+}, async () => {
   // Apply unrelated changes to noise:* docs to stress PIT/chunk retrieval
   for (let b = 0; b < CHURN_BATCHES; b++) {
     const docId = `noise:${b}`;
@@ -292,7 +392,14 @@ Deno.bench({ name: "schema: selective over churn (open tasks)", group: "queries"
       d.tick = (d.tick ?? 0) + 1;
     });
     const c = Automerge.getLastLocalChange(d1)!;
-    await space.submitTx({ reads: [], writes: [{ ref: { docId, branch: "main" }, baseHeads: [], changes: [{ bytes: c }] }] });
+    await space.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId, branch: "main" },
+        baseHeads: [],
+        changes: [{ bytes: c }],
+      }],
+    });
   }
 
   // Now query a narrow subset of task docs
@@ -300,7 +407,9 @@ Deno.bench({ name: "schema: selective over churn (open tasks)", group: "queries"
   const targets = Array.from({ length: targetCount }, (_, i) => `task:${i}`);
   const taskOpen = {
     type: "object",
-    properties: { value: { type: "object", properties: { status: { const: "open" } } } },
+    properties: {
+      value: { type: "object", properties: { status: { const: "open" } } },
+    },
   };
   const ir = compileSchema(pool, taskOpen);
   let matched = 0;
@@ -310,4 +419,3 @@ Deno.bench({ name: "schema: selective over churn (open tasks)", group: "queries"
   }
   if (matched < 0) throw new Error("unreachable");
 });
-

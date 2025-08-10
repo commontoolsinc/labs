@@ -69,7 +69,11 @@ class SQLiteSpace implements SpaceStorage {
       allowServerMerge: w.allowServerMerge ?? isServerMergeEnabled(db),
     }));
 
-    const receipt = await submitTxInternal(db, { reads, writes, txId: req.clientTxId });
+    const receipt = await submitTxInternal(db, {
+      reads,
+      writes,
+      txId: req.clientTxId,
+    });
 
     // Map internal receipt → public receipt shape
     const results: TxDocResult[] = receipt.results.map((r) => ({
@@ -140,8 +144,20 @@ class SQLiteSpace implements SpaceStorage {
     const to = readBranchState(db, docId, toBranch);
 
     // Load PIT docs for both branches at their current seq
-    const fromBytes = getAutomergeBytesAtSeq(db, null, docId, from.branchId, from.seqNo);
-    const toBytes = getAutomergeBytesAtSeq(db, null, docId, to.branchId, to.seqNo);
+    const fromBytes = getAutomergeBytesAtSeq(
+      db,
+      null,
+      docId,
+      from.branchId,
+      from.seqNo,
+    );
+    const toBytes = getAutomergeBytesAtSeq(
+      db,
+      null,
+      docId,
+      to.branchId,
+      to.seqNo,
+    );
 
     const a = Automerge.load(toBytes);
     const b = Automerge.load(fromBytes);
@@ -161,7 +177,9 @@ class SQLiteSpace implements SpaceStorage {
     const wantDeps = [...to.heads, ...from.heads].sort();
     const gotDeps = [...header.deps].sort();
     if (JSON.stringify(wantDeps) !== JSON.stringify(gotDeps)) {
-      throw new Error("synthesized merge deps do not match source+target heads");
+      throw new Error(
+        "synthesized merge deps do not match source+target heads",
+      );
     }
 
     // Persist change blob
@@ -192,7 +210,14 @@ class SQLiteSpace implements SpaceStorage {
     newHeads.push(header.changeHash);
     newHeads.sort();
     updateHeads(db, to.branchId, newHeads, seqNo, 0);
-    const snap = maybeCreateSnapshot(db, docId, to.branchId, seqNo, newHeads, 0);
+    const snap = maybeCreateSnapshot(
+      db,
+      docId,
+      to.branchId,
+      seqNo,
+      newHeads,
+      0,
+    );
     if (!snap) {
       await maybeEmitChunks(db, docId, to.branchId, to.seqNo, seqNo);
     }

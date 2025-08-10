@@ -26,4 +26,3 @@ export type EngineEvent = {
   changedDocs: Set<DocId>;
   atVersion: Version;
 };
-

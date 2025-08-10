@@ -48,8 +48,9 @@ export function maybeCreateSnapshot(
 
   // Persist snapshot via CAS for content-addressability and future reuse
   const cas = createCas(db);
-  cas.put('am_snapshot', snapshotBytes, { docId, branchId, seqNo, txId }).catch(() => {/* best-effort */});
+  cas.put("am_snapshot", snapshotBytes, { docId, branchId, seqNo, txId }).catch(
+    () => {/* best-effort */},
+  );
 
   return true;
 }
-

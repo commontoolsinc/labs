@@ -4,13 +4,20 @@ This document tracks the implementation of the new storage backend described in
 `docs/specs/storage/*`.
 
 Summary and code links
-- Status: Heads, PIT, Snapshots, Branching, CAS, Queries, basic UCAN, and Toolshed route scaffolding are implemented; remaining items are TX pipeline invariants and final route wiring behind a flag.
+
+- Status: Heads, PIT, Snapshots, Branching, CAS, Queries, basic UCAN, and
+  Toolshed route scaffolding are implemented; remaining items are TX pipeline
+  invariants and final route wiring behind a flag.
 - Flags (defaults): ENABLE_NEW_STORAGE=0, ENABLE_SERVER_MERGE=0.
 - Provider entry: packages/storage/src/provider.ts
-- SQLite modules: packages/storage/src/sqlite/db.ts, schema.sql, heads.ts, change.ts, pit.ts, projection.ts, snapshots.ts, branches.ts, cas.ts, query_ir.ts, query_eval.ts
-- Toolshed routes (flagged): packages/toolshed/routes/storage/new/* and flag plumbing in packages/toolshed/env.ts
+- SQLite modules: packages/storage/src/sqlite/db.ts, schema.sql, heads.ts,
+  change.ts, pit.ts, projection.ts, snapshots.ts, branches.ts, cas.ts,
+  query_ir.ts, query_eval.ts
+- Toolshed routes (flagged): packages/toolshed/routes/storage/new/* and flag
+  plumbing in packages/toolshed/env.ts
 - CLI tasks: packages/storage/deno.json new-storage:* and packages/storage/cli/*
-- Specs: docs/specs/storage/*.md (API, PIT, branching, snapshots, tx processing, invariants, queries)
+- Specs: docs/specs/storage/*.md (API, PIT, branching, snapshots, tx processing,
+  invariants, queries)
 
 ## Goals
 
@@ -112,11 +119,16 @@ Acceptance:
 
 Implementation:
 
-- `packages/storage/src/sqlite/pit.ts` implements PIT reconstruction with both fast path and fallback
-- `packages/storage/src/sqlite/projection.ts` implements JSON projection for selective subtrees  
-- Updated `packages/storage/interface.ts` to include `at?: string` for timestamp-based PIT
-- Updated `packages/storage/src/provider.ts` to integrate PIT and projection functionality
-- Comprehensive test coverage in `packages/storage/test/pit-and-projection-test.ts`
+- `packages/storage/src/sqlite/pit.ts` implements PIT reconstruction with both
+  fast path and fallback
+- `packages/storage/src/sqlite/projection.ts` implements JSON projection for
+  selective subtrees
+- Updated `packages/storage/interface.ts` to include `at?: string` for
+  timestamp-based PIT
+- Updated `packages/storage/src/provider.ts` to integrate PIT and projection
+  functionality
+- Comprehensive test coverage in
+  `packages/storage/test/pit-and-projection-test.ts`
 
 ### 3. Branching and merge semantics (DONE)
 
@@ -133,8 +145,11 @@ Acceptance:
 
 Implementation:
 
-- Added `packages/storage/src/sqlite/branches.ts` with `createBranch()` and `closeBranch()` built on existing heads/doc helpers; records `parent_branch_id` and `merged_into_branch_id`.
-- Added `packages/storage/test/branches-basic-test.ts` covering creating a new branch and ensuring reads work after closing.
+- Added `packages/storage/src/sqlite/branches.ts` with `createBranch()` and
+  `closeBranch()` built on existing heads/doc helpers; records
+  `parent_branch_id` and `merged_into_branch_id`.
+- Added `packages/storage/test/branches-basic-test.ts` covering creating a new
+  branch and ensuring reads work after closing.
 
 ### 4. Snapshots (SQLite-backed) — DONE
 
@@ -150,9 +165,12 @@ Acceptance:
 
 Implementation:
 
-- Added `packages/storage/src/sqlite/snapshots.ts` with `maybeCreateSnapshot()` using a basic cadence (default 5 changes) and storing full snapshots with upto_seq_no.
+- Added `packages/storage/src/sqlite/snapshots.ts` with `maybeCreateSnapshot()`
+  using a basic cadence (default 5 changes) and storing full snapshots with
+  upto_seq_no.
 - Wired snapshot creation into submitTx() after heads update.
-- Added `packages/storage/test/snapshots-basic-test.ts` ensuring cadence triggers and PIT returns the latest state.
+- Added `packages/storage/test/snapshots-basic-test.ts` ensuring cadence
+  triggers and PIT returns the latest state.
 
 ### 5. Transactions (multi-doc) and invariants
 
@@ -174,26 +192,31 @@ Acceptance:
 ### 6. Content-addressed primitives (SQLite CAS) — DONE
 
 - [x] CAS interface over SQLite tables:
-  - [x] `put(kind, bytes, meta?) -> digest`, `get(digest) -> {kind,bytes,meta}`, `has(digest)` using
-        `am_change_blobs` for changes and `cas_blobs` for snapshots/generic blobs.
+  - [x] `put(kind, bytes, meta?) -> digest`, `get(digest) -> {kind,bytes,meta}`,
+        `has(digest)` using `am_change_blobs` for changes and `cas_blobs` for
+        snapshots/generic blobs.
   - [x] Record kinds: `am_change`, `am_snapshot`, `blob`.
-- [x] Indexes: `am_change_index` lookups by `(docId, branchId, seqNo)` and `(docId, branchId, txId)`; JSON meta indexes on `cas_blobs`.
+- [x] Indexes: `am_change_index` lookups by `(docId, branchId, seqNo)` and
+      `(docId, branchId, txId)`; JSON meta indexes on `cas_blobs`.
 
 Acceptance:
 
-- Unit tests for CAS and indexes added at `packages/storage/test/sqlite/cas_test.ts`.
+- Unit tests for CAS and indexes added at
+  `packages/storage/test/sqlite/cas_test.ts`.
 
 ### 7. Queries and subscriptions
 
 - [x] Query IR compiler and evaluator with provenance/touch set tracking.
 - [x] Link traversal semantics and depth budgeting.
 - [x] Subscription tables from §11 and WS server handling; at-least-once with
-      acks (single WS endpoint shared with tx at /api/storage/new/v1/:space/ws; resume via last acked).
+      acks (single WS endpoint shared with tx at /api/storage/new/v1/:space/ws;
+      resume via last acked).
 
 Acceptance:
 
 - Query tests: filters, sorts, limits, joins/reference traversals.
-- Subscription tests: multiple consumers, ordering, no duplication, reconnect resume.
+- Subscription tests: multiple consumers, ordering, no duplication, reconnect
+  resume.
 
 ### 8. UCAN / Access control (MVP)
 
@@ -225,17 +248,19 @@ Acceptance:
 
 Usage examples:
 
-- List spaces (under $SPACES_DIR or ./.spaces):
-  deno task new-storage:list-spaces
+- List spaces (under $SPACES_DIR or ./.spaces): deno task
+  new-storage:list-spaces
 
-- List branches in a space:
-  deno task new-storage:list-branches -- --space my-space
+- List branches in a space: deno task new-storage:list-branches -- --space
+  my-space
 
-- Export a snapshot (Automerge binary) at a given seq to a file:
-  deno task new-storage:export-snapshot -- --space my-space --doc my-doc --branch main --seq 12 --out ./my-doc-main-12.am
+- Export a snapshot (Automerge binary) at a given seq to a file: deno task
+  new-storage:export-snapshot -- --space my-space --doc my-doc --branch main
+  --seq 12 --out ./my-doc-main-12.am
 
-- Import a snapshot file for fast PIT (records in am_snapshots and CAS):
-  deno task new-storage:import-snapshot -- --space my-space --doc my-doc --branch main --file ./my-doc-main-12.am
+- Import a snapshot file for fast PIT (records in am_snapshots and CAS): deno
+  task new-storage:import-snapshot -- --space my-space --doc my-doc --branch
+  main --file ./my-doc-main-12.am
 
 ## Module layout (proposed)
 
@@ -290,39 +315,75 @@ packages/storage/src/
 
 - Existing SQLite backend modules to reuse/extend:
   - packages/storage/src/sqlite/db.ts — SQLite open/PRAGMAs/migrations
-  - packages/storage/src/sqlite/heads.ts — heads state, root_ref, branch/doc init
+  - packages/storage/src/sqlite/heads.ts — heads state, root_ref, branch/doc
+    init
   - packages/storage/src/sqlite/change.ts — decode Automerge change headers
-  - packages/storage/src/sqlite/pit.ts — PIT reconstruction (epochForTimestamp, uptoSeqNo, getAutomergeBytesAtSeq)
-  - packages/storage/src/sqlite/snapshots.ts — snapshot cadence (DEFAULT_CADENCE=5), writes am_snapshots
+  - packages/storage/src/sqlite/pit.ts — PIT reconstruction (epochForTimestamp,
+    uptoSeqNo, getAutomergeBytesAtSeq)
+  - packages/storage/src/sqlite/snapshots.ts — snapshot cadence
+    (DEFAULT_CADENCE=5), writes am_snapshots
   - packages/storage/src/sqlite/branches.ts — create/close branches with lineage
-  - packages/storage/src/sqlite/projection.ts — JSON projection for selective paths
+  - packages/storage/src/sqlite/projection.ts — JSON projection for selective
+    paths
   - packages/storage/src/provider.ts — SpaceStorage implementation and submitTx
 - CAS tables/primitives already referenced:
-  - am_change_blobs (bytes dedup) and am_change_index (per-branch index) used in submitTx and PIT fallback.
-  - Follow-up: factor a sqlite/cas.ts wrapper if we expand beyond change blobs (snapshots, generic blobs).
+  - am_change_blobs (bytes dedup) and am_change_index (per-branch index) used in
+    submitTx and PIT fallback.
+  - Follow-up: factor a sqlite/cas.ts wrapper if we expand beyond change blobs
+    (snapshots, generic blobs).
 - Provider submitTx implementation:
-  - packages/storage/src/provider.ts: submitTx performs dep checks, per-actor seq monotonicity, CAS insert into am_change_blobs, index in am_change_index, updates am_heads (including root_ref via merkle-reference/json), and triggers maybeCreateSnapshot().
+  - packages/storage/src/provider.ts: submitTx performs dep checks, per-actor
+    seq monotonicity, CAS insert into am_change_blobs, index in am_change_index,
+    updates am_heads (including root_ref via merkle-reference/json), and
+    triggers maybeCreateSnapshot().
 - PIT, snapshots, and projection (spec alignment):
-  - Spec refs: docs/specs/storage/05-point-in-time.md (§05) and 07-snapshots.md (§07).
-  - Implementation: sqlite/pit.ts and sqlite/snapshots.ts match the described fast-path and fallback; projection helper exists.
+  - Spec refs: docs/specs/storage/05-point-in-time.md (§05) and 07-snapshots.md
+    (§07).
+  - Implementation: sqlite/pit.ts and sqlite/snapshots.ts match the described
+    fast-path and fallback; projection helper exists.
 - Merge semantics / branching:
   - Spec ref: docs/specs/storage/06-branching.md (§06).
-  - Implementation: sqlite/branches.ts; client-driven merges validated by submitTx logic (deps ⊆ heads); optional server-merge remains TODO/flagged.
+  - Implementation: sqlite/branches.ts; client-driven merges validated by
+    submitTx logic (deps ⊆ heads); optional server-merge remains TODO/flagged.
 - Query spec references for later phases:
-  - docs/specs/storage/09-query-ir.md, 10-query-evaluation.md, 11-query-schema.md, 12-query-types.md (IR, evaluation algorithm, schema, types).
-  - No runtime modules checked in yet; to be implemented under sqlite/query_*.ts per plan.
+  - docs/specs/storage/09-query-ir.md, 10-query-evaluation.md,
+    11-query-schema.md, 12-query-types.md (IR, evaluation algorithm, schema,
+    types).
+  - No runtime modules checked in yet; to be implemented under sqlite/query_*.ts
+    per plan.
 - Invariants:
-  - Spec ref: docs/specs/storage/14-invariants.md (§04 numbering in plan); provider submitTx currently lacks invariant hooks; to add during Tx pipeline work.
+  - Spec ref: docs/specs/storage/14-invariants.md (§04 numbering in plan);
+    provider submitTx currently lacks invariant hooks; to add during Tx pipeline
+    work.
 - Toolshed route scaffolding and feature flags:
-  - packages/toolshed/routes/storage/new/* present (new.index.ts, new.routes.ts, new.handlers.ts) — currently wired to a Map-backed SpaceStorage placeholder and throws until SQLite provider is injected.
-  - Feature flag not yet plumbed; propose ENABLE_NEW_STORAGE in packages/toolshed/env.ts and conditional router mounting in packages/toolshed/index.ts/create-app.
+  - packages/toolshed/routes/storage/new/* present (new.index.ts, new.routes.ts,
+    new.handlers.ts) — currently wired to a Map-backed SpaceStorage placeholder
+    and throws until SQLite provider is injected.
+  - Feature flag not yet plumbed; propose ENABLE_NEW_STORAGE in
+    packages/toolshed/env.ts and conditional router mounting in
+    packages/toolshed/index.ts/create-app.
 - Baseline execution (on this branch):
   - deno task check: PASSED.
-  - deno test --allow-env --allow-ffi --allow-read --allow-write: FAILED early due to an import map issue in a mirrored .conductor/kolkata path (Relative import not in import map). Storage package tests themselves compile; full workspace run requires fixing or excluding those mirrored paths.
+  - deno test --allow-env --allow-ffi --allow-read --allow-write: FAILED early
+    due to an import map issue in a mirrored .conductor/kolkata path (Relative
+    import not in import map). Storage package tests themselves compile; full
+    workspace run requires fixing or excluding those mirrored paths.
 
 Action items for phase 2:
+
 - Add ENABLE_NEW_STORAGE env flag and gate Toolshed new storage routes.
-- Provide a SpaceStorage factory that opens per-space SQLite (openSpaceStorage) and inject into Toolshed handlers.
-- Add invariant hook points within submitTx pipeline and basic invariant examples.
+- Provide a SpaceStorage factory that opens per-space SQLite (openSpaceStorage)
+  and inject into Toolshed handlers.
+- Add invariant hook points within submitTx pipeline and basic invariant
+  examples.
 - Consider sqlite/cas.ts wrapper for CAS beyond change blobs.
-- Resolve deno test import-map issue or restrict default test set to avoid mirrored .conductor paths.
+- Resolve deno test import-map issue or restrict default test set to avoid
+  mirrored .conductor paths.
+
+## Cleanup tasks
+
+- [ ] Rationalize seqId vs txId use
+- [ ] Remove InMemoryStorage in query/
+  - [ ] First remove the dependency on it in cycle_test.ts
+- [ ] Rename `Storage` class inside query to something more like ReadHelper
+- [ ] Rename `sqlite` directory into something more meaningful

@@ -10,15 +10,19 @@ import { parseArgs } from "jsr:@std/cli/parse-args";
 import { openSqlite } from "../src/sqlite/db.ts";
 import { createCas } from "../src/sqlite/cas.ts";
 import { getBranchState } from "../src/sqlite/heads.ts";
-import * as Automerge from "npm:@automerge/automerge";
+import * as Automerge from "@automerge/automerge";
 
 function usage() {
-  console.error("Usage: import-snapshot --space <space> --doc <doc> --branch <branch> --file <path>");
+  console.error(
+    "Usage: import-snapshot --space <space> --doc <doc> --branch <branch> --file <path>",
+  );
   Deno.exit(2);
 }
 
 if (import.meta.main) {
-  const args = parseArgs(Deno.args, { string: ["space", "doc", "branch", "file"] });
+  const args = parseArgs(Deno.args, {
+    string: ["space", "doc", "branch", "file"],
+  });
   const space = args.space as string | undefined;
   const doc = args.doc as string | undefined;
   const branch = args.branch as string | undefined;
@@ -26,9 +30,13 @@ if (import.meta.main) {
   if (!space || !doc || !branch || !file) usage();
 
   const envDir = Deno.env.get("SPACES_DIR");
-  const base = envDir ? new URL(envDir) : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
+  const base = envDir
+    ? new URL(envDir)
+    : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
   await Deno.mkdir(base, { recursive: true }).catch(() => {});
-  const { db, close } = await openSqlite({ url: new URL(`./${space}.sqlite`, base) });
+  const { db, close } = await openSqlite({
+    url: new URL(`./${space}.sqlite`, base),
+  });
   try {
     const bytes = await Deno.readFile(file as string);
     const docObj = Automerge.load(bytes);
@@ -52,10 +60,16 @@ if (import.meta.main) {
     );
 
     const cas = createCas(db);
-    await cas.put('am_snapshot', bytes, { docId: doc, branchId: st.branchId, seqNo: st.seqNo, txId: st.epoch });
-    console.log(`imported snapshot for ${doc}@${branch} upto_seq_no=${st.seqNo}`);
+    await cas.put("am_snapshot", bytes, {
+      docId: doc,
+      branchId: st.branchId,
+      seqNo: st.seqNo,
+      txId: st.epoch,
+    });
+    console.log(
+      `imported snapshot for ${doc}@${branch} upto_seq_no=${st.seqNo}`,
+    );
   } finally {
     await close();
   }
 }
-

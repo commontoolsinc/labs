@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { IRPool, compileSchema } from "../../src/query/ir.ts";
+import { compileSchema, IRPool } from "../../src/query/ir.ts";
 
 Deno.test("compileSchema supports nested $defs and deep $ref paths", () => {
   const pool = new IRPool();
@@ -23,4 +23,3 @@ Deno.test("compileSchema supports nested $defs and deep $ref paths", () => {
   const node = pool.get(id);
   assertEquals(typeof node, "object");
 });
-

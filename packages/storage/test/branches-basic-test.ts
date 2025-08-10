@@ -14,12 +14,18 @@ Deno.test("create and close branches with lineage", async () => {
 
   // Create a feature branch by submitting a change with from main heads (implicitly creates branch row)
   let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => { doc.title = "v1"; });
+  let d1 = Automerge.change(d0, (doc: any) => {
+    doc.title = "v1";
+  });
   const c1 = Automerge.getLastLocalChange(d1)!;
 
   await space.submitTx({
     reads: [],
-    writes: [{ ref: { docId, branch: "feature/x" }, baseHeads: [], changes: [{ bytes: c1 }] }],
+    writes: [{
+      ref: { docId, branch: "feature/x" },
+      baseHeads: [],
+      changes: [{ bytes: c1 }],
+    }],
   });
   const feature = await space.getBranchState(docId, "feature/x");
   assertEquals(feature.seqNo, 1);
@@ -29,4 +35,3 @@ Deno.test("create and close branches with lineage", async () => {
   const after = await space.getBranchState(docId, "feature/x");
   assertEquals(after.seqNo, 1);
 });
-
