@@ -153,19 +153,18 @@ type VNode = {
 };
 
 async function seedVDOM(nodes: number, maxChildren: number) {
-  const N = Math.max(200, nodes);
   // Pre-generate children adjacency to avoid cycles: only point to higher index
-  const children: number[][] = Array.from({ length: N }, () => []);
-  for (let i = 0; i < N; i++) {
+  const children: number[][] = Array.from({ length: nodes }, () => []);
+  for (let i = 0; i < nodes; i++) {
     const fanout = Math.floor(rnd() * (maxChildren + 1)); // 0..maxChildren
     for (let k = 0; k < fanout; k++) {
-      const j = i + 1 + Math.floor(rnd() * Math.max(1, N - i - 1));
-      if (j >= N) break;
+      const j = i + 1 + Math.floor(rnd() * Math.max(1, nodes - i - 1));
+      if (j >= nodes) break;
       children[i].push(j);
     }
   }
   // Create docs: vdom:0..N-1, each doc is a VNode at root with children as links to other docs' roots
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < nodes; i++) {
     const docId = `vdom:${i}`;
     const tag = TAGS[Math.floor(rnd() * TAGS.length)];
     const kidLinks = children[i].map((j) => link(`vdom:${j}`, []));
