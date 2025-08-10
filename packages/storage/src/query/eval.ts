@@ -3,6 +3,8 @@ import { IRId, IRPool } from "./ir.ts";
 import { Storage } from "./storage.ts";
 import { child, toTokens } from "./path.ts";
 
+export const DEFAULT_LINK_BUDGET = 32;
+
 export type EvalKey = { ir: IRId; doc: DocId; path: Path; budget: number };
 export type EvalResult = {
   verdict: Verdict;
@@ -177,7 +179,7 @@ export class Evaluator {
     );
     const effDoc = norm.doc;
     const effPath = norm.path;
-    let effBudget = norm.budget;
+    const effBudget = norm.budget;
 
     const v = this.storage.read(effDoc, effPath, at);
 

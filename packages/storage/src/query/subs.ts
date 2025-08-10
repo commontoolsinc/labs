@@ -7,7 +7,7 @@ export type Query = {
   doc: string;
   path: Path;
   ir: string;
-  budget: number;
+  budget?: number;
 };
 
 export class SubscriptionIndex {
