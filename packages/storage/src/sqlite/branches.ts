@@ -1,4 +1,4 @@
-import type { BranchName, BranchState, DocId } from "../../interface.ts";
+import type { BranchName, BranchState, DocId } from "../interface.ts";
 import type { Database } from "@db/sqlite";
 import { getBranchState, getOrCreateBranch, getOrCreateDoc } from "./heads.ts";
 import { isServerMergeEnabled } from "./flags.ts";
