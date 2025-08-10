@@ -213,7 +213,7 @@ Deno.bench({
     $ref: "#/$defs/VNode",
   } as const;
   const ir = compileSchema(pool, VNodeRecursive as any);
-  const deadline = performance.now() + 20000; // 20s soft timeout
+  const deadline = performance.now() + 2000; // 2s soft timeout
   let ok = 0;
   for (let i = 0; i < Math.min(20, VDOM_NODES); i++) {
     if (performance.now() > deadline) {
