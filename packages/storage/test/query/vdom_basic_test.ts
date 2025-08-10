@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { InMemoryStorage } from "../../src/query/storage.ts";
-import { IRPool, compileSchema } from "../../src/query/ir.ts";
+import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
 
 // Helper to create LinkValue objects
@@ -56,7 +56,9 @@ Deno.test("vdom basic: recursive VNode schema validates small graph", () => {
   }
 });
 
-Deno.test({ name: "vdom filter: tag=span flips from No to Yes after edit (direct doc)", ignore: true }, () => {
+Deno.test({
+  name: "vdom filter: tag=span flips from No to Yes after edit (direct doc)",
+}, () => {
   const storage = new InMemoryStorage();
   const prov = new Provenance();
   const pool = new IRPool();
@@ -64,7 +66,7 @@ Deno.test({ name: "vdom filter: tag=span flips from No to Yes after edit (direct
 
   seedVDOM(storage, 10);
 
-  const schema = { type: "object", properties: { tag: { const: "span" } } };
+  const schema = { type: "object", properties: { tag: { enum: ["span"] } } };
   const ir = compileSchema(pool, schema);
 
   // Verify vdom:0 starts as div → No
@@ -80,5 +82,3 @@ Deno.test({ name: "vdom filter: tag=span flips from No to Yes after edit (direct
   const after = evaluator.evaluate({ ir, doc: "vdom:0", path: [] });
   assertEquals(after.verdict, "Yes");
 });
-
-
