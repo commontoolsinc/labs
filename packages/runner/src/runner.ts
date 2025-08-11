@@ -788,7 +788,15 @@ export class Runner implements IRunner {
         }
       };
 
-      addCancel(this.runtime.scheduler.addEventHandler(handler, streamLink));
+      const wrappedHandler = Object.assign(handler, {
+        reads,
+        writes,
+        module,
+        recipe,
+      });
+      addCancel(
+        this.runtime.scheduler.addEventHandler(wrappedHandler, streamLink),
+      );
     } else {
       if (isRecord(inputs) && "$event" in inputs) {
         throw new Error(
@@ -880,7 +888,15 @@ export class Runner implements IRunner {
         }
       };
 
-      addCancel(this.runtime.scheduler.schedule(action, { reads, writes }));
+      const wrappedAction = Object.assign(action, {
+        reads,
+        writes,
+        module,
+        recipe,
+      });
+      addCancel(
+        this.runtime.scheduler.schedule(wrappedAction, { reads, writes }),
+      );
     }
   }
 

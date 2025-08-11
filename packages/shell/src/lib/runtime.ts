@@ -16,6 +16,12 @@ import {
   StorageInspectorUpdateEvent,
 } from "./storage-inspector.ts";
 import { setupIframe } from "./iframe-ctx.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("shell.telemetry", {
+  enabled: false,
+  level: "debug",
+});
 
 async function createSession(
   root: Identity,
@@ -83,10 +89,12 @@ export class RuntimeInternals extends EventTarget {
 
   #onTelemetry = (event: Event) => {
     this.#check();
-    this.#telemetryMarkers.push((event as RuntimeTelemetryEvent).marker);
+    const marker = (event as RuntimeTelemetryEvent).marker;
+    this.#telemetryMarkers.push(marker);
     // Dispatch an event here so that views may subscribe,
     // and know when to rerender, fetching the markers
     this.dispatchEvent(new CustomEvent("telemetryupdate"));
+    logger.log(marker.type, marker);
   };
 
   #check() {
