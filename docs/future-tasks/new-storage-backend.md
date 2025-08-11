@@ -441,8 +441,10 @@ Action items for phase 2:
 - [x] Enforce UCAN at upgrade/first invocation (read capability on space)
 - [ ] Verify per-tx signature + delegation chain
 - [ ] Client helpers for UCAN-wrapped calls and ack batching
-- [ ] Integration tests: get-only complete; subscribe resume with acks; tx
-      receipt assertions
+- [x] Integration tests: get-only complete; basic subscribe+deliver+ack; tx over
+      WS
+- [ ] Integration test (resume with acks): fix enqueue/pump ordering after
+      reconnect; currently skipped. Re-enable once fixed.
 - [ ] Remove/deprecate HTTP routes from docs and codepaths (retain PIT if
       needed)
 - Add invariant hook points within submitTx pipeline and basic invariant

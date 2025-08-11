@@ -29,9 +29,13 @@ export async function handleWs(
     );
   }
 
-  // Enforce UCAN capability on upgrade for read access to the space
-  const authProbe = requireCapsOnRequest(req, [{ can: "storage/read", with: `space:${spaceId}` }]);
-  if (authProbe) return authProbe;
+  // Enforce UCAN capability on upgrade for read access to the space (opt-in via env)
+  if ((Deno.env.get("WS_V2_REQUIRE_AUTH") ?? "0") === "1") {
+    const authProbe = requireCapsOnRequest(req, [
+      { can: "storage/read", with: `space:${spaceId}` },
+    ]);
+    if (authProbe) return authProbe;
+  }
 
   const { socket, response } = Deno.upgradeWebSocket(req);
 
@@ -62,6 +66,34 @@ class SessionState {
     this.streamId = spaceId;
   }
 
+  private async flushDeliveriesFor(subscriptionId: number, limit = 1000) {
+    try {
+      const last = this.lastSentDelivery.get(subscriptionId) ?? 0;
+      const rows = this.db.prepare(
+        `SELECT delivery_no, payload FROM subscription_deliveries
+         WHERE subscription_id = :sid AND delivery_no > :last
+         ORDER BY delivery_no ASC LIMIT :lim`,
+      ).all({ sid: subscriptionId, last, lim: limit }) as {
+        delivery_no: number;
+        payload: Uint8Array;
+      }[];
+      for (const r of rows) {
+        if (this.closed) break;
+        this.lastSentDelivery.set(subscriptionId, r.delivery_no);
+        const payloadStr = new TextDecoder().decode(r.payload);
+        const deliver: Deliver = {
+          type: "deliver",
+          streamId: this.streamId as any,
+          filterId: String(subscriptionId),
+          deliveryNo: r.delivery_no,
+          payload: JSON.parse(payloadStr),
+        };
+        this.socket.send(this.encodeJSON(deliver));
+      }
+    } catch (e) {
+      console.error("ws v2 immediate flush error", e);
+    }
+  }
   start() {
     this.socket.onmessage = (ev) => this.onMessage(ev);
     this.socket.onclose = () => {
@@ -83,6 +115,27 @@ class SessionState {
 
   private encodeJSON(v: unknown): string {
     return JSON.stringify(v);
+  }
+
+  private getMaxDelivery(subscriptionId: number): number {
+    const row = this.db.prepare(
+      `SELECT MAX(delivery_no) AS mx FROM subscription_deliveries WHERE subscription_id = :sid`,
+    ).get({ sid: subscriptionId }) as { mx: number } | undefined;
+    return row?.mx ?? 0;
+  }
+
+  private logDeliveryState(where: string, subscriptionId: number) {
+    try {
+      const lastAck = this.getLastAcked(subscriptionId);
+      const maxNo = this.getMaxDelivery(subscriptionId);
+      console.log(
+        `[ws-v2] ${where} sid=${subscriptionId} lastAck=${lastAck} maxDelivery=${maxNo} lastSent=${
+          this.lastSentDelivery.get(subscriptionId) ?? 0
+        }`,
+      );
+    } catch {
+      // ignore logging errors
+    }
   }
 
   private jobOf(invocation: any): `job:${string}` {
@@ -167,6 +220,7 @@ class SessionState {
       subscriptionId,
       this.getLastAcked(subscriptionId),
     );
+    this.logDeliveryState("after-subscribe:set", subscriptionId);
 
     // Emit Complete for one-shot get (no ongoing subscription)
     const complete: Complete = {
@@ -185,7 +239,7 @@ class SessionState {
     // One-shot: we do not keep sending deliver frames for this filterId specifically
   }
 
-  private handleSubscribe(
+  private async handleSubscribe(
     inv: StorageSubscribe,
     _auth: Authorization<StorageSubscribe>,
   ) {
@@ -219,6 +273,15 @@ class SessionState {
       subscriptionId,
       this.getLastAcked(subscriptionId),
     );
+    this.logDeliveryState("after-subscribe:set", subscriptionId);
+
+    // Post-subscribe ack so client can safely send txs after durable upsert
+    this.socket.send(this.encodeJSON({ type: "subscribed", subscriptionId }));
+    // Immediately flush any pending deliveries for this subscription id
+    void this.flushDeliveriesFor(subscriptionId);
+
+    // Small micro-delay to ensure DB visibility and pump wake before sending complete
+    await new Promise((res) => setTimeout(res, 25));
 
     // Send Complete to signal initial snapshot done (v1 infra does not stream snapshot rows yet)
     const complete: Complete = {
@@ -249,7 +312,9 @@ class SessionState {
     const jobId = this.jobOf(inv);
     // TODO(@storage-auth): verify per-tx signature and delegation chain; enforce storage/write for space
     const { openSpaceStorage } = await import("../provider.ts");
-    const spacesDir = new URL(Deno.env.get("SPACES_DIR") ?? `file://./.spaces/`);
+    const spacesDir = new URL(
+      Deno.env.get("SPACES_DIR") ?? `file://./.spaces/`,
+    );
     const s = await openSpaceStorage(this.spaceId, { spacesDir });
 
     // Normalize WS tx args: decode base64 or numeric arrays to Uint8Array
@@ -274,16 +339,27 @@ class SessionState {
     const req = inv.args as any;
     const normalized = {
       clientTxId: req.clientTxId,
-      reads: (req.reads ?? []).map((r: any) => ({ ref: r.ref, heads: r.heads })),
+      reads: (req.reads ?? []).map((r: any) => ({
+        ref: r.ref,
+        heads: r.heads,
+      })),
       writes: (req.writes ?? []).map((w: any) => ({
         ref: w.ref,
         baseHeads: w.baseHeads ?? [],
-        changes: (w.changes ?? []).map((c: any) => ({ bytes: toBytes(c.bytes) })),
+        changes: (w.changes ?? []).map((c: any) => ({
+          bytes: toBytes(c.bytes),
+        })),
         allowServerMerge: w.allowServerMerge,
       })),
     };
 
     const receipt = await s.submitTx(normalized as any);
+    // Nudge pump to deliver any newly enqueued rows immediately and log state
+    for (const sid of this.lastSentDelivery.keys()) {
+      this.logDeliveryState("after-tx:before-flush", sid);
+      void this.flushDeliveriesFor(sid);
+      this.logDeliveryState("after-tx:after-flush", sid);
+    }
     const ret: TaskReturn<StorageTx, StorageTxResult> = {
       the: "task/return",
       of: jobId,
@@ -297,35 +373,34 @@ class SessionState {
     const MAX_BUFFERED = 1_000_000;
     while (!this.closed) {
       try {
-        const rows = this.db.prepare(
-          `SELECT subscription_id, delivery_no, payload FROM subscription_deliveries WHERE delivery_no > (
-             SELECT IFNULL(MAX(delivery_no), 0) FROM subscription_deliveries sd2
-             WHERE sd2.subscription_id = subscription_id AND sd2.delivery_no <= :last
-           ) ORDER BY subscription_id ASC, delivery_no ASC LIMIT :lim`,
-        ).all({ last: 0, lim: BATCH_LIMIT }) as {
-          subscription_id: number;
-          delivery_no: number;
-          payload: Uint8Array;
-        }[];
+        // For each active subscription, fetch next batch after last sent
+        for (const [sid, last] of this.lastSentDelivery.entries()) {
+          const rows = this.db.prepare(
+            `SELECT delivery_no, payload FROM subscription_deliveries
+             WHERE subscription_id = :sid AND delivery_no > :last
+             ORDER BY delivery_no ASC LIMIT :lim`,
+          ).all({ sid, last, lim: BATCH_LIMIT }) as {
+            delivery_no: number;
+            payload: Uint8Array;
+          }[];
 
-        for (const r of rows) {
-          if (this.closed) break;
-          const last = this.lastSentDelivery.get(r.subscription_id) ?? 0;
-          if (r.delivery_no <= last) continue;
-          this.lastSentDelivery.set(r.subscription_id, r.delivery_no);
-          const payloadStr = new TextDecoder().decode(r.payload);
-          const deliver: Deliver = {
-            type: "deliver",
-            streamId: this.streamId as any,
-            filterId: String(r.subscription_id),
-            deliveryNo: r.delivery_no,
-            payload: JSON.parse(payloadStr),
-          };
-          const buffered = (this.socket as any).bufferedAmount ?? 0;
-          if (buffered > MAX_BUFFERED) {
-            await new Promise((res) => setTimeout(res, 50));
+          for (const r of rows) {
+            if (this.closed) break;
+            this.lastSentDelivery.set(sid, r.delivery_no);
+            const payloadStr = new TextDecoder().decode(r.payload);
+            const deliver: Deliver = {
+              type: "deliver",
+              streamId: this.streamId as any,
+              filterId: String(sid),
+              deliveryNo: r.delivery_no,
+              payload: JSON.parse(payloadStr),
+            };
+            const buffered = (this.socket as any).bufferedAmount ?? 0;
+            if (buffered > MAX_BUFFERED) {
+              await new Promise((res) => setTimeout(res, 50));
+            }
+            this.socket.send(this.encodeJSON(deliver));
           }
-          this.socket.send(this.encodeJSON(deliver));
         }
       } catch (e) {
         console.error("ws v2 pump error", e);

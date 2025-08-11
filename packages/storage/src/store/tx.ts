@@ -322,7 +322,9 @@ export async function submitTx(
           console.warn(
             `[tx] rejected doc=${docId} branch=${branch} reason=${rejectedReason}`,
           );
-        } catch {}
+        } catch {
+          // ignore logging failures (non-fatal)
+        }
         results.push({
           docId,
           branch,

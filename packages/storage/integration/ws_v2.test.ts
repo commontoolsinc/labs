@@ -12,6 +12,10 @@ Deno.test({
     ffi: true,
   },
 }, async () => {
+  // Avoid hangs
+  const watchdog = setTimeout(() => {
+    throw new Error("watchdog timeout ws_v2.basic");
+  }, 10000);
   const tmpDir = await Deno.makeTempDir();
   const spacesDir = new URL(`file://${tmpDir}/`);
   const PORT = 8012;
@@ -130,4 +134,5 @@ Deno.test({
     p.kill();
     await p.status;
   } catch { /* ignore */ }
+  clearTimeout(watchdog);
 });
