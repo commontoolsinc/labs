@@ -76,7 +76,7 @@ export function map(
 
     // .getRaw() because we want the recipe itself and avoid following the
     // aliases in the recipe
-    const opRecipe = op.getRaw();
+    const opRecipe = op.getRaw() as any;
 
     // If the result's value is undefined, set it to the empty array.
     if (resultWithLog.get() === undefined) {

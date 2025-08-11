@@ -92,7 +92,7 @@ describe("Query", () => {
     const assert2 = {
       the: "application/json",
       of: `of:${entityId2["/"]}` as Entity,
-      is: { value: testCell2.getRaw() },
+      is: { value: docValue2 },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };
@@ -176,17 +176,18 @@ describe("Query", () => {
       undefined,
       tx,
     );
-    testCell2.setRaw({
+    const docValue2 = {
       name: {
         cell: entityId1,
         path: ["employees", "0", "name"],
       },
-    });
+    };
+    testCell2.setRaw(docValue2);
     const entityId2 = testCell2.entityId!;
     const assert2 = {
       the: "application/json",
       of: `of:${entityId2["/"]}` as Entity,
-      is: { value: testCell2.getRaw() },
+      is: { value: docValue2 },
       cause: refer({ the: "application/json", of: `of:${entityId2["/"]}` }),
       since: 2,
     };
