@@ -447,6 +447,15 @@ jobs:
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           script: /opt/ct/deploy.sh ${{ vars.DEPLOYMENT_ENVIRONMENT }} ${{ github.sha }}
 
+  # Post-deployment patterns test (runs after deployment, so this will NOT block deployments.)
+  post-deploy-patterns-test:
+    name: "Toolshed Post-Deploy Patterns Test"
+    if: github.ref == 'refs/heads/main'
+    needs: ["deploy-toolshed"]
+    runs-on: ubuntu-latest
+    environment: toolshed
+    continue-on-error: true # Don't fail the workflow if tests fail
+    steps:
       - name: 🧩 Run post-deploy Patterns integration tests against Toolshed (Staging)
         uses: appleboy/ssh-action@master
         with:
