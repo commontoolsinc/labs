@@ -190,7 +190,6 @@ export default recipe(model, {}, (state) => {
   const data = repoData.result;
 
   const validData = derive(data, (data) => {
-    console.log("[DATA]", data);
     return (
       data ?? {
         name: "Unknown",
