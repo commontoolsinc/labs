@@ -50,7 +50,7 @@ describe("instantiate-recipe integration test", () => {
     assertEquals(state.activeCharmId, charmId);
 
     // Wait for charm to load and render
-    await sleep(1500);
+    await sleep(2000);
 
     // Store the current URL before any action
     const urlBefore = await page.evaluate(() => globalThis.location.href);
@@ -65,7 +65,7 @@ describe("instantiate-recipe integration test", () => {
     await input.type("New counter");
 
     // Wait for input to be processed
-    await sleep(200);
+    await sleep(500);
 
     // Find and click the button using data attribute with pierce strategy
     const button = await page.$("[data-ct-button]", {
@@ -75,8 +75,8 @@ describe("instantiate-recipe integration test", () => {
 
     await button.click();
 
-    // Wait for navigation to complete
-    await sleep(500);
+    // Wait longer for navigation to complete in CI environment
+    await sleep(2000);
 
     // Check if we navigated to a new counter instance
     const urlAfter = await page.evaluate(() => globalThis.location.href);
