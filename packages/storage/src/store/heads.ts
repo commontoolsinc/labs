@@ -3,6 +3,7 @@ import {
   refer as referJson,
   toDigest as refToDigest,
 } from "merkle-reference/json";
+import { bytesToHex } from "./bytes.ts";
 import type { Database } from "@db/sqlite";
 
 export function getOrCreateDoc(db: Database, docId: DocId): void {
@@ -69,11 +70,25 @@ export function getBranchState(
   };
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  const hex: string[] = new Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) {
-    const byte = bytes[i]!.toString(16).padStart(2, "0");
-    hex[i] = byte;
-  }
-  return hex.join("");
+export function updateHeads(
+  db: Database,
+  branchId: string,
+  heads: string[],
+  seqNo: number,
+  epoch: number,
+): void {
+  const headsJson = JSON.stringify(heads);
+  const rootRef = referJson({ heads: [...heads].sort() });
+  const rootHashBytes = new Uint8Array(refToDigest(rootRef));
+  db.run(
+    `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = :root_hash, committed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE branch_id = :branch_id`,
+    {
+      heads_json: headsJson,
+      seq_no: seqNo,
+      tx_id: epoch,
+      branch_id: branchId,
+      root_hash: rootHashBytes,
+    },
+  );
 }
