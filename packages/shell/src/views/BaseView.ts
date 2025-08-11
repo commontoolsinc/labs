@@ -1,6 +1,6 @@
 import { LitElement } from "lit";
 import { Command } from "../lib/app/commands.ts";
-import { DebugController } from "../lib/debug-controller.ts";
+import { DebugController } from "@commontools/ui/v2";
 
 // Set to `true` to render outlines everytime a
 // LitElement renders.
