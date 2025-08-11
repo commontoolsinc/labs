@@ -446,15 +446,15 @@ Action items for phase 2 (expanded):
 - [ ] Prepared statements rollout (performance)
   - [ ] Introduce prepared statement caching for hot-path queries beyond
         `store/tx.ts`:
-    - [ ] `store/heads.ts` (reads and updates).
-    - [ ] `store/pit.ts` (snapshot/chunk/changes scans).
+    - [x] `store/heads.ts` (reads and updates).
+    - [x] `store/pit.ts` (snapshot/chunk/changes scans).
     - [x] `store/cache.ts` upsert and `query/sqlite_storage.ts` reads.
   - [ ] Optional micro-benchmarks to quantify improvements.
 
 - [ ] API layering and consistency
-  - [ ] Centralize SQL timestamp snippet as a constant and use everywhere
+  - [x] Centralize SQL timestamp snippet as a constant and use everywhere
         (`store/sql.ts`).
-  - [ ] Move per-space toggles (e.g., chunking, cadence) behind `config.ts`
+  - [x] Move per-space toggles (e.g., chunking, cadence) behind `config.ts`
         accessors; make `store/flags.ts` delegate.
   - [x] Create a `store/index.ts` facade exporting a curated API to reduce
         import complexity and cycles.
