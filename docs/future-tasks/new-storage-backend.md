@@ -422,30 +422,30 @@ packages/storage/src/
 Action items for phase 2 (expanded):
 
 - [ ] Transactions
-  - [ ] Enforce all-or-nothing semantics for multi-doc transactions (implemented in
-    `store/tx.ts`).
-    - [ ] Add focused tests to verify rollback when any doc fails within a tx and
-      that receipts reflect aggregated failures.
+  - [ ] Enforce all-or-nothing semantics for multi-doc transactions (implemented
+        in `store/tx.ts`).
+    - [ ] Add focused tests to verify rollback when any doc fails within a tx
+          and that receipts reflect aggregated failures.
   - [ ] Add invariant hooks (pre-commit) with a clear interface to validate
-    materialized state per write; fail the entire tx on invariant violation.
-  - [ ] Add optional post-commit hooks for heavy validations and async notifications
-    (deferred, best-effort).
+        materialized state per write; fail the entire tx on invariant violation.
 
 - [ ] Merge identity and semantics
   - [ ] Unify merge identity using a consistent header decoder
-    (`decodeChangeHeader`) in all codepaths (implemented in `store/merge.ts`).
-  - [ ] Define/document server merge actor identity policy (e.g., dedicated server
-    actor id); add tests for actor/seq correctness of synthesized merges.
+        (`decodeChangeHeader`) in all codepaths (implemented in
+        `store/merge.ts`).
+  - [ ] Define/document server merge actor identity policy (e.g., dedicated
+        server actor id); add tests for actor/seq correctness of synthesized
+        merges.
 
 - [ ] PIT determinism and behavior
   - [ ] Confirm and document deterministic PIT reconstruction (ordering by
-    `seq_no`).
-  - [ ] Add tests to assert identical bytes across reconstructions given the same
-    `upto_seq_no`, even when index plans change.
+        `seq_no`).
+  - [ ] Add tests to assert identical bytes across reconstructions given the
+        same `upto_seq_no`, even when index plans change.
 
 - [ ] Prepared statements rollout (performance)
   - [ ] Introduce prepared statement caching for hot-path queries beyond
-    `store/tx.ts`:
+        `store/tx.ts`:
     - [ ] `store/heads.ts` (reads and updates).
     - [ ] `store/pit.ts` (snapshot/chunk/changes scans).
     - [ ] `store/cache.ts` upsert and `query/sqlite_storage.ts` reads.
@@ -453,17 +453,17 @@ Action items for phase 2 (expanded):
 
 - [ ] API layering and consistency
   - [ ] Centralize SQL timestamp snippet as a constant and use everywhere
-    (`store/sql.ts`).
+        (`store/sql.ts`).
   - [ ] Move per-space toggles (e.g., chunking, cadence) behind `config.ts`
-    accessors; make `store/flags.ts` delegate.
-  - [ ] Create a `store/index.ts` facade exporting a curated API to reduce import
-    complexity and cycles.
-  - [ ] Remove stale/migratory comments and unused imports; ensure module headers
-    summarize purpose and responsibilities.
+        accessors; make `store/flags.ts` delegate.
+  - [ ] Create a `store/index.ts` facade exporting a curated API to reduce
+        import complexity and cycles.
+  - [ ] Remove stale/migratory comments and unused imports; ensure module
+        headers summarize purpose and responsibilities.
 
 - [ ] Logging and observability
-  - [ ] Adopt the shared logger across PIT, snapshots, heads, and WS modules; gate
-    verbose logs by `LOG_LEVEL`.
+  - [ ] Adopt the shared logger across PIT, snapshots, heads, and WS modules;
+        gate verbose logs by `LOG_LEVEL`.
   - [ ] Add counters/histograms for:
     - [ ] Applied changes per tx; conflicts/rejections.
     - [ ] Snapshot creations and chunk emissions.
@@ -473,24 +473,24 @@ Action items for phase 2 (expanded):
 - [ ] SQL/schema
   - [ ] Verify and document required indexes (added in `004_perf_indexes.sql`):
     - [ ] `am_change_index` on `(branch_id, actor_id, seq_no)`,
-      `(branch_id, change_hash)`, `(doc_id, branch_id, seq_no)`.
+          `(branch_id, change_hash)`, `(doc_id, branch_id, seq_no)`.
     - [ ] `am_chunks` on `(doc_id, branch_id, seq_no)` for PIT fast-path.
     - [ ] `subscription_deliveries` on `(subscription_id, delivery_no)` and
-      `(subscription_id, acked, delivery_no)`.
+          `(subscription_id, acked, delivery_no)`.
     - [ ] `json_cache` PK/unique on `(doc_id, branch_id)`.
   - [ ] Add migration notes and validation steps for applying new indexes to
-    existing spaces.
+        existing spaces.
 
 - [ ] Testing
-  - [ ] JSON cache tests: verify tip reads utilize cache, historical reads bypass,
-    and cache updates on write.
+  - [ ] JSON cache tests: verify tip reads utilize cache, historical reads
+        bypass, and cache updates on write.
   - [ ] WS resume/acks test: unskip and fix ordering issues; ensure deliveries
-    resume from last ack.
+        resume from last ack.
   - [ ] Merge actor/seq tests for synthesized merges; PIT determinism tests.
 
 - [ ] Developer experience and documentation
   - [ ] Update specs (`03-api.md`, `04-transactions.md`, `05-point-in-time.md`,
-    `06-branching.md`) to reflect:
+        `06-branching.md`) to reflect:
     - [ ] All-or-nothing tx semantics and invariant hooks.
     - [ ] Merge actor policy and deterministic PIT behavior.
   - [ ] Refresh this plan to mark completed items and track remaining work.
