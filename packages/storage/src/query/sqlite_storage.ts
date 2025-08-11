@@ -5,6 +5,7 @@ import { getBranchState } from "../store/heads.ts";
 import type { Reader } from "./storage.ts";
 import type { Path, Version } from "../types.ts";
 import { getAtPath as getAtJsonPath } from "../json/path.ts";
+import { isJsonCacheDisabled } from "../config.ts";
 
 function isObject(x: any): x is Record<string, any> {
   return x !== null && typeof x === "object" && !Array.isArray(x);
@@ -32,7 +33,7 @@ export class SqliteStorageReader implements Reader {
   read(docId: string, path: Path, at?: Version): any {
     const { branchId, seq } = this.resolve(docId, at);
     // Fast path: if reading current tip (no historical epoch), use json_cache
-    const cacheDisabled = (Deno.env.get("DISABLE_JSON_CACHE") ?? "") === "1";
+    const cacheDisabled = isJsonCacheDisabled();
     if (at?.epoch == null && !cacheDisabled) {
       const row = this.db.prepare(
         `SELECT json, seq_no FROM json_cache WHERE doc_id = :doc_id AND branch_id = :branch_id`,
@@ -72,7 +73,7 @@ export class SqliteStorageReader implements Reader {
   readDocAtVersion(docId: string, at: Version): { version: Version; doc: any } {
     const { branchId, seq } = this.resolve(docId, at);
     let json: any;
-    const cacheDisabled = (Deno.env.get("DISABLE_JSON_CACHE") ?? "") === "1";
+    const cacheDisabled = isJsonCacheDisabled();
     if (at?.epoch == null && !cacheDisabled) {
       const row = this.db.prepare(
         `SELECT json, seq_no FROM json_cache WHERE doc_id = :doc_id AND branch_id = :branch_id`,
