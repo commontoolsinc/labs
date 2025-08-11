@@ -18,7 +18,8 @@
     "new-storage:export-snapshot": "deno run -A ./cli/export_snapshot.ts",
     "new-storage:import-snapshot": "deno run -A ./cli/import_snapshot.ts",
     "new-storage:list-spaces": "deno run -A ./cli/list_spaces.ts",
-    "new-storage:list-branches": "deno run -A ./cli/list_branches.ts"
+    "new-storage:list-branches": "deno run -A ./cli/list_branches.ts",
+    "ws": "deno run -A deno.ts"
   },
   "test": {
     "include": [
@@ -27,7 +28,9 @@
   },
   "exports": {
     ".": "./mod.ts",
-    "./interface": "./interface.ts"
+    "./interface": "./interface.ts",
+    "./ws/server": "./src/ws/server.ts",
+    "./ws/protocol": "./src/ws/protocol.ts"
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@^1",
