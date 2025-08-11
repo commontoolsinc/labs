@@ -364,7 +364,6 @@ export async function submitTx(
       try {
         const amBytes = getAutomergeBytesAtSeq(
           db,
-          null,
           docId,
           write.branchId as string,
           seqNo,
@@ -501,7 +500,6 @@ function synthesizeAndApplyMerge(
   if (current.heads.length < 2) return false;
   const amBytes = getAutomergeBytesAtSeq(
     db,
-    null,
     docId,
     current.branchId,
     current.seqNo,

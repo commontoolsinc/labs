@@ -118,13 +118,7 @@ class SQLiteSpace implements SpaceStorage {
       ? state.seqNo
       : uptoSeqNo(db, docId, state.branchId, targetEpoch);
 
-    const amBytes = getAutomergeBytesAtSeq(
-      db,
-      null,
-      docId,
-      state.branchId,
-      targetSeq,
-    );
+    const amBytes = getAutomergeBytesAtSeq(db, docId, state.branchId, targetSeq);
 
     const accept = opts?.accept ?? "automerge";
     if (accept === "json") {
@@ -147,20 +141,8 @@ class SQLiteSpace implements SpaceStorage {
     const to = readBranchState(db, docId, toBranch);
 
     // Load PIT docs for both branches at their current seq
-    const fromBytes = getAutomergeBytesAtSeq(
-      db,
-      null,
-      docId,
-      from.branchId,
-      from.seqNo,
-    );
-    const toBytes = getAutomergeBytesAtSeq(
-      db,
-      null,
-      docId,
-      to.branchId,
-      to.seqNo,
-    );
+    const fromBytes = getAutomergeBytesAtSeq(db, docId, from.branchId, from.seqNo);
+    const toBytes = getAutomergeBytesAtSeq(db, docId, to.branchId, to.seqNo);
 
     const a = Automerge.load(toBytes);
     const b = Automerge.load(fromBytes);
