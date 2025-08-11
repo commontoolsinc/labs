@@ -65,23 +65,27 @@ built around three core ideas:
   exact set of `(docId, path)` links that were read, where `path` is an array of
   strings
 
-## WebSocket API
+## WebSocket API (v2)
 
-Single endpoint per space shared by tx and queries:
-/api/storage/new/v1/:space/ws
+Single endpoint per space: /api/storage/new/v2/:space/ws
 
 - Client → Server
-  - subscribe { consumerId: string, query: JSON }
-  - ack { subscriptionId: number, deliveryNo: number }
+  - UCAN-wrapped invocations for commands:
+    - /storage/get { consumerId, query }
+    - /storage/subscribe { consumerId, query }
+    - /storage/tx { ... }
+  - ack { streamId: DID, deliveryNo: number }
 - Server → Client
-  - subscribed { subscriptionId: number }
-  - deliver { subscriptionId: number, deliveryNo: number, payload: any }
+  - deliver { streamId: DID, filterId: string, deliveryNo: number, payload: any
+    }
+  - task/return complete tied to job: { the: "task/return", of: jobId, is: {
+    type: "complete", at, streamId, filterId } }
 
 At-least-once delivery: payloads are persisted in subscription_deliveries.
-Resume is based on last acked deliveryNo per (space, consumerId).
+Resume is based on last acked deliveryNo per (streamId, filterId).
 
-Ordering: deliveries enqueued transactionally from the tx processor by commit
-order and am_change_index seq.
+Ordering: deliveries are strictly increasing by deliveryNo per (streamId,
+filterId).
 
 ### Client → Server
 

@@ -32,9 +32,10 @@
   - Assigns a **global epoch** (`tx_id`)
   - Stamps with a `committed_at` timestamp
   - Extends a **BLAKE3-based, Ed25519-signed transaction chain** (see §4)
-- **Subscriptions:** WebSocket multiplexed channels; clients subscribe to
-  `(doc, branch)` and receive change notifications with **at-least-once**
-  delivery and client acks by `tx_id`.
+- **Subscriptions (WS v2):** UCAN-invoked commands (`get`, `subscribe`, `tx`)
+  over a single WS per space. Server pushes untied `deliver` frames with
+  at-least-once delivery and client acks; initial snapshot completion is a
+  task/return `complete` tied to the invoking job.
 
 ## Code structure (impl)
 
