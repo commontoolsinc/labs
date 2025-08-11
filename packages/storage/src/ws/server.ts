@@ -7,6 +7,8 @@ import type {
   Deliver,
   StorageGet,
   StorageSubscribe,
+  StorageTx,
+  StorageTxResult,
   TaskReturn,
   UCAN,
 } from "./protocol.ts";
@@ -88,7 +90,7 @@ class SessionState {
     return `job:${digest}` as const;
   }
 
-  private onMessage(ev: MessageEvent) {
+  private async onMessage(ev: MessageEvent) {
     try {
       const msg = this.decodeJSON(ev.data);
       if (msg && msg.type === "ack") {
@@ -99,13 +101,15 @@ class SessionState {
 
       // Treat other messages as UCAN-wrapped invocations
       const { invocation, authorization } = msg as UCAN<
-        StorageGet | StorageSubscribe
+        StorageGet | StorageSubscribe | StorageTx
       >;
-      // TODO(@storage-auth): verify UCAN and capabilities (read) here
+      // TODO(@storage-auth): verify UCAN and capabilities (read/write) here
       if (invocation.cmd === "/storage/get") {
         this.handleGet(invocation as StorageGet, authorization);
       } else if (invocation.cmd === "/storage/subscribe") {
         this.handleSubscribe(invocation as StorageSubscribe, authorization);
+      } else if (invocation.cmd === "/storage/tx") {
+        await this.handleTx(invocation as StorageTx, authorization);
       }
     } catch (e) {
       console.error("ws v2 message error", e);
@@ -231,6 +235,24 @@ class SessionState {
       `SELECT MAX(delivery_no) AS last FROM subscription_deliveries WHERE subscription_id = :sid AND acked = 1`,
     ).get({ sid: subscriptionId }) as { last: number } | undefined;
     return lastAck?.last ?? 0;
+  }
+
+  private async handleTx(
+    inv: StorageTx,
+    _auth: Authorization<StorageTx>,
+  ) {
+    const jobId = this.jobOf(inv);
+    // TODO(@storage-auth): verify per-tx signature and delegation chain; enforce storage/write for space
+    const { openSpaceStorage } = await import("../provider.ts");
+    const spacesDir = new URL(Deno.env.get("SPACES_DIR") ?? `file://./.spaces/`);
+    const s = await openSpaceStorage(this.spaceId, { spacesDir });
+    const receipt = await s.submitTx(inv.args);
+    const ret: TaskReturn<StorageTx, StorageTxResult> = {
+      the: "task/return",
+      of: jobId,
+      is: receipt,
+    };
+    this.socket.send(this.encodeJSON(ret));
   }
 
   private async pump() {

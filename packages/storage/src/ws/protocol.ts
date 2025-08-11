@@ -50,4 +50,7 @@ export type GetArgs = { query?: Record<string, unknown>; consumerId: string };
 export type StorageGet = Invocation<"/storage/get", DID, GetArgs>;
 export type StorageSubscribe = Invocation<"/storage/subscribe", DID, GetArgs>;
 
-// For tx we will add a dedicated type in a subsequent step
+// Tx command
+import type { TxRequest, TxReceipt } from "../interface.ts";
+export type StorageTx = Invocation<"/storage/tx", DID, TxRequest>;
+export type StorageTxResult = TxReceipt;
