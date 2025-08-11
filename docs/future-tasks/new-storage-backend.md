@@ -19,7 +19,7 @@ Summary and code links
   - WS: `packages/storage/src/ws/*`
 - Toolshed routes (flagged): packages/toolshed/routes/storage/new/* and flag
   plumbing in packages/toolshed/env.ts
-- CLI tasks: packages/storage/deno.json new-storage:* and packages/storage/cli/*
+- CLI tasks: packages/storage/deno.json and packages/storage/cli/*
 - Specs: docs/specs/storage/*.md (API, PIT, branching, snapshots, tx processing,
   invariants, queries)
 
@@ -422,15 +422,15 @@ packages/storage/src/
 Action items for phase 2 (expanded):
 
 - [ ] Transactions
-  - [ ] Enforce all-or-nothing semantics for multi-doc transactions (implemented
+  - [x] Enforce all-or-nothing semantics for multi-doc transactions (implemented
         in `store/tx.ts`).
-    - [ ] Add focused tests to verify rollback when any doc fails within a tx
+    - [x] Add focused tests to verify rollback when any doc fails within a tx
           and that receipts reflect aggregated failures.
   - [ ] Add invariant hooks (pre-commit) with a clear interface to validate
         materialized state per write; fail the entire tx on invariant violation.
 
 - [ ] Merge identity and semantics
-  - [ ] Unify merge identity using a consistent header decoder
+  - [x] Unify merge identity using a consistent header decoder
         (`decodeChangeHeader`) in all codepaths (implemented in
         `store/merge.ts`).
   - [ ] Define/document server merge actor identity policy (e.g., dedicated
@@ -440,7 +440,7 @@ Action items for phase 2 (expanded):
 - [ ] PIT determinism and behavior
   - [ ] Confirm and document deterministic PIT reconstruction (ordering by
         `seq_no`).
-  - [ ] Add tests to assert identical bytes across reconstructions given the
+  - [x] Add tests to assert identical bytes across reconstructions given the
         same `upto_seq_no`, even when index plans change.
 
 - [ ] Prepared statements rollout (performance)
@@ -448,7 +448,7 @@ Action items for phase 2 (expanded):
         `store/tx.ts`:
     - [ ] `store/heads.ts` (reads and updates).
     - [ ] `store/pit.ts` (snapshot/chunk/changes scans).
-    - [ ] `store/cache.ts` upsert and `query/sqlite_storage.ts` reads.
+    - [x] `store/cache.ts` upsert and `query/sqlite_storage.ts` reads.
   - [ ] Optional micro-benchmarks to quantify improvements.
 
 - [ ] API layering and consistency
@@ -456,7 +456,7 @@ Action items for phase 2 (expanded):
         (`store/sql.ts`).
   - [ ] Move per-space toggles (e.g., chunking, cadence) behind `config.ts`
         accessors; make `store/flags.ts` delegate.
-  - [ ] Create a `store/index.ts` facade exporting a curated API to reduce
+  - [x] Create a `store/index.ts` facade exporting a curated API to reduce
         import complexity and cycles.
   - [ ] Remove stale/migratory comments and unused imports; ensure module
         headers summarize purpose and responsibilities.
@@ -472,12 +472,12 @@ Action items for phase 2 (expanded):
 
 - [ ] SQL/schema
   - [ ] Verify and document required indexes (added in `004_perf_indexes.sql`):
-    - [ ] `am_change_index` on `(branch_id, actor_id, seq_no)`,
+    - [x] `am_change_index` on `(branch_id, actor_id, seq_no)`,
           `(branch_id, change_hash)`, `(doc_id, branch_id, seq_no)`.
-    - [ ] `am_chunks` on `(doc_id, branch_id, seq_no)` for PIT fast-path.
-    - [ ] `subscription_deliveries` on `(subscription_id, delivery_no)` and
+    - [x] `am_chunks` on `(doc_id, branch_id, seq_no)` for PIT fast-path.
+    - [x] `subscription_deliveries` on `(subscription_id, delivery_no)` and
           `(subscription_id, acked, delivery_no)`.
-    - [ ] `json_cache` PK/unique on `(doc_id, branch_id)`.
+    - [x] `json_cache` PK/unique on `(doc_id, branch_id)`.
   - [ ] Add migration notes and validation steps for applying new indexes to
         existing spaces.
 

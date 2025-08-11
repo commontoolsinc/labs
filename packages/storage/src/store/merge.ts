@@ -48,7 +48,7 @@ export function synthesizeAndApplyMergeOnBranch(
   const seqNo = currentSeqNo + 1;
   db.run(
     `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-     VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
+     VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, ${"strftime('%Y-%m-%dT%H:%M:%fZ','now')"});`,
     {
       doc_id: docId,
       branch_id: branchId,
@@ -112,7 +112,7 @@ export function synthesizeAndApplyMergeAcrossBranches(
   const seqNo = to.seqNo + 1;
   db.run(
     `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-     VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
+     VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, ${"strftime('%Y-%m-%dT%H:%M:%fZ','now')"});`,
     {
       doc_id: docId,
       branch_id: to.branchId,
