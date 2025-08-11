@@ -8,23 +8,20 @@ import { beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 
-const { API_URL, FRONTEND_URL } = env;
+const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 describe("instantiate-recipe integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let spaceName: string;
   let charmId: string;
 
   beforeAll(async () => {
     const { identity } = shell.get();
-    spaceName = Deno.env.get("SPACE_NAME") ??
-      globalThis.crypto.randomUUID();
 
     // Register the instantiate-recipe charm
     charmId = await registerCharm({
-      spaceName: spaceName,
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
       source: await Deno.readTextFile(
@@ -41,12 +38,12 @@ describe("instantiate-recipe integration test", () => {
     const { page } = shell.get();
 
     // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${SPACE_NAME}/${charmId}`);
     await page.applyConsoleFormatter();
 
     // Login
     const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
+    assertEquals(state.spaceName, SPACE_NAME);
     assertEquals(state.activeCharmId, charmId);
 
     // Wait for charm to load and render
@@ -56,22 +53,18 @@ describe("instantiate-recipe integration test", () => {
     const urlBefore = await page.evaluate(() => globalThis.location.href);
     console.log("URL before action:", urlBefore);
 
-    // Find and type in the input using data attribute with pierce strategy
-    const input = await page.$("[data-ct-input]", {
+    const input = await page.waitForSelector("[data-ct-input]", {
       strategy: "pierce",
     });
-    assert(input, "Should find input element");
 
     await input.type("New counter");
 
     // Wait for input to be processed
     await sleep(500);
 
-    // Find and click the button using data attribute with pierce strategy
-    const button = await page.$("[data-ct-button]", {
+    const button = await page.waitForSelector("[data-ct-button]", {
       strategy: "pierce",
     });
-    assert(button, "Should find button element");
 
     await button.click();
 
@@ -89,7 +82,7 @@ describe("instantiate-recipe integration test", () => {
     );
 
     // Verify we're now on a counter page by checking for counter-specific elements
-    const counterResult = await page.$("#counter-result", {
+    const counterResult = await page.waitForSelector("#counter-result", {
       strategy: "pierce",
     });
     assert(
