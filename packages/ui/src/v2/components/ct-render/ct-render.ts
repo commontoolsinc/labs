@@ -77,8 +77,21 @@ export class CTRender extends BaseElement {
     );
 
     if (changedProperties.has("cell")) {
-      this._log("cell changed, calling _renderCell");
-      this._renderCell();
+      const oldCell = changedProperties.get("cell") as Cell | undefined;
+
+      // Only re-render if the cell actually changed
+      // Check if both cells exist and are equal, or if one doesn't exist
+      const shouldRerender = !oldCell || !this.cell ||
+        !oldCell.equals(this.cell);
+
+      this._log("cell property changed, should rerender:", shouldRerender);
+
+      if (shouldRerender) {
+        this._log("cells are different, calling _renderCell");
+        this._renderCell();
+      } else {
+        this._log("cells are equal, skipping _renderCell");
+      }
     }
   }
 
