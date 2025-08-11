@@ -1,4 +1,5 @@
 import { openSqlite } from "../store/db.ts";
+import { getSpacesDir, isWsAuthRequired } from "../config.ts";
 import { requireCapsOnRequest } from "./ucan.ts";
 import type { Database } from "@db/sqlite";
 import type {
@@ -30,7 +31,7 @@ export async function handleWs(
   }
 
   // Enforce UCAN capability on upgrade for read access to the space (opt-in via env)
-  if ((Deno.env.get("WS_V2_REQUIRE_AUTH") ?? "0") === "1") {
+  if (isWsAuthRequired()) {
     const authProbe = requireCapsOnRequest(req, [
       { can: "storage/read", with: `space:${spaceId}` },
     ]);
@@ -40,10 +41,7 @@ export async function handleWs(
   const { socket, response } = Deno.upgradeWebSocket(req);
 
   // Open per-space DB
-  const envDir = Deno.env.get("SPACES_DIR");
-  const base = envDir
-    ? new URL(envDir)
-    : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
+  const base = getSpacesDir();
   await Deno.mkdir(base, { recursive: true }).catch(() => {});
   const dbFile = new URL(`./${spaceId}.sqlite`, base);
   const { db } = await openSqlite({ url: dbFile });
