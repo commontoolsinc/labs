@@ -24,6 +24,8 @@ Summary and code links
 - Implement Automerge-backed `doc:` storage first (documents, branches, heads),
   then layer content-addressed primitives where needed.
 - Provide query, subscription, and snapshot capabilities.
+- WebSocket-only API (WS v2): deprecate HTTP routes; all commands over a single
+  WS per space.
 - Integrate with Toolshed to expose HTTP endpoints for the storage API.
 
 ## Status snapshot (current repo)
@@ -43,7 +45,8 @@ Summary and code links
 ## Milestones & Acceptance Criteria
 
 - Each task group lands with unit tests and `deno task check` passing.
-- Toolshed routes behind an `ENABLE_NEW_STORAGE=1` flag initially.
+- Toolshed routes behind an `ENABLE_NEW_STORAGE=1` flag initially. HTTP routes
+  will be deprecated in favor of the WS v2 endpoint.
 - API surface documented and aligned to `docs/specs/storage/03-api.md`.
 
 ## Implementation map (spec → modules)
@@ -247,8 +250,10 @@ Acceptance:
 - [x] Query IR compiler and evaluator with provenance/touch set tracking.
 - [x] Link traversal semantics and depth budgeting.
 - [x] Subscription tables from §11 and WS server handling; at-least-once with
-      acks (single WS endpoint shared with tx at /api/storage/new/v1/:space/ws;
-      resume via last acked).
+      acks. New WS v2 endpoint at `/api/storage/new/v2/:space/ws` multiplexes
+      `get`, `subscribe`, and `tx`. Deliver frames are untied to RPC jobs;
+      initial snapshot completion is signaled via a task/return `complete` tied
+      to the invoking job. Resume via last acked `deliveryNo`.
 
 Acceptance:
 
@@ -260,6 +265,8 @@ Acceptance:
 
 - [x] Minimal UCAN validation and capability checks.
 - [x] Enforce space-level caps on tx and read endpoints.
+- [ ] WS v2: enforce UCAN at upgrade or first invocation; for tx, verify per-tx
+      signature + delegation chain; bind receipts to crypto chain.
 
 Acceptance:
 
@@ -270,6 +277,8 @@ Acceptance:
 - [x] Add routes under `packages/toolshed/routes/storage/new/` for docs/branches
       heads, tx, PIT read, query, subscribe, snapshots; use `doc:<ref>` and
       `root_ref` in responses.
+- [ ] Deprecate HTTP routes in favor of the WS v2 endpoint; keep Toolshed HTTP
+      helpers only for PIT/snapshots if needed.
 - [x] Gate on `ENABLE_NEW_STORAGE`.
 
 Acceptance:
@@ -412,6 +421,12 @@ Action items for phase 2:
 - Add ENABLE_NEW_STORAGE env flag and gate Toolshed new storage routes.
 - Provide a SpaceStorage factory that opens per-space SQLite (openSpaceStorage)
   and inject into Toolshed handlers.
+- Implement WS v2 handler inside `packages/storage` and route
+  `/api/storage/new/v2/:space/ws`.
+- Add client helpers for UCAN-wrapped invocations; base64-encode change bytes in
+  tx over WS.
+- Update specs in `docs/specs/storage` for WS v2 wire format (get, subscribe,
+  tx, deliver, complete, ack). Deprecate HTTP API surface.
 - Add invariant hook points within submitTx pipeline and basic invariant
   examples.
 - Consider sqlite/cas.ts wrapper for CAS beyond change blobs.
@@ -421,9 +436,9 @@ Action items for phase 2:
 ## Cleanup tasks
 
 - [x] Links are wrong, they are json pointer but should be string[]
-- [ ] Rationalize seqId vs txId use
-- [ ] Remove InMemoryStorage in query/
-  - [ ] First remove the dependency on it in cycle_test.ts and others
+- [x] Rationalize seqId vs txId use
+- [x] Remove InMemoryStorage in query/
+  - [x] First remove the dependency on it in cycle_test.ts and others
 - [ ] Can we use :memory; instead of temp directories?
-- [ ] Rename `Storage` class inside query to something more like ReadHelper
-- [ ] Rename `sqlite` directory into something more meaningful
+- [x] Rename `Storage` class inside query to something more like ReadHelper
+- [x] Rename `sqlite` directory into something more meaningful
