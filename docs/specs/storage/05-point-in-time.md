@@ -54,6 +54,15 @@ WHERE doc_id = ?
 3. Fetch `bytes` from `am_change_blobs` for each change.
 4. Apply changes via `Automerge.applyChanges()` until reaching target seq.
 
+## Determinism
+
+Both fast-path and fallback enforce deterministic ordering by `seq_no`:
+
+- `am_chunks` rows are appended in `ORDER BY seq_no`.
+- Fallback scans `am_change_index` joined to `am_change_blobs` in `ORDER BY i.seq_no`.
+
+Given the same `(doc_id, branch_id, upto_seq_no)`, repeated reconstructions return identical Automerge bytes.
+
 ## Timestamp → Epoch → Branch State
 
 - Given `at=<timestamp>`:
