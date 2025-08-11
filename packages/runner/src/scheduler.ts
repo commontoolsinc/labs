@@ -330,15 +330,6 @@ export class Scheduler implements IScheduler {
           }`,
         ]);
 
-        // Only process commit notifications to avoid self-triggering
-        // from async notifications that lack source tracking
-        if (notification.type !== "commit") {
-          logger.debug(() => [
-            `[NOTIFICATION] Skipping non-commit notification: ${notification.type}`,
-          ]);
-          return { done: false };
-        }
-
         if ("changes" in notification) {
           let changeIndex = 0;
           for (const change of notification.changes) {

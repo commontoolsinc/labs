@@ -55,7 +55,7 @@ export class TheConflictError extends Error implements ConflictError {
           )
         }`
         : conflict.actual == null
-        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exists`
+        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exist`
         : `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it is ${
           refer(actual)
         }`,

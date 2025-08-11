@@ -12,7 +12,6 @@ import type {
   MemorySpace,
   QueryError as IQueryError,
   Result,
-  Retraction,
   SchemaPathSelector,
   Signer,
   State,
@@ -228,7 +227,7 @@ export interface IStorageSubscriptionCapability {
  */
 export interface IStorageSubscription {
   /**
-   * Called with a next notification, if returs `{ done: true }` or throws an
+   * Called with a next notification, if returns `{ done: true }` or throws an
    * exception, subscription will be cancelled and method will not be called
    * again until re-subscribed through another `subscribe` on
    * `IStorageSubscriptionCapability`. Returning any other return value implies
@@ -726,7 +725,7 @@ export interface IStorageTransactionComplete extends Error {
  */
 export interface IMemoryAddress {
   /**
-   * URI to an entitiy. It corresponds to `of` field in the memory protocol.
+   * URI to an entity. It corresponds to `of` field in the memory protocol.
    */
   id: URI;
   /**

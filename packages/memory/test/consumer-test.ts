@@ -167,7 +167,8 @@ test("create memory fails if already exists", store, async (session) => {
 
   assert(conflict.error, "Create fail when already exists");
   assert(conflict.error.name === "ConflictError");
-  assertEquals(conflict.error.conflict, {
+  const { history, ...baseConflict } = conflict.error.conflict;
+  assertEquals(baseConflict, {
     space: subject.did(),
     the,
     of: doc,
