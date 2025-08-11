@@ -11,6 +11,8 @@ import {
   toDigest as refToDigest,
 } from "merkle-reference/json";
 import { createCas } from "./cas.ts";
+import { upsertJsonCache } from "./cache.ts";
+import { getLogger } from "@commontools/utils/logger";
 import { bytesToHex, hexToBytes } from "./bytes.ts";
 import { createStubTx, getLastStubCrypto } from "./tx_chain.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
@@ -91,6 +93,7 @@ export function createTxProcessor(db: Database, _opts?: TxProcessorOptions) {
   return { submitTx: (req: TxRequest) => submitTx(db, req) };
 }
 
+const log = getLogger("storage:tx", { level: "info", enabled: true });
 const MAX_DELIVERY_QUEUE = 1000; // bounded per-subscription buffer
 function enqueueSubscriptionDeliveries(
   db: Database,
@@ -104,13 +107,10 @@ function enqueueSubscriptionDeliveries(
     id: number;
   }[];
   if (!subs || subs.length === 0) return;
-  try {
-    console.log(
-      `[enqueue] doc=${docId} branch=${branchId} seq=${seqNo} tx=${txId} subs=${subs.length}`,
-    );
-  } catch {
-    // ignore logging failures (non-fatal)
-  }
+  log.debug(() => [
+    "enqueue",
+    { docId, branchId, seqNo, txId, subs: subs.length },
+  ]);
   const payload = {
     kind: "doc_update",
     docId,
@@ -141,11 +141,7 @@ function enqueueSubscriptionDeliveries(
       `SELECT MAX(delivery_no) AS last FROM subscription_deliveries WHERE subscription_id = :sid`,
     ).get({ sid: s.id }) as { last: number } | undefined;
     const next = (last?.last ?? 0) + 1;
-    try {
-      console.log(`[enqueue] sid=${s.id} last=${last?.last ?? 0} next=${next}`);
-    } catch {
-      // ignore logging failures (non-fatal)
-    }
+    log.debug(() => ["enqueue", { sid: s.id, last: last?.last ?? 0, next }]);
     db.run(
       `INSERT OR IGNORE INTO subscription_deliveries(subscription_id, delivery_no, payload, acked) VALUES(:sid, :dno, :payload, 0)`,
       { sid: s.id, dno: next, payload: bytes },
@@ -154,7 +150,7 @@ function enqueueSubscriptionDeliveries(
       const cnt = db.prepare(
         `SELECT COUNT(1) AS c FROM subscription_deliveries WHERE subscription_id = :sid`,
       ).get({ sid: s.id }) as { c: number };
-      console.log(`[enqueue] sid=${s.id} total=${cnt.c}`);
+      log.debug(() => ["enqueue", { sid: s.id, total: cnt.c }]);
     } catch {
       // ignore logging failures (non-fatal)
     }
@@ -377,22 +373,12 @@ export async function submitTx(
         const materialized = Automerge.load(amBytes);
         const json = Automerge.toJS(materialized);
         const jsonStr = JSON.stringify(json);
-        // Upsert into json_cache only if this seq is newer or equal
-        db.run(
-          `INSERT INTO json_cache(doc_id, branch_id, seq_no, json, updated_at)
-           VALUES(:doc_id, :branch_id, :seq_no, :json, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-           ON CONFLICT(doc_id, branch_id) DO UPDATE SET
-             seq_no = excluded.seq_no,
-             json = excluded.json,
-             updated_at = excluded.updated_at
-           WHERE excluded.seq_no >= json_cache.seq_no;`,
-          {
-            doc_id: docId,
-            branch_id: write.branchId as string,
-            seq_no: seqNo,
-            json: jsonStr,
-          },
-        );
+        upsertJsonCache(db, {
+          docId,
+          branchId: write.branchId as string,
+          seqNo,
+          json: jsonStr,
+        });
       } catch (e) {
         results.push({
           docId,
@@ -414,7 +400,7 @@ export async function submitTx(
         );
       } catch (e) {
         // Do not fail tx if notifications fail; at-least-once will catch up on next tx
-        console.warn("subscription delivery enqueue failed", e);
+        log.warn(() => ["subscription delivery enqueue failed", e]);
       }
 
       results.push({ docId, branch, status: "ok", newHeads, applied });
