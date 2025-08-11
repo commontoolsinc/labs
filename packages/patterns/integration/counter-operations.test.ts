@@ -9,22 +9,20 @@ import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { getCharmResult, setCharmResult } from "@commontools/charm/ops";
 
-const { API_URL, FRONTEND_URL } = env;
+const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
 describe("counter direct operations test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let spaceName: string;
   let charmId: string;
 
   beforeAll(async () => {
     const { identity } = shell.get();
-    spaceName = globalThis.crypto.randomUUID();
 
     // Register the counter charm
     charmId = await registerCharm({
-      spaceName: spaceName,
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
       source: await Deno.readTextFile(
@@ -37,24 +35,22 @@ describe("counter direct operations test", () => {
     });
 
     // Setup the CharmManager for direct operations
-    await shell.setupManager(spaceName, API_URL);
+    await shell.setupManager(SPACE_NAME, API_URL);
   });
 
   it("should load the counter charm and verify initial state", async () => {
     const { page } = shell.get();
 
     // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${SPACE_NAME}/${charmId}`);
     await page.applyConsoleFormatter();
 
     // Login
     const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
+    assertEquals(state.spaceName, SPACE_NAME);
     assertEquals(state.activeCharmId, charmId);
 
-    // Wait for charm to load and verify counter exists
-    await sleep(5000);
-    const counterResult = await page.$("#counter-result", {
+    const counterResult = await page.waitForSelector("#counter-result", {
       strategy: "pierce",
     });
     assert(counterResult, "Should find counter-result element");
@@ -79,10 +75,9 @@ describe("counter direct operations test", () => {
     const manager = shell.manager!;
 
     // Get the counter result element
-    const counterResult = await page.$("#counter-result", {
+    const counterResult = await page.waitForSelector("#counter-result", {
       strategy: "pierce",
     });
-    assert(counterResult, "Should find counter-result element");
 
     // Update value to 42 via direct operation
     console.log("Setting counter value to 42 via direct operation");
@@ -120,16 +115,13 @@ describe("counter direct operations test", () => {
 
     // Now refresh the page by navigating to the same URL
     console.log("Refreshing the page...");
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
+    await page.goto(`${FRONTEND_URL}${SPACE_NAME}/${charmId}`);
 
     // Need to login again after navigation
     await shell.login();
 
-    // Wait for charm to fully load
-    await sleep(5000);
-
     // Get the counter result element after refresh
-    const counterResult = await page.$("#counter-result", {
+    const counterResult = await page.waitForSelector("#counter-result", {
       strategy: "pierce",
     });
     assert(counterResult, "Should find counter-result element after refresh");
