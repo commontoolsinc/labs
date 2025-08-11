@@ -214,3 +214,13 @@ CREATE TABLE IF NOT EXISTS subscription_deliveries (
 CREATE INDEX IF NOT EXISTS idx_subscription_deliveries_sub_acked ON subscription_deliveries(subscription_id, acked);
 CREATE INDEX IF NOT EXISTS idx_subscription_deliveries_seq ON subscription_deliveries(subscription_id, delivery_no);
 
+-- Client knowledge tracking (per logical client per document)
+CREATE TABLE IF NOT EXISTS client_known_docs (
+  client_id TEXT NOT NULL,
+  doc_id TEXT NOT NULL,
+  epoch INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY(client_id, doc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_client_known_epoch ON client_known_docs(epoch);
+

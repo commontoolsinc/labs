@@ -20,6 +20,10 @@ export function isWsAuthRequired(): boolean {
   return getEnvBoolean("WS_V2_REQUIRE_AUTH", false);
 }
 
+export function isEpochSubscriptionsEnabled(): boolean {
+  return getEnvBoolean("WS_V2_EPOCH_SUBS", false);
+}
+
 export function getSpacesDir(): URL {
   const envDir = Deno.env.get("SPACES_DIR");
   return envDir
