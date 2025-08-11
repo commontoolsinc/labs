@@ -17,8 +17,8 @@ Deno.test("linear changes update heads and seq", async () => {
   assertEquals(s0.seqNo, 0);
 
   // build first change
-  let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => {
+  const d0 = Automerge.init();
+  const d1 = Automerge.change(d0, (doc: any) => {
     doc.value = { count: 1 };
   });
   const c1 = Automerge.getLastLocalChange(d1)!;
@@ -41,7 +41,7 @@ Deno.test("linear changes update heads and seq", async () => {
   assertEquals(s1.heads, [h1]);
 
   // build second change on top of first
-  let d2 = Automerge.change(d1, (doc: any) => {
+  const d2 = Automerge.change(d1, (doc: any) => {
     doc.value.count = 2;
   });
   const c2 = Automerge.getLastLocalChange(d2)!;

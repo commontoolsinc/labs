@@ -66,7 +66,7 @@ class SessionState {
     this.streamId = spaceId;
   }
 
-  private async flushDeliveriesFor(subscriptionId: number, limit = 1000) {
+  private flushDeliveriesFor(subscriptionId: number, limit = 1000): void {
     try {
       const last = this.lastSentDelivery.get(subscriptionId) ?? 0;
       const rows = this.db.prepare(

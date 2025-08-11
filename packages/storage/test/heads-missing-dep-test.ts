@@ -11,8 +11,8 @@ Deno.test("reject change with missing dependency", async () => {
   const branch = "main";
 
   // prepare a change that depends on a fake head
-  let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => {
+  const d0 = Automerge.init();
+  const d1 = Automerge.change(d0, (doc: any) => {
     doc.value = { n: 1 };
   });
   const c1 = Automerge.getLastLocalChange(d1)!;

@@ -82,13 +82,13 @@ Deno.test("joins via link fields and traversal with budget", async () => {
   const branch = "main";
 
   // Create docs with link topology: a -> b -> c, and a -> c (cycle-safe)
-  let da = Automerge.change(Automerge.init<any>(), (doc) => {
+  const da = Automerge.change(Automerge.init<any>(), (doc) => {
     doc.ref = { doc: b, path: [] };
   });
-  let dbb = Automerge.change(Automerge.init<any>(), (doc) => {
+  const dbb = Automerge.change(Automerge.init<any>(), (doc) => {
     doc.ref = { doc: c, path: [] };
   });
-  let dc = Automerge.change(Automerge.init<any>(), (doc) => {
+  const dc = Automerge.change(Automerge.init<any>(), (doc) => {
     doc.value = 42;
   });
   await space.submitTx({

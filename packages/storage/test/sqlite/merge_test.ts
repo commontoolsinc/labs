@@ -21,8 +21,8 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
   assertEquals(s0.heads, []);
 
   // First change from empty base
-  let a0 = Automerge.init();
-  let a1 = Automerge.change(a0, (doc: any) => {
+  const a0 = Automerge.init();
+  const a1 = Automerge.change(a0, (doc: any) => {
     doc.x = 1;
   });
   const c1 = Automerge.getLastLocalChange(a1)!;
@@ -39,8 +39,8 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
   assertEquals(s1.heads, [h1]);
 
   // Second independent change derived from empty base (deps = []) to create fork
-  let b0 = Automerge.init();
-  let b1 = Automerge.change(b0, (doc: any) => {
+  const b0 = Automerge.init();
+  const b1 = Automerge.change(b0, (doc: any) => {
     doc.y = 2;
   });
   const c2 = Automerge.getLastLocalChange(b1)!;
@@ -80,8 +80,8 @@ Deno.test("test_server_merge_enabled", async () => {
   const branch = "main";
 
   // Create two concurrent heads on main
-  let a0 = Automerge.init();
-  let a1 = Automerge.change(a0, (doc: any) => {
+  const a0 = Automerge.init();
+  const a1 = Automerge.change(a0, (doc: any) => {
     doc.a = 1;
   });
   const c1 = Automerge.getLastLocalChange(a1)!;
@@ -97,8 +97,8 @@ Deno.test("test_server_merge_enabled", async () => {
   const s1 = await space.getBranchState(docId, branch);
   assertEquals(s1.heads, [h1]);
 
-  let b0 = Automerge.init();
-  let b1 = Automerge.change(b0, (doc: any) => {
+  const b0 = Automerge.init();
+  const b1 = Automerge.change(b0, (doc: any) => {
     doc.b = 2;
   });
   const c2 = Automerge.getLastLocalChange(b1)!;
@@ -141,8 +141,8 @@ Deno.test("test_close_branch_post_merge", async () => {
   await space.getOrCreateBranch(docId, feature);
 
   // Put a change on feature
-  let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => {
+  const d0 = Automerge.init();
+  const d1 = Automerge.change(d0, (doc: any) => {
     doc.title = "feat";
   });
   const cf = Automerge.getLastLocalChange(d1)!;
@@ -156,8 +156,8 @@ Deno.test("test_close_branch_post_merge", async () => {
   });
 
   // Put a base change on main too
-  let e0 = Automerge.init();
-  let e1 = Automerge.change(e0, (doc: any) => {
+  const e0 = Automerge.init();
+  const e1 = Automerge.change(e0, (doc: any) => {
     doc.base = true;
   });
   const cm = Automerge.getLastLocalChange(e1)!;
@@ -212,8 +212,8 @@ Deno.test("test_no_close_if_not_collapsed", async () => {
   await space.getOrCreateBranch(docId, feature);
 
   // Create two heads on main
-  let a0 = Automerge.init();
-  let a1 = Automerge.change(a0, (doc: any) => {
+  const a0 = Automerge.init();
+  const a1 = Automerge.change(a0, (doc: any) => {
     doc.m = 1;
   });
   const c1 = Automerge.getLastLocalChange(a1)!;

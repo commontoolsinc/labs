@@ -9,7 +9,7 @@ function b64(bytes: Uint8Array): string {
 import storageNew from "../../toolshed/routes/storage/new/new.index.ts";
 import { createRouter } from "../../toolshed/lib/create-app.ts";
 
-async function loadTestAppWith(flag: "on" | "off") {
+function loadTestAppWith(flag: "on" | "off") {
   const app = createRouter();
   if (flag === "on") {
     app.route("/", storageNew);
@@ -19,7 +19,7 @@ async function loadTestAppWith(flag: "on" | "off") {
 
 Deno.test("new storage routes gated by ENABLE_NEW_STORAGE", async () => {
   // Off: do not mount router
-  const appOff = await loadTestAppWith("off");
+  const appOff = loadTestAppWith("off");
   const serverOff = Deno.serve({ port: 0 }, appOff.fetch);
   const base = `http://${serverOff.addr.hostname}:${serverOff.addr.port}`;
   try {
@@ -34,7 +34,7 @@ Deno.test("new storage routes gated by ENABLE_NEW_STORAGE", async () => {
   }
 
   // On: mount router and expect route to exist (may 404 if branch not exists, but should not 404 due to missing route). We'll accept 200 or 500 as well.
-  const appOn = await loadTestAppWith("on");
+  const appOn = loadTestAppWith("on");
   const serverOn = Deno.serve({ port: 0 }, appOn.fetch);
   const baseOn = `http://${serverOn.addr.hostname}:${serverOn.addr.port}`;
   try {
@@ -55,7 +55,7 @@ Deno.test({
   fn: async () => {
     const tmp = await Deno.makeTempDir();
     Deno.env.set("SPACES_DIR", new URL(`file://${tmp}/`).href);
-    const app = await loadTestAppWith("on");
+    const app = loadTestAppWith("on");
     const server = Deno.serve({ port: 0 }, app.fetch);
     const base = `http://${server.addr.hostname}:${server.addr.port}`;
     const spaceId = "did:key:z6Mkspace";

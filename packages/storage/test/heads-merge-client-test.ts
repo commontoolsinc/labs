@@ -12,15 +12,15 @@ Deno.test("client merge collapses two heads into one", async () => {
   const branch = "main";
 
   // Two independent changes from empty base
-  let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => {
+  const d0 = Automerge.init();
+  const d1 = Automerge.change(d0, (doc: any) => {
     doc.value = { n: 1 };
   });
   const c1 = Automerge.getLastLocalChange(d1)!;
   const h1 = decodeChangeHeader(c1).changeHash;
 
-  let e0 = Automerge.init();
-  let e1 = Automerge.change(e0, (doc: any) => {
+  const e0 = Automerge.init();
+  const e1 = Automerge.change(e0, (doc: any) => {
     doc.value = { n: 2 };
   });
   const c2 = Automerge.getLastLocalChange(e1)!;
