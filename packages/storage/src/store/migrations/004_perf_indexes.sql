@@ -13,3 +13,9 @@ CREATE INDEX IF NOT EXISTS idx_change_seq_range ON am_change_index(doc_id, branc
 -- subscription_deliveries sequential send and resume by (subscription_id, delivery_no)
 CREATE INDEX IF NOT EXISTS idx_subscription_deliveries_seq ON subscription_deliveries(subscription_id, delivery_no);
 
+-- subscription_deliveries ack and pruning by (subscription_id, acked, delivery_no)
+CREATE INDEX IF NOT EXISTS idx_subscription_deliveries_ack ON subscription_deliveries(subscription_id, acked, delivery_no);
+
+-- am_chunks fast-path PIT lookups by (doc_id, branch_id, seq_no)
+CREATE INDEX IF NOT EXISTS idx_chunks_seq_range ON am_chunks(doc_id, branch_id, seq_no);
+

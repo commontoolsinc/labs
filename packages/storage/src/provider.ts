@@ -17,10 +17,6 @@ import {
 } from "./store/heads.ts";
 import { decodeChangeHeader } from "./store/change.ts";
 import type { Database } from "@db/sqlite";
-import {
-  refer as referJson,
-  toDigest as refToDigest,
-} from "merkle-reference/json";
 import { maybeCreateSnapshot } from "./store/snapshots.ts";
 import { maybeEmitChunks } from "./store/chunks.ts";
 import { isServerMergeEnabled } from "./store/flags.ts";
@@ -29,7 +25,6 @@ import { synthesizeAndApplyMergeAcrossBranches } from "./store/merge.ts";
 import * as Automerge from "@automerge/automerge";
 import { closeBranch } from "./store/branches.ts";
 import { updateHeads as updateHeadsShared } from "./store/heads.ts";
-import { hexToBytes } from "./store/bytes.ts";
 import { createStubTx } from "./store/tx_chain.ts";
 
 export interface SQLiteSpaceOptions {
