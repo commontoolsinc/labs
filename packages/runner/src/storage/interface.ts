@@ -725,7 +725,7 @@ export interface IStorageTransactionComplete extends Error {
  */
 export interface IMemoryAddress {
   /**
-   * URI to an entitiy. It corresponds to `of` field in the memory protocol.
+   * URI to an entity. It corresponds to `of` field in the memory protocol.
    */
   id: URI;
   /**

@@ -497,7 +497,6 @@ export class Replica {
     private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);
-    this.isFresh = this.isFresh.bind(this);
   }
 
   did(): MemorySpace {
@@ -623,18 +622,19 @@ export class Replica {
       fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
     }
     const revisions = fetchedEntries.map(([revision, _selector]) => revision);
-    const localFacts = this.updateLocalFacts(revisions);
-    const freshFacts = revisions.filter(this.isFresh);
+    // resolved is the set of facts we received that were pending
+    // current is the set of facts we received that are now live
+    const { resolved, current } = this.updateLocalFacts(revisions);
 
     // We limit changes to the non-stale changes, since we don't have a good
     // way of determining that in the "pull" event handler.
-    const changes = Differential.create().update(this, freshFacts);
+    const changes = Differential.create().update(this, current);
     // We can put stale facts in the heap, but not in the nursery.
     // We also don't want to update the document map with the stale version.
     this.heap.merge(
       revisions,
       Replica.put,
-      (revision) => revision === undefined || !localFacts.has(revision),
+      (revision) => revision === undefined || !resolved.has(revision),
     );
 
     // Remote may not have all the requested entries. We denitrify them by
@@ -915,28 +915,28 @@ export class Replica {
         // We strip transaction info so we don't duplicate same data
         { ...commit, is: { since: commit.is.since } },
       ];
+      // We only delete from the nursery when we've seen all of our pending
+      // facts (or gotten a fact that did or will conflict).
       // Avoid sending out updates to subscribers if it's a fact we already
       // know about in the nursery.
-      const localFacts = this.updateLocalFacts(revisions);
+      const { resolved, current } = this.updateLocalFacts(revisions);
       // Turn facts into revisions corresponding with the commit.
       this.heap.merge(
         revisions,
         Replica.put,
-        (revision) => revision === undefined || !localFacts.has(revision),
+        (revision) => revision === undefined || !resolved.has(revision),
       );
-
-      // We only delete from the nursery when we've seen all of our pending
-      // facts (or gotten a fact that did or will conflict).
-      const freshFacts = revisions.filter(this.isFresh);
 
       // Evict redundant facts which we just merged into `heap` so that reads
       // will occur from `heap`. This way future changes upstream will not get
       // shadowed by prior local changes.
       // I only evict the fresh facts, but if you never have more than one
       // call of commit, you could evict all of them.
-      this.nursery.merge(freshFacts, Nursery.evict);
+      this.nursery.merge(current, Nursery.evict);
 
-      for (const fact of freshFacts) {
+      // This is mostly redundant, since any current Fact isn't pending, but
+      // this also purges Unclaimed items in case the server ever sends them.
+      for (const fact of current) {
         this.pendingNurseryChanges.delete(toKey(fact));
       }
     }
@@ -959,20 +959,19 @@ export class Replica {
     // It's possible to get the same fact (including cause) twice, but we
     // should have the same since on the second, so we can clear them from
     // tracking when we see them.
-    const localFacts = this.updateLocalFacts(revisions);
-    const freshFacts = revisions.filter(this.isFresh);
+    const { resolved, current } = this.updateLocalFacts(revisions);
 
-    const checkout = Differential.checkout(this, freshFacts);
+    const checkout = Differential.checkout(this, revisions);
 
     // Remove "fresh" facts which we are about to merge into `heap`
-    this.nursery.merge(freshFacts, Nursery.delete);
+    this.nursery.merge(current, Nursery.delete);
 
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
       revisions,
       Replica.put,
-      (state) => state === undefined || !localFacts.has(state),
+      (state) => state === undefined || !resolved.has(state),
     );
 
     this.subscription.next({
@@ -1009,47 +1008,39 @@ export class Replica {
    * to know that, so that we don't propagate the stale entry.
    *
    * This function removes pending entries when we see them, and
-   * returns a set containing the stale facts.
+   * returns a set containing the facts we already had sent, but have
+   * now resolved, as well as the facts that are now current.
    *
    * @param revisions the facts we received from the server
-   * @returns the set of these facts that are stale.
+   * @returns an object with the set of pending facts that were resolved and
+   *     an array with the facts that are current.
    */
-  private updateLocalFacts(
-    revisions: (Revision<State> | undefined)[],
-  ) {
-    const matches = new Set<Revision<State>>();
+  private updateLocalFacts(revisions: Revision<State>[]) {
+    const current: Revision<State>[] = [];
+    const resolved = new Set<Revision<State>>();
     for (const revision of revisions) {
-      if (revision === undefined || revision.cause === undefined) {
+      if (revision.cause === undefined) {
+        // we couldn't have tracked an Unclaimed as pending
+        current.push(revision);
         continue;
       }
+      const heapVersion = this.heap.get(revision);
+      const revisionIsNew = heapVersion === undefined ||
+        revision.since > heapVersion.since;
       const factKey = toKey(revision);
+      const changes = this.pendingNurseryChanges.get(factKey);
       const factCause = revision.cause.toString();
-      if (this.pendingNurseryChanges.hasValue(factKey, factCause)) {
-        this.pendingNurseryChanges.deleteValue(factKey, factCause);
-        matches.add(revision);
+      if (changes?.has(factCause)) {
+        changes.delete(factCause);
+        resolved.add(revision);
+        if (revisionIsNew && changes.size === 0) {
+          current.push(revision);
+        }
+      } else if (revisionIsNew) {
+        current.push(revision);
       }
     }
-    return matches;
-  }
-
-  /**
-   * If the revision is something that can't be properly compared, it's fresh.
-   * If we have a version that's at least as new in the heap, it's not fresh.
-   * If we expected this fact because we have sent it, but not received it,
-   * then this isn't a fresh fact.
-   */
-  private isFresh(revision: Revision<State> | undefined): boolean {
-    if (revision === undefined || revision.cause === undefined) {
-      return true;
-    }
-    const heapVersion = this.heap.get(revision);
-    if (heapVersion !== undefined && revision.since <= heapVersion.since) {
-      return false;
-    }
-    return !this.pendingNurseryChanges.hasValue(
-      toKey(revision),
-      revision.cause.toString(),
-    );
+    return { resolved, current };
   }
 
   /**
