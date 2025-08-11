@@ -156,6 +156,23 @@ CREATE TABLE am_snapshots (
 CREATE INDEX idx_snap_seq ON am_snapshots(doc_id, branch_id, upto_seq_no);
 ```
 
+## Client Knowledge Table
+
+Tracks, for each logical client, the last epoch at which the server knows the
+client has received a given document. Used to decide whether to send a snapshot
+again during initial backfill or resume.
+
+```sql
+CREATE TABLE client_known_docs (
+  client_id TEXT NOT NULL,
+  doc_id TEXT NOT NULL,
+  epoch INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY(client_id, doc_id)
+);
+CREATE INDEX idx_client_known_epoch ON client_known_docs(epoch);
+```
+
 ## Immutable Blobs
 
 ```sql
