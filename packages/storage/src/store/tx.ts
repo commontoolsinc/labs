@@ -17,6 +17,7 @@ import { bytesToHex, hexToBytes } from "./bytes.ts";
 import { createStubTx, getLastStubCrypto } from "./tx_chain.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
 import { synthesizeAndApplyMergeOnBranch } from "./merge.ts";
+import { getPrepared } from "./prepared.ts";
 
 // Local types for the SQLite tx pipeline (server-internal shape per §04/§06)
 export type DocId = string;
@@ -268,9 +269,8 @@ export async function submitTx(
         if (rejectedReason) break;
 
         // Actor/seq monotonicity per branch/actor
-        const last = db.prepare(
-          `SELECT lamport FROM am_change_index WHERE branch_id = :branch_id AND actor_id = :actor_id ORDER BY seq_no DESC LIMIT 1`,
-        ).get({
+        const { selectActorLamport } = getPrepared(db);
+        const last = selectActorLamport.get({
           branch_id: (write.branchId as string),
           actor_id: header.actorId,
         }) as { lamport: number } | undefined;
@@ -282,9 +282,8 @@ export async function submitTx(
         }
 
         // Reject if change already indexed for this branch (idempotency per DAG)
-        const exists = db.prepare(
-          `SELECT 1 FROM am_change_index WHERE branch_id = :branch_id AND change_hash = :hash LIMIT 1`,
-        ).get({
+        const { selectChangeExists } = getPrepared(db);
+        const exists = selectChangeExists.get({
           branch_id: (write.branchId as string),
           hash: header.changeHash,
         }) as { 1: number } | undefined;
@@ -302,21 +301,18 @@ export async function submitTx(
         const bytesHash = hexToBytes(header.changeHash);
 
         seqNo += 1;
-        db.run(
-          `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-           VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
-          {
-            doc_id: docId,
-            branch_id: write.branchId,
-            seq_no: seqNo,
-            change_hash: header.changeHash,
-            bytes_hash: bytesHash,
-            deps_json: JSON.stringify(header.deps),
-            lamport: header.seq,
-            actor_id: header.actorId,
-            tx_id: txId,
-          },
-        );
+        const { insertChangeIndex } = getPrepared(db);
+        insertChangeIndex.run({
+          doc_id: docId,
+          branch_id: write.branchId,
+          seq_no: seqNo,
+          change_hash: header.changeHash,
+          bytes_hash: bytesHash,
+          deps_json: JSON.stringify(header.deps),
+          lamport: header.seq,
+          actor_id: header.actorId,
+          tx_id: txId,
+        });
 
         // Update heads: (heads - deps) ∪ {hash}
         newHeads = newHeads.filter((h) => !header.deps.includes(h));
