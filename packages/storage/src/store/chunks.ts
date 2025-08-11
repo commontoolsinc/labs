@@ -1,22 +1,7 @@
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 import { sha256Hex } from "./crypto.ts";
-
-export function isChunkingEnabled(db: Database): boolean {
-  try {
-    const row = db.prepare(
-      `SELECT value_json FROM space_settings WHERE key = 'settings'`,
-    ).get() as { value_json: string } | undefined;
-    if (!row) return true;
-    const settings = JSON.parse(row.value_json) as { enableChunks?: boolean };
-    if (typeof settings.enableChunks === "boolean") {
-      return settings.enableChunks;
-    }
-    return true;
-  } catch {
-    return true;
-  }
-}
+import { isChunkingEnabled } from "../config.ts";
 
 /**
  * Emit incremental Automerge chunks between the latest snapshot and `seqNo`.

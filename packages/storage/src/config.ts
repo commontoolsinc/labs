@@ -26,3 +26,29 @@ export function getSpacesDir(): URL {
     ? new URL(envDir)
     : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
 }
+
+// Per-space settings
+import type { Database } from "@db/sqlite";
+
+export function getSpaceSettings(db: Database): Record<string, unknown> {
+  try {
+    const row = db.prepare(
+      `SELECT value_json FROM space_settings WHERE key = 'settings'`,
+    ).get() as { value_json: string } | undefined;
+    if (!row) return {};
+    const settings = JSON.parse(row.value_json) as Record<string, unknown>;
+    return settings ?? {};
+  } catch {
+    return {};
+  }
+}
+
+export function isChunkingEnabled(db: Database): boolean {
+  const s = getSpaceSettings(db) as { enableChunks?: boolean };
+  return s.enableChunks ?? true;
+}
+
+export function getSnapshotCadence(db: Database, fallback = 5): number {
+  const s = getSpaceSettings(db) as { snapshotCadence?: number };
+  return typeof s.snapshotCadence === "number" ? s.snapshotCadence : fallback;
+}

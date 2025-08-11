@@ -7,6 +7,13 @@ type Statements = {
   insertChangeIndex: any;
   selectJsonCache: any;
   upsertJsonCache: any;
+  // PIT
+  selectLatestSnapshot: any;
+  selectChunksRange: any;
+  selectChangeBytesRange: any;
+  // Heads
+  selectHeadsByDocName: any;
+  updateHeads: any;
 };
 
 const dbToStatements = new WeakMap<Database, Statements>();
@@ -40,6 +47,37 @@ export function getPrepared(db: Database): Statements {
          json = CASE WHEN excluded.seq_no >= json_cache.seq_no THEN excluded.json ELSE json_cache.json END,
          updated_at = excluded.updated_at
        WHERE excluded.seq_no >= json_cache.seq_no;`,
+    ),
+    // PIT
+    selectLatestSnapshot: db.prepare(
+      `SELECT snapshot_id, upto_seq_no, bytes
+       FROM am_snapshots
+       WHERE doc_id = :doc_id AND branch_id = :branch_id AND upto_seq_no <= :target
+       ORDER BY upto_seq_no DESC LIMIT 1`,
+    ),
+    selectChunksRange: db.prepare(
+      `SELECT bytes FROM am_chunks
+       WHERE doc_id = :doc_id AND branch_id = :branch_id
+         AND seq_no > :from_seq AND seq_no <= :to_seq
+       ORDER BY seq_no`,
+    ),
+    selectChangeBytesRange: db.prepare(
+      `SELECT b.bytes AS bytes
+       FROM am_change_index i
+       JOIN am_change_blobs b ON (i.bytes_hash = b.bytes_hash)
+       WHERE i.doc_id = :doc_id AND i.branch_id = :branch_id
+         AND i.seq_no > :from_seq AND i.seq_no <= :to_seq
+       ORDER BY i.seq_no`,
+    ),
+    // Heads
+    selectHeadsByDocName: db.prepare(
+      `SELECT h.branch_id as branch_id, h.heads_json as heads_json, h.seq_no as seq_no, h.tx_id as tx_id, h.root_hash as root_hash
+       FROM am_heads h JOIN branches b ON (h.branch_id = b.branch_id)
+       WHERE b.doc_id = :doc_id AND b.name = :name`,
+    ),
+    updateHeads: db.prepare(
+      `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = :root_hash, committed_at = ${NOW_SQL}
+       WHERE branch_id = :branch_id`,
     ),
   } as const as Statements;
   dbToStatements.set(db, stmts);
