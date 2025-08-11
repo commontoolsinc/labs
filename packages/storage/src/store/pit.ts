@@ -8,6 +8,8 @@
 import type { BranchId, DocId } from "../interface.ts";
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
+import { getLogger } from "@commontools/utils/logger";
+const log = getLogger("storage:pit", { level: "info", enabled: true });
 
 /**
  * Resolve a timestamp (ISO string) to the latest tx_id at or before it.
@@ -90,6 +92,16 @@ export function getAutomergeBytesAtSeq(
         out.set(c.bytes, offset);
         offset += c.bytes.length;
       }
+      log.debug(() => [
+        "pit-fast-path",
+        {
+          docId,
+          branchId,
+          from: snap.upto_seq_no,
+          to: targetSeq,
+          chunks: chunks.length,
+        },
+      ]);
       return out;
     }
   }
@@ -112,5 +124,15 @@ export function getAutomergeBytesAtSeq(
   const changes = rows.map((r) => r.bytes);
   const applied = Automerge.applyChanges(baseDoc, changes);
   const doc = Array.isArray(applied) ? applied[0] : applied;
+  log.debug(() => [
+    "pit-fallback",
+    {
+      docId,
+      branchId,
+      from: snap?.upto_seq_no ?? 0,
+      to: targetSeq,
+      changes: changes.length,
+    },
+  ]);
   return Automerge.save(doc);
 }

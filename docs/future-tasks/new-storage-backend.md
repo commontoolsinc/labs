@@ -426,7 +426,7 @@ Action items for phase 2 (expanded):
         in `store/tx.ts`).
     - [x] Add focused tests to verify rollback when any doc fails within a tx
           and that receipts reflect aggregated failures.
-  - [ ] Add invariant hooks (pre-commit) with a clear interface to validate
+  - [x] Add invariant hooks (pre-commit) with a clear interface to validate
         materialized state per write; fail the entire tx on invariant violation.
 
 - [ ] Merge identity and semantics
@@ -482,11 +482,12 @@ Action items for phase 2 (expanded):
         existing spaces.
 
 - [ ] Testing
-  - [ ] JSON cache tests: verify tip reads utilize cache, historical reads
+  - [x] JSON cache tests: verify tip reads utilize cache, historical reads
         bypass, and cache updates on write.
   - [ ] WS resume/acks test: unskip and fix ordering issues; ensure deliveries
         resume from last ack.
-  - [ ] Merge actor/seq tests for synthesized merges; PIT determinism tests.
+  - [ ] Merge actor/seq tests for synthesized merges.
+  - [x] PIT determinism tests.
 
 - [ ] Developer experience and documentation
   - [ ] Update specs (`03-api.md`, `04-transactions.md`, `05-point-in-time.md`,
