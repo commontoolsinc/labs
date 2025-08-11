@@ -427,6 +427,19 @@ Action items for phase 2:
   tx over WS.
 - Update specs in `docs/specs/storage` for WS v2 wire format (get, subscribe,
   tx, deliver, complete, ack). Deprecate HTTP API surface.
+
+### WS v2 Tasks (summary)
+
+- [x] Define WS v2 protocol types (Invocation, Authorization, UCAN, TaskReturn, Deliver, Ack, Complete)
+- [x] Implement WS v2 handler in `packages/storage` with `get`/`subscribe` and `complete` as task/return
+- [x] Untie Deliver frames from RPC jobs; persist acks and resume
+- [x] Wire `/storage/tx` over WS and return task/return receipt
+- [x] Base64 encode/decode change bytes for WS tx
+- [ ] Stream initial snapshot rows via Deliver before `complete`
+- [ ] Enforce UCAN at upgrade/first invocation; verify per-tx signature + delegation chain
+- [ ] Client helpers for UCAN-wrapped calls and ack batching
+- [ ] Integration tests: get-only complete; subscribe resume with acks; tx receipt assertions
+- [ ] Remove/deprecate HTTP routes from docs and codepaths (retain PIT if needed)
 - Add invariant hook points within submitTx pipeline and basic invariant
   examples.
 - Consider sqlite/cas.ts wrapper for CAS beyond change blobs.

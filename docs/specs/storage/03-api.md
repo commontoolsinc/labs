@@ -6,8 +6,8 @@ initial cut and may be added later if needed.
 
 ## WebSocket `/v2/:space/ws`
 
-Text frames (JSON). Commands are UCAN-wrapped invocations; server pushes
-untied Deliver frames. HTTP routes are deprecated in favor of WS.
+Text frames (JSON). Commands are UCAN-wrapped invocations; server pushes untied
+Deliver frames. HTTP routes are deprecated in favor of WS.
 
 ### Client → Server frames
 
