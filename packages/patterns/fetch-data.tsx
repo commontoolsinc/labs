@@ -209,8 +209,8 @@ export default recipe(model, {}, (state) => {
   return {
     [NAME]: "GitHub Repository Details",
     [UI]: (
-      <div style="margin: 0 auto;">
-        <div style="margin-bottom: 8px;">
+      <div>
+        <div>
           <ct-input
             $value={state.repoUrl}
             placeholder="https://github.com/owner/repo"
@@ -218,32 +218,31 @@ export default recipe(model, {}, (state) => {
           />
         </div>
 
-        <div style="background: #f5f5f5; border: 1px solid #ddd; padding: 8px; border-radius: 4px;">
-          <h3 id="github-title" style="margin: 0 0 8px 0; font-size: 20px;">
+        <div>
+          <h3 id="github-title">
             {validData.name}
           </h3>
-          <p style="margin: 0 0 8px 0; color: #666;">
+          <p>
             by {validData.owner.login}
           </p>
-          <p style="margin: 0 0 16px 0;">{validData.description}</p>
-          <div style="display: flex; gap: 8px; font-size: 14px;">
+          <p>{validData.description}</p>
+          <div>
             <div>
-              <span style="margin-right: 5px;">⭐</span>
+              <span>⭐</span>
               <strong>{validData.stargazers_count}</strong> stars
             </div>
             <div>
-              <span style="margin-right: 5px;">🍴</span>
+              <span>🍴</span>
               <strong>{validData.forks_count}</strong> forks
             </div>
             <div>
-              <span style="margin-right: 5px;">🔤</span>
+              <span>🔤</span>
               <strong>{validData.language}</strong>
             </div>
             <div>
               <a
                 href={validData.html_url}
                 target="_blank"
-                style="color: #0366d6; text-decoration: none;"
               >
                 View on GitHub →
               </a>
