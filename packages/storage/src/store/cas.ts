@@ -19,7 +19,8 @@ export interface CasRecord {
   meta?: CasMeta | null;
 }
 
-// hex/sha helpers now imported from shared modules
+// CAS over SQLite tables. Stores Automerge changes in am_change_blobs and
+// generic blobs/snapshots in cas_blobs. Provides put/get/has and index helpers.
 
 export function createCas(db: Database) {
   return {

@@ -1,3 +1,10 @@
+/**
+ * Heads state access and initialization for a (doc, branch).
+ * - getOrCreateDoc(): ensures a `docs` row exists
+ * - getOrCreateBranch(): ensures `branches` + default `am_heads` rows exist
+ * - getBranchState(): reads canonical heads, seq, epoch, and rootRef
+ * - updateHeads(): persists new heads/seq/epoch and recomputes root_ref
+ */
 import type { BranchName, BranchState, DocId, Heads } from "../interface.ts";
 import {
   refer as referJson,

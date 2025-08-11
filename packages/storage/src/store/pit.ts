@@ -1,3 +1,10 @@
+/**
+ * Point-in-time reconstruction utilities.
+ * - epochForTimestamp(): map ISO timestamp → latest tx_id at/before
+ * - uptoSeqNo(): last applied seq_no for (doc, branch) at/before epoch
+ * - getAutomergeBytesAtSeq(): reconstruct Automerge binary using snapshot+chunks fast path,
+ *   or snapshot + applyChanges fallback
+ */
 import type { BranchId, DocId } from "../interface.ts";
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";

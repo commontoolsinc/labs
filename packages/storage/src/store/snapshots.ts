@@ -12,7 +12,7 @@ export interface SnapshotOptions {
 
 /**
  * Create a full snapshot via Automerge.save() when cadence threshold is hit.
- * Stores snapshot in am_snapshots with upto_seq_no and current heads/root_hash.
+ * Persists into `am_snapshots` with upto_seq_no and heads, and mirrors to CAS.
  */
 export function maybeCreateSnapshot(
   db: Database,

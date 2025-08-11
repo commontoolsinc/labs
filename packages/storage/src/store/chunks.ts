@@ -19,9 +19,9 @@ export function isChunkingEnabled(db: Database): boolean {
 }
 
 /**
- * If we did not just create a snapshot at seqNo, emit incremental chunks for
- * all changes since the last snapshot upto seqNo. Each row is stored with the
- * specific seq_no of the change it represents.
+ * Emit incremental Automerge chunks between the latest snapshot and `seqNo`.
+ * Each emitted row is keyed by the concrete change `seq_no` it represents.
+ * No-op if a fresh snapshot already covers the range or chunking is disabled.
  */
 export async function maybeEmitChunks(
   db: Database,
