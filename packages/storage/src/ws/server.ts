@@ -45,10 +45,11 @@ export async function handleWs(
   const base = getSpacesDir();
   await Deno.mkdir(base, { recursive: true }).catch(() => {});
   const dbFile = new URL(`./${spaceId}.sqlite`, base);
-  const { db } = await openSqlite({ url: dbFile });
+  const handle = await openSqlite({ url: dbFile });
+  const db = handle.db;
 
   const state = new SessionState(db, spaceId, socket);
-  state.start();
+  state.start(() => handle.close().catch(() => {}));
   return response;
 }
 
@@ -93,13 +94,15 @@ class SessionState {
       console.error("ws v2 immediate flush error", e);
     }
   }
-  start() {
+  start(onClose?: () => void) {
     this.socket.onmessage = (ev) => this.onMessage(ev);
     this.socket.onclose = () => {
       this.closed = true;
+      onClose?.();
     };
     this.socket.onerror = () => {
       this.closed = true;
+      onClose?.();
     };
     this.pump();
   }

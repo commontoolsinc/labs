@@ -103,6 +103,7 @@ export interface SpaceStorage {
     toBranch: BranchName,
     opts?: { closeSource?: boolean },
   ): Promise<string>;
+  close(): Promise<void>;
 }
 
 // ----- Query engine shared types -----

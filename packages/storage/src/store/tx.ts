@@ -406,7 +406,7 @@ export async function submitTx(
       results.push({ docId, branch, status: "ok", newHeads, applied });
     }
 
-    // Commit
+    // Success path: commit entire tx atomically (all-or-nothing for multi-doc)
     db.exec("COMMIT;");
 
     const receipt: TxReceipt = {
@@ -418,6 +418,7 @@ export async function submitTx(
     };
     return receipt;
   } catch (err) {
+    // Failure path: roll back entire tx (all-or-nothing)
     db.exec("ROLLBACK;");
     if (err instanceof ReadConflictError) {
       const receipt: TxReceipt = {
