@@ -90,7 +90,7 @@ export function getAutomergeBytesAtSeq(
   }
 
   // Fallback path: start from snapshot (if any) then apply changes.
-  let baseDoc = snap ? Automerge.load(snap.bytes) : Automerge.init();
+  const baseDoc = snap ? Automerge.load(snap.bytes) : Automerge.init();
   const rows = db.prepare(
     `SELECT b.bytes AS bytes
      FROM am_change_index i

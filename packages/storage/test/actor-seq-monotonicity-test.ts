@@ -23,7 +23,7 @@ Deno.test("reject non-monotonic actor seq on same branch", async () => {
   const c2 = Automerge.getLastLocalChange(doc)!; // seq=2
 
   // Submit c1 then c2
-  let r1 = await space.submitTx({
+  const r1 = await space.submitTx({
     reads: [],
     writes: [{
       ref: { docId, branch },
@@ -34,7 +34,7 @@ Deno.test("reject non-monotonic actor seq on same branch", async () => {
   assertEquals(r1.results[0]?.status, "ok");
   const s1 = await space.getBranchState(docId, branch);
 
-  let r2 = await space.submitTx({
+  const r2 = await space.submitTx({
     reads: [],
     writes: [{
       ref: { docId, branch },

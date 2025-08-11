@@ -15,8 +15,8 @@ Deno.test("fork: two concurrent changes produce two heads", async () => {
   assertEquals(s0.heads, []);
 
   // First change from base []
-  let a0 = Automerge.init();
-  let a1 = Automerge.change(a0, (doc: any) => {
+  const a0 = Automerge.init();
+  const a1 = Automerge.change(a0, (doc: any) => {
     doc.value = { v: 1 };
   });
   const c1 = Automerge.getLastLocalChange(a1)!;
@@ -36,8 +36,8 @@ Deno.test("fork: two concurrent changes produce two heads", async () => {
   assertEquals(s1.heads, [h1]);
 
   // Second independent change also derived from empty base [] (concurrent)
-  let b0 = Automerge.init();
-  let b1 = Automerge.change(b0, (doc: any) => {
+  const b0 = Automerge.init();
+  const b1 = Automerge.change(b0, (doc: any) => {
     doc.value = { v: 2 };
   });
   const c2 = Automerge.getLastLocalChange(b1)!;

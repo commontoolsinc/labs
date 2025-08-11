@@ -48,12 +48,12 @@ export async function createBranch(
  * Close a branch. Optionally mark it as merged into another branch.
  * No-op if already closed.
  */
-export async function closeBranch(
+export function closeBranch(
   db: Database,
   docId: DocId,
   name: BranchName,
   opts?: { mergedInto?: BranchName },
-): Promise<void> {
+): void {
   const state = getBranchState(db, docId, name);
   let mergedIntoBranchId: string | null = null;
   if (opts?.mergedInto) {

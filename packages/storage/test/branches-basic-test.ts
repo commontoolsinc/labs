@@ -13,8 +13,8 @@ Deno.test("create and close branches with lineage", async () => {
   assertEquals(main.seqNo, 0);
 
   // Create a feature branch by submitting a change with from main heads (implicitly creates branch row)
-  let d0 = Automerge.init();
-  let d1 = Automerge.change(d0, (doc: any) => {
+  const d0 = Automerge.init();
+  const d1 = Automerge.change(d0, (doc: any) => {
     doc.title = "v1";
   });
   const c1 = Automerge.getLastLocalChange(d1)!;

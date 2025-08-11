@@ -224,7 +224,7 @@ class SQLiteSpace implements SpaceStorage {
 
     // After successful merge collapse, close source branch if requested
     if (opts?.closeSource ?? true) {
-      await closeBranch(db, docId, fromBranch, { mergedInto: toBranch });
+      closeBranch(db, docId, fromBranch, { mergedInto: toBranch });
     }
 
     return header.changeHash;
