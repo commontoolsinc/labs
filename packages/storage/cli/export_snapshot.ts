@@ -41,7 +41,6 @@ if (import.meta.main) {
   try {
     const bytes = getAutomergeBytesAtSeq(
       db,
-      null,
       doc as string,
       branch as string,
       seq,

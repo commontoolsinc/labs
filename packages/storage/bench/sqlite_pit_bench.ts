@@ -77,7 +77,6 @@ const { branchId } = getBranchState(db, PIT_DOC_ID, latest.branch ?? "main");
 const latestSeq = uptoSeqNo(db, PIT_DOC_ID as any, branchId, latest.epoch);
 const latestBytes = getAutomergeBytesAtSeq(
   db,
-  null,
   PIT_DOC_ID as any,
   branchId,
   latestSeq,
@@ -91,7 +90,6 @@ Deno.bench({
 }, () => {
   const bytes = getAutomergeBytesAtSeq(
     db,
-    null,
     PIT_DOC_ID as any,
     branchId,
     latestSeq,
@@ -136,12 +134,6 @@ Deno.bench({
   n: 1,
 }, () => {
   const mid = Math.max(1, Math.floor(latestSeq * 0.6));
-  const bytes = getAutomergeBytesAtSeq(
-    db,
-    null,
-    PIT_DOC_ID as any,
-    branchId,
-    mid,
-  );
+  const bytes = getAutomergeBytesAtSeq(db, PIT_DOC_ID as any, branchId, mid);
   if (bytes.length === 0) throw new Error("empty PIT bytes (mid)");
 });
