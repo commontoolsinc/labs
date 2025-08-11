@@ -1,4 +1,5 @@
 import { openSqlite } from "../store/db.ts";
+import { requireCapsOnRequest } from "./ucan.ts";
 import type { Database } from "@db/sqlite";
 import type {
   Ack,
@@ -27,6 +28,10 @@ export async function handleWs(
       },
     );
   }
+
+  // Enforce UCAN capability on upgrade for read access to the space
+  const authProbe = requireCapsOnRequest(req, [{ can: "storage/read", with: `space:${spaceId}` }]);
+  if (authProbe) return authProbe;
 
   const { socket, response } = Deno.upgradeWebSocket(req);
 
