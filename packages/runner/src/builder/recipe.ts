@@ -21,6 +21,7 @@ import {
   type UnsafeBinding,
 } from "./types.ts";
 import { createShadowRef, opaqueRef } from "./opaque-ref.ts";
+import { createRef } from "../doc-map.ts";
 import {
   applyArgumentIfcToResult,
   applyInputIfcToOutput,
@@ -128,6 +129,7 @@ export function recipeFromFrame<T, R>(
   argumentSchema: string | JSONSchema,
   resultSchema: JSONSchema | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+  runtime?: { recipeManager: any }, // Optional runtime for deduplication
 ): RecipeFactory<T, R> {
   const inputs = opaqueRef<Required<T>>(
     undefined,
@@ -136,6 +138,52 @@ export function recipeFromFrame<T, R>(
       : argumentSchema as JSONSchema | undefined,
   );
   const outputs = fn(inputs);
+
+  // Check if the output has parent context for deduplication
+  if (isOpaqueRef(outputs) && runtime) {
+    const outputAny = outputs as any;
+    if (outputAny.__recipeFactoryId && outputAny.__recipeInputs) {
+      // Generate deterministic ID for this recipe instance
+      const instanceId = createRef({
+        factory: outputAny.__recipeFactoryId,
+        inputs: outputAny.__recipeInputs,
+      }, "recipe instance").toString();
+
+      // Check if this instance already exists
+      const existingRecipe = runtime.recipeManager.recipeById(instanceId);
+      if (existingRecipe) {
+        return existingRecipe;
+      }
+
+      // Create the new recipe but we'll register it with the deterministic ID
+      const newRecipe = factoryFromRecipe<T, R>(
+        argumentSchema,
+        resultSchema,
+        inputs,
+        outputs,
+      );
+
+      // Store the instance ID for registration
+      (newRecipe as any).__instanceId = instanceId;
+      (newRecipe as any).__parentFactoryId = outputAny.__recipeFactoryId;
+
+      // Try to find the factory recipe by ID to get its source
+      const factoryRecipe = runtime.recipeManager.recipeById(
+        outputAny.__recipeFactoryId,
+      );
+      if (factoryRecipe) {
+        const parentSource = runtime.recipeManager.getRecipeSource(
+          factoryRecipe,
+        );
+        if (parentSource) {
+          (newRecipe as any).__parentSource = parentSource;
+        }
+      }
+
+      return newRecipe;
+    }
+  }
+
   return factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
 }
 
@@ -336,6 +384,43 @@ function factoryFromRecipe<T, R>(
 
   const recipeFactory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
+
+    // Store metadata for deduplication only if:
+    // 1. This is a recipe (not a lifted function)
+    // 2. It has inputs
+    if (module.type === "recipe" && inputs && Object.keys(inputs).length > 0) {
+      // Get or generate the factory ID
+      let factoryId = (recipeFactory as any)[Symbol.for("id")];
+      if (!factoryId) {
+        // Generate ID from the recipe object itself to avoid circular references
+        factoryId = createRef(recipe, "recipe").toString();
+        (recipeFactory as any)[Symbol.for("id")] = factoryId;
+      }
+
+      // Sanitize inputs to avoid circular references
+      // Replace OpaqueRefs with a simple identifier
+      const sanitizeInputs = (value: any): any => {
+        if (isOpaqueRef(value)) {
+          // Just store a marker that this was an OpaqueRef
+          // We only need the inputs for deduplication, not the actual values
+          return { __opaqueRef: true };
+        } else if (Array.isArray(value)) {
+          return (value as any[]).map(sanitizeInputs);
+        } else if (isRecord(value)) {
+          const result: any = {};
+          for (const [key, val] of Object.entries(value)) {
+            result[key] = sanitizeInputs(val);
+          }
+          return result;
+        }
+        return value;
+      };
+
+      // Store metadata on the output for deduplication
+      (outputs as any).__recipeFactoryId = factoryId;
+      (outputs as any).__recipeInputs = sanitizeInputs(inputs);
+    }
+
     const node: NodeRef = {
       module,
       inputs,

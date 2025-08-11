@@ -1,4 +1,7 @@
 import { getLogger } from "@commontools/utils/logger";
+import type { RuntimeProgram } from "./harness/types.ts";
+
+const runnerLogger = getLogger("runner", { enabled: true, level: "debug" });
 import { refer } from "merkle-reference/json";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { vdomSchema } from "@commontools/html";
@@ -90,18 +93,30 @@ export class Runner implements IRunner {
     recipeFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    parentContext?: {
+      parentRecipeId: string;
+      parentSource: string | RuntimeProgram;
+    },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     recipe: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    parentContext?: {
+      parentRecipeId: string;
+      parentSource: string | RuntimeProgram;
+    },
   ): Cell<R>;
   run<T, R = any>(
     providedTx: IExtendedStorageTransaction,
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    parentContext?: {
+      parentRecipeId: string;
+      parentSource: string | RuntimeProgram;
+    },
   ): Cell<R> {
     const tx = providedTx ?? this.runtime.edit();
 
@@ -177,7 +192,10 @@ export class Runner implements IRunner {
       recipe = recipeOrModule as Recipe;
     }
 
-    recipeId ??= this.runtime.recipeManager.registerRecipe(recipe);
+    recipeId ??= this.runtime.recipeManager.registerRecipe(
+      recipe,
+      parentContext?.parentSource,
+    );
     this.runtime.recipeManager.saveRecipe({
       recipeId,
       space: resultCell.space,
@@ -761,6 +779,7 @@ export class Runner implements IRunner {
               "event handler result",
               undefined,
               () => result,
+              this.runtime,
             );
 
             const resultCell = this.run(
@@ -838,6 +857,7 @@ export class Runner implements IRunner {
               "action result",
               undefined,
               () => result,
+              this.runtime,
             );
 
             // If nothing changed, don't rerun the recipe
@@ -1008,7 +1028,37 @@ export class Runner implements IRunner {
       undefined,
       tx,
     );
-    this.run(tx, recipeImpl, inputs, resultCell);
+    // Track parent recipe context for source inheritance
+    // Get parent recipe ID - try multiple approaches
+    let parentRecipeId: string | undefined;
+    const recipeAny = recipe as any;
+
+    // First try: Check if recipe has ID symbol (set during registration)
+    if (recipeAny[Symbol.for("id")]) {
+      parentRecipeId = recipeAny[Symbol.for("id")];
+    } else {
+      // Second try: Look for the recipe in recipeIdMap
+      const recipeManager = this.runtime.recipeManager as any;
+      for (const [id, r] of recipeManager.recipeIdMap.entries()) {
+        if (r === recipe) {
+          parentRecipeId = id;
+          break;
+        }
+      }
+    }
+
+    // Check if parent recipe has source
+    let parentSource: string | RuntimeProgram | undefined;
+    if (parentRecipeId) {
+      parentSource = this.runtime.recipeManager.getRecipeSource(recipe);
+    }
+
+    // Pass parent context when running the sub-recipe
+    const parentContext = parentRecipeId && parentSource
+      ? { parentRecipeId, parentSource }
+      : undefined;
+
+    this.run(tx, recipeImpl, inputs, resultCell, parentContext);
     sendValueToBinding(
       tx,
       processCell,

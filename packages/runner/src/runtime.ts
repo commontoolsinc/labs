@@ -238,6 +238,7 @@ export interface IRecipeManager {
   ): Promise<Recipe>;
   compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
   getRecipeMeta(input: any): RecipeMeta;
+  getRecipeSource(recipe: Recipe | Module): string | RuntimeProgram | undefined;
   saveRecipe(
     params: {
       recipeId: string;

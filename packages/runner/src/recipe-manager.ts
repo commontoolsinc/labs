@@ -72,10 +72,36 @@ export class RecipeManager implements IRecipeManager {
     return this.recipeMetaMap.get(input as Recipe)?.get()!;
   }
 
+  getRecipeSource(
+    recipe: Recipe | Module,
+  ): string | RuntimeProgram | undefined {
+    return this.recipeProgramMap.get(recipe as Recipe);
+  }
+
   registerRecipe(
     recipe: Recipe | Module,
     src?: string | RuntimeProgram,
   ): string {
+    // Check if the recipe has a pre-determined instance ID
+    const recipeAny = recipe as any;
+    if (recipeAny.__instanceId) {
+      // Check if already registered with this ID
+      const existing = this.recipeIdMap.get(recipeAny.__instanceId);
+      if (existing) {
+        return recipeAny.__instanceId;
+      }
+
+      // Register with the instance ID
+      this.recipeIdMap.set(recipeAny.__instanceId, recipe as Recipe);
+
+      // Preserve parent source if available
+      if (recipeAny.__parentSource) {
+        this.recipeProgramMap.set(recipe as Recipe, recipeAny.__parentSource);
+      }
+
+      return recipeAny.__instanceId;
+    }
+
     const id = this.recipeMetaMap.get(recipe as Recipe)?.get()?.id;
     if (id) {
       return id;
@@ -84,6 +110,14 @@ export class RecipeManager implements IRecipeManager {
     const generatedId = src
       ? createRef({ src }, "recipe source").toString()
       : createRef(recipe, "recipe").toString();
+
+    // Store the ID on the recipe/factory function for later reference
+    if (typeof recipe === "function") {
+      (recipe as any)[Symbol.for("id")] = generatedId;
+      if (src) {
+        (recipe as any)[Symbol.for("source")] = src;
+      }
+    }
 
     this.recipeIdMap.set(generatedId, recipe as Recipe);
     if (src) this.recipeProgramMap.set(recipe as Recipe, src);
