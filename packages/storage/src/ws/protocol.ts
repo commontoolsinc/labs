@@ -21,21 +21,43 @@ export type Authorization<Cmd> = {
 
 export type UCAN<Cmd> = { invocation: Cmd; authorization: Authorization<Cmd> };
 
+// Session hello: client identifies itself and reports last fully processed epoch
+export type StorageHello = Invocation<"/storage/hello", DID, {
+  clientId: string;
+  sinceEpoch: number; // -1 if none
+}>;
+
 export type TaskReturn<Cmd, Result> = {
   the: "task/return";
   of: `job:${string}`;
   is: Result;
 };
 
-export type Deliver = {
-  type: "deliver";
-  streamId: DID; // space DID
-  filterId: string; // server-assigned (subscription id)
-  deliveryNo: number; // monotonic per (streamId, filterId)
-  payload: unknown;
-};
+// Epoch-grouped deliver: bundles all doc updates for a single epoch
+export type Deliver =
+  | {
+      type: "deliver";
+      streamId: DID; // space DID
+      filterId: string; // legacy per-subscription id
+      deliveryNo: number; // legacy delivery sequence
+      payload: unknown;
+    }
+  | {
+      type: "deliver";
+      streamId: DID; // space DID
+      epoch: number; // global tx epoch
+      docs: Array<{
+        docId: string;
+        branch?: string;
+        version: { epoch: number; branch?: string };
+        kind: "snapshot" | "delta";
+        body: unknown;
+      }>;
+    };
 
-export type Ack = { type: "ack"; streamId: DID; deliveryNo: number };
+export type Ack =
+  | { type: "ack"; streamId: DID; deliveryNo: number }
+  | { type: "ack"; streamId: DID; epoch: number };
 
 export type Complete = {
   type: "complete";
