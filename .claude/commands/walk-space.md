@@ -1,8 +1,10 @@
 # CommonTools Space Mapping Workflow
 
+**INSTRUCTIONS FOR AI AGENT**: When the `/walk-space` command is invoked, execute the steps in this workflow to map a CommonTools space. Do not explain the workflow - actually run the commands and store data in the memory knowledge graph.
+
 ## Overview
 
-This workflow enables semantic mapping and change tracking of CommonTools spaces using the murmur fragment system. It creates a searchable knowledge graph of charm states, relationships, and evolution over time.
+This workflow enables semantic mapping and change tracking of CommonTools spaces using the memory MCP knowledge graph system. It creates a searchable knowledge graph of charm states, relationships, and evolution over time.
 
 ## Core Concepts
 
@@ -21,10 +23,10 @@ This workflow enables semantic mapping and change tracking of CommonTools spaces
 ### 1. Initial Space Discovery
 
 ```bash
-# List all charms in the space
+# First, list all charms in the space
 ./dist/ct charm ls --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name]
 
-# Generate visual map (optional)
+# Optionally generate visual map
 ./dist/ct charm map --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name]
 ./dist/ct charm map --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net/ --space [space-name] --format dot
 ```
@@ -41,36 +43,40 @@ For each charm discovered:
 # Additional fields as needed based on charm type
 ```
 
-### 3. Create Semantic Fragments
+### 3. Create Knowledge Graph Entries
 
-Use `mcp__murmur__record_fragment` with these patterns:
+Use `mcp__memory__add_memory` to build the knowledge graph:
 
 #### Individual Charm Documentation
-- **Title**: "Charm: [Name] ([Type])"
-- **Type**: "reference"
-- **Tags**: ["charm", "type", "space-name", ...content-tags]
-- **Body**: Include charm ID, type, purpose, content summary, technical details
-- **Priority**: "medium"
+- **Name**: "Charm: [Name] ([Type])"
+- **Episode Body**: Include charm ID, type, purpose, content summary, technical details, connections
+- **Source**: "text" or "json" (for structured charm data)
+- **Source Description**: "charm [type] in [space-name]"
+- **Group ID**: "[space-name]"
 
-#### Space Relationships
-- **Title**: "Space Relationships: [space-name]"
-- **Type**: "documentation"
-- **Tags**: ["relationships", "connections", "data-flow", "space-name"]
-- **Body**: Document all charm connections, data flows, and dependencies
-- **Priority**: "medium"
+#### Space Relationships (JSON Format)
+- **Name**: "Space Relationships: [space-name] @ [timestamp]"
+- **Episode Body**: JSON string containing charm connections and data flows
+  ```json
+  {
+    "space": "space-name",
+    "timestamp": "ISO-timestamp",
+    "relationships": [
+      {"source": "charm-id-1", "target": "charm-id-2", "type": "data-flow"},
+      {"source": "charm-id-2", "target": "charm-id-3", "type": "connection"}
+    ]
+  }
+  ```
+- **Source**: "json"
+- **Source Description**: "relationship mapping for [space-name]"
+- **Group ID**: "[space-name]"
 
 #### Space Snapshot
-- **Title**: "Space Snapshot: [space-name] @ [ISO-timestamp]"
-- **Type**: "reference"
-- **Tags**: ["snapshot", "change-tracking", "space-name", "baseline"]
-- **Priority**: "high"
-- **Metadata**: {
-    "snapshot_time": "ISO-timestamp",
-    "charm_count": N,
-    "is_baseline": true/false,
-    "previous_snapshot": "fragment-id"
-  }
-- **Body**: Complete state of all charms, connections, and metadata
+- **Name**: "Space Snapshot: [space-name] @ [ISO-timestamp]"
+- **Episode Body**: Complete state of all charms, connections, and metadata
+- **Source**: "json"
+- **Source Description**: "complete snapshot of [space-name]"
+- **Group ID**: "[space-name]"
 
 ### 4. Iterative Monitoring
 
@@ -86,16 +92,12 @@ On subsequent scans:
    - Note new or removed connections
 
 3. **Document changes**
-   Use `mcp__murmur__record_fragment`:
-   - **Title**: "Space Changes: [space-name] @ [ISO-timestamp]"
-   - **Type**: "documentation"
-   - **Tags**: ["changes", "space-name", "update"]
-   - **Metadata**: {
-       "previous_snapshot_id": "fragment-id",
-       "change_time": "ISO-timestamp"
-     }
-   - **Body**: Detailed list of all changes detected
-   - **Priority**: "medium"
+   Use `mcp__memory__add_memory`:
+   - **Name**: "Space Changes: [space-name] @ [ISO-timestamp]"
+   - **Episode Body**: Detailed list of all changes detected, including added/removed charms, modified content
+   - **Source**: "text"
+   - **Source Description**: "changes detected in [space-name]"
+   - **Group ID**: "[space-name]"
 
 4. **Create new snapshot**
    - Reference previous snapshot
@@ -105,38 +107,41 @@ On subsequent scans:
 ### 5. Search and Analysis
 
 #### Find specific charms
-Use the murmur fragment tools:
+Use the memory MCP tools:
 
-- **Semantic search**: `mcp__murmur__search_fragments_similar`
+- **Semantic search for nodes**: `mcp__memory__search_memory_nodes`
   - Query: "dog pet border collie"
   - Query: "page recipe outliner component"
+  - Group IDs: ["[space-name]"]
   
-- **Tag-based search**: `mcp__murmur__list_fragments`
-  - Parameters: `tags=["snapshot", "space-name"]`
+- **Search for facts/relationships**: `mcp__memory__search_memory_facts`
+  - Query: "data flow connections"
+  - Group IDs: ["[space-name]"]
 
 #### Track evolution
-- **Get all snapshots**: `mcp__murmur__list_fragments`
-  - Parameters: `tags=["snapshot", "space-name"], type="reference"`
-  - Sort by creation date to see chronological progression
+- **Get recent episodes**: `mcp__memory__get_episodes`
+  - Group ID: "[space-name]"
+  - Last N: 10 (to see recent snapshots)
 
-- **Find all changes**: `mcp__murmur__list_fragments`
-  - Parameters: `tags=["changes", "space-name"], type="documentation"`
+- **Search for changes**: `mcp__memory__search_memory_nodes`
+  - Query: "changes modifications updates snapshot"
+  - Group IDs: ["[space-name]"]
 
-## Fragment Schema Guidelines
+## Memory Episode Guidelines
 
 ### Essential Fields
-- **Title**: Consistent naming pattern for easy identification
-- **Body**: Structured content with clear sections
-- **Type**: `reference` for states, `documentation` for analysis
-- **Tags**: Enable filtering and categorization
-- **Priority**: `high` for snapshots, `medium` for changes
-- **Metadata**: Machine-readable data for automation
+- **Name**: Consistent naming pattern for easy identification (include type in name)
+- **Episode Body**: Structured content (text or JSON)
+- **Source**: "text" for narratives, "json" for structured data, "message" for conversations
+- **Source Description**: Descriptive context including content type and space
+- **Group ID**: Single identifier per space (like a tag, but only one allowed)
 
-### Tagging Strategy
-- Always include space name
-- Add content-specific tags (pet, recipe-type, etc.)
-- Use temporal tags for time-based queries
-- Include relationship tags (connected-to, uses, etc.)
+### Group ID Strategy
+- Use `[space-name]` as the single group ID for all content related to that space
+- Differentiate content types through:
+  - **Name patterns**: Include type ("Charm:", "Snapshot:", "Changes:", "Reflection:")
+  - **Source descriptions**: Be specific about what kind of data it is
+  - **Episode body structure**: Use consistent formats for each type
 
 ## Example Implementation Flow
 
@@ -144,18 +149,18 @@ Use the murmur fragment tools:
 1. List charms using `ct charm ls`
 2. For each charm:
    - Use `ct charm get` to extract data
-   - Create charm fragment with `mcp__murmur__record_fragment`
-3. Document relationships with `mcp__murmur__record_fragment` (type: documentation)
-4. Create baseline snapshot with `mcp__murmur__record_fragment` (type: reference, metadata includes is_baseline: true)
+   - Add to knowledge graph with `mcp__memory__add_memory` (group: "[space-name]")
+3. Document relationships with `mcp__memory__add_memory` (source: "json", group: "[space-name]")
+4. Create baseline snapshot with `mcp__memory__add_memory` (source: "json", group: "[space-name]")
 
 ### Subsequent Scans
 1. List charms again with `ct charm ls`
 2. Extract current data for comparison
-3. Search previous snapshot: `mcp__murmur__search_fragments_by_title` or `mcp__murmur__list_fragments`
+3. Search previous data: `mcp__memory__search_memory_nodes` or `mcp__memory__get_episodes` (group: "[space-name]")
 4. If changes detected:
-   - Record changes with `mcp__murmur__record_fragment` (type: documentation)
-   - Create new snapshot with `mcp__murmur__record_fragment` (reference previous snapshot ID)
-   - Update existing charm fragments with `mcp__murmur__update_fragment`
+   - Record changes with `mcp__memory__add_memory` (group: "[space-name]")
+   - Create new snapshot with `mcp__memory__add_memory` (group: "[space-name]")
+   - Add updated charm states to graph (new episodes build on existing knowledge)
 
 ## Benefits
 
@@ -181,7 +186,8 @@ Enable AI agents to contribute meaningful content to spaces by analyzing user da
 ### Workflow for Content Reflection
 
 1. **Analyze existing content**
-   - Use `mcp__murmur__search_fragments_similar` to find all content about specific topics
+   - Use `mcp__memory__search_memory_nodes` to find all entities about specific topics
+   - Use `mcp__memory__search_memory_facts` to understand relationships
    - Extract actual user data from charm fields (not just metadata)
    - Focus on what the user has written, not technical implementation
 
@@ -210,11 +216,12 @@ Enable AI agents to contribute meaningful content to spaces by analyzing user da
    ```
 
 4. **Document the reflection**
-   Create a fragment recording the AI contribution:
-   - Title: "AI Reflection: [Topic] @ [timestamp]"
-   - Type: "documentation"
-   - Tags: ["ai-reflection", "space-name", "topic"]
-   - Include charm ID and key insights
+   Add to knowledge graph recording the AI contribution:
+   - Name: "AI Reflection: [Topic] @ [timestamp]"
+   - Episode Body: Include charm ID, key insights, observations, questions
+   - Source: "text"
+   - Source Description: "ai reflection on [topic] in [space-name]"
+   - Group ID: "[space-name]"
 
 ### Reflection Content Guidelines
 
