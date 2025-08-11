@@ -11,6 +11,7 @@ import { getAutomergeBytesAtSeq } from "./pit.ts";
 import { createCas } from "./cas.ts";
 import { hexToBytes } from "./bytes.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
+import { decodeChangeHeader } from "./change.ts";
 
 export function synthesizeAndApplyMergeOnBranch(
   db: Database,
@@ -35,16 +36,15 @@ export function synthesizeAndApplyMergeOnBranch(
   });
   const mergeBytes = Automerge.getLastLocalChange(mergedDoc);
   if (!mergeBytes) return { ok: false };
-  const hdr = Automerge.decodeChange(mergeBytes);
-  if (!hdr.hash) return { ok: false };
-  const depsSorted = [...(hdr.deps ?? [])].sort();
+  const hdr = decodeChangeHeader(mergeBytes);
+  const depsSorted = [...hdr.deps].sort();
   const headsSorted = [...currentHeads].sort();
   if (JSON.stringify(depsSorted) !== JSON.stringify(headsSorted)) {
     return { ok: false };
   }
   const cas = createCas(db);
   cas.put("am_change", mergeBytes).catch(() => {});
-  const bytesHash = hexToBytes(hdr.hash);
+  const bytesHash = hexToBytes(hdr.changeHash);
   const seqNo = currentSeqNo + 1;
   db.run(
     `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
@@ -53,19 +53,19 @@ export function synthesizeAndApplyMergeOnBranch(
       doc_id: docId,
       branch_id: branchId,
       seq_no: seqNo,
-      change_hash: hdr.hash,
+      change_hash: hdr.changeHash,
       bytes_hash: bytesHash,
-      deps_json: JSON.stringify(hdr.deps ?? []),
+      deps_json: JSON.stringify(hdr.deps),
       lamport: hdr.seq,
-      actor_id: hdr.actor,
+      actor_id: hdr.actorId,
       tx_id: txId,
     },
   );
-  const newHeads = currentHeads.filter((h) => !(hdr.deps ?? []).includes(h));
-  newHeads.push(hdr.hash);
+  const newHeads = currentHeads.filter((h) => !hdr.deps.includes(h));
+  newHeads.push(hdr.changeHash);
   newHeads.sort();
   updateHeadsShared(db, branchId, newHeads, seqNo, txId);
-  return { ok: true, changeHash: hdr.hash, newHeads, seqNo };
+  return { ok: true, changeHash: hdr.changeHash, newHeads, seqNo };
 }
 
 export function synthesizeAndApplyMergeAcrossBranches(
@@ -95,17 +95,16 @@ export function synthesizeAndApplyMergeAcrossBranches(
   });
   const mergeBytes = Automerge.getLastLocalChange(mergedWithMarker);
   if (!mergeBytes) throw new Error("failed to synthesize merge change");
-  const header = Automerge.decodeChange(mergeBytes);
-  if (!header.hash) throw new Error("merge change missing hash");
+  const header = decodeChangeHeader(mergeBytes);
 
   // deps must be union of both branches' heads
   const wantDeps = [...to.heads, ...from.heads].sort();
-  const gotDeps = [...(header.deps ?? [])].sort();
+  const gotDeps = [...header.deps].sort();
   if (JSON.stringify(wantDeps) !== JSON.stringify(gotDeps)) {
     throw new Error("synthesized merge deps do not match source+target heads");
   }
 
-  const bytesHash = hexToBytes(header.hash);
+  const bytesHash = hexToBytes(header.changeHash);
   db.run(
     `INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`,
     { bytes_hash: bytesHash, bytes: mergeBytes },
@@ -118,17 +117,17 @@ export function synthesizeAndApplyMergeAcrossBranches(
       doc_id: docId,
       branch_id: to.branchId,
       seq_no: seqNo,
-      change_hash: header.hash,
+      change_hash: header.changeHash,
       bytes_hash: bytesHash,
-      deps_json: JSON.stringify(header.deps ?? []),
+      deps_json: JSON.stringify(header.deps),
       lamport: header.seq,
-      actor_id: header.actor,
+      actor_id: header.actorId,
       tx_id: txId,
     },
   );
-  const newHeads = to.heads.filter((h) => !(header.deps ?? []).includes(h));
-  newHeads.push(header.hash);
+  const newHeads = to.heads.filter((h) => !header.deps.includes(h));
+  newHeads.push(header.changeHash);
   newHeads.sort();
   updateHeadsShared(db, to.branchId, newHeads, seqNo, txId);
-  return { changeHash: header.hash, newHeads, seqNo };
+  return { changeHash: header.changeHash, newHeads, seqNo };
 }

@@ -193,6 +193,7 @@ export async function submitTx(
 
     // Per-doc processing
     const results: TxDocResult[] = [];
+    let hasNonOk = false;
 
     for (const write of resolvedWrites) {
       const { docId, branch } = write;
@@ -209,6 +210,7 @@ export async function submitTx(
             reason: "baseHeads mismatch",
             newHeads: current.heads,
           });
+          hasNonOk = true;
           continue;
         }
       }
@@ -237,6 +239,7 @@ export async function submitTx(
             reason: "cannot server-merge",
             newHeads: current.heads,
           });
+          hasNonOk = true;
           continue;
         }
         // refresh state after merge
@@ -336,6 +339,7 @@ export async function submitTx(
           status: "rejected",
           reason: rejectedReason,
         });
+        hasNonOk = true;
         continue;
       }
 
@@ -406,6 +410,11 @@ export async function submitTx(
       results.push({ docId, branch, status: "ok", newHeads, applied });
     }
 
+    // Abort entire tx (rollback) if any doc failed
+    if (hasNonOk) {
+      throw new TxAbortError(results);
+    }
+
     // Success path: commit entire tx atomically (all-or-nothing for multi-doc)
     db.exec("COMMIT;");
 
@@ -420,6 +429,16 @@ export async function submitTx(
   } catch (err) {
     // Failure path: roll back entire tx (all-or-nothing)
     db.exec("ROLLBACK;");
+    if (err instanceof TxAbortError) {
+      const conflicts = err.results.filter((r) => r.status !== "ok");
+      return {
+        txId: 0,
+        results: err.results,
+        conflicts,
+        digests: { changeCount: 0 },
+        stubCrypto: { prevTxHash: "", txBodyHash: "", txHash: "" },
+      };
+    }
     if (err instanceof ReadConflictError) {
       const receipt: TxReceipt = {
         txId: 0,
@@ -446,6 +465,12 @@ class ReadConflictError extends Error {
     _heads: Heads,
   ) {
     super("ReadConflict");
+  }
+}
+
+class TxAbortError extends Error {
+  constructor(public readonly results: TxDocResult[]) {
+    super("TxAbort");
   }
 }
 

@@ -125,7 +125,7 @@ export const pit: AppRouteHandler<typeof import("./new.routes.ts").pit> =
     const { getAutomergeBytesAtSeq } = await import(
       "../../../../storage/src/store/pit.ts"
     );
-    const bytes = getAutomergeBytesAtSeq(db, null, docId, branchId, seq);
+    const bytes = getAutomergeBytesAtSeq(db, docId, branchId, seq);
     return new Response(bytes, {
       status: 200,
       headers: { "content-type": "application/octet-stream" },
@@ -307,7 +307,7 @@ export const snapshot: AppRouteHandler<
   const { getAutomergeBytesAtSeq } = await import(
     "../../../../storage/src/store/pit.ts"
   );
-  const bytes = getAutomergeBytesAtSeq(db, null, docId, branchId, Number(seq));
+  const bytes = getAutomergeBytesAtSeq(db, docId, branchId, Number(seq));
   return new Response(bytes, {
     status: 200,
     headers: { "content-type": "application/octet-stream" },
