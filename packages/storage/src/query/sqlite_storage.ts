@@ -8,6 +8,7 @@ import * as Automerge from "@automerge/automerge";
 import { getAutomergeBytesAtSeq, uptoSeqNo } from "../store/pit.ts";
 import { getBranchState } from "../store/heads.ts";
 import type { Reader } from "./storage.ts";
+import { getPrepared } from "../store/prepared.ts";
 import type { Path, Version } from "../types.ts";
 import { getAtPath as getAtJsonPath } from "../json/path.ts";
 import { isJsonCacheDisabled } from "../config.ts";
@@ -40,9 +41,8 @@ export class SqliteStorageReader implements Reader {
     // Fast path: if reading current tip (no historical epoch), use json_cache
     const cacheDisabled = isJsonCacheDisabled();
     if (at?.epoch == null && !cacheDisabled) {
-      const row = this.db.prepare(
-        `SELECT json, seq_no FROM json_cache WHERE doc_id = :doc_id AND branch_id = :branch_id`,
-      ).get({ doc_id: docId, branch_id: branchId }) as
+      const { selectJsonCache } = getPrepared(this.db as any);
+      const row = selectJsonCache.get({ doc_id: docId, branch_id: branchId }) as
         | { json: string; seq_no: number }
         | undefined;
       if (row && row.seq_no >= seq) {
