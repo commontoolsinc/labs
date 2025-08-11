@@ -14,6 +14,7 @@ import { createCas } from "./cas.ts";
 import { bytesToHex, hexToBytes } from "./bytes.ts";
 import { createStubTx, getLastStubCrypto } from "./tx_chain.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
+import { synthesizeAndApplyMergeOnBranch } from "./merge.ts";
 
 // Local types for the SQLite tx pipeline (server-internal shape per §04/§06)
 export type DocId = string;
@@ -225,8 +226,14 @@ export async function submitTx(
 
       // If server merge allowed and baseHeads mismatch, attempt simple synthesized merge first
       if (!baseOk && write.allowServerMerge && isServerMergeEnabled(db)) {
-        const mergedOk = synthesizeAndApplyMerge(db, current, docId, txId);
-        if (!mergedOk) {
+        const merged = synthesizeAndApplyMergeOnBranch(db, {
+          docId,
+          branchId: current.branchId,
+          currentHeads: current.heads,
+          currentSeqNo: current.seqNo,
+          txId,
+        });
+        if (!merged.ok) {
           results.push({
             docId,
             branch,
@@ -237,9 +244,8 @@ export async function submitTx(
           continue;
         }
         // refresh state after merge
-        const after = getBranchState(db, docId, branch);
-        newHeads = after.heads.slice();
-        seqNo = after.seqNo;
+        newHeads = merged.newHeads.slice();
+        seqNo = merged.seqNo;
       }
 
       // Apply client changes with validations
@@ -490,61 +496,4 @@ function computeTxDigests(
 }
 
 // getLastStubCrypto and createStubTx moved to tx_chain.ts
-
-function synthesizeAndApplyMerge(
-  db: Database,
-  current: { branchId: string; heads: ReadonlyArray<string>; seqNo: number },
-  docId: string,
-  txId: number,
-): boolean {
-  if (current.heads.length < 2) return false;
-  const amBytes = getAutomergeBytesAtSeq(
-    db,
-    docId,
-    current.branchId,
-    current.seqNo,
-  );
-  const baseDoc = Automerge.load(amBytes);
-  const TMP_KEY = "__server_merge_marker";
-  const mergedDoc = Automerge.change(baseDoc, (d: any) => {
-    d[TMP_KEY] = true;
-    delete d[TMP_KEY];
-  });
-  const mergeBytes = Automerge.getLastLocalChange(mergedDoc);
-  if (!mergeBytes) return false;
-  const hdr = Automerge.decodeChange(mergeBytes);
-  if (!hdr.hash) return false;
-  // deps check: ensure deps == current.heads (sorted compare)
-  const depsSorted = [...(hdr.deps ?? [])].sort();
-  const headsSorted = [...current.heads].sort();
-  if (JSON.stringify(depsSorted) !== JSON.stringify(headsSorted)) return false;
-
-  // persist blob via CAS
-  const cas = createCas(db);
-  cas.put("am_change", mergeBytes).catch(() => {});
-  const bytesHash = hexToBytes(hdr.hash);
-
-  // index
-  const seqNo = current.seqNo + 1;
-  db.run(
-    `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-     VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
-    {
-      doc_id: docId,
-      branch_id: current.branchId,
-      seq_no: seqNo,
-      change_hash: hdr.hash,
-      bytes_hash: bytesHash,
-      deps_json: JSON.stringify(hdr.deps ?? []),
-      lamport: hdr.seq,
-      actor_id: hdr.actor,
-      tx_id: txId,
-    },
-  );
-  const newHeads = current.heads.filter((h) => !(hdr.deps ?? []).includes(h));
-  newHeads.push(hdr.hash);
-  newHeads.sort();
-  updateHeadsShared(db, current.branchId, newHeads, seqNo, txId);
-  // snapshots/chunks are handled by caller after continuing
-  return true;
-}
+// merge helper now in merge.ts
