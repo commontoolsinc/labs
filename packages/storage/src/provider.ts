@@ -25,6 +25,7 @@ import { maybeCreateSnapshot } from "./store/snapshots.ts";
 import { maybeEmitChunks } from "./store/chunks.ts";
 import { isServerMergeEnabled } from "./store/flags.ts";
 import { epochForTimestamp, getAutomergeBytesAtSeq } from "./store/pit.ts";
+import { synthesizeAndApplyMergeAcrossBranches } from "./store/merge.ts";
 import * as Automerge from "@automerge/automerge";
 import { closeBranch } from "./store/branches.ts";
 import { updateHeads as updateHeadsShared } from "./store/heads.ts";
@@ -141,60 +142,15 @@ class SQLiteSpace implements SpaceStorage {
     const to = readBranchState(db, docId, toBranch);
 
     // Load PIT docs for both branches at their current seq
-    const fromBytes = getAutomergeBytesAtSeq(db, docId, from.branchId, from.seqNo);
-    const toBytes = getAutomergeBytesAtSeq(db, docId, to.branchId, to.seqNo);
-
-    const a = Automerge.load(toBytes);
-    const b = Automerge.load(fromBytes);
-    const mergedState = Automerge.merge(a, b);
-
-    // Create explicit merge change on target branch with parents = to.heads ∪ from.heads
-    const TMP_KEY = "__server_merge_marker";
-    const mergedWithMarker = Automerge.change(mergedState, (d: any) => {
-      d[TMP_KEY] = true;
-      delete d[TMP_KEY];
-    });
-    const mergeBytes = Automerge.getLastLocalChange(mergedWithMarker);
-    if (!mergeBytes) throw new Error("failed to synthesize merge change");
-    const header: DecodedChangeHeader = decodeChangeHeader(mergeBytes);
-
-    // Validate deps contain both branches' heads
-    const wantDeps = [...to.heads, ...from.heads].sort();
-    const gotDeps = [...header.deps].sort();
-    if (JSON.stringify(wantDeps) !== JSON.stringify(gotDeps)) {
-      throw new Error(
-        "synthesized merge deps do not match source+target heads",
-      );
-    }
-
-    // Persist change blob
-    const bytesHash = hexToBytes(header.changeHash);
-    db.run(
-      `INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`,
-      { bytes_hash: bytesHash, bytes: mergeBytes },
-    );
-
-    // Index on target branch and update heads
-    const seqNo = to.seqNo + 1;
-    db.run(
-      `INSERT OR REPLACE INTO am_change_index(doc_id, branch_id, seq_no, change_hash, bytes_hash, deps_json, lamport, actor_id, tx_id, committed_at)
-       VALUES(:doc_id, :branch_id, :seq_no, :change_hash, :bytes_hash, :deps_json, :lamport, :actor_id, :tx_id, strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
+    const { changeHash, newHeads, seqNo } = synthesizeAndApplyMergeAcrossBranches(
+      db,
       {
-        doc_id: docId,
-        branch_id: to.branchId,
-        seq_no: seqNo,
-        change_hash: header.changeHash,
-        bytes_hash: bytesHash,
-        deps_json: JSON.stringify(header.deps),
-        lamport: header.seq,
-        actor_id: header.actorId,
-        tx_id: createStubTx(db),
+        docId,
+        from,
+        to,
+        txId: createStubTx(db),
       },
     );
-    const newHeads = to.heads.filter((h: string) => !header.deps.includes(h));
-    newHeads.push(header.changeHash);
-    newHeads.sort();
-    updateHeadsShared(db, to.branchId, newHeads, seqNo, 0);
     const snap = maybeCreateSnapshot(
       db,
       docId,
@@ -212,7 +168,7 @@ class SQLiteSpace implements SpaceStorage {
       closeBranch(db, docId, fromBranch, { mergedInto: toBranch });
     }
 
-    return header.changeHash;
+    return changeHash;
   }
 
   // Non-interface helper for tests and graceful shutdown
