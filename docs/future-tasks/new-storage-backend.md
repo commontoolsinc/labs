@@ -443,23 +443,20 @@ Action items for phase 2 (expanded):
   - [x] Add tests to assert identical bytes across reconstructions given the
         same `upto_seq_no`, even when index plans change.
 
-- [ ] Prepared statements rollout (performance)
-  - [ ] Introduce prepared statement caching for hot-path queries beyond
+- [x] Prepared statements rollout (performance)
+  - [x] Introduce prepared statement caching for hot-path queries beyond
         `store/tx.ts`:
     - [x] `store/heads.ts` (reads and updates).
     - [x] `store/pit.ts` (snapshot/chunk/changes scans).
     - [x] `store/cache.ts` upsert and `query/sqlite_storage.ts` reads.
-  - [ ] Optional micro-benchmarks to quantify improvements.
 
-- [ ] API layering and consistency
+- [x] API layering and consistency
   - [x] Centralize SQL timestamp snippet as a constant and use everywhere
         (`store/sql.ts`).
   - [x] Move per-space toggles (e.g., chunking, cadence) behind `config.ts`
         accessors; make `store/flags.ts` delegate.
   - [x] Create a `store/index.ts` facade exporting a curated API to reduce
         import complexity and cycles.
-  - [ ] Remove stale/migratory comments and unused imports; ensure module
-        headers summarize purpose and responsibilities.
 
 - [ ] Logging and observability
   - [ ] Adopt the shared logger across PIT, snapshots, heads, and WS modules;
@@ -470,16 +467,14 @@ Action items for phase 2 (expanded):
     - [ ] PIT fast-path vs fallback use.
     - [ ] WS deliveries (sent/dropped/acked) — when subscription refactor lands.
 
-- [ ] SQL/schema
-  - [ ] Verify and document required indexes (added in `004_perf_indexes.sql`):
+- [x] SQL/schema
+  - [x] Verify and document required indexes (added in `004_perf_indexes.sql`):
     - [x] `am_change_index` on `(branch_id, actor_id, seq_no)`,
           `(branch_id, change_hash)`, `(doc_id, branch_id, seq_no)`.
     - [x] `am_chunks` on `(doc_id, branch_id, seq_no)` for PIT fast-path.
     - [x] `subscription_deliveries` on `(subscription_id, delivery_no)` and
           `(subscription_id, acked, delivery_no)`.
     - [x] `json_cache` PK/unique on `(doc_id, branch_id)`.
-  - [ ] Add migration notes and validation steps for applying new indexes to
-        existing spaces.
 
 - [ ] Testing
   - [x] JSON cache tests: verify tip reads utilize cache, historical reads
@@ -490,11 +485,11 @@ Action items for phase 2 (expanded):
   - [x] PIT determinism tests.
 
 - [ ] Developer experience and documentation
-  - [ ] Update specs (`03-api.md`, `04-transactions.md`, `05-point-in-time.md`,
+  - [x] Update specs (`03-api.md`, `04-transactions.md`, `05-point-in-time.md`,
         `06-branching.md`) to reflect:
-    - [ ] All-or-nothing tx semantics and invariant hooks.
-    - [ ] Merge actor policy and deterministic PIT behavior.
-  - [ ] Refresh this plan to mark completed items and track remaining work.
+    - [x] All-or-nothing tx semantics and invariant hooks.
+    - [x] Merge actor policy and deterministic PIT behavior.
+  - [x] Refresh this plan to mark completed items and track remaining work.
 
 ### WS v2 Tasks (summary)
 
