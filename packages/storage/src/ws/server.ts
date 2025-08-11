@@ -15,7 +15,8 @@ import type {
   UCAN,
 } from "./protocol.ts";
 
-// WS handler for storage v2: supports get and subscribe with Deliver frames and Complete task/return
+// WebSocket v2 handler for storage: multiplexes get/subscribe/tx over a single connection.
+// Deliver frames are decoupled from task/return; initial completion is signaled via Complete.
 export async function handleWs(
   req: Request,
   spaceId: string,

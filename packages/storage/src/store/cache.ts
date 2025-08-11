@@ -1,3 +1,7 @@
+/**
+ * Per-branch JSON cache maintenance for query fast-path.
+ * Upserts the latest materialized JSON when a write advances a branch.
+ */
 import type { Database } from "@db/sqlite";
 
 export function upsertJsonCache(

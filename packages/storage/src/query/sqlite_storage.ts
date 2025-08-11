@@ -1,3 +1,8 @@
+/**
+ * SQLite-backed Reader implementation for the query engine.
+ * Uses a per-branch JSON cache for tip reads when available, falling back to
+ * point-in-time reconstruction for historical versions.
+ */
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 import { getAutomergeBytesAtSeq, uptoSeqNo } from "../store/pit.ts";

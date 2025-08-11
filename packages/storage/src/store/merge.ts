@@ -1,3 +1,10 @@
+/**
+ * Server-side merge helpers.
+ * - synthesizeAndApplyMergeOnBranch(): collapse multiple heads on a single branch by
+ *   synthesizing a no-op change with deps = current heads, then indexing it.
+ * - synthesizeAndApplyMergeAcrossBranches(): merge `from` into `to` using Automerge.merge,
+ *   synthesize a merge change on the target, index, and update heads.
+ */
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 import { getAutomergeBytesAtSeq } from "./pit.ts";
