@@ -169,10 +169,14 @@ export function compileSchema(
     );
   }
   if ((schema as any).const !== undefined) {
-    nodes.push(pushId(intern(pool, { kind: "Const", value: (schema as any).const })));
+    nodes.push(
+      pushId(intern(pool, { kind: "Const", value: (schema as any).const })),
+    );
   }
   if (Array.isArray((schema as any).enum)) {
-    nodes.push(pushId(intern(pool, { kind: "Enum", values: (schema as any).enum })));
+    nodes.push(
+      pushId(intern(pool, { kind: "Enum", values: (schema as any).enum })),
+    );
   }
   if (
     (schema as any).minimum !== undefined ||

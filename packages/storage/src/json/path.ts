@@ -28,5 +28,3 @@ export function setAtPath(root: any, path: JsonPath, value: any): void {
     }
   }
 }
-
-

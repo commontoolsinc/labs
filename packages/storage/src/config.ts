@@ -22,5 +22,7 @@ export function isWsAuthRequired(): boolean {
 
 export function getSpacesDir(): URL {
   const envDir = Deno.env.get("SPACES_DIR");
-  return envDir ? new URL(envDir) : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
+  return envDir
+    ? new URL(envDir)
+    : new URL(`.spaces/`, `file://${Deno.cwd()}/`);
 }

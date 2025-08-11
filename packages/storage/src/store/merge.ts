@@ -71,7 +71,12 @@ export function synthesizeAndApplyMergeAcrossBranches(
   },
 ): { changeHash: string; newHeads: string[]; seqNo: number } {
   const { docId, from, to, txId } = params;
-  const fromBytes = getAutomergeBytesAtSeq(db, docId, from.branchId, from.seqNo);
+  const fromBytes = getAutomergeBytesAtSeq(
+    db,
+    docId,
+    from.branchId,
+    from.seqNo,
+  );
   const toBytes = getAutomergeBytesAtSeq(db, docId, to.branchId, to.seqNo);
   const a = Automerge.load(toBytes);
   const b = Automerge.load(fromBytes);
@@ -120,5 +125,3 @@ export function synthesizeAndApplyMergeAcrossBranches(
   updateHeadsShared(db, to.branchId, newHeads, seqNo, txId);
   return { changeHash: header.hash, newHeads, seqNo };
 }
-
-

@@ -51,6 +51,6 @@ export type StorageGet = Invocation<"/storage/get", DID, GetArgs>;
 export type StorageSubscribe = Invocation<"/storage/subscribe", DID, GetArgs>;
 
 // Tx command
-import type { TxRequest, TxReceipt } from "../interface.ts";
+import type { TxReceipt, TxRequest } from "../interface.ts";
 export type StorageTx = Invocation<"/storage/tx", DID, TxRequest>;
 export type StorageTxResult = TxReceipt;
