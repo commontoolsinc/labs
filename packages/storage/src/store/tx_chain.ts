@@ -58,5 +58,3 @@ export function createStubTx(
     .get() as { tx_id: number };
   return row.tx_id;
 }
-
-

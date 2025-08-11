@@ -1,6 +1,10 @@
 // Minimal UCAN JWT parsing and capability checks for WS v2
 
-export type UcanCap = { can: string; with: string; nb?: Record<string, unknown> };
+export type UcanCap = {
+  can: string;
+  with: string;
+  nb?: Record<string, unknown>;
+};
 export type UcanPayload = {
   iss: string;
   aud?: string;
@@ -53,25 +57,42 @@ export function verifyJWT(token: string): VerifiedUcan {
   return { header, payload, signature };
 }
 
-export function hasCap(payload: UcanPayload, need: { can: string; with: string }): boolean {
+export function hasCap(
+  payload: UcanPayload,
+  need: { can: string; with: string },
+): boolean {
   const caps = payload.caps ?? payload.att ?? [];
   return caps.some((c) => c.can === need.can && c.with === need.with);
 }
 
-export function requireCapsOnRequest(req: Request, caps: Array<{ can: string; with: string }>): Response | null {
+export function requireCapsOnRequest(
+  req: Request,
+  caps: Array<{ can: string; with: string }>,
+): Response | null {
   const token = parseAuthHeader(req.headers.get("authorization") ?? undefined);
-  if (!token) return new Response(JSON.stringify({ error: { message: "Missing Authorization" } }), { status: 401, headers: { "content-type": "application/json" } });
+  if (!token) {
+    return new Response(
+      JSON.stringify({ error: { message: "Missing Authorization" } }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    );
+  }
   try {
     const u = verifyJWT(token);
     for (const need of caps) {
       if (!hasCap(u.payload, need)) {
-        return new Response(JSON.stringify({ error: { message: "Forbidden: missing capability" } }), { status: 403, headers: { "content-type": "application/json" } });
+        return new Response(
+          JSON.stringify({
+            error: { message: "Forbidden: missing capability" },
+          }),
+          { status: 403, headers: { "content-type": "application/json" } },
+        );
       }
     }
     return null;
   } catch (e) {
-    return new Response(JSON.stringify({ error: { message: (e as Error).message } }), { status: 401, headers: { "content-type": "application/json" } });
+    return new Response(
+      JSON.stringify({ error: { message: (e as Error).message } }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    );
   }
 }
-
-

@@ -9,5 +9,3 @@ export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   }
   return hex.join("");
 }
-
-

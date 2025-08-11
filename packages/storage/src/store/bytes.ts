@@ -16,5 +16,3 @@ export function bytesToHex(bytes: Uint8Array): string {
   }
   return hex.join("");
 }
-
-
