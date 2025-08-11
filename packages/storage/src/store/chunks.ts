@@ -1,15 +1,6 @@
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const out = new Uint8Array(digest);
-  const hex: string[] = new Array(out.length);
-  for (let i = 0; i < out.length; i++) {
-    hex[i] = out[i]!.toString(16).padStart(2, "0");
-  }
-  return hex.join("");
-}
+import { sha256Hex } from "./crypto.ts";
 
 export function isChunkingEnabled(db: Database): boolean {
   try {

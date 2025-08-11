@@ -11,6 +11,9 @@ import {
   toDigest as refToDigest,
 } from "merkle-reference/json";
 import { createCas } from "./cas.ts";
+import { hexToBytes, bytesToHex } from "./bytes.ts";
+import { createStubTx, getLastStubCrypto } from "./tx_chain.ts";
+import { updateHeads as updateHeadsShared } from "./heads.ts";
 
 // Local types for the SQLite tx pipeline (server-internal shape per §04/§06)
 export type DocId = string;
@@ -186,10 +189,10 @@ export async function submitTx(
     }
 
     // Build digests placeholders
-    const digestInfo = computeTxDigests(resolvedWrites);
+  const digestInfo = computeTxDigests(resolvedWrites);
 
     // Create provisional tx row (stub cryptographic fields per §04)
-    const txId = createStubTx(db, digestInfo);
+  const txId = createStubTx(db, digestInfo);
 
     // Per-doc processing
     const results: TxDocResult[] = [];
@@ -289,9 +292,9 @@ export async function submitTx(
         }
 
         // CAS: store blob and index
-        const cas = createCas(db);
-        await cas.put("am_change", change.bytes);
-        const bytesHash = changeHashToBytes(header.changeHash);
+         const cas = createCas(db);
+         await cas.put("am_change", change.bytes);
+         const bytesHash = hexToBytes(header.changeHash);
 
         seqNo += 1;
         db.run(
@@ -335,7 +338,7 @@ export async function submitTx(
       }
 
       // Persist heads
-      updateHeads(db, write.branchId as string, newHeads, seqNo, txId);
+      updateHeadsShared(db, write.branchId as string, newHeads, seqNo, txId);
       const snap = maybeCreateSnapshot(
         db,
         docId,
@@ -409,7 +412,7 @@ export async function submitTx(
         console.warn("subscription delivery enqueue failed", e);
       }
 
-      results.push({ docId, branch, status: "ok", newHeads, applied });
+         results.push({ docId, branch, status: "ok", newHeads, applied });
     }
 
     // Commit
@@ -420,11 +423,11 @@ export async function submitTx(
       results,
       conflicts: results.filter((r) => r.status !== "ok"),
       digests: digestInfo,
-      stubCrypto: getLastStubCrypto(db),
+       stubCrypto: getLastStubCrypto(db),
     };
     return receipt;
   } catch (err) {
-    db.exec("ROLLBACK;");
+  db.exec("ROLLBACK;");
     if (err instanceof ReadConflictError) {
       const receipt: TxReceipt = {
         txId: 0,
@@ -460,42 +463,7 @@ function equalHeads(a: Heads, b: Heads): boolean {
   return true;
 }
 
-function updateHeads(
-  db: Database,
-  branchId: string,
-  heads: string[],
-  seqNo: number,
-  epoch: number,
-): void {
-  const headsJson = JSON.stringify(heads);
-  const rootRef = referJson({ heads: [...heads].sort() });
-  const rootHashBytes = new Uint8Array(refToDigest(rootRef));
-  db.run(
-    `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = :root_hash, committed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE branch_id = :branch_id`,
-    {
-      heads_json: headsJson,
-      seq_no: seqNo,
-      tx_id: epoch,
-      branch_id: branchId,
-      root_hash: rootHashBytes,
-    },
-  );
-}
-
-function changeHashToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-function randomBytes(length: number): Uint8Array {
-  const arr = new Uint8Array(length);
-  crypto.getRandomValues(arr);
-  return arr;
-}
+// changeHashToBytes now provided by shared hexToBytes
 
 function computeTxDigests(
   writes: ReadonlyArray<WriteEntry>,
@@ -522,66 +490,7 @@ function computeTxDigests(
   };
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  const hex: string[] = new Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) {
-    hex[i] = bytes[i]!.toString(16).padStart(2, "0");
-  }
-  return hex.join("");
-}
-
-function createStubTx(
-  db: Database,
-  digests: {
-    baseHeadsRoot?: string;
-    changesRoot?: string;
-    changeCount: number;
-  },
-): number {
-  // Fetch prev tx
-  const prev = db.prepare(`SELECT tx_hash FROM tx ORDER BY tx_id DESC LIMIT 1`)
-    .get() as { tx_hash: Uint8Array } | undefined;
-  const prevHash = prev?.tx_hash ?? new Uint8Array();
-  const txBodyHash = randomBytes(32);
-  const txHash = randomBytes(32);
-  const stmt = db.prepare(
-    `INSERT INTO tx(prev_tx_hash, tx_body_hash, tx_hash, server_sig, server_pubkey, client_sig, client_pubkey, ucan_jwt)
-     VALUES(:prev_tx_hash, :tx_body_hash, :tx_hash, :server_sig, :server_pubkey, :client_sig, :client_pubkey, :ucan_jwt)`,
-  );
-  stmt.run({
-    prev_tx_hash: prevHash,
-    tx_body_hash: txBodyHash,
-    tx_hash: txHash,
-    server_sig: randomBytes(64),
-    server_pubkey: randomBytes(32),
-    client_sig: randomBytes(64),
-    client_pubkey: randomBytes(32),
-    ucan_jwt: "stub",
-  });
-  const row = db.prepare(`SELECT tx_id FROM tx ORDER BY tx_id DESC LIMIT 1`)
-    .get() as { tx_id: number };
-  return row.tx_id;
-}
-
-function getLastStubCrypto(
-  db: Database,
-): { prevTxHash: string; txBodyHash: string; txHash: string } {
-  const row = db.prepare(
-    `SELECT prev_tx_hash, tx_body_hash, tx_hash FROM tx ORDER BY tx_id DESC LIMIT 1`,
-  ).get() as
-    | {
-      prev_tx_hash: Uint8Array;
-      tx_body_hash: Uint8Array;
-      tx_hash: Uint8Array;
-    }
-    | undefined;
-  if (!row) return { prevTxHash: "", txBodyHash: "", txHash: "" };
-  return {
-    prevTxHash: bytesToHex(row.prev_tx_hash),
-    txBodyHash: bytesToHex(row.tx_body_hash),
-    txHash: bytesToHex(row.tx_hash),
-  };
-}
+// getLastStubCrypto and createStubTx moved to tx_chain.ts
 
 function synthesizeAndApplyMerge(
   db: Database,
@@ -615,7 +524,7 @@ function synthesizeAndApplyMerge(
   // persist blob via CAS
   const cas = createCas(db);
   cas.put("am_change", mergeBytes).catch(() => {});
-  const bytesHash = changeHashToBytes(hdr.hash);
+  const bytesHash = hexToBytes(hdr.hash);
 
   // index
   const seqNo = current.seqNo + 1;
@@ -637,7 +546,7 @@ function synthesizeAndApplyMerge(
   const newHeads = current.heads.filter((h) => !(hdr.deps ?? []).includes(h));
   newHeads.push(hdr.hash);
   newHeads.sort();
-  updateHeads(db, current.branchId, newHeads, seqNo, txId);
+  updateHeadsShared(db, current.branchId, newHeads, seqNo, txId);
   // snapshots/chunks are handled by caller after continuing
   return true;
 }

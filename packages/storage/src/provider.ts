@@ -27,6 +27,9 @@ import { isServerMergeEnabled } from "./store/flags.ts";
 import { epochForTimestamp, getAutomergeBytesAtSeq } from "./store/pit.ts";
 import * as Automerge from "@automerge/automerge";
 import { closeBranch } from "./store/branches.ts";
+import { updateHeads as updateHeadsShared } from "./store/heads.ts";
+import { hexToBytes } from "./store/bytes.ts";
+import { createStubTx } from "./store/tx_chain.ts";
 
 export interface SQLiteSpaceOptions {
   spacesDir: URL; // directory where per-space sqlite files live
@@ -183,7 +186,7 @@ class SQLiteSpace implements SpaceStorage {
     }
 
     // Persist change blob
-    const bytesHash = changeHashToBytes(header.changeHash);
+    const bytesHash = hexToBytes(header.changeHash);
     db.run(
       `INSERT OR IGNORE INTO am_change_blobs(bytes_hash, bytes) VALUES(:bytes_hash, :bytes);`,
       { bytes_hash: bytesHash, bytes: mergeBytes },
@@ -209,7 +212,7 @@ class SQLiteSpace implements SpaceStorage {
     const newHeads = to.heads.filter((h: string) => !header.deps.includes(h));
     newHeads.push(header.changeHash);
     newHeads.sort();
-    updateHeads(db, to.branchId, newHeads, seqNo, 0);
+    updateHeadsShared(db, to.branchId, newHeads, seqNo, 0);
     const snap = maybeCreateSnapshot(
       db,
       docId,
@@ -236,74 +239,6 @@ class SQLiteSpace implements SpaceStorage {
   }
 }
 
-function updateHeads(
-  db: Database,
-  branchId: string,
-  heads: string[],
-  seqNo: number,
-  epoch: number,
-): void {
-  const headsJson = JSON.stringify(heads);
-  const rootRef = referJson({ heads: [...heads].sort() });
-  const rootHashBytes = new Uint8Array(refToDigest(rootRef));
-  db.run(
-    `UPDATE am_heads SET heads_json = :heads_json, seq_no = :seq_no, tx_id = :tx_id, root_hash = :root_hash, committed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-     WHERE branch_id = :branch_id`,
-    {
-      heads_json: headsJson,
-      seq_no: seqNo,
-      tx_id: epoch,
-      branch_id: branchId,
-      root_hash: rootHashBytes,
-    },
-  );
-}
-
-function changeHashToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  return changeHashToBytes(hex);
-}
-
-function randomBytes(length: number): Uint8Array {
-  const arr = new Uint8Array(length);
-  crypto.getRandomValues(arr);
-  return arr;
-}
-
-function createStubTx(db: Database): number {
-  // Find previous tx hash if any
-  const prev = db.prepare(`SELECT tx_hash FROM tx ORDER BY tx_id DESC LIMIT 1`)
-    .get() as
-      | { tx_hash: Uint8Array }
-      | undefined;
-  const prevHash = prev?.tx_hash ?? new Uint8Array();
-  const txBodyHash = randomBytes(32);
-  const txHash = randomBytes(32);
-  const stmt = db.prepare(
-    `INSERT INTO tx(prev_tx_hash, tx_body_hash, tx_hash, server_sig, server_pubkey, client_sig, client_pubkey, ucan_jwt)
-     VALUES(:prev_tx_hash, :tx_body_hash, :tx_hash, :server_sig, :server_pubkey, :client_sig, :client_pubkey, :ucan_jwt)`,
-  );
-  stmt.run({
-    prev_tx_hash: prevHash,
-    tx_body_hash: txBodyHash,
-    tx_hash: txHash,
-    server_sig: randomBytes(64),
-    server_pubkey: randomBytes(32),
-    client_sig: randomBytes(64),
-    client_pubkey: randomBytes(32),
-    ucan_jwt: "stub",
-  });
-  const row = db.prepare(`SELECT tx_id FROM tx ORDER BY tx_id DESC LIMIT 1`)
-    .get() as { tx_id: number };
-  return row.tx_id;
-}
 
 export function createStorageProvider(): StorageProvider {
   return {

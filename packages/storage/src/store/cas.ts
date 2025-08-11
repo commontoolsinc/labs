@@ -1,5 +1,7 @@
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
+import { hexToBytes } from "./bytes.ts";
+import { sha256Hex } from "./crypto.ts";
 
 export type CasKind = "am_change" | "am_snapshot" | "blob";
 
@@ -17,23 +19,7 @@ export interface CasRecord {
   meta?: CasMeta | null;
 }
 
-function hexToBytes(hex: string): Uint8Array {
-  const out = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    out[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-  }
-  return out;
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const out = new Uint8Array(digest);
-  const hex: string[] = new Array(out.length);
-  for (let i = 0; i < out.length; i++) {
-    hex[i] = out[i]!.toString(16).padStart(2, "0");
-  }
-  return hex.join("");
-}
+// hex/sha helpers now imported from shared modules
 
 export function createCas(db: Database) {
   return {
