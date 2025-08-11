@@ -49,7 +49,7 @@ export class SqliteStorageReader implements Reader {
       }
     }
     // PIT path (snapshot/chunk/changes → Automerge → JSON)
-    const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
+    const bytes = getAutomergeBytesAtSeq(this.db, docId, branchId, seq);
     const json = Automerge.toJS(Automerge.load(bytes));
     return getAtPath(json, path);
   }
@@ -88,7 +88,7 @@ export class SqliteStorageReader implements Reader {
       }
     }
     if (json === undefined) {
-      const bytes = getAutomergeBytesAtSeq(this.db, null, docId, branchId, seq);
+      const bytes = getAutomergeBytesAtSeq(this.db, docId, branchId, seq);
       json = Automerge.toJS(Automerge.load(bytes));
     }
     return {

@@ -27,7 +27,7 @@ export function maybeCreateSnapshot(
   if (seqNo === 0 || (seqNo % cadence) !== 0) return false;
 
   // Reconstruct document bytes at upto seqNo using PIT path
-  const amBytes = getAutomergeBytesAtSeq(db, null, docId, branchId, seqNo);
+  const amBytes = getAutomergeBytesAtSeq(db, docId, branchId, seqNo);
   const doc = Automerge.load(amBytes);
   const snapshotBytes = Automerge.save(doc);
 
