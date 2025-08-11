@@ -73,6 +73,7 @@ Deno.test({
 
   // Submit tx over WS
   const txSent = new Promise<void>((resolve) => {
+    const changeB64 = btoa(String.fromCharCode(...c1));
     const tx = {
       invocation: {
         iss: "did:key:test",
@@ -83,7 +84,7 @@ Deno.test({
           writes: [{
             ref: { docId, branch },
             baseHeads: [],
-            changes: [{ bytes: c1 }],
+            changes: [{ bytes: changeB64 }],
           }],
         },
         prf: [],

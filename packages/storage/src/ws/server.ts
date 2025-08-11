@@ -246,7 +246,39 @@ class SessionState {
     const { openSpaceStorage } = await import("../provider.ts");
     const spacesDir = new URL(Deno.env.get("SPACES_DIR") ?? `file://./.spaces/`);
     const s = await openSpaceStorage(this.spaceId, { spacesDir });
-    const receipt = await s.submitTx(inv.args);
+
+    // Normalize WS tx args: decode base64 or numeric arrays to Uint8Array
+    const decodeB64 = (s: string): Uint8Array => {
+      const bin = atob(s);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    };
+    const toBytes = (v: unknown): Uint8Array => {
+      if (v instanceof Uint8Array) return v;
+      if (typeof v === "string") return decodeB64(v);
+      if (Array.isArray(v)) return new Uint8Array(v as number[]);
+      // last resort: try to coerce objects with numeric indices
+      try {
+        const arr = Array.from(v as any);
+        return new Uint8Array(arr as number[]);
+      } catch {
+        return new Uint8Array();
+      }
+    };
+    const req = inv.args as any;
+    const normalized = {
+      clientTxId: req.clientTxId,
+      reads: (req.reads ?? []).map((r: any) => ({ ref: r.ref, heads: r.heads })),
+      writes: (req.writes ?? []).map((w: any) => ({
+        ref: w.ref,
+        baseHeads: w.baseHeads ?? [],
+        changes: (w.changes ?? []).map((c: any) => ({ bytes: toBytes(c.bytes) })),
+        allowServerMerge: w.allowServerMerge,
+      })),
+    };
+
+    const receipt = await s.submitTx(normalized as any);
     const ret: TaskReturn<StorageTx, StorageTxResult> = {
       the: "task/return",
       of: jobId,
