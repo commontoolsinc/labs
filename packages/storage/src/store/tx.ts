@@ -454,7 +454,7 @@ function equalHeads(a: Heads, b: Heads): boolean {
   return true;
 }
 
-// changeHashToBytes now provided by shared hexToBytes
+//
 
 function computeTxDigests(
   writes: ReadonlyArray<WriteEntry>,
@@ -481,5 +481,6 @@ function computeTxDigests(
   };
 }
 
-// getLastStubCrypto and createStubTx moved to tx_chain.ts
-// merge helper now in merge.ts
+// Implementation notes:
+// - getLastStubCrypto and createStubTx are defined in tx_chain.ts
+// - Merge synthesis helpers are defined in merge.ts
