@@ -4,6 +4,7 @@
  * undefined, returns full JSON.
  */
 import * as Automerge from "@automerge/automerge";
+import { getAtPath, setAtPath } from "../json/path.ts";
 
 export function project(docBytes: Uint8Array, paths?: string[][]): Uint8Array {
   const doc = Automerge.load(docBytes);
@@ -18,30 +19,4 @@ function projectJson(root: unknown, paths: string[][]): unknown {
     setAtPath(out, p, getAtPath(root as any, p));
   }
   return out;
-}
-
-function getAtPath(obj: any, path: string[]): any {
-  let cur = obj;
-  for (const key of path) {
-    if (cur == null) return undefined;
-    cur = cur[key];
-  }
-  return cur;
-}
-
-function setAtPath(obj: any, path: string[], value: any): void {
-  let cur = obj;
-  for (let i = 0; i < path.length; i++) {
-    const key = path[i]!;
-    const isLast = i === path.length - 1;
-    if (isLast) {
-      cur[key] = value;
-    } else {
-      const next = cur[key];
-      if (next == null || typeof next !== "object") {
-        cur[key] = {};
-      }
-      cur = cur[key];
-    }
-  }
 }

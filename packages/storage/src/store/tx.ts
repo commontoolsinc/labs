@@ -11,7 +11,7 @@ import {
   toDigest as refToDigest,
 } from "merkle-reference/json";
 import { createCas } from "./cas.ts";
-import { hexToBytes, bytesToHex } from "./bytes.ts";
+import { bytesToHex, hexToBytes } from "./bytes.ts";
 import { createStubTx, getLastStubCrypto } from "./tx_chain.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
 
@@ -189,10 +189,10 @@ export async function submitTx(
     }
 
     // Build digests placeholders
-  const digestInfo = computeTxDigests(resolvedWrites);
+    const digestInfo = computeTxDigests(resolvedWrites);
 
     // Create provisional tx row (stub cryptographic fields per §04)
-  const txId = createStubTx(db, digestInfo);
+    const txId = createStubTx(db, digestInfo);
 
     // Per-doc processing
     const results: TxDocResult[] = [];
@@ -292,9 +292,9 @@ export async function submitTx(
         }
 
         // CAS: store blob and index
-         const cas = createCas(db);
-         await cas.put("am_change", change.bytes);
-         const bytesHash = hexToBytes(header.changeHash);
+        const cas = createCas(db);
+        await cas.put("am_change", change.bytes);
+        const bytesHash = hexToBytes(header.changeHash);
 
         seqNo += 1;
         db.run(
@@ -412,7 +412,7 @@ export async function submitTx(
         console.warn("subscription delivery enqueue failed", e);
       }
 
-         results.push({ docId, branch, status: "ok", newHeads, applied });
+      results.push({ docId, branch, status: "ok", newHeads, applied });
     }
 
     // Commit
@@ -423,11 +423,11 @@ export async function submitTx(
       results,
       conflicts: results.filter((r) => r.status !== "ok"),
       digests: digestInfo,
-       stubCrypto: getLastStubCrypto(db),
+      stubCrypto: getLastStubCrypto(db),
     };
     return receipt;
   } catch (err) {
-  db.exec("ROLLBACK;");
+    db.exec("ROLLBACK;");
     if (err instanceof ReadConflictError) {
       const receipt: TxReceipt = {
         txId: 0,

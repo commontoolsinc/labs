@@ -4,17 +4,14 @@ import { getAutomergeBytesAtSeq, uptoSeqNo } from "../store/pit.ts";
 import { getBranchState } from "../store/heads.ts";
 import type { Reader } from "./storage.ts";
 import type { Path, Version } from "../types.ts";
+import { getAtPath as getAtJsonPath } from "../json/path.ts";
 
 function isObject(x: any): x is Record<string, any> {
   return x !== null && typeof x === "object" && !Array.isArray(x);
 }
 
 function getAtPath(doc: any, path: Path): any {
-  let cur = doc;
-  for (const seg of path) {
-    cur = isObject(cur) || Array.isArray(cur) ? (cur as any)[seg] : undefined;
-  }
-  return cur;
+  return getAtJsonPath(doc, path);
 }
 
 export class SqliteStorageReader implements Reader {
