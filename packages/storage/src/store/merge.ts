@@ -7,6 +7,7 @@
  */
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
+import { getEnvBoolean } from "../config.ts";
 import { getAutomergeBytesAtSeq } from "./pit.ts";
 import { createCas } from "./cas.ts";
 import { hexToBytes } from "./bytes.ts";
@@ -37,6 +38,13 @@ export function synthesizeAndApplyMergeOnBranch(
   const mergeBytes = Automerge.getLastLocalChange(mergedDoc);
   if (!mergeBytes) return { ok: false };
   const hdr = decodeChangeHeader(mergeBytes);
+  // Enforce server-merge actor policy for single-branch collapse when enabled
+  const enforceActor = getEnvBoolean("ENFORCE_SERVER_MERGE_ACTOR", false);
+  if (enforceActor && hdr.actorId !== "server") {
+    return { ok: false };
+  }
+  // Optional: enforce a deterministic server actorId when configured
+  // Do not enforce actor policy here; keep single-branch merge permissive
   const depsSorted = [...hdr.deps].sort();
   const headsSorted = [...currentHeads].sort();
   if (JSON.stringify(depsSorted) !== JSON.stringify(headsSorted)) {
@@ -96,6 +104,7 @@ export function synthesizeAndApplyMergeAcrossBranches(
   const mergeBytes = Automerge.getLastLocalChange(mergedWithMarker);
   if (!mergeBytes) throw new Error("failed to synthesize merge change");
   const header = decodeChangeHeader(mergeBytes);
+  // Actor policy not enforced for cross-branch merge in current MVP
 
   // deps must be union of both branches' heads
   const wantDeps = [...to.heads, ...from.heads].sort();

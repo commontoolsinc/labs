@@ -12,6 +12,7 @@ import {
 } from "merkle-reference/json";
 import { bytesToHex } from "./bytes.ts";
 import type { Database } from "@db/sqlite";
+import { getPrepared } from "./prepared.ts";
 
 export function getOrCreateDoc(db: Database, docId: DocId): void {
   db.run(`INSERT OR IGNORE INTO docs(doc_id) VALUES (:doc_id);`, {
@@ -50,12 +51,13 @@ export function getBranchState(
   docId: DocId,
   branch: BranchName,
 ): BranchState {
-  const stmt = db.prepare(
+  // Placeholder for future prepared heads selectors
+  void getPrepared(db);
+  const row = db.prepare(
     `SELECT h.branch_id as branch_id, h.heads_json as heads_json, h.seq_no as seq_no, h.tx_id as tx_id, h.root_hash as root_hash
      FROM am_heads h JOIN branches b ON (h.branch_id = b.branch_id)
      WHERE b.doc_id = :doc_id AND b.name = :name`,
-  );
-  const row = stmt.get({ doc_id: docId, name: branch }) as
+  ).get({ doc_id: docId, name: branch }) as
     | {
       branch_id: string;
       heads_json: string;

@@ -18,6 +18,7 @@ import { createStubTx, getLastStubCrypto } from "./tx_chain.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
 import { synthesizeAndApplyMergeOnBranch } from "./merge.ts";
 import { getPrepared } from "./prepared.ts";
+import { runInvariants } from "./invariants.ts";
 
 // Local types for the SQLite tx pipeline (server-internal shape per §04/§06)
 export type DocId = string;
@@ -379,6 +380,14 @@ export async function submitTx(
           seqNo,
           json: jsonStr,
         });
+        // Run registered invariants; any throw aborts this doc and the tx overall
+        runInvariants({
+          db,
+          docId,
+          branchId: write.branchId as string,
+          seqNo,
+          json,
+        });
       } catch (e) {
         results.push({
           docId,
@@ -386,6 +395,7 @@ export async function submitTx(
           status: "conflict",
           reason: `invariant/materialize failed: ${(e as Error).message}`,
         });
+        hasNonOk = true;
         continue;
       }
 
