@@ -79,12 +79,11 @@ Summary and code links
 
 - Added a per-version JSON cache (writes via `store/cache.ts`) used by
   `query/sqlite_storage.ts` for the `read()` and `readDocAtVersion()` methods.
-  The cache is keyed by
-  `${docId}\u0001${branchId}\u0001${seq}` and avoids repeatedly calling
-  `Automerge.load()`/`Automerge.toJS()` for the same document version during
-  query evaluation. This significantly reduces the cost of traversals with
-  higher link budgets and prevents superlinear slowdowns in recursive VDOM
-  validations observed in benchmarks.
+  The cache is keyed by `${docId}\u0001${branchId}\u0001${seq}` and avoids
+  repeatedly calling `Automerge.load()`/`Automerge.toJS()` for the same document
+  version during query evaluation. This significantly reduces the cost of
+  traversals with higher link budgets and prevents superlinear slowdowns in
+  recursive VDOM validations observed in benchmarks.
 - Follow-up: consider an LRU cap and/or invalidation hooks on write paths to
   bound memory in long-lived server processes.
 
@@ -411,8 +410,8 @@ packages/storage/src/
     provider submitTx currently lacks invariant hooks; to add during Tx pipeline
     work.
 - Toolshed/WS and feature flags:
-  - WS v2 implemented in `packages/storage/src/ws/*`; Toolshed mounts new
-    routes behind `ENABLE_NEW_STORAGE=1`.
+  - WS v2 implemented in `packages/storage/src/ws/*`; Toolshed mounts new routes
+    behind `ENABLE_NEW_STORAGE=1`.
 - Baseline execution (on this branch):
   - deno task check: PASSED.
   - deno test --allow-env --allow-ffi --allow-read --allow-write: FAILED early
