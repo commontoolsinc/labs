@@ -484,7 +484,7 @@ Action items for phase 2 (expanded):
   - [ ] Merge actor/seq tests for synthesized merges.
   - [x] PIT determinism tests.
 
-- [ ] Developer experience and documentation
+- [x] Developer experience and documentation
   - [x] Update specs (`03-api.md`, `04-transactions.md`, `05-point-in-time.md`,
         `06-branching.md`) to reflect:
     - [x] All-or-nothing tx semantics and invariant hooks.
