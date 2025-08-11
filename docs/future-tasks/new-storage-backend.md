@@ -10,9 +10,13 @@ Summary and code links
   invariants and final route wiring behind a flag.
 - Flags (defaults): ENABLE_NEW_STORAGE=0, ENABLE_SERVER_MERGE=0.
 - Provider entry: packages/storage/src/provider.ts
-- SQLite modules: packages/storage/src/sqlite/db.ts, schema.sql, heads.ts,
-  change.ts, pit.ts, projection.ts, snapshots.ts, branches.ts, cas.ts,
-  query_ir.ts, query_eval.ts
+- SQLite modules (current layout under `store/` and `query/`):
+  - Core store: `packages/storage/src/store/*` including `db.ts`, `schema.sql`,
+    `heads.ts`, `change.ts`, `pit.ts`, `projection.ts`, `snapshots.ts`,
+    `branches.ts`, `cas.ts`, `chunks.ts`, `tx.ts`, `tx_chain.ts`, `merge.ts`,
+    `bytes.ts`, `crypto.ts`, `cache.ts`
+  - Query: `packages/storage/src/query/*` including `sqlite_storage.ts`, IR/eval
+  - WS: `packages/storage/src/ws/*`
 - Toolshed routes (flagged): packages/toolshed/routes/storage/new/* and flag
   plumbing in packages/toolshed/env.ts
 - CLI tasks: packages/storage/deno.json new-storage:* and packages/storage/cli/*
@@ -55,13 +59,16 @@ Summary and code links
   over per-space DB files with PRAGMAs (§02).
 - Change decoding and heads: `change.ts`, `heads.ts` use `@automerge/automerge`
   to parse headers and update heads (§01, §02, §04).
-- PIT & projection: `pit.ts`, `projection.ts` implement snapshot+chunk fast-path
-  and fallback (§05, §07).
-- Transactions & crypto chain: `tx.ts`, `tx_chain.ts` implement pipeline,
-  digests, and signatures (§04).
-- CAS primitives: `cas.ts` over `am_change_blobs` and friends (§02, §06).
-- Branching/merge: `branches.ts` for creation/closure/merge semantics (§06).
-- Snapshots: `snapshots.ts` with cadence policies and pruning (§07).
+- PIT & projection: `store/pit.ts`, `store/projection.ts` implement
+  snapshot+chunk fast-path and fallback (§05, §07). PIT signature simplified to
+  `(db, docId, branchId, targetSeq)`.
+- Transactions & crypto chain: `store/tx.ts`, `store/tx_chain.ts` implement
+  pipeline, digests, and signatures (§04). JSON cache writes are factored into
+  `store/cache.ts` and invoked post-commit.
+- CAS primitives: `store/cas.ts` over `am_change_blobs` and friends (§02, §06).
+- Branching/merge: `store/branches.ts` for creation/closure; merge synthesis is
+  centralized in `store/merge.ts` and used by both provider and tx pipeline.
+- Snapshots: `store/snapshots.ts` with cadence policies and pruning (§07).
 - Queries/subscriptions: `query_ir.ts`, `query_eval.ts`, `query_ws.ts` and SQL
   tables in §11 (§08–§12).
 - UCAN: `ucan.ts` to validate cap and nb digests (§13).
@@ -70,16 +77,16 @@ Summary and code links
 
 ### Runtime performance notes (query read path)
 
-- Added a per-version JSON cache in
-  `packages/storage/src/query/sqlite_storage.ts` for the `read()` and
-  `readDocAtVersion()` methods. The cache is keyed by
+- Added a per-version JSON cache (writes via `store/cache.ts`) used by
+  `query/sqlite_storage.ts` for the `read()` and `readDocAtVersion()` methods.
+  The cache is keyed by
   `${docId}\u0001${branchId}\u0001${seq}` and avoids repeatedly calling
   `Automerge.load()`/`Automerge.toJS()` for the same document version during
   query evaluation. This significantly reduces the cost of traversals with
   higher link budgets and prevents superlinear slowdowns in recursive VDOM
   validations observed in benchmarks.
-  - Follow-up: consider an LRU cap and/or invalidation hooks on write paths to
-    bound memory in long-lived server processes.
+- Follow-up: consider an LRU cap and/or invalidation hooks on write paths to
+  bound memory in long-lived server processes.
 
 ### Query traversal/budgeting semantics (updated)
 
@@ -390,8 +397,9 @@ packages/storage/src/
     fast-path and fallback; projection helper exists.
 - Merge semantics / branching:
   - Spec ref: docs/specs/storage/06-branching.md (§06).
-  - Implementation: sqlite/branches.ts; client-driven merges validated by
-    submitTx logic (deps ⊆ heads); optional server-merge remains TODO/flagged.
+  - Implementation: `store/branches.ts`; client-driven merges validated by
+    submitTx logic (deps ⊆ heads). Server merge synthesis is available behind a
+    flag and implemented in `store/merge.ts`.
 - Query spec references for later phases:
   - docs/specs/storage/09-query-ir.md, 10-query-evaluation.md,
     11-query-schema.md, 12-query-types.md (IR, evaluation algorithm, schema,
@@ -402,13 +410,9 @@ packages/storage/src/
   - Spec ref: docs/specs/storage/14-invariants.md (§04 numbering in plan);
     provider submitTx currently lacks invariant hooks; to add during Tx pipeline
     work.
-- Toolshed route scaffolding and feature flags:
-  - packages/toolshed/routes/storage/new/* present (new.index.ts, new.routes.ts,
-    new.handlers.ts) — currently wired to a Map-backed SpaceStorage placeholder
-    and throws until SQLite provider is injected.
-  - Feature flag not yet plumbed; propose ENABLE_NEW_STORAGE in
-    packages/toolshed/env.ts and conditional router mounting in
-    packages/toolshed/index.ts/create-app.
+- Toolshed/WS and feature flags:
+  - WS v2 implemented in `packages/storage/src/ws/*`; Toolshed mounts new
+    routes behind `ENABLE_NEW_STORAGE=1`.
 - Baseline execution (on this branch):
   - deno task check: PASSED.
   - deno test --allow-env --allow-ffi --allow-read --allow-write: FAILED early
