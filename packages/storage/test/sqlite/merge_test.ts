@@ -229,8 +229,8 @@ Deno.test("test_no_close_if_not_collapsed", async () => {
   const s1 = await space.getBranchState(docId, main);
   assertEquals(s1.heads, [h1]);
 
-  let b0 = Automerge.init();
-  let b1 = Automerge.change(b0, (doc: any) => {
+  const b0 = Automerge.init();
+  const b1 = Automerge.change(b0, (doc: any) => {
     doc.n = 2;
   });
   const c2 = Automerge.getLastLocalChange(b1)!;
