@@ -71,33 +71,40 @@ Single endpoint per space: /api/storage/new/v2/:space/ws
 
 - Client → Server
   - UCAN-wrapped invocations for commands:
-    - /storage/get { consumerId, query }
-    - /storage/subscribe { consumerId, query }
+    - /storage/hello { clientId, sinceEpoch }
+    - /storage/get { consumerId, query } // one-shot; no server state kept
+    - /storage/subscribe { consumerId, query } // register in-memory only
     - /storage/tx { ... }
-  - ack { streamId: DID, deliveryNo: number }
+  - ack { type: "ack", streamId: DID, epoch: number }
 - Server → Client
-  - deliver { streamId: DID, filterId: string, deliveryNo: number, payload: any
-    }
+  - deliver { type: "deliver", streamId: DID, epoch: number, docs: Array<{
+    docId, branch?: string, version: { epoch: number, branch?: string }, kind:
+    "snapshot"|"delta", body: unknown }> }
   - task/return complete tied to job: { the: "task/return", of: jobId, is: {
-    type: "complete", at, streamId, filterId } }
+    type: "complete", at: { epoch, heads?, seq? }, streamId, filterId } }
 
-At-least-once delivery: payloads are persisted in subscription_deliveries.
-Resume is based on last acked deliveryNo per (streamId, filterId).
+At-least-once delivery: deliveries are grouped by global tx epoch. The server
+does not persist per-delivery payloads. Instead, it persists a compact
+"client-known" map of the last epoch per document per client (see Schema).
 
-Ordering: deliveries are strictly increasing by deliveryNo per (streamId,
-filterId).
+Resume: on connect the client calls /storage/hello with { sinceEpoch }. The
+server conservatively redelivers snapshots when the client's sinceEpoch is
+behind the server's persisted client-known epoch for a document.
 
-### Client → Server
+Ordering: all documents bundled in a deliver frame share the same epoch. Acks
+confirm receipt of all docs in that epoch for that connection.
+
+### Client → Server (illustrative legacy-style frames)
 
 ```jsonc
-{ "op": "hello", "protocol": "v1", "clientId": "xyz" }
+{ "op": "hello", "protocol": "v2", "clientId": "xyz", "sinceEpoch": 123 }
 
-{ "op": "subscribe", "queryId": "uuid", "spaceDid": "did:key:...", 
+{ "op": "subscribe", "queryId": "uuid", "spaceDid": "did:key:...",
   "docId": "doc:<ref>", "path": ["users"], "schema": {...}, "maxLinkDepth": 3 }
 
 { "op": "unsubscribe", "queryId": "uuid" }
 
-{ "op": "ack", "queryId": "uuid", "epoch": 12345 }
+{ "op": "ack", "epoch": 12345 }
 ```
 
 ### Server → Client
@@ -121,9 +128,22 @@ filterId).
 
 ## Subscription Management
 
-- **Subscribe**: compile schema to IR, evaluate once, compute Touch Set,
-  register reverse indexes
-- **Unsubscribe**: remove from reverse indexes, optionally GC unused IR nodes
-- **Ack model**: client acks with highest `epoch` fully processed per query
-- **Backpressure**: if unacked updates exceed threshold, server pauses sending
-  to that subscription
+- **Subscribe**: compile schema to IR, evaluate once, compute Touch Set, and
+  register reverse indexes in memory for this WS session. No DB rows are stored
+  for subscriptions.
+- **Get**: same as Subscribe but the server sends initial deliveries and a
+  complete message, then discards the query state immediately.
+- **Initial backfill**: when (get|subscribe) arrives, evaluate the query and
+  compute the set of docs it refers to. For each doc, consult the in-memory
+  "already sent on this socket" set and the persisted client-known table. If the
+  client is missing the doc (or conservatively behind), send the current
+  snapshot in a single deliver frame for the current epoch. Then send complete.
+- **Ack model**: client acks with the epoch number; the server updates the
+  client-known table for all docs included in that epoch for this connection and
+  clears its in-memory map of pending docs for that epoch.
+- **Change processing**: after each tx, use the provenance graph to determine
+  which queries may be affected. Re-evaluate incrementally and produce the set
+  of docs per client that require updates. Batch those into a single deliver
+  frame per epoch per client.
+- **Backpressure**: if socket bufferedAmount is high, coalesce updates but keep
+  epoch grouping.

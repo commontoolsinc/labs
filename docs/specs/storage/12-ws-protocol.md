@@ -12,22 +12,30 @@ untied Deliver frames. Initial snapshot completion is signaled by a task/return
 ## Client → Server
 
 - UCAN-wrapped invocations for commands:
+  - `/storage/hello` { clientId: string, sinceEpoch: number }
   - `/storage/get` { consumerId, query }
   - `/storage/subscribe` { consumerId, query }
   - `/storage/tx` { reads, writes, ... }
 - Ack checkpoint:
-  - `{ type: "ack", streamId: DID, deliveryNo: number }`
+  - `{ type: "ack", streamId: DID, epoch: number }`
 
 ## Server → Client
 
-- Deliver (untied to any job):
+- Deliver (untied to any job, grouped by epoch):
   ```json
   {
     "type": "deliver",
     "streamId": "did:key:...",
-    "filterId": "123",
-    "deliveryNo": 42,
-    "payload": {/* change */}
+    "epoch": 12345,
+    "docs": [
+      {
+        "docId": "doc:...",
+        "branch": "main",
+        "version": { "epoch": 12345, "branch": "main" },
+        "kind": "snapshot",
+        "body": {/* JSON snapshot or delta */}
+      }
+    ]
   }
   ```
 - Complete (task/return tied to the job):
@@ -50,11 +58,15 @@ untied Deliver frames. Initial snapshot completion is signaled by a task/return
 
 ## Semantics
 
-- At-least-once delivery; clients dedupe by `deliveryNo`.
-- Ordering: strictly increasing `deliveryNo` per `(streamId, filterId)`.
-- Resume: server persists last acked `deliveryNo`; upon reconnect, resume from
-  last ack.
-- Backpressure: server monitors socket bufferedAmount and batches sends.
+- At-least-once delivery; clients dedupe by `epoch` and doc ids.
+- Ordering: all documents in a deliver share the same `epoch` (global tx id).
+- Resume: server persists per-client per-document knowledge
+  `{ clientId, docId,
+  epoch }`. On reconnect, client provides `sinceEpoch`.
+  The server will redeliver snapshots for any doc whose persisted epoch is
+  greater than the client's `sinceEpoch`.
+- Backpressure: server monitors socket bufferedAmount and batches sends per
+  epoch; multiple epochs can be in-flight before acks.
 
 ## Authorization
 

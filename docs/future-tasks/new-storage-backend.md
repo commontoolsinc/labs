@@ -516,6 +516,46 @@ Action items for phase 2 (expanded):
 - Resolve deno test import-map issue or restrict default test set to avoid
   mirrored .conductor paths.
 
+### Subscriptions Refactor (query-driven, client-known epochs)
+
+- [ ] Protocol and behavior
+  - [x] Spec: update `08-subscriptions.md` and `12-ws-protocol.md` to define
+        epoch-grouped Deliver, `/storage/hello {clientId, sinceEpoch}`, and ack
+        by epoch
+  - [ ] Spec: document subscription as query of shape `(docId, path, schema)`;
+        single-document subscribe is `(docId, [], false)` with root always
+        delivered
+  - [ ] Spec: describe conservative resend when client `sinceEpoch` < persisted
+        client-known epoch
+- [ ] Schema
+  - [x] Add `client_known_docs(client_id, doc_id, epoch)` with index
+  - [ ] Migration to create the table (SQLite)
+- [ ] Server implementation
+  - [ ] WS hello: accept `{clientId, sinceEpoch}` and store in session state
+  - [ ] Keep active subscriptions in memory per socket; drop on close
+  - [ ] Maintain in-memory `sentDocsByEpoch` map per socket until ack; on ack
+        update `client_known_docs` for all docs in that epoch
+  - [ ] On get/subscribe: evaluate query, compute doc set, and deliver any docs
+        the client does not have (per in-memory sent set OR table OR
+        sinceEpoch). Then send `complete` for the invocation
+  - [ ] After each tx: use provenance graph to compute per-client doc updates
+        across all active subscriptions; coalesce by current tx epoch and
+        deliver once per client
+- [ ] Deltas and snapshots
+  - [ ] For docs with a known prior epoch for the client, send an efficient
+        representation (JSON snapshot for now; delta path can be added later)
+  - [ ] For docs with no known epoch (or conservative mismatch), send full
+        snapshot
+- [ ] Tests
+  - [ ] Unit: session hello stores `sinceEpoch`; ack updates table and clears
+        pending
+  - [ ] Unit: initial backfill respects in-memory sent set and table, resends
+        snapshot when `sinceEpoch` is behind table
+  - [ ] Integration: subscribe to query spanning many docs; verify single
+        deliver per epoch with all required docs; ack enables next epoch
+  - [ ] Integration: reconnect with lower `sinceEpoch`; server resends snapshots
+        for docs ahead of client
+
 ## Cleanup tasks
 
 - [x] Links are wrong, they are json pointer but should be string[]
