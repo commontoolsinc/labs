@@ -1,7 +1,7 @@
 import { getLogger } from "@commontools/utils/logger";
 import type { MemorySpace, URI } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
-import { TYPE } from "./builder/types.ts";
+import { Module, Recipe, TYPE } from "./builder/types.ts";
 import type { Cancel } from "./cancel.ts";
 import {
   getCellOrThrow,
@@ -43,8 +43,17 @@ const logger = getLogger("scheduler", {
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
 
+export interface TelemetryAnnotations {
+  recipe: Recipe;
+  module: Module;
+  reads: NormalizedFullLink[];
+  writes: NormalizedFullLink[];
+}
+
 export type Action = (tx: IExtendedStorageTransaction) => any;
+export type AnnotatedAction = Action & TelemetryAnnotations;
 export type EventHandler = (tx: IExtendedStorageTransaction, event: any) => any;
+export type AnnotatedEventHandler = EventHandler & TelemetryAnnotations;
 
 /**
  * Reactivity log.
@@ -199,7 +208,7 @@ export class Scheduler implements IScheduler {
   async run(action: Action): Promise<any> {
     this.runtime.telemetry.submit({
       type: "scheduler.run",
-      action: action.toString(),
+      action,
     });
 
     logger.debug(() => [
@@ -331,6 +340,10 @@ export class Scheduler implements IScheduler {
               `Before: ${JSON.stringify(change.before)}`,
               `After: ${JSON.stringify(change.after)}`,
             ]);
+            this.runtime.telemetry.submit({
+              type: "cell.update",
+              change: change,
+            });
 
             if (change.address.type !== "application/json") {
               logger.debug(() => [
@@ -430,6 +443,10 @@ export class Scheduler implements IScheduler {
     // Process next event from the event queue. Will mark more docs as dirty.
     const handler = this.eventQueue.shift();
     if (handler) {
+      this.runtime.telemetry.submit({
+        type: "scheduler.invocation",
+        handler,
+      });
       const finalize = (error?: unknown) => {
         try {
           if (error) this.handleError(error as Error, handler);

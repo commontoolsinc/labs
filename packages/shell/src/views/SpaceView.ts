@@ -94,8 +94,7 @@ export class XSpaceView extends BaseView {
         `)
       // TBD if we want to use x-charm or ct-render directly here
       : html`
-        <x-charm-view .charm="${defaultRecipe}" .rt="${this
-          .rt}"></x-charm-view>
+        <x-charm-view .charm="${defaultRecipe}"></x-charm-view>
       `;
 
     return html`

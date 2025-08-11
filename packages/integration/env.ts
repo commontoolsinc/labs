@@ -13,6 +13,11 @@ export const FRONTEND_URL = ensureTrailing(
 
 export const HEADLESS = envToBool(Deno.env.get("HEADLESS"));
 
+// Some tests take a SPACE_NAME, targeting a specific space.
+// If not defined, uses a random UUID.
+export const SPACE_NAME = Deno.env.get("SPACE_NAME") ??
+  globalThis.crypto.randomUUID();
+
 function ensureTrailing(value: string): string {
   return value.substr(-1) === "/" ? value : `${value}/`;
 }

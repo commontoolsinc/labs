@@ -4,8 +4,16 @@
  */
 import { css, CSSResult, LitElement } from "lit";
 import { variablesCSS } from "../styles/variables.ts";
+import { DebugController } from "./debug-controller.ts";
+
+// Set to `true` to render outlines everytime a
+// LitElement renders.
+const DEBUG_RENDERER = false;
 
 export abstract class BaseElement extends LitElement {
+  // deno-lint-ignore no-unused-vars
+  #debugController = new DebugController(this, DEBUG_RENDERER);
+
   /**
    * Get base styles including CSS variables
    */

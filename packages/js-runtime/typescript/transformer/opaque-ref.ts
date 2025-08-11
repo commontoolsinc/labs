@@ -2,6 +2,7 @@ import ts from "typescript";
 import { getLogger } from "@commontools/utils/logger";
 import {
   containsOpaqueRef,
+  isEventHandlerJsxAttribute,
   isOpaqueRefType,
   isSimpleOpaqueRefAccess,
 } from "./types.ts";
@@ -607,6 +608,12 @@ export function createOpaqueRefTransformer(
           // Only transform if we're inside a JSX expression
           const hasOpaqueRef = containsOpaqueRef(node, checker);
           const isInJsx = isInsideJsxExpression(node);
+
+          // If this CallExpression is ultimately inside a JSX event handler attribute (e.g., onClick),
+          // do not wrap the entire call in derive. Let child nodes handle OpaqueRefs.
+          if (isInJsx && isEventHandlerJsxAttribute(node)) {
+            return ts.visitEachChild(node, visit, context);
+          }
 
           if (hasOpaqueRef && isInJsx) {
             // log(`Found function call transformation at ${sourceFile.fileName}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`);

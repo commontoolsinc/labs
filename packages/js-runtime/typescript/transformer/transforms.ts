@@ -106,9 +106,10 @@ export function createIfElseCall(
 }
 
 function getSimpleName(ref: ts.Expression): string | undefined {
-  // If we only have one token, we can use it as the param name
-  if (ref.getLastToken() === undefined) {
-    return ref.getText();
+  // Only use simple identifiers as parameter names
+  // e.g., "state" or "count" but not "state.count" or complex expressions
+  if (ts.isIdentifier(ref)) {
+    return ref.text;
   }
   return undefined;
 }
@@ -124,6 +125,16 @@ export function transformExpressionWithOpaqueRef(
   sourceFile: ts.SourceFile,
   context: ts.TransformationContext,
 ): ts.Expression {
+  // If this expression is part of a JSX event handler attribute, do not transform.
+  // Event handlers like onClick expect functions, not derived values.
+  if (
+    ts.isJsxExpression(expression) && expression.parent &&
+    ts.isJsxAttribute(expression.parent)
+  ) {
+    const attrName = expression.parent.name.getText();
+    if (attrName.startsWith("on")) return expression;
+  }
+
   // Handle property access expressions (e.g., person.name.length)
   if (ts.isPropertyAccessExpression(expression)) {
     // Get the OpaqueRef being accessed

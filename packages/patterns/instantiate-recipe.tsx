@@ -2,12 +2,8 @@
 import {
   Cell,
   Default,
-  compileAndRun,
-  derive,
   h,
   handler,
-  ifElse,
-  JSONSchema,
   NAME,
   navigateTo,
   recipe,
@@ -64,49 +60,39 @@ export const Counter = recipe<RecipeState>("Counter", (state) => {
   };
 });
 
+interface FactoryInput {
+  // Provided by the shell; not used directly here
+  allCharms: Default<unknown[], []>;
+}
 
-const InputSchema = {
-  type: "object",
-  properties: {
-    allCharms: {
-      type: "array",
-      items: {
-        type: "object",
-        asCell: true,
-      },
-    },
-  },
-  required: ["allCharms"],
-} as const satisfies JSONSchema;
+// No additional outputs beyond name and UI
+type FactoryOutput = {
+  [NAME]: string;
+  [UI]: any;
+};
 
-// Define output schema
-const OutputSchema = {
-  type: "object",
-  properties: {},
-  required: [],
-} as const satisfies JSONSchema;
+type InputEvent = { detail: { message: string } };
 
-const newCounter = handler(
-  { type: 'object', properties: { detail: { type: 'object', properties: { message: { type: 'string' } } } } },
-  { type: 'object' },
-  (e, _) => {
-    const charm = Counter({ value: Math.round(Math.random()*10) });
-    return navigateTo(charm);
+const newCounter = handler<InputEvent, Record<string, never>>((_, __) => {
+  const charm = Counter({ value: Math.round(Math.random() * 10) });
+  return navigateTo(charm);
+});
+
+export default recipe<FactoryInput, FactoryOutput>(
+  "Counter Factory",
+  (_) => {
+    return {
+      [NAME]: "Counter Factory",
+      [UI]: (
+        <div>
+          <ct-message-input
+            button-text="Add"
+            placeholder="New counter"
+            appearance="rounded"
+            onct-send={newCounter({})}
+          />
+        </div>
+      ),
+    };
   },
 );
-
-export default recipe(InputSchema, OutputSchema, (_) => {
-  return {
-    [NAME]: "Counter Factory",
-    [UI]: (
-      <div>
-        <ct-message-input
-          button-text="Add"
-          placeholder="New counter"
-          appearance="rounded"
-          onct-send={newCounter({ })}
-        />
-      </div>
-    ),
-  };
-});
