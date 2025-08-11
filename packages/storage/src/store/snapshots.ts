@@ -2,6 +2,7 @@ import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 import { getAutomergeBytesAtSeq } from "./pit.ts";
 import { createCas } from "./cas.ts";
+import { getSnapshotCadence } from "../config.ts";
 
 // Basic snapshot cadence policy: every N changes per branch
 const DEFAULT_CADENCE = 5;
@@ -23,7 +24,7 @@ export function maybeCreateSnapshot(
   txId: number,
   opts?: SnapshotOptions,
 ): boolean {
-  const cadence = opts?.cadence ?? DEFAULT_CADENCE;
+  const cadence = opts?.cadence ?? getSnapshotCadence(db, DEFAULT_CADENCE);
   if (seqNo === 0 || (seqNo % cadence) !== 0) return false;
 
   // Reconstruct document bytes at upto seqNo using PIT path

@@ -9,6 +9,7 @@ import type { BranchId, DocId } from "../interface.ts";
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
 import { getLogger } from "@commontools/utils/logger";
+import { getPrepared } from "./prepared.ts";
 const log = getLogger("storage:pit", { level: "info", enabled: true });
 
 /**
@@ -55,24 +56,18 @@ export function getAutomergeBytesAtSeq(
   targetSeq: number,
 ): Uint8Array {
   // Fast path: find latest snapshot with upto_seq_no <= targetSeq
-  const snap = db.prepare(
-    `SELECT snapshot_id, upto_seq_no, bytes
-     FROM am_snapshots
-     WHERE doc_id = :doc_id AND branch_id = :branch_id
-       AND upto_seq_no <= :target
-     ORDER BY upto_seq_no DESC
-     LIMIT 1`,
-  ).get({ doc_id: docId, branch_id: branchId, target: targetSeq }) as
+  const { selectLatestSnapshot, selectChunksRange, selectChangeBytesRange } =
+    getPrepared(db);
+  const snap = selectLatestSnapshot.get({
+    doc_id: docId,
+    branch_id: branchId,
+    target: targetSeq,
+  }) as
     | { snapshot_id: string; upto_seq_no: number; bytes: Uint8Array }
     | undefined;
 
   if (snap) {
-    const chunks = db.prepare(
-      `SELECT bytes FROM am_chunks
-       WHERE doc_id = :doc_id AND branch_id = :branch_id
-         AND seq_no > :from_seq AND seq_no <= :to_seq
-       ORDER BY seq_no`,
-    ).all({
+    const chunks = selectChunksRange.all({
       doc_id: docId,
       branch_id: branchId,
       from_seq: snap.upto_seq_no,
@@ -108,14 +103,7 @@ export function getAutomergeBytesAtSeq(
 
   // Fallback path: start from snapshot (if any) then apply changes.
   const baseDoc = snap ? Automerge.load(snap.bytes) : Automerge.init();
-  const rows = db.prepare(
-    `SELECT b.bytes AS bytes
-     FROM am_change_index i
-     JOIN am_change_blobs b ON (i.bytes_hash = b.bytes_hash)
-     WHERE i.doc_id = :doc_id AND i.branch_id = :branch_id
-       AND i.seq_no > :from_seq AND i.seq_no <= :to_seq
-     ORDER BY i.seq_no`,
-  ).all({
+  const rows = selectChangeBytesRange.all({
     doc_id: docId,
     branch_id: branchId,
     from_seq: snap?.upto_seq_no ?? 0,
