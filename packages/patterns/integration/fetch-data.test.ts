@@ -97,7 +97,7 @@ describe("fetchData() test", () => {
       ["repoUrl"],
       "https://github.com/commontoolsinc/labs",
     );
-    await sleep(1000);
+    await sleep(5000);
 
     // Now refresh the page by navigating to the same URL
     console.log("Refreshing the page...");
