@@ -330,13 +330,13 @@ function factoryFromRecipe<T, R>(
     toJSON: () => recipeToJSON(recipeFactory),
   };
 
-  const module: Module & toJSON = {
-    type: "recipe",
-    implementation: recipe,
-    toJSON: () => moduleToJSON(module),
-  };
-
   const recipeFactory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+    const module: Module & toJSON = {
+      type: "recipe",
+      implementation: recipeFactory,
+      toJSON: () => moduleToJSON(module),
+    };
+
     const outputs = opaqueRef<R>();
     const node: NodeRef = {
       module,
