@@ -108,14 +108,16 @@ export function toJSONWithLegacyAliases(
   }
 
   if (isRecord(value) || isRecipe(value)) {
-    if (isRecipe(value) && typeof (value as toJSON).toJSON === "function") {
-      value = (value as toJSON).toJSON();
-    }
+    const valueToProcess =
+      (isRecipe(value) && typeof (value as toJSON).toJSON === "function")
+        ? (value as toJSON).toJSON() as Record<string, any>
+        : (value as Record<string, any>);
+
     const result: any = {};
     let hasValue = false;
-    for (const key in value as any) {
+    for (const key in valueToProcess as any) {
       const jsonValue = toJSONWithLegacyAliases(
-        value[key],
+        valueToProcess[key],
         paths,
         ignoreSelfAliases,
         [...path, key],
