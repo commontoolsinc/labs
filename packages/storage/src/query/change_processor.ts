@@ -119,6 +119,8 @@ export class ChangeProcessor {
     for (const [qid, root] of this.subs.queryRoot.entries()) {
       const rootKey = SubscriptionIndex.keyEval(root);
       let intersects = dirty.has(rootKey);
+      // If the changed doc is the root target of this query, treat as intersecting
+      if (!intersects && root.doc === delta.doc) intersects = true;
       if (!intersects) {
         const old = this.queryTouches.get(qid) || new Set<Link>();
         for (const l of old) {

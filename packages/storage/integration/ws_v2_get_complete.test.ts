@@ -1,4 +1,5 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import * as Automerge from "@automerge/automerge";
 
 Deno.test({
   name: "WS v2: get-only returns complete and no deliver",
@@ -21,7 +22,11 @@ Deno.test({
   const p = new Deno.Command(Deno.execPath(), {
     args: ["run", "-A", "./deno.ts"],
     cwd: new URL("../", import.meta.url),
-    env: { SPACES_DIR: spacesDir.toString(), PORT: String(PORT) },
+    env: {
+      SPACES_DIR: spacesDir.toString(),
+      PORT: String(PORT),
+      ENABLE_SERVER_MERGE: "1",
+    },
   }).spawn();
 
   await new Promise((r) => setTimeout(r, 300));
@@ -34,27 +39,73 @@ Deno.test({
   );
 
   // Wait for complete
+  // Seed the doc/branch first
+  const pre = new WebSocket(
+    `ws://localhost:${PORT}/api/storage/new/v2/${
+      encodeURIComponent(spaceDid)
+    }/ws`,
+  );
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("complete timeout")), 3000);
-    ws.onopen = () => {
-      const msg = {
+    const t = setTimeout(() => reject(new Error("seed timeout")), 3000);
+    pre.onmessage = (e) => {
+      const m = JSON.parse(e.data as string);
+      if (m && m.the === "task/return" && m.is?.txId !== undefined) {
+        clearTimeout(t);
+        resolve();
+      }
+    };
+    pre.onopen = () => {
+      const preDoc = Automerge.change(Automerge.init<any>(), (x: any) => {
+        x.seed = true;
+      });
+      const changeB64 = btoa(
+        String.fromCharCode(...Automerge.getLastLocalChange(preDoc)!),
+      );
+      pre.send(JSON.stringify({
         invocation: {
           iss: "did:key:test",
-          cmd: "/storage/get",
+          cmd: "/storage/tx",
           sub: spaceDid,
-          args: { consumerId: "g1", query: {} },
+          args: {
+            reads: [],
+            writes: [{
+              ref: { docId: "doc:s1", branch: "main" },
+              baseHeads: [],
+              changes: [{ bytes: changeB64 }],
+            }],
+          },
           prf: [],
         },
         authorization: { signature: [], access: {} },
-      };
-      ws.send(JSON.stringify(msg));
+      }));
     };
+  });
+  pre.close();
+
+  await new Promise<void>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("complete timeout")), 3000);
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data as string);
       if (m && m.the === "task/return" && m.is?.type === "complete") {
         clearTimeout(t);
         resolve();
       }
+    };
+    ws.onopen = () => {
+      const msg = {
+        invocation: {
+          iss: "did:key:test",
+          cmd: "/storage/get",
+          sub: spaceDid,
+          args: {
+            consumerId: "g1",
+            query: { docId: "doc:s1", path: [], schema: false },
+          },
+          prf: [],
+        },
+        authorization: { signature: [], access: {} },
+      };
+      ws.send(JSON.stringify(msg));
     };
   });
 

@@ -24,7 +24,11 @@ Deno.test({
   const p = new Deno.Command(Deno.execPath(), {
     args: ["run", "-A", "./deno.ts"],
     cwd: new URL("../", import.meta.url),
-    env: { SPACES_DIR: spacesDir.toString(), PORT: String(PORT) },
+    env: {
+      SPACES_DIR: spacesDir.toString(),
+      PORT: String(PORT),
+      ENABLE_SERVER_MERGE: "1",
+    },
   }).spawn();
 
   // Small delay to boot
@@ -37,87 +41,83 @@ Deno.test({
     }/ws`,
   );
 
-  const subscribed = new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("subscribe timeout")), 5000);
-    ws.onopen = () => {
+  // Seed using a separate socket so subscribe backfill will still deliver on primary ws
+  {
+    const wsSeed = new WebSocket(
+      `ws://localhost:${PORT}/api/storage/new/v2/${
+        encodeURIComponent(spaceDid)
+      }/ws`,
+    );
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("seed timeout")), 3000);
+      wsSeed.onmessage = (e) => {
+        const m = JSON.parse(e.data as string);
+        if (m && m.the === "task/return" && m.is?.txId !== undefined) {
+          clearTimeout(t);
+          resolve();
+        }
+      };
+      wsSeed.onopen = () => {
+        const pre = Automerge.change(Automerge.init<any>(), (x: any) => {
+          x.init = true;
+        });
+        const preChange = Automerge.getLastLocalChange(pre)!;
+        const preTx = {
+          invocation: {
+            iss: "did:key:test",
+            cmd: "/storage/tx",
+            sub: spaceDid,
+            args: {
+              reads: [],
+              writes: [{
+                ref: { docId: "doc:s1", branch: "main" },
+                baseHeads: [],
+                changes: [{ bytes: btoa(String.fromCharCode(...preChange)) }],
+              }],
+            },
+            prf: [],
+          },
+          authorization: { signature: [], access: {} },
+        };
+        wsSeed.send(JSON.stringify(preTx));
+      };
+    });
+    wsSeed.close();
+  }
+
+  const gotDeliver = await new Promise<{ epoch: number; docs: any[] }>(
+    (resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("deliver timeout")), 5000);
       const msg = {
         invocation: {
           iss: "did:key:test",
           cmd: "/storage/subscribe",
           sub: spaceDid,
-          args: { consumerId: "c1", query: {} },
+          args: {
+            consumerId: "c1",
+            query: { docId: "doc:s1", path: [], schema: false },
+          },
           prf: [],
         },
         authorization: { signature: [], access: {} },
       };
-      ws.send(JSON.stringify(msg));
-    };
-    ws.onmessage = (e) => {
-      try {
-        const m = JSON.parse(e.data as string);
-        if (m && m.the === "task/return" && m.is?.type === "complete") {
-          clearTimeout(t);
-          resolve();
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-  });
-  await subscribed;
-
-  // Prepare a small doc change
-  const docId = "doc:s1";
-  const branch = "main";
-  let d = Automerge.init<any>();
-  d = Automerge.change(d, (x: any) => {
-    x.value = 1;
-  });
-  const c1 = Automerge.getLastLocalChange(d)!;
-
-  // Submit tx over WS
-  const txSent = new Promise<void>((resolve) => {
-    const changeB64 = btoa(String.fromCharCode(...c1));
-    const tx = {
-      invocation: {
-        iss: "did:key:test",
-        cmd: "/storage/tx",
-        sub: spaceDid,
-        args: {
-          reads: [],
-          writes: [{
-            ref: { docId, branch },
-            baseHeads: [],
-            changes: [{ bytes: changeB64 }],
-          }],
-        },
-        prf: [],
-      },
-      authorization: { signature: [], access: {} },
-    };
-    ws.send(JSON.stringify(tx));
-    resolve();
-  });
-  await txSent;
-
-  // Expect a deliver and ack it
-  const gotDeliver = await new Promise<{ deliveryNo: number }>(
-    (resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("deliver timeout")), 5000);
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+      else ws.onopen = () => ws.send(JSON.stringify(msg));
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data as string);
         if (m && m.type === "deliver") {
           try {
-            assert(typeof m.deliveryNo === "number");
+            assert(typeof m.epoch === "number");
+            assert(Array.isArray(m.docs));
             ws.send(
               JSON.stringify({
                 type: "ack",
                 streamId: spaceDid,
-                deliveryNo: m.deliveryNo,
+                epoch: m.epoch,
               }),
             );
             clearTimeout(t);
-            resolve({ deliveryNo: m.deliveryNo });
+            resolve({ epoch: m.epoch, docs: m.docs });
           } catch (err) {
             clearTimeout(t);
             reject(err);
@@ -127,7 +127,8 @@ Deno.test({
     },
   );
 
-  assert(gotDeliver.deliveryNo >= 1);
+  assert(gotDeliver.epoch >= 1);
+  assert(gotDeliver.docs.length >= 1);
 
   ws.close();
   try {
