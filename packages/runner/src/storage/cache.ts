@@ -629,6 +629,9 @@ export class Replica {
     // We limit changes to the non-stale changes, since we don't have a good
     // way of determining that in the "pull" event handler.
     const changes = Differential.create().update(this, current);
+    // Any current facts can be deleted from the nursery
+    // (though we probably don't have any)
+    this.nursery.merge(current, Nursery.delete);
     // We can put stale facts in the heap, but not in the nursery.
     // We also don't want to update the document map with the stale version.
     this.heap.merge(
@@ -846,9 +849,20 @@ export class Replica {
   async commit(transaction: ITransaction, source?: IStorageTransaction) {
     const { facts, claims } = transaction;
     const changes = Differential.create().update(this, facts);
+    // Some facts may be redundant, so only include the changed ones.
+    // This will also exclude facts that match the nursery version, but these
+    // should have already been sent.
+    const changedAddresses = [...changes].map((change) => change.address);
+    const changedFacts = facts.filter((fact) =>
+      changedAddresses.find((addr) =>
+        fact.of === addr.id && fact.the === addr.type
+      )
+    );
     // Store facts in a nursery so that subsequent changes will be build
     // optimistically assuming that push will succeed.
-    this.nursery.merge(facts, Nursery.put);
+    // We only add the changedFacts here, because the facts that are unchanged
+    // will have an invalid cause chain (we're not going to write them).
+    this.nursery.merge(changedFacts, Nursery.put);
     // Notify storage subscribers about the committed changes.
     this.subscription.next({
       type: "commit",
@@ -857,13 +871,13 @@ export class Replica {
       source,
     });
     // Track all our pending changes
-    facts.map((fact) =>
+    changedFacts.map((fact) =>
       this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
     );
 
     // These push transaction that will commit desired state to a remote.
     const commitPromise = this.remote.transact({
-      changes: getChanges([...claims, ...facts] as Statement[]),
+      changes: getChanges([...claims, ...changedFacts] as Statement[]),
     });
     this.commitPromises.add(commitPromise);
     const result = await commitPromise;
@@ -872,8 +886,9 @@ export class Replica {
     // If transaction fails we delete facts from the nursery so that new
     // changes will not build upon rejected state. If there are other inflight
     // transactions that already were built upon our facts they will also fail.
+    // It's possible we should also purge claims here, but I'm not doing that.
     if (result.error) {
-      for (const fact of facts) {
+      for (const fact of changedFacts) {
         this.pendingNurseryChanges.deleteValue(
           toKey(fact),
           fact.cause.toString(),
@@ -884,10 +899,10 @@ export class Replica {
 
       // Checkout current state of facts so we can compute
       // changes after we update underlying stores.
-      const checkout = Differential.checkout(this, facts);
+      const checkout = Differential.checkout(this, changedFacts);
 
       // Any returned facts should be purged from the nursery
-      this.nursery.merge(facts, Nursery.delete);
+      this.nursery.merge(changedFacts, Nursery.delete);
 
       const fact = result.error.name === "ConflictError" &&
         result.error.conflict.actual;
@@ -911,7 +926,7 @@ export class Replica {
       const { since } = commit.is;
       // Turn facts into revisions corresponding with the commit.
       const revisions = [
-        ...facts.map((fact) => ({ ...fact, since })),
+        ...changedFacts.map((fact) => ({ ...fact, since })),
         // We strip transaction info so we don't duplicate same data
         { ...commit, is: { since: commit.is.since } },
       ];
@@ -920,19 +935,19 @@ export class Replica {
       // Avoid sending out updates to subscribers if it's a fact we already
       // know about in the nursery.
       const { resolved, current } = this.updateLocalFacts(revisions);
+
+      // Evict redundant facts which we'll merge into `heap` so that reads
+      // will occur from `heap`. This way future changes upstream will not get
+      // shadowed by prior local changes.
+      // I only evict the current facts, but if you never have more than one
+      // task in commit, this could be simpler and you could evict all of them.
+      this.nursery.merge(current, Nursery.evict);
       // Turn facts into revisions corresponding with the commit.
       this.heap.merge(
         revisions,
         Replica.put,
         (revision) => revision === undefined || !resolved.has(revision),
       );
-
-      // Evict redundant facts which we just merged into `heap` so that reads
-      // will occur from `heap`. This way future changes upstream will not get
-      // shadowed by prior local changes.
-      // I only evict the fresh facts, but if you never have more than one
-      // call of commit, you could evict all of them.
-      this.nursery.merge(current, Nursery.evict);
 
       // This is mostly redundant, since any current Fact isn't pending, but
       // this also purges Unclaimed items in case the server ever sends them.
@@ -965,7 +980,6 @@ export class Replica {
 
     // Remove "fresh" facts which we are about to merge into `heap`
     this.nursery.merge(current, Nursery.delete);
-
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
@@ -1009,7 +1023,9 @@ export class Replica {
    *
    * This function removes pending entries when we see them, and
    * returns a set containing the facts we already had sent, but have
-   * now resolved, as well as the facts that are now current.
+   * now resolved, as well as the facts that are now current. When we
+   * receive the last pending fact, it's current (and will be in both
+   * collections).
    *
    * @param revisions the facts we received from the server
    * @returns an object with the set of pending facts that were resolved and
@@ -1768,6 +1784,13 @@ export class StorageManager implements IStorageManager {
   }
 }
 
+/**
+ * Converts a set of statements into the hierarchical structure used in some
+ * parts of the code, like network protocol.
+ *
+ * @param statements statements to be converted
+ * @returns a MemoryChange object that contains the changes
+ */
 export const getChanges = (
   statements: Iterable<Statement>,
 ) => {
