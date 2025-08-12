@@ -39,6 +39,9 @@ describe("shell charm tests", () => {
     await page.applyConsoleFormatter();
 
     const state = await shell.login();
+
+    await sleep(2000);
+
     assertEquals(state.spaceName, spaceName);
     assertEquals(state.activeCharmId, charmId);
     assertEquals(
@@ -46,7 +49,6 @@ describe("shell charm tests", () => {
       identity.serialize().privateKey,
     );
 
-    await sleep(2000);
     let handle = await page.$(
       "ct-button",
       { strategy: "pierce" },
