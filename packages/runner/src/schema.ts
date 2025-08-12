@@ -396,12 +396,10 @@ export function validateAndTransform(
             rootSchema,
           },
           tx,
-          false,
-          synced,
         );
       }
     }
-    return createCell(runtime, link, tx, false, synced);
+    return createCell(runtime, link, tx);
   }
 
   // If there is no schema, return as raw data via query result proxy
