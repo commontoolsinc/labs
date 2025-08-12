@@ -3,6 +3,7 @@ import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
 import { decodeChangeHeader } from "../../src/store/change.ts";
 import { openSqlite } from "../../src/store/db.ts";
+import { computeGenesisHead, createGenesisDoc } from "../../src/index.ts";
 
 Deno.test("test_server_merge_guarded_by_flag", async () => {
   // Ensure flag disabled
@@ -17,11 +18,11 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
   const branch = "main";
 
   // Create two concurrent heads on main
-  const s0 = await space.getOrCreateBranch(docId, branch);
-  assertEquals(s0.heads, []);
+  await space.getOrCreateBranch(docId, branch);
 
-  // First change from empty base
-  const a0 = Automerge.init();
+  // First change from genesis base
+  const gen = computeGenesisHead(docId);
+  const a0 = createGenesisDoc<any>(docId);
   const a1 = Automerge.change(a0, (doc: any) => {
     doc.x = 1;
   });
@@ -31,14 +32,14 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [],
+      baseHeads: [gen],
       changes: [{ bytes: c1 }],
     }],
   });
   const s1 = await space.getBranchState(docId, branch);
   assertEquals(s1.heads, [h1]);
 
-  // Second independent change derived from empty base (deps = []) to create fork
+  // Second independent change derived from empty deps to create fork
   const b0 = Automerge.init();
   const b1 = Automerge.change(b0, (doc: any) => {
     doc.y = 2;
@@ -59,7 +60,19 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
   // Now submit with baseHeads mismatch and expect conflict (server merge disabled)
   const r = await space.submitTx({
     reads: [],
-    writes: [{ ref: { docId, branch }, baseHeads: [], changes: [] }],
+    writes: [{
+      ref: { docId, branch },
+      baseHeads: ["wrong"],
+      changes: [{
+        bytes: Automerge.getLastLocalChange(
+          Automerge.change(Automerge.init(), (d: any) => {
+            (d as any).__noop = true;
+            delete (d as any).__noop;
+          }),
+        )!,
+      }],
+      allowServerMerge: true,
+    }],
   });
   assertEquals(r.results[0]?.status, "conflict");
   assertEquals(r.results[0]?.reason, "baseHeads mismatch");
@@ -75,12 +88,25 @@ Deno.test("test_server_merge_enabled", async () => {
   const spacesDir = new URL(`file://${tmpDir}/`);
   const did = "did:key:merge-tests-enabled";
   const space = await openSpaceStorage(did, { spacesDir });
+  // Ensure space-level setting enables server merge regardless of env
+  {
+    const dbUrl = new URL(`./${did}.sqlite`, spacesDir);
+    const { db, close } = await openSqlite({ url: dbUrl });
+    try {
+      db.run(
+        `INSERT OR REPLACE INTO space_settings(key, value_json) VALUES('settings', :json)`,
+        { json: JSON.stringify({ enableServerMerge: true }) },
+      );
+    } finally {
+      await close();
+    }
+  }
 
   const docId = "doc:merge-enabled";
   const branch = "main";
 
   // Create two concurrent heads on main
-  const a0 = Automerge.init();
+  const a0 = createGenesisDoc<any>(docId);
   const a1 = Automerge.change(a0, (doc: any) => {
     doc.a = 1;
   });
@@ -90,7 +116,7 @@ Deno.test("test_server_merge_enabled", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [],
+      baseHeads: [computeGenesisHead(docId)],
       changes: [{ bytes: c1 }],
     }],
   });
@@ -117,7 +143,7 @@ Deno.test("test_server_merge_enabled", async () => {
   // Submit with baseHeads mismatch, expect server-merge to collapse to 1 head
   const r = await space.submitTx({
     reads: [],
-    writes: [{ ref: { docId, branch }, baseHeads: [], changes: [] }],
+    writes: [{ ref: { docId, branch }, baseHeads: ["wrong"], changes: [] }],
   });
   assertEquals(r.results[0]?.status, "ok");
   assertEquals(r.results[0]?.applied, 0); // synthesized merge only
@@ -141,7 +167,7 @@ Deno.test("test_close_branch_post_merge", async () => {
   await space.getOrCreateBranch(docId, feature);
 
   // Put a change on feature
-  const d0 = Automerge.init();
+  const d0 = createGenesisDoc<any>(docId);
   const d1 = Automerge.change(d0, (doc: any) => {
     doc.title = "feat";
   });
@@ -150,13 +176,13 @@ Deno.test("test_close_branch_post_merge", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch: feature },
-      baseHeads: [],
+      baseHeads: [computeGenesisHead(docId)],
       changes: [{ bytes: cf }],
     }],
   });
 
   // Put a base change on main too
-  const e0 = Automerge.init();
+  const e0 = createGenesisDoc<any>(docId);
   const e1 = Automerge.change(e0, (doc: any) => {
     doc.base = true;
   });
@@ -165,7 +191,7 @@ Deno.test("test_close_branch_post_merge", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch: main },
-      baseHeads: [],
+      baseHeads: [computeGenesisHead(docId)],
       changes: [{ bytes: cm }],
     }],
   });
@@ -212,7 +238,7 @@ Deno.test("test_no_close_if_not_collapsed", async () => {
   await space.getOrCreateBranch(docId, feature);
 
   // Create two heads on main
-  const a0 = Automerge.init();
+  const a0 = createGenesisDoc<any>(docId);
   const a1 = Automerge.change(a0, (doc: any) => {
     doc.m = 1;
   });
@@ -222,7 +248,7 @@ Deno.test("test_no_close_if_not_collapsed", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch: main },
-      baseHeads: [],
+      baseHeads: [computeGenesisHead(docId)],
       changes: [{ bytes: c1 }],
     }],
   });

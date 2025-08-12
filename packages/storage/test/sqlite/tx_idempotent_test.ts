@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
+import { computeGenesisHead, createGenesisDoc } from "../../src/index.ts";
 
 Deno.test("sqlite tx pipeline: idempotent replay returns same heads and no-ops", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -10,8 +11,9 @@ Deno.test("sqlite tx pipeline: idempotent replay returns same heads and no-ops",
   const docId = "doc:IDEM";
   const branch = "main";
 
-  // Build a change at base []
-  const d1 = Automerge.change(Automerge.init(), (doc: any) => {
+  // Build a change at base genesis
+  const gen = computeGenesisHead(docId);
+  const d1 = Automerge.change(createGenesisDoc<any>(docId), (doc: any) => {
     doc.n = 1;
   });
   const c1 = Automerge.getLastLocalChange(d1)!;
@@ -21,10 +23,11 @@ Deno.test("sqlite tx pipeline: idempotent replay returns same heads and no-ops",
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [],
+      baseHeads: [gen],
       changes: [{ bytes: c1 }],
     }],
   });
+  await space.getOrCreateBranch(docId, branch);
   const s1 = await space.getBranchState(docId, branch);
   assertEquals(s1.seqNo, 1);
 
@@ -34,7 +37,7 @@ Deno.test("sqlite tx pipeline: idempotent replay returns same heads and no-ops",
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [],
+      baseHeads: s1.heads,
       changes: [{ bytes: c1 }],
     }],
   });
@@ -50,7 +53,7 @@ Deno.test("sqlite tx pipeline: idempotent replay returns same heads and no-ops",
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [],
+      baseHeads: s1.heads,
       changes: [{ bytes: c1 }],
     }],
   });

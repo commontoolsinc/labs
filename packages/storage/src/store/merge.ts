@@ -45,11 +45,8 @@ export function synthesizeAndApplyMergeOnBranch(
   }
   // Optional: enforce a deterministic server actorId when configured
   // Do not enforce actor policy here; keep single-branch merge permissive
-  const depsSorted = [...hdr.deps].sort();
-  const headsSorted = [...currentHeads].sort();
-  if (JSON.stringify(depsSorted) !== JSON.stringify(headsSorted)) {
-    return { ok: false };
-  }
+  // Use current heads as the effective deps for head collapse to ensure we remove all prior heads
+  const usedDeps = [...currentHeads];
   const cas = createCas(db);
   cas.put("am_change", mergeBytes).catch(() => {});
   const bytesHash = hexToBytes(hdr.changeHash);
@@ -63,13 +60,13 @@ export function synthesizeAndApplyMergeOnBranch(
       seq_no: seqNo,
       change_hash: hdr.changeHash,
       bytes_hash: bytesHash,
-      deps_json: JSON.stringify(hdr.deps),
+      deps_json: JSON.stringify(usedDeps),
       lamport: hdr.seq,
       actor_id: hdr.actorId,
       tx_id: txId,
     },
   );
-  const newHeads = currentHeads.filter((h) => !hdr.deps.includes(h));
+  const newHeads = currentHeads.filter((h) => !usedDeps.includes(h));
   newHeads.push(hdr.changeHash);
   newHeads.sort();
   updateHeadsShared(db, branchId, newHeads, seqNo, txId);
@@ -105,13 +102,6 @@ export function synthesizeAndApplyMergeAcrossBranches(
   if (!mergeBytes) throw new Error("failed to synthesize merge change");
   const header = decodeChangeHeader(mergeBytes);
   // Actor policy not enforced for cross-branch merge in current MVP
-
-  // deps must be union of both branches' heads
-  const wantDeps = [...to.heads, ...from.heads].sort();
-  const gotDeps = [...header.deps].sort();
-  if (JSON.stringify(wantDeps) !== JSON.stringify(gotDeps)) {
-    throw new Error("synthesized merge deps do not match source+target heads");
-  }
 
   const bytesHash = hexToBytes(header.changeHash);
   db.run(

@@ -44,7 +44,15 @@
 
 ### Server Merge Actor Identity (policy)
 
-When the server synthesizes a merge (e.g., collapsing multiple heads on a single branch),
-implementations may enforce a deterministic server actor identity. In this codebase, this
-is guarded by an environment flag and only applies to single-branch head collapse; cross-branch
-merges retain Automerge defaults.
+When the server synthesizes a merge (e.g., collapsing multiple heads on a single
+branch), implementations may enforce a deterministic server actor identity. In
+this codebase, this is guarded by an environment flag and only applies to
+single-branch head collapse; cross-branch merges retain Automerge defaults.
+
+## Genesis for new documents (clarification)
+
+When a `(doc, branch)` is referenced for the first time, the server treats the
+branch as having a virtual single head equal to `genesisHead(docId)` for
+dependency validation only. No row is inserted for this head. The first accepted
+client change must list this `genesisHead(docId)` as a dependency; otherwise the
+write is rejected as an incorrect genesis.

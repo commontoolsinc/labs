@@ -32,3 +32,22 @@ Notes:
 - All document creation and branch management occur implicitly via transactions.
 - Retrieval of doc bytes for point-in-time can use PIT endpoint or future WS
   command if needed; standard flow is get/subscribe + Deliver.
+
+## Client responsibilities (genesis)
+
+To ensure concurrent creators of the same logical document converge, clients
+MUST:
+
+- Initialize new documents from a deterministic "genesis" head derived from the
+  document id.
+- Always send non-empty `baseHeads` for writes, including the first write on a
+  brand-new document. For new documents, `baseHeads` MUST equal
+  `[genesisHead(docId)]`.
+- A reference implementation is provided as a helper that:
+  - Creates an Automerge doc with the actor id set to the `docId` string.
+  - Applies a single initial empty change to produce a deterministic head.
+  - Immediately returns a `.fork()` of that doc (optionally with a provided
+    actor id) for subsequent edits.
+
+If a client’s first change does not depend on `genesisHead(docId)`, the server
+will reject the transaction with `conflict: incorrect genesis`.

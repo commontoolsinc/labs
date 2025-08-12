@@ -1,0 +1,83 @@
+import * as Automerge from "@automerge/automerge";
+import { decodeChangeHeader } from "./change.ts";
+
+/**
+ * Build a deterministic "genesis" change for a document by:
+ * - Initializing an Automerge doc with the actor id set to the docId
+ * - Applying a single change that sets and deletes a temporary key
+ *   within the same change block so the net result is an empty object
+ * - Returning the change hash (the genesis head)
+ */
+function toHexUtf8(s: string): string {
+  const enc = new TextEncoder();
+  return Array.from(enc.encode(s)).map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function initWithActor(actor: string): any {
+  const am: any = Automerge as any;
+  // Try common option keys
+  try {
+    if (typeof am.init === "function") {
+      return am.init({ actor: toHexUtf8(actor) });
+    }
+  } catch {}
+  try {
+    if (typeof am.init === "function") {
+      return am.init({ actorId: toHexUtf8(actor) });
+    }
+  } catch {}
+  // Some builds expose explicit helpers
+  try {
+    if (typeof am.initActor === "function") {
+      return am.initActor(toHexUtf8(actor));
+    }
+  } catch {}
+  // Fallback: set post-init if available
+  let d = Automerge.init();
+  try {
+    if (typeof am.setActorId === "function") {
+      d = am.setActorId(d, toHexUtf8(actor));
+    }
+  } catch {}
+  return d;
+}
+
+export function computeGenesisHead(docId: string): string {
+  // Initialize with a deterministic actor id based on docId
+  const doc: any = initWithActor(docId);
+
+  const changed = Automerge.change(doc as any, { time: 0 }, (d: any) => {
+    // produce at least one operation with zero net effect
+    (d as any).__genesis__ = 1;
+    delete (d as any).__genesis__;
+  });
+  const c = Automerge.getLastLocalChange(changed as any);
+  if (!c) throw new Error("failed to produce genesis change");
+  const hdr = decodeChangeHeader(c);
+  return hdr.changeHash;
+}
+
+/**
+ * Create a client-side Automerge document that has the deterministic genesis
+ * change applied (actor id = docId), then fork it for subsequent edits under
+ * an optional `forkActorId`. Returns the forked doc if fork is available.
+ */
+export function createGenesisDoc<T = any>(
+  docId: string,
+  forkActorId?: string,
+): T {
+  // Initialize with deterministic actor id
+  let base: any = initWithActor(docId);
+  base = Automerge.change(base, { time: 0 }, (d: any) => {
+    (d as any).__genesis__ = 1;
+    delete (d as any).__genesis__;
+  });
+  // Prefer fork when available to set client actor id
+  const am: any = Automerge as any;
+  if (typeof am.fork === "function") {
+    return forkActorId ? am.fork(base, forkActorId) : am.fork(base);
+  }
+  // Fallback: return the base doc (actor id remains docId)
+  return base as T;
+}
