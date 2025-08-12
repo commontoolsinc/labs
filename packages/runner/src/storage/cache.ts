@@ -849,16 +849,6 @@ export class Replica {
   async commit(transaction: ITransaction, source?: IStorageTransaction) {
     const { facts, claims } = transaction;
     const changes = Differential.create().update(this, facts);
-    // Store facts in a nursery so that subsequent changes will be build
-    // optimistically assuming that push will succeed.
-    this.nursery.merge(facts, Nursery.put);
-    // Notify storage subscribers about the committed changes.
-    this.subscription.next({
-      type: "commit",
-      space: this.did(),
-      changes,
-      source,
-    });
     // Some facts may be redundant, so only include the changed ones.
     // This will also exclude facts that match the nursery version, but these
     // should have already been sent.
@@ -868,6 +858,18 @@ export class Replica {
         fact.of === addr.id && fact.the === addr.type
       )
     );
+    // Store facts in a nursery so that subsequent changes will be build
+    // optimistically assuming that push will succeed.
+    // We only add the changedFacts here, because the facts that are unchanged
+    // will have an invalid cause chain (we're not going to write them).
+    this.nursery.merge(changedFacts, Nursery.put);
+    // Notify storage subscribers about the committed changes.
+    this.subscription.next({
+      type: "commit",
+      space: this.did(),
+      changes,
+      source,
+    });
     // Track all our pending changes
     changedFacts.map((fact) =>
       this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
@@ -897,10 +899,10 @@ export class Replica {
 
       // Checkout current state of facts so we can compute
       // changes after we update underlying stores.
-      const checkout = Differential.checkout(this, facts);
+      const checkout = Differential.checkout(this, changedFacts);
 
       // Any returned facts should be purged from the nursery
-      this.nursery.merge(facts, Nursery.delete);
+      this.nursery.merge(changedFacts, Nursery.delete);
 
       const fact = result.error.name === "ConflictError" &&
         result.error.conflict.actual;
@@ -924,7 +926,7 @@ export class Replica {
       const { since } = commit.is;
       // Turn facts into revisions corresponding with the commit.
       const revisions = [
-        ...facts.map((fact) => ({ ...fact, since })),
+        ...changedFacts.map((fact) => ({ ...fact, since })),
         // We strip transaction info so we don't duplicate same data
         { ...commit, is: { since: commit.is.since } },
       ];
