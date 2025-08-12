@@ -177,7 +177,11 @@ export class Engine extends EventTarget implements Harness {
         // Create a map from exported values to `RuntimeProgram` that can
         // generate them and pass to the callback from the exports.
         const exportsByValue = new Map<any, RuntimeProgram>();
-        for (const [fileName, exports] of Object.entries(exportMap)) {
+        const prefix = `/${id}`;
+        for (let [fileName, exports] of Object.entries(exportMap)) {
+          if (fileName.startsWith(prefix)) {
+            fileName = fileName.substring(prefix.length);
+          }
           for (const [exportName, exportValue] of Object.entries(exports)) {
             exportsByValue.set(exportValue, {
               main: fileName,

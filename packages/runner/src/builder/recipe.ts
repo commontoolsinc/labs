@@ -325,16 +325,18 @@ function factoryFromRecipe<T, R>(
     initial,
     result,
     nodes: serializedNodes,
-    toJSON: () => recipeToJSON(recipe),
-  };
-
-  const module: Module & toJSON = {
-    type: "recipe",
-    implementation: recipe,
-    toJSON: () => moduleToJSON(module),
+    // Important that this refers to recipeFactory, as .program will be set on
+    // recipe afterwards (see factory.ts:exportsCallback)
+    toJSON: () => recipeToJSON(recipeFactory),
   };
 
   const recipeFactory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+    const module: Module & toJSON = {
+      type: "recipe",
+      implementation: recipeFactory,
+      toJSON: () => moduleToJSON(module),
+    };
+
     const outputs = opaqueRef<R>();
     const node: NodeRef = {
       module,

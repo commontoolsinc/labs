@@ -89,7 +89,7 @@ export const createBuilder = (
     for (const [value, program] of exports) {
       if (isRecipe(value)) {
         // This will associate the program with the recipe
-        runtime.recipeManager.registerRecipe(value, program);
+        value.program = program;
       }
     }
   };
