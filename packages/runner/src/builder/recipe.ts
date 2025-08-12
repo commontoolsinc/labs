@@ -325,7 +325,9 @@ function factoryFromRecipe<T, R>(
     initial,
     result,
     nodes: serializedNodes,
-    toJSON: () => recipeToJSON(recipe),
+    // Important that this refers to recipeFactory, as .program will be set on
+    // recipe afterwards (see factory.ts:exportsCallback)
+    toJSON: () => recipeToJSON(recipeFactory),
   };
 
   const module: Module & toJSON = {
