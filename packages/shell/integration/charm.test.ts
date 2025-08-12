@@ -38,10 +38,9 @@ describe("shell charm tests", () => {
     await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
     await page.applyConsoleFormatter();
 
-    const state = await shell.login();
+    await sleep(1000);
 
-    console.log("state", state);
-    await sleep(2000);
+    const state = await shell.login();
 
     assertEquals(state.spaceName, spaceName);
     assertEquals(state.activeCharmId, charmId);
@@ -49,6 +48,8 @@ describe("shell charm tests", () => {
       state.identity?.serialize().privateKey,
       identity.serialize().privateKey,
     );
+
+    await sleep(1000);
 
     let handle = await page.$(
       "ct-button",
