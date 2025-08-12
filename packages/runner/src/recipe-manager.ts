@@ -1,3 +1,4 @@
+import { getLogger } from "@commontools/utils/logger";
 import {
   JSONSchema,
   Module,
@@ -10,6 +11,8 @@ import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+
+const logger = getLogger("recipe-manager");
 
 export const recipeMetaSchema = {
   type: "object",
@@ -144,6 +147,12 @@ export class RecipeManager implements IRecipeManager {
     },
     providedTx?: IExtendedStorageTransaction,
   ): boolean {
+    // HACK(seefeld): Let's always use a new transaction for now. The reason is
+    // that this will fail when saving the same recipe again, even though it's
+    // identical (it's effecively content addresed). So let's just parallelize
+    // and eat the conflict, until we support these kinds of writes properly.
+    providedTx = undefined;
+
     const tx = providedTx ?? this.runtime.edit();
 
     // Already saved
@@ -166,7 +175,13 @@ export class RecipeManager implements IRecipeManager {
     const recipeMetaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
     recipeMetaCell.set(recipeMeta);
 
-    if (!providedTx) tx.commit();
+    if (!providedTx) {
+      tx.commit().then((result) => {
+        if (result.error) {
+          logger.warn("Recipe already existed", recipeId);
+        }
+      });
+    }
 
     this.recipeMetaCellById.set(recipeId, recipeMetaCell.withTx());
     // If we have a recipe object for this id, ensure the back mapping exists
