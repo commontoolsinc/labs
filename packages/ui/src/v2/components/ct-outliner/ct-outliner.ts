@@ -25,10 +25,14 @@ import type {
   KeyboardContext,
   MentionableItem,
   Node as OutlineTreeNode,
-  Tree,
   PathBasedOutlinerOperations,
+  Tree,
 } from "./types.ts";
-import { TreeDiffCalculator, PathDiffApplier, type TreeOperationResult } from "./tree-diff.ts";
+import {
+  PathDiffApplier,
+  TreeDiffCalculator,
+  type TreeOperationResult,
+} from "./tree-diff.ts";
 import {
   executeEditingKeyboardCommand,
   executeKeyboardCommand,
@@ -38,15 +42,15 @@ import { TreeOperations } from "./tree-operations.ts";
 import { NodeUtils } from "./node-utils.ts";
 import { EventUtils } from "./event-utils.ts";
 import {
-  pathToString,
-  stringToPath,
-  getNodeByPath,
-  getNodePath,
-  getNodeCell,
   getNodeBodyCell,
   getNodeBodyCellByPath,
-  getNodeChildrenCell,
+  getNodeByPath,
+  getNodeCell,
   getNodeCellByPath,
+  getNodeChildrenCell,
+  getNodePath,
+  pathToString,
+  stringToPath,
 } from "./node-path.ts";
 import { Charm, charmSchema, getRecipeIdFromCharm } from "@commontools/charm";
 import "../ct-render/ct-render.ts";
@@ -124,7 +128,8 @@ export const OutlinerEffects = {
   },
 };
 
-export class CTOutliner extends BaseElement implements PathBasedOutlinerOperations {
+export class CTOutliner extends BaseElement
+  implements PathBasedOutlinerOperations {
   static override properties = {
     value: { type: Object },
     readonly: { type: Boolean },
@@ -163,7 +168,9 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
 
   // Compatibility properties for OutlinerOperations interface
   get focusedNode(): OutlineTreeNode | null {
-    return this.focusedNodePath ? getNodeByPath(this.tree, this.focusedNodePath) : null;
+    return this.focusedNodePath
+      ? getNodeByPath(this.tree, this.focusedNodePath)
+      : null;
   }
 
   set focusedNode(node: OutlineTreeNode | null) {
@@ -214,12 +221,14 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     }
 
     // Apply the delete operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<OutlineTreeNode>;
+    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+      OutlineTreeNode
+    >;
     if (nodeCell) {
       const newFocusPath = await TreeOperations.deleteNodeCell(
         this.value.key("root"),
         nodeCell,
-        path
+        path,
       );
       result.newFocusedPath = newFocusPath;
     }
@@ -246,7 +255,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     // Apply the indent operation using existing Cell operations
     const newFocusPath = await TreeOperations.indentNodeCell(
       this.value.key("root"),
-      path
+      path,
     );
     if (newFocusPath) {
       result.newFocusedPath = newFocusPath;
@@ -274,7 +283,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     // Apply the outdent operation using existing Cell operations
     const newFocusPath = await TreeOperations.outdentNodeCell(
       this.value.key("root"),
-      path
+      path,
     );
     if (newFocusPath) {
       result.newFocusedPath = newFocusPath;
@@ -300,12 +309,14 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     }
 
     // Apply the move operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<OutlineTreeNode>;
+    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+      OutlineTreeNode
+    >;
     if (nodeCell) {
       const success = await TreeOperations.moveNodeUpCell(
         this.value.key("root"),
         nodeCell,
-        path
+        path,
       );
       if (success && result.newFocusedPath) {
         this.applyTreeDiff(result);
@@ -331,12 +342,14 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     }
 
     // Apply the move operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<OutlineTreeNode>;
+    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+      OutlineTreeNode
+    >;
     if (nodeCell) {
       const success = await TreeOperations.moveNodeDownCell(
         this.value.key("root"),
         nodeCell,
-        path
+        path,
       );
       if (success && result.newFocusedPath) {
         this.applyTreeDiff(result);
@@ -346,7 +359,10 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     return result;
   }
 
-  async createNodeAfterPath(path: number[], nodeData: { body: string }): Promise<TreeOperationResult> {
+  async createNodeAfterPath(
+    path: number[],
+    nodeData: { body: string },
+  ): Promise<TreeOperationResult> {
     if (!this.value) {
       return {
         changes: [],
@@ -356,13 +372,19 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       };
     }
 
-    const result = TreeDiffCalculator.calculateCreateAfterDiff(path, nodeData, this.tree);
+    const result = TreeDiffCalculator.calculateCreateAfterDiff(
+      path,
+      nodeData,
+      this.tree,
+    );
     if (!result.success) {
       return result;
     }
 
     // Apply the create operation using existing Cell operations
-    const nodeCell = getNodeCellByPath(this.value, path) as Cell<OutlineTreeNode>;
+    const nodeCell = getNodeCellByPath(this.value, path) as Cell<
+      OutlineTreeNode
+    >;
     if (nodeCell) {
       await this.createNewNodeAfterCell(nodeCell);
     }
@@ -371,7 +393,10 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     return result;
   }
 
-  async createChildNodeAtPath(path: number[], nodeData: { body: string }): Promise<TreeOperationResult> {
+  async createChildNodeAtPath(
+    path: number[],
+    nodeData: { body: string },
+  ): Promise<TreeOperationResult> {
     if (!this.value) {
       return {
         changes: [],
@@ -381,7 +406,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       };
     }
 
-    const result = TreeDiffCalculator.calculateCreateChildDiff(path, nodeData, this.tree);
+    const result = TreeDiffCalculator.calculateCreateChildDiff(
+      path,
+      nodeData,
+      this.tree,
+    );
     if (!result.success) {
       return result;
     }
@@ -394,7 +423,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
 
     const node = getNodeByPath(this.tree, path);
     if (!node) return result;
-    
+
     const nodeChildrenCell = getNodeChildrenCell(this.value, this.tree, node);
     if (nodeChildrenCell) {
       await mutateCell(nodeChildrenCell, (cell) => {
@@ -480,7 +509,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     }
   }
 
-  indentNodeWithEditState(node: OutlineTreeNode, editingContent: string, cursorPosition: number): void {
+  indentNodeWithEditState(
+    node: OutlineTreeNode,
+    editingContent: string,
+    cursorPosition: number,
+  ): void {
     // For compatibility - finish editing first, then indent
     if (this.editingNodePath) {
       this.finishEditing();
@@ -488,7 +521,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     this.indentNode(node);
   }
 
-  outdentNodeWithEditState(node: OutlineTreeNode, editingContent: string, cursorPosition: number): void {
+  outdentNodeWithEditState(
+    node: OutlineTreeNode,
+    editingContent: string,
+    cursorPosition: number,
+  ): void {
     // For compatibility - finish editing first, then outdent
     if (this.editingNodePath) {
       this.finishEditing();
@@ -635,7 +672,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       handleCharmLinkClick: (event: MouseEvent) =>
         this.handleCharmLinkClick(event),
       encodeCharmForHref: (charm: Charm) => this.encodeCharmForHref(charm),
-      insertMention: (mention: MentionableItem) => this.insertMention(mention),
+      insertMention: (mention: Charm) => this.insertMention(mention),
     };
   }
 
@@ -1011,9 +1048,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     return TreeOperations.toMarkdown(this.tree);
   }
 
-
-
-
   /**
    * Finish editing the current node and save changes
    *
@@ -1024,7 +1058,10 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     if (!this.value || !this.editingNodePath) return;
 
     // Use the stored path to get the Cell
-    const nodeBodyCell = getNodeBodyCellByPath(this.value, this.editingNodePath);
+    const nodeBodyCell = getNodeBodyCellByPath(
+      this.value,
+      this.editingNodePath,
+    );
     if (nodeBodyCell) {
       mutateCell(nodeBodyCell, (cell) => cell.set(this.editingContent));
     }
@@ -1035,7 +1072,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     this.requestUpdate();
     OutlinerEffects.focusOutliner(this.shadowRoot);
   }
-
 
   private handleNodeClick(
     node: OutlineTreeNode,
@@ -1097,19 +1133,28 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     const lastAtIndex = textBeforeCursor.lastIndexOf("@");
 
     if (lastAtIndex !== -1 && lastAtIndex === textBeforeCursor.length - 1) {
-      // Just typed @
+      // Just typed @ - cursor is right after @
       this.showingMentions = true;
       this.mentionQuery = "";
       this.selectedMentionIndex = 0;
       this.requestUpdate();
-    } else if (lastAtIndex !== -1 && this.showingMentions) {
-      // Update query
+    } else if (lastAtIndex !== -1) {
+      // There's an @ before cursor
       const query = textBeforeCursor.substring(lastAtIndex + 1);
       if (!query.includes(" ")) {
+        // Valid query - show mentions with query
+        this.showingMentions = true;
         this.mentionQuery = query;
         this.selectedMentionIndex = 0;
         this.requestUpdate();
       } else {
+        // Space in query - hide mentions
+        this.showingMentions = false;
+        this.requestUpdate();
+      }
+    } else {
+      // No @ before cursor - hide mentions if showing
+      if (this.showingMentions) {
         this.showingMentions = false;
         this.requestUpdate();
       }
@@ -1161,7 +1206,10 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
 
       const focusedNodePath = this.focusedNodePath;
       if (!focusedNodePath || !this.value) return;
-      const focusedNodeCell = getNodeCellByPath(this.value, focusedNodePath) as Cell<OutlineTreeNode>;
+      const focusedNodeCell = getNodeCellByPath(
+        this.value,
+        focusedNodePath,
+      ) as Cell<OutlineTreeNode>;
       if (!focusedNodeCell) return;
 
       const parentNode = TreeOperations.findParentNodeCell(
@@ -1175,7 +1223,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
         );
 
         // Insert new nodes after current one using Cell operations
-        const parentChildrenCell = getNodeChildrenCell(this.value, this.tree, parentNode);
+        const parentChildrenCell = getNodeChildrenCell(
+          this.value,
+          this.tree,
+          parentNode,
+        );
         if (parentChildrenCell) {
           mutateCell(parentChildrenCell, (cell) => {
             const currentChildren = cell.get();
@@ -1336,7 +1388,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     executePathBasedKeyboardCommand(event.key, pathBasedContext);
   }
 
-
   /**
    * Create a new sibling node after the specified node
    *
@@ -1347,7 +1398,10 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   private async createNewNodeAfterCell(node: Cell<OutlineTreeNode>) {
     if (!this.value) return;
 
-    const parentNode = TreeOperations.findParentNodeCell(this.value.key('root'), node);
+    const parentNode = TreeOperations.findParentNodeCell(
+      this.value.key("root"),
+      node,
+    );
     if (!parentNode) return;
 
     const nodeIndex = TreeOperations.getNodeIndex(parentNode, node);
@@ -1365,7 +1419,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     const parentPath = currentNodePath.slice(0, -1); // Remove last index to get parent path
     const newNodePath = [...parentPath, nodeIndex + 1]; // Insert after current node
 
-    const parentChildrenCell = getNodeChildrenCell(this.value, this.tree, parentNode);
+    const parentChildrenCell = getNodeChildrenCell(
+      this.value,
+      this.tree,
+      parentNode,
+    );
     if (parentChildrenCell) {
       await mutateCell(parentChildrenCell, (cell) => {
         const currentChildren = cell.get();
@@ -1405,8 +1463,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     return getNodePath(this.tree, targetNode);
   }
 
-
-
   /**
    * Start editing with initial text by path instead of node reference
    *
@@ -1429,15 +1485,6 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       OutlinerEffects.focusEditor(this.shadowRoot, nodeIndex);
     }
   }
-
-
-
-
-
-
-
-
-
 
   private deleteCurrentNode() {
     if (!this.editingNodePath) return;
@@ -1511,22 +1558,32 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
   }
 
   private getFilteredMentions(): Charm[] {
-    if (!this.mentionable || this.mentionable.getAsQueryResult().length === 0) return [];
+    if (!this.mentionable) {
+      return [];
+    }
+
+    const mentionableData = this.mentionable.getAsQueryResult();
+    if (!mentionableData || mentionableData.length === 0) {
+      return [];
+    }
 
     const query = this.mentionQuery.toLowerCase();
     const matches = [];
 
-    const flattened = this.mentionable.getAsQueryResult();
-    for (const mention of flattened) {
-      if (mention[NAME]?.toLowerCase()?.includes(query)) {
-        matches.push(flattened.indexOf(mention));
+    // Since mentionable contains an array of Cells (which could be LINK references),
+    // we need to resolve each one individually
+    for (let i = 0; i < mentionableData.length; i++) {
+      // Use key(i).getAsQueryResult() to properly resolve LINK references
+      const mention = this.mentionable.key(i).getAsQueryResult();
+      if (mention && mention[NAME]?.toLowerCase()?.includes(query)) {
+        matches.push(i);
       }
     }
 
     return matches.map((i) => this.mentionable.key(i).getAsQueryResult());
   }
 
-  private async insertMention(mention: Charm) {
+  private insertMention(mention: Charm) {
     if (!this.editingNodePath) return;
 
     const editingNode = getNodeByPath(this.tree, this.editingNodePath);
@@ -1548,7 +1605,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     const afterMention = this.editingContent.substring(cursorPos);
 
     // Create markdown link with encoded charm reference
-    const charmHref = await this.encodeCharmForHref(mention);
+    const charmHref = this.encodeCharmForHref(mention);
     const mentionText = `[${mention[NAME]}](${charmHref})`;
 
     this.editingContent = beforeMention + mentionText + afterMention;
@@ -1566,43 +1623,40 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     textarea.focus();
   }
 
-  private async generateHash(input: string) {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(input);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-    return hashHex;
-  }
-
-  private async encodeCharmForHref(charm: Charm) {
-    const id = await this.generateHash(charm[NAME] ?? "");
-    return id;
+  private encodeCharmForHref(charm: Charm): string {
+    // Simply use the entity ID as the href
+    const entityId = getEntityId(charm);
+    return encodeURIComponent(JSON.stringify(entityId)) || "";
   }
 
   /**
-   * Decode charm reference from href
+   * Decode charm reference from href (entity ID)
    */
-  private async decodeCharmFromHref(href: string | null): Promise<Charm> {
-    // Check if hash matches any mentionable charm
-    let match = -1;
-    const flattened = this.mentionable.getAsQueryResult() || [];
-    for (const mention of flattened) {
-      const mentionHash = await this.generateHash(mention[NAME] || "");
-      if (mentionHash === href) {
-        match = flattened.indexOf(mention);
-        break;
+  private decodeCharmFromHref(href: string | null): Charm | null {
+    if (!href || !this.mentionable) return null;
+
+    const mentionableData = this.mentionable.getAsQueryResult() || [];
+
+    for (let i = 0; i < mentionableData.length; i++) {
+      // Properly resolve each LINK reference
+      const mention = this.mentionable.key(i).getAsQueryResult();
+      if (mention) {
+        const mentionEntityId = encodeURIComponent(
+          JSON.stringify(getEntityId(mention)),
+        );
+        if (mentionEntityId === href) {
+          return mention;
+        }
       }
     }
 
-    return this.mentionable.key(match).getAsQueryResult();
+    return null;
   }
 
   /**
    * Handle click on charm links
    */
-  private async handleCharmLinkClick(event: MouseEvent) {
+  private handleCharmLinkClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
     if (!target.classList.contains("charm-link")) {
       return;
@@ -1619,8 +1673,9 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       return;
     }
 
-    const charm = await this.decodeCharmFromHref(href);
+    const charm = this.decodeCharmFromHref(href);
     if (!charm) {
+      console.warn("Could not decode charm from href:", href);
       return;
     }
 
@@ -1647,24 +1702,12 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
     this.setNodeCheckboxByPath(nodePath, isChecked);
   }
 
-
-
-
   private handleOutlinerClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
 
-    // Handle charm link clicks
+    // Handle charm link clicks - delegate to the dedicated handler
     if (target.matches("a.charm-link")) {
-      event.preventDefault();
-      const href = target.getAttribute("href");
-      const text = target.textContent;
-
-      // Emit a custom event for charm link clicks
-      this.emit("charm-link-click", {
-        href,
-        text,
-        charm: this.decodeCharmFromHref(href),
-      });
+      this.handleCharmLinkClick(event);
       return;
     }
 
@@ -1723,7 +1766,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
       const focusedNode = getNodeByPath(this.tree, this.focusedNodePath);
       if (!focusedNode) return;
 
-      const focusedNodeCell = this.value ? getNodeCellByPath(this.value, this.focusedNodePath) as Cell<OutlineTreeNode> : null;
+      const focusedNodeCell = this.value
+        ? getNodeCellByPath(this.value, this.focusedNodePath) as Cell<
+          OutlineTreeNode
+        >
+        : null;
       if (!focusedNodeCell || !this.value) return;
 
       const parentNode = TreeOperations.findParentNodeCell(
@@ -1738,7 +1785,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
         );
 
         // Insert all parsed nodes after the focused node using Cell operations
-        const parentChildrenCell = getNodeChildrenCell(this.value, this.tree, parentNode);
+        const parentChildrenCell = getNodeChildrenCell(
+          this.value,
+          this.tree,
+          parentNode,
+        );
         if (parentChildrenCell) {
           mutateCell(parentChildrenCell, (cell) => {
             const currentChildren = cell.get();
@@ -2039,7 +2090,11 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
               ?checked="${isChecked}"
               @change="${checkboxChangeHandler || ((e: Event) => {
             e.stopPropagation();
-            this.handleCheckboxChange(node, getNodePath(this.tree, node) || [], e);
+            this.handleCheckboxChange(
+              node,
+              getNodePath(this.tree, node) || [],
+              e,
+            );
           })}"
             />
             <span class="markdown-content" @click="${this
@@ -2064,7 +2119,7 @@ export class CTOutliner extends BaseElement implements PathBasedOutlinerOperatio
    * Render attachments for a node using ct-render
    */
   private renderAttachments(node: Cell<OutlineTreeNode>): unknown {
-    const attachments = node.key('attachments').getAsQueryResult() as Charm[];
+    const attachments = node.key("attachments").getAsQueryResult() as Charm[];
 
     if (!attachments || attachments.length === 0) {
       return "";
