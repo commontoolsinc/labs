@@ -52,7 +52,6 @@ export class RecipeManager implements IRecipeManager {
   private inProgressCompilations = new Map<string, Promise<Recipe>>();
   // Maps keyed by recipeId for consistent lookups
   private recipeMetaCellById = new Map<string, Cell<RecipeMeta>>();
-  private recipeProgramById = new Map<string, string | RuntimeProgram>();
   private recipeIdMap = new Map<string, Recipe>();
   // Map from recipe object instance to recipeId
   private recipeToIdMap = new WeakMap<Recipe, string>();
@@ -101,7 +100,7 @@ export class RecipeManager implements IRecipeManager {
 
     // If we don't have a stored cell yet, return whatever pending/meta we have
     const pending = this.pendingMetaById.get(recipeId) ?? {};
-    const source = this.recipeProgramById.get(recipeId);
+    const source = this.recipeIdMap.get(recipeId)?.program;
     if (!source && Object.keys(pending).length === 0) {
       throw new Error(`Recipe ${recipeId} has no metadata available`);
     }
@@ -121,6 +120,17 @@ export class RecipeManager implements IRecipeManager {
     // Walk up derivation copies to original
     recipe = this.findOriginalRecipe(recipe as Recipe);
 
+    if (src && !recipe.program) {
+      if (typeof src === "string") {
+        recipe.program = {
+          main: "/main.tsx",
+          files: [{ name: "/main.tsx", contents: src }],
+        };
+      } else {
+        recipe.program = src;
+      }
+    }
+
     // If this recipe object was already registered, return its id
     const existingId = this.recipeToIdMap.get(recipe);
     if (existingId) return existingId;
@@ -129,13 +139,11 @@ export class RecipeManager implements IRecipeManager {
       ? createRef({ src }, "recipe source").toString()
       : createRef(recipe, "recipe").toString();
 
-    // If an id already exists for this source/recipe, reuse it
-    if (this.recipeIdMap.has(generatedId)) return generatedId;
-
-    // Register fresh
-    this.recipeIdMap.set(generatedId, recipe as Recipe);
     this.recipeToIdMap.set(recipe as Recipe, generatedId);
-    if (src) this.recipeProgramById.set(generatedId, src);
+
+    if (!this.recipeIdMap.has(generatedId)) {
+      this.recipeIdMap.set(generatedId, recipe as Recipe);
+    }
 
     return generatedId;
   }
@@ -160,15 +168,13 @@ export class RecipeManager implements IRecipeManager {
       return true;
     }
 
-    const srcOrProgram = this.recipeProgramById.get(recipeId);
-    if (!srcOrProgram) return false;
+    const program = this.recipeIdMap.get(recipeId)?.program;
+    if (!program) return false;
 
     const pending = this.pendingMetaById.get(recipeId) ?? {};
     const recipeMeta: RecipeMeta = {
       id: recipeId,
-      ...(typeof srcOrProgram === "string"
-        ? { src: srcOrProgram }
-        : { program: srcOrProgram }),
+      program,
       ...(pending as Partial<RecipeMeta>),
     } as RecipeMeta;
 
@@ -219,7 +225,9 @@ export class RecipeManager implements IRecipeManager {
     } else {
       program = input;
     }
-    return await this.runtime.harness.run(program);
+    const recipe = await this.runtime.harness.run(program);
+    recipe.program = program;
+    return recipe;
   }
 
   // we need to ensure we only compile once otherwise we get ~12 +/- 4

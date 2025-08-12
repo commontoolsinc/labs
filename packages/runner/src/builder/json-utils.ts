@@ -240,5 +240,6 @@ export function recipeToJSON(recipe: Recipe) {
     ...(recipe.initial ? { initial: recipe.initial } : {}),
     result: recipe.result,
     nodes: recipe.nodes,
+    program: recipe.program,
   };
 }
