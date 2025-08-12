@@ -81,6 +81,15 @@ export class RecipeManager implements IRecipeManager {
     return recipe;
   }
 
+  async loadRecipeMeta(
+    recipeId: string,
+    space: MemorySpace,
+  ): Promise<RecipeMeta> {
+    const cell = this.getRecipeMetaCell({ recipeId, space });
+    await cell.sync();
+    return cell.get();
+  }
+
   getRecipeMeta(
     input: Recipe | Module | { recipeId: string },
   ): RecipeMeta {

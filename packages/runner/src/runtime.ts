@@ -237,6 +237,7 @@ export interface IRecipeManager {
     tx?: IExtendedStorageTransaction,
   ): Promise<Recipe>;
   compileRecipe(input: string | RuntimeProgram): Promise<Recipe>;
+  loadRecipeMeta(recipeId: string, space: MemorySpace): Promise<RecipeMeta>;
   getRecipeMeta(input: any): RecipeMeta;
   saveRecipe(
     params: {
