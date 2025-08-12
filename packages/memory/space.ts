@@ -688,7 +688,10 @@ const swap = <Space extends MemorySpace>(
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
     if (refer(actual).toString() !== fact) {
-      const revisions = causeChain(session, { the, of });
+      // Disable including history tracking for performance.
+      // Re-enable this if you need to debug cause chains.
+      const revisions: Revision<Fact>[] = [];
+      // const revisions = causeChain(session, { the, of });
       throw Error.conflict(transaction, {
         space: transaction.sub,
         the,
