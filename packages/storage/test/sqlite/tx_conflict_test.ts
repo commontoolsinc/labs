@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
 import { decodeChangeHeader } from "../../src/store/change.ts";
+import { computeGenesisHead, createGenesisDoc } from "../../src/index.ts";
 
 Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -13,11 +14,14 @@ Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async 
   const s0 = await space.getOrCreateBranch(docId, branch);
   assertEquals(s0.heads, []);
 
-  // Build two independent changes at base []
-  const a0 = Automerge.change(Automerge.init(), (d: any) => {
+  // Build two independent changes atop genesis
+  const gen = computeGenesisHead(docId);
+  const aBase = createGenesisDoc<any>(docId);
+  const a0 = Automerge.change(aBase, (d: any) => {
     d.v = 1;
   });
-  const b0 = Automerge.change(Automerge.init(), (d: any) => {
+  const bBase = Automerge.init();
+  const b0 = Automerge.change(bBase, (d: any) => {
     d.v = 2;
   });
   const ca = Automerge.getLastLocalChange(a0)!;
@@ -30,18 +34,18 @@ Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async 
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [],
+      baseHeads: [gen],
       changes: [{ bytes: ca }],
     }],
   });
   assertEquals(r1.conflicts.length, 0);
 
-  // Second tx attempts to apply change B but still claims base [] -> should conflict
+  // Second tx attempts to apply change B but still claims base incorrect genesis -> should conflict
   const r2 = await space.submitTx({
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [],
+      baseHeads: [gen],
       changes: [{ bytes: cb }],
     }],
   });

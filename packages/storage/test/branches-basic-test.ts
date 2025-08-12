@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../src/provider.ts";
+import { computeGenesisHead, createGenesisDoc } from "../src/index.ts";
 
 Deno.test("create and close branches with lineage", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -13,7 +14,8 @@ Deno.test("create and close branches with lineage", async () => {
   assertEquals(main.seqNo, 0);
 
   // Create a feature branch by submitting a change with from main heads (implicitly creates branch row)
-  const d0 = Automerge.init();
+  const gen = computeGenesisHead(docId);
+  const d0 = createGenesisDoc<any>(docId);
   const d1 = Automerge.change(d0, (doc: any) => {
     doc.title = "v1";
   });
@@ -23,7 +25,7 @@ Deno.test("create and close branches with lineage", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch: "feature/x" },
-      baseHeads: [],
+      baseHeads: [gen],
       changes: [{ bytes: c1 }],
     }],
   });

@@ -19,6 +19,7 @@ import { updateHeads as updateHeadsShared } from "./heads.ts";
 import { synthesizeAndApplyMergeOnBranch } from "./merge.ts";
 import { getPrepared } from "./prepared.ts";
 import { runInvariants } from "./invariants.ts";
+import { computeGenesisHead } from "./genesis.ts";
 
 // Local types for the SQLite tx pipeline (server-internal shape per §04/§06)
 export type DocId = string;
@@ -201,8 +202,35 @@ export async function submitTx(
       const { docId, branch } = write;
       const current = getBranchState(db, docId, branch);
 
-      // baseHeads vs current heads
-      const baseOk = equalHeads(current.heads, write.baseHeads);
+      // Genesis virtualization: if branch has no heads yet, require baseHeads = [genesisHead]
+      let baseOk = equalHeads(current.heads, write.baseHeads);
+      const isNewBranch = current.heads.length === 0 && current.seqNo === 0;
+      let virtualGenesis: string | undefined;
+      if (!baseOk && isNewBranch) {
+        try {
+          virtualGenesis = computeGenesisHead(docId);
+        } catch (e) {
+          results.push({
+            docId,
+            branch,
+            status: "conflict",
+            reason: `genesis compute failed: ${(e as Error).message}`,
+          });
+          hasNonOk = true;
+          continue;
+        }
+        baseOk = equalHeads([virtualGenesis], write.baseHeads);
+        if (!baseOk) {
+          results.push({
+            docId,
+            branch,
+            status: "conflict",
+            reason: "incorrect genesis",
+          });
+          hasNonOk = true;
+          continue;
+        }
+      }
       if (!baseOk) {
         if (!(write.allowServerMerge && isServerMergeEnabled(db))) {
           results.push({
@@ -220,6 +248,11 @@ export async function submitTx(
       // Track state while applying changes
       let newHeads = current.heads.slice();
       let seqNo = current.seqNo;
+      if (virtualGenesis) {
+        // Virtualize the genesis head for initial write
+        newHeads = [virtualGenesis];
+        seqNo = 0;
+      }
       let applied = 0;
       let rejectedReason: string | undefined;
       const seenChangeHashes = new Set<string>();
@@ -267,6 +300,7 @@ export async function submitTx(
             break;
           }
         }
+        // Do not require explicit dependency on virtual genesis
         if (rejectedReason) break;
 
         // Actor/seq monotonicity per branch/actor
@@ -340,6 +374,10 @@ export async function submitTx(
         continue;
       }
 
+      // Drop virtual genesis from heads before persisting
+      if (virtualGenesis) {
+        newHeads = newHeads.filter((h) => h !== virtualGenesis);
+      }
       // Persist heads
       updateHeadsShared(db, write.branchId as string, newHeads, seqNo, txId);
       const snap = maybeCreateSnapshot(
