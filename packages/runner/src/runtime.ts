@@ -242,8 +242,6 @@ export interface IRecipeManager {
     params: {
       recipeId: string;
       space: MemorySpace;
-      recipe?: Recipe | Module;
-      recipeMeta?: RecipeMeta;
     },
     tx?: IExtendedStorageTransaction,
   ): boolean;
@@ -251,11 +249,10 @@ export interface IRecipeManager {
     params: {
       recipeId: string;
       space: MemorySpace;
-      recipe?: Recipe | Module;
-      recipeMeta?: RecipeMeta;
     },
     tx?: IExtendedStorageTransaction,
   ): Promise<void>;
+  setRecipeMetaFields(recipeId: string, fields: Partial<RecipeMeta>): void;
 }
 
 export interface IModuleRegistry {

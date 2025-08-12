@@ -540,27 +540,16 @@ export async function compileRecipe(
     throw new Error("No default recipe found in the compiled exports.");
   }
   const parentsIds = parents?.map((id) => id.toString());
-  const recipeId = runtime.recipeManager.registerRecipe(
-    recipe,
-    recipeSrc,
-  );
+  const recipeId = runtime.recipeManager.registerRecipe(recipe, recipeSrc);
 
-  const recipeMeta: Partial<Mutable<RecipeMeta>> = {
-    id: recipeId,
+  // Record metadata fields (spec, parents) for this recipe
+  runtime.recipeManager.setRecipeMetaFields(recipeId, {
     spec,
     parents: parentsIds,
-  };
-
-  if (typeof recipeSrc === "string") {
-    recipeMeta.src = recipeSrc;
-  } else {
-    recipeMeta.program = recipeSrc;
-  }
+  } as Partial<Mutable<RecipeMeta>>);
   await runtime.recipeManager.saveAndSyncRecipe({
     recipeId,
     space,
-    recipe,
-    recipeMeta: recipeMeta as RecipeMeta,
   });
 
   return recipe;
