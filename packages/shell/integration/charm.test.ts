@@ -40,6 +40,7 @@ describe("shell charm tests", () => {
 
     const state = await shell.login();
 
+    console.log("state", state);
     await sleep(2000);
 
     assertEquals(state.spaceName, spaceName);
