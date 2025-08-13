@@ -21,6 +21,7 @@
 import { assert } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { computeGenesisHead, createGenesisDoc } from "../src/store/genesis.ts";
+import { decodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
   name: "WS v2: multi-consumer subscribe delivers epoch-batched updates",
@@ -171,12 +172,7 @@ Deno.test({
         },
         authorization: { signature: [], access: {} },
       };
-      const decodeB64 = (s: string): Uint8Array => {
-        const bin = atob(s);
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-      };
+      const decodeB64 = (s: string): Uint8Array => decodeBase64(s);
       ws.send(JSON.stringify(msg));
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data as string);
@@ -236,12 +232,7 @@ Deno.test({
   ) =>
     new Promise<number>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error("deliver timeout")), 7000);
-      const decodeB64 = (s: string): Uint8Array => {
-        const bin = atob(s);
-        const out = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-        return out;
-      };
+      const decodeB64 = (s: string): Uint8Array => decodeBase64(s);
       const currentDocs = new Map(initialDocs);
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data as string);

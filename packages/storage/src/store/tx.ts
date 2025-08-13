@@ -22,14 +22,16 @@ import { runInvariants } from "./invariants.ts";
 import { computeGenesisHead } from "./genesis.ts";
 
 // Use canonical types from src/types.ts
-import type { DocId, BranchName, Heads } from "../types.ts";
+import type { BranchName, DocId, Heads } from "../types.ts";
 export interface ReadEntry {
   docId: DocId;
   branchId?: string;
   branch: BranchName;
   heads: Heads;
 }
-export interface SubmittedChange { bytes: Uint8Array }
+export interface SubmittedChange {
+  bytes: Uint8Array;
+}
 export interface WriteEntry {
   docId: DocId;
   branchId?: string;
@@ -156,7 +158,11 @@ export async function submitTx(
   try {
     // Pre-resolve and/or create branches
     const resolvedReads = req.reads.map((r) => {
-      const state = getBranchState(db, r.docId as any ?? (r as any).docId, (r as any).branch ?? (r as any).branch);
+      const state = getBranchState(
+        db,
+        r.docId as any ?? (r as any).docId,
+        (r as any).branch ?? (r as any).branch,
+      );
       // r is already a ReadEntry in internal shape when called via provider mapping
       return { ...r, branchId: state.branchId } as ReadEntry;
     });
@@ -197,20 +203,36 @@ export async function submitTx(
         try {
           virtualGenesis = computeGenesisHead(docId);
         } catch (e) {
-          results.push({ docId, branch, status: "conflict", reason: `genesis compute failed: ${(e as Error).message}` });
+          results.push({
+            docId,
+            branch,
+            status: "conflict",
+            reason: `genesis compute failed: ${(e as Error).message}`,
+          });
           hasNonOk = true;
           continue;
         }
         baseOk = equalHeads([virtualGenesis], write.baseHeads);
         if (!baseOk) {
-          results.push({ docId, branch, status: "conflict", reason: "incorrect genesis" });
+          results.push({
+            docId,
+            branch,
+            status: "conflict",
+            reason: "incorrect genesis",
+          });
           hasNonOk = true;
           continue;
         }
       }
       if (!baseOk) {
         if (!(write.allowServerMerge && isServerMergeEnabled(db))) {
-          results.push({ docId, branch, status: "conflict", reason: "baseHeads mismatch", newHeads: current.heads });
+          results.push({
+            docId,
+            branch,
+            status: "conflict",
+            reason: "baseHeads mismatch",
+            newHeads: current.heads,
+          });
           hasNonOk = true;
           continue;
         }
@@ -238,7 +260,13 @@ export async function submitTx(
           txId,
         });
         if (!merged.ok) {
-          results.push({ docId, branch, status: "conflict", reason: "cannot server-merge", newHeads: current.heads });
+          results.push({
+            docId,
+            branch,
+            status: "conflict",
+            reason: "cannot server-merge",
+            newHeads: current.heads,
+          });
           hasNonOk = true;
           continue;
         }
@@ -329,7 +357,12 @@ export async function submitTx(
         } catch {
           // ignore logging failures (non-fatal)
         }
-        results.push({ docId, branch, status: "rejected", reason: rejectedReason });
+        results.push({
+          docId,
+          branch,
+          status: "rejected",
+          reason: rejectedReason,
+        });
         hasNonOk = true;
         continue;
       }
@@ -387,7 +420,12 @@ export async function submitTx(
           json,
         });
       } catch (e) {
-        results.push({ docId, branch, status: "conflict", reason: `invariant/materialize failed: ${(e as Error).message}` });
+        results.push({
+          docId,
+          branch,
+          status: "conflict",
+          reason: `invariant/materialize failed: ${(e as Error).message}`,
+        });
         hasNonOk = true;
         continue;
       }
@@ -417,7 +455,7 @@ export async function submitTx(
     // Success path: commit entire tx atomically (all-or-nothing for multi-doc)
     db.exec("COMMIT;");
 
-    const receipt: TxReceipt = {
+    const receipt: any = {
       txId,
       committedAt: new Date().toISOString(),
       results,
@@ -429,14 +467,23 @@ export async function submitTx(
     db.exec("ROLLBACK;");
     if (err instanceof TxAbortError) {
       const conflicts = err.results.filter((r) => r.status !== "ok");
-      return { txId: 0, committedAt: new Date().toISOString(), results: err.results, conflicts } as any;
+      return {
+        txId: 0,
+        committedAt: new Date().toISOString(),
+        results: err.results,
+        conflicts,
+      } as any;
     }
     if (err instanceof ReadConflictError) {
-      const receipt: TxReceipt = {
+      const receipt: any = {
         txId: 0,
         committedAt: new Date().toISOString(),
         results: [],
-        conflicts: [{ ref: { docId: err.docId, branch: err.branch }, status: "conflict", reason: "read conflict" }],
+        conflicts: [{
+          ref: { docId: err.docId, branch: err.branch },
+          status: "conflict",
+          reason: "read conflict",
+        }],
       } as any;
       return receipt;
     }
