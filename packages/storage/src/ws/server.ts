@@ -152,14 +152,12 @@ class SessionState {
     try {
       this.activeOps++;
       const msg = this.decodeJSON(ev.data);
-      try {
-        console.log(
-          "[ws] recv",
-          typeof msg === "object"
-            ? msg?.invocation?.cmd ?? msg?.type
-            : typeof msg,
-        );
-      } catch {}
+      console.log(
+        "[ws] recv",
+        typeof msg === "object"
+          ? msg?.invocation?.cmd ?? msg?.type
+          : typeof msg,
+      );
       if (msg && msg.type === "ack") {
         const ack = msg as Ack;
         this.handleAck(ack);
@@ -212,7 +210,6 @@ class SessionState {
 
   private evaluateQuery(
     query: Record<string, unknown> | undefined,
-    alwaysIncludeRoot: boolean,
   ) {
     // Query schema: if missing, use False; require docId
     const spaceRootDoc = (query as any)?.docId as string;
@@ -225,35 +222,22 @@ class SessionState {
     const root = { ir, doc: spaceRootDoc, path };
     const docSet = new Set<string>();
     const docsToSend: string[] = [];
-    const wildcard = false; // wildcard not supported
 
-    // If rooted at a concrete doc, evaluate and include all touched docs
-    if (spaceRootDoc) {
-      this.evaluator.memo.clear();
-      this.evaluator.evaluate(
-        root as any,
-        undefined,
-        this.evaluator.newContext(),
-      );
-      const touches = this.collectTouchesFromRoot(root);
-      for (const l of touches) docSet.add(l.doc);
-      if (alwaysIncludeRoot) docSet.add(spaceRootDoc);
-    }
-    if (docSet.size === 0 && spaceRootDoc) {
-      docSet.add(spaceRootDoc);
-    }
+    this.evaluator.memo.clear();
+    this.evaluator.evaluate(
+      root as any,
+      undefined,
+      this.evaluator.newContext(),
+    );
+    const touches = this.collectTouchesFromRoot(root);
+    for (const l of touches) docSet.add(l.doc);
+    docSet.add(spaceRootDoc); // always include root doc
+
     // Deduplicate against socket-sent and client-known table
     const filtered = this.filterDocsClientNeeds(
       docsToSend.length > 0 ? docsToSend : Array.from(docSet),
     );
-    return { root, docSet, docsToSend: filtered, wildcard } as const;
-  }
-
-  private evaluateQueryAndBackfill(
-    query: Record<string, unknown> | undefined,
-    alwaysIncludeRoot: boolean,
-  ) {
-    return this.evaluateQuery(query, alwaysIncludeRoot);
+    return { root, docSet, docsToSend: filtered } as const;
   }
 
   private filterDocsClientNeeds(docIds: string[]): string[] {
@@ -325,19 +309,18 @@ class SessionState {
   private handleGet(inv: StorageGet, _auth: Authorization<StorageGet>) {
     const jobId = this.jobOf(inv);
     // One-shot evaluation and backfill
-    const { docsToSend } = this.evaluateQueryAndBackfill(
-      inv.args.query,
-      /*alwaysIncludeRoot*/ true,
-    );
+    const { docsToSend } = this.evaluateQuery(inv.args.query);
     if (docsToSend.length > 0) {
       this.sendDocsAsEpochBatch(docsToSend);
     }
-    try {
-      console.log("[ws] get complete");
-    } catch {}
+    console.log("[ws] get complete");
     const complete: Complete = {
       type: "complete",
-      at: {},
+      at: {
+        epoch: this.storageReader.currentVersion(
+          (inv.args.query as any)?.docId ?? "",
+        )?.epoch,
+      },
       streamId: this.streamId as any,
       filterId: "get",
     };
@@ -349,15 +332,12 @@ class SessionState {
     this.socket.send(this.encodeJSON(ret));
   }
 
-  private async handleSubscribe(
+  private handleSubscribe(
     inv: StorageSubscribe,
     _auth: Authorization<StorageSubscribe>,
   ) {
     const jobId = this.jobOf(inv);
-    const { root, docSet, docsToSend } = this.evaluateQuery(
-      inv.args.query,
-      /*alwaysIncludeRoot*/ true,
-    );
+    const { root, docSet, docsToSend } = this.evaluateQuery(inv.args.query);
     this.subs.set(inv.args.consumerId, { root, docSet });
     // Register query for incremental change processing when rooted at a concrete doc
     if (root.doc) {
@@ -372,9 +352,7 @@ class SessionState {
       // Force initial backfill of root doc if nothing else was touched
       this.sendDocsAsEpochBatch([root.doc]);
     } else if (docsToSend.length > 0) this.sendDocsAsEpochBatch(docsToSend);
-    try {
-      console.log("[ws] subscribe complete");
-    } catch {}
+    console.log("[ws] subscribe complete");
     const complete: Complete = {
       type: "complete",
       at: {},
@@ -436,9 +414,7 @@ class SessionState {
     };
 
     const receipt = await s.submitTx(normalized as any);
-    try {
-      console.log("[ws] receipt", JSON.stringify(receipt));
-    } catch {}
+    console.log("[ws] receipt", JSON.stringify(receipt));
     const epoch = receipt.txId;
     // Build a coarse delta per changed doc to drive incremental processing
     const deltas: Array<{ doc: string }> = [];
@@ -483,9 +459,7 @@ class SessionState {
           atVersion: v,
         } as any;
         const events = this.changeProc.onDelta(delta);
-        try {
-          console.log("[ws] delta", d.doc, "events", events.length);
-        } catch {}
+        console.log("[ws] delta", d.doc, "events", events.length);
         for (const ev of events) {
           if (!this.subs.has(ev.queryId)) continue;
           const sub = this.subs.get(ev.queryId)!;
@@ -496,9 +470,7 @@ class SessionState {
         }
       }
     }
-    try {
-      console.log("[ws] docsSet", [...docsSet]);
-    } catch {}
+    console.log("[ws] docsSet", [...docsSet]);
     if (docsSet.size === 0) return;
     const docsPayload: Deliver = {
       type: "deliver",
@@ -522,9 +494,7 @@ class SessionState {
         body: snap.doc,
       });
     }
-    try {
-      console.log("[ws] deliver", epoch, docsPayload.docs.length);
-    } catch {}
+    console.log("[ws] deliver", epoch, docsPayload.docs.length);
     this.socket.send(this.encodeJSON(docsPayload));
   }
 }
