@@ -173,7 +173,8 @@ async function runUpdatesWorkload(
     // Pick a doc reachable from vdom:0 (bias towards impacting the root query)
     const i = reachable[Math.floor(rnd() * reachable.length)] ?? 0;
     const docId = `vdom:${i}`;
-    const cur = docs.get(docId) ?? createGenesisDoc<any>(docId, `bench-actor:${i}`);
+    const cur = docs.get(docId) ??
+      createGenesisDoc<any>(docId, `bench-actor:${i}`);
     const removeMode = rnd() < 0.5;
     const base = Automerge.clone(cur);
     let updated = base;
@@ -318,7 +319,8 @@ if (!Deno.env.get("PROFILE")) {
     for (let t = 0; t < CHANGES; t++) {
       const i = reachableB[Math.floor(rnd() * reachableB.length)] ?? 0;
       const docId = `vdom:${i}`;
-      const cur = docsB.get(docId) ?? createGenesisDoc<any>(docId, `bench-actor:${i}`);
+      const cur = docsB.get(docId) ??
+        createGenesisDoc<any>(docId, `bench-actor:${i}`);
       const removeMode = rnd() < 0.5;
       const base = Automerge.clone(cur);
       let updated = base;
