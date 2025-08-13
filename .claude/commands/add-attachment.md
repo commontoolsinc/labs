@@ -46,10 +46,8 @@ echo '[INPUT_DATA]' | ./dist/ct charm set --identity [IDENTITY_FILE] --api-url [
 Attach the charm to the target node's attachments array:
 
 ```bash
-./dist/ct charm link --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [ATTACHMENT_CHARM_ID] [PAGE_CHARM_ID]/page/[PATH_TO_NODE]/attachments/[INDEX]
+./dist/ct charm link --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [ATTACHMENT_CHARM_ID] [PAGE_CHARM_ID]/[PATH_TO_NODE]/attachments/[INDEX]
 ```
-
-**Important**: The path requires the `page/` prefix when linking to page charms.
 
 ## Path Structure
 
@@ -80,30 +78,30 @@ Example paths:
 Attach charms that fetch and display external data (GitHub repos, APIs, databases):
 ```bash
 # Example: Attach a data fetcher to a node mentioning a resource
-./dist/ct charm link --identity [...] [FETCHER_CHARM] [PAGE]/page/outline/root/children/0/attachments/0
+./dist/ct charm link --identity [...] [FETCHER_CHARM] [PAGE]/outline/root/children/0/attachments/0
 ```
 
 ### 2. Visualizations
 Attach charts, graphs, or other visual representations:
 ```bash
 # Example: Attach a chart to display metrics mentioned in text
-./dist/ct charm link --identity [...] [CHART_CHARM] [PAGE]/page/outline/root/children/1/attachments/0
+./dist/ct charm link --identity [...] [CHART_CHARM] [PAGE]/outline/root/children/1/attachments/0
 ```
 
 ### 3. Interactive Elements
 Attach forms, buttons, or interactive components:
 ```bash
 # Example: Attach an input form to a task node
-./dist/ct charm link --identity [...] [FORM_CHARM] [PAGE]/page/outline/root/children/2/attachments/0
+./dist/ct charm link --identity [...] [FORM_CHARM] [PAGE]/outline/root/children/2/attachments/0
 ```
 
 ### 4. Multiple Attachments
 Nodes can have multiple attachments at different indices:
 ```bash
 # Attach multiple charms to the same node
-./dist/ct charm link --identity [...] [CHARM_1] [PAGE]/page/outline/root/attachments/0
-./dist/ct charm link --identity [...] [CHARM_2] [PAGE]/page/outline/root/attachments/1
-./dist/ct charm link --identity [...] [CHARM_3] [PAGE]/page/outline/root/attachments/2
+./dist/ct charm link --identity [...] [CHARM_1] [PAGE]/outline/root/attachments/0
+./dist/ct charm link --identity [...] [CHARM_2] [PAGE]/outline/root/attachments/1
+./dist/ct charm link --identity [...] [CHARM_3] [PAGE]/outline/root/attachments/2
 ```
 
 ## Efficient Querying
@@ -144,13 +142,11 @@ After linking, verify the attachment:
 
 1. **Index Management**: Attachments are indexed arrays. Use index 0 for the first attachment, 1 for the second, etc.
 
-2. **Path Prefix**: Always include `/page/` prefix when linking to page charms.
+2. **Selective Updates**: Target specific nodes rather than re-processing entire outlines.
 
-3. **Selective Updates**: Target specific nodes rather than re-processing entire outlines.
+3. **Attachment Types**: Any charm can be an attachment - consider what makes sense for the content.
 
-4. **Attachment Types**: Any charm can be an attachment - consider what makes sense for the content.
-
-5. **Performance**: When outlines contain many attachments with large data, use jq filters to query only needed parts.
+4. **Performance**: When outlines contain many attachments with large data, use jq filters to query only needed parts.
 
 ## Example: Complete Workflow
 
@@ -171,7 +167,7 @@ After linking, verify the attachment:
 echo '{"data": [1,2,3,4,5]}' | ./dist/ct charm set --identity ~/dev/.ct.key --api-url https://api.example.com --space myspace --charm chart456 chartData --input
 
 # 5. Attach to node
-./dist/ct charm link --identity ~/dev/.ct.key --api-url https://api.example.com --space myspace chart456 page123/page/outline/root/children/0/attachments/0
+./dist/ct charm link --identity ~/dev/.ct.key --api-url https://api.example.com --space myspace chart456 page123/outline/root/children/0/attachments/0
 
 # 6. Verify
 ./dist/ct charm get --identity ~/dev/.ct.key --api-url https://api.example.com --space myspace --charm page123 outline | jq '.root.children[0].attachments | length'

@@ -20,9 +20,9 @@ import {
   SpaceConfig,
 } from "../lib/charm.ts";
 import { renderCharm } from "../lib/charm-render.ts";
-import { render } from "../lib/render.ts";
+import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
-import { absPath, safeStringify } from "../lib/utils.ts";
+import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commontools/charm/ops";
 
 // Override usage, since we do not "require" args that can be reflected by env vars.
