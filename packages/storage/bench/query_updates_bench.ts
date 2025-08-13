@@ -173,9 +173,10 @@ async function runUpdatesWorkload(
     // Pick a doc reachable from vdom:0 (bias towards impacting the root query)
     const i = reachable[Math.floor(rnd() * reachable.length)] ?? 0;
     const docId = `vdom:${i}`;
-    const cur = docs.get(docId) ?? Automerge.init<any>();
+    const cur = docs.get(docId) ?? createGenesisDoc<any>(docId, `bench-actor:${i}`);
     const removeMode = rnd() < 0.5;
-    let updated = cur;
+    const base = Automerge.clone(cur);
+    let updated = base;
     // capture current children set before change for verification
     const curChildren: string[] = (() => {
       const cc = (Automerge.toJS(cur) as any)?.children ?? [];
@@ -222,7 +223,7 @@ async function runUpdatesWorkload(
     });
     const change = Automerge.getLastLocalChange(updated);
     if (!change) continue;
-    const baseHeads = Automerge.getHeads(cur);
+    const baseHeads = Automerge.getHeads(base);
     const rec = await space.submitTx({
       reads: [],
       writes: [{
@@ -317,9 +318,10 @@ if (!Deno.env.get("PROFILE")) {
     for (let t = 0; t < CHANGES; t++) {
       const i = reachableB[Math.floor(rnd() * reachableB.length)] ?? 0;
       const docId = `vdom:${i}`;
-      const cur = docsB.get(docId) ?? Automerge.init<any>();
+      const cur = docsB.get(docId) ?? createGenesisDoc<any>(docId, `bench-actor:${i}`);
       const removeMode = rnd() < 0.5;
-      let updated = cur;
+      const base = Automerge.clone(cur);
+      let updated = base;
       updated = Automerge.change(updated, (d: any) => {
         if (!Array.isArray(d.children)) d.children = [];
         const current: string[] = d.children.map((c: any) =>
@@ -347,7 +349,7 @@ if (!Deno.env.get("PROFILE")) {
       });
       const change = Automerge.getLastLocalChange(updated);
       if (!change) continue;
-      const baseHeads = Automerge.getHeads(cur);
+      const baseHeads = Automerge.getHeads(base);
       const rec = await spaceB.submitTx({
         reads: [],
         writes: [{
