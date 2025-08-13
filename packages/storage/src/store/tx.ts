@@ -21,29 +21,15 @@ import { getPrepared } from "./prepared.ts";
 import { runInvariants } from "./invariants.ts";
 import { computeGenesisHead } from "./genesis.ts";
 
-// Local types for the SQLite tx pipeline (server-internal shape per §04/§06)
-export type DocId = string;
-export type BranchName = string;
-export type ChangeHash = string;
-export type Heads = ReadonlyArray<ChangeHash>;
-
-export interface BranchRef {
-  docId: DocId;
-  branchId: string; // internal resolved branch id (optional in requests; resolved server-side)
-  branch: BranchName;
-}
-
+// Use canonical types from src/types.ts
+import type { DocId, BranchName, Heads } from "../types.ts";
 export interface ReadEntry {
   docId: DocId;
   branchId?: string;
   branch: BranchName;
   heads: Heads;
 }
-
-export interface SubmittedChange {
-  bytes: Uint8Array;
-}
-
+export interface SubmittedChange { bytes: Uint8Array }
 export interface WriteEntry {
   docId: DocId;
   branchId?: string;
@@ -75,14 +61,14 @@ export interface TxReceipt {
   results: ReadonlyArray<TxDocResult>;
   conflicts: ReadonlyArray<TxDocResult>;
   digests: {
-    baseHeadsRoot?: string; // hex
-    changesRoot?: string; // hex
+    baseHeadsRoot?: string;
+    changesRoot?: string;
     changeCount: number;
   };
   stubCrypto: {
-    prevTxHash: string; // hex
-    txBodyHash: string; // hex
-    txHash: string; // hex
+    prevTxHash: string;
+    txBodyHash: string;
+    txHash: string;
   };
 }
 
@@ -170,7 +156,8 @@ export async function submitTx(
   try {
     // Pre-resolve and/or create branches
     const resolvedReads = req.reads.map((r) => {
-      const state = getBranchState(db, r.docId, r.branch);
+      const state = getBranchState(db, r.docId as any ?? (r as any).docId, (r as any).branch ?? (r as any).branch);
+      // r is already a ReadEntry in internal shape when called via provider mapping
       return { ...r, branchId: state.branchId } as ReadEntry;
     });
     const resolvedWrites = await Promise.all(req.writes.map(async (w) => {
@@ -210,36 +197,20 @@ export async function submitTx(
         try {
           virtualGenesis = computeGenesisHead(docId);
         } catch (e) {
-          results.push({
-            docId,
-            branch,
-            status: "conflict",
-            reason: `genesis compute failed: ${(e as Error).message}`,
-          });
+          results.push({ docId, branch, status: "conflict", reason: `genesis compute failed: ${(e as Error).message}` });
           hasNonOk = true;
           continue;
         }
         baseOk = equalHeads([virtualGenesis], write.baseHeads);
         if (!baseOk) {
-          results.push({
-            docId,
-            branch,
-            status: "conflict",
-            reason: "incorrect genesis",
-          });
+          results.push({ docId, branch, status: "conflict", reason: "incorrect genesis" });
           hasNonOk = true;
           continue;
         }
       }
       if (!baseOk) {
         if (!(write.allowServerMerge && isServerMergeEnabled(db))) {
-          results.push({
-            docId,
-            branch,
-            status: "conflict",
-            reason: "baseHeads mismatch",
-            newHeads: current.heads,
-          });
+          results.push({ docId, branch, status: "conflict", reason: "baseHeads mismatch", newHeads: current.heads });
           hasNonOk = true;
           continue;
         }
@@ -267,13 +238,7 @@ export async function submitTx(
           txId,
         });
         if (!merged.ok) {
-          results.push({
-            docId,
-            branch,
-            status: "conflict",
-            reason: "cannot server-merge",
-            newHeads: current.heads,
-          });
+          results.push({ docId, branch, status: "conflict", reason: "cannot server-merge", newHeads: current.heads });
           hasNonOk = true;
           continue;
         }
@@ -364,12 +329,7 @@ export async function submitTx(
         } catch {
           // ignore logging failures (non-fatal)
         }
-        results.push({
-          docId,
-          branch,
-          status: "rejected",
-          reason: rejectedReason,
-        });
+        results.push({ docId, branch, status: "rejected", reason: rejectedReason });
         hasNonOk = true;
         continue;
       }
@@ -427,12 +387,7 @@ export async function submitTx(
           json,
         });
       } catch (e) {
-        results.push({
-          docId,
-          branch,
-          status: "conflict",
-          reason: `invariant/materialize failed: ${(e as Error).message}`,
-        });
+        results.push({ docId, branch, status: "conflict", reason: `invariant/materialize failed: ${(e as Error).message}` });
         hasNonOk = true;
         continue;
       }
@@ -464,38 +419,25 @@ export async function submitTx(
 
     const receipt: TxReceipt = {
       txId,
+      committedAt: new Date().toISOString(),
       results,
       conflicts: results.filter((r) => r.status !== "ok"),
-      digests: digestInfo,
-      stubCrypto: getLastStubCrypto(db),
-    };
+    } as any;
     return receipt;
   } catch (err) {
     // Failure path: roll back entire tx (all-or-nothing)
     db.exec("ROLLBACK;");
     if (err instanceof TxAbortError) {
       const conflicts = err.results.filter((r) => r.status !== "ok");
-      return {
-        txId: 0,
-        results: err.results,
-        conflicts,
-        digests: { changeCount: 0 },
-        stubCrypto: { prevTxHash: "", txBodyHash: "", txHash: "" },
-      };
+      return { txId: 0, committedAt: new Date().toISOString(), results: err.results, conflicts } as any;
     }
     if (err instanceof ReadConflictError) {
       const receipt: TxReceipt = {
         txId: 0,
+        committedAt: new Date().toISOString(),
         results: [],
-        conflicts: [{
-          docId: err.docId,
-          branch: err.branch,
-          status: "conflict",
-          reason: "read conflict",
-        }],
-        digests: { changeCount: 0 },
-        stubCrypto: { prevTxHash: "", txBodyHash: "", txHash: "" },
-      };
+        conflicts: [{ ref: { docId: err.docId, branch: err.branch }, status: "conflict", reason: "read conflict" }],
+      } as any;
       return receipt;
     }
     throw err;

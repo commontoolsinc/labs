@@ -15,32 +15,7 @@ function toHexUtf8(s: string): string {
 }
 
 function initWithActor(actor: string): any {
-  const am: any = Automerge as any;
-  // Try common option keys
-  try {
-    if (typeof am.init === "function") {
-      return am.init({ actor: toHexUtf8(actor) });
-    }
-  } catch {}
-  try {
-    if (typeof am.init === "function") {
-      return am.init({ actorId: toHexUtf8(actor) });
-    }
-  } catch {}
-  // Some builds expose explicit helpers
-  try {
-    if (typeof am.initActor === "function") {
-      return am.initActor(toHexUtf8(actor));
-    }
-  } catch {}
-  // Fallback: set post-init if available
-  let d = Automerge.init();
-  try {
-    if (typeof am.setActorId === "function") {
-      d = am.setActorId(d, toHexUtf8(actor));
-    }
-  } catch {}
-  return d;
+  return Automerge.init({ actor: toHexUtf8(actor) });
 }
 
 export function computeGenesisHead(docId: string): string {
