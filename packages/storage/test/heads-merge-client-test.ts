@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../src/provider.ts";
 import { decodeChangeHeader } from "../src/store/change.ts";
-import { computeGenesisHead, createGenesisDoc } from "../src/index.ts";
+import { createGenesisDoc } from "../src/index.ts";
 
 Deno.test("client merge collapses two heads into one", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -13,7 +13,6 @@ Deno.test("client merge collapses two heads into one", async () => {
   const branch = "main";
 
   // Two independent changes from empty base
-  const gen = computeGenesisHead(docId);
   const d0 = createGenesisDoc<any>(docId);
   const d1 = Automerge.change(d0, (doc: any) => {
     doc.value = { n: 1 };
@@ -33,7 +32,7 @@ Deno.test("client merge collapses two heads into one", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [gen],
+      baseHeads: Automerge.getHeads(d0),
       changes: [{ bytes: c1 }],
     }],
   });

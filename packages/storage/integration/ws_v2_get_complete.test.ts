@@ -23,7 +23,7 @@
  */
 import { assertEquals, assertRejects } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
-import { computeGenesisHead, createGenesisDoc } from "../src/store/genesis.ts";
+import { createGenesisDoc } from "../src/store/genesis.ts";
 import { decodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
@@ -99,7 +99,7 @@ Deno.test({
             reads: [],
             writes: [{
               ref: { docId, branch: "main" },
-              baseHeads: [computeGenesisHead(docId)],
+              baseHeads: Automerge.getHeads(base),
               changes: [{ bytes: btoa(String.fromCharCode(...c1)) }],
             }],
           },
@@ -172,7 +172,7 @@ Deno.test({
   // Now ensure we do not receive any deliver frames in a short window
   // Produce next change by editing the locally seeded doc
   const docId = "doc:s1";
-  let cur = Automerge.change(seededDoc as any, (x: any) => {
+  const cur = Automerge.change(seededDoc as any, (x: any) => {
     x.bump = (x.bump || 0) + 1;
   });
   const nextChange = Automerge.getLastLocalChange(cur)!;
@@ -239,7 +239,7 @@ Deno.test({
             reads: [],
             writes: [{
               ref: { docId: docId2, branch: "main" },
-              baseHeads: [computeGenesisHead(docId2)],
+              baseHeads: Automerge.getHeads(base2),
               changes: [{ bytes: changeB64_2 }],
             }],
           },

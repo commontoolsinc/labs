@@ -13,7 +13,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
-import { computeGenesisHead, createGenesisDoc } from "../src/store/genesis.ts";
+import { createGenesisDoc } from "../src/store/genesis.ts";
 
 Deno.test({
   name: "WS v2: subscribe complete and deliver/ack via tx",
@@ -87,7 +87,7 @@ Deno.test({
               reads: [],
               writes: [{
                 ref: { docId, branch: "main" },
-                baseHeads: [computeGenesisHead(docId)],
+                baseHeads: Automerge.getHeads(base),
                 changes: [{ bytes: btoa(String.fromCharCode(...preChange)) }],
               }],
             },

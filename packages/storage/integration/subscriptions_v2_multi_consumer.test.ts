@@ -20,7 +20,7 @@
  */
 import { assert } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
-import { computeGenesisHead, createGenesisDoc } from "../src/store/genesis.ts";
+import { createGenesisDoc } from "../src/store/genesis.ts";
 import { decodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
@@ -97,7 +97,7 @@ Deno.test({
                 reads: [],
                 writes: [{
                   ref: { docId: docId2, branch: "main" },
-                  baseHeads: [computeGenesisHead(docId2)],
+                  baseHeads: Automerge.getHeads(base2),
                   changes: [{ bytes: changeB642 }],
                 }],
               },
@@ -130,7 +130,7 @@ Deno.test({
             reads: [],
             writes: [{
               ref: { docId, branch: "main" },
-              baseHeads: [computeGenesisHead(docId)],
+              baseHeads: Automerge.getHeads(base),
               changes: [{ bytes: changeB64 }],
             }],
           },

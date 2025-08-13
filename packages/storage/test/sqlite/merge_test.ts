@@ -3,7 +3,7 @@ import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
 import { decodeChangeHeader } from "../../src/store/change.ts";
 import { openSqlite } from "../../src/store/db.ts";
-import { computeGenesisHead, createGenesisDoc } from "../../src/index.ts";
+import { createGenesisDoc } from "../../src/index.ts";
 
 Deno.test("test_server_merge_guarded_by_flag", async () => {
   // Ensure flag disabled
@@ -21,7 +21,6 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
   await space.getOrCreateBranch(docId, branch);
 
   // First change from genesis base
-  const gen = computeGenesisHead(docId);
   const a0 = createGenesisDoc<any>(docId);
   const a1 = Automerge.change(a0, (doc: any) => {
     doc.x = 1;
@@ -32,7 +31,7 @@ Deno.test("test_server_merge_guarded_by_flag", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [gen],
+      baseHeads: Automerge.getHeads(a0),
       changes: [{ bytes: c1 }],
     }],
   });
@@ -116,7 +115,7 @@ Deno.test("test_server_merge_enabled", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [computeGenesisHead(docId)],
+      baseHeads: Automerge.getHeads(a0),
       changes: [{ bytes: c1 }],
     }],
   });
@@ -176,7 +175,7 @@ Deno.test("test_close_branch_post_merge", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch: feature },
-      baseHeads: [computeGenesisHead(docId)],
+      baseHeads: Automerge.getHeads(d0),
       changes: [{ bytes: cf }],
     }],
   });
@@ -191,7 +190,7 @@ Deno.test("test_close_branch_post_merge", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch: main },
-      baseHeads: [computeGenesisHead(docId)],
+      baseHeads: Automerge.getHeads(e0),
       changes: [{ bytes: cm }],
     }],
   });
@@ -248,7 +247,7 @@ Deno.test("test_no_close_if_not_collapsed", async () => {
     reads: [],
     writes: [{
       ref: { docId, branch: main },
-      baseHeads: [computeGenesisHead(docId)],
+      baseHeads: Automerge.getHeads(a0),
       changes: [{ bytes: c1 }],
     }],
   });
