@@ -20,6 +20,11 @@ const SEED = Number(Deno.env.get("BENCH_UPD_SEED") ?? 1234);
 const NODES = Number(Deno.env.get("BENCH_UPD_NODES") ?? 500);
 const MAX_CHILDREN = Number(Deno.env.get("BENCH_UPD_MAX_CHILDREN") ?? 12);
 const CHANGES = Number(Deno.env.get("BENCH_UPD_CHANGES") ?? 200);
+const CHILD_PROB = Number(Deno.env.get("BENCH_UPD_CHILD_PROB") ?? 0.08);
+const VERIFY = (() => {
+  const v = (Deno.env.get("BENCH_UPD_VERIFY") ?? "0").toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+})();
 
 function mulberry32(a: number) {
   return function () {
@@ -65,6 +70,7 @@ async function seedVDOM(
       for (let k = 0; k < fanout; k++) {
         const remaining = Math.max(0, nodes - i - 1);
         if (remaining <= 0) break;
+        if (rnd() > CHILD_PROB) continue;
         const j = i + 1 + Math.floor(rnd() * remaining);
         if (j > i && j < nodes) children.add(j);
       }
@@ -135,7 +141,7 @@ function buildEngine(db: Database) {
   // Register a single root query on vdom:0 to cover the entire VDOM via links
   cp.registerQuery({ id: `q:vdom:0`, doc: `vdom:0`, path: [], ir });
 
-  return { storage, evaluator, cp };
+  return { storage, evaluator, cp, prov, ir };
 }
 
 // Globals initialized once for the benchmark
@@ -150,7 +156,7 @@ const db: Database = sqliteHandle.db;
 const seeded = await seedVDOM(space, NODES, MAX_CHILDREN);
 const docs = seeded.docs;
 const reachable = seeded.reachableFromZero;
-const { storage, cp } = buildEngine(db);
+const { storage, cp, prov, ir } = buildEngine(db);
 
 // Helper to pick random int in [0, n)
 function randInt(n: number): number {
@@ -172,6 +178,16 @@ Deno.bench({
     const cur = docs.get(docId) ?? Automerge.init<any>();
     const removeMode = rnd() < 0.5;
     let updated = cur;
+    // capture current children set before change for verification
+    const curChildren: string[] = (() => {
+      const cc = (Automerge.toJS(cur) as any)?.children ?? [];
+      return Array.isArray(cc)
+        ? cc.map((c: any) => c?.["/"]?.["link@1"]?.id).filter((x: any) =>
+          typeof x === "string"
+        )
+        : [];
+    })();
+    let changedIdx: number | null = null;
     updated = Automerge.change(updated, (d: any) => {
       if (!Array.isArray(d.children)) d.children = [];
       // Extract current child doc ids for convenience
@@ -182,6 +198,7 @@ Deno.bench({
         // remove a random child
         const idx = randInt(current.length);
         d.children.splice(idx, 1);
+        changedIdx = idx;
       } else {
         // add a new child j > i and not already present (respect DAG direction)
         const remaining = Math.max(0, NODES - i - 1);
@@ -190,15 +207,18 @@ Deno.bench({
           const childId = `vdom:${candidate}`;
           if (!current.includes(childId)) {
             d.children.push(link(childId, []));
+            changedIdx = d.children.length - 1;
           } else if (current.length > 0) {
             // fallback: remove one to ensure a structural change
             const idx = randInt(current.length);
             d.children.splice(idx, 1);
+            changedIdx = idx;
           }
         } else if (current.length > 0) {
           // no valid higher children; remove something
           const idx = randInt(current.length);
           d.children.splice(idx, 1);
+          changedIdx = idx;
         }
       }
     });
@@ -221,12 +241,46 @@ Deno.bench({
     const v = storage.currentVersion(docId);
     const delta: Delta = {
       doc: docId,
-      changed: new Set([keyPathLocal(["children"])]) as unknown as Set<string>,
+      changed: new Set(
+        [keyPathLocal(["children"])].concat(
+          changedIdx != null
+            ? [keyPathLocal(["children", String(changedIdx)])]
+            : [],
+        ),
+      ) as unknown as Set<string>,
       removed: new Set(),
       newDoc: undefined,
       atVersion: v,
     } as unknown as Delta;
     const ev = cp.onDelta(delta);
+    if (VERIFY && ok) {
+      const js = Automerge.toJS(updated) as any;
+      const afterChildren: Array<{ id: string; idx: number }> =
+        Array.isArray(js?.children)
+          ? js.children.map((c: any, idx: number) => ({
+            id: c?.["/"]?.["link@1"]?.id,
+            idx,
+          }))
+          : [];
+      const beforeSet = new Set(curChildren);
+      const added = afterChildren.find((c) =>
+        typeof c.id === "string" && !beforeSet.has(c.id)
+      );
+      if (added) {
+        // Expect provenance link edge from parent slot to child doc root to exist for root query
+        const ek = `${ir}\u0001vdom:0\u0001[]`;
+        const toKey = keyPathLocal([]);
+        const edgeSet = prov.linkEdges.get(ek);
+        const hasEdge = Array.from(edgeSet ?? []).some((k) =>
+          typeof k === "string" && k.startsWith(`${added.id}\u0001`)
+        );
+        if (!hasEdge) {
+          throw new Error(
+            `verify failed: link edge to new child ${added.id} missing in provenance`,
+          );
+        }
+      }
+    }
     events += ev.length;
   }
   if (events <= 0) throw new Error("no update events generated");

@@ -74,6 +74,106 @@ Deno.test("schema compile with #/definitions and evaluation over SQLite", async 
   assertEquals(res.verdict, "Yes");
 });
 
+Deno.test("link topology change: adding new child triggers touch and provenance edge", async () => {
+  const tmpDir = await Deno.makeTempDir();
+  const spacesDir = new URL(`file://${tmpDir}/`);
+  const space = await openSpaceStorage("did:key:query-topology", { spacesDir });
+  const db: Database = (await openSqlite({
+    url: new URL("./did:key:query-topology.sqlite", spacesDir),
+  })).db;
+
+  const root = "doc:R";
+  const child = "doc:C";
+  await space.getOrCreateBranch(root, "main");
+  await space.getOrCreateBranch(child, "main");
+
+  // Seed root with empty children array
+  let r = Automerge.init<any>();
+  r = Automerge.change(r, (x: any) => {
+    x.tag = "div";
+    x.children = [];
+  });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId: root, branch: "main" },
+      baseHeads: [],
+      changes: [{ bytes: Automerge.getLastLocalChange(r)! }],
+    }],
+  });
+
+  const storage = new SqliteStorageReader(db);
+  const pool = new IRPool();
+  const prov = new Provenance();
+  const evalr = new Evaluator(pool, storage, prov);
+  const { SubscriptionIndex } = await import("../../src/query/subs.ts");
+  const { ChangeProcessor } = await import(
+    "../../src/query/change_processor.ts"
+  );
+  const subs = new SubscriptionIndex();
+  const proc = new ChangeProcessor(evalr, prov, subs);
+
+  // Recursive VNode schema
+  const VNodeRecursive = {
+    $defs: {
+      VNode: {
+        type: "object",
+        properties: {
+          tag: { type: "string" },
+          children: { type: "array", items: { $ref: "#/$defs/VNode" } },
+        },
+      },
+    },
+    $ref: "#/$defs/VNode",
+  } as const;
+  const ir = compileSchema(pool, VNodeRecursive as any);
+  proc.registerQuery({ id: "q", doc: root, path: [], ir });
+
+  // Simulate a delta on the children array, then add a child and send delta for specific index
+  const v0 = storage.currentVersion(root);
+  proc.onDelta({
+    doc: root,
+    changed: new Set([JSON.stringify(["children"])]) as any,
+    removed: new Set(),
+    newDoc: undefined,
+    atVersion: v0,
+  });
+
+  // Compute proper base heads for the next write
+  const heads0 = (await space.getBranchState(root, "main")).heads;
+  r = Automerge.change(r, (x: any) => {
+    x.children.push({ "/": { "link@1": { id: child, path: [] } } });
+  });
+  await space.submitTx({
+    reads: [],
+    writes: [{
+      ref: { docId: root, branch: "main" },
+      baseHeads: heads0,
+      changes: [{ bytes: Automerge.getLastLocalChange(r)! }],
+    }],
+  });
+  const v1 = storage.currentVersion(root);
+  const ev1 = proc.onDelta({
+    doc: root,
+    changed: new Set([
+      JSON.stringify(["children"]),
+      JSON.stringify(["children", "0"]),
+    ]) as any,
+    removed: new Set(),
+    newDoc: undefined,
+    atVersion: v1,
+  });
+  assert(ev1.length >= 1);
+  // Expect touchAdded to include the new link slot at children/0 on the root doc
+  const keyChildren0 = JSON.stringify(["children", "0"]);
+  const sawNewSlot = ev1.some((e) =>
+    (e as any).touchAdded?.some?.((l: any) =>
+      l?.doc === root && JSON.stringify(l?.path ?? []) === keyChildren0
+    )
+  );
+  assert(sawNewSlot);
+});
+
 Deno.test("schema evaluator yields MaybeExceededDepth when visit limit is tiny", async () => {
   const tmpDir = await Deno.makeTempDir();
   const spacesDir = new URL(`file://${tmpDir}/`);
