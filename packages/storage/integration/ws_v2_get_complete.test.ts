@@ -24,6 +24,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { computeGenesisHead, createGenesisDoc } from "../src/store/genesis.ts";
+import { decodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
   name: "WS v2: get-only returns complete and no deliver",
@@ -119,12 +120,7 @@ Deno.test({
 
   // Expect one deliver (current snapshot or delta) followed by complete; then ensure no further delivers
   let sawInitialDeliver = false;
-  const decodeB64 = (s: string): Uint8Array => {
-    const bin = atob(s);
-    const out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  };
+  const decodeB64 = (s: string): Uint8Array => decodeBase64(s);
   await new Promise<void>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("complete timeout")), 7000);
     ws.onmessage = (e) => {

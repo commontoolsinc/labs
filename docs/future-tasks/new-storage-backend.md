@@ -583,7 +583,7 @@ Action items for phase 2 (expanded):
     - [x] `bytesToHex(bytes: Uint8Array): string` (re-export/impl)
     - [x] `hexToBytes(hex: string): Uint8Array` (re-export/impl)
   - [x] Replace ad-hoc helpers in `src/ws/server.ts` and `src/ws/ucan.ts`.
-  - [ ] Migrate shared test utilities to import the module (keep local helpers
+  - [x] Migrate shared test utilities to import the module (keep local helpers
         for now).
 
 - [x] Standardize path keying
@@ -592,12 +592,14 @@ Action items for phase 2 (expanded):
   - [x] Replace direct `JSON.stringify(path)` usages in hot paths with
         `keyPath()`.
 
-- [ ] Types consolidation (follow-up)
-  - [ ] Use `src/types.ts` as the canonical source for `TxRequest`, `TxReceipt`,
-        `TxDocResult`, `BranchRef`, etc.
-  - [ ] Refactor `src/store/tx.ts` to consume these types instead of
-        re-declaring local variants.
-  - [ ] Align `src/ws/protocol.ts` to reference the same transaction types.
+- [x] Types consolidation (follow-up)
+  - [x] Use `src/types.ts` as the canonical source for public `TxRequest`,
+        `TxReceipt`, `TxDocResult`, `BranchRef`, etc. (re-exported via
+        `src/interface.ts`).
+  - [x] Refactor `src/store/tx.ts` to eliminate duplicate public types; use a
+        small internal `ReadEntry`/`WriteEntry` for the SQLite pipeline and map
+        to/from public types in `src/provider.ts`.
+  - [x] Ensure WS protocol references the public transaction types.
 
 - [x] Migrations/schema unification (follow-up)
   - [x] Remove/replace empty or duplicated migration files under
