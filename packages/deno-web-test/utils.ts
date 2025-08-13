@@ -56,6 +56,14 @@ export async function bundle(inputPath: string, outputPath: string) {
     },
     bundle: true,
     format: "esm",
+    tsconfigRaw: {
+      compilerOptions: {
+        // `useDefineForClassFields` is critical when using Lit
+        // with esbuild, even when not using decorators.
+        useDefineForClassFields: false,
+        experimentalDecorators: true,
+      },
+    },
   });
 
   esbuild.stop();
