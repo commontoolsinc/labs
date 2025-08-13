@@ -117,14 +117,17 @@ describe("shell iframe counter tests", () => {
       identity,
     });
 
-    // Wait for iframe content to load
-    // The charm uses nested iframes with sandbox restrictions, requiring coordinate-based interaction
-    await sleep(5000);
-
     // Get the iframe element using pierce selector to traverse shadow DOM
-    const counterIframe = await page.$("iframe", { strategy: "pierce" });
-    assert(counterIframe, "Outer iframe should be found");
+    const counterIframe = await page.waitForSelector(
+      'common-iframe-sandbox[load-state="loaded"]',
+      { strategy: "pierce" },
+    );
 
+    // TODO(js): No way currently to know when an iframe's react
+    // views are rendered, wait after the iframe's contents have been loaded.
+    await sleep(2000);
+
+    // The charm uses nested iframes with sandbox restrictions, requiring coordinate-based interaction
     // Click the right third of the iframe 5 times to increment (starting from 0)
     console.log("Clicking increment area 5 times...");
     for (let i = 0; i < 5; i++) {
