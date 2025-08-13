@@ -1,7 +1,7 @@
 import { DocId, Link, Path, Verdict, Version } from "../types.ts";
 import { IRId, IRPool } from "./ir.ts";
 import { Reader } from "./storage.ts";
-import { child } from "./path.ts";
+import { child, keyPath as keyPathLocal } from "./path.ts";
 
 export const DEFAULT_VISIT_LIMIT = 16_384;
 
@@ -36,10 +36,10 @@ export class Provenance {
   linkEdges = new Map<string, Set<string>>();
 
   static keyLink(c: Link): string {
-    return `${c.doc}\u0001${JSON.stringify(c.path)}`;
+    return `${c.doc}\u0001${keyPathLocal(c.path)}`;
   }
   static keyEval(k: EvalKey): string {
-    return `${k.ir}\u0001${k.doc}\u0001${JSON.stringify(k.path)}`;
+    return `${k.ir}\u0001${k.doc}\u0001${keyPathLocal(k.path)}`;
   }
 }
 
@@ -96,7 +96,7 @@ export class Evaluator {
 
       curPath = next;
       while (true) {
-        const memoKey = `${curDoc}\u0001${JSON.stringify(curPath)}\u0001${
+        const memoKey = `${curDoc}\u0001${keyPathLocal(curPath)}\u0001${
           JSON.stringify(at ?? {})
         }`;
         let val = ctx.valueMemo.get(memoKey);
@@ -124,7 +124,7 @@ export class Evaluator {
     while (remaining.length > 0) {
       // Follow links at current location before stepping into next segment
       while (true) {
-        const memoKey = `${curDoc}\u0001${JSON.stringify(curPath)}\u0001${
+        const memoKey = `${curDoc}\u0001${keyPathLocal(curPath)}\u0001${
           JSON.stringify(at ?? {})
         }`;
         let val = ctx.valueMemo.get(memoKey);
@@ -199,7 +199,7 @@ export class Evaluator {
     const effDoc = norm.doc;
     const effPath = norm.path;
 
-    const memoKey = `${effDoc}\u0001${JSON.stringify(effPath)}\u0001${
+    const memoKey = `${effDoc}\u0001${keyPathLocal(effPath)}\u0001${
       JSON.stringify(at ?? {})
     }`;
     let v = ctx.valueMemo.get(memoKey);
@@ -366,9 +366,7 @@ export class Evaluator {
       }
       this.prov.linkEdges.get(ekStr)!.add(toKey);
 
-      const visitKey = `${key.ir}\u0001${to.doc}\u0001${
-        JSON.stringify(to.path)
-      }`;
+      const visitKey = `${key.ir}\u0001${to.doc}\u0001${keyPathLocal(to.path)}`;
       if (ctx.seenIRDocPath.has(visitKey)) {
         // Proper cycle revisit at same (IR, doc, path): do not recurse.
         const result: EvalResult = { verdict, touches, linkEdges, deps };
