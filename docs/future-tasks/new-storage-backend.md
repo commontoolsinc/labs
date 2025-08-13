@@ -558,10 +558,10 @@ Action items for phase 2 (expanded):
 
 ## Cleanup tasks
 
-- [x] Links are wrong, they are json pointer but should be string[]
-- [x] Rationalize seqId vs txId use
-- [x] Remove InMemoryStorage in query/
-  - [x] First remove the dependency on it in cycle_test.ts and others
+- [ ] in server.ts and maybe other places it says "standed in for
+      merkle-reference", just actually use it!
+- [ ] remove all try { console.log() } catch {}
+- [ ] server: ack should also be a UCAN invocation, or even better modelled as
+      the response to the server, mirroring the protocol?
+- [ ] How to test over a socket without booting a server
 - [ ] Can we use :memory; instead of temp directories?
-- [x] Rename `Storage` class inside query to something more like ReadHelper
-- [x] Rename `sqlite` directory into something more meaningful
