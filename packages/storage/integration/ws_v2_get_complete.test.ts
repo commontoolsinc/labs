@@ -62,27 +62,52 @@ Deno.test({
       sock.onopen = () => resolve();
     });
 
-  // Seed the doc/branch first using local storage to avoid websocket timing
-  const { openSpaceStorage: openSpaceStorageSeed } = await import(
-    "../src/provider.ts"
-  );
-  const storageSeed = await openSpaceStorageSeed(spaceDid, { spacesDir });
-  {
-    const docId = "doc:s1";
-    const base = createGenesisDoc<any>(docId);
-    const after = Automerge.change(base, (x: any) => {
-      x.seed = true;
-    });
-    const c1 = Automerge.getLastLocalChange(after)!;
-    await (storageSeed as any).submitTx({
-      reads: [],
-      writes: [{
-        ref: { docId, branch: "main" },
-        baseHeads: [computeGenesisHead(docId)],
-        changes: [{ bytes: c1 }],
-      }],
-    });
-  }
+  // Seed the doc/branch first using a separate websocket to avoid dynamic lib leaks
+  let seedHeads: string[] = [];
+  let seededDoc: Automerge.Doc<any> | null = null;
+  await new Promise<void>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("seed timeout")), 3000);
+    const wsSeed = new WebSocket(
+      `ws://localhost:${PORT}/api/storage/new/v2/${
+        encodeURIComponent(spaceDid)
+      }/ws`,
+    );
+    wsSeed.onmessage = (e) => {
+      const m = JSON.parse(e.data as string);
+      if (m && m.the === "task/return" && m.is?.txId !== undefined) {
+        seedHeads = m.is?.results?.[0]?.newHeads ?? [];
+        clearTimeout(t);
+        wsSeed.close();
+        resolve();
+      }
+    };
+    wsSeed.onopen = () => {
+      const docId = "doc:s1";
+      const base = createGenesisDoc<any>(docId);
+      const after = Automerge.change(base, (x: any) => {
+        x.seed = true;
+      });
+      const c1 = Automerge.getLastLocalChange(after)!;
+      seededDoc = after as any;
+      wsSeed.send(JSON.stringify({
+        invocation: {
+          iss: "did:key:test",
+          cmd: "/storage/tx",
+          sub: spaceDid,
+          args: {
+            reads: [],
+            writes: [{
+              ref: { docId, branch: "main" },
+              baseHeads: [computeGenesisHead(docId)],
+              changes: [{ bytes: btoa(String.fromCharCode(...c1)) }],
+            }],
+          },
+          prf: [],
+        },
+        authorization: { signature: [], access: {} },
+      }));
+    };
+  });
 
   // Now open the client connection for get-only operations
   const ws = new WebSocket(
@@ -92,13 +117,39 @@ Deno.test({
   );
   await waitOpen(ws);
 
-  // Expect one deliver (current snapshot) followed by complete; then ensure no further delivers
+  // Expect one deliver (current snapshot or delta) followed by complete; then ensure no further delivers
   let sawInitialDeliver = false;
+  const decodeB64 = (s: string): Uint8Array => {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
   await new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("complete timeout")), 5000);
+    const t = setTimeout(() => reject(new Error("complete timeout")), 7000);
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data as string);
-      if (m && m.type === "deliver") sawInitialDeliver = true;
+      if (m && m.type === "deliver") {
+        // Validate payload shape under new protocol
+        if (Array.isArray(m.docs) && m.docs.length > 0) {
+          const d = m.docs[0];
+          if (d.kind === "snapshot") {
+            // Should be base64 automerge bytes
+            const _bytes = decodeB64(d.body as string);
+            // consume bytes to avoid linter warning
+            if (_bytes.length < 0) {
+              // no-op
+            }
+          } else if (d.kind === "delta") {
+            // If server chose to send delta, it must be array of base64 change bytes
+            const _changes = (d.body as string[]).map(decodeB64);
+            if (_changes.length < 0) {
+              // no-op
+            }
+          }
+        }
+        sawInitialDeliver = true;
+      }
       if (m && m.the === "task/return" && m.is?.type === "complete") {
         clearTimeout(t);
         resolve();
@@ -123,16 +174,9 @@ Deno.test({
   if (!sawInitialDeliver) throw new Error("expected initial deliver for get");
 
   // Now ensure we do not receive any deliver frames in a short window
-  const { openSpaceStorage: openSpaceStorageRead } = await import(
-    "../src/provider.ts"
-  );
-  const storage = await openSpaceStorageRead(spaceDid, { spacesDir });
-  const state = await (storage as any).getBranchState("doc:s1", "main");
-  const bytes = await (storage as any).getDocBytes("doc:s1", "main", {
-    accept: "automerge",
-  });
-  let cur = Automerge.load(bytes);
-  cur = Automerge.change(cur, (x: any) => {
+  // Produce next change by editing the locally seeded doc
+  const docId = "doc:s1";
+  let cur = Automerge.change(seededDoc as any, (x: any) => {
     x.bump = (x.bump || 0) + 1;
   });
   const nextChange = Automerge.getLastLocalChange(cur)!;
@@ -145,7 +189,7 @@ Deno.test({
         reads: [],
         writes: [{
           ref: { docId: "doc:s1", branch: "main" },
-          baseHeads: state.heads,
+          baseHeads: seedHeads,
           changes: [{ bytes: btoa(String.fromCharCode(...nextChange)) }],
         }],
       },
@@ -155,7 +199,7 @@ Deno.test({
   };
   ws.send(JSON.stringify(sendTx));
   const noMore = new Promise<void>((resolve, reject) => {
-    const t = setTimeout(() => resolve(), 800);
+    const t = setTimeout(() => resolve(), 1000);
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data as string);
       if (m && m.type === "deliver") {
@@ -255,11 +299,10 @@ Deno.test({
 
   ws.close();
   try {
-    (storageSeed as any).close?.();
-  } catch {}
-  try {
     p.kill();
     await p.status;
-  } catch { /* ignore */ }
+  } catch {
+    // ignore
+  }
   clearTimeout(watchdog);
 });

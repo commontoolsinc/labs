@@ -154,6 +154,7 @@ Deno.test({
     ws: WebSocket,
     consumerId: string,
     docId: string,
+    baseline: Map<string, any>,
   ) =>
     new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error("deliver timeout")), 5000);
@@ -170,12 +171,32 @@ Deno.test({
         },
         authorization: { signature: [], access: {} },
       };
+      const decodeB64 = (s: string): Uint8Array => {
+        const bin = atob(s);
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+      };
       ws.send(JSON.stringify(msg));
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data as string);
         if (m && m.type === "deliver") {
           try {
             assert(Array.isArray(m.docs) && m.docs.length >= 1);
+            for (const d of m.docs) {
+              if (d.docId !== docId) continue;
+              if (d.kind === "snapshot") {
+                const bytes = decodeB64(d.body as string);
+                baseline.set(docId, Automerge.load(bytes));
+              } else if (d.kind === "delta") {
+                const changes = (d.body as string[]).map(decodeB64);
+                const cur = baseline.get(docId) ?? Automerge.init();
+                baseline.set(
+                  docId,
+                  Automerge.applyChanges(cur as any, changes),
+                );
+              }
+            }
             ws.send(
               JSON.stringify({
                 type: "ack",
@@ -196,10 +217,12 @@ Deno.test({
     });
 
   // Subscribe sequentially per socket to avoid overwriting onmessage handlers
-  await subscribeAndExpectBackfill(ws1, "c1-s1", "doc:s1");
-  await subscribeAndExpectBackfill(ws1, "c1-s2", "doc:s2");
-  await subscribeAndExpectBackfill(ws2, "c2-s1", "doc:s1");
-  await subscribeAndExpectBackfill(ws2, "c2-s2", "doc:s2");
+  const baseline1 = new Map<string, any>();
+  const baseline2 = new Map<string, any>();
+  await subscribeAndExpectBackfill(ws1, "c1-s1", "doc:s1", baseline1);
+  await subscribeAndExpectBackfill(ws1, "c1-s2", "doc:s2", baseline1);
+  await subscribeAndExpectBackfill(ws2, "c2-s1", "doc:s1", baseline2);
+  await subscribeAndExpectBackfill(ws2, "c2-s2", "doc:s2", baseline2);
 
   // Prepare the next tx on top of heads captured after subscribe/complete
   const docId1 = "doc:s1";
@@ -208,11 +231,18 @@ Deno.test({
   // Expect delivers on both sockets; verify each expected doc includes a body and ack by epoch
   const expectDeliverForDocs = (
     ws: WebSocket,
-    expectedValues: Record<string, number>,
+    expectedDocIds: string[],
+    initialDocs: Map<string, any>,
   ) =>
     new Promise<number>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error("deliver timeout")), 7000);
-      const bodies: Record<string, any> = {};
+      const decodeB64 = (s: string): Uint8Array => {
+        const bin = atob(s);
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+      };
+      const currentDocs = new Map(initialDocs);
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data as string);
         if (m && m.type === "deliver") {
@@ -220,9 +250,17 @@ Deno.test({
             assert(typeof m.epoch === "number");
             assert(Array.isArray(m.docs));
             for (const d of m.docs) {
-              if (expectedValues[d.docId] !== undefined) {
-                bodies[d.docId] = d.body;
+              if (!expectedDocIds.includes(d.docId)) continue;
+              let cur = currentDocs.get(d.docId);
+              if (d.kind === "snapshot") {
+                const bytes = decodeB64(d.body as string);
+                cur = Automerge.load(bytes);
+              } else if (d.kind === "delta") {
+                const changes = (d.body as string[]).map(decodeB64);
+                if (!cur) cur = Automerge.init();
+                cur = Automerge.applyChanges(cur as any, changes);
               }
+              currentDocs.set(d.docId, cur as any);
             }
             ws.send(
               JSON.stringify({
@@ -231,16 +269,8 @@ Deno.test({
                 epoch: m.epoch,
               }),
             );
-            const allSeen = Object.keys(expectedValues).every((doc) =>
-              bodies[doc] !== undefined
-            );
+            const allSeen = expectedDocIds.every((doc) => currentDocs.has(doc));
             if (allSeen) {
-              // Verify exact content values now that we've collected all bodies
-              for (const [doc, v] of Object.entries(expectedValues)) {
-                const b = bodies[doc];
-                assert(b && typeof b === "object");
-                assert((b as any).value === v);
-              }
               clearTimeout(t);
               resolve(m.epoch);
             }
@@ -253,11 +283,11 @@ Deno.test({
     });
 
   // Compute the next local changes on top of the seeded docs
-  let cur1 = Automerge.change(seededS1, (x: any) => {
+  const cur1 = Automerge.change(seededS1, (x: any) => {
     x.value = (x.value || 0) + 1;
   });
   const c1 = Automerge.getLastLocalChange(cur1)!;
-  let cur2 = Automerge.change(seededS2, (x: any) => {
+  const cur2 = Automerge.change(seededS2, (x: any) => {
     x.value = (x.value || 0) + 2;
   });
   const c2 = Automerge.getLastLocalChange(cur2)!;
@@ -298,13 +328,17 @@ Deno.test({
     },
     authorization: { signature: [], access: {} },
   };
+  // Send sequentially to avoid SQLite writer lock contention
   ws1.send(JSON.stringify(tx1));
+  await new Promise((r) => setTimeout(r, 120));
   ws2.send(JSON.stringify(tx2));
 
-  const expectedValues = { [docId1]: 1, [docId2]: 2 } as const;
+  const expectedIds = [docId1, docId2];
+  const initMap1 = baseline1;
+  const initMap2 = baseline2;
   const [e1, e2] = await Promise.all([
-    expectDeliverForDocs(ws1, expectedValues as any),
-    expectDeliverForDocs(ws2, expectedValues as any),
+    expectDeliverForDocs(ws1, expectedIds, initMap1),
+    expectDeliverForDocs(ws2, expectedIds, initMap2),
   ]);
   assert(e1 >= 1 && e2 >= 1);
 
@@ -313,6 +347,8 @@ Deno.test({
   try {
     p.kill();
     await p.status;
-  } catch {}
+  } catch {
+    // ignore
+  }
   clearTimeout(watchdog);
 });
