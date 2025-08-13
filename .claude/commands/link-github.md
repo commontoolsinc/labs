@@ -13,7 +13,7 @@ This command finds GitHub URLs in page.tsx charms and creates linked GitHub repo
 ```
 
 **Parameters:**
-- `API_URL`: CommonTools API endpoint 
+- `API_URL`: CommonTools API endpoint
 - `SPACE_NAME`: Target space name
 - `IDENTITY_FILE`: Path to CT identity key file
 - `RECIPES_PATH`: Path to recipes directory containing `github-repo-fetcher.tsx`
@@ -59,9 +59,9 @@ echo '"https://github.com/owner/repo"' | ./dist/ct charm set --identity [IDENTIT
 For each node containing a GitHub URL:
 ```bash
 # Link the github fetcher charm to the node's attachments array at index 0
-./dist/ct charm link --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [GITHUB_FETCHER_CHARM_ID] [PAGE_CHARM_ID]/page/[PATH_TO_NODE]/attachments/0
+./dist/ct charm link --identity [IDENTITY_FILE] --api-url [API_URL] --space [SPACE_NAME] [GITHUB_FETCHER_CHARM_ID] [PAGE_CHARM_ID]/[PATH_TO_NODE]/attachments/0
 
-# Example path: charm1/page/outline/root/children/1/attachments/0
+# Example path: charm1/outline/root/children/1/attachments/0
 ```
 
 **Important Note**: The path requires the `page/` prefix because the input and output data shapes differ for page charms. While `ct charm get` returns the outline directly, when linking you must specify the `page/` prefix to target the correct input structure. You can verify this difference using `ct charm inspect [PAGE_CHARM_ID]` which shows the full input/output schema.
@@ -87,7 +87,7 @@ The outline structure looks like:
 
 When searching:
 1. Check the `body` field of each node
-2. Recursively check all `children` 
+2. Recursively check all `children`
 3. Record the path to any node containing a GitHub URL
 4. Only link to nodes that actually contain the URL (not parent/child nodes)
 
@@ -118,7 +118,7 @@ When searching:
 echo '"https://github.com/vercel/next.js"' | ./dist/ct charm set --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev --charm newcharm123 repoUrl --input
 
 # Step 6: Link to page
-./dist/ct charm link --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev newcharm123 charm1/page/outline/root/children/0/attachments/0
+./dist/ct charm link --identity ~/dev/.ct.key --api-url https://toolshed.saga-castor.ts.net --space 2025-08-06-ben-dev newcharm123 charm1/outline/root/children/0/attachments/0
 ```
 
 ## Summary Output
@@ -126,8 +126,8 @@ echo '"https://github.com/vercel/next.js"' | ./dist/ct charm set --identity ~/de
 ```
 Found 3 page charms
 Found 2 GitHub URLs:
-  - https://github.com/vercel/next.js at charm1/page/outline/root/children/0
-  - https://github.com/facebook/react at charm2/page/outline/root/children/1
+  - https://github.com/vercel/next.js at charm1/outline/root/children/0
+  - https://github.com/facebook/react at charm2/outline/root/children/1
 Created 2 github-repo-fetcher charms
 Successfully linked all GitHub repositories
 ```

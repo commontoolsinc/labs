@@ -4,11 +4,7 @@ type Child = {
   children?: Children;
 };
 
-type Cell<T> = {
-  get(): T,
-  set(value: T): void;
-}
-
+type Cell<T> = any
 type Charm = any
 
 type OutlinerNode = {

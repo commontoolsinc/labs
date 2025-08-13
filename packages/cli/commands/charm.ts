@@ -20,7 +20,7 @@ import {
   SpaceConfig,
 } from "../lib/charm.ts";
 import { renderCharm } from "../lib/charm-render.ts";
-import { render } from "../lib/render.ts";
+import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
 import { absPath } from "../lib/utils.ts";
 import { parsePath } from "@commontools/charm/ops";
@@ -200,7 +200,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
 --- Source (Inputs) ---`;
 
     if (charmData.source) {
-      output += `\n${JSON.stringify(charmData.source, null, 2)}`;
+      output += `\n${safeStringify(charmData.source)}`;
     } else {
       output += "\n<no source data>";
     }
@@ -212,7 +212,7 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
       if (filteredResult.$UI && typeof filteredResult.$UI === "object") {
         filteredResult.$UI = "<large UI object - use --json to see full UI>";
       }
-      output += `\n${JSON.stringify(filteredResult, null, 2)}`;
+      output += `\n${safeStringify(filteredResult)}`;
     } else {
       output += "\n<no result data>";
     }
