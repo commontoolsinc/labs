@@ -286,6 +286,9 @@ export class Evaluator {
         }
         case "Items": {
           if (!Array.isArray(val)) return "No";
+          // Touch the array itself so length/index topology changes invalidate
+          // queries that depend on any of its items.
+          readLink(effDoc, effPath);
           // We intentionally avoid listItemsCount here; the production adapter can override.
           const len = Array.isArray(val) ? val.length : 0;
           if (ir.tuple) {
