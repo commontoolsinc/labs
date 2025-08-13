@@ -1,8 +1,6 @@
 import {
   deserializeKeyPairRaw,
   Identity,
-  isKeyPairRaw,
-  KeyPairRaw,
   KeyStore,
   TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
@@ -65,7 +63,7 @@ export class App extends EventTarget {
     this.#element.requestUpdate("keyStore", undefined);
     const root = await ks.get(ROOT_KEY);
     if (root) {
-      await app.setIdentity(root);
+      await this.setIdentity(root);
     }
   }
 }
