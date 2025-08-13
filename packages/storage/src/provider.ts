@@ -68,11 +68,7 @@ class SQLiteSpace implements SpaceStorage {
       allowServerMerge: w.allowServerMerge ?? isServerMergeEnabled(db),
     }));
 
-    const receipt = await submitTxInternal(db, {
-      reads,
-      writes,
-      txId: req.clientTxId,
-    });
+    const receipt = await submitTxInternal(db, { reads, writes } as any);
 
     // Map internal receipt → public receipt shape
     const results: TxDocResult[] = receipt.results.map((r: any) => ({
