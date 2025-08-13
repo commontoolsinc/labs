@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../src/provider.ts";
-import { computeGenesisHead, createGenesisDoc } from "../src/index.ts";
+import { createGenesisDoc } from "../src/index.ts";
 import { decodeChangeHeader } from "../src/store/change.ts";
 
 Deno.test("linear changes update heads and seq", async () => {
@@ -18,7 +18,6 @@ Deno.test("linear changes update heads and seq", async () => {
   assertEquals(s0.seqNo, 0);
 
   // build first change on top of genesis
-  const gen = computeGenesisHead(docId);
   const d0 = createGenesisDoc<any>(docId);
   const d1 = Automerge.change(d0, (doc: any) => {
     doc.value = { count: 1 };
@@ -32,7 +31,7 @@ Deno.test("linear changes update heads and seq", async () => {
     writes: [
       {
         ref: { docId, branch },
-        baseHeads: [gen],
+        baseHeads: Automerge.getHeads(d0),
         changes: [{ bytes: c1 }],
       },
     ],

@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
-import { computeGenesisHead, createGenesisDoc } from "../../src/index.ts";
+import { createGenesisDoc } from "../../src/index.ts";
 import { decodeChangeHeader } from "../../src/store/change.ts";
 
 Deno.test("sqlite tx pipeline: valid multi-doc tx applies atomically", async () => {
@@ -19,7 +19,6 @@ Deno.test("sqlite tx pipeline: valid multi-doc tx applies atomically", async () 
   assertEquals(sB0.heads, []);
 
   // Build one change for A and one for B on top of genesis
-  const genA = computeGenesisHead(docA);
   const aBase = createGenesisDoc<any>(docA);
   const a0 = Automerge.change(aBase, (d: any) => {
     d.title = "A1";
@@ -27,7 +26,6 @@ Deno.test("sqlite tx pipeline: valid multi-doc tx applies atomically", async () 
   const a1 = Automerge.getLastLocalChange(a0)!;
   const aH = decodeChangeHeader(a1).changeHash;
 
-  const genB = computeGenesisHead(docB);
   const bBase = createGenesisDoc<any>(docB);
   const b0 = Automerge.change(bBase, (d: any) => {
     d.title = "B1";
@@ -43,12 +41,12 @@ Deno.test("sqlite tx pipeline: valid multi-doc tx applies atomically", async () 
     writes: [
       {
         ref: { docId: docA, branch },
-        baseHeads: [genA],
+        baseHeads: Automerge.getHeads(aBase),
         changes: [{ bytes: a1 }],
       },
       {
         ref: { docId: docB, branch },
-        baseHeads: [genB],
+        baseHeads: Automerge.getHeads(bBase),
         changes: [{ bytes: b1 }],
       },
     ],

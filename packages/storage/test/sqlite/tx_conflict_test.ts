@@ -2,7 +2,7 @@ import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
 import { decodeChangeHeader } from "../../src/store/change.ts";
-import { computeGenesisHead, createGenesisDoc } from "../../src/index.ts";
+import { createGenesisDoc } from "../../src/index.ts";
 
 Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -15,7 +15,6 @@ Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async 
   assertEquals(s0.heads, []);
 
   // Build two independent changes atop genesis
-  const gen = computeGenesisHead(docId);
   const aBase = createGenesisDoc<any>(docId);
   const a0 = Automerge.change(aBase, (d: any) => {
     d.v = 1;
@@ -34,7 +33,7 @@ Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async 
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [gen],
+      baseHeads: Automerge.getHeads(aBase),
       changes: [{ bytes: ca }],
     }],
   });
@@ -45,7 +44,7 @@ Deno.test("sqlite tx pipeline: concurrent write conflict on same branch", async 
     reads: [],
     writes: [{
       ref: { docId, branch },
-      baseHeads: [gen],
+      baseHeads: Automerge.getHeads(aBase),
       changes: [{ bytes: cb }],
     }],
   });
