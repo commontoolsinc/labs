@@ -1,59 +1,54 @@
 import { env } from "@commontools/integration";
 import { describe, it } from "@std/testing/bdd";
-import { assert, assertObjectMatch } from "@std/assert";
-import { sleep } from "@commontools/utils/sleep";
+import { assert } from "@std/assert";
 import { ShellIntegration } from "../../integration/shell-utils.ts";
+import { sleep } from "@commontools/utils/sleep";
 
 const { FRONTEND_URL } = env;
 
+// Tests the manual logging in via passphrase.
+// Other tests should use the `shell.login(identity)`
+// utility to directly provide an identity.
 describe("shell login tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
   it("can create a new user via passphrase", async () => {
-    const { page } = shell.get();
+    const page = shell.page();
     const spaceName = "common-knowledge";
-    await page.goto(`${FRONTEND_URL}`);
-    await page.applyConsoleFormatter();
-    const state = await page.evaluate(() => {
-      return globalThis.app.state();
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName,
     });
-    assertObjectMatch(state, {
-      // Given a frontend URL, we don't necessarily know
-      // what the backend is.
-      apiUrl: state.apiUrl,
-      spaceName: "common-knowledge",
-    }, "Expected default app state");
 
-    // TODO(js): Temporary workaround for upstream https://github.com/lino-levan/astral/pull/166
-    // Once resolved, we could use `waitForSelector` with piercing selectors,
-    // eliminating the sleeps.
+    const state = await shell.state();
+    assert(state);
+    assert(state.spaceName === "common-knowledge");
 
-    await sleep(2000);
-    let handle = await page.$(
+    let handle = await page.waitForSelector(
       '[test-id="register-new-key"]',
       { strategy: "pierce" },
     );
-    assert(handle);
     handle.click();
-    await sleep(2000);
-    handle = await page.$(
+    // TODO(js): If we don't sleep, we get box model errors
+    // when trying to click the handles. Not sure why we need
+    // to sleep at all, but at least not "duration" dependent
+    await sleep(1);
+    handle = await page.waitForSelector(
       '[test-id="generate-passphrase"]',
       { strategy: "pierce" },
     );
-    assert(handle);
     handle.click();
-    await sleep(2000);
-    handle = await page.$(
+    await sleep(1);
+    handle = await page.waitForSelector(
       '[test-id="passphrase-continue"]',
       { strategy: "pierce" },
     );
-    assert(handle);
     handle.click();
-    await sleep(2000);
 
-    handle = await page.$("#page-title", { strategy: "pierce" });
-    assert(handle);
+    await sleep(1);
+    handle = await page.waitForSelector("#page-title", { strategy: "pierce" });
     const title = await handle.evaluate((el: Element) => el.textContent);
     assert(
       title?.trim() === spaceName,

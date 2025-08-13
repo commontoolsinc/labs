@@ -6,8 +6,9 @@ import {
 } from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assert } from "@std/assert";
 import "../src/globals.ts";
+import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL } = env;
 
@@ -16,7 +17,8 @@ describe("shell charm tests", () => {
   shell.bindLifecycle();
 
   it("can view and interact with a charm", async () => {
-    const { page, identity } = shell.get();
+    const page = shell.page();
+    const identity = await Identity.generate({ implementation: "noble" });
     const spaceName = globalThis.crypto.randomUUID();
 
     const charmId = await registerCharm({
@@ -35,32 +37,26 @@ describe("shell charm tests", () => {
       ),
     });
 
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName,
+      charmId,
+      identity,
+    });
 
-    const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
-    assertEquals(state.activeCharmId, charmId);
-    assertEquals(
-      state.identity?.serialize().privateKey,
-      identity.serialize().privateKey,
-    );
-
-    await sleep(2000);
-    let handle = await page.$(
+    let handle = await page.waitForSelector(
       "ct-button",
       { strategy: "pierce" },
     );
-    assert(handle);
     handle.click();
     await sleep(1000);
     handle.click();
     await sleep(1000);
-    handle = await page.$(
+    handle = await page.waitForSelector(
       "#counter-result",
       { strategy: "pierce" },
     );
-    await sleep(2000);
+    await sleep(1000);
     const text = await handle?.innerText();
     assert(text === "Counter is the -2th number");
   });
