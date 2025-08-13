@@ -4,6 +4,7 @@ import { openSpaceStorage } from "../../src/provider.ts";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
 import { SqliteStorageReader } from "../../src/query/sqlite_storage.ts";
+import { openSqlite } from "../../src/store/db.ts";
 
 Deno.test("query filters, sorts, limits", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -50,7 +51,6 @@ Deno.test("query filters, sorts, limits", async () => {
     },
   });
 
-  const { openSqlite } = await import("../../src/store/db.ts");
   const { db, close } = await openSqlite({
     url: new URL(`./did:key:query-tests.sqlite`, spacesDir),
   });
@@ -116,7 +116,6 @@ Deno.test("joins via link fields and traversal with budget", async () => {
     }],
   });
 
-  const { openSqlite } = await import("../../src/store/db.ts");
   const { db, close } = await openSqlite({
     url: new URL(`./did:key:query-join.sqlite`, spacesDir),
   });
