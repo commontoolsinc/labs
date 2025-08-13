@@ -90,6 +90,11 @@ export type InsecureCryptoKeyPair = {
   publicKey: Uint8Array;
 };
 
+export type TransferrableInsecureCryptoKeyPair = {
+  privateKey: Array<number>;
+  publicKey: Array<number>;
+};
+
 export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;
 
 export function isCryptoKeyPair(input: any): input is CryptoKeyPair {
@@ -101,7 +106,9 @@ export function isCryptoKeyPair(input: any): input is CryptoKeyPair {
   );
 }
 
-export function isInsecureCryptoKeyPair(input: any): input is CryptoKeyPair {
+export function isInsecureCryptoKeyPair(
+  input: any,
+): input is InsecureCryptoKeyPair {
   return !!(
     typeof input === "object" &&
     input.privateKey instanceof Uint8Array &&
@@ -111,4 +118,24 @@ export function isInsecureCryptoKeyPair(input: any): input is CryptoKeyPair {
 
 export function isKeyPairRaw(value: any): value is KeyPairRaw {
   return isCryptoKeyPair(value) || isInsecureCryptoKeyPair(value);
+}
+
+export function serializeKeyPairRaw(
+  keyPairRaw: KeyPairRaw,
+): TransferrableInsecureCryptoKeyPair | null {
+  return isInsecureCryptoKeyPair(keyPairRaw)
+    ? {
+      privateKey: Array.from(keyPairRaw.privateKey),
+      publicKey: Array.from(keyPairRaw.publicKey),
+    }
+    : null;
+}
+
+export function deserializeKeyPairRaw(
+  transferrable: TransferrableInsecureCryptoKeyPair,
+): InsecureCryptoKeyPair {
+  return {
+    privateKey: Uint8Array.from(transferrable.privateKey),
+    publicKey: Uint8Array.from(transferrable.publicKey),
+  };
 }

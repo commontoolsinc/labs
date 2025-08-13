@@ -1,12 +1,15 @@
 import {
+  deserializeKeyPairRaw,
   Identity,
   isKeyPairRaw,
   KeyPairRaw,
   KeyStore,
+  TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
 import { XRootView } from "../../views/RootView.ts";
 import { Command } from "./commands.ts";
 import { AppState, AppUpdateEvent } from "./mod.ts";
+import { AppStateSerialized, serialize } from "./state.ts";
 
 // Key store key name for user's key
 export const ROOT_KEY = "$ROOT_KEY";
@@ -32,6 +35,11 @@ export class App extends EventTarget {
     return this.#element.state();
   }
 
+  // For tests
+  serialize(): AppStateSerialized {
+    return serialize(this.state());
+  }
+
   async setSpace(spaceName: string) {
     await this.apply({ type: "set-space", spaceName });
   }
@@ -40,10 +48,10 @@ export class App extends EventTarget {
     await this.apply({ type: "set-active-charm-id", charmId });
   }
 
-  async setIdentity(id: Identity | KeyPairRaw) {
-    const identity = isKeyPairRaw(id)
-      ? await Identity.fromRaw(id.privateKey as Uint8Array<ArrayBufferLike>)
-      : id;
+  async setIdentity(id: Identity | TransferrableInsecureCryptoKeyPair) {
+    const identity = id instanceof Identity
+      ? id
+      : await Identity.fromRaw(deserializeKeyPairRaw(id).privateKey);
     await this.apply({ type: "set-identity", identity });
   }
 

@@ -22,6 +22,7 @@ import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import type { ElementHandle } from "@astral/astral";
+import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL } = env;
 
@@ -90,7 +91,8 @@ describe("shell iframe counter tests", () => {
   shell.bindLifecycle();
 
   it("can increment 5 times, decrement 3 times, and verify count is 2", async () => {
-    const { page, identity } = shell.get();
+    const page = shell.page();
+    const identity = await Identity.generate({ implementation: "noble" });
     const spaceName = globalThis.crypto.randomUUID();
 
     // Register the iframe counter recipe as a charm
@@ -108,18 +110,12 @@ describe("shell iframe counter tests", () => {
       ),
     });
 
-    // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Login and verify state
-    const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
-    assertEquals(state.activeCharmId, charmId);
-    assertEquals(
-      state.identity?.serialize().privateKey,
-      identity.serialize().privateKey,
-    );
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName,
+      charmId,
+      identity,
+    });
 
     // Wait for iframe content to load
     // The charm uses nested iframes with sandbox restrictions, requiring coordinate-based interaction
@@ -162,11 +158,12 @@ describe("shell iframe counter tests", () => {
 
     // Reload the page to test persistence
     console.log("\nReloading page to test persistence...");
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Need to login again after reload
-    await shell.login();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName,
+      charmId,
+      identity,
+    });
 
     // Wait for the page and iframe to load
     await sleep(5000);

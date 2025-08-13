@@ -6,7 +6,8 @@ import {
 } from "@commontools/integration/shell-utils";
 import { describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assert } from "@std/assert";
+import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL } = env;
 
@@ -20,7 +21,8 @@ describe("background charm counter tests", () => {
     // this.charmCell.sink only seems to trigger when the service.ts starts -
     // restarting is currently the only way to get the charmCell to update
 
-    const { page, identity } = shell.get();
+    const page = shell.page();
+    const identity = await Identity.generate({ implementation: "noble" });
     const spaceName = globalThis.crypto.randomUUID();
 
     const charmId = await registerCharm({
@@ -39,37 +41,27 @@ describe("background charm counter tests", () => {
       ),
     });
 
-    // TODO(js): Remove /shell when no longer prefixed
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName,
+      charmId,
+      identity,
+    });
 
-    const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
-    assertEquals(state.activeCharmId, charmId);
-    assertEquals(
-      state.identity?.serialize().privateKey,
-      identity.serialize().privateKey,
-    );
-
-    await sleep(2000);
-    const countValueEl = await page.$(
+    const countValueEl = await page.waitForSelector(
       "#countValue",
       { strategy: "pierce" },
     );
-    console.log("countValueEl", countValueEl);
-    assert(countValueEl);
 
     let text = await countValueEl?.innerText();
     let value = text ? parseInt(text) : NaN;
     console.log("before text/value", text, value);
     assert(value === 0);
 
-    await sleep(2000);
-    const registerBgCounterEl = await page.$(
+    const registerBgCounterEl = await page.waitForSelector(
       "#registerBgCounter",
       { strategy: "pierce" },
     );
-    assert(registerBgCounterEl);
     registerBgCounterEl.click();
 
     await sleep(1000);
@@ -90,11 +82,10 @@ describe("background charm counter tests", () => {
     // Ensure the dev server is killed after the test
     try {
       // Re-query the element to avoid stale reference
-      const updatedCountValueEl = await page.$(
+      const updatedCountValueEl = await page.waitForSelector(
         "#countValue",
         { strategy: "pierce" },
       );
-      assert(updatedCountValueEl);
       text = await updatedCountValueEl.innerText();
       value = text ? parseInt(text) : NaN;
       console.log("after text/value", text, value);
