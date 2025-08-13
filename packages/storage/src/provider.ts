@@ -40,6 +40,12 @@ export interface SQLiteSpaceOptions {
 class SQLiteSpace implements SpaceStorage {
   constructor(private readonly handle: SqliteHandle) {}
 
+  // Ensure single-writer semantics on a per-space DB handle by serializing
+  // submitTx calls. SQLite does not support nested transactions, and our
+  // tx pipeline uses BEGIN IMMEDIATE; concurrent calls on the same handle
+  // would otherwise throw "cannot start a transaction within a transaction".
+  private writeQueue: Promise<unknown> = Promise.resolve();
+
   async getOrCreateDoc(docId: DocId): Promise<void> {
     await ensureDoc(this.handle.db, docId);
   }
@@ -56,40 +62,47 @@ class SQLiteSpace implements SpaceStorage {
   }
 
   async submitTx(req: TxRequest): Promise<TxReceipt> {
-    // Delegate to sqlite/tx pipeline to preserve single-writer and BEGIN IMMEDIATE boundaries
-    const db = this.handle.db;
+    // Serialize all writes on this DB handle
+    const run = async (): Promise<TxReceipt> => {
+      const db = this.handle.db;
 
-    // Translate public TxRequest → internal sqlite/tx TxRequest
-    const reads = (req.reads ?? []).map((r) => ({
-      docId: r.ref.docId,
-      branch: r.ref.branch,
-      heads: r.heads,
-    }));
-    const writes = req.writes.map((w) => ({
-      docId: w.ref.docId,
-      branch: w.ref.branch,
-      baseHeads: w.baseHeads,
-      changes: w.changes.map((c) => ({ bytes: c.bytes })),
-      allowServerMerge: w.allowServerMerge ?? isServerMergeEnabled(db),
-    }));
+      // Translate public TxRequest → internal sqlite/tx TxRequest
+      const reads = (req.reads ?? []).map((r) => ({
+        docId: r.ref.docId,
+        branch: r.ref.branch,
+        heads: r.heads,
+      }));
+      const writes = req.writes.map((w) => ({
+        docId: w.ref.docId,
+        branch: w.ref.branch,
+        baseHeads: w.baseHeads,
+        changes: w.changes.map((c) => ({ bytes: c.bytes })),
+        allowServerMerge: w.allowServerMerge ?? isServerMergeEnabled(db),
+      }));
 
-    const receipt = await submitTxInternal(db, { reads, writes } as any);
+      const receipt = await submitTxInternal(db, { reads, writes } as any);
 
-    // Map internal receipt → public receipt shape
-    const results: TxDocResult[] = receipt.results.map((r: any) => ({
-      ref: { docId: r.docId, branch: r.branch },
-      status: r.status,
-      newHeads: r.newHeads,
-      applied: r.applied,
-      reason: r.reason,
-    }));
+      // Map internal receipt → public receipt shape
+      const results: TxDocResult[] = receipt.results.map((r: any) => ({
+        ref: { docId: r.docId, branch: r.branch },
+        status: r.status,
+        newHeads: r.newHeads,
+        applied: r.applied,
+        reason: r.reason,
+      }));
 
-    return {
-      txId: receipt.txId,
-      committedAt: new Date().toISOString(),
-      results,
-      conflicts: results.filter((r) => r.status === "conflict"),
+      return {
+        txId: receipt.txId,
+        committedAt: new Date().toISOString(),
+        results,
+        conflicts: results.filter((r) => r.status === "conflict"),
+      };
     };
+
+    const p = this.writeQueue.then(run, run) as Promise<TxReceipt>;
+    // Ensure subsequent calls wait for this one regardless of success/failure
+    this.writeQueue = p.then(() => undefined, () => undefined);
+    return await p;
   }
 
   getDocBytes(
