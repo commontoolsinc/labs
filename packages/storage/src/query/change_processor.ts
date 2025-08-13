@@ -1,4 +1,5 @@
 import { Delta, EngineEvent, Link, Verdict } from "../types.ts";
+import { keyPath as keyPathLocal } from "./path.ts";
 import { EvalKey, Evaluator, Provenance } from "./eval.ts";
 import { SubscriptionIndex } from "./subs.ts";
 
@@ -126,8 +127,8 @@ export class ChangeProcessor {
         for (const l of old) {
           if (
             l.doc === delta.doc &&
-            (delta.changed.has(JSON.stringify(l.path)) ||
-              delta.removed.has(JSON.stringify(l.path)))
+            (delta.changed.has(keyPathLocal(l.path)) ||
+              delta.removed.has(keyPathLocal(l.path)))
           ) {
             intersects = true;
             break;
@@ -149,7 +150,7 @@ export class ChangeProcessor {
         [...set].some(
           (x) =>
             x.doc === l.doc &&
-            JSON.stringify(x.path) === JSON.stringify(l.path),
+            keyPathLocal(x.path) === keyPathLocal(l.path),
         );
       for (const l of newTouches) if (!exists(oldTouches, l)) add.push(l);
       for (const l of oldTouches) if (!exists(newTouches, l)) rem.push(l);

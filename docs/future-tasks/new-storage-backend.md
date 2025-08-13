@@ -586,10 +586,10 @@ Action items for phase 2 (expanded):
   - [ ] Migrate shared test utilities to import the module (keep local helpers
         for now).
 
-- [ ] Standardize path keying
+- [x] Standardize path keying
   - [x] Add `packages/storage/src/path.ts` with `keyPath(tokens: string[])`
         wrapper.
-  - [ ] Replace direct `JSON.stringify(path)` usages in hot paths with
+  - [x] Replace direct `JSON.stringify(path)` usages in hot paths with
         `keyPath()`.
 
 - [ ] Types consolidation (follow-up)

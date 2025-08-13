@@ -367,7 +367,7 @@ class SessionState {
     const out = new Set<{ doc: string; path: string[] }>();
     const seen = new Set<string>();
     const dfs = (k: { ir: string; doc: string; path: string[] }) => {
-      const ks = `${k.ir}\u0001${k.doc}\u0001${JSON.stringify(k.path)}`;
+      const ks = `${k.ir}\u0001${k.doc}\u0001${keyPath(k.path)}`;
       if (seen.has(ks)) return;
       seen.add(ks);
       const r = this.evaluator.memo.get(ks);
