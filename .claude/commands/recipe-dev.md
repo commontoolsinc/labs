@@ -10,7 +10,21 @@ This script guides Claude through recipe development with the `ct` utility after
 
 ## Script Flow for Claude
 
-### STEP 1: Initial Setup and Context
+### STEP 0: Determine Starting Point
+
+**Check if user provided configuration:**
+- If user provides a config file (like `.common.json`) with space, api-url, key, and recipes paths:
+  1. Read the config
+  2. Test the connection: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
+  3. Show what charms exist in the space (if any)
+  4. Ask: "What would you like to do with this space?" (e.g., modify existing recipe, create new one, adjust networking)
+  5. Skip to STEP 2
+
+- If NO config provided:
+  1. Ask: "Do you have an existing CommonTools space set up, or would you like help setting one up?"
+  2. Continue to STEP 1 for setup
+
+### STEP 1: Initial Setup and Context (ONLY if no config provided)
 
 **Read common setup instructions:**
 - First, read `.claude/commands/common/ct.md` for shared CT binary setup
@@ -43,11 +57,11 @@ Read `HANDLERS.md` when confused about event handler errors.
 **Edit recipe:**
 1. Guide user through making changes to the recipe code
 2. If saving to file: Create a temporary file with the modified recipe
-3. Test syntax locally: `./dist/ct dev [modified-recipe-path] --no-run`
-4. Show any syntax errors and help fix them
+3. (Optional) Only if user requests or if deployment fails: Test syntax locally: `./dist/ct dev [modified-recipe-path] --no-run`
+4. If syntax errors occur, help fix them
 
 **Update recipe source:**
-1. Once syntax is valid, update the charm:
+1. Update the charm:
    `./dist/ct charm setsrc --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] [modified-recipe-path]`
 2. Verify update: `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id]`
 3. Explain what changed and how it affects the charm's behavior
@@ -65,11 +79,11 @@ Read `HANDLERS.md` when confused about event handler errors.
 1. Ensure TypeScript setup is current: User should run `ct init` manually in their recipes directory
 2. Guide user through creating a new .tsx file
 3. Start with a template based on their requirements
-4. Test syntax: `./dist/ct dev [new-recipe-path] --no-run`
-5. Iterate on the recipe until it's correct
+4. (Optional) Only if user requests or if deployment fails: Test syntax: `./dist/ct dev [new-recipe-path] --no-run`
+5. If syntax errors occur, iterate on the recipe until it's correct
 
 **Deploy new charm:**
-1. Create the charm: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [new-recipe-path]`
+1. Deploy the charm directly: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [new-recipe-path]`
 2. Record the new CHARM_ID
 3. Help user connect it to other charms as needed
 
@@ -85,6 +99,10 @@ Read `HANDLERS.md` when confused about event handler errors.
 2. Help them understand source → target relationships
 3. Execute links: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source-charm]/[field] [target-charm]/[input-field]`
 4. Verify the link worked by inspecting the target charm
+
+NOTE: some recipes take the well known `allCharms` cell as a linked input which has the ID `baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye`, this can be achieved like so:
+
+`./dist/ct charm link baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye [recipe]/allCharms`
 
 **Remove links (if needed):**
 1. If user wants to disconnect charms, guide them through identifying which links to remove
@@ -152,7 +170,7 @@ Multi-file recipes allow you to compose functionality from multiple source files
 3. **Deployment vs development paths**:
    - Problem: Import paths work locally but fail when deployed
    - Solution: Use relative imports (`./list.tsx` not absolute paths)
-   - Test with `ct dev [recipe] --no-run` before deploying
+   - The recipe will be compiled during deployment, which will catch any syntax errors
 
 **Best practices for multi-file recipes:**
 
@@ -263,7 +281,8 @@ Key points:
 
 ### Notes for Claude
 
-- Always verify recipe syntax before deploying
+- Do NOT test recipe syntax before deploying unless explicitly requested by user or if deployment fails
+- The deployment process (`ct charm new` or `ct charm setsrc`) will compile and validate the recipe automatically
 - Keep track of charm IDs when creating new ones
 - Help user understand data flow direction (source → target)
 - Encourage incremental development and testing
