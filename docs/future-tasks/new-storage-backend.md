@@ -599,21 +599,21 @@ Action items for phase 2 (expanded):
         re-declaring local variants.
   - [ ] Align `src/ws/protocol.ts` to reference the same transaction types.
 
-- [ ] Migrations/schema unification (follow-up)
-  - [ ] Remove/replace empty or duplicated migration files under
+- [x] Migrations/schema unification (follow-up)
+  - [x] Remove/replace empty or duplicated migration files under
         `src/store/migrations/`.
-  - [ ] Keep a single authoritative DDL in `src/store/schema.sql` (already used
+  - [x] Keep a single authoritative DDL in `src/store/schema.sql` (already used
         by `db.ts`).
 
-- [ ] Flags/config centralization (follow-up)
-  - [ ] Ensure feature flags are read exclusively via `src/config.ts` and make
+- [x] Flags/config centralization (follow-up)
+  - [x] Ensure feature flags are read exclusively via `src/config.ts` and make
         `src/store/flags.ts` delegate there.
-  - [ ] Consider unifying per-space overrides under a documented settings row.
+  - [x] Consider unifying per-space overrides under a documented settings row.
 
 - Acceptance criteria:
 
 - [x] No remaining ad-hoc base64 helpers in runtime code; WS server and UCAN
       import from `codec/bytes.ts`.
-- [ ] New `keyPath()` used where paths are stringified in runtime code.
+- [x] New `keyPath()` used where paths are stringified in runtime code.
 - [x] Tests and `deno task check` pass.
 - [x] Follow-up items tracked for types/migrations/flags.
