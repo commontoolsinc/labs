@@ -1,5 +1,19 @@
+/**
+ * Expected sequence (WS v2: subscribe complete and deliver/ack via tx)
+ *
+ * 1. Start WS v2 server on an ephemeral port.
+ * 2. Seed the document using deterministic genesis:
+ *    - createGenesisDoc(doc:s1)
+ *    - send /storage/tx with baseHeads=[genesis] and a single change
+ * 3. Open client WS and send /storage/subscribe with query {docId:"doc:s1",
+ *    path:[], schema:false}.
+ * 4. Expect initial backfill deliver (epoch-batched), then complete.
+ * 5. Test concludes after verifying the deliver structure, receiving the
+ *    completion signal, and sending the ACK.
+ */
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
+import { computeGenesisHead, createGenesisDoc } from "../src/store/genesis.ts";
 
 Deno.test({
   name: "WS v2: subscribe complete and deliver/ack via tx",
@@ -58,10 +72,12 @@ Deno.test({
         }
       };
       wsSeed.onopen = () => {
-        const pre = Automerge.change(Automerge.init<any>(), (x: any) => {
+        const docId = "doc:s1";
+        const base = createGenesisDoc<any>(docId);
+        const after = Automerge.change(base, (x: any) => {
           x.init = true;
         });
-        const preChange = Automerge.getLastLocalChange(pre)!;
+        const preChange = Automerge.getLastLocalChange(after)!;
         const preTx = {
           invocation: {
             iss: "did:key:test",
@@ -70,8 +86,8 @@ Deno.test({
             args: {
               reads: [],
               writes: [{
-                ref: { docId: "doc:s1", branch: "main" },
-                baseHeads: [],
+                ref: { docId, branch: "main" },
+                baseHeads: [computeGenesisHead(docId)],
                 changes: [{ bytes: btoa(String.fromCharCode(...preChange)) }],
               }],
             },
@@ -85,9 +101,9 @@ Deno.test({
     wsSeed.close();
   }
 
-  const gotDeliver = await new Promise<{ epoch: number; docs: any[] }>(
+  const got = await new Promise<{ epoch: number; docs: any[] }>(
     (resolve, reject) => {
-      const t = setTimeout(() => reject(new Error("deliver timeout")), 5000);
+      const t = setTimeout(() => reject(new Error("subscribe timeout")), 6000);
       const msg = {
         invocation: {
           iss: "did:key:test",
@@ -103,6 +119,8 @@ Deno.test({
       };
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
       else ws.onopen = () => ws.send(JSON.stringify(msg));
+      let deliver: { epoch: number; docs: any[] } | null = null;
+      let sawComplete = false;
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data as string);
         if (m && m.type === "deliver") {
@@ -116,19 +134,29 @@ Deno.test({
                 epoch: m.epoch,
               }),
             );
-            clearTimeout(t);
-            resolve({ epoch: m.epoch, docs: m.docs });
+            deliver = { epoch: m.epoch, docs: m.docs };
+            if (sawComplete) {
+              clearTimeout(t);
+              resolve(deliver);
+            }
           } catch (err) {
             clearTimeout(t);
             reject(err);
+          }
+        }
+        if (m && m.the === "task/return" && m.is?.type === "complete") {
+          sawComplete = true;
+          if (deliver) {
+            clearTimeout(t);
+            resolve(deliver);
           }
         }
       };
     },
   );
 
-  assert(gotDeliver.epoch >= 1);
-  assert(gotDeliver.docs.length >= 1);
+  assert(got.epoch >= 1);
+  assert(got.docs.length >= 1);
 
   ws.close();
   try {

@@ -20,6 +20,9 @@ import { compileSchema, IRPool } from "../query/ir.ts";
 import { Evaluator, Provenance } from "../query/eval.ts";
 import { SubscriptionIndex } from "../query/subs.ts";
 import { ChangeProcessor } from "../query/change_processor.ts";
+import { getBranchState } from "../store/heads.ts";
+import { getPrepared } from "../store/prepared.ts";
+import { getAutomergeBytesAtSeq, uptoSeqNo } from "../store/pit.ts";
 
 // WebSocket v2 handler for storage: multiplexes get/subscribe/tx over a single connection.
 // Deliver frames are decoupled from task/return; initial completion is signaled via Complete.
@@ -269,9 +272,83 @@ class SessionState {
       epoch,
       docs: [],
     };
+
+    const defaultBranch = "main";
+    const stmts = getPrepared(this.db as any);
+
+    const encodeB64 = (bytes: Uint8Array): string => {
+      let s = "";
+      for (let i = 0; i < bytes.length; i++) {
+        s += String.fromCharCode(bytes[i]!);
+      }
+      return btoa(s);
+    };
+
     for (const docId of docIds) {
-      const v = this.storageReader.currentVersion(docId);
-      const snap = this.storageReader.readDocAtVersion(docId, v);
+      // Resolve branch state
+      const state = getBranchState(this.db, docId, defaultBranch);
+      const currentSeq = state.seqNo;
+      const currentVersion = {
+        epoch: state.epoch,
+        branch: defaultBranch as any,
+      };
+
+      // Determine baseline epoch the client is known to have
+      let baselineEpoch: number | undefined = undefined;
+      if (this.clientId && this.sinceEpoch >= 0) {
+        const row = this.db.prepare(
+          `SELECT epoch FROM client_known_docs WHERE client_id = :cid AND doc_id = :doc`,
+        ).get({ cid: this.clientId, doc: docId }) as
+          | { epoch: number }
+          | undefined;
+        baselineEpoch = row?.epoch ?? this.sinceEpoch;
+      } else if (this.clientId) {
+        const row = this.db.prepare(
+          `SELECT epoch FROM client_known_docs WHERE client_id = :cid AND doc_id = :doc`,
+        ).get({ cid: this.clientId, doc: docId }) as
+          | { epoch: number }
+          | undefined;
+        baselineEpoch = row?.epoch;
+      }
+
+      if (baselineEpoch == null) {
+        // Unknown client state → send Automerge snapshot bytes at current tip
+        const amBytes = getAutomergeBytesAtSeq(
+          this.db,
+          docId,
+          state.branchId,
+          currentSeq,
+        );
+        this.sentOnSocket.add(docId);
+        if (!this.pendingByEpoch.has(epoch)) {
+          this.pendingByEpoch.set(epoch, new Set());
+        }
+        this.pendingByEpoch.get(epoch)!.add(docId);
+        payload.docs.push({
+          docId,
+          branch: currentVersion.branch,
+          version: currentVersion,
+          kind: "snapshot",
+          body: encodeB64(amBytes),
+        });
+        continue;
+      }
+
+      // Known baseline → compute changes since baseline up to current tip
+      const fromSeq = uptoSeqNo(this.db, docId, state.branchId, baselineEpoch);
+      const toSeq = currentSeq;
+      if (toSeq <= fromSeq) {
+        // Nothing to send for this doc
+        continue;
+      }
+      const rows = stmts.selectChangeBytesRange.all({
+        doc_id: docId,
+        branch_id: state.branchId,
+        from_seq: fromSeq,
+        to_seq: toSeq,
+      }) as Array<{ bytes: Uint8Array }>;
+      const changesB64 = rows.map((r) => encodeB64(r.bytes));
+      if (changesB64.length === 0) continue;
       this.sentOnSocket.add(docId);
       if (!this.pendingByEpoch.has(epoch)) {
         this.pendingByEpoch.set(epoch, new Set());
@@ -279,13 +356,13 @@ class SessionState {
       this.pendingByEpoch.get(epoch)!.add(docId);
       payload.docs.push({
         docId,
-        branch: v.branch,
-        version: v,
-        kind: "snapshot",
-        body: snap.doc,
+        branch: currentVersion.branch,
+        version: currentVersion,
+        kind: "delta",
+        body: changesB64,
       });
     }
-    this.socket.send(this.encodeJSON(payload));
+    if (payload.docs.length > 0) this.socket.send(this.encodeJSON(payload));
   }
 
   private collectTouchesFromRoot(
@@ -478,9 +555,67 @@ class SessionState {
       epoch,
       docs: [],
     };
+
+    const defaultBranch = "main";
+    const stmts = getPrepared(this.db as any);
+    const encodeB64 = (bytes: Uint8Array): string => {
+      let s = "";
+      for (let i = 0; i < bytes.length; i++) {
+        s += String.fromCharCode(bytes[i]!);
+      }
+      return btoa(s);
+    };
+
     for (const docId of docsSet) {
-      const v = this.storageReader.currentVersion(docId);
-      const snap = this.storageReader.readDocAtVersion(docId, v);
+      const state = getBranchState(this.db, docId, defaultBranch);
+      const tipSeq = uptoSeqNo(this.db, docId, state.branchId, epoch);
+      const currentVersion = { epoch, branch: defaultBranch as any };
+
+      // Baseline: last acknowledged epoch for this client and doc
+      let baselineEpoch: number | undefined = undefined;
+      if (this.clientId) {
+        const row = this.db.prepare(
+          `SELECT epoch FROM client_known_docs WHERE client_id = :cid AND doc_id = :doc`,
+        ).get({ cid: this.clientId, doc: docId }) as
+          | { epoch: number }
+          | undefined;
+        baselineEpoch = row?.epoch;
+      }
+
+      if (baselineEpoch == null) {
+        // Unknown baseline → send Automerge snapshot bytes at this epoch
+        const amBytes = getAutomergeBytesAtSeq(
+          this.db,
+          docId,
+          state.branchId,
+          tipSeq,
+        );
+        this.sentOnSocket.add(docId);
+        if (!this.pendingByEpoch.has(epoch)) {
+          this.pendingByEpoch.set(epoch, new Set());
+        }
+        this.pendingByEpoch.get(epoch)!.add(docId);
+        docsPayload.docs.push({
+          docId,
+          branch: currentVersion.branch,
+          version: currentVersion,
+          kind: "snapshot",
+          body: encodeB64(amBytes),
+        });
+        continue;
+      }
+
+      const fromSeq = uptoSeqNo(this.db, docId, state.branchId, baselineEpoch);
+      const toSeq = tipSeq;
+      if (toSeq <= fromSeq) continue;
+      const rows = stmts.selectChangeBytesRange.all({
+        doc_id: docId,
+        branch_id: state.branchId,
+        from_seq: fromSeq,
+        to_seq: toSeq,
+      }) as Array<{ bytes: Uint8Array }>;
+      const changesB64 = rows.map((r) => encodeB64(r.bytes));
+      if (changesB64.length === 0) continue;
       this.sentOnSocket.add(docId);
       if (!this.pendingByEpoch.has(epoch)) {
         this.pendingByEpoch.set(epoch, new Set());
@@ -488,14 +623,16 @@ class SessionState {
       this.pendingByEpoch.get(epoch)!.add(docId);
       docsPayload.docs.push({
         docId,
-        branch: v.branch,
-        version: v,
-        kind: "snapshot",
-        body: snap.doc,
+        branch: currentVersion.branch,
+        version: currentVersion,
+        kind: "delta",
+        body: changesB64,
       });
     }
-    console.log("[ws] deliver", epoch, docsPayload.docs.length);
-    this.socket.send(this.encodeJSON(docsPayload));
+    if (docsPayload.docs.length > 0) {
+      console.log("[ws] deliver", epoch, docsPayload.docs.length);
+      this.socket.send(this.encodeJSON(docsPayload));
+    }
   }
 }
 
