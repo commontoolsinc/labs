@@ -1,9 +1,10 @@
+import { refer } from "merkle-reference/json";
+import type { Database } from "@db/sqlite";
 import { openSqlite } from "../store/db.ts";
 import { decodeBase64, encodeBase64 } from "../codec/bytes.ts";
 import { getSpacesDir, isWsAuthRequired } from "../config.ts";
 import { keyPath } from "../path.ts";
 import { requireCapsOnRequest } from "./ucan.ts";
-import type { Database } from "@db/sqlite";
 import type {
   Ack,
   Authorization,
@@ -25,6 +26,7 @@ import { ChangeProcessor } from "../query/change_processor.ts";
 import { getBranchState } from "../store/heads.ts";
 import { getPrepared } from "../store/prepared.ts";
 import { getAutomergeBytesAtSeq, uptoSeqNo } from "../store/pit.ts";
+import { openSpaceStorage } from "../provider.ts";
 
 // WebSocket v2 handler for storage: multiplexes get/subscribe/tx over a single connection.
 // Deliver frames are decoupled from task/return; initial completion is signaled via Complete.
@@ -133,13 +135,7 @@ class SessionState {
   }
 
   private jobOf(invocation: any): `job:${string}` {
-    // Minimal refer() placeholder: use a hash of the serialized invocation; replace with merkle-reference if desired.
-    const bytes = new TextEncoder().encode(JSON.stringify(invocation));
-    const digest = Array.from(bytes).reduce(
-      (a, b) => ((a * 33) ^ b) >>> 0,
-      5381,
-    ).toString(16);
-    return `job:${digest}` as const;
+    return `job:${refer(invocation)}` as const;
   }
 
   private maybeClose() {
@@ -446,7 +442,6 @@ class SessionState {
   ) {
     const jobId = this.jobOf(inv);
     // TODO(@storage-auth): verify per-tx signature and delegation chain; enforce storage/write for space
-    const { openSpaceStorage } = await import("../provider.ts");
     const spacesDir = getSpacesDir();
     const s = await openSpaceStorage(this.spaceId, { spacesDir });
 
