@@ -285,3 +285,69 @@ Deno.bench({
   }
   if (events <= 0) throw new Error("no update events generated");
 });
+
+// Baseline: same structural churn without query engine involvement (fresh dataset)
+const tmpDirB = await Deno.makeTempDir();
+const spacesDirB = new URL(`file://${tmpDirB}/`);
+const spaceDidB = "did:key:bench-updates-baseline";
+const spaceB = await openSpaceStorage(spaceDidB, { spacesDir: spacesDirB });
+const sqliteHandleB = await openSqlite({
+  url: new URL(`./${spaceDidB}.sqlite`, spacesDirB),
+});
+const dbB: Database = sqliteHandleB.db;
+const seededB = await seedVDOM(spaceB, NODES, MAX_CHILDREN);
+const docsB = seededB.docs;
+const reachableB = seededB.reachableFromZero;
+
+Deno.bench({
+  name:
+    `updates baseline (no query): vdom churn (${CHANGES} changes over ${NODES} nodes)`,
+  group: "updates",
+  n: 1,
+}, async () => {
+  for (let t = 0; t < CHANGES; t++) {
+    const i = reachableB[Math.floor(rnd() * reachableB.length)] ?? 0;
+    const docId = `vdom:${i}`;
+    const cur = docsB.get(docId) ?? Automerge.init<any>();
+    const removeMode = rnd() < 0.5;
+    let updated = cur;
+    updated = Automerge.change(updated, (d: any) => {
+      if (!Array.isArray(d.children)) d.children = [];
+      const current: string[] = d.children.map((c: any) =>
+        c?.["/"]?.["link@1"]?.id
+      ).filter((x: any) => typeof x === "string");
+      if (removeMode && current.length > 0) {
+        const idx = randInt(current.length);
+        d.children.splice(idx, 1);
+      } else {
+        const remaining = Math.max(0, NODES - i - 1);
+        if (remaining > 0) {
+          const candidate = i + 1 + randInt(remaining);
+          const childId = `vdom:${candidate}`;
+          if (!current.includes(childId)) {
+            d.children.push(link(childId, []));
+          } else if (current.length > 0) {
+            const idx = randInt(current.length);
+            d.children.splice(idx, 1);
+          }
+        } else if (current.length > 0) {
+          const idx = randInt(current.length);
+          d.children.splice(idx, 1);
+        }
+      }
+    });
+    const change = Automerge.getLastLocalChange(updated);
+    if (!change) continue;
+    const baseHeads = Automerge.getHeads(cur);
+    const rec = await spaceB.submitTx({
+      reads: [],
+      writes: [{
+        ref: { docId, branch: "main" },
+        baseHeads,
+        changes: [{ bytes: change }],
+      }],
+    });
+    const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+    if (ok) docsB.set(docId, updated);
+  }
+});
