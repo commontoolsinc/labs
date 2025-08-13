@@ -13,13 +13,9 @@ export type UcanPayload = {
   att?: UcanCap[];
 };
 
+import { decodeBase64Url } from "../codec/bytes.ts";
 function base64UrlDecode(input: string): Uint8Array {
-  const pad = input.length % 4 === 2 ? "==" : input.length % 4 === 3 ? "=" : "";
-  const b64 = input.replace(/-/g, "+").replace(/_/g, "/") + pad;
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
+  return decodeBase64Url(input);
 }
 
 function jsonFromB64<T>(b64u: string): T {

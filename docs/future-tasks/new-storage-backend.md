@@ -565,3 +565,55 @@ Action items for phase 2 (expanded):
       the response to the server, mirroring the protocol?
 - [ ] How to test over a socket without booting a server
 - [ ] Can we use :memory; instead of temp directories?
+
+### Deduplication and consistency pass (phase 2)
+
+- Goals: eliminate small but widespread duplication (base64 helpers, path
+  keying, type drift, migrations/flags sprawl) and align runtime behavior with
+  specs.
+
+- Tasks:
+
+- [x] Create shared bytes codec
+  - [x] Add `packages/storage/src/codec/bytes.ts` exporting:
+    - [x] `encodeBase64(bytes: Uint8Array): string`
+    - [x] `decodeBase64(s: string): Uint8Array`
+    - [x] `encodeBase64Url(bytes: Uint8Array): string`
+    - [x] `decodeBase64Url(s: string): Uint8Array`
+    - [x] `bytesToHex(bytes: Uint8Array): string` (re-export/impl)
+    - [x] `hexToBytes(hex: string): Uint8Array` (re-export/impl)
+  - [x] Replace ad-hoc helpers in `src/ws/server.ts` and `src/ws/ucan.ts`.
+  - [ ] Migrate shared test utilities to import the module (keep local helpers
+        for now).
+
+- [ ] Standardize path keying
+  - [x] Add `packages/storage/src/path.ts` with `keyPath(tokens: string[])`
+        wrapper.
+  - [ ] Replace direct `JSON.stringify(path)` usages in hot paths with
+        `keyPath()`.
+
+- [ ] Types consolidation (follow-up)
+  - [ ] Use `src/types.ts` as the canonical source for `TxRequest`, `TxReceipt`,
+        `TxDocResult`, `BranchRef`, etc.
+  - [ ] Refactor `src/store/tx.ts` to consume these types instead of
+        re-declaring local variants.
+  - [ ] Align `src/ws/protocol.ts` to reference the same transaction types.
+
+- [ ] Migrations/schema unification (follow-up)
+  - [ ] Remove/replace empty or duplicated migration files under
+        `src/store/migrations/`.
+  - [ ] Keep a single authoritative DDL in `src/store/schema.sql` (already used
+        by `db.ts`).
+
+- [ ] Flags/config centralization (follow-up)
+  - [ ] Ensure feature flags are read exclusively via `src/config.ts` and make
+        `src/store/flags.ts` delegate there.
+  - [ ] Consider unifying per-space overrides under a documented settings row.
+
+- Acceptance criteria:
+
+- [x] No remaining ad-hoc base64 helpers in runtime code; WS server and UCAN
+      import from `codec/bytes.ts`.
+- [ ] New `keyPath()` used where paths are stringified in runtime code.
+- [x] Tests and `deno task check` pass.
+- [x] Follow-up items tracked for types/migrations/flags.

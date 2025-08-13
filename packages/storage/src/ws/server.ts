@@ -1,5 +1,7 @@
 import { openSqlite } from "../store/db.ts";
+import { decodeBase64, encodeBase64 } from "../codec/bytes.ts";
 import { getSpacesDir, isWsAuthRequired } from "../config.ts";
+import { keyPath } from "../path.ts";
 import { requireCapsOnRequest } from "./ucan.ts";
 import type { Database } from "@db/sqlite";
 import type {
@@ -276,13 +278,7 @@ class SessionState {
     const defaultBranch = "main";
     const stmts = getPrepared(this.db as any);
 
-    const encodeB64 = (bytes: Uint8Array): string => {
-      let s = "";
-      for (let i = 0; i < bytes.length; i++) {
-        s += String.fromCharCode(bytes[i]!);
-      }
-      return btoa(s);
-    };
+    const encodeB64 = (bytes: Uint8Array): string => encodeBase64(bytes);
 
     for (const docId of docIds) {
       // Resolve branch state
@@ -455,12 +451,7 @@ class SessionState {
     const s = await openSpaceStorage(this.spaceId, { spacesDir });
 
     // Normalize WS tx args: decode base64 or numeric arrays to Uint8Array
-    const decodeB64 = (s: string): Uint8Array => {
-      const bin = atob(s);
-      const out = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out;
-    };
+    const decodeB64 = (s: string): Uint8Array => decodeBase64(s);
     const toBytes = (v: unknown): Uint8Array => {
       if (v instanceof Uint8Array) return v;
       if (typeof v === "string") return decodeB64(v);
@@ -530,7 +521,7 @@ class SessionState {
         const v = this.storageReader.currentVersion(d.doc);
         const delta = {
           doc: d.doc,
-          changed: new Set([JSON.stringify([])]),
+          changed: new Set([keyPath([])]),
           removed: new Set<string>(),
           newDoc: undefined,
           atVersion: v,
@@ -558,13 +549,7 @@ class SessionState {
 
     const defaultBranch = "main";
     const stmts = getPrepared(this.db as any);
-    const encodeB64 = (bytes: Uint8Array): string => {
-      let s = "";
-      for (let i = 0; i < bytes.length; i++) {
-        s += String.fromCharCode(bytes[i]!);
-      }
-      return btoa(s);
-    };
+    const encodeB64 = (bytes: Uint8Array): string => encodeBase64(bytes);
 
     for (const docId of docsSet) {
       const state = getBranchState(this.db, docId, defaultBranch);
