@@ -163,15 +163,13 @@ function randInt(n: number): number {
   return Math.floor(rnd() * n);
 }
 
-// Produce CHANGES structural edits (add/remove children) and feed deltas to engine
-Deno.bench({
-  name:
-    `updates: vdom structural churn (${CHANGES} changes over ${NODES} nodes)`,
-  group: "updates",
-  n: 1,
-}, async () => {
+// Workload used by both the benchmark runner and profiling path
+async function runUpdatesWorkload(
+  changes: number,
+  verify: boolean,
+): Promise<number> {
   let events = 0;
-  for (let t = 0; t < CHANGES; t++) {
+  for (let t = 0; t < changes; t++) {
     // Pick a doc reachable from vdom:0 (bias towards impacting the root query)
     const i = reachable[Math.floor(rnd() * reachable.length)] ?? 0;
     const docId = `vdom:${i}`;
@@ -253,7 +251,7 @@ Deno.bench({
       atVersion: v,
     } as unknown as Delta;
     const ev = cp.onDelta(delta);
-    if (VERIFY && ok) {
+    if (verify && ok) {
       const js = Automerge.toJS(updated) as any;
       const afterChildren: Array<{ id: string; idx: number }> =
         Array.isArray(js?.children)
@@ -269,7 +267,6 @@ Deno.bench({
       if (added) {
         // Expect provenance link edge from parent slot to child doc root to exist for root query
         const ek = `${ir}\u0001vdom:0\u0001[]`;
-        const toKey = keyPathLocal([]);
         const edgeSet = prov.linkEdges.get(ek);
         const hasEdge = Array.from(edgeSet ?? []).some((k) =>
           typeof k === "string" && k.startsWith(`${added.id}\u0001`)
@@ -284,70 +281,90 @@ Deno.bench({
     events += ev.length;
   }
   if (events <= 0) throw new Error("no update events generated");
-});
+  return events;
+}
 
-// Baseline: same structural churn without query engine involvement (fresh dataset)
-const tmpDirB = await Deno.makeTempDir();
-const spacesDirB = new URL(`file://${tmpDirB}/`);
-const spaceDidB = "did:key:bench-updates-baseline";
-const spaceB = await openSpaceStorage(spaceDidB, { spacesDir: spacesDirB });
-const sqliteHandleB = await openSqlite({
-  url: new URL(`./${spaceDidB}.sqlite`, spacesDirB),
-});
-const dbB: Database = sqliteHandleB.db;
-const seededB = await seedVDOM(spaceB, NODES, MAX_CHILDREN);
-const docsB = seededB.docs;
-const reachableB = seededB.reachableFromZero;
-
+// Produce CHANGES structural edits (add/remove children) and feed deltas to engine
 Deno.bench({
   name:
-    `updates baseline (no query): vdom churn (${CHANGES} changes over ${NODES} nodes)`,
+    `updates: vdom structural churn (${CHANGES} changes over ${NODES} nodes)`,
   group: "updates",
   n: 1,
 }, async () => {
-  for (let t = 0; t < CHANGES; t++) {
-    const i = reachableB[Math.floor(rnd() * reachableB.length)] ?? 0;
-    const docId = `vdom:${i}`;
-    const cur = docsB.get(docId) ?? Automerge.init<any>();
-    const removeMode = rnd() < 0.5;
-    let updated = cur;
-    updated = Automerge.change(updated, (d: any) => {
-      if (!Array.isArray(d.children)) d.children = [];
-      const current: string[] = d.children.map((c: any) =>
-        c?.["/"]?.["link@1"]?.id
-      ).filter((x: any) => typeof x === "string");
-      if (removeMode && current.length > 0) {
-        const idx = randInt(current.length);
-        d.children.splice(idx, 1);
-      } else {
-        const remaining = Math.max(0, NODES - i - 1);
-        if (remaining > 0) {
-          const candidate = i + 1 + randInt(remaining);
-          const childId = `vdom:${candidate}`;
-          if (!current.includes(childId)) {
-            d.children.push(link(childId, []));
+  await runUpdatesWorkload(CHANGES, VERIFY);
+});
+
+// Baseline: same structural churn without query engine involvement (fresh dataset)
+if (!Deno.env.get("PROFILE")) {
+  const tmpDirB = await Deno.makeTempDir();
+  const spacesDirB = new URL(`file://${tmpDirB}/`);
+  const spaceDidB = "did:key:bench-updates-baseline";
+  const spaceB = await openSpaceStorage(spaceDidB, { spacesDir: spacesDirB });
+  const sqliteHandleB = await openSqlite({
+    url: new URL(`./${spaceDidB}.sqlite`, spacesDirB),
+  });
+  const dbB: Database = sqliteHandleB.db;
+  const seededB = await seedVDOM(spaceB, NODES, MAX_CHILDREN);
+  const docsB = seededB.docs;
+  const reachableB = seededB.reachableFromZero;
+
+  Deno.bench({
+    name:
+      `updates baseline (no query): vdom churn (${CHANGES} changes over ${NODES} nodes)`,
+    group: "updates",
+    n: 1,
+  }, async () => {
+    for (let t = 0; t < CHANGES; t++) {
+      const i = reachableB[Math.floor(rnd() * reachableB.length)] ?? 0;
+      const docId = `vdom:${i}`;
+      const cur = docsB.get(docId) ?? Automerge.init<any>();
+      const removeMode = rnd() < 0.5;
+      let updated = cur;
+      updated = Automerge.change(updated, (d: any) => {
+        if (!Array.isArray(d.children)) d.children = [];
+        const current: string[] = d.children.map((c: any) =>
+          c?.["/"]?.["link@1"]?.id
+        ).filter((x: any) => typeof x === "string");
+        if (removeMode && current.length > 0) {
+          const idx = randInt(current.length);
+          d.children.splice(idx, 1);
+        } else {
+          const remaining = Math.max(0, NODES - i - 1);
+          if (remaining > 0) {
+            const candidate = i + 1 + randInt(remaining);
+            const childId = `vdom:${candidate}`;
+            if (!current.includes(childId)) {
+              d.children.push(link(childId, []));
+            } else if (current.length > 0) {
+              const idx = randInt(current.length);
+              d.children.splice(idx, 1);
+            }
           } else if (current.length > 0) {
             const idx = randInt(current.length);
             d.children.splice(idx, 1);
           }
-        } else if (current.length > 0) {
-          const idx = randInt(current.length);
-          d.children.splice(idx, 1);
         }
-      }
-    });
-    const change = Automerge.getLastLocalChange(updated);
-    if (!change) continue;
-    const baseHeads = Automerge.getHeads(cur);
-    const rec = await spaceB.submitTx({
-      reads: [],
-      writes: [{
-        ref: { docId, branch: "main" },
-        baseHeads,
-        changes: [{ bytes: change }],
-      }],
-    });
-    const ok = rec.results.length > 0 && rec.results[0].status === "ok";
-    if (ok) docsB.set(docId, updated);
-  }
-});
+      });
+      const change = Automerge.getLastLocalChange(updated);
+      if (!change) continue;
+      const baseHeads = Automerge.getHeads(cur);
+      const rec = await spaceB.submitTx({
+        reads: [],
+        writes: [{
+          ref: { docId, branch: "main" },
+          baseHeads,
+          changes: [{ bytes: change }],
+        }],
+      });
+      const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+      if (ok) docsB.set(docId, updated);
+    }
+  });
+}
+
+// Profiling path: run the updates workload directly when PROFILE env var is set
+if (Deno.env.get("BENCH_UPD_PROFILE")) {
+  const changes = Number(Deno.env.get("BENCH_UPD_CHANGES") ?? CHANGES);
+  const verify = VERIFY;
+  await runUpdatesWorkload(changes, verify);
+}
