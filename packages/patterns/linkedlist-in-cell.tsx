@@ -1,5 +1,6 @@
 /// <cts-enable />
 import {
+  h,
   Cell,
   cell,
   Default,
