@@ -1,4 +1,5 @@
 import { assert, assertEquals } from "@std/assert";
+import * as Automerge from "@automerge/automerge";
 
 function b64(bytes: Uint8Array): string {
   let s = "";
@@ -63,7 +64,6 @@ Deno.test({
     const branch = "main";
 
     // Create a simple Automerge change
-    const Automerge = await import("@automerge/automerge");
     let doc = Automerge.init();
     doc = Automerge.change(doc, (d: any) => {
       d.title = "hello";

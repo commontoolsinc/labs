@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { openSpaceStorage } from "../../src/provider.ts";
+import { openSqlite } from "../../src/store/db.ts";
 
 Deno.test("test_pit_uses_chunks_after_last_snapshot", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -77,7 +78,6 @@ Deno.test("test_pit_fallback_without_chunks", async () => {
 
   // Disable chunking by writing a space_settings row
   // Open space DB directly via store API
-  const { openSqlite } = await import("../../src/store/db.ts");
   const handle = await openSqlite({
     url: new URL(`./did:key:pit-no-chunks.sqlite`, spacesDir),
   });

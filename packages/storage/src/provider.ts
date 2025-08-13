@@ -20,12 +20,18 @@ import type { Database } from "@db/sqlite";
 import { maybeCreateSnapshot } from "./store/snapshots.ts";
 import { maybeEmitChunks } from "./store/chunks.ts";
 import { isServerMergeEnabled } from "./store/flags.ts";
-import { epochForTimestamp, getAutomergeBytesAtSeq } from "./store/pit.ts";
+import {
+  epochForTimestamp,
+  getAutomergeBytesAtSeq,
+  uptoSeqNo,
+} from "./store/pit.ts";
 import { synthesizeAndApplyMergeAcrossBranches } from "./store/merge.ts";
 import * as Automerge from "@automerge/automerge";
 import { closeBranch } from "./store/branches.ts";
 import { updateHeads as updateHeadsShared } from "./store/heads.ts";
 import { createStubTx } from "./store/tx_chain.ts";
+import { submitTx as submitTxInternal } from "./store/tx.ts";
+import { project } from "./store/projection.ts";
 
 export interface SQLiteSpaceOptions {
   spacesDir: URL; // directory where per-space sqlite files live
@@ -51,7 +57,6 @@ class SQLiteSpace implements SpaceStorage {
 
   async submitTx(req: TxRequest): Promise<TxReceipt> {
     // Delegate to sqlite/tx pipeline to preserve single-writer and BEGIN IMMEDIATE boundaries
-    const { submitTx: submitTxInternal } = await import("./store/tx.ts");
     const db = this.handle.db;
 
     // Translate public TxRequest → internal sqlite/tx TxRequest
@@ -87,7 +92,7 @@ class SQLiteSpace implements SpaceStorage {
     };
   }
 
-  async getDocBytes(
+  getDocBytes(
     docId: DocId,
     branch: BranchName,
     opts?: {
@@ -99,8 +104,6 @@ class SQLiteSpace implements SpaceStorage {
   ): Promise<Uint8Array> {
     const db = this.handle.db;
     const state = readBranchState(db, docId, branch);
-    const { uptoSeqNo } = await import("./store/pit.ts");
-    const { project } = await import("./store/projection.ts");
 
     let targetEpoch: number | undefined = opts?.epoch;
     if (targetEpoch == null && opts?.at) {
@@ -119,9 +122,9 @@ class SQLiteSpace implements SpaceStorage {
 
     const accept = opts?.accept ?? "automerge";
     if (accept === "json") {
-      return project(amBytes, opts?.paths);
+      return Promise.resolve(project(amBytes, opts?.paths));
     }
-    return amBytes;
+    return Promise.resolve(amBytes);
   }
 
   async mergeBranches(

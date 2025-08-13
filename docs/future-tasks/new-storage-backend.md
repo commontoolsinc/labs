@@ -558,9 +558,9 @@ Action items for phase 2 (expanded):
 
 ## Cleanup tasks
 
-- [ ] in server.ts and maybe other places it says "standed in for
+- [x] in server.ts and maybe other places it says "standed in for
       merkle-reference", just actually use it!
-- [ ] remove all try { console.log() } catch {}
+- [x] remove all try { console.log() } catch {}
 - [ ] server: ack should also be a UCAN invocation, or even better modelled as
       the response to the server, mirroring the protocol?
 - [ ] How to test over a socket without booting a server
