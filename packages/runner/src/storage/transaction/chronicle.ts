@@ -1,5 +1,6 @@
 import { normalizeFact, unclaimed } from "@commontools/memory/fact";
 import type {
+  Assertion,
   IAttestation,
   IInvalidDataURIError,
   IMemoryAddress,
@@ -94,12 +95,31 @@ export class Chronicle {
   /**
    * Takes an invariant and applies all the changes that were written to this
    * chonicle that fall under the given source.
+   *
+   * This is really filtering the entries in `#novelty` for those that are
+   * children of the source address, and returning the result of applying all
+   * those changes to the source value.
+   *
+   * This does not modify source, but if there are no changes, we return
+   * source, so we may need to avoid modifying the returned value.
    */
-  rebase(source: IAttestation) {
+  rebase(source: IAttestation): Result<
+    IAttestation,
+    IStorageTransactionInconsistent | INotFoundError | ITypeMismatchError
+  > {
     const changes = this.#novelty.select(source.address);
     return changes ? changes.rebase(source) : { ok: source };
   }
 
+  /**
+   * This does some validation to ensure that the write is applicable to the
+   * state in the replica, and if it is, it adds this change to the set of
+   * claims in the `#novelty` map.
+   *
+   * @param address the address for the value being written
+   * @param value the value to add to the #novelty map
+   * @returns a Result containing the new attestation or error
+   */
   write(
     address: IMemoryAddress,
     value?: JSONValue,
@@ -261,19 +281,23 @@ export class Chronicle {
           };
         }
         return { error };
-      } //
-      // If merged value is `undefined` and loaded fact was retraction
-      // we simply claim loaded state. Otherwise we retract loaded fact
-      else if (merged.value === undefined) {
-        if (loaded.is === undefined) {
-          edit.claim(loaded);
-        } else {
-          edit.retract(loaded);
-        }
-      } //
-      // If merged value is not `undefined` we create an assertion referring
-      // to the loaded fact in a causal reference.
-      else {
+      }
+      if (
+        merged.value === loaded.is ||
+        JSON.stringify(merged.value) === JSON.stringify(loaded.is)
+      ) {
+        // If merged value is the same as the loaded value, we simply claim the
+        // loaded state.
+        edit.claim(loaded);
+      } else if (merged.value === undefined) {
+        // If the merged value is `undefined`, retract the fact.
+        // We cast here, since typescript doesn't realize that a non-assertion
+        // would have matched on the initial if check.
+        edit.retract(loaded as Assertion);
+      } else {
+        // If the merged value is neither `undefined` nor the existing value,
+        // create an assertion referring to the loaded fact in a causal
+        // reference.
         edit.assert({
           ...loaded,
           is: merged.value,
@@ -286,6 +310,10 @@ export class Chronicle {
   }
 }
 
+/**
+ * History is essentially a map whose keys are the id, type, and path triple
+ * whose values are the IAttestation for that key.
+ */
 class History {
   #model: Map<string, IAttestation> = new Map();
   #space: MemorySpace;
@@ -345,8 +373,8 @@ class History {
   }
 
   /**
-   * Claims an new read invariant while ensuring consistency with all the
-   * privous invariants.
+   * Claims a new read invariant while ensuring consistency with all the
+   * previous invariants.
    */
   claim(
     attestation: IAttestation,
@@ -415,6 +443,10 @@ class History {
   }
 }
 
+/**
+ * Novelty is essentially a map whose keys are the id and type pair and whose
+ * values are the Changes associated with that key.
+ */
 class Novelty {
   #model: Map<string, Changes> = new Map();
   #space: MemorySpace;
@@ -474,8 +506,9 @@ class Novelty {
 
     // If we did not find any parents we may have some children
     // that will be replaced by this invariant
-    for (const candidate of candidates) {
-      if (Address.includes(candidate.address, invariant.address)) {
+    // Since we are altering the collection, we iterate over a copy.
+    for (const candidate of [...candidates]) {
+      if (Address.includes(invariant.address, candidate.address)) {
         candidates.delete(candidate);
       }
     }
@@ -504,6 +537,10 @@ class Novelty {
   }
 }
 
+/**
+ * Changes is essentially a map whose keys are the path, and whose values
+ * are the IAttestation objects.
+ */
 class Changes {
   #model: Map<string, IAttestation> = new Map();
   address: IMemoryAddress;
