@@ -120,7 +120,7 @@ export type Delta = {
   doc: DocId;
   changed: Set<PathKey>; // keys created via keyPath(path)
   removed: Set<PathKey>;
-  newDoc?: any;
+  newDoc?: unknown;
   atVersion: Version;
 };
 
