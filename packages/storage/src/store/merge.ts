@@ -31,9 +31,9 @@ export function synthesizeAndApplyMergeOnBranch(
   const amBytes = getAutomergeBytesAtSeq(db, docId, branchId, currentSeqNo);
   const baseDoc = Automerge.load(amBytes);
   const TMP_KEY = "__server_merge_marker";
-  const mergedDoc = Automerge.change(baseDoc, (d: any) => {
-    d[TMP_KEY] = true;
-    delete d[TMP_KEY];
+  const mergedDoc = Automerge.change(baseDoc, (d: Record<string, unknown>) => {
+    (d as Record<string, unknown>)[TMP_KEY] = true as unknown as never;
+    delete (d as Record<string, unknown>)[TMP_KEY];
   });
   const mergeBytes = Automerge.getLastLocalChange(mergedDoc);
   if (!mergeBytes) return { ok: false };
@@ -94,9 +94,9 @@ export function synthesizeAndApplyMergeAcrossBranches(
   const b = Automerge.load(fromBytes);
   const mergedState = Automerge.merge(a, b);
   const TMP_KEY = "__server_merge_marker";
-  const mergedWithMarker = Automerge.change(mergedState, (d: any) => {
-    d[TMP_KEY] = true;
-    delete d[TMP_KEY];
+  const mergedWithMarker = Automerge.change(mergedState, (d: Record<string, unknown>) => {
+    (d as Record<string, unknown>)[TMP_KEY] = true as unknown as never;
+    delete (d as Record<string, unknown>)[TMP_KEY];
   });
   const mergeBytes = Automerge.getLastLocalChange(mergedWithMarker);
   if (!mergeBytes) throw new Error("failed to synthesize merge change");

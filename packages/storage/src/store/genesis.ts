@@ -14,20 +14,20 @@ function toHexUtf8(s: string): string {
     .join("");
 }
 
-function initWithActor(actor: string): any {
-  return Automerge.init({ actor: toHexUtf8(actor) });
+function initWithActor<T>(actor: string): T {
+  return Automerge.init({ actor: toHexUtf8(actor) }) as unknown as T;
 }
 
 export function computeGenesisHead(docId: string): string {
   // Initialize with a deterministic actor id based on docId
-  const doc: any = initWithActor(docId);
+  const doc = initWithActor<Automerge.Doc<unknown>>(docId);
 
-  const changed = Automerge.change(doc as any, { time: 0 }, (d: any) => {
+  const changed = Automerge.change(doc, { time: 0 }, (d: Record<string, unknown>) => {
     // produce at least one operation with zero net effect
-    (d as any).__genesis__ = 1;
-    delete (d as any).__genesis__;
+    (d as Record<string, unknown>)["__genesis__"] = 1 as unknown as never;
+    delete (d as Record<string, unknown>)["__genesis__"];
   });
-  const c = Automerge.getLastLocalChange(changed as any);
+  const c = Automerge.getLastLocalChange(changed);
   if (!c) throw new Error("failed to produce genesis change");
   const hdr = decodeChangeHeader(c);
   return hdr.changeHash;
@@ -38,20 +38,20 @@ export function computeGenesisHead(docId: string): string {
  * change applied (actor id = docId), then fork it for subsequent edits under
  * an optional `forkActorId`. Returns the forked doc if fork is available.
  */
-export function createGenesisDoc<T = any>(
+export function createGenesisDoc<T = unknown>(
   docId: string,
   forkActorId?: string,
 ): T {
   // Initialize with deterministic actor id
-  let base: any = initWithActor(docId);
-  base = Automerge.change(base, { time: 0 }, (d: any) => {
-    (d as any).__genesis__ = 1;
-    delete (d as any).__genesis__;
+  let base = initWithActor<Automerge.Doc<unknown>>(docId);
+  base = Automerge.change(base, { time: 0 }, (d: Record<string, unknown>) => {
+    (d as Record<string, unknown>)["__genesis__"] = 1 as unknown as never;
+    delete (d as Record<string, unknown>)["__genesis__"];
   });
   // Prefer fork when available to set client actor id
-  const am: any = Automerge as any;
+  const am = Automerge as unknown as { fork?: (d: Automerge.Doc<unknown>, actorId?: string) => T };
   if (typeof am.fork === "function") {
-    return forkActorId ? am.fork(base, forkActorId) : am.fork(base);
+    return forkActorId ? am.fork!(base, forkActorId) : am.fork!(base);
   }
   // Fallback: return the base doc (actor id remains docId)
   return base as T;
