@@ -14,9 +14,9 @@ export function project(docBytes: Uint8Array, paths?: string[][]): Uint8Array {
 }
 
 function projectJson(root: unknown, paths: string[][]): unknown {
-  const out: any = Array.isArray(root) ? [] : {};
+  const out: unknown = Array.isArray(root) ? [] : {};
   for (const p of paths) {
-    setAtPath(out, p, getAtPath(root as any, p));
+    setAtPath(out, p, getAtPath(root, p));
   }
   return out;
 }

@@ -124,10 +124,11 @@ class SessionState {
     };
   }
 
-  private decodeJSON(data: string | ArrayBufferLike | Blob): any {
+  private async decodeJSON(data: string | ArrayBufferLike | Blob): Promise<unknown> {
     if (typeof data === "string") return JSON.parse(data);
     if (data instanceof Blob) {
-      return JSON.parse(new TextDecoder().decode(data as any));
+      const ab = await data.arrayBuffer();
+      return JSON.parse(new TextDecoder().decode(ab));
     }
     return JSON.parse(new TextDecoder().decode(data as ArrayBuffer));
   }
@@ -136,7 +137,7 @@ class SessionState {
     return JSON.stringify(v);
   }
 
-  private jobOf(invocation: any): `job:${string}` {
+  private jobOf(invocation: unknown): `job:${string}` {
     return `job:${refer(invocation)}` as const;
   }
 
@@ -155,21 +156,24 @@ class SessionState {
   private async onMessage(ev: MessageEvent) {
     try {
       this.activeOps++;
-      const msg = this.decodeJSON(ev.data);
+      const msg = await this.decodeJSON(ev.data) as unknown;
       console.log(
         "[ws] recv",
-        typeof msg === "object"
-          ? msg?.invocation?.cmd ?? msg?.type
+        typeof msg === "object" && msg !== null
+          ? ((msg as Record<string, unknown>)?.invocation as Record<string, unknown> | undefined)?.cmd ?? (msg as Record<string, unknown>)?.type
           : typeof msg,
       );
-      if (msg && msg.type === "ack") {
-        const ack = msg as Ack;
+      const maybeObj = (typeof msg === "object" && msg !== null)
+        ? (msg as Record<string, unknown>)
+        : {};
+      if (maybeObj && (maybeObj["type"] as string | undefined) === "ack") {
+        const ack = maybeObj as unknown as Ack;
         this.handleAck(ack);
         return;
       }
 
       // Treat other messages as UCAN-wrapped invocations
-      const { invocation, authorization } = msg as UCAN<
+      const { invocation, authorization } = maybeObj as unknown as UCAN<
         StorageHello | StorageGet | StorageSubscribe | StorageTx
       >;
       // TODO(@storage-auth): verify UCAN and capabilities (read/write) here

@@ -13,13 +13,13 @@ export type EvalResult = {
   deps: Set<EvalKey>;
 };
 
-function isObject(x: any): x is Record<string, any> {
+function isObject(x: unknown): x is Record<string, unknown> {
   return x !== null && typeof x === "object" && !Array.isArray(x);
 }
 
 export type LinkValue = { "/": { "link@1": { id: DocId; path: string[] } } };
 
-export function isLinkValue(v: any): v is LinkValue {
+export function isLinkValue(v: unknown): v is LinkValue {
   return (
     isObject(v) &&
     isObject(v["/"]) &&
@@ -208,7 +208,7 @@ export class Evaluator {
       ctx.valueMemo.set(memoKey, v);
     }
 
-    const descend = (irId: IRId, val: any): Verdict => {
+    const descend = (irId: IRId, val: unknown): Verdict => {
       const ir = this.pool.get(irId);
       switch (ir.kind) {
         case "True":
@@ -230,7 +230,7 @@ export class Evaluator {
             ? "Yes"
             : "No";
         case "Enum":
-          return ir.values.some((x: any) =>
+          return ir.values.some((x: unknown) =>
               JSON.stringify(x) === JSON.stringify(val)
             )
             ? "Yes"

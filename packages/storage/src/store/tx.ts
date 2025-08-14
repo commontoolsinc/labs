@@ -321,7 +321,7 @@ export async function submitTx(
         const { insertChangeIndex } = getPrepared(db);
         insertChangeIndex.run({
           doc_id: docId,
-          branch_id: write.branchId,
+          branch_id: write.branchId as string,
           seq_no: seqNo,
           change_hash: header.changeHash,
           bytes_hash: bytesHash,

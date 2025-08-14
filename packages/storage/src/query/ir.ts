@@ -5,8 +5,8 @@ export type IRNode =
     kind: "TypeCheck";
     t: "object" | "array" | "string" | "number" | "boolean" | "null";
   }
-  | { kind: "Const"; value: any }
-  | { kind: "Enum"; values: any[] }
+  | { kind: "Const"; value: unknown }
+  | { kind: "Enum"; values: unknown[] }
   | {
     kind: "Range";
     min?: number;
@@ -65,11 +65,11 @@ function newLocalId(): IRId {
   return `ir_local_${__ir_local_id}`;
 }
 
-function isObject(x: any): x is Record<string, any> {
+function isObject(x: unknown): x is Record<string, unknown> {
   return x !== null && typeof x === "object" && !Array.isArray(x);
 }
 
-function stableHash(obj: any): string {
+function stableHash(obj: unknown): string {
   const s = JSON.stringify(obj, (_k, v) => {
     if (v instanceof RegExp) return { $re: v.source, $flags: v.flags };
     if (v instanceof Set) return { $set: [...v].sort() };
