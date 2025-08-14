@@ -22,11 +22,15 @@ export function computeGenesisHead(docId: string): string {
   // Initialize with a deterministic actor id based on docId
   const doc = initWithActor<Automerge.Doc<unknown>>(docId);
 
-  const changed = Automerge.change(doc, { time: 0 }, (d: Record<string, unknown>) => {
-    // produce at least one operation with zero net effect
-    (d as Record<string, unknown>)["__genesis__"] = 1 as unknown as never;
-    delete (d as Record<string, unknown>)["__genesis__"];
-  });
+  const changed = Automerge.change(
+    doc,
+    { time: 0 },
+    (d: Record<string, unknown>) => {
+      // produce at least one operation with zero net effect
+      (d as Record<string, unknown>)["__genesis__"] = 1 as unknown as never;
+      delete (d as Record<string, unknown>)["__genesis__"];
+    },
+  );
   const c = Automerge.getLastLocalChange(changed);
   if (!c) throw new Error("failed to produce genesis change");
   const hdr = decodeChangeHeader(c);
@@ -49,7 +53,9 @@ export function createGenesisDoc<T = unknown>(
     delete (d as Record<string, unknown>)["__genesis__"];
   });
   // Prefer fork when available to set client actor id
-  const am = Automerge as unknown as { fork?: (d: Automerge.Doc<unknown>, actorId?: string) => T };
+  const am = Automerge as unknown as {
+    fork?: (d: Automerge.Doc<unknown>, actorId?: string) => T;
+  };
   if (typeof am.fork === "function") {
     return forkActorId ? am.fork!(base, forkActorId) : am.fork!(base);
   }
