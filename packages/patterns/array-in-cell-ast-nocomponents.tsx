@@ -15,28 +15,18 @@ interface Item {
   text: Default<string, "">;
 }
 
-interface InputSchema {
-  title: Default<string, "untitled">;
-  items: Default<Item[], []>;
-}
-
-type InputEventType = {
-  detail: {
-    message: string;
-  };
-};
-
-interface ListState {
-  items: Cell<Item[]>;
-}
-
-const addItem = handler<InputEventType, ListState>(
-  (event: InputEventType, state: ListState) => {
-    state.items.push({ text: event.detail.message });
+const addItem = handler(
+  (event: { detail: { message: string } }, { items }: {
+    items: Cell<Item[]>;
+  }) => {
+    items.push({ text: event.detail.message });
   },
 );
 
-export default recipe("Simple List", ({ title, items }: InputSchema) => {
+export default recipe<{
+  title: Default<string, "untitled">;
+  items: Default<Item[], []>;
+}>("Simple List", ({ title, items }) => {
   return {
     [NAME]: title,
     [UI]: (

@@ -13,16 +13,12 @@ import {
   UI,
 } from "commontools";
 
-interface RecipeState {
-  value: Default<number, 0>;
-}
-
-const increment = handler<unknown, { value: Cell<number> }>((_, state) => {
-  state.value.set(state.value.get() + 1);
+const increment = handler((_, { value }: { value: Cell<number> }) => {
+  value.set(value.get() + 1);
 });
 
-const decrement = handler((_, state: { value: Cell<number> }) => {
-  state.value.set(state.value.get() - 1);
+const decrement = handler((_, { value }: { value: Cell<number> }) => {
+  value.set(value.get() - 1);
 });
 
 function previous(value: number) {
@@ -42,22 +38,22 @@ function nth(value: number) {
   return `${value}th`;
 }
 
-export default recipe<RecipeState>("Counter", (state) => {
+export default recipe<{ value: Default<number, 0> }>("Counter", ({ value }) => {
   return {
-    [NAME]: str`Simple counter: ${state.value}`,
+    [NAME]: str`Simple counter: ${value}`,
     [UI]: (
       <div>
-        <ct-button onClick={decrement(state)}>
-          dec to {previous(state.value)}
+        <ct-button onClick={decrement({ value })}>
+          dec to {previous(value)}
         </ct-button>
         <span id="counter-result">
-          Counter is the {nth(state.value)} number
+          Counter is the {nth(value)} number
         </span>
-        <ct-button onClick={increment({ value: state.value })}>
-          inc to {state.value + 1}
+        <ct-button onClick={increment({ value })}>
+          inc to {value + 1}
         </ct-button>
       </div>
     ),
-    value: state.value,
+    value,
   };
 });

@@ -15,38 +15,35 @@ interface Item {
   text: Default<string, "">;
 }
 
-interface InputSchema {
-  title: Default<string, "untitled">;
-  items: Default<Item[], []>;
-}
-
+// Should be imported, once we have types for all events
 type InputEventType = {
   detail: {
     message: string;
   };
 };
 
-interface ListState {
-  items: Cell<Item[]>;
-}
-
-const addItem = handler<InputEventType, ListState>(
-  (event: InputEventType, state: ListState) => {
-    state.items.push({ text: event.detail.message });
+const addItem = handler(
+  (event: InputEventType, { items }: {
+    items: Cell<Item[]>;
+  }) => {
+    items.push({ text: event.detail.message });
   },
 );
 
-const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
-  (_, { items, index }) => {
+const removeItem = handler(
+  (_, { items, index }: { items: Cell<Item[]>; index: number }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length) next.splice(index, 1);
     items.set(next);
   },
 );
 
-export default recipe(
+export default recipe<{
+  title: Default<string, "untitled">;
+  items: Default<Item[], []>;
+}>(
   "Simple List with Remove",
-  ({ title, items }: InputSchema) => {
+  ({ title, items }) => {
     return {
       [NAME]: title,
       [UI]: (
