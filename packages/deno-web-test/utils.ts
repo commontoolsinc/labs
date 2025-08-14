@@ -1,9 +1,8 @@
-import * as esbuild from "esbuild";
-import { denoPlugins } from "@luca/esbuild-deno-loader";
 import * as path from "@std/path";
 import { Manifest } from "./manifest.ts";
 import { Summary, TestFileResults } from "./interface.ts";
 import { copy } from "@std/fs";
+import { build } from "@commontools/felt";
 
 export const tsToJs = (path: string): string => path.replace(/\.ts$/, ".js");
 
@@ -18,7 +17,11 @@ export const buildTestDir = async (manifest: Manifest) => {
       "dist",
       tsToJs(testPath),
     );
-    await bundle(input, output);
+
+    await build(Object.assign({
+      entryPoints: [input],
+      outfile: output,
+    }, manifest.config.esbuildConfig ?? {}));
   }
 
   // Bundle all extra includes and move to server root.
@@ -45,29 +48,6 @@ export const buildTestDir = async (manifest: Manifest) => {
     );
   }
 };
-
-export async function bundle(inputPath: string, outputPath: string) {
-  const _ = await esbuild.build({
-    plugins: [...denoPlugins()],
-    entryPoints: [inputPath],
-    outfile: outputPath,
-    supported: {
-      using: false,
-    },
-    bundle: true,
-    format: "esm",
-    tsconfigRaw: {
-      compilerOptions: {
-        // `useDefineForClassFields` is critical when using Lit
-        // with esbuild, even when not using decorators.
-        useDefineForClassFields: false,
-        experimentalDecorators: true,
-      },
-    },
-  });
-
-  esbuild.stop();
-}
 
 export function summarize(results: TestFileResults[]): Summary {
   let passed = 0;
