@@ -14,16 +14,15 @@
 
 import { env, Page } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { describe, it } from "@std/testing/bdd";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import type { ElementHandle } from "@astral/astral";
+import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
-const { API_URL, FRONTEND_URL } = env;
+const { SPACE_NAME, API_URL, FRONTEND_URL } = env;
 
 // Helper functions for coordinate-based clicking on the iframe
 // These click specific regions of the iframe since we cannot access
@@ -89,46 +88,52 @@ describe("shell iframe counter tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  it("can increment 5 times, decrement 3 times, and verify count is 2", async () => {
-    const { page, identity } = shell.get();
-    const spaceName = globalThis.crypto.randomUUID();
+  let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
-    // Register the iframe counter recipe as a charm
-    const charmId = await registerCharm({
-      spaceName: spaceName,
+  beforeAll(async () => {
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
-          "..",
-          "integration",
           "iframe-counter-recipe.tsx",
         ),
       ),
+    );
+    charmId = charm.id;
+  });
+
+  afterAll(async () => {
+    if (cc) await cc.dispose();
+  });
+
+  it("can increment 5 times, decrement 3 times, and verify count is 2", async () => {
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
     });
 
-    // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Login and verify state
-    const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
-    assertEquals(state.activeCharmId, charmId);
-    assertEquals(
-      state.identity?.serialize().privateKey,
-      identity.serialize().privateKey,
+    // Get the iframe element using pierce selector to traverse shadow DOM
+    const counterIframe = await page.waitForSelector(
+      'common-iframe-sandbox[load-state="loaded"]',
+      { strategy: "pierce" },
     );
 
-    // Wait for iframe content to load
+    // TODO(js): No way currently to know when an iframe's react
+    // views are rendered, wait after the iframe's contents have been loaded.
+    await sleep(2000);
+
     // The charm uses nested iframes with sandbox restrictions, requiring coordinate-based interaction
-    await sleep(5000);
-
-    // Get the iframe element using pierce selector to traverse shadow DOM
-    const counterIframe = await page.$("iframe", { strategy: "pierce" });
-    assert(counterIframe, "Outer iframe should be found");
-
     // Click the right third of the iframe 5 times to increment (starting from 0)
     console.log("Clicking increment area 5 times...");
     for (let i = 0; i < 5; i++) {
@@ -162,11 +167,12 @@ describe("shell iframe counter tests", () => {
 
     // Reload the page to test persistence
     console.log("\nReloading page to test persistence...");
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Need to login again after reload
-    await shell.login();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
+    });
 
     // Wait for the page and iframe to load
     await sleep(5000);

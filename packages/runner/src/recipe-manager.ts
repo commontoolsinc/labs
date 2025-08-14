@@ -1,9 +1,18 @@
-import { JSONSchema, Module, Recipe, Schema } from "./builder/types.ts";
+import { getLogger } from "@commontools/utils/logger";
+import {
+  JSONSchema,
+  Module,
+  Recipe,
+  Schema,
+  unsafe_originalRecipe,
+} from "./builder/types.ts";
 import { Cell } from "./cell.ts";
 import type { IRecipeManager, IRuntime, MemorySpace } from "./runtime.ts";
 import { createRef } from "./doc-map.ts";
 import { RuntimeProgram } from "./harness/types.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
+
+const logger = getLogger("recipe-manager");
 
 export const recipeMetaSchema = {
   type: "object",
@@ -41,9 +50,13 @@ export type RecipeMeta = Schema<typeof recipeMetaSchema>;
 
 export class RecipeManager implements IRecipeManager {
   private inProgressCompilations = new Map<string, Promise<Recipe>>();
-  private recipeMetaMap = new WeakMap<Recipe, Cell<RecipeMeta>>();
-  private recipeProgramMap = new WeakMap<Recipe, string | RuntimeProgram>();
+  // Maps keyed by recipeId for consistent lookups
+  private recipeMetaCellById = new Map<string, Cell<RecipeMeta>>();
   private recipeIdMap = new Map<string, Recipe>();
+  // Map from recipe object instance to recipeId
+  private recipeToIdMap = new WeakMap<Recipe, string>();
+  // Pending metadata set before the meta cell exists (e.g., spec, parents)
+  private pendingMetaById = new Map<string, Partial<RecipeMeta>>();
 
   constructor(readonly runtime: IRuntime) {}
 
@@ -61,91 +74,147 @@ export class RecipeManager implements IRecipeManager {
     return cell;
   }
 
+  private findOriginalRecipe(recipe: Recipe): Recipe {
+    while (recipe[unsafe_originalRecipe]) {
+      recipe = recipe[unsafe_originalRecipe];
+    }
+    return recipe;
+  }
+
+  async loadRecipeMeta(
+    recipeId: string,
+    space: MemorySpace,
+  ): Promise<RecipeMeta> {
+    const cell = this.getRecipeMetaCell({ recipeId, space });
+    await cell.sync();
+    return cell.get();
+  }
+
   getRecipeMeta(
     input: Recipe | Module | { recipeId: string },
   ): RecipeMeta {
+    let recipeId: string | undefined;
     if ("recipeId" in input) {
-      const recipe = this.recipeById(input.recipeId);
-      if (!recipe) throw new Error(`Recipe ${input.recipeId} not loaded`);
-      return this.recipeMetaMap.get(recipe)?.get()!;
+      recipeId = input.recipeId;
+    } else if (input && typeof input === "object") {
+      recipeId = this.recipeToIdMap.get(
+        this.findOriginalRecipe(input as Recipe),
+      );
     }
-    return this.recipeMetaMap.get(input as Recipe)?.get()!;
+
+    if (!recipeId) throw new Error("Recipe is not registered");
+
+    const cell = this.recipeMetaCellById.get(recipeId);
+    if (cell) return cell.get();
+
+    // If we don't have a stored cell yet, return whatever pending/meta we have
+    const pending = this.pendingMetaById.get(recipeId) ?? {};
+    const source = this.recipeIdMap.get(recipeId)?.program;
+    if (!source && Object.keys(pending).length === 0) {
+      throw new Error(`Recipe ${recipeId} has no metadata available`);
+    }
+    const meta: RecipeMeta = {
+      id: recipeId,
+      ...(typeof source === "string" ? { src: source } : {}),
+      ...(typeof source === "object" ? { program: source } : {}),
+      ...(pending as Partial<RecipeMeta>),
+    } as RecipeMeta;
+    return meta;
   }
 
   registerRecipe(
     recipe: Recipe | Module,
     src?: string | RuntimeProgram,
   ): string {
-    const id = this.recipeMetaMap.get(recipe as Recipe)?.get()?.id;
-    if (id) {
-      return id;
+    // Walk up derivation copies to original
+    recipe = this.findOriginalRecipe(recipe as Recipe);
+
+    if (src && !recipe.program) {
+      if (typeof src === "string") {
+        recipe.program = {
+          main: "/main.tsx",
+          files: [{ name: "/main.tsx", contents: src }],
+        };
+      } else {
+        recipe.program = src;
+      }
     }
+
+    // If this recipe object was already registered, return its id
+    const existingId = this.recipeToIdMap.get(recipe);
+    if (existingId) return existingId;
 
     const generatedId = src
       ? createRef({ src }, "recipe source").toString()
       : createRef(recipe, "recipe").toString();
 
-    this.recipeIdMap.set(generatedId, recipe as Recipe);
-    if (src) this.recipeProgramMap.set(recipe as Recipe, src);
+    this.recipeToIdMap.set(recipe as Recipe, generatedId);
+
+    if (!this.recipeIdMap.has(generatedId)) {
+      this.recipeIdMap.set(generatedId, recipe as Recipe);
+    }
 
     return generatedId;
   }
 
   saveRecipe(
-    { recipeId, space, recipe, recipeMeta }: {
+    { recipeId, space }: {
       recipeId: string;
       space: MemorySpace;
-      recipe?: Recipe | Module;
-      recipeMeta?: RecipeMeta;
     },
     providedTx?: IExtendedStorageTransaction,
   ): boolean {
+    // HACK(seefeld): Let's always use a new transaction for now. The reason is
+    // that this will fail when saving the same recipe again, even though it's
+    // identical (it's effecively content addresed). So let's just parallelize
+    // and eat the conflict, until we support these kinds of writes properly.
+    providedTx = undefined;
+
     const tx = providedTx ?? this.runtime.edit();
 
-    // FIXME(ja): should we update the recipeMeta if it already exists? when does this happen?
-    if (this.recipeMetaMap.has(recipe as Recipe)) {
+    // Already saved
+    if (this.recipeMetaCellById.has(recipeId)) {
       return true;
     }
 
-    if (!recipe) {
-      recipe = this.recipeById(recipeId);
-      if (!recipe) {
-        throw new Error(`Recipe ${recipeId} not loaded`);
-      }
-    }
+    const program = this.recipeIdMap.get(recipeId)?.program;
+    if (!program) return false;
 
-    if (!recipeMeta) {
-      const src = this.recipeProgramMap.get(recipe as Recipe);
-      recipeMeta = {
-        id: recipeId,
-        src: typeof src === "string" ? src : undefined,
-        program: typeof src === "object" ? src : undefined,
-      };
-    }
-
-    if (!recipeMeta.src && !recipeMeta.program) {
-      return false;
-    }
+    const pending = this.pendingMetaById.get(recipeId) ?? {};
+    const recipeMeta: RecipeMeta = {
+      id: recipeId,
+      program,
+      ...(pending as Partial<RecipeMeta>),
+    } as RecipeMeta;
 
     const recipeMetaCell = this.getRecipeMetaCell({ recipeId, space }, tx);
     recipeMetaCell.set(recipeMeta);
 
-    if (!providedTx) tx.commit();
+    if (!providedTx) {
+      tx.commit().then((result) => {
+        if (result.error) {
+          logger.warn("Recipe already existed", recipeId);
+        }
+      });
+    }
 
-    this.recipeMetaMap.set(recipe as Recipe, recipeMetaCell.withTx());
+    this.recipeMetaCellById.set(recipeId, recipeMetaCell.withTx());
+    // If we have a recipe object for this id, ensure the back mapping exists
+    const recipe = this.recipeIdMap.get(recipeId);
+    if (recipe) this.recipeToIdMap.set(recipe, recipeId);
+    // Clear pending once persisted
+    this.pendingMetaById.delete(recipeId);
     return true;
   }
 
   async saveAndSyncRecipe(
-    { recipeId, space, recipe, recipeMeta }: {
+    { recipeId, space }: {
       recipeId: string;
       space: MemorySpace;
-      recipe: Recipe | Module;
-      recipeMeta: RecipeMeta;
     },
     tx?: IExtendedStorageTransaction,
   ) {
-    if (this.saveRecipe({ recipeId, space, recipe, recipeMeta }, tx)) {
+    if (this.saveRecipe({ recipeId, space }, tx)) {
       await this.getRecipeMetaCell({ recipeId, space }, tx).sync();
     }
   }
@@ -165,7 +234,9 @@ export class RecipeManager implements IRecipeManager {
     } else {
       program = input;
     }
-    return await this.runtime.harness.run(program);
+    const recipe = await this.runtime.harness.run(program);
+    recipe.program = program;
+    return recipe;
   }
 
   // we need to ensure we only compile once otherwise we get ~12 +/- 4
@@ -188,7 +259,8 @@ export class RecipeManager implements IRecipeManager {
       : recipeMeta.src!;
     const recipe = await this.compileRecipe(source);
     this.recipeIdMap.set(recipeId, recipe);
-    this.recipeMetaMap.set(recipe, metaCell.withTx());
+    this.recipeToIdMap.set(recipe, recipeId);
+    this.recipeMetaCellById.set(recipeId, metaCell.withTx());
     return recipe;
   }
 
@@ -213,5 +285,21 @@ export class RecipeManager implements IRecipeManager {
     this.inProgressCompilations.set(id, compilationPromise);
 
     return await compilationPromise;
+  }
+
+  /**
+   * Set or update metadata fields for a recipe before or after saving.
+   * If the metadata cell already exists, it updates it in-place.
+   * Otherwise, it stores the fields to be applied on the next save.
+   */
+  setRecipeMetaFields(recipeId: string, fields: Partial<RecipeMeta>): void {
+    const cell = this.recipeMetaCellById.get(recipeId);
+    if (cell) {
+      const current = cell.get();
+      cell.set({ ...current, ...fields, id: recipeId });
+    } else {
+      const pending = this.pendingMetaById.get(recipeId) ?? {};
+      this.pendingMetaById.set(recipeId, { ...pending, ...fields });
+    }
   }
 }

@@ -61,10 +61,11 @@ export class CharmController {
     return recipe;
   }
 
-  async getRecipeMeta(): Promise<RecipeMeta> {
-    return this.#manager.runtime.recipeManager.getRecipeMeta(
-      await this.getRecipe(),
-    ) as RecipeMeta;
+  getRecipeMeta(): Promise<RecipeMeta> {
+    return this.#manager.runtime.recipeManager.loadRecipeMeta(
+      getRecipeIdFromCharm(this.#cell),
+      this.#manager.getSpace(),
+    );
   }
 
   // Returns an `IFrameRecipe` for the charm, or `undefined`

@@ -4,11 +4,11 @@ type Child = {
   children?: Children;
 };
 
-type Cell<T> = {
-  get(): T,
-  set(value: T): void;
+type Elem = {
+  id?: string
 }
 
+type Cell<T> = any
 type Charm = any
 
 type OutlinerNode = {
@@ -36,7 +36,7 @@ declare global {
         $value: Cell<{ root: OutlinerNode }>,
         $mentionable?: Cell<Charm[]>
         'oncharm-link-click'?: any,
-      } & Child;
+      } & Child & Elem;
       "ct-list": {
         $value: Cell<ListItem[]>,
         /** setting this allows editing items inline */
@@ -45,7 +45,7 @@ declare global {
         readonly?: boolean,
         title?: string,
         'onct-remove-item'?: any,
-      } & Child;
+      } & Child & Elem;
       "ct-input": {
         $value?: Cell<string>,
         customStyle?: string, // bf: I think this is going to go away one day soon
@@ -82,7 +82,7 @@ declare global {
         'onct-keydown'?: any,
         'onct-submit'?: any,
         'onct-invalid'?: any,
-      } & Child;
+      } & Child & Elem;
     }
   }
 }

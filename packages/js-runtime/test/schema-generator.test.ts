@@ -232,6 +232,45 @@ describe("typeToJsonSchema", () => {
       });
     });
 
+    it("should handle multi-hop mutually recursive types A-B-C-A", () => {
+      const code = `
+        interface A { b: B }
+        interface B { c: C }
+        interface C { a: A }
+      `;
+      const { type, checker } = getTypeFromCode(code, "A");
+
+      const schema = typeToJsonSchema(type, checker);
+
+      expect(schema).toEqual({
+        "$ref": "#/definitions/A",
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "definitions": {
+          "A": {
+            "type": "object",
+            "properties": {
+              "b": { "$ref": "#/definitions/B" },
+            },
+            "required": ["b"],
+          },
+          "B": {
+            "type": "object",
+            "properties": {
+              "c": { "$ref": "#/definitions/C" },
+            },
+            "required": ["c"],
+          },
+          "C": {
+            "type": "object",
+            "properties": {
+              "a": { "$ref": "#/definitions/A" },
+            },
+            "required": ["a"],
+          },
+        },
+      });
+    });
+
     it("should handle same type in different branches (not a real cycle)", () => {
       const code = `
         interface B {

@@ -1,3 +1,4 @@
+import { build } from "@commontools/felt";
 import { LaunchOptions } from "@astral/astral";
 import * as path from "@std/path";
 import { exists } from "@std/fs/exists";
@@ -17,6 +18,7 @@ export type Config = {
   // The keys are relative file paths and the values are the destination from
   // the server root.
   include?: Record<string, string>;
+  esbuildConfig?: Parameters<typeof build>[0];
 };
 
 export const applyDefaults = (config: object): Config => {

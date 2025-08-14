@@ -1,4 +1,5 @@
 import { css, html, LitElement, PropertyValues } from "lit";
+import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
 import { getIframeContextHandler } from "./context.ts";
@@ -30,6 +31,8 @@ const HEALTH_CHECK_LOAD_DELAY = 5000;
 // charm to spend a lot of time processing.
 const HEALTH_CHECK_TIMEOUT = 3000;
 
+type CommonIframeLoadState = "" | "loading" | "loaded";
+
 // @summary A sandboxed iframe to execute arbitrary scripts.
 // @tag common-iframe-sandbox
 // @prop {string} src - String representation of HTML content to load within an iframe.
@@ -37,45 +40,41 @@ const HEALTH_CHECK_TIMEOUT = 3000;
 // @event {CustomEvent} error - An error from the iframe.
 // @event {CustomEvent} load - The iframe was successfully loaded.
 export class CommonIframeSandboxElement extends LitElement {
-  static override properties = {
-    src: { type: String, attribute: false },
-    context: { type: Object, attribute: false },
-    crashed: { type: Boolean, attribute: false, state: true },
-  };
-  declare src: string;
-  declare context?: object;
-  declare crashed: boolean;
+  @property()
+  src = "";
 
-  constructor() {
-    super();
-    this.src = "";
-    this.context = undefined;
-    this.crashed = false;
-  }
+  @property()
+  context?: object;
+
+  @property()
+  crashed = false;
+
+  @property({ attribute: "load-state", reflect: true })
+  loadState: CommonIframeLoadState = "";
 
   static override styles = css`
-  :host {
-    display: block;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: #ddd;
-  }
-  #crash-message {
-    width: 50%;
-    margin: 20px auto;
-    display: flex;
-    flex-direction: column;
-    text-align: center;
-  }
-  #crash-message > * {
-    flex: 1; 
-  }
-  #crash-message button {
-    font-size: 20px;
-    background-color: white;
-    border: 1px solid black;
-  }
+    :host {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #ddd;
+    }
+    #crash-message {
+      width: 50%;
+      margin: 20px auto;
+      display: flex;
+      flex-direction: column;
+      text-align: center;
+    }
+    #crash-message > * {
+      flex: 1;
+    }
+    #crash-message button {
+      font-size: 20px;
+      background-color: white;
+      border: 1px solid black;
+    }
   `;
 
   // Static id for this component for its lifetime.
@@ -128,6 +127,7 @@ export class CommonIframeSandboxElement extends LitElement {
         if (this.contentSupportsHealthCheck()) {
           this.requestHealthCheck();
         }
+        this.loadState = "loaded";
         this.dispatchEvent(new CustomEvent("load"));
         return;
       }
@@ -349,6 +349,7 @@ export class CommonIframeSandboxElement extends LitElement {
   }
 
   private loadInnerDoc() {
+    this.loadState = "loading";
     // Remove all active subscriptions when navigating
     // to a new document.
     const IframeHandler = getIframeContextHandler();
@@ -492,10 +493,10 @@ export class CommonIframeSandboxElement extends LitElement {
   override render() {
     if (this.crashed) {
       return html`
-      <div id="crash-message">
-        <div class="message">🤨 Charm crashed! 🤨</div>
-        <button @click=${this.onCrashReload}>Reload</button>
-      </div>
+        <div id="crash-message">
+          <div class="message">🤨 Charm crashed! 🤨</div>
+          <button @click="${this.onCrashReload}">Reload</button>
+        </div>
       `;
     }
     return html`
@@ -503,7 +504,7 @@ export class CommonIframeSandboxElement extends LitElement {
         ${ref(this.iframeRef)}
         allow="clipboard-write"
         sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox"
-        .srcdoc=${OuterFrame}
+        .srcdoc="${OuterFrame}"
         height="100%"
         width="100%"
         style="border: none;"

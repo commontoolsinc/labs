@@ -44,17 +44,13 @@ export class Builder extends EventTarget {
     );
 
     try {
-      const config: Partial<Parameters<typeof esbuild.build>[0]> = {
+      const config: Parameters<typeof build>[0] = {
         define: resolveDefines(this.manifest),
         sourcemap: this.manifest.esbuild.sourcemap,
         minify: this.manifest.esbuild.minify,
-        plugins: [...denoPlugins()],
-        platform: "browser",
         entryPoints: [this.manifest.entry],
         outfile: this.manifest.out,
         external: this.manifest.esbuild.external,
-        bundle: true,
-        format: "esm",
         supported: this.manifest.esbuild.supported,
         // Explicitly compile decorators, as this what Jumble->Vite
         // does, and no browsers currently support (any form of) decorators,
@@ -67,8 +63,7 @@ export class Builder extends EventTarget {
         config.metafile = true;
       }
 
-      const result = await esbuild.build(config);
-      esbuild.stop();
+      const result = await build(config);
 
       // Calculate build time
       const buildTime = Math.round(performance.now() - startTime);
@@ -110,4 +105,22 @@ function resolveDefines(
     defines[envName] = typeof value === "string" ? `"${value}"` : `undefined`;
     return defines;
   }, {} as Record<string, string>);
+}
+
+// Exposes `esbuild`'s build functionality, applying
+// default deno resolution plugins, browser platform,
+// and ESM bundling format.
+export async function build(
+  config: Parameters<typeof esbuild.build>[0],
+): Promise<ReturnType<typeof esbuild.build>> {
+  const fullConfig = Object.assign({}, config, {
+    plugins: [...denoPlugins()],
+    platform: "browser",
+    bundle: true,
+    format: "esm",
+  });
+
+  const result = await esbuild.build(fullConfig);
+  esbuild.stop();
+  return result;
 }

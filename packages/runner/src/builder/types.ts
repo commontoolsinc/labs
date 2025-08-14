@@ -81,6 +81,7 @@ import {
   type IExtendedStorageTransaction,
   type MemorySpace,
 } from "../storage/interface.ts";
+import { type RuntimeProgram } from "../harness/types.ts";
 
 export type JSONSchemaMutable = Mutable<JSONSchema>;
 
@@ -195,6 +196,7 @@ declare module "@commontools/api" {
     initial?: JSONValue;
     result: JSONValue;
     nodes: Node[];
+    program?: RuntimeProgram;
     [unsafe_originalRecipe]?: Recipe;
     [unsafe_parentRecipe]?: Recipe;
     [unsafe_materializeFactory]?: (

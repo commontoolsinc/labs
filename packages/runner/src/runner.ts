@@ -181,7 +181,6 @@ export class Runner implements IRunner {
     this.runtime.recipeManager.saveRecipe({
       recipeId,
       space: resultCell.space,
-      recipe,
     }, tx);
 
     // If the bindings are a cell, doc or doc link, convert them to an alias

@@ -1,13 +1,12 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { beforeAll, describe, it } from "@std/testing/bdd";
+import { CharmsController } from "@commontools/charm/ops";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { getCharmResult, setCharmResult } from "@commontools/charm/ops";
+import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -16,39 +15,40 @@ describe("counter direct operations test", () => {
   shell.bindLifecycle();
 
   let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
   beforeAll(async () => {
-    const { identity } = shell.get();
-
-    // Register the counter charm
-    charmId = await registerCharm({
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
           "counter.tsx",
         ),
       ),
-    });
+    );
+    charmId = charm.id;
+  });
 
-    // Setup the CharmManager for direct operations
-    await shell.setupManager(SPACE_NAME, API_URL);
+  afterAll(async () => {
+    if (cc) await cc.dispose();
   });
 
   it("should load the counter charm and verify initial state", async () => {
-    const { page } = shell.get();
-
-    // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${SPACE_NAME}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Login
-    const state = await shell.login();
-    assertEquals(state.spaceName, SPACE_NAME);
-    assertEquals(state.activeCharmId, charmId);
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
+    });
 
     const counterResult = await page.waitForSelector("#counter-result", {
       strategy: "pierce",
@@ -61,9 +61,7 @@ describe("counter direct operations test", () => {
     );
     assertEquals(initialText?.trim(), "Counter is the 0th number");
 
-    // Also verify via direct operations
-    const manager = shell.manager!;
-    const value = await getCharmResult(manager, charmId, ["value"]);
+    const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
     assertEquals(value, 0);
   });
 
@@ -71,8 +69,8 @@ describe("counter direct operations test", () => {
   // The browser has its own runtime/session that doesn't receive
   // live updates from our test CharmManager's operations
   it.skip("should update counter value via direct operation (live)", async () => {
-    const { page } = shell.get();
-    const manager = shell.manager!;
+    const page = shell.page();
+    const manager = cc!.manager();
 
     // Get the counter result element
     const counterResult = await page.waitForSelector("#counter-result", {
@@ -102,8 +100,8 @@ describe("counter direct operations test", () => {
   });
 
   it("should update counter value and verify after page refresh", async () => {
-    const { page } = shell.get();
-    const manager = shell.manager!;
+    const page = shell.page();
+    const manager = cc!.manager();
 
     // Update value to 42 via direct operation
     console.log("Setting counter value to 42 via direct operation");
@@ -115,10 +113,12 @@ describe("counter direct operations test", () => {
 
     // Now refresh the page by navigating to the same URL
     console.log("Refreshing the page...");
-    await page.goto(`${FRONTEND_URL}${SPACE_NAME}/${charmId}`);
-
-    // Need to login again after navigation
-    await shell.login();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
+    });
 
     // Get the counter result element after refresh
     const counterResult = await page.waitForSelector("#counter-result", {

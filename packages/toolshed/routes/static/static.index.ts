@@ -5,6 +5,8 @@ import { getMimeType } from "@/lib/mime-type.ts";
 
 const router = createRouter();
 
+const STATIC_CACHE_DURATION = 60 * 60 * 1; // 1 hour
+
 // Notably this uses a different cache
 // than the runtime that runs in this context, negigible
 // cost of not incorporating the runtime here.
@@ -29,6 +31,7 @@ router.get("/static/*", async (c) => {
     status: 200,
     headers: {
       "Content-Type": mimeType,
+      "Cache-Control": `max-age=${STATIC_CACHE_DURATION}`,
     },
   });
 });

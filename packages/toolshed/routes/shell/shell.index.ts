@@ -5,6 +5,8 @@ import { cors } from "@hono/hono/cors";
 import { getMimeType } from "@/lib/mime-type.ts";
 import env from "@/env.ts";
 
+const STATIC_CACHE_DURATION = 60 * 60 * 1; // 1 hour
+
 const router = createRouter();
 
 router.use(
@@ -28,6 +30,33 @@ const COMPILED = await exists(path.join(projectRoot, "COMPILED"));
 const SHELL_URL = Deno.env.get("SHELL_URL");
 
 if (COMPILED) {
+  class StaticResponse {
+    mimeType: string;
+    buffer: Uint8Array<ArrayBuffer>;
+    constructor(buffer: Uint8Array<ArrayBuffer>, mimeType: string) {
+      this.buffer = buffer;
+      this.mimeType = mimeType;
+    }
+
+    static async fromFile(filePath: string) {
+      const buffer = await Deno.readFile(filePath);
+      const mimeType = getMimeType(filePath);
+      return new StaticResponse(buffer, mimeType);
+    }
+
+    response() {
+      return new Response(this.buffer, {
+        status: 200,
+        headers: {
+          "Content-Type": this.mimeType,
+          "Cache-Control": `max-age=${STATIC_CACHE_DURATION}`,
+        },
+      });
+    }
+  }
+
+  const cache = new Map<string, StaticResponse>();
+
   // Production mode - serve static files
   router.get("/*", async (c) => {
     let reqPath = c.req.path.slice(1); // Remove leading slash
@@ -37,27 +66,29 @@ if (COMPILED) {
       reqPath = "index.html";
     }
 
+    const cached = cache.get(reqPath);
+    if (cached) {
+      return cached.response();
+    }
+
     try {
       const filePath = path.join(shellStaticRoot, reqPath);
-      const buffer = await Deno.readFile(filePath);
-      const mimeType = getMimeType(reqPath);
-
-      return new Response(buffer, {
-        status: 200,
-        headers: {
-          "Content-Type": mimeType,
-        },
-      });
+      if (!filePath.startsWith(shellStaticRoot)) {
+        throw new Error("Outside of static root range");
+      }
+      const res = await StaticResponse.fromFile(filePath);
+      cache.set(reqPath, res);
+      return res.response();
     } catch {
       // Serve index.html for client-side routing
+      const cached = cache.get("index.html");
+      if (cached) {
+        return cached.response();
+      }
       const indexPath = path.join(shellStaticRoot, "index.html");
-      const buffer = await Deno.readFile(indexPath);
-      return new Response(buffer, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/html",
-        },
-      });
+      const res = await StaticResponse.fromFile(indexPath);
+      cache.set("index.html", res);
+      return res.response();
     }
   });
 } else if (SHELL_URL) {
