@@ -7,10 +7,9 @@ const MAX_TELEMETRY_EVENTS = 1000; // Limit memory usage
 
 /**
  * Controller for managing Shell Debugger state and telemetry events.
- * 
+ *
  * Handles:
  * - Debugger visibility state with localStorage persistence
- * - Cross-tab synchronization via storage events
  * - Runtime connection and telemetry event collection
  * - Memory management by limiting event history
  */
@@ -59,9 +58,11 @@ export class DebuggerController implements ReactiveController {
         "telemetryupdate",
         this.handleTelemetryUpdate,
       );
-      
+
       // Load existing telemetry markers
-      this.telemetryMarkers = this.runtime.telemetry().slice(-MAX_TELEMETRY_EVENTS);
+      this.telemetryMarkers = this.runtime.telemetry().slice(
+        -MAX_TELEMETRY_EVENTS,
+      );
       this.updateVersion++;
       this.host.requestUpdate();
     }
@@ -122,11 +123,11 @@ export class DebuggerController implements ReactiveController {
     if (this.runtime) {
       // Get all telemetry markers from runtime
       const allMarkers = this.runtime.telemetry();
-      
+
       // Limit to maximum number of events to prevent memory issues
       this.telemetryMarkers = allMarkers.slice(-MAX_TELEMETRY_EVENTS);
       this.updateVersion++;
-      
+
       // Request update to refresh the UI
       this.host.requestUpdate();
     }
@@ -150,17 +151,18 @@ export class DebuggerController implements ReactiveController {
    */
   getStatistics() {
     const eventTypes = new Map<string, number>();
-    
+
     for (const marker of this.telemetryMarkers) {
-      const type = marker.type.split('.')[0]; // Get the main category
+      const type = marker.type.split(".")[0]; // Get the main category
       eventTypes.set(type, (eventTypes.get(type) || 0) + 1);
     }
-    
+
     return {
       totalEvents: this.telemetryMarkers.length,
       eventTypes: Object.fromEntries(eventTypes),
       oldestEvent: this.telemetryMarkers[0]?.timeStamp,
-      newestEvent: this.telemetryMarkers[this.telemetryMarkers.length - 1]?.timeStamp,
+      newestEvent: this.telemetryMarkers[this.telemetryMarkers.length - 1]
+        ?.timeStamp,
     };
   }
 

@@ -30,7 +30,7 @@ export type RuntimeTelemetryMarker = {
 } | {
   type: "storage.push.complete";
   id: string;
-  success: boolean;
+  error?: string;
 } | {
   type: "storage.push.error";
   id: string;
@@ -42,7 +42,7 @@ export type RuntimeTelemetryMarker = {
 } | {
   type: "storage.pull.complete";
   id: string;
-  success: boolean;
+  error?: string;
 } | {
   type: "storage.pull.error";
   id: string;

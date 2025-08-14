@@ -103,7 +103,6 @@ export class StorageTelemetry {
           this.telemetry.submit({
             type: "storage.push.complete",
             id,
-            success: true,
           });
         }
       }
@@ -115,7 +114,6 @@ export class StorageTelemetry {
           this.telemetry.submit({
             type: "storage.push.complete",
             id,
-            success: true,
           });
         }
       }
@@ -144,7 +142,6 @@ export class StorageTelemetry {
           this.telemetry.submit({
             type: "storage.pull.complete",
             id,
-            success: true,
           });
         }
       }
@@ -156,7 +153,6 @@ export class StorageTelemetry {
           this.telemetry.submit({
             type: "storage.pull.complete",
             id,
-            success: true,
           });
         }
       }

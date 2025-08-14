@@ -1,4 +1,4 @@
-import { css, html, LitElement } from "lit";
+import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
 import type { RuntimeTelemetryMarkerResult } from "@commontools/runner";
@@ -785,7 +785,7 @@ export class XDebuggerView extends LitElement {
     );
   }
 
-  private renderEventDetails(marker: RuntimeTelemetryMarkerResult): any {
+  private renderEventDetails(marker: RuntimeTelemetryMarkerResult): TemplateResult[] {
     const details = [];
 
     // Extract key-value pairs from the marker (excluding type and timeStamp)
