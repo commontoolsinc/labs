@@ -21,6 +21,13 @@
     "new-storage:list-branches": "deno run -A ./cli/list_branches.ts",
     "ws": "deno run -A deno.ts"
   },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true
+  },
   "test": {
     "include": [
       "test/*-test.ts"

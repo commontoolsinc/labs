@@ -10,6 +10,7 @@ import type {
   Authorization,
   Complete,
   Deliver,
+  DID,
   StorageGet,
   StorageHello,
   StorageSubscribe,
@@ -61,7 +62,7 @@ export async function handleWs(
   const handle = await openSqlite({ url: dbFile });
   const db = handle.db;
 
-  const state = new SessionState(db, spaceId, socket);
+  const state = new SessionState(db, spaceId as DID, socket);
   registerSession(spaceId, state);
   state.start(() => {
     unregisterSession(spaceId, state);
@@ -74,7 +75,7 @@ class SessionState {
   private closed = false;
   private activeOps = 0;
   private onCloseCb?: () => void;
-  private streamId: string;
+  private streamId: DID;
   private clientId: string | null = null;
   private sinceEpoch: number = -1;
   private sentOnSocket = new Set<string>(); // docId
@@ -96,7 +97,7 @@ class SessionState {
 
   constructor(
     private db: Database,
-    private spaceId: string,
+    private spaceId: DID,
     private socket: WebSocket,
   ) {
     this.streamId = spaceId;
@@ -110,7 +111,8 @@ class SessionState {
   }
 
   start(onClose?: () => void) {
-    this.onCloseCb = onClose;
+    if (onClose !== undefined) this.onCloseCb = onClose;
+    else delete this.onCloseCb;
     this.socket.onmessage = (ev) => this.onMessage(ev);
     this.socket.onclose = () => {
       this.closed = true;
@@ -141,11 +143,12 @@ class SessionState {
   private maybeClose() {
     if (this.closed && this.activeOps === 0) {
       try {
-        this.onCloseCb?.();
+        const cb = this.onCloseCb;
+        if (cb) cb();
       } catch {
         // ignore
       }
-      this.onCloseCb = undefined;
+      delete this.onCloseCb;
     }
   }
 
@@ -225,11 +228,7 @@ class SessionState {
     const docsToSend: string[] = [];
 
     this.evaluator.memo.clear();
-    this.evaluator.evaluate(
-      root as any,
-      undefined,
-      this.evaluator.newContext(),
-    );
+    this.evaluator.evaluate(root, undefined, this.evaluator.newContext());
     const touches = this.collectTouchesFromRoot(root);
     for (const l of touches) docSet.add(l.doc);
     docSet.add(spaceRootDoc); // always include root doc
@@ -266,13 +265,13 @@ class SessionState {
     const epoch = this.storageReader.currentVersion(docIds[0]!).epoch;
     const payload: Deliver = {
       type: "deliver",
-      streamId: this.streamId as any,
+      streamId: this.streamId,
       epoch,
       docs: [],
     };
 
     const defaultBranch = "main";
-    const stmts = getPrepared(this.db as any);
+    const stmts = getPrepared(this.db);
 
     const encodeB64 = (bytes: Uint8Array): string => encodeBase64(bytes);
 
@@ -282,7 +281,7 @@ class SessionState {
       const currentSeq = state.seqNo;
       const currentVersion = {
         epoch: state.epoch,
-        branch: defaultBranch as any,
+        branch: defaultBranch,
       };
 
       // Determine baseline epoch the client is known to have
@@ -368,8 +367,8 @@ class SessionState {
       seen.add(ks);
       const r = this.evaluator.memo.get(ks);
       if (!r) return;
-      r.touches.forEach((c) => out.add(c as any));
-      r.deps.forEach((child) => dfs(child as any));
+      r.touches.forEach((c) => out.add({ doc: c.doc, path: c.path }));
+      r.deps.forEach((child) => dfs(child));
     };
     dfs(root);
     return out;
@@ -390,7 +389,7 @@ class SessionState {
           (inv.args.query as any)?.docId ?? "",
         )?.epoch,
       },
-      streamId: this.streamId as any,
+      streamId: this.streamId,
       filterId: "get",
     };
     const ret: TaskReturn<StorageGet, Complete> = {
@@ -425,7 +424,7 @@ class SessionState {
     const complete: Complete = {
       type: "complete",
       at: {},
-      streamId: this.streamId as any,
+      streamId: this.streamId,
       filterId: inv.args.consumerId,
     };
     const ret: TaskReturn<StorageSubscribe, Complete> = {
@@ -537,19 +536,19 @@ class SessionState {
     if (docsSet.size === 0) return;
     const docsPayload: Deliver = {
       type: "deliver",
-      streamId: this.streamId as any,
+      streamId: this.streamId,
       epoch,
       docs: [],
     };
 
     const defaultBranch = "main";
-    const stmts = getPrepared(this.db as any);
+    const stmts = getPrepared(this.db);
     const encodeB64 = (bytes: Uint8Array): string => encodeBase64(bytes);
 
     for (const docId of docsSet) {
       const state = getBranchState(this.db, docId, defaultBranch);
       const tipSeq = uptoSeqNo(this.db, docId, state.branchId, epoch);
-      const currentVersion = { epoch, branch: defaultBranch as any };
+      const currentVersion = { epoch, branch: defaultBranch };
 
       // Baseline: last acknowledged epoch for this client and doc
       let baselineEpoch: number | undefined = undefined;

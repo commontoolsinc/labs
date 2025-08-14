@@ -34,17 +34,27 @@ export type TaskReturn<Cmd, Result> = {
 };
 
 // Epoch-grouped deliver: bundles all doc updates for a single epoch
+export type DeliverDocSnapshot = {
+  docId: string;
+  branch?: string;
+  version: { epoch: number; branch?: string };
+  kind: "snapshot";
+  body: string; // base64 encoded Automerge bytes
+};
+
+export type DeliverDocDelta = {
+  docId: string;
+  branch?: string;
+  version: { epoch: number; branch?: string };
+  kind: "delta";
+  body: string[]; // base64 encoded change bytes
+};
+
 export type Deliver = {
   type: "deliver";
   streamId: DID; // space DID
   epoch: number; // global tx epoch
-  docs: Array<{
-    docId: string;
-    branch?: string;
-    version: { epoch: number; branch?: string };
-    kind: "snapshot" | "delta";
-    body: unknown;
-  }>;
+  docs: Array<DeliverDocSnapshot | DeliverDocDelta>;
 };
 
 export type Ack = { type: "ack"; streamId: DID; epoch: number };

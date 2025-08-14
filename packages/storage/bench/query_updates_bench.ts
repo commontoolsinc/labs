@@ -85,7 +85,8 @@ async function seedVDOM(
         changes: [{ bytes: c }],
       }],
     });
-    const ok = seedRes.results.length > 0 && seedRes.results[0].status === "ok";
+    const ok = seedRes.results.length > 0 &&
+      seedRes.results[0]!.status === "ok";
     if (!ok) throw new Error(`seed failed for ${docId}`);
     docs.set(docId, d);
     graph.set(
@@ -237,10 +238,10 @@ async function runUpdatesWorkload(
       }],
     });
     // Update local doc snapshot only if server accepted
-    const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+    const ok = rec.results.length > 0 && rec.results[0]!.status === "ok";
     if (ok) docs.set(docId, updated);
     if (rec.results.length > 0) {
-      const st = rec.results[0].status;
+      const st = rec.results[0]!.status;
       if (st === "ok") okCount += 1;
       else if (st === "conflict") conflictCount += 1;
       else if (st === "rejected") rejectedCount += 1;
@@ -380,10 +381,10 @@ if (!Deno.env.get("PROFILE")) {
           changes: [{ bytes: change }],
         }],
       });
-      const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+      const ok = rec.results.length > 0 && rec.results[0]!.status === "ok";
       if (ok) docsB.set(docId, updated);
       if (rec.results.length > 0) {
-        const st = rec.results[0].status;
+        const st = rec.results[0]!.status;
         if (st === "ok") okCountB += 1;
         else if (st === "conflict") conflictCountB += 1;
         else if (st === "rejected") rejectedCountB += 1;

@@ -68,12 +68,13 @@ export function getBranchState(
     throw new Error(`Branch not found for doc ${docId} / ${branch}`);
   }
   const heads = JSON.parse(row.heads_json) as Heads;
+  const rootRef = row.root_hash ? bytesToHex(row.root_hash) : undefined;
   return {
     branchId: row.branch_id,
     heads,
     seqNo: row.seq_no,
     epoch: row.tx_id,
-    rootRef: row.root_hash ? bytesToHex(row.root_hash) : undefined,
+    ...(rootRef ? { rootRef } : {}),
   };
 }
 

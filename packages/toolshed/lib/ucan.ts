@@ -1,7 +1,11 @@
 import { z } from "zod";
 import env from "@/env.ts";
 
-export type UcanCap = { can: string; with: string; nb?: Record<string, unknown> };
+export type UcanCap = {
+  can: string;
+  with: string;
+  nb?: Record<string, unknown>;
+};
 export type UcanPayload = {
   iss: string;
   aud?: string;
@@ -10,7 +14,11 @@ export type UcanPayload = {
   att?: UcanCap[];
 };
 
-const JwtParts = z.tuple([z.string(), z.string(), z.string().or(z.literal(""))]);
+const JwtParts = z.tuple([
+  z.string(),
+  z.string(),
+  z.string().or(z.literal("")),
+]);
 
 function base64UrlDecode(input: string): Uint8Array {
   const pad = input.length % 4 === 2 ? "==" : input.length % 4 === 3 ? "=" : "";
@@ -62,9 +70,14 @@ export function verifyJWT(token: string): VerifiedUcan {
   return { header, payload, signature };
 }
 
-export type RequestCaps = Array<{ can: "storage/read" | "storage/write"; with: string }>;
+export type RequestCaps = Array<
+  { can: "storage/read" | "storage/write"; with: string }
+>;
 
-export function hasCap(payload: UcanPayload, need: { can: string; with: string }): boolean {
+export function hasCap(
+  payload: UcanPayload,
+  need: { can: string; with: string },
+): boolean {
   const caps = payload.caps ?? payload.att ?? [];
   return caps.some((c) => c.can === need.can && c.with === need.with);
 }
@@ -72,20 +85,27 @@ export function hasCap(payload: UcanPayload, need: { can: string; with: string }
 export function parseAuthHeader(authHeader?: string): string | null {
   if (!authHeader) return null;
   const [scheme, token] = authHeader.split(" ", 2);
-  if (!token || !/^Bearer$/i.test(scheme)) return null;
+  if (!token || !/^Bearer$/i.test(scheme ?? "")) return null;
   return token.trim();
 }
 
 export function requireCaps(c: any, caps: RequestCaps) {
   const token = parseAuthHeader(c.req.header("authorization"));
-  if (!token) return c.json({ error: { message: "Missing Authorization" } }, 401);
+  if (!token) {
+    return c.json({ error: { message: "Missing Authorization" } }, 401);
+  }
   try {
     const u = verifyJWT(token);
     const space = c.req.param()?.space as string | undefined;
     for (const need of caps) {
-      const scopedWith = need.with && need.with.includes(":") ? need.with : `space:${space}`;
+      const scopedWith = need.with && need.with.includes(":")
+        ? need.with
+        : `space:${space}`;
       if (!hasCap(u.payload, { can: need.can, with: scopedWith })) {
-        return c.json({ error: { message: "Forbidden: missing capability" } }, 403);
+        return c.json(
+          { error: { message: "Forbidden: missing capability" } },
+          403,
+        );
       }
     }
     c.set && c.set("principal", u.payload.iss);

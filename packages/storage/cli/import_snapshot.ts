@@ -61,7 +61,7 @@ if (import.meta.main) {
 
     const cas = createCas(db);
     await cas.put("am_snapshot", bytes, {
-      docId: doc,
+      docId: doc as string,
       branchId: st.branchId,
       seqNo: st.seqNo,
       txId: st.epoch,

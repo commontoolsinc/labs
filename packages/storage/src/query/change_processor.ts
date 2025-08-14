@@ -102,13 +102,13 @@ export class ChangeProcessor {
 
     // Re-evaluate in order
     for (const ek of order) {
-      const [ir, doc, pathKey, budgetStr] = ek.split("\u0001");
+      const [ir, doc, pathKey = "[]"] = ek.split("\u0001");
       this.evaluator.memo.delete(ek);
       this.evaluator.evaluate(
         {
-          ir,
-          doc,
-          path: JSON.parse(pathKey),
+          ir: ir as string,
+          doc: doc as string,
+          path: JSON.parse(pathKey) as string[],
         },
         undefined,
         this.evaluator.newContext(),

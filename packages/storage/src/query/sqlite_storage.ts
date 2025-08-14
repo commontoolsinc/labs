@@ -36,7 +36,7 @@ export class SqliteStorageReader implements Reader {
     return { branchId: state.branchId, seq };
   }
 
-  read(docId: string, path: Path, at?: Version): any {
+  read(docId: string, path: Path, at?: Version): unknown {
     const { branchId, seq } = this.resolve(docId, at);
     // Fast path: if reading current tip (no historical epoch), use json_cache
     const cacheDisabled = isJsonCacheDisabled();
@@ -75,7 +75,10 @@ export class SqliteStorageReader implements Reader {
     return { epoch: state.epoch, branch: this.defaultBranch };
   }
 
-  readDocAtVersion(docId: string, at: Version): { version: Version; doc: any } {
+  readDocAtVersion(
+    docId: string,
+    at: Version,
+  ): { version: Version; doc: unknown } {
     const { branchId, seq } = this.resolve(docId, at);
     let json: any;
     const cacheDisabled = isJsonCacheDisabled();

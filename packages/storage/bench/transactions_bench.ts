@@ -121,7 +121,7 @@ async function submitSingleChange(
       allowServerMerge: true,
     }],
   });
-  const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+  const ok = rec.results.length > 0 && rec.results[0]!.status === "ok";
   if (!ok && VERIFY) {
     try {
       console.error(
@@ -159,7 +159,7 @@ async function submitBatchChanges(
       allowServerMerge: true,
     }],
   });
-  const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+  const ok = rec.results.length > 0 && rec.results[0]!.status === "ok";
   if (!ok && VERIFY) {
     try {
       console.error(
@@ -198,7 +198,7 @@ async function scenarioGenesisManyDocs(): Promise<number> {
         changes: [{ bytes: c }],
       }],
     });
-    const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+    const ok = rec.results.length > 0 && rec.results[0]!.status === "ok";
     if (ok) {
       docs.set(docId, d);
       applied += 1;
@@ -313,7 +313,7 @@ async function scenarioConcurrentSmallTxs(): Promise<number> {
     // Select unique docs for this batch to avoid parallel writes to same doc
     const chosen = new Set<string>();
     while (chosen.size < inFlight) {
-      chosen.add(docs[randomInt(docs.length)]);
+      chosen.add(docs[randomInt(docs.length)]!);
     }
     const promises: Promise<void>[] = [];
     for (const docId of chosen) {
@@ -364,7 +364,7 @@ async function scenarioRandomDocsSeparateTx(
   );
   let applied = 0;
   for (let t = 0; t < changeCount; t++) {
-    const docId = docIds[randomInt(docIds.length)];
+    const docId = docIds[randomInt(docIds.length)]!;
     const cur = curByDoc.get(docId)!;
     const res = await submitSingleChange(space, docId, cur, pickChangeFn(cur));
     if (res.ok) {
@@ -474,7 +474,9 @@ async function runStandalone() {
         );
       }
     } else {
-      await runOne(scenario, cases[scenario]);
+      const fn = cases[scenario];
+      if (!fn) throw new Error(`missing scenario ${scenario}`);
+      await runOne(scenario, fn);
     }
   } else {
     console.error(
