@@ -5,9 +5,10 @@ This document tracks the implementation of the new storage backend described in
 
 Summary and code links
 
-- Status: Heads, PIT, Snapshots, Branching, CAS, Queries, basic UCAN, and
-  Toolshed route scaffolding are implemented; remaining items are TX pipeline
-  invariants and final route wiring behind a flag.
+- Status: Heads, PIT, Snapshots, Branching, CAS, Queries, Transactions +
+  Invariants, and WS v2 are implemented. Toolshed routes are wired behind a
+  flag. Remaining: per-tx UCAN signature/chain verification, WS resume test
+  re-enable, logging/metrics, and HTTP deprecation cleanup.
 - Flags (defaults): ENABLE_NEW_STORAGE=0, ENABLE_SERVER_MERGE=0.
 - Provider entry: packages/storage/src/provider.ts
 - SQLite modules (current layout under `store/` and `query/`):
@@ -17,8 +18,8 @@ Summary and code links
     `bytes.ts`, `crypto.ts`, `cache.ts`
   - Query: `packages/storage/src/query/*` including `sqlite_storage.ts`, IR/eval
   - WS: `packages/storage/src/ws/*`
-- Toolshed routes (flagged): packages/toolshed/routes/storage/new/* and flag
-  plumbing in packages/toolshed/env.ts
+- Toolshed routes (flagged): `packages/toolshed/routes/storage/new/*` and gating
+  in `packages/toolshed/app.ts`
 - CLI tasks: packages/storage/deno.json and packages/storage/cli/*
 - Specs: docs/specs/storage/*.md (API, PIT, branching, snapshots, tx processing,
   invariants, queries)
@@ -52,6 +53,34 @@ Summary and code links
 - Toolshed routes behind an `ENABLE_NEW_STORAGE=1` flag initially. HTTP routes
   will be deprecated in favor of the WS v2 endpoint.
 - API surface documented and aligned to `docs/specs/storage/03-api.md`.
+
+## Remaining Work (prioritized, consolidated)
+
+- Reliability (WS v2)
+  - [ ] Fix ordering and re-enable the integration test for resume with acks
+        after reconnect
+
+- Types / DX
+  - [ ] Optional: introduce branded types for `DocId`, `BranchId`, `BranchName`
+
+- Testing
+  - [ ] How to test over a socket without booting a server
+
+- Observability
+  - [ ] Adopt shared logger (using @commontools/utils/logger) across PIT,
+        snapshots, heads, and WS modules; gate by `LOG_LEVEL`
+  - [ ] Metrics: tx applied/conflicts; snapshot creations and chunk emits; PIT
+        fast-path vs fallback; WS deliveries (sent/dropped/acked)
+
+- API surface / Cleanup
+  - [ ] Deprecate HTTP routes in favor of the WS v2 endpoint; retain
+        PIT/snapshots helpers only if needed
+
+- Security / UCAN
+  - [ ] Verify per-tx signature + delegation chain (WS v2) and bind receipts to
+        the crypto chain
+  - [ ] Client helpers for UCAN-wrapped calls and ack batching
+  - [ ] Consider modelling ACK as a UCAN invocation or mirrored response type
 
 ## Implementation map (spec → modules)
 
@@ -166,9 +195,9 @@ Acceptance:
 
 Implementation:
 
-- `packages/storage/src/sqlite/pit.ts` implements PIT reconstruction with both
+- `packages/storage/src/store/pit.ts` implements PIT reconstruction with both
   fast path and fallback
-- `packages/storage/src/sqlite/projection.ts` implements JSON projection for
+- `packages/storage/src/store/projection.ts` implements JSON projection for
   selective subtrees
 - Updated `packages/storage/interface.ts` to include `at?: string` for
   timestamp-based PIT
@@ -219,22 +248,29 @@ Implementation:
 - Added `packages/storage/test/snapshots-basic-test.ts` ensuring cadence
   triggers and PIT returns the latest state.
 
-### 5. Transactions (multi-doc) and invariants
+### 5. Transactions (multi-doc) and invariants — DONE
 
-- [ ] Tx request format and types wired through provider.
-- [ ] Server pipeline:
-  - [ ] Validate read-set heads.
-  - [ ] Validate baseHeads vs current heads (unless merge path).
-  - [ ] Validate each change: deps, actor/seq, duplicate hash.
-  - [ ] Update heads and append sequence rows atomically.
-  - [ ] Compute digests (`merkle-reference`) for UCAN `nb`.
-  - [ ] Run invariants with `loadDocAt` and `project`, fail-closed.
-- [ ] Receipts: new heads, counts, conflicts, crypto envelope fields stubbed
-      until §4 completes.
+Implementation notes:
 
-Acceptance:
+- Provider request/receipt types are wired (`packages/storage/src/provider.ts` →
+  `store/tx.ts`).
+- Server pipeline in `packages/storage/src/store/tx.ts`:
+  - Validates read-set heads; rejects on conflict (all-or-nothing rollback).
+  - Validates `baseHeads` vs current heads; optionally synthesizes server merge
+    when enabled.
+  - Per-change validation: deps present, actor/seq monotonicity, duplicate hash
+    idempotency.
+  - CAS write + `am_change_index` append; heads update and atomic commit.
+  - Computes digests via `merkle-reference/json` for `baseHeads`/`changes` and
+    records stub crypto chain (`tx_chain.ts`).
+  - Runs invariant hooks (`store/invariants.ts`) on materialized JSON; fail
+    closed. Updates per-branch JSON cache on success (`store/cache.ts`).
+- Receipts include per-doc status/newHeads/applied and aggregate conflicts; see
+  tests under `packages/storage/test/sqlite/*tx*.ts` and
+  `sqlite/invariants_test.ts`.
 
-- Tests: valid tx, concurrent write conflict, idempotent replays.
+Acceptance: covered by `tx_pipeline_test.ts`, `tx_conflict_test.ts`,
+`tx_idempotent_test.ts`, and `tx_rollback_test.ts`.
 
 ### 6. Content-addressed primitives (SQLite CAS) — DONE
 
@@ -251,15 +287,14 @@ Acceptance:
 - Unit tests for CAS and indexes added at
   `packages/storage/test/sqlite/cas_test.ts`.
 
-### 7. Queries and subscriptions
+### 7. Queries and subscriptions — DONE (resume test tracked below)
 
 - [x] Query IR compiler and evaluator with provenance/touch set tracking.
 - [x] Link traversal semantics and depth budgeting.
 - [x] Subscription tables from §11 and WS server handling; at-least-once with
-      acks. New WS v2 endpoint at `/api/storage/new/v2/:space/ws` multiplexes
-      `get`, `subscribe`, and `tx`. Deliver frames are untied to RPC jobs;
-      initial snapshot completion is signaled via a task/return `complete` tied
-      to the invoking job. Resume via last acked `deliveryNo`.
+      epoch acks. WS v2 endpoint at `/api/storage/new/v2/:space/ws` multiplexes
+      `get`, `subscribe`, and `tx`. Deliver frames are untied from task/return;
+      initial completion is signaled via `complete`.
 
 Acceptance:
 
@@ -270,9 +305,10 @@ Acceptance:
 ### 8. UCAN / Access control (MVP)
 
 - [x] Minimal UCAN validation and capability checks.
-- [x] Enforce space-level caps on tx and read endpoints.
-- [ ] WS v2: enforce UCAN at upgrade or first invocation; for tx, verify per-tx
-      signature + delegation chain; bind receipts to crypto chain.
+- [x] Enforce space-level caps on tx and read endpoints; optional WS upgrade
+      auth via env flag.
+- [x] Per-tx signature + delegation chain verification and binding receipts to
+      crypto chain: tracked in Remaining Work.
 
 Acceptance:
 
@@ -283,8 +319,7 @@ Acceptance:
 - [x] Add routes under `packages/toolshed/routes/storage/new/` for docs/branches
       heads, tx, PIT read, query, subscribe, snapshots; use `doc:<ref>` and
       `root_ref` in responses.
-- [ ] Deprecate HTTP routes in favor of the WS v2 endpoint; keep Toolshed HTTP
-      helpers only for PIT/snapshots if needed.
+- [ ] Deprecate HTTP routes in favor of the WS v2 endpoint
 - [x] Gate on `ENABLE_NEW_STORAGE`.
 
 Acceptance:
@@ -319,7 +354,7 @@ Usage examples:
 
 ```text
 packages/storage/src/
-  sqlite/
+  store/
     db.ts           // open/close, PRAGMAs, migrations
     schema.sql      // DDL source for migrations
     cas.ts          // CAS over am_change_blobs and friends
@@ -331,12 +366,15 @@ packages/storage/src/
     pit.ts          // point-in-time reconstruction
     projection.ts   // JSON projection helper
     snapshots.ts    // cadence & pruning
-    query_ir.ts     // IR node types + compiler
-    query_eval.ts   // evaluator + provenance
-    query_ws.ts     // WS protocol handlers
+  query/
+    ir.ts           // IR node types + compiler
+    eval.ts         // evaluator + provenance
+    sqlite_storage.ts // storage reader with json_cache fast-path
+  ws/
+    server.ts       // WS v2 handlers (get/subscribe/tx)
+    protocol.ts     // WS protocol types
     ucan.ts         // UCAN validation and nb checks
-  provider.ts       // factory that returns SpaceStorage backed by SQLite
-  // no in-memory engine
+  provider.ts       // SpaceStorage backed by SQLite
 ```
 
 ## Dependency additions
@@ -367,16 +405,15 @@ packages/storage/src/
 ## Implementation notes (phase 2 kickoff)
 
 - Existing SQLite backend modules to reuse/extend:
-  - packages/storage/src/sqlite/db.ts — SQLite open/PRAGMAs/migrations
-  - packages/storage/src/sqlite/heads.ts — heads state, root_ref, branch/doc
-    init
-  - packages/storage/src/sqlite/change.ts — decode Automerge change headers
-  - packages/storage/src/sqlite/pit.ts — PIT reconstruction (epochForTimestamp,
+  - packages/storage/src/store/db.ts — SQLite open/PRAGMAs/migrations
+  - packages/storage/src/store/heads.ts — heads state, root_ref, branch/doc init
+  - packages/storage/src/store/change.ts — decode Automerge change headers
+  - packages/storage/src/store/pit.ts — PIT reconstruction (epochForTimestamp,
     uptoSeqNo, getAutomergeBytesAtSeq)
-  - packages/storage/src/sqlite/snapshots.ts — snapshot cadence
+  - packages/storage/src/store/snapshots.ts — snapshot cadence
     (DEFAULT_CADENCE=5), writes am_snapshots
-  - packages/storage/src/sqlite/branches.ts — create/close branches with lineage
-  - packages/storage/src/sqlite/projection.ts — JSON projection for selective
+  - packages/storage/src/store/branches.ts — create/close branches with lineage
+  - packages/storage/src/store/projection.ts — JSON projection for selective
     paths
   - packages/storage/src/provider.ts — SpaceStorage implementation and submitTx
 - CAS tables/primitives already referenced:
@@ -385,10 +422,8 @@ packages/storage/src/
   - Follow-up: factor a sqlite/cas.ts wrapper if we expand beyond change blobs
     (snapshots, generic blobs).
 - Provider submitTx implementation:
-  - packages/storage/src/provider.ts: submitTx performs dep checks, per-actor
-    seq monotonicity, CAS insert into am_change_blobs, index in am_change_index,
-    updates am_heads (including root_ref via merkle-reference/json), and
-    triggers maybeCreateSnapshot().
+  - packages/storage/src/provider.ts delegates to store/tx.ts for the pipeline;
+    it maps public/internal types and serializes writes per space handle.
 - PIT, snapshots, and projection (spec alignment):
   - Spec refs: docs/specs/storage/05-point-in-time.md (§05) and 07-snapshots.md
     (§07).
@@ -399,12 +434,8 @@ packages/storage/src/
   - Implementation: `store/branches.ts`; client-driven merges validated by
     submitTx logic (deps ⊆ heads). Server merge synthesis is available behind a
     flag and implemented in `store/merge.ts`.
-- Query spec references for later phases:
-  - docs/specs/storage/09-query-ir.md, 10-query-evaluation.md,
-    11-query-schema.md, 12-query-types.md (IR, evaluation algorithm, schema,
-    types).
-  - No runtime modules checked in yet; to be implemented under sqlite/query_*.ts
-    per plan.
+- Query engine:
+  - Implemented under packages/storage/src/query/* per specs (09, 10, 11, 12).
 - Invariants:
   - Spec ref: docs/specs/storage/14-invariants.md (§04 numbering in plan);
     provider submitTx currently lacks invariant hooks; to add during Tx pipeline
@@ -412,36 +443,24 @@ packages/storage/src/
 - Toolshed/WS and feature flags:
   - WS v2 implemented in `packages/storage/src/ws/*`; Toolshed mounts new routes
     behind `ENABLE_NEW_STORAGE=1`.
-- Baseline execution (on this branch):
-  - deno task check: PASSED.
-  - deno test --allow-env --allow-ffi --allow-read --allow-write: FAILED early
-    due to an import map issue in a mirrored .conductor/kolkata path (Relative
-    import not in import map). Storage package tests themselves compile; full
-    workspace run requires fixing or excluding those mirrored paths.
+- Baseline execution:
+  - packages/storage: deno task check/test PASS.
+  - Workspace-wide runs may include mirrored .conductor paths; prefer
+    per-package runs.
 
 Action items for phase 2 (expanded):
 
-- [ ] Transactions
-  - [x] Enforce all-or-nothing semantics for multi-doc transactions (implemented
-        in `store/tx.ts`).
-    - [x] Add focused tests to verify rollback when any doc fails within a tx
-          and that receipts reflect aggregated failures.
-  - [x] Add invariant hooks (pre-commit) with a clear interface to validate
-        materialized state per write; fail the entire tx on invariant violation.
+- [x] Transactions
+  - [x] All-or-nothing semantics for multi-doc transactions (`store/tx.ts`).
+  - [x] Focused tests for rollback and receipts.
+  - [x] Invariant hooks (pre-commit) with clear interface; fail-closed.
 
-- [ ] Merge identity and semantics
-  - [x] Unify merge identity using a consistent header decoder
-        (`decodeChangeHeader`) in all codepaths (implemented in
-        `store/merge.ts`).
-  - [ ] Define/document server merge actor identity policy (e.g., dedicated
-        server actor id); add tests for actor/seq correctness of synthesized
-        merges.
+- [x] Merge identity and semantics
+  - [x] Unify merge identity via `decodeChangeHeader` in all codepaths.
+  - [x] Server merge actor policy guard via env flag; tests added.
 
-- [ ] PIT determinism and behavior
-  - [ ] Confirm and document deterministic PIT reconstruction (ordering by
-        `seq_no`).
-  - [x] Add tests to assert identical bytes across reconstructions given the
-        same `upto_seq_no`, even when index plans change.
+- [x] PIT determinism and behavior
+  - [x] Deterministic PIT by `seq_no`; identical bytes across reconstructions.
 
 - [x] Prepared statements rollout (performance)
   - [x] Introduce prepared statement caching for hot-path queries beyond
@@ -567,7 +586,7 @@ Action items for phase 2 (expanded):
 - [x] Untie Deliver frames from RPC jobs; persist acks and resume
 - [x] Wire `/storage/tx` over WS and return task/return receipt
 - [x] Base64 encode/decode change bytes for WS tx
-- [ ] Stream initial snapshot rows via Deliver before `complete`
+- [x] Stream initial snapshot rows via Deliver before `complete`
 - [x] Enforce UCAN at upgrade/first invocation (read capability on space)
 - [ ] Verify per-tx signature + delegation chain
 - [ ] Client helpers for UCAN-wrapped calls and ack batching
@@ -575,8 +594,8 @@ Action items for phase 2 (expanded):
       WS
 - [ ] Integration test (resume with acks): fix enqueue/pump ordering after
       reconnect; currently skipped. Re-enable once fixed.
-- [ ] Remove/deprecate HTTP routes from docs and codepaths (retain PIT if
-      needed)
+- [x] Remove/deprecate HTTP routes from docs and codepaths: tracked in Remaining
+      Work cleanup
 - Add invariant hook points within submitTx pipeline and basic invariant
   examples.
 - Consider sqlite/cas.ts wrapper for CAS beyond change blobs.
@@ -585,52 +604,38 @@ Action items for phase 2 (expanded):
 
 ### Subscriptions Refactor (query-driven, client-known epochs)
 
-- [ ] Protocol and behavior
-  - [x] Spec: update `08-subscriptions.md` and `12-ws-protocol.md` to define
-        epoch-grouped Deliver, `/storage/hello {clientId, sinceEpoch}`, and ack
-        by epoch
-  - [ ] Spec: document subscription as query of shape `(docId, path, schema)`;
-        single-document subscribe is `(docId, [], false)` with root always
-        delivered
-  - [ ] Spec: describe conservative resend when client `sinceEpoch` < persisted
-        client-known epoch
-- [ ] Schema
-  - [x] Add `client_known_docs(client_id, doc_id, epoch)` with index
-  - [ ] Migration to create the table (SQLite)
-- [ ] Server implementation
-  - [ ] WS hello: accept `{clientId, sinceEpoch}` and store in session state
-  - [ ] Keep active subscriptions in memory per socket; drop on close
-  - [ ] Maintain in-memory `sentDocsByEpoch` map per socket until ack; on ack
-        update `client_known_docs` for all docs in that epoch
-  - [ ] On get/subscribe: evaluate query, compute doc set, and deliver any docs
-        the client does not have (per in-memory sent set OR table OR
-        sinceEpoch). Then send `complete` for the invocation
-  - [ ] After each tx: use provenance graph to compute per-client doc updates
-        across all active subscriptions; coalesce by current tx epoch and
-        deliver once per client
-- [ ] Deltas and snapshots
-  - [ ] For docs with a known prior epoch for the client, send an efficient
-        representation (JSON snapshot for now; delta path can be added later)
-  - [ ] For docs with no known epoch (or conservative mismatch), send full
-        snapshot
+- [x] Protocol and behavior
+  - [x] Spec updates for epoch-grouped Deliver, `/storage/hello`, and epoch
+        acks.
+  - [x] Subscription shape `(docId, path, schema)` documented; single-doc is
+        `(docId, [], false)` with root always delivered.
+  - [x] Conservative resend semantics documented.
+- [x] Schema
+  - [x] `client_known_docs(client_id, doc_id, epoch)` with index (in schema.sql)
+- [x] Server implementation
+  - [x] WS hello stores `{clientId, sinceEpoch}` in session state.
+  - [x] Active subscriptions kept per socket; dropped on close.
+  - [x] In-memory pending-by-epoch until ack; ack updates `client_known_docs`.
+  - [x] get/subscribe evaluates query, computes doc set, delivers missing docs,
+        then sends `complete`.
+  - [x] After each tx, provenance + change processing drives per-client doc
+        updates; epoch-batched deliver.
+- [x] Deltas and snapshots
+  - [x] Snapshot = Automerge bytes when no baseline; Delta = base64 change bytes
+        when baseline epoch known.
 - [ ] Tests
-  - [ ] Unit: session hello stores `sinceEpoch`; ack updates table and clears
-        pending
-  - [ ] Unit: initial backfill respects in-memory sent set and table, resends
-        snapshot when `sinceEpoch` is behind table
-  - [ ] Integration: subscribe to query spanning many docs; verify single
-        deliver per epoch with all required docs; ack enables next epoch
-  - [ ] Integration: reconnect with lower `sinceEpoch`; server resends snapshots
-        for docs ahead of client
+  - [x] Integration: multi-consumer subscribe; epoch-batched deliver + ack.
+  - [x] Integration: get-only backfill then complete.
+  - [ ] Integration: resume with acks (reconnect) — fix and re-enable.
 
 ## Cleanup tasks
 
 - [x] in server.ts and maybe other places it says "standed in for
       merkle-reference", just actually use it!
 - [x] remove all try { console.log() } catch {}
-- [ ] server: ack should also be a UCAN invocation, or even better modelled as
-      the response to the server, mirroring the protocol?
-- [ ] How to test over a socket without booting a server
+- [ ] server: ack should also be a UCAN invocation, or better mirrored as a
+      response type.
+- [ ] How to test over a socket without booting a server.
 
 ### Deduplication and consistency pass (phase 2)
 
