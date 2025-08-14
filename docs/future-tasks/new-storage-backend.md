@@ -506,25 +506,25 @@ Action items for phase 2 (expanded):
       - `strict`, `noImplicitReturns`, `noUncheckedIndexedAccess`,
         `exactOptionalPropertyTypes`, `useUnknownInCatchVariables`.
 
-  - [ ] Phase 1: Public/exported API annotations
-    - [ ] Ensure all exported functions/classes in `packages/storage/src/**`
+  - [x] Phase 1: Public/exported API annotations
+    - [x] Ensure all exported functions/classes in `packages/storage/src/**`
           have explicit return types.
     - [x] Add a precise return type for `createTxProcessor()`.
 
-  - [ ] Phase 2: WS protocol typing + guards
+  - [x] Phase 2: WS protocol typing + guards
     - [x] Refine `Deliver` docs payload to a discriminated union:
       - `snapshot` → `body: string` (base64 bytes), `delta` → `body: string[]`
         (base64 changes).
-    - [ ] Add minimal type guards in `src/ws/server.ts` to narrow inbound
-          messages (ACK vs UCAN invocations) without adding new deps.
+    - [x] Add minimal narrowing for ACK vs invocation and Blob decoding in
+          `src/ws/server.ts` (no new deps).
     - [x] Remove most `as any` casts in `src/ws/server.ts` by using precise
           types.
 
-  - [ ] Phase 3: Prepared statements row/param typing (scaffold)
-    - [ ] Replace `any` fields in `src/store/prepared.ts` with lightweight
+  - [x] Phase 3: Prepared statements row/param typing (scaffold)
+    - [x] Replace `any` fields in `src/store/prepared.ts` with lightweight
           wrapper interfaces that type params and rows for the statements used
           in hot paths: heads, PIT, cache, and tx index operations.
-    - [ ] Update call sites to rely on typed return/params instead of ad-hoc
+    - [x] Update call sites to rely on typed return/params instead of ad-hoc
           casts.
 
   - [x] Phase 4: Transactions internals
@@ -536,15 +536,15 @@ Action items for phase 2 (expanded):
     - [x] Fix the read-conflict path to return the internal result shape (was
           using `ref` previously).
 
-  - [ ] Phase 5: Query engine cleanups (unknown + guards)
-    - [ ] Replace `any` with `unknown` in `src/query/eval.ts`,
+  - [x] Phase 5: Query engine cleanups (unknown + guards)
+    - [x] Replace `any` with `unknown` in `src/query/eval.ts`,
           `src/query/ir.ts`, and add local guards where needed.
     - [x] In `src/query/sqlite_storage.ts`, have `read()`/`readDocAtVersion()`
           return `unknown` instead of `any`; keep cache/PIT paths typed via
           prepared statements.
 
-  - [ ] Phase 6: JSON path/projection typing
-    - [ ] Update `src/json/path.ts` and `src/store/projection.ts` to use
+  - [x] Phase 6: JSON path/projection typing
+    - [x] Update `src/json/path.ts` and `src/store/projection.ts` to use
           `unknown` and narrow when reading/writing.
 
   - [ ] Phase 7 (optional): ID branding
@@ -555,7 +555,7 @@ Action items for phase 2 (expanded):
   - [x] `packages/storage` compiles with strict options enabled.
   - [ ] No `as any` usages remain in runtime code for WS server, tx pipeline,
         and query reader; residual casts are localized and justified.
-  - [ ] All exported functions have explicit return types.
+  - [x] All exported functions have explicit return types.
   - [x] Tests and `deno task check` pass.
 
 ### WS v2 Tasks (summary)
