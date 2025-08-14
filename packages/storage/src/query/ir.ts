@@ -91,11 +91,11 @@ export function intern(pool: IRPool, node: IRNode): IRId {
   return id;
 }
 
-export type JsonSchema = any;
+export type JsonSchema = unknown;
 
 import { toTokens } from "./path.ts";
 
-type CompileCtx = { root: JsonSchema; memo: Map<any, IRId> };
+type CompileCtx = { root: JsonSchema; memo: Map<unknown, IRId> };
 
 export function compileSchema(
   pool: IRPool,
@@ -103,7 +103,7 @@ export function compileSchema(
   ctx?: Partial<CompileCtx>,
 ): IRId {
   const root = ctx?.root ?? schema;
-  const memo = ctx?.memo ?? new Map<any, IRId>();
+  const memo = ctx?.memo ?? new Map<unknown, IRId>();
   if (memo.has(schema)) return memo.get(schema)!;
   if (schema === true) {
     const id = intern(pool, { kind: "True" });
@@ -120,19 +120,24 @@ export function compileSchema(
     memo.set(schema, id);
     return id;
   }
+  const sch = schema as Record<string, unknown>;
 
   // $ref support (local-only): "#/definitions/Name" or "#/$defs/Name" etc.
-  if (typeof (schema as any).$ref === "string") {
-    const ref = (schema as any).$ref as string;
+  if (typeof sch.$ref === "string") {
+    const ref = sch.$ref;
     if (!ref.startsWith("#")) {
       throw new Error(`Only local $ref supported: ${ref}`);
     }
     const ptr = ref.slice(1); // drop leading '#'
     const tokens = ptr === "" ? [] : toTokens(ptr);
-    let target: any = root;
+    let target: unknown = root;
     for (const t of tokens) {
       if (t === "") continue;
-      target = target?.[t];
+      if (!isObject(target)) {
+        target = undefined;
+        break;
+      }
+      target = (target as Record<string, unknown>)[t];
     }
     if (target === undefined) throw new Error(`$ref not found: ${ref}`);
     const id = compileSchema(pool, target, { root, memo });
@@ -151,78 +156,83 @@ export function compileSchema(
   };
 
   const nodes: IRId[] = [];
-  if ((schema as any).type && typeof (schema as any).type === "string") {
+  const typeVal = sch.type;
+  const allowed = ["object", "array", "string", "number", "boolean", "null"] as const;
+  type Allowed = typeof allowed[number];
+  if (
+    typeof typeVal === "string" &&
+    (allowed as readonly string[]).includes(typeVal)
+  ) {
     nodes.push(
-      pushId(
-        intern(pool, { kind: "TypeCheck", t: (schema as any).type } as any),
-      ),
+      pushId(intern(pool, { kind: "TypeCheck", t: typeVal as Allowed })),
     );
   }
-  if ((schema as any).pattern) {
+  if (typeof sch.pattern === "string") {
     nodes.push(
       pushId(
         intern(pool, {
           kind: "Pattern",
-          re: new RegExp((schema as any).pattern),
+          re: new RegExp(sch.pattern),
         }),
       ),
     );
   }
-  if ((schema as any).const !== undefined) {
-    nodes.push(
-      pushId(intern(pool, { kind: "Const", value: (schema as any).const })),
-    );
+  if (Object.prototype.hasOwnProperty.call(sch, "const")) {
+    nodes.push(pushId(intern(pool, { kind: "Const", value: sch["const"] })));
   }
-  if (Array.isArray((schema as any).enum)) {
+  if (Array.isArray(sch.enum)) {
     nodes.push(
-      pushId(intern(pool, { kind: "Enum", values: (schema as any).enum })),
+      pushId(intern(pool, { kind: "Enum", values: sch.enum as unknown[] })),
     );
   }
   if (
-    (schema as any).minimum !== undefined ||
-    (schema as any).maximum !== undefined ||
-    (schema as any).exclusiveMinimum || (schema as any).exclusiveMaximum
+    sch.minimum !== undefined ||
+    sch.maximum !== undefined ||
+    sch.exclusiveMinimum || sch.exclusiveMaximum
   ) {
-    nodes.push(
-      pushId(intern(pool, {
-        kind: "Range",
-        min: (schema as any).minimum,
-        max: (schema as any).maximum,
-        exclMin: !!(schema as any).exclusiveMinimum,
-        exclMax: !!(schema as any).exclusiveMaximum,
-      })),
-    );
+    const range: { kind: "Range"; min?: number; max?: number; exclMin?: boolean; exclMax?: boolean } = {
+      kind: "Range",
+      ...(typeof sch.minimum === "number" ? { min: sch.minimum } : {}),
+      ...(typeof sch.maximum === "number" ? { max: sch.maximum } : {}),
+      ...(sch.exclusiveMinimum ? { exclMin: true } : {}),
+      ...(sch.exclusiveMaximum ? { exclMax: true } : {}),
+    };
+    nodes.push(pushId(intern(pool, range)));
   }
 
   if (
-    (schema as any).properties || (schema as any).required ||
-    (schema as any).additionalProperties !== undefined
+    sch.properties || sch.required || sch.additionalProperties !== undefined
   ) {
-    const required = new Set<string>(
-      Array.isArray((schema as any).required) ? (schema as any).required : [],
-    );
+    const required = new Set<string>(Array.isArray(sch.required)
+      ? (sch.required as unknown[]).filter((x): x is string => typeof x === "string")
+      : []);
     const props = new Map<string, IRId>();
-    if ((schema as any).properties) {
-      for (const [k, v] of Object.entries((schema as any).properties)) {
+    if (isObject(sch.properties)) {
+      for (const [k, v] of Object.entries(sch.properties as Record<string, unknown>)) {
         props.set(k, pushId(compileSchema(pool, v, { root, memo })));
       }
     }
     let additional: AP = { mode: "omit" };
-    if (Object.prototype.hasOwnProperty.call(schema, "additionalProperties")) {
-      if ((schema as any).additionalProperties === true) {
+    if (Object.prototype.hasOwnProperty.call(sch, "additionalProperties")) {
+      const ap = sch.additionalProperties as unknown;
+      if (ap === true) {
         additional = { mode: "true" };
-      } else if ((schema as any).additionalProperties === false) {
+      } else if (ap === false) {
         additional = { mode: "omit" };
       } else {
         additional = {
           mode: "schema",
           ir: pushId(
-            compileSchema(pool, (schema as any).additionalProperties, {
+            compileSchema(pool, ap as JsonSchema, {
               root,
               memo,
             }),
           ),
         };
+           
+          
+           
+          
       }
     }
     nodes.push(
@@ -230,40 +240,42 @@ export function compileSchema(
     );
   }
 
-  if ((schema as any).items !== undefined) {
-    if (Array.isArray((schema as any).items)) {
+  if (sch.items !== undefined) {
+    if (Array.isArray(sch.items)) {
       nodes.push(
         pushId(intern(pool, {
           kind: "Items",
-          tuple: (schema as any).items.map((s: any) =>
-            compileSchema(pool, s, { root, memo })
-          ),
+          tuple: (sch.items as unknown[]).map((s) => compileSchema(pool, s, { root, memo })),
         })),
+       
+      
       );
     } else {
+       
+      
       nodes.push(
         pushId(intern(pool, {
+       
+      
           kind: "Items",
-          item: compileSchema(pool, (schema as any).items, { root, memo }),
+          item: compileSchema(pool, sch.items as JsonSchema, { root, memo }),
         })),
       );
+       
+      
     }
   }
 
-  if (Array.isArray((schema as any).allOf)) {
+  if (Array.isArray(sch.allOf)) {
     nodes.push(pushId(intern(pool, {
       kind: "AllOf",
-      nodes: (schema as any).allOf.map((s: any) =>
-        compileSchema(pool, s, { root, memo })
-      ),
+      nodes: (sch.allOf as unknown[]).map((s) => compileSchema(pool, s, { root, memo })),
     })));
   }
-  if (Array.isArray((schema as any).anyOf)) {
+  if (Array.isArray(sch.anyOf)) {
     nodes.push(pushId(intern(pool, {
       kind: "AnyOf",
-      nodes: (schema as any).anyOf.map((s: any) =>
-        compileSchema(pool, s, { root, memo })
-      ),
+      nodes: (sch.anyOf as unknown[]).map((s) => compileSchema(pool, s, { root, memo })),
     })));
   }
 

@@ -125,7 +125,9 @@ class SessionState {
     };
   }
 
-  private async decodeJSON(data: string | ArrayBufferLike | Blob): Promise<unknown> {
+  private async decodeJSON(
+    data: string | ArrayBufferLike | Blob,
+  ): Promise<unknown> {
     if (typeof data === "string") return JSON.parse(data);
     if (data instanceof Blob) {
       const ab = await data.arrayBuffer();
@@ -161,7 +163,9 @@ class SessionState {
       console.log(
         "[ws] recv",
         typeof msg === "object" && msg !== null
-          ? ((msg as Record<string, unknown>)?.invocation as Record<string, unknown> | undefined)?.cmd ?? (msg as Record<string, unknown>)?.type
+          ? ((msg as Record<string, unknown>)?.invocation as
+            | Record<string, unknown>
+            | undefined)?.cmd ?? (msg as Record<string, unknown>)?.type
           : typeof msg,
       );
       const maybeObj = (typeof msg === "object" && msg !== null)
@@ -179,7 +183,10 @@ class SessionState {
       >;
       // TODO(@storage-auth): verify UCAN and capabilities (read/write) here
       if (invocation.cmd === "/storage/hello") {
-        this.handleHello(invocation as StorageHello, authorization as any);
+        this.handleHello(
+          invocation as StorageHello,
+          undefined as unknown as Authorization<unknown>,
+        );
       } else if (invocation.cmd === "/storage/get") {
         this.handleGet(invocation as StorageGet, authorization);
       } else if (invocation.cmd === "/storage/subscribe") {
@@ -211,7 +218,7 @@ class SessionState {
     this.pendingByEpoch.delete(ack.epoch);
   }
 
-  private handleHello(inv: StorageHello, _auth: Authorization<StorageHello>) {
+  private handleHello(inv: StorageHello, _auth: Authorization<unknown>) {
     this.clientId = inv.args.clientId;
     this.sinceEpoch = inv.args.sinceEpoch ?? -1;
     // No reply frame; subsequent get/subscribe/tx will use this state
@@ -379,7 +386,7 @@ class SessionState {
     return out;
   }
 
-  private handleGet(inv: StorageGet, _auth: Authorization<StorageGet>) {
+  private handleGet(inv: StorageGet, _auth: Authorization<unknown>) {
     const jobId = this.jobOf(inv);
     // One-shot evaluation and backfill
     const { docsToSend } = this.evaluateQuery(inv.args.query);
@@ -407,7 +414,7 @@ class SessionState {
 
   private handleSubscribe(
     inv: StorageSubscribe,
-    _auth: Authorization<StorageSubscribe>,
+    _auth: Authorization<unknown>,
   ) {
     const jobId = this.jobOf(inv);
     const { root, docSet, docsToSend } = this.evaluateQuery(inv.args.query);
@@ -457,8 +464,8 @@ class SessionState {
       if (Array.isArray(v)) return new Uint8Array(v as number[]);
       // last resort: try to coerce objects with numeric indices
       try {
-        const arr = Array.from(v as any);
-        return new Uint8Array(arr as number[]);
+        const arr = Array.from(v as Iterable<number>);
+        return new Uint8Array(arr as unknown as number[]);
       } catch {
         return new Uint8Array();
       }
@@ -520,13 +527,12 @@ class SessionState {
     if (deltas.length > 0) {
       for (const d of deltas) {
         const v = this.storageReader.currentVersion(d.doc);
-        const delta = {
+        const delta: import("../types.ts").Delta = {
           doc: d.doc,
           changed: new Set([keyPath([])]),
           removed: new Set<string>(),
-          newDoc: undefined,
           atVersion: v,
-        } as any;
+        };
         const events = this.changeProc.onDelta(delta);
         console.log("[ws] delta", d.doc, "events", events.length);
         for (const ev of events) {

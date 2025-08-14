@@ -22,7 +22,25 @@ export interface CasRecord {
 // CAS over SQLite tables. Stores Automerge changes in am_change_blobs and
 // generic blobs/snapshots in cas_blobs. Provides put/get/has and index helpers.
 
-export function createCas(db: Database) {
+export function createCas(db: Database): {
+  put(
+    kind: CasKind,
+    bytes: Uint8Array,
+    meta?: CasMeta,
+  ): Promise<string>;
+  get(digest: string): CasRecord | null;
+  has(digest: string): boolean;
+  findChangeBySeq(
+    docId: string,
+    branchId: string,
+    seqNo: number,
+  ): { digest: string; bytes: Uint8Array } | null;
+  findByTxId(
+    docId: string,
+    branchId: string,
+    txId: number,
+  ): Array<{ kind: CasKind; digest: string; bytes: Uint8Array }>;
+} {
   return {
     async put(
       kind: CasKind,
