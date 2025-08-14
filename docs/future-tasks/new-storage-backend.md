@@ -553,7 +553,7 @@ Action items for phase 2 (expanded):
 
 - Acceptance criteria:
   - [x] `packages/storage` compiles with strict options enabled.
-  - [ ] No `as any` usages remain in runtime code for WS server, tx pipeline,
+  - [x] No `as any` usages remain in runtime code for WS server, tx pipeline,
         and query reader; residual casts are localized and justified.
   - [x] All exported functions have explicit return types.
   - [x] Tests and `deno task check` pass.
@@ -631,7 +631,6 @@ Action items for phase 2 (expanded):
 - [ ] server: ack should also be a UCAN invocation, or even better modelled as
       the response to the server, mirroring the protocol?
 - [ ] How to test over a socket without booting a server
-- [ ] Can we use :memory; instead of temp directories?
 
 ### Deduplication and consistency pass (phase 2)
 
