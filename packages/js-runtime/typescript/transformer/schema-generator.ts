@@ -3,9 +3,24 @@ import { getLogger } from "@commontools/utils/logger";
 
 // Create logger for Schema transformer
 const logger = getLogger("schema-transformer", {
-  enabled: false,
-  level: "debug",
+  enabled: true,
+  level: "info",
 });
+
+/**
+ * Get a stable, human-readable type name for definitions
+ */
+function getStableTypeName(
+  type: ts.Type,
+  definitions?: Record<string, any>,
+): string {
+  const symbolName = type.symbol?.name;
+  if (symbolName && symbolName !== "__type") return symbolName;
+  if (definitions) {
+    return `Type${Object.keys(definitions).length}`;
+  }
+  return "Type0";
+}
 
 /**
  * Helper to extract array element type using multiple detection methods
@@ -14,8 +29,6 @@ function getArrayElementType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
-  const typeString = checker.typeToString(type);
-
   // Check ObjectFlags.Reference for Array/ReadonlyArray
   const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
 
@@ -38,12 +51,127 @@ function getArrayElementType(
   }
 
   // Use numeric index type as fallback
-  const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-  if (elementType) {
-    return elementType;
+  try {
+    const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
+    if (elementType) {
+      return elementType;
+    }
+  } catch (error) {
+    // Stack overflow can happen with recursive types
+    // Don't log as it could cause another stack overflow
+    // Emit a lightweight breadcrumb without touching the error object
+    try {
+      logger.warn(() =>
+        "getArrayElementType: checker.getIndexTypeOfType threw; treating as non-array"
+      );
+    } catch (_e) {
+      // Swallow any logging issues to remain safe
+    }
   }
 
   return undefined;
+}
+
+/**
+ * Safely resolve a property's type, preferring AST nodes to avoid deep checker recursion
+ */
+function safeGetPropertyType(
+  prop: ts.Symbol,
+  parentType: ts.Type,
+  checker: ts.TypeChecker,
+  fallbackNode?: ts.TypeNode,
+): ts.Type {
+  // Prefer declared type node when available
+  const decl = prop.valueDeclaration;
+  if (decl && ts.isPropertySignature(decl) && decl.type) {
+    try {
+      return checker.getTypeFromTypeNode(decl.type);
+    } catch (_) {
+      // fallthrough
+    }
+  }
+  if (fallbackNode) {
+    try {
+      return checker.getTypeFromTypeNode(fallbackNode);
+    } catch (_) {
+      // fallthrough
+    }
+  }
+  // Last resort: use symbol location
+  try {
+    return checker.getTypeOfSymbolAtLocation(
+      prop,
+      prop.valueDeclaration || fallbackNode || prop.declarations?.[0]!,
+    );
+  } catch (_) {
+    // As a conservative fallback, return the parent type to avoid crashes
+    try {
+      logger.warn(() =>
+        "safeGetPropertyType: checker.getTypeOfSymbolAtLocation threw; returning parentType"
+      );
+    } catch (_e) {
+      // Swallow any logging issues to remain safe
+    }
+    return parentType;
+  }
+}
+
+/**
+ * Build an object schema for a given type. This is separated so we can reuse it
+ * while guarding against self-recursion via definitionStack.
+ */
+function buildObjectSchema(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+  typeNode: ts.TypeNode | undefined,
+  depth: number,
+  seenTypes: Set<ts.Type>,
+  cyclicTypes: Set<ts.Type> | undefined,
+  definitions: Record<string, any> | undefined,
+  definitionStack: Set<ts.Type>,
+): any {
+  const properties: any = {};
+  const required: string[] = [];
+
+  const props = checker.getPropertiesOfType(type);
+  for (const prop of props) {
+    const propName = prop.getName();
+    if (propName.startsWith("__")) continue;
+
+    const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0;
+    if (!isOptional) required.push(propName);
+
+    let propTypeNode: ts.TypeNode | undefined;
+    const propDecl = prop.valueDeclaration;
+    if (propDecl && ts.isPropertySignature(propDecl) && propDecl.type) {
+      propTypeNode = propDecl.type;
+    }
+
+    const resolvedPropType = safeGetPropertyType(
+      prop,
+      type,
+      checker,
+      propTypeNode,
+    );
+
+    const propSchema = typeToJsonSchemaHelper(
+      resolvedPropType,
+      checker,
+      propTypeNode,
+      depth + 1,
+      seenTypes,
+      cyclicTypes,
+      definitions,
+      definitionStack,
+      false,
+    );
+
+    properties[propName] = propSchema;
+  }
+
+  const schema: any = { type: "object", properties };
+  if (required.length > 0) schema.required = required;
+  return schema;
 }
 
 /**
@@ -57,51 +185,46 @@ function typeToJsonSchemaHelper(
   seenTypes: Set<ts.Type> = new Set(),
   cyclicTypes?: Set<ts.Type>,
   definitions?: Record<string, any>,
+  definitionStack: Set<ts.Type> = new Set(),
   isRootType: boolean = false,
 ): any {
   // If cyclicTypes is provided, check if this is a cyclic type
   if (cyclicTypes && cyclicTypes.has(type) && definitions) {
-    const typeName = type.symbol?.name ||
-      `Type${Object.keys(definitions).length}`;
+    const typeName = getStableTypeName(type, definitions);
 
-    // If we've already seen this type, return a $ref
-    if (seenTypes.has(type)) {
+    // If we're already generating or have seen this type in the current path, return a $ref
+    if (definitionStack.has(type) || seenTypes.has(type)) {
       return { "$ref": `#/definitions/${typeName}` };
     }
 
-    // First time seeing this cyclic type - generate the full schema
-    // but we'll add it to definitions and return a $ref if this is not the root
+    // Non-root: ensure definition exists and return a $ref
     if (!isRootType) {
-      // Check if we already have a definition for this type
-      if (definitions[typeName]) {
-        return { "$ref": `#/definitions/${typeName}` };
+      if (!definitions[typeName]) {
+        // Mark as in-progress to break self-recursion
+        definitionStack.add(type);
+        // Add to seen types for this path
+        const newSeen = new Set(seenTypes);
+        newSeen.add(type);
+        const defSchema = buildObjectSchema(
+          type,
+          checker,
+          typeNode,
+          depth,
+          newSeen,
+          cyclicTypes,
+          definitions,
+          definitionStack,
+        );
+        definitions[typeName] = defSchema;
+        definitionStack.delete(type);
       }
-
-      // Mark that we're processing this type
-      seenTypes.add(type);
-
-      // Generate the full schema WITHOUT checking for cycles again
-      // We temporarily remove this type from cyclicTypes to avoid infinite recursion
-      const tempCyclicTypes = new Set(cyclicTypes);
-      tempCyclicTypes.delete(type);
-
-      const schema = typeToJsonSchemaHelper(
-        type,
-        checker,
-        typeNode,
-        depth,
-        seenTypes,
-        tempCyclicTypes,
-        definitions,
-        false,
-      );
-
-      // Add to definitions
-      definitions[typeName] = schema;
-
-      // Return a reference
       return { "$ref": `#/definitions/${typeName}` };
     }
+
+    // Root cyclic type: allow building root schema with self-refs
+    // Mark as in-progress so inner references become $ref
+    definitionStack.add(type);
+    seenTypes.add(type);
   }
 
   // Old cycle detection for when cyclicTypes is not provided
@@ -113,26 +236,19 @@ function typeToJsonSchemaHelper(
     };
   }
 
-  // Create a new set with this type added for recursive calls
+  // Create a new set with this type added for recursive calls where appropriate
   const newSeenTypes = new Set(seenTypes);
 
   // Only add interface/class types to seenTypes - only these can cause recursive cycles
   // Skip arrays, built-in types, and other types that can't self-reference
   if (type.flags & ts.TypeFlags.Object) {
     const symbol = type.getSymbol();
-    const typeString = checker.typeToString(type);
 
-    // Only track types that could potentially self-reference:
-    // - Has a symbol (named type)
-    // - Is an interface or class
-    // - Not an array type
-    // - Not a built-in type
     const shouldTrack = symbol &&
       (symbol.flags &
         (ts.SymbolFlags.Interface | ts.SymbolFlags.Class |
           ts.SymbolFlags.TypeAlias)) &&
       symbol.name !== "Array" &&
-      !typeString.endsWith("[]") &&
       !["Date", "RegExp", "Promise", "Map", "Set", "WeakMap", "WeakSet"]
         .includes(symbol.name);
 
@@ -147,8 +263,27 @@ function typeToJsonSchemaHelper(
     // Check if this is Default or a type that resolves to Default
     if (ts.isIdentifier(typeName)) {
       // Check if the resolved type is Default
-      const symbol = checker.getSymbolAtLocation(typeName);
-      const resolvedType = checker.getTypeFromTypeNode(typeNode);
+      // Wrap in try-catch to handle potential stack overflow with recursive types
+      let symbol: ts.Symbol | undefined;
+      let resolvedType: ts.Type;
+
+      try {
+        symbol = checker.getSymbolAtLocation(typeName);
+        resolvedType = checker.getTypeFromTypeNode(typeNode);
+      } catch (error) {
+        // If we get a stack overflow, skip the Default type checking
+        // Don't log as it could cause another stack overflow
+        // Fall through to normal type processing
+        try {
+          logger.warn(() =>
+            "typeToJsonSchemaHelper: resolving Default type caused checker error; skipping Default handling"
+          );
+        } catch (_e) {
+          // Swallow any logging issues to remain safe
+        }
+        symbol = undefined;
+        resolvedType = type;
+      }
 
       // Check if the symbol is a type alias that resolves to Default
       let declaredType: ts.Type | undefined;
@@ -177,10 +312,7 @@ function typeToJsonSchemaHelper(
         (resolvedType as any).aliasSymbol?.name === "Default" ||
         (declaredType &&
           (declaredType as any).aliasSymbol?.name === "Default") ||
-        isDefaultAlias ||
-        (symbol &&
-          checker.typeToString(checker.getDeclaredTypeOfSymbol(symbol))
-            .startsWith("Default<"));
+        isDefaultAlias;
 
       if (isDefaultType) {
         // For type aliases that resolve to Default, we need to get the instantiated type
@@ -202,6 +334,8 @@ function typeToJsonSchemaHelper(
               newSeenTypes,
               cyclicTypes,
               definitions,
+              definitionStack,
+              false, // Default inner types are never root types
             );
 
             // Extract the default value from the type node
@@ -232,6 +366,8 @@ function typeToJsonSchemaHelper(
             newSeenTypes,
             cyclicTypes,
             definitions,
+            definitionStack,
+            false, // Default inner types are never root types
           );
 
           // Try to extract the literal value from the default value type
@@ -268,6 +404,8 @@ function typeToJsonSchemaHelper(
             newSeenTypes,
             cyclicTypes,
             definitions,
+            definitionStack,
+            false, // Default inner types are never root types
           );
 
           // Extract the default value from the type node
@@ -286,13 +424,8 @@ function typeToJsonSchemaHelper(
   }
 
   // Check if this is a Cell<T> or Stream<T> type at the top level
-  const typeString = checker.typeToString(type);
-
   // Check for Cell type by symbol name (handles type aliases)
-  if (
-    type.symbol?.name === "Cell" ||
-    (typeString.startsWith("Cell<") && typeString.endsWith(">"))
-  ) {
+  if (type.symbol?.name === "Cell") {
     // This is a Cell<T> type
     let innerType = type;
 
@@ -325,16 +458,15 @@ function typeToJsonSchemaHelper(
       newSeenTypes,
       cyclicTypes,
       definitions,
+      definitionStack,
+      false, // Cell inner types are never root types
     );
     schema.asCell = true;
     return schema;
   }
 
   // Check for Stream type by symbol name (handles type aliases)
-  if (
-    type.symbol?.name === "Stream" ||
-    (typeString.startsWith("Stream<") && typeString.endsWith(">"))
-  ) {
+  if (type.symbol?.name === "Stream") {
     // This is a Stream<T> type
     let innerType = type;
 
@@ -360,6 +492,8 @@ function typeToJsonSchemaHelper(
       newSeenTypes,
       cyclicTypes,
       definitions,
+      definitionStack,
+      false, // Stream inner types are never root types
     );
     schema.asStream = true;
     return schema;
@@ -399,6 +533,8 @@ function typeToJsonSchemaHelper(
         newSeenTypes,
         cyclicTypes,
         definitions,
+        definitionStack,
+        false, // array elements are never root types
       ),
     };
   }
@@ -426,6 +562,8 @@ function typeToJsonSchemaHelper(
         newSeenTypes,
         cyclicTypes,
         definitions,
+        definitionStack,
+        false, // array elements are never root types
       ),
     };
   }
@@ -457,6 +595,8 @@ function typeToJsonSchemaHelper(
           newSeenTypes,
           cyclicTypes,
           definitions,
+          definitionStack,
+          false, // Default inner types are never root types
         );
 
         // Try to extract the literal value from the default value type
@@ -508,6 +648,8 @@ function typeToJsonSchemaHelper(
         newSeenTypes,
         cyclicTypes,
         definitions,
+        definitionStack,
+        false, // Default inner types are never root types
       );
 
       // Try to extract the literal value from the default value type
@@ -534,59 +676,16 @@ function typeToJsonSchemaHelper(
 
   // Handle object types (interfaces, type literals)
   if (type.flags & ts.TypeFlags.Object) {
-    const properties: any = {};
-    const required: string[] = [];
-
-    // Get all properties (including inherited ones)
-    const props = checker.getPropertiesOfType(type);
-    for (const prop of props) {
-      const propName = prop.getName();
-
-      // Skip symbol properties
-      if (propName.startsWith("__")) continue;
-
-      const propType = checker.getTypeOfSymbolAtLocation(
-        prop,
-        prop.valueDeclaration || typeNode || prop.declarations?.[0]!,
-      );
-
-      // Check if property is optional
-      const isOptional = prop.flags & ts.SymbolFlags.Optional;
-      if (!isOptional) {
-        required.push(propName);
-      }
-
-      // Check if the property has a type node we can analyze directly
-      const propDecl = prop.valueDeclaration;
-      let propTypeNode: ts.TypeNode | undefined;
-      if (propDecl && ts.isPropertySignature(propDecl) && propDecl.type) {
-        propTypeNode = propDecl.type;
-      }
-
-      // Get property schema - let typeToJsonSchema handle all wrapper types
-      const propSchema = typeToJsonSchemaHelper(
-        propType,
-        checker,
-        propTypeNode,
-        depth + 1,
-        newSeenTypes,
-        cyclicTypes,
-        definitions,
-      );
-
-      properties[propName] = propSchema;
-    }
-
-    const schema: any = {
-      type: "object",
-      properties,
-    };
-
-    if (required.length > 0) {
-      schema.required = required;
-    }
-
-    return schema;
+    return buildObjectSchema(
+      type,
+      checker,
+      typeNode,
+      depth,
+      newSeenTypes,
+      cyclicTypes,
+      definitions,
+      definitionStack,
+    );
   }
 
   // Handle union types
@@ -618,6 +717,8 @@ function typeToJsonSchemaHelper(
         newSeenTypes,
         cyclicTypes,
         definitions,
+        definitionStack,
+        false, // union members are never root types
       );
     }
     // Otherwise, use oneOf
@@ -631,6 +732,8 @@ function typeToJsonSchemaHelper(
           newSeenTypes,
           cyclicTypes,
           definitions,
+          definitionStack,
+          false, // union members are never root types
         )
       ),
     };
@@ -743,7 +846,6 @@ export function getCycles(
   // Only track types that could potentially self-reference
   if (type.flags & ts.TypeFlags.Object) {
     const symbol = type.getSymbol();
-    const typeString = checker.typeToString(type);
 
     // Use same logic as in typeToJsonSchema for consistency
     const shouldTrack = symbol &&
@@ -751,7 +853,6 @@ export function getCycles(
         (ts.SymbolFlags.Interface | ts.SymbolFlags.Class |
           ts.SymbolFlags.TypeAlias)) &&
       symbol.name !== "Array" &&
-      !typeString.endsWith("[]") &&
       !["Date", "RegExp", "Promise", "Map", "Set", "WeakMap", "WeakSet"]
         .includes(symbol.name);
 
@@ -766,19 +867,12 @@ export function getCycles(
 
     // Check if we're already visiting this type (cycle detected)
     if (visiting.has(type)) {
-      // Add this type and all types in the current path to cycles
+      // This type is part of a cycle
       cycles.add(type);
-      // Only add tracked types from the visiting path
+      // Also mark all types currently being visited as potentially cyclic
+      // This ensures parent types know they contain cyclic children
       visiting.forEach((t) => {
-        const sym = t.getSymbol();
-        if (
-          sym &&
-          (sym.flags &
-            (ts.SymbolFlags.Interface | ts.SymbolFlags.Class |
-              ts.SymbolFlags.TypeAlias))
-        ) {
-          cycles.add(t);
-        }
+        cycles.add(t);
       });
       return cycles;
     }
@@ -800,10 +894,22 @@ export function getCycles(
         // Skip symbol properties
         if (prop.getName().startsWith("__")) continue;
 
-        const propType = checker.getTypeOfSymbolAtLocation(
-          prop,
-          prop.valueDeclaration || prop.declarations?.[0]!,
-        );
+        let propType: ts.Type | undefined;
+        try {
+          propType = checker.getTypeOfSymbolAtLocation(
+            prop,
+            prop.valueDeclaration || prop.declarations?.[0]!,
+          );
+        } catch (_err) {
+          try {
+            logger.warn(() =>
+              "getCycles: checker.getTypeOfSymbolAtLocation threw; skipping property"
+            );
+          } catch (_e) {
+            // Swallow any logging issues to remain safe
+          }
+          continue;
+        }
 
         // Check if the property has a type node we can analyze directly
         const propDecl = prop.valueDeclaration;
@@ -811,7 +917,19 @@ export function getCycles(
           // Check if it's an array type node
           if (ts.isArrayTypeNode(propDecl.type)) {
             const elementTypeNode = propDecl.type.elementType;
-            const elementType = checker.getTypeFromTypeNode(elementTypeNode);
+            let elementType: ts.Type | undefined;
+            try {
+              elementType = checker.getTypeFromTypeNode(elementTypeNode);
+            } catch (_err) {
+              try {
+                logger.warn(() =>
+                  "getCycles: checker.getTypeFromTypeNode threw; skipping array element type"
+                );
+              } catch (_e) {
+                // Swallow any logging issues to remain safe
+              }
+              continue;
+            }
             getCycles(elementType, checker, visiting, cycles);
             continue;
           }
@@ -850,7 +968,17 @@ export function typeToJsonSchema(
 
   // If no cycles, just return the simple schema
   if (cyclicTypes.size === 0) {
-    return typeToJsonSchemaHelper(type, checker, typeNode);
+    return typeToJsonSchemaHelper(
+      type,
+      checker,
+      typeNode,
+      0,
+      new Set(),
+      undefined,
+      undefined,
+      new Set(),
+      true,
+    );
   }
 
   // Second pass: generate schema with definitions
@@ -866,15 +994,16 @@ export function typeToJsonSchema(
     seenTypes,
     cyclicTypes,
     definitions,
+    new Set<ts.Type>(),
     true, // isRootType
   );
 
-  // If the root type itself is cyclic, we need to add it to definitions
-  // and return a $ref structure
+  // If the root type itself is cyclic, always return a top-level $ref with definitions
   if (cyclicTypes.has(type)) {
-    const typeName = type.symbol?.name || "Type0";
-    definitions[typeName] = rootSchema;
-
+    const typeName = getStableTypeName(type, definitions);
+    if (!definitions[typeName]) {
+      definitions[typeName] = rootSchema;
+    }
     return {
       "$ref": `#/definitions/${typeName}`,
       "$schema": "http://json-schema.org/draft-07/schema#",
@@ -882,7 +1011,7 @@ export function typeToJsonSchema(
     };
   }
 
-  // If only nested types are cyclic, return the root schema with definitions
+  // If we have any definitions, attach them to the root schema
   if (Object.keys(definitions).length > 0) {
     return {
       ...rootSchema,
@@ -891,6 +1020,6 @@ export function typeToJsonSchema(
     };
   }
 
-  // Shouldn't reach here, but just in case
+  // No cycles/definitions to attach
   return rootSchema;
 }
