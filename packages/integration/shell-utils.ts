@@ -6,18 +6,13 @@ import {
   pipeConsole,
 } from "@commontools/integration";
 import {
-  ANYONE,
   Identity,
   InsecureCryptoKeyPair,
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
 import { afterAll, afterEach, beforeAll } from "@std/testing/bdd";
-import { AppState, deserialize, serialize } from "../shell/src/lib/app/mod.ts";
-import { Runtime } from "@commontools/runner";
-import { StorageManager } from "@commontools/runner/storage/cache";
-import { CharmManager } from "@commontools/charm";
-import { CharmsController } from "@commontools/charm/ops";
+import { AppState, deserialize } from "../shell/src/lib/app/mod.ts";
 import { PageErrorEvent } from "@astral/astral";
 
 import "../shell/src/globals.ts";
@@ -53,64 +48,20 @@ export async function login(page: Page, identity: Identity): Promise<void> {
   );
 }
 
-// Create a new charm using `source` in the provided space.
-// Returns the charm id upon success.
-export async function registerCharm(
-  { apiUrl, source, identity, spaceName }: {
-    apiUrl: URL;
-    source: string;
-    identity: Identity;
-    spaceName: string;
-  },
-): Promise<string> {
-  const account = spaceName.startsWith("~")
-    ? identity
-    : await Identity.fromPassphrase(ANYONE);
-  const user = await account.derive(spaceName);
-  const session = {
-    private: account.did() === identity.did(),
-    name: spaceName,
-    space: user.did(),
-    as: user,
-  };
-
-  const runtime = new Runtime({
-    storageManager: StorageManager.open({
-      as: session.as,
-      address: new URL("/api/storage/memory", apiUrl),
-    }),
-    blobbyServerUrl: apiUrl.toString(),
-  });
-
-  let charmId: string | undefined;
-  try {
-    const manager = new CharmManager(session, runtime);
-    await manager.synced();
-    const charms = new CharmsController(manager);
-    const charm = await charms.create(source);
-    charmId = charm.id;
-  } finally {
-    await runtime.dispose();
-  }
-  return charmId;
-}
-
 export class ShellIntegration {
-  browser?: Browser;
-  _page?: Page;
-  manager?: CharmManager;
-  runtime?: Runtime;
-  exceptions: Array<string> = [];
+  #browser?: Browser;
+  #page?: Page;
+  #exceptions: Array<string> = [];
 
   bindLifecycle() {
-    beforeAll(this.beforeAll);
-    afterAll(this.afterAll);
-    afterEach(this.afterEach);
+    beforeAll(this.#beforeAll);
+    afterAll(this.#afterAll);
+    afterEach(this.#afterEach);
   }
 
   page(): Page {
     this.checkIsOk();
-    return this._page!;
+    return this.#page!;
   }
 
   async state(): Promise<AppState | undefined> {
@@ -182,61 +133,29 @@ export class ShellIntegration {
     }
   }
 
-  async setupManager(
-    spaceName: string,
-    apiUrl: string,
-    identity: Identity,
-  ): Promise<CharmManager> {
-    if (this.manager) return this.manager;
-
-    const account = spaceName.startsWith("~")
-      ? identity
-      : await Identity.fromPassphrase(ANYONE);
-    const user = await account.derive(spaceName);
-    const session = {
-      private: account.did() === identity.did(),
-      name: spaceName,
-      space: user.did(),
-      as: user,
-    };
-
-    this.runtime = new Runtime({
-      storageManager: StorageManager.open({
-        as: session.as,
-        address: new URL("/api/storage/memory", apiUrl),
-      }),
-      blobbyServerUrl: apiUrl,
-    });
-
-    this.manager = new CharmManager(session, this.runtime);
-    await this.manager.synced();
-    return this.manager;
-  }
-
-  beforeAll = async () => {
-    this.browser = await Browser.launch({ headless: env.HEADLESS });
-    this._page = await this.browser.newPage();
-    this._page.addEventListener("console", pipeConsole);
-    this._page.addEventListener("dialog", dismissDialogs);
-    this._page.addEventListener("pageerror", (e: PageErrorEvent) => {
+  #beforeAll = async () => {
+    this.#browser = await Browser.launch({ headless: env.HEADLESS });
+    this.#page = await this.#browser.newPage();
+    this.#page.addEventListener("console", pipeConsole);
+    this.#page.addEventListener("dialog", dismissDialogs);
+    this.#page.addEventListener("pageerror", (e: PageErrorEvent) => {
       console.error("Browser Page Error:", e.detail.message);
-      this.exceptions.push(e.detail.message);
+      this.#exceptions.push(e.detail.message);
     });
   };
 
-  afterAll = async () => {
-    await this.runtime?.dispose();
-    await this._page?.close();
-    await this.browser?.close();
+  #afterAll = async () => {
+    await this.#page?.close();
+    await this.#browser?.close();
   };
 
-  afterEach = () => {
-    if (this.exceptions.length > 0) {
-      throw new Error(`Exceptions recorded: \n${this.exceptions.join("\n")}`);
+  #afterEach = () => {
+    if (this.#exceptions.length > 0) {
+      throw new Error(`Exceptions recorded: \n${this.#exceptions.join("\n")}`);
     }
   };
 
   private checkIsOk() {
-    if (!this.page) throw new Error("Page not initialized.");
+    if (!this.#page) throw new Error("Page not initialized.");
   }
 }

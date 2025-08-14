@@ -14,17 +14,15 @@
 
 import { env, Page } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { describe, it } from "@std/testing/bdd";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import type { ElementHandle } from "@astral/astral";
 import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
-const { API_URL, FRONTEND_URL } = env;
+const { SPACE_NAME, API_URL, FRONTEND_URL } = env;
 
 // Helper functions for coordinate-based clicking on the iframe
 // These click specific regions of the iframe since we cannot access
@@ -90,29 +88,37 @@ describe("shell iframe counter tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  it("can increment 5 times, decrement 3 times, and verify count is 2", async () => {
-    const page = shell.page();
-    const identity = await Identity.generate({ implementation: "noble" });
-    const spaceName = globalThis.crypto.randomUUID();
+  let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
-    // Register the iframe counter recipe as a charm
-    const charmId = await registerCharm({
-      spaceName: spaceName,
+  beforeAll(async () => {
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
-          "..",
-          "integration",
           "iframe-counter-recipe.tsx",
         ),
       ),
-    });
+    );
+    charmId = charm.id;
+  });
 
+  afterAll(async () => {
+    if (cc) await cc.dispose();
+  });
+
+  it("can increment 5 times, decrement 3 times, and verify count is 2", async () => {
+    const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName,
+      spaceName: SPACE_NAME,
       charmId,
       identity,
     });
@@ -163,7 +169,7 @@ describe("shell iframe counter tests", () => {
     console.log("\nReloading page to test persistence...");
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName,
+      spaceName: SPACE_NAME,
       charmId,
       identity,
     });

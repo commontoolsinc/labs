@@ -1,10 +1,8 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { beforeAll, describe, it } from "@std/testing/bdd";
+import { CharmsController } from "@commontools/charm/ops";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { getCharmResult, setCharmResult } from "@commontools/charm/ops";
@@ -18,26 +16,29 @@ describe("counter direct operations test", () => {
 
   let charmId: string;
   let identity: Identity;
+  let cc: CharmsController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-
-    // Register the counter charm
-    charmId = await registerCharm({
+    cc = await CharmsController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
           "counter.tsx",
         ),
       ),
-    });
+    );
+    charmId = charm.id;
+  });
 
-    // Setup the CharmManager for direct operations
-    await shell.setupManager(SPACE_NAME, API_URL, identity);
+  afterAll(async () => {
+    if (cc) await cc.dispose();
   });
 
   it("should load the counter charm and verify initial state", async () => {
@@ -60,9 +61,7 @@ describe("counter direct operations test", () => {
     );
     assertEquals(initialText?.trim(), "Counter is the 0th number");
 
-    // Also verify via direct operations
-    const manager = shell.manager!;
-    const value = await getCharmResult(manager, charmId, ["value"]);
+    const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
     assertEquals(value, 0);
   });
 
@@ -71,7 +70,7 @@ describe("counter direct operations test", () => {
   // live updates from our test CharmManager's operations
   it.skip("should update counter value via direct operation (live)", async () => {
     const page = shell.page();
-    const manager = shell.manager!;
+    const manager = cc!.manager();
 
     // Get the counter result element
     const counterResult = await page.waitForSelector("#counter-result", {
@@ -102,7 +101,7 @@ describe("counter direct operations test", () => {
 
   it("should update counter value and verify after page refresh", async () => {
     const page = shell.page();
-    const manager = shell.manager!;
+    const manager = cc!.manager();
 
     // Update value to 42 via direct operation
     console.log("Setting counter value to 42 via direct operation");
