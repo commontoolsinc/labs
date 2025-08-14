@@ -169,6 +169,9 @@ async function runUpdatesWorkload(
   verify: boolean,
 ): Promise<number> {
   let events = 0;
+  let okCount = 0;
+  let conflictCount = 0;
+  let rejectedCount = 0;
   for (let t = 0; t < changes; t++) {
     // Pick a doc reachable from vdom:0 (bias towards impacting the root query)
     const i = reachable[Math.floor(rnd() * reachable.length)] ?? 0;
@@ -236,6 +239,12 @@ async function runUpdatesWorkload(
     // Update local doc snapshot only if server accepted
     const ok = rec.results.length > 0 && rec.results[0].status === "ok";
     if (ok) docs.set(docId, updated);
+    if (rec.results.length > 0) {
+      const st = rec.results[0].status;
+      if (st === "ok") okCount += 1;
+      else if (st === "conflict") conflictCount += 1;
+      else if (st === "rejected") rejectedCount += 1;
+    }
 
     // Notify query engine of the delta at this version
     const v = storage.currentVersion(docId);
@@ -283,6 +292,14 @@ async function runUpdatesWorkload(
     events += ev.length;
   }
   if (events <= 0) throw new Error("no update events generated");
+  if (
+    (Deno.env.get("BENCH_UPD_DEBUG") ?? "").toLowerCase() in
+      { "1": 1, "true": 1, "yes": 1, "on": 1 }
+  ) {
+    console.log(
+      `updates workload tx summary: ok=${okCount} conflict=${conflictCount} rejected=${rejectedCount}`,
+    );
+  }
   return events;
 }
 
@@ -316,6 +333,9 @@ if (!Deno.env.get("PROFILE")) {
     group: "updates",
     n: 1,
   }, async () => {
+    let okCountB = 0;
+    let conflictCountB = 0;
+    let rejectedCountB = 0;
     for (let t = 0; t < CHANGES; t++) {
       const i = reachableB[Math.floor(rnd() * reachableB.length)] ?? 0;
       const docId = `vdom:${i}`;
@@ -362,6 +382,20 @@ if (!Deno.env.get("PROFILE")) {
       });
       const ok = rec.results.length > 0 && rec.results[0].status === "ok";
       if (ok) docsB.set(docId, updated);
+      if (rec.results.length > 0) {
+        const st = rec.results[0].status;
+        if (st === "ok") okCountB += 1;
+        else if (st === "conflict") conflictCountB += 1;
+        else if (st === "rejected") rejectedCountB += 1;
+      }
+    }
+    if (
+      (Deno.env.get("BENCH_UPD_DEBUG") ?? "").toLowerCase() in
+        { "1": 1, "true": 1, "yes": 1, "on": 1 }
+    ) {
+      console.log(
+        `baseline workload tx summary: ok=${okCountB} conflict=${conflictCountB} rejected=${rejectedCountB}`,
+      );
     }
   });
 }
