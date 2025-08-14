@@ -97,6 +97,9 @@ export function map(
       throw new Error("map currently only supports arrays");
     }
 
+    const newArrayValue = [
+      ...resultWithLog.getRaw()!.slice(0, initializedUpTo),
+    ];
     // Add values that have been appended
     while (initializedUpTo < list.length) {
       const resultCell = runtime.getCell(
@@ -121,6 +124,7 @@ export function map(
 
       // Send the result value to the result cell
       resultWithLog.key(initializedUpTo).set(resultCell);
+      newArrayValue.push(resultCell);
 
       initializedUpTo++;
     }
@@ -129,6 +133,8 @@ export function map(
     if (resultWithLog.get().length > list.length) {
       resultWithLog.key("length").set(list.length);
       initializedUpTo = list.length;
+    } else if (resultWithLog.get().length < list.length) {
+      resultWithLog.set(newArrayValue);
     }
 
     // NOTE: We leave prior results in the list for now, so they reuse prior
