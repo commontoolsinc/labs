@@ -68,6 +68,7 @@ export type Complete = {
 
 // Command-specific invocations
 import type { JsonSchema } from "../query/ir.ts";
+import type { BranchRef, Heads, ReadAssert, SubmittedChange } from "../types.ts";
 
 export type QueryArgs = {
   docId: string;
@@ -81,6 +82,22 @@ export type StorageGet = Invocation<"/storage/get", DID, GetArgs>;
 export type StorageSubscribe = Invocation<"/storage/subscribe", DID, GetArgs>;
 
 // Tx command
-import type { TxReceipt, TxRequest } from "../interface.ts";
-export type StorageTx = Invocation<"/storage/tx", DID, TxRequest>;
+import type { TxReceipt } from "../interface.ts";
+
+// WS-layer TxRequest accepts change bytes as base64 string, number[] or Uint8Array
+export type ByteLike = string | number[] | Uint8Array;
+export type WSTxChange = { bytes: ByteLike };
+export type WSTxWriteRequest = {
+  ref: BranchRef;
+  baseHeads: Heads;
+  changes: ReadonlyArray<WSTxChange>;
+  allowServerMerge?: boolean;
+};
+export type WSTxRequest = {
+  clientTxId?: string;
+  reads: ReadonlyArray<ReadAssert>;
+  writes: ReadonlyArray<WSTxWriteRequest>;
+};
+
+export type StorageTx = Invocation<"/storage/tx", DID, WSTxRequest>;
 export type StorageTxResult = TxReceipt;

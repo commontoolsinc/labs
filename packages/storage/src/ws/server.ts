@@ -11,6 +11,7 @@ import type {
   Complete,
   Deliver,
   DID,
+  QueryArgs,
   StorageGet,
   StorageHello,
   StorageSubscribe,
@@ -217,15 +218,15 @@ class SessionState {
   }
 
   private evaluateQuery(
-    query: Record<string, unknown> | undefined,
+    query: QueryArgs | undefined,
   ) {
     // Query schema: if missing, use False; require docId
-    const spaceRootDoc = (query as any)?.docId as string;
+    const spaceRootDoc = query?.docId as string;
     if (!spaceRootDoc || typeof spaceRootDoc !== "string") {
       throw new Error("subscribe/get requires query.docId");
     }
-    const schema = (query as any)?.schema ?? { const: false };
-    const path = (query as any)?.path ?? [];
+    const schema = query?.schema ?? { const: false };
+    const path = query?.path ?? [];
     const ir = compileSchema(this.irPool, schema);
     const root = { ir, doc: spaceRootDoc, path };
     const docSet = new Set<string>();
@@ -390,7 +391,7 @@ class SessionState {
       type: "complete",
       at: {
         epoch: this.storageReader.currentVersion(
-          (inv.args.query as any)?.docId ?? "",
+          inv.args.query?.docId ?? "",
         )?.epoch,
       },
       streamId: this.streamId,
@@ -462,24 +463,26 @@ class SessionState {
         return new Uint8Array();
       }
     };
-    const req = inv.args as any;
+    const req = inv.args;
     const normalized = {
-      clientTxId: req.clientTxId,
-      reads: (req.reads ?? []).map((r: any) => ({
+      ...(req.clientTxId !== undefined ? { clientTxId: req.clientTxId } : {}),
+      reads: (req.reads ?? []).map((r) => ({
         ref: r.ref,
         heads: r.heads,
       })),
-      writes: (req.writes ?? []).map((w: any) => ({
-        ref: w.ref,
-        baseHeads: w.baseHeads ?? [],
-        changes: (w.changes ?? []).map((c: any) => ({
-          bytes: toBytes(c.bytes),
-        })),
-        allowServerMerge: w.allowServerMerge,
-      })),
-    };
+      writes: (req.writes ?? []).map((w) => {
+        const base = {
+          ref: w.ref,
+          baseHeads: w.baseHeads ?? [],
+          changes: (w.changes ?? []).map((c) => ({ bytes: toBytes(c.bytes) })),
+        };
+        return w.allowServerMerge !== undefined
+          ? { ...base, allowServerMerge: w.allowServerMerge }
+          : base;
+      }),
+    } satisfies import("../types.ts").TxRequest;
 
-    const receipt = await s.submitTx(normalized as any);
+    const receipt = await s.submitTx(normalized);
     console.log("[ws] receipt", JSON.stringify(receipt));
     const epoch = receipt.txId;
     // Build a coarse delta per changed doc to drive incremental processing
