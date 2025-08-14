@@ -2048,7 +2048,6 @@
       "jsr:@std/path@1",
       "jsr:@std/testing@1",
       "npm:@babel/standalone@^7.28.2",
-      "npm:@types/react@^18.3.1",
       "npm:jsdom@*",
       "npm:lit@^3.3.0",
       "npm:merkle-reference@^2.2.0",
