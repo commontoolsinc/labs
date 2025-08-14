@@ -13,7 +13,6 @@ export interface AppState {
   activeCharmId?: string;
   apiUrl: URL;
   showShellCharmListView?: boolean;
-  showInspectorView?: boolean;
   showDebuggerView?: boolean;
 }
 
@@ -50,10 +49,6 @@ export function applyCommand(
     }
     case "set-show-charm-list-view": {
       next.showShellCharmListView = command.show;
-      break;
-    }
-    case "set-show-inspector-view": {
-      next.showInspectorView = command.show;
       break;
     }
     case "set-show-debugger-view": {

@@ -11,10 +11,7 @@ import { StorageManager } from "@commontools/runner/storage/cache";
 import { API_URL } from "./env.ts";
 import { navigate } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
-import {
-  StorageInspectorState,
-  StorageInspectorUpdateEvent,
-} from "./storage-inspector.ts";
+import { StorageTelemetry } from "@commontools/runner/storage/telemetry";
 import { setupIframe } from "./iframe-ctx.ts";
 import { getLogger } from "@commontools/utils/logger";
 
@@ -50,7 +47,7 @@ export class RuntimeInternals extends EventTarget {
   #telemetry: RuntimeTelemetry;
   #telemetryMarkers: RuntimeTelemetryMarkerResult[];
   #inspector: Inspector.Channel;
-  #inspectorState: StorageInspectorState;
+  #storageTelemetry: StorageTelemetry;
   #disposed = false;
 
   private constructor(cc: CharmsController, telemetry: RuntimeTelemetry) {
@@ -64,8 +61,8 @@ export class RuntimeInternals extends EventTarget {
     this.#telemetry = telemetry;
     this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
     this.#telemetryMarkers = [];
-    // Initialize StorageInspectorState with telemetry integration
-    this.#inspectorState = new StorageInspectorState(Date.now(), telemetry);
+    // Initialize StorageTelemetry to bridge inspector events to telemetry
+    this.#storageTelemetry = new StorageTelemetry(telemetry);
   }
 
   telemetry(): RuntimeTelemetryMarkerResult[] {
@@ -85,8 +82,7 @@ export class RuntimeInternals extends EventTarget {
 
   #onInspectorUpdate = (command: Inspector.BroadcastCommand) => {
     this.#check();
-    this.#inspectorState.update(command);
-    this.dispatchEvent(new StorageInspectorUpdateEvent(this.#inspectorState));
+    this.#storageTelemetry.processCommand(command);
   };
 
   #onTelemetry = (event: Event) => {

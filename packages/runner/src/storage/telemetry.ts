@@ -1,5 +1,5 @@
 import type { RuntimeTelemetry } from "../telemetry.ts";
-import type * as Inspector from "./inspector.ts";
+import * as Inspector from "./inspector.ts";
 
 /**
  * StorageTelemetry bridges storage inspector operations with the RuntimeTelemetry system.
@@ -17,24 +17,47 @@ export class StorageTelemetry {
   }
 
   /**
-   * Track storage state changes through telemetry events.
-   * Compares before and after states to detect changes and emit appropriate events.
+   * Process an inspector command directly and emit appropriate telemetry events.
+   * Maintains internal state to track changes.
    */
-  trackStateChange(
+  processCommand(command: Inspector.BroadcastCommand) {
+    // Update our internal model with the command
+    const before = {
+      connection: this.previousConnection ||
+        { pending: { ok: { attempt: 0 } }, time: Date.now() },
+      push: this.previousPush,
+      pull: this.previousPull,
+      subscriptions: this.previousSubscriptions,
+    };
+
+    const after = Inspector.update(before as Inspector.Model, command);
+
+    // Track state changes
+    this.trackStateChange(before as Inspector.Model, after, command);
+
+    // Update our cached state
+    this.previousConnection = after.connection;
+    this.previousPush = after.push;
+    this.previousPull = after.pull;
+    this.previousSubscriptions = after.subscriptions;
+  }
+
+  private trackStateChange(
     before: Inspector.Model,
     after: Inspector.Model,
-    command: Inspector.BroadcastCommand
+    command: Inspector.BroadcastCommand,
   ) {
     if (
       JSON.stringify(before.connection) !== JSON.stringify(after.connection)
     ) {
-      const status: "pending" | "ok" | "error" = 
-        after.connection.ready?.ok ? "ok" :
-        after.connection.ready?.error ? "error" :
-        "pending";
-      
+      const status: "pending" | "ok" | "error" = after.connection.ready?.ok
+        ? "ok"
+        : after.connection.ready?.error
+        ? "error"
+        : "pending";
+
       const attempt = after.connection.pending?.ok?.attempt ?? 0;
-      
+
       this.telemetry.submit({
         type: "storage.connection.update",
         status,
@@ -49,7 +72,7 @@ export class StorageTelemetry {
     if (command.send) {
       const [id] = Object.keys(command.send.authorization.access);
       const url = `job:${id}`;
-      
+
       this.telemetry.submit({
         type: "storage.push.start",
         id: url,
@@ -60,7 +83,7 @@ export class StorageTelemetry {
 
   private trackPushChanges(
     before: Inspector.PushState,
-    after: Inspector.PushState
+    after: Inspector.PushState,
   ) {
     for (const [id, state] of Object.entries(after)) {
       if (!before[id]) {
@@ -101,7 +124,7 @@ export class StorageTelemetry {
 
   private trackPullChanges(
     before: Inspector.PullState,
-    after: Inspector.PullState
+    after: Inspector.PullState,
   ) {
     for (const [id, state] of Object.entries(after)) {
       if (!before[id]) {
@@ -142,7 +165,7 @@ export class StorageTelemetry {
 
   private trackSubscriptionChanges(
     before: Record<string, any>,
-    after: Record<string, any>
+    after: Record<string, any>,
   ) {
     for (const id of Object.keys(after)) {
       if (!before[id]) {
