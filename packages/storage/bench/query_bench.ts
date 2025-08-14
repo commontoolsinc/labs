@@ -160,14 +160,14 @@ async function seedVDOM(nodes: number, maxChildren: number) {
     for (let k = 0; k < fanout; k++) {
       const j = i + 1 + Math.floor(rnd() * Math.max(1, nodes - i - 1));
       if (j >= nodes) break;
-      children[i].push(j);
+      children[i]!.push(j);
     }
   }
   // Create docs: vdom:0..N-1, each doc is a VNode at root with children as links to other docs' roots
   for (let i = 0; i < nodes; i++) {
     const docId = `vdom:${i}`;
     const tag = TAGS[Math.floor(rnd() * TAGS.length)];
-    const kidLinks = children[i].map((j) => link(`vdom:${j}`, []));
+    const kidLinks = children[i]!.map((j) => link(`vdom:${j}`, []));
     await seedDoc(docId, (d: any) => {
       // Put VNode at document root so links can target "" path
       d.tag = tag;

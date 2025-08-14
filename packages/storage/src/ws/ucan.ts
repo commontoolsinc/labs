@@ -33,7 +33,7 @@ export type VerifiedUcan = {
 export function parseAuthHeader(authHeader?: string): string | null {
   if (!authHeader) return null;
   const [scheme, token] = authHeader.split(" ", 2);
-  if (!token || !/^Bearer$/i.test(scheme)) return null;
+  if (!token || !/^Bearer$/i.test(scheme ?? "")) return null;
   return token.trim();
 }
 

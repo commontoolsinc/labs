@@ -60,18 +60,9 @@ export interface TxDocResult {
 
 export interface TxReceipt {
   txId: number;
+  committedAt: string;
   results: ReadonlyArray<TxDocResult>;
   conflicts: ReadonlyArray<TxDocResult>;
-  digests: {
-    baseHeadsRoot?: string;
-    changesRoot?: string;
-    changeCount: number;
-  };
-  stubCrypto: {
-    prevTxHash: string;
-    txBodyHash: string;
-    txHash: string;
-  };
 }
 
 export interface TxProcessorOptions {
@@ -80,7 +71,10 @@ export interface TxProcessorOptions {
   invariantHooks?: never;
 }
 
-export function createTxProcessor(db: Database, _opts?: TxProcessorOptions) {
+export function createTxProcessor(
+  db: Database,
+  _opts?: TxProcessorOptions,
+): { submitTx(req: TxRequest): Promise<TxReceipt> } {
   return { submitTx: (req: TxRequest) => submitTx(db, req) };
 }
 
@@ -158,12 +152,7 @@ export async function submitTx(
   try {
     // Pre-resolve and/or create branches
     const resolvedReads = req.reads.map((r) => {
-      const state = getBranchState(
-        db,
-        r.docId as any ?? (r as any).docId,
-        (r as any).branch ?? (r as any).branch,
-      );
-      // r is already a ReadEntry in internal shape when called via provider mapping
+      const state = getBranchState(db, r.docId, r.branch);
       return { ...r, branchId: state.branchId } as ReadEntry;
     });
     const resolvedWrites = await Promise.all(req.writes.map(async (w) => {
@@ -455,36 +444,38 @@ export async function submitTx(
     // Success path: commit entire tx atomically (all-or-nothing for multi-doc)
     db.exec("COMMIT;");
 
-    const receipt: any = {
+    const receipt: TxReceipt = {
       txId,
       committedAt: new Date().toISOString(),
       results,
       conflicts: results.filter((r) => r.status !== "ok"),
-    } as any;
+    };
     return receipt;
   } catch (err) {
     // Failure path: roll back entire tx (all-or-nothing)
     db.exec("ROLLBACK;");
     if (err instanceof TxAbortError) {
       const conflicts = err.results.filter((r) => r.status !== "ok");
-      return {
+      const receipt: TxReceipt = {
         txId: 0,
         committedAt: new Date().toISOString(),
         results: err.results,
         conflicts,
-      } as any;
+      };
+      return receipt;
     }
     if (err instanceof ReadConflictError) {
-      const receipt: any = {
+      const receipt: TxReceipt = {
         txId: 0,
         committedAt: new Date().toISOString(),
         results: [],
         conflicts: [{
-          ref: { docId: err.docId, branch: err.branch },
+          docId: err.docId,
+          branch: err.branch,
           status: "conflict",
           reason: "read conflict",
         }],
-      } as any;
+      };
       return receipt;
     }
     throw err;

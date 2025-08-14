@@ -296,7 +296,7 @@ export class Evaluator {
               const childPath = child(effPath, String(i));
               readLink(effDoc, childPath);
               const childKey: EvalKey = {
-                ir: ir.tuple[i],
+                ir: ir.tuple[i]!,
                 doc: effDoc,
                 path: childPath,
               };
