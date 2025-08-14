@@ -1,31 +1,32 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { describe, it } from "@std/testing/bdd";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import "../src/globals.ts";
 import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
-const { API_URL, FRONTEND_URL } = env;
+const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 
 describe("shell charm tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  it("can view and interact with a charm", async () => {
-    const page = shell.page();
-    const identity = await Identity.generate({ implementation: "noble" });
-    const spaceName = globalThis.crypto.randomUUID();
+  let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
-    const charmId = await registerCharm({
-      spaceName: spaceName,
+  beforeAll(async () => {
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
@@ -35,11 +36,19 @@ describe("shell charm tests", () => {
           "counter.tsx",
         ),
       ),
-    });
+    );
+    charmId = charm.id;
+  });
 
+  afterAll(async () => {
+    if (cc) await cc.dispose();
+  });
+
+  it("can view and interact with a charm", async () => {
+    const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
-      spaceName,
+      spaceName: SPACE_NAME,
       charmId,
       identity,
     });

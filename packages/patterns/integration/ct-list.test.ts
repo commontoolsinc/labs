@@ -1,13 +1,11 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { beforeAll, describe, it } from "@std/testing/bdd";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -17,23 +15,29 @@ describe("ct-list integration test", () => {
 
   let charmId: string;
   let identity: Identity;
+  let cc: CharmsController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
-
-    // Register the ct-list charm once for all tests
-    charmId = await registerCharm({
+    cc = await CharmsController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
           "ct-list.tsx",
         ),
       ),
-    });
+    );
+    charmId = charm.id;
+  });
+
+  afterAll(async () => {
+    if (cc) await cc.dispose();
   });
 
   it("should load the ct-list charm", async () => {

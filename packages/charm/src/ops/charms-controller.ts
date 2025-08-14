@@ -1,7 +1,9 @@
-import { RuntimeProgram } from "@commontools/runner";
+import { Runtime, RuntimeProgram } from "@commontools/runner";
+import { StorageManager } from "@commontools/runner/storage/cache";
 import { CharmManager } from "../index.ts";
 import { CharmController } from "./charm-controller.ts";
 import { compileProgram } from "./utils.ts";
+import { ANYONE, Identity } from "@commontools/identity";
 
 export class CharmsController {
   #manager: CharmManager;
@@ -66,5 +68,34 @@ export class CharmsController {
     if (this.#disposed) {
       throw new Error("CharmsController has been disposed.");
     }
+  }
+
+  static async initialize({ apiUrl, identity, spaceName }: {
+    apiUrl: URL;
+    identity: Identity;
+    spaceName: string;
+  }): Promise<CharmsController> {
+    const account = spaceName.startsWith("~")
+      ? identity
+      : await Identity.fromPassphrase(ANYONE);
+    const user = await account.derive(spaceName);
+    const session = {
+      private: account.did() === identity.did(),
+      name: spaceName,
+      space: user.did(),
+      as: user,
+    };
+
+    const runtime = new Runtime({
+      storageManager: StorageManager.open({
+        as: session.as,
+        address: new URL("/api/storage/memory", apiUrl),
+      }),
+      blobbyServerUrl: apiUrl.toString(),
+    });
+
+    const manager = new CharmManager(session, runtime);
+    await manager.synced();
+    return new CharmsController(manager);
   }
 }

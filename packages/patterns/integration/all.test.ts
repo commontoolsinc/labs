@@ -1,6 +1,6 @@
 import { env } from "@commontools/integration";
-import { registerCharm } from "@commontools/integration/shell-utils";
-import { describe, it } from "@std/testing/bdd";
+import { CharmsController } from "@commontools/charm/ops";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert } from "@std/assert";
 import { Identity } from "@commontools/identity";
@@ -12,21 +12,33 @@ describe("Compile all recipes", () => {
     const { name } = file;
     if (!name.endsWith(".tsx")) continue;
 
-    it(`Executes: ${name}`, async () => {
-      const identity = await Identity.generate();
-      const charmId = await registerCharm({
+    let cc: CharmsController;
+    let identity: Identity;
+
+    beforeAll(async () => {
+      identity = await Identity.generate();
+      cc = await CharmsController.initialize({
         spaceName: SPACE_NAME,
         apiUrl: new URL(API_URL),
         identity: identity,
-        source: await Deno.readTextFile(
+      });
+    });
+
+    afterAll(async () => {
+      if (cc) await cc.dispose();
+    });
+
+    it(`Executes: ${name}`, async () => {
+      const charm = await cc!.create(
+        await Deno.readTextFile(
           join(
             import.meta.dirname!,
             "..",
             name,
           ),
         ),
-      });
-      assert(charmId, `Received charm ID for ${name}.`);
+      );
+      assert(charm.id, `Received charm ID ${charm.id} for ${name}.`);
     });
   }
 });
