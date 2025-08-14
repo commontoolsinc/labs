@@ -785,7 +785,9 @@ export class XDebuggerView extends LitElement {
     );
   }
 
-  private renderEventDetails(marker: RuntimeTelemetryMarkerResult): TemplateResult[] {
+  private renderEventDetails(
+    marker: RuntimeTelemetryMarkerResult,
+  ): TemplateResult[] {
     const details = [];
 
     // Extract key-value pairs from the marker (excluding type and timeStamp)

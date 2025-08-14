@@ -9,6 +9,8 @@ import {
   AnnotatedEventHandler,
   EventHandler,
 } from "./scheduler.ts";
+import { StorageTelemetry } from "./storage/telemetry.ts";
+import type * as Inspector from "./storage/inspector.ts";
 
 // Types of markers that can be submitted by the runtime.
 export type RuntimeTelemetryMarker = {
@@ -27,6 +29,7 @@ export type RuntimeTelemetryMarker = {
   type: "storage.push.start";
   id: string;
   operation: string;
+  error?: string;
 } | {
   type: "storage.push.complete";
   id: string;
@@ -39,6 +42,7 @@ export type RuntimeTelemetryMarker = {
   type: "storage.pull.start";
   id: string;
   operation: string;
+  error?: string;
 } | {
   type: "storage.pull.complete";
   id: string;
@@ -51,12 +55,15 @@ export type RuntimeTelemetryMarker = {
   type: "storage.connection.update";
   status: "pending" | "ok" | "error";
   attempt: number;
+  error?: string;
 } | {
   type: "storage.subscription.add";
   id: string;
+  error?: string;
 } | {
   type: "storage.subscription.remove";
   id: string;
+  error?: string;
 };
 
 export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {
@@ -78,7 +85,18 @@ export class RuntimeTelemetryEvent
 }
 
 export class RuntimeTelemetry extends EventTarget {
+  #storageTelemetry: StorageTelemetry;
+
+  constructor() {
+    super();
+    this.#storageTelemetry = new StorageTelemetry(this);
+  }
+
   submit(marker: RuntimeTelemetryMarker) {
     this.dispatchEvent(new RuntimeTelemetryEvent(marker));
+  }
+
+  processInspectorCommand(command: Inspector.BroadcastCommand) {
+    this.#storageTelemetry.processCommand(command);
   }
 }
