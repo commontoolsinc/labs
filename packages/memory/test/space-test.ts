@@ -549,6 +549,9 @@ test("concurrent identical memory updates succeed", DB, async (session) => {
   });
 });
 
+// TODO(@ubik2): This isn't really valid, since this is redundant.
+// A retrected unclaimed is also unclaimed, but it adds another entry to the
+// cause chain despite the data not changing.
 test("retract unclaimed", DB, async (session) => {
   const v0 = Fact.unclaimed({ the, of: doc });
   const retract = Transaction.create({
