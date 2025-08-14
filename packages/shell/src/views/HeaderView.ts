@@ -4,10 +4,6 @@ import { KeyStore } from "@commontools/identity";
 import { BaseView } from "./BaseView.ts";
 import { Task } from "@lit/task";
 import { RuntimeInternals } from "../lib/runtime.ts";
-import {
-  StorageInspectorConflicts,
-  StorageInspectorUpdateEvent,
-} from "../lib/storage-inspector.ts";
 import "../components/Flex.ts";
 
 type ConnectionStatus =
@@ -104,50 +100,13 @@ export class XHeaderView extends BaseView {
   @property({ attribute: false })
   isLoggedIn = false;
 
-  @state()
-  private _conflicts?: StorageInspectorConflicts;
 
   @property()
   showShellCharmListView = false;
 
   @property()
-  showInspectorView = false;
+  showDebuggerView = false;
 
-  private _inspectorListener = new Task(this, {
-    args: () => [this.rt],
-    task: ([rt]) => {
-      if (this._inspectorListener.value) {
-        this._inspectorListener.value.removeEventListener(
-          "inspectorupdate",
-          this.#onInspectorUpdate,
-        );
-      }
-      if (rt) {
-        rt.addEventListener("inspectorupdate", this.#onInspectorUpdate);
-      }
-      return rt;
-    },
-  });
-
-  override connectedCallback() {
-    super.connectedCallback();
-    if (this._inspectorListener.value) {
-      this._inspectorListener.value.addEventListener(
-        "inspectorupdate",
-        this.#onInspectorUpdate,
-      );
-    }
-  }
-
-  override disconnectedCallback() {
-    if (this._inspectorListener.value) {
-      this._inspectorListener.value.removeEventListener(
-        "inspectorupdate",
-        this.#onInspectorUpdate,
-      );
-    }
-    super.disconnectedCallback();
-  }
 
   private handleAuthClick(e: Event) {
     e.preventDefault();
@@ -169,26 +128,19 @@ export class XHeaderView extends BaseView {
     });
   }
 
-  private handleInspectorToggleClick(e: Event) {
+  private handleDebuggerToggleClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.command({
-      type: "set-show-inspector-view",
-      show: !this.showInspectorView,
+      type: "set-show-debugger-view",
+      show: !this.showDebuggerView,
     });
   }
 
   private getConnectionStatus(): ConnectionStatus {
-    if (this._conflicts) {
-      return "conflict";
-    }
     return this.rt ? "connected" : "disconnected";
   }
 
-  #onInspectorUpdate = (e: Event) => {
-    this._conflicts = (e as StorageInspectorUpdateEvent).detail.model
-      .getErrors();
-  };
 
   override render() {
     const spaceLink = this.spaceName
@@ -236,12 +188,12 @@ export class XHeaderView extends BaseView {
             <x-button
               class="emoji-button"
               size="small"
-              @click="${this.handleInspectorToggleClick}"
-              title="${this.showInspectorView
-            ? "Hide Inspector"
-            : "Show Inspector"}"
+              @click="${this.handleDebuggerToggleClick}"
+              title="${this.showDebuggerView
+            ? "Hide Debugger"
+            : "Show Debugger"}"
             >
-              ${this.showInspectorView ? "🔧" : "🛠️"}
+              ${this.showDebuggerView ? "🐛" : "🪲"}
             </x-button>
             <x-button
               class="auth-button"

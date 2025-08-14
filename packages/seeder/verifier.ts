@@ -3,7 +3,8 @@ import { z } from "zod";
 import { CharmResult } from "./interfaces.ts";
 import { sleep } from "@commontools/utils/sleep";
 import { Browser, Page, pipeConsole } from "@commontools/integration";
-import { login } from "@commontools/integration/jumble";
+import { Identity } from "@commontools/identity";
+import { login } from "@commontools/integration/shell-utils";
 
 const model = openai("gpt-4o-mini");
 
@@ -11,19 +12,21 @@ export class Verifier {
   private browser: Browser;
   private page: Page;
   private apiUrl: string;
+  private identity: Identity;
 
   private constructor(
-    { browser, page, apiUrl }: { browser: Browser; page: Page; apiUrl: string },
+    { browser, page, apiUrl, identity }: { browser: Browser; page: Page; apiUrl: string; identity: Identity },
   ) {
     this.browser = browser;
     this.page = page;
     this.apiUrl = apiUrl;
+    this.identity = identity;
 
     page.addEventListener("console", pipeConsole);
   }
 
   static async initialize(
-    { headless, apiUrl }: { headless: boolean; apiUrl: string },
+    { headless, apiUrl, identity }: { headless: boolean; apiUrl: string; identity: Identity },
   ) {
     const browser = await Browser.launch({
       headless,
@@ -31,7 +34,7 @@ export class Verifier {
     });
     try {
       const page = await browser.newPage();
-      return new Verifier({ browser, page, apiUrl });
+      return new Verifier({ browser, page, apiUrl, identity });
     } catch (e) {
       await browser.close();
       throw e;
@@ -46,7 +49,7 @@ export class Verifier {
     await this.page.applyConsoleFormatter();
     await sleep(1000);
     await addErrorListeners(this.page);
-    await login(this.page);
+    await login(this.page, this.identity);
 
     // FIXME(ja): perhaps charm can emit a "ready" event and we can wait for it?
     await sleep(10000);

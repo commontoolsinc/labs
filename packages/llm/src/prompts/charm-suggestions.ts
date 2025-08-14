@@ -94,7 +94,7 @@ export async function generateCharmSuggestions(
   const optionsWithDefaults = applyDefaults(options);
   const { model, cache, space, generationId } = optionsWithDefaults;
 
-  // FIXME(jake): Currently in jumble, whenever we iterate, we are overwriting
+  // FIXME(jake): Currently, whenever we iterate, we are overwriting
   // the entire spec, so we lose context of the original spec.
   //
   // To work around this, we we first generate a description of the charm, and
