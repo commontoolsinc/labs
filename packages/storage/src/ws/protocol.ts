@@ -67,7 +67,15 @@ export type Complete = {
 };
 
 // Command-specific invocations
-export type GetArgs = { query?: Record<string, unknown>; consumerId: string };
+import type { JsonSchema } from "../query/ir.ts";
+
+export type QueryArgs = {
+  docId: string;
+  schema?: JsonSchema;
+  path?: string[];
+};
+
+export type GetArgs = { query?: QueryArgs; consumerId: string };
 
 export type StorageGet = Invocation<"/storage/get", DID, GetArgs>;
 export type StorageSubscribe = Invocation<"/storage/subscribe", DID, GetArgs>;

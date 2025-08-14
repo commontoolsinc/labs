@@ -13,11 +13,11 @@ import type { Path, Version } from "../types.ts";
 import { getAtPath as getAtJsonPath } from "../json/path.ts";
 import { isJsonCacheDisabled } from "../config.ts";
 
-function isObject(x: any): x is Record<string, any> {
+function isObject(x: unknown): x is Record<string, unknown> {
   return x !== null && typeof x === "object" && !Array.isArray(x);
 }
 
-function getAtPath(doc: any, path: Path): any {
+function getAtPath(doc: unknown, path: Path): unknown {
   return getAtJsonPath(doc, path);
 }
 
@@ -41,7 +41,7 @@ export class SqliteStorageReader implements Reader {
     // Fast path: if reading current tip (no historical epoch), use json_cache
     const cacheDisabled = isJsonCacheDisabled();
     if (at?.epoch == null && !cacheDisabled) {
-      const { selectJsonCache } = getPrepared(this.db as any);
+      const { selectJsonCache } = getPrepared(this.db);
       const row = selectJsonCache.get({ doc_id: docId, branch_id: branchId }) as
         | { json: string; seq_no: number }
         | undefined;
@@ -80,7 +80,7 @@ export class SqliteStorageReader implements Reader {
     at: Version,
   ): { version: Version; doc: unknown } {
     const { branchId, seq } = this.resolve(docId, at);
-    let json: any;
+    let json: unknown;
     const cacheDisabled = isJsonCacheDisabled();
     if (at?.epoch == null && !cacheDisabled) {
       const row = this.db.prepare(

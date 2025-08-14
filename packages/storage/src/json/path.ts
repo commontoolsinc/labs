@@ -2,29 +2,29 @@
 
 export type JsonPath = string[];
 
-export function getAtPath(root: any, path: JsonPath): any {
-  let cur = root;
+export function getAtPath(root: unknown, path: JsonPath): unknown {
+  let cur: unknown = root;
   for (const key of path) {
     if (cur == null) return undefined;
     if (typeof cur !== "object") return undefined;
-    cur = (cur as any)[key];
+    cur = (cur as Record<string, unknown>)[key];
   }
   return cur;
 }
 
-export function setAtPath(root: any, path: JsonPath, value: any): void {
-  let cur = root;
+export function setAtPath(root: unknown, path: JsonPath, value: unknown): void {
+  let cur: unknown = root;
   for (let i = 0; i < path.length; i++) {
     const key = path[i]!;
     const last = i === path.length - 1;
     if (last) {
-      (cur as any)[key] = value;
+      (cur as Record<string, unknown>)[key] = value as unknown as never;
     } else {
-      const next = (cur as any)[key];
+      const next = (cur as Record<string, unknown>)[key];
       if (next == null || typeof next !== "object") {
-        (cur as any)[key] = {};
+        (cur as Record<string, unknown>)[key] = {} as unknown as never;
       }
-      cur = (cur as any)[key];
+      cur = (cur as Record<string, unknown>)[key];
     }
   }
 }
