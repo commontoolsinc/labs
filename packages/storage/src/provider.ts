@@ -31,6 +31,10 @@ import { closeBranch } from "./store/branches.ts";
 import { updateHeads as updateHeadsShared } from "./store/heads.ts";
 import { createStubTx } from "./store/tx_chain.ts";
 import { submitTx as submitTxInternal } from "./store/tx.ts";
+import type {
+  TxReceipt as SqliteTxReceipt,
+  TxRequest as SqliteTxRequest,
+} from "./store/tx.ts";
 import { project } from "./store/projection.ts";
 
 export interface SQLiteSpaceOptions {
@@ -67,12 +71,12 @@ class SQLiteSpace implements SpaceStorage {
       const db = this.handle.db;
 
       // Translate public TxRequest → internal sqlite/tx TxRequest
-      const reads = (req.reads ?? []).map((r) => ({
+      const reads: SqliteTxRequest["reads"] = (req.reads ?? []).map((r) => ({
         docId: r.ref.docId,
         branch: r.ref.branch,
         heads: r.heads,
       }));
-      const writes = req.writes.map((w) => ({
+      const writes: SqliteTxRequest["writes"] = req.writes.map((w) => ({
         docId: w.ref.docId,
         branch: w.ref.branch,
         baseHeads: w.baseHeads,
@@ -80,7 +84,10 @@ class SQLiteSpace implements SpaceStorage {
         allowServerMerge: w.allowServerMerge ?? isServerMergeEnabled(db),
       }));
 
-      const receipt = await submitTxInternal(db, { reads, writes } as any);
+      const receipt: SqliteTxReceipt = await submitTxInternal(db, {
+        reads,
+        writes,
+      });
 
       // Map internal receipt → public receipt shape
       const results: TxDocResult[] = receipt.results.map((r: any) => ({
