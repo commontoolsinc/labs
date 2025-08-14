@@ -1,20 +1,16 @@
 /// <cts-enable />
 import { JSONSchema, recipe } from "commontools";
-
-// NOTE: This expected output is currently a PLACEHOLDER.
-// The actual test causes a stack overflow due to a bug with nested recursive types.
-// Once the bug is fixed, this file should be updated with the actual expected
-// transformation output.
-
+// NOTE: The expected output for this test is currently a placeholder.
+// This test demonstrates a stack overflow bug when recursive types are
+// nested inside other types. Once the bug is fixed, the expected output
+// should be updated with the actual transformation result.
 interface LinkedList {
     value: number;
     next?: LinkedList;
 }
-
 interface RootType {
     list: LinkedList;
 }
-
 const rootTypeSchema = {
     $ref: "#/definitions/RootType",
     $schema: "http://json-schema.org/draft-07/schema#",
@@ -43,7 +39,6 @@ const rootTypeSchema = {
     }
 } as const satisfies JSONSchema;
 export { rootTypeSchema };
-
 // Add a recipe export for ct dev testing
 export default recipe("Nested Recursive Type Test", () => {
     return {
