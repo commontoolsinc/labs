@@ -55,6 +55,7 @@ export class StaticCache {
     if (!assets.includes(assetName)) {
       throw new Error(`No static asset "${assetName}" found.`);
     }
+
     const url = this.getBaseUrl();
     url.pathname = join(url.pathname, assetName);
     return url;
