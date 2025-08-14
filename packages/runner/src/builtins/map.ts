@@ -127,7 +127,7 @@ export function map(
 
     // Shorten the result if the list got shorter
     if (resultWithLog.get().length > list.length) {
-      resultWithLog.key("length").set(list.length);
+      resultWithLog.set(resultWithLog.get().slice(0, list.length));
       initializedUpTo = list.length;
     }
 
