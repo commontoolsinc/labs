@@ -45,6 +45,12 @@ const VERIFY = (() => {
   const v = (Deno.env.get("BENCH_TX_VERIFY") ?? "0").toLowerCase();
   return v === "1" || v === "true" || v === "yes" || v === "on";
 })();
+// Optional: force-enable server merge globally for this run
+(() => {
+  const v = (Deno.env.get("BENCH_TX_ENABLE_SERVER_MERGE") ?? "").toLowerCase();
+  const on = v === "1" || v === "true" || v === "yes" || v === "on";
+  if (on) Deno.env.set("ENABLE_SERVER_MERGE", "1");
+})();
 
 type Space = Awaited<ReturnType<typeof openSpaceStorage>>;
 
@@ -112,9 +118,20 @@ async function submitSingleChange(
       ref: { docId, branch: "main" },
       baseHeads: Automerge.getHeads(base),
       changes: [{ bytes: c }],
+      allowServerMerge: true,
     }],
   });
   const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+  if (!ok && VERIFY) {
+    try {
+      console.error(
+        "submitSingleChange failed",
+        JSON.stringify(rec.results[0] ?? rec, null, 2),
+      );
+    } catch {
+      // ignore logging failures
+    }
+  }
   return { ok, updated: ok ? updated : cur };
 }
 
@@ -139,9 +156,20 @@ async function submitBatchChanges(
       ref: { docId, branch: "main" },
       baseHeads,
       changes,
+      allowServerMerge: true,
     }],
   });
   const ok = rec.results.length > 0 && rec.results[0].status === "ok";
+  if (!ok && VERIFY) {
+    try {
+      console.error(
+        "submitBatchChanges failed",
+        JSON.stringify(rec.results[0] ?? rec, null, 2),
+      );
+    } catch {
+      // ignore
+    }
+  }
   return { ok, updated: ok ? rolling : cur, produced: changes.length };
 }
 
@@ -188,12 +216,7 @@ async function scenarioSingleDocSeparateTx(): Promise<number> {
   const space = await createSpace("single-separate");
   const docId = `single:separate`;
   await ensureDoc(space, docId);
-  let cur = Automerge.change(
-    createGenesisDoc<any>(docId, actorForDoc(docId)),
-    (x: any) => {
-      x.count = 0;
-    },
-  );
+  let cur = createGenesisDoc<any>(docId, actorForDoc(docId));
   let applied = 0;
   for (let i = 0; i < CHANGES; i++) {
     const res = await submitSingleChange(space, docId, cur, pickChangeFn(cur));
@@ -214,12 +237,7 @@ async function scenarioSingleDocBatchTx(): Promise<number> {
   const space = await createSpace("single-batch");
   const docId = `single:batch`;
   await ensureDoc(space, docId);
-  let cur = Automerge.change(
-    createGenesisDoc<any>(docId, actorForDoc(docId)),
-    (x: any) => {
-      x.count = 0;
-    },
-  );
+  let cur = createGenesisDoc<any>(docId, actorForDoc(docId));
   let applied = 0;
   let remaining = CHANGES;
   while (remaining > 0) {
@@ -245,13 +263,7 @@ async function scenarioMultiDocMultiWriteTx(): Promise<number> {
   for (let i = 0; i < MULTI_DOCS; i++) {
     const docId = `multi:${i}`;
     await ensureDoc(space, docId);
-    const cur = Automerge.change(
-      createGenesisDoc<any>(docId, actorForDoc(docId)),
-      (x: any) => {
-        x.seed = i;
-        x.count = 0;
-      },
-    );
+    const cur = createGenesisDoc<any>(docId, actorForDoc(docId));
     docs.push({ id: docId, cur });
   }
   const writes = docs.map(({ id, cur }) => {
@@ -264,7 +276,12 @@ async function scenarioMultiDocMultiWriteTx(): Promise<number> {
       const ch = Automerge.getLastLocalChange(rolling);
       if (ch) changes.push({ bytes: ch });
     }
-    return { ref: { docId: id, branch: "main" }, baseHeads, changes } as const;
+    return {
+      ref: { docId: id, branch: "main" },
+      baseHeads,
+      changes,
+      allowServerMerge: true,
+    } as const;
   });
   const rec = await space.submitTx({ reads: [], writes: writes as any });
   const ok = rec.results.every((r) => r.status === "ok");
@@ -288,19 +305,18 @@ async function scenarioConcurrentSmallTxs(): Promise<number> {
   }
   // Keep a map of current states per doc
   const curByDoc = new Map<string, Automerge.Doc<any>>(
-    docs.map((id) => [
-      id,
-      Automerge.change(createGenesisDoc<any>(id, actorForDoc(id)), (x: any) => {
-        x.count = 0;
-      }),
-    ]),
+    docs.map((id) => [id, createGenesisDoc<any>(id, actorForDoc(id))]),
   );
   let remaining = total;
   while (remaining > 0) {
     const inFlight = Math.min(CONCURRENCY, remaining);
+    // Select unique docs for this batch to avoid parallel writes to same doc
+    const chosen = new Set<string>();
+    while (chosen.size < inFlight) {
+      chosen.add(docs[randomInt(docs.length)]);
+    }
     const promises: Promise<void>[] = [];
-    for (let i = 0; i < inFlight; i++) {
-      const docId = docs[randomInt(docs.length)];
+    for (const docId of chosen) {
       const cur = curByDoc.get(docId)!;
       promises.push((async () => {
         const res = await submitSingleChange(
@@ -312,6 +328,9 @@ async function scenarioConcurrentSmallTxs(): Promise<number> {
         if (res.ok) {
           curByDoc.set(docId, res.updated);
           applied += 1;
+        } else if (VERIFY) {
+          // surface failure early in verify mode
+          throw new Error(`concurrent batch tx failed for ${docId}`);
         }
       })());
     }
@@ -321,6 +340,43 @@ async function scenarioConcurrentSmallTxs(): Promise<number> {
   (space as any)?.close?.();
   if (VERIFY && applied !== total) {
     throw new Error(`applied=${applied} != total=${total}`);
+  }
+  return applied;
+}
+
+// Scenario 6: Random docs, sequential small txs (no concurrency)
+async function scenarioRandomDocsSeparateTx(
+  changeCount: number,
+): Promise<number> {
+  const space = await createSpace("random-docs-separate");
+  const docPool = DOCS;
+  const docIds: string[] = [];
+  for (let i = 0; i < docPool; i++) {
+    const docId = `rand:${i}`;
+    await ensureDoc(space, docId);
+    docIds.push(docId);
+  }
+  const curByDoc = new Map<string, Automerge.Doc<any>>(
+    docIds.map((id) => [
+      id,
+      createGenesisDoc<any>(id, actorForDoc(id)),
+    ]),
+  );
+  let applied = 0;
+  for (let t = 0; t < changeCount; t++) {
+    const docId = docIds[randomInt(docIds.length)];
+    const cur = curByDoc.get(docId)!;
+    const res = await submitSingleChange(space, docId, cur, pickChangeFn(cur));
+    if (res.ok) {
+      curByDoc.set(docId, res.updated);
+      applied += 1;
+    } else if (VERIFY) {
+      throw new Error(`tx failed for ${docId} at t=${t}`);
+    }
+  }
+  (space as any)?.close?.();
+  if (VERIFY && applied !== changeCount) {
+    throw new Error(`applied=${applied} != changes=${changeCount}`);
   }
   return applied;
 }
@@ -361,6 +417,13 @@ function registerBenches() {
   }, async () => {
     await scenarioConcurrentSmallTxs();
   });
+  Deno.bench({
+    name: `tx: random docs separate (docs ${DOCS}, changes ${CHANGES})`,
+    group: "tx",
+    n: 1,
+  }, async () => {
+    await scenarioRandomDocsSeparateTx(CHANGES);
+  });
 }
 
 // Standalone run mode
@@ -373,6 +436,7 @@ async function runStandalone() {
     single_doc_batch: scenarioSingleDocBatchTx,
     multi_doc_multi_write: scenarioMultiDocMultiWriteTx,
     concurrent_small: scenarioConcurrentSmallTxs,
+    random_docs_separate: () => scenarioRandomDocsSeparateTx(CHANGES),
   };
 
   async function runOne(name: string, fn: () => Promise<number>) {
@@ -392,8 +456,26 @@ async function runStandalone() {
     await runOne("single_doc_batch", scenarioSingleDocBatchTx);
     await runOne("multi_doc_multi_write", scenarioMultiDocMultiWriteTx);
     await runOne("concurrent_small", scenarioConcurrentSmallTxs);
+    await runOne(
+      "random_docs_separate",
+      () => scenarioRandomDocsSeparateTx(CHANGES),
+    );
   } else if (scenario in cases) {
-    await runOne(scenario, cases[scenario]);
+    // Sweep support: BENCH_TX_SWEEP as comma-separated change counts
+    const sweep = Deno.env.get("BENCH_TX_SWEEP");
+    if (sweep && scenario === "random_docs_separate") {
+      const values = sweep.split(",").map((s) => Number(s.trim())).filter((n) =>
+        Number.isFinite(n) && n > 0
+      );
+      for (const v of values) {
+        await runOne(
+          `${scenario}[changes=${v}]`,
+          () => scenarioRandomDocsSeparateTx(v),
+        );
+      }
+    } else {
+      await runOne(scenario, cases[scenario]);
+    }
   } else {
     console.error(
       `Unknown BENCH_TX_SCENARIO='${scenario}'. Expected one of: all, ${
