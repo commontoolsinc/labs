@@ -25,9 +25,10 @@ type ListItem = {
 declare global {
   namespace JSX {
     interface Element {
-      type: string;
+      type: "vnode";
+      name: string;
       props: any;
-      children?: Children;
+      children: any;
     }
 
     interface IntrinsicElements {
