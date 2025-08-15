@@ -1,14 +1,4 @@
-import type { OpaqueRef, Cell } from "commontools";
-
-type Children = JSX.Element[] | JSX.Element | string | number | boolean | null | undefined;
-
-type Child = {
-  children?: Children;
-};
-
-type Elem = {
-  id?: string
-}
+import type { OpaqueRef, Cell, VNode } from "commontools";
 
 type HandlerEvent<T> = {
   detail: T,
@@ -28,13 +18,13 @@ type CtListItem = {
   done?: boolean
 }
 
+type HTMLElementProps = {
+  id?: string,
+}
+
 declare global {
   namespace JSX {
-    interface Element {
-      type: string;
-      props: any;
-      children?: Children;
-    }
+    interface Element extends VNode {}
 
     interface IntrinsicElements {
       [elemName: string]: any;
@@ -42,7 +32,7 @@ declare global {
         "$value": OpaqueRef<Cell<{ root: OutlinerNode }>>,
         "$mentionable"?: OpaqueRef<Cell<Charm[]>>,
         "oncharm-link-click"?: OpaqueRef<HandlerEvent<{ charm: Cell<Charm> }>>,
-      } & Child & Elem;
+      } & HTMLElementProps;
       "ct-list": {
         "$value": OpaqueRef<CtListItem[]>,
         /** setting this allows editing items inline */
@@ -51,7 +41,7 @@ declare global {
         "readonly"?: boolean,
         "title"?: string,
         "onct-remove-item"?: OpaqueRef<HandlerEvent<{ item: CtListItem }>>,
-      } & Child & Elem;
+      } & HTMLElementProps;
       "ct-input": {
         "$value"?: OpaqueRef<string>,
         "customStyle"?: string, // bf: I think this is going to go away one day soon
@@ -87,7 +77,7 @@ declare global {
         "onct-keydown"?: any,
         "onct-submit"?: any,
         "onct-invalid"?: any,
-      } & Child & Elem;
+      } & HTMLElementProps;
     }
   }
 }
