@@ -141,6 +141,10 @@ or during load operations. The cache never stores data directly from local
 changes. If IndexedDB is unavailable, it falls back to NoCache which provides no
 persistence. This tier aims to improve startup performance.
 
+> Note: While IndexedDB provides the storage layer, queries are currently
+> performed through schema queries rather than direct IndexedDB queries. Direct
+> IndexedDB query functionality would require additional development to be useful.
+
 ## Storage - Heap
 
 The in-memory cache for the current session that stores confirmed revisions
@@ -164,8 +168,14 @@ succeeds, facts are promoted from nursery to heap. If a commit fails, facts
 are deleted from the nursery to prevent building on rejected state. The nursery
 "shadows" the heap, meaning reads check here first, and any local unconfirmed
 change will be returned even if the heap has a newer version from the server.
-Facts are evicted from the nursery when the remote server returns a matching
-state, indicating the server has caught up with the local change.
+
+Nursery eviction occurs in several scenarios:
+- When the remote server returns a matching state, indicating the server has
+  caught up with the local change
+- When conflicts occur, which will purge conflicting entries from the nursery
+- When an update arrives that matches what was expected from the server, but
+  local changes have been built on top of those changes (in this case, the
+  nursery copy is retained to preserve the local changes)
 
 ## TCB (Trusted Computing Base)
 
