@@ -1,5 +1,4 @@
 import type {
-  FactAddress,
   MemorySpace,
   Revision,
   SchemaPathSelector,
@@ -9,18 +8,18 @@ import type {
 import type { JSONObject, JSONValue } from "../builder/types.ts";
 import type { DocImpl } from "../doc.ts";
 import { entityIdStr } from "../doc-map.ts";
-import type { IMemoryAddress, StorageValue } from "./interface.ts";
+import type { StorageValue } from "./interface.ts";
 import type { IDocumentMap, IStorageProvider } from "../runtime.ts";
 import {
   type BaseMemoryAddress,
   BaseObjectManager,
   CycleTracker,
   getAtPath,
+  IAttestation,
   loadSource,
   MapSet,
   MinimalSchemaSelector,
   SchemaObjectTraverser,
-  type ValueEntry,
 } from "../traverse.ts";
 import { uriToEntityId } from "./transaction-shim.ts";
 
@@ -33,22 +32,12 @@ export abstract class ClientObjectManager
     super();
   }
 
-  override toKey(doc: BaseMemoryAddress): string {
-    return `${doc.id}/${doc.type}`;
-  }
-
-  override toAddress(str: string): BaseMemoryAddress {
-    return { id: `of:${str}`, type: "application/json" };
-  }
-
   // get the fact address for the doc pointed to by the cell target
   override getTarget(uri: URI): BaseMemoryAddress {
     return { id: uri, type: "application/json" };
   }
 
-  getReadDocs(): Iterable<
-    ValueEntry<BaseMemoryAddress, JSONValue | undefined>
-  > {
+  getReadDocs(): Iterable<IAttestation> {
     return this.readValues.values();
   }
 
@@ -68,7 +57,7 @@ export class StoreObjectManager extends ClientObjectManager {
   // Returns null if there is no matching fact
   override load(
     doc: BaseMemoryAddress,
-  ): ValueEntry<BaseMemoryAddress, JSONValue | undefined> | null {
+  ): IAttestation | null {
     const key = this.toKey(doc);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
@@ -76,7 +65,7 @@ export class StoreObjectManager extends ClientObjectManager {
     // we should only have one match
     if (this.store.has(key)) {
       const storeValue = this.store.get(key);
-      const rv = { source: doc, value: storeValue?.is };
+      const rv = { address: { path: [], ...doc }, value: storeValue?.is };
       this.readValues.set(key, rv);
       return rv;
     } else {
@@ -99,9 +88,7 @@ export class DocObjectManager extends ClientObjectManager {
   ) {
     super();
   }
-  override load(
-    doc: BaseMemoryAddress,
-  ): ValueEntry<BaseMemoryAddress, JSONValue | undefined> | null {
+  override load(doc: BaseMemoryAddress): IAttestation | null {
     const key = this.toKey(doc);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
@@ -128,8 +115,8 @@ export class DocObjectManager extends ClientObjectManager {
       if (storageValue.source !== undefined) {
         valEntryValue.source = { "/": entityIdStr(storageValue.source) };
       }
-      const rv: ValueEntry<BaseMemoryAddress, JSONValue> = {
-        source: doc,
+      const rv: IAttestation = {
+        address: { path: [], ...doc },
         value: valEntryValue,
       };
       this.readValues.set(key, rv);
@@ -144,8 +131,8 @@ export class DocObjectManager extends ClientObjectManager {
       if (storageEntry.source !== undefined) {
         valEntryValue.source = { "/": entityIdStr(storageEntry.source) };
       }
-      const rv: ValueEntry<BaseMemoryAddress, JSONValue> = {
-        source: doc,
+      const rv: IAttestation = {
+        address: { path: [], ...doc },
         value: valEntryValue,
       };
       this.readValues.set(key, rv);
@@ -166,7 +153,7 @@ export function querySchema(
   manager: ClientObjectManager,
 ): {
   missing: BaseMemoryAddress[];
-  loaded: Set<ValueEntry<BaseMemoryAddress, JSONValue | undefined>>;
+  loaded: Set<IAttestation>;
   selected: MapSet<string, SchemaPathSelector>;
 } {
   // Then filter the facts by the associated schemas, which will dereference
@@ -175,7 +162,7 @@ export function querySchema(
   const tracker = new CycleTracker<JSONValue>();
   const schemaTracker = new MapSet<string, SchemaPathSelector>();
 
-  const rv = new Set<ValueEntry<BaseMemoryAddress, JSONValue | undefined>>();
+  const rv = new Set<IAttestation>();
   const valueEntry = manager.load(factAddress);
   if (valueEntry === null) {
     // If we don't have the top document, we don't have all the documents

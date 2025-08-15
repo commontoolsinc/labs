@@ -19,11 +19,11 @@ import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import type { URI } from "./sigil-types.ts";
 import { fromURI } from "./uri-utils.ts";
-import type { IMemoryAddress } from "./storage/interface.ts";
+import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
-export type { IMemoryAddress } from "./storage/interface.ts";
+export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -135,24 +135,22 @@ export interface ObjectStorageManager<K, S, V> {
   // get the key for the doc pointed to by the cell target
   getTarget(uri: URI): K;
   // load the object for the specified key
-  load(doc: K): ValueEntry<S, V | undefined> | null;
+  load(doc: K): IAttestation | null;
 }
 
-export type ValueEntry<T, V> = {
-  value: V;
-  source: T;
+// This is very similar to the IAttestation class.
+// There's a difference where the address will not include the initial
+// "value" in the path, and the rootValue is actually the contents of the
+// "value" property of the document.
+type BaseValueAtPath = {
+  readonly address: IMemoryAddress;
+  readonly value: Immutable<JSONValue> | undefined;
 };
 
 export type BaseMemoryAddress = Omit<IMemoryAddress, "path">;
 
-// This is very similar to the IAttestation class, but with the addition of
-// the rootValue property.
-// There's also a difference where the address will not include the initial
-// "value" in the path, and the rootValue is actually the contents of the
-// "value" property of the document.
-export type ValueAtPath = {
-  readonly address: IMemoryAddress;
-  readonly value: Immutable<JSONValue> | undefined;
+// This adds the rootValue property to the BaseValueAtPath
+export type ValueAtPath = BaseValueAtPath & {
   readonly rootValue: Immutable<JSONValue> | undefined;
 };
 
@@ -164,29 +162,43 @@ export type ValueAtPath = {
 //  1. Loading objects from the DB (on the server)
 //  2. Loading objects from our memory interface (on the client)
 
-export abstract class BaseObjectManager<S extends BaseMemoryAddress, V>
-  implements ObjectStorageManager<BaseMemoryAddress, S, V> {
+export abstract class BaseObjectManager<
+  S extends BaseMemoryAddress,
+  V extends JSONValue | undefined,
+> implements ObjectStorageManager<BaseMemoryAddress, S, V> {
   constructor(
-    protected readValues = new Map<string, ValueEntry<S, V>>(),
-    protected writeValues = new Map<string, ValueEntry<S, V>>(),
+    protected readValues = new Map<string, IAttestation>(),
+    protected writeValues = new Map<string, IAttestation>(),
   ) {}
 
   addRead(doc: S, value: V, source: S) {
     const key = this.toKey(doc);
-    this.readValues.set(key, { value: value, source: source });
+    this.readValues.set(key, {
+      value: value,
+      address: { path: [], ...source },
+    });
   }
 
   addWrite(doc: S, value: V, source: S) {
     const key = this.toKey(doc);
-    this.writeValues.set(key, { value: value, source: source });
+    this.writeValues.set(key, {
+      value: value,
+      address: { path: [], ...source },
+    });
   }
+
+  toKey(doc: BaseMemoryAddress): string {
+    return `${doc.id}/${doc.type}`;
+  }
+
+  toAddress(str: string): BaseMemoryAddress {
+    return { id: `of:${str}`, type: "application/json" };
+  }
+
   abstract getTarget(uri: URI): BaseMemoryAddress;
   // load the doc from the underlying system.
   // implementations are responsible for adding this to the readValues
-  abstract load(doc: BaseMemoryAddress): ValueEntry<S, V | undefined> | null;
-  // get a string version of a key
-  abstract toKey(doc: BaseMemoryAddress): string;
-  abstract toAddress(str: string): BaseMemoryAddress;
+  abstract load(doc: BaseMemoryAddress): IAttestation | null;
 }
 
 export type OptJSONValue =
@@ -467,7 +479,7 @@ function followPointer<S extends BaseMemoryAddress>(
 // This will also load any recipes linked by the doc.
 export function loadSource<S extends BaseMemoryAddress>(
   manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
-  valueEntry: ValueEntry<BaseMemoryAddress, Immutable<JSONValue> | undefined>,
+  valueEntry: IAttestation,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
@@ -485,7 +497,7 @@ export function loadSource<S extends BaseMemoryAddress>(
     // undefined is strange, but acceptable
     if (source !== undefined) {
       logger.warn(
-        () => ["Invalid source link", source, "in", valueEntry.source],
+        () => ["Invalid source link", source, "in", valueEntry.address],
       );
     }
     return;
@@ -497,7 +509,7 @@ export function loadSource<S extends BaseMemoryAddress>(
   cycleCheck.add(of);
   const entryDoc = manager.toAddress(of);
   const entry = manager.load(entryDoc);
-  if (entry === null || entry.value === undefined || !entry.source) {
+  if (entry === null || entry.value === undefined || !entry.address) {
     return;
   }
   if (schemaTracker !== undefined) {
@@ -510,7 +522,7 @@ export function loadSource<S extends BaseMemoryAddress>(
 // We don't recurse, since that's not required for recipe links
 function loadLinkedRecipe<S extends BaseMemoryAddress>(
   manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
-  valueEntry: ValueEntry<BaseMemoryAddress, Immutable<JSONValue> | undefined>,
+  valueEntry: IAttestation,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
   if (!isObject(valueEntry.value)) {
@@ -540,7 +552,7 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
     return;
   }
   const entry = manager.load(entryDoc);
-  if (entry === null || entry.value === undefined || !entry.source) {
+  if (entry === null || entry.value === undefined) {
     return;
   }
   if (schemaTracker !== undefined) {

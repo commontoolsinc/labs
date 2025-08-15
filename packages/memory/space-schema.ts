@@ -5,11 +5,11 @@ import {
   CycleTracker,
   DefaultSchemaSelector,
   getAtPath,
+  type IAttestation,
   loadSource,
   MapSet,
   type PointerCycleTracker,
   SchemaObjectTraverser,
-  type ValueEntry,
 } from "@commontools/runner/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
@@ -66,11 +66,13 @@ type ExtendedMemoryAddress = BaseMemoryAddress & {
 // It also lets us use one system on the server (where we have the sqlite db)
 // and another system on the client.
 export class ServerObjectManager extends BaseObjectManager<
-  ExtendedMemoryAddress,
+  BaseMemoryAddress,
   Immutable<JSONValue> | undefined
 > {
   // Cache our read labels, and any docs we can't read
   private readLabels = new Map<Entity, SelectedFact | undefined>();
+  // Mapping from factKey to object with cause and since
+  private factDetails = new Map<string, { cause: Cause; since: number }>();
   private restrictedValues = new Set<string>();
 
   constructor(
@@ -78,14 +80,6 @@ export class ServerObjectManager extends BaseObjectManager<
     private providedClassifications: Set<string>,
   ) {
     super();
-  }
-
-  override toKey(doc: BaseMemoryAddress): string {
-    return `${doc.id}/${doc.type}`;
-  }
-
-  override toAddress(str: string): BaseMemoryAddress {
-    return { id: `of:${str}`, type: "application/json" };
   }
 
   override getTarget(uri: URI): BaseMemoryAddress {
@@ -96,12 +90,12 @@ export class ServerObjectManager extends BaseObjectManager<
    * Load the facts for the provided doc
    *
    * @param doc the address of the fact to load
-   * @returns a ValueEntry with the value for the specified doc,
+   * @returns an IAttestation with the value for the specified doc,
    * null if there is no matching fact, or undefined if there is a retraction.
    */
   override load(
     doc: BaseMemoryAddress,
-  ): ValueEntry<ExtendedMemoryAddress, JSONValue | undefined> | null {
+  ): IAttestation | null {
     const key = this.toKey(doc);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
@@ -110,13 +104,9 @@ export class ServerObjectManager extends BaseObjectManager<
     }
     const fact = selectFact(this.session, { of: doc.id, the: doc.type });
     if (fact !== undefined) {
+      const address = { id: fact.of, type: fact.the, path: [] };
       const valueEntry = {
-        source: {
-          id: fact.of,
-          type: fact.the,
-          cause: fact.cause,
-          since: fact.since,
-        },
+        address: address,
         value: fact.is ? (fact.is as JSONObject) : undefined,
       };
       if (!this.readLabels.has(doc.id)) {
@@ -137,20 +127,27 @@ export class ServerObjectManager extends BaseObjectManager<
           return null;
         }
       }
+      // Any entry in readValues should also have an entry in factDetails
+      this.factDetails.set(this.toKey(address), {
+        cause: fact.cause,
+        since: fact.since,
+      });
       this.readValues.set(key, valueEntry);
       return valueEntry;
     }
     return null;
   }
 
-  getReadDocs(): Iterable<
-    ValueEntry<ExtendedMemoryAddress, JSONValue | undefined>
-  > {
+  getReadDocs(): Iterable<IAttestation> {
     return this.readValues.values();
   }
 
   getLabels(): Iterable<[Entity, SelectedFact | undefined]> {
     return this.readLabels.entries();
+  }
+
+  getDetails(address: BaseMemoryAddress) {
+    return this.factDetails.get(this.toKey(address));
   }
 }
 
@@ -181,11 +178,11 @@ export const selectSchema = <Space extends MemorySpace>(
     };
     const matchingFacts = getMatchingFacts(session, factSelector);
     for (const entry of matchingFacts) {
-      const factKey = manager.toKey(entry.source);
+      const factKey = manager.toKey(entry.address);
       // TODO(@ubik2): need to remove this or schemaTracker
       selectionTracker?.add(factKey, selectorEntry.value);
       // The top level facts we accessed should be included
-      addToSelection(includedFacts, entry);
+      addToSelection(includedFacts, entry, entry.cause, entry.since);
 
       // Then filter the facts by the associated schemas, which will dereference
       // pointers as we walk through the structure.
@@ -199,8 +196,9 @@ export const selectSchema = <Space extends MemorySpace>(
 
       // Add any facts that we accessed while traversing the object with its schema
       // We'll need the same set of objects on the client to traverse it there.
-      for (const entry of manager.getReadDocs()) {
-        addToSelection(includedFacts, entry);
+      for (const included of manager.getReadDocs()) {
+        const details = manager.getDetails(included.address)!;
+        addToSelection(includedFacts, included, details.cause, details.since);
       }
     }
   }
@@ -251,20 +249,19 @@ export const selectSchema = <Space extends MemorySpace>(
   return includedFacts;
 };
 
-function loadFactsForDoc<S extends BaseMemoryAddress>(
+function loadFactsForDoc(
   manager: ServerObjectManager,
-  fact: ValueEntry<S, Immutable<JSONValue> | undefined>,
+  fact: IAttestation,
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (isObject(fact.value)) {
-    const factAddress = { ...fact.source, path: [] };
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
       const [newDoc, newSelector] = getAtPath<ExtendedMemoryAddress>(
         manager,
-        { address: factAddress, value: factValue, rootValue: factValue },
+        { address: fact.address, value: factValue, rootValue: factValue },
         selector.path,
         tracker,
         schemaTracker,
@@ -286,7 +283,7 @@ function loadFactsForDoc<S extends BaseMemoryAddress>(
     } else {
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
-      manager.load(factAddress);
+      manager.load(fact.address);
     }
     // Also load any source links and recipes
     loadSource(manager, fact, new Set<string>(), schemaTracker);
@@ -330,16 +327,16 @@ const redactCommits = <Space extends MemorySpace>(
 // into the `is` field.
 function addToSelection(
   includedFacts: FactSelection,
-  entry: ValueEntry<ExtendedMemoryAddress, JSONValue | undefined>,
+  entry: IAttestation,
+  cause: Cause,
+  since: number,
 ) {
   setRevision(
     includedFacts,
-    entry.source.id,
-    entry.source.type,
-    entry.source.cause,
-    (entry.value !== undefined)
-      ? { is: entry.value, since: entry.source.since }
-      : { since: entry.source.since },
+    entry.address.id,
+    entry.address.type,
+    cause,
+    (entry.value !== undefined) ? { is: entry.value, since } : { since },
   );
 }
 
@@ -347,17 +344,14 @@ function addToSelection(
 function getMatchingFacts<Space extends MemorySpace>(
   session: Session<Space>,
   factSelector: FactSelector,
-): Iterable<ValueEntry<ExtendedMemoryAddress, JSONValue | undefined>> {
+): Iterable<IAttestation & { cause: Cause; since: number }> {
   const results = [];
   for (const fact of selectFacts(session, factSelector)) {
     results.push({
       value: fact.is,
-      source: {
-        id: fact.of,
-        type: fact.the,
-        cause: fact.cause,
-        since: fact.since,
-      },
+      address: { id: fact.of, type: fact.the, path: [] },
+      cause: fact.cause,
+      since: fact.since,
     });
   }
   return results;

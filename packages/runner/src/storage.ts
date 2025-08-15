@@ -308,7 +308,7 @@ export class Storage implements IStorage {
     // per-space transaction entry, and may have labels.
     // We'll also ensure we're only dealing with the entity ids that will
     // be managed in our document map.
-    const uris = loaded.values().map((valueEntry) => valueEntry.source)
+    const uris = loaded.values().map((valueEntry) => valueEntry.address)
       .filter((docAddr) =>
         docAddr.type === "application/json" && docAddr.id.startsWith("of:")
       ).map((docAddr) => docAddr.id).toArray();
@@ -533,7 +533,7 @@ export class Storage implements IStorage {
     // Our queryLocal call has determined which docs are linked, so make sure
     // we're sending those to storage as well. If they're redundant, they will
     // be skipped by storage.
-    const docAddrs = [...missing, ...loaded.values().map((sv) => sv.source)];
+    const docAddrs = [...missing, ...loaded.values().map((sv) => sv.address)];
     const docToStoragePromise = this._sendDocValue(doc, docAddrs, labels);
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
