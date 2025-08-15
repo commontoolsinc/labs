@@ -2,7 +2,7 @@ import { css, html } from "lit";
 import { property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { BaseElement } from "../../core/base-element.ts";
-import { type Cell, isCell } from "@commontools/runner";
+import { type Cell, ID, isCell } from "@commontools/runner";
 // Removed cell-controller import - working directly with Cell
 import "../ct-input/ct-input.ts";
 
@@ -353,7 +353,7 @@ export class CTList extends BaseElement {
       return;
     }
 
-    const newItem = { title } as ListItem;
+    const newItem = { title, [ID]: crypto.randomUUID() } as ListItem;
     mutateCell(this.value, (cell) => cell.push(newItem));
     this.requestUpdate();
   }
