@@ -129,6 +129,54 @@ It is worth pointing out that while typescript function is used it does not
 actually defines a computation, instead it is a way to build a computation
 pipeline that flows through input [cell]s into output [cell]s.
 
+## Storage - Cache (IndexDB)
+
+The persistent storage layer using IndexedDB (when
+available) that survives across browser sessions and stores historical revisions
+fetched from the remote server. The cache is only accessed during load()
+operations when explicitly loading data into the heap at session start or when
+accessing new entities. Writes to the cache occur as a write-through persistence
+layer: after successful pulls from remote, when receiving subscription updates,
+or during load operations. The cache never stores data directly from local
+changes. If IndexedDB is unavailable, it falls back to NoCache which provides no
+persistence. This tier aims to improve startup performance.
+
+> Note: While IndexedDB provides the storage layer, queries are currently
+> performed through schema queries rather than direct IndexedDB queries. Direct
+> IndexedDB query functionality would require additional development to be useful.
+
+## Storage - Heap
+
+The in-memory cache for the current session that stores confirmed revisions
+from the remote server. All incoming subscription data and remote updates flow
+directly into the heap (does not touch nursery). The heap maintains subscribers
+to notify them when facts change. Facts enter the heap through three paths:
+promotion from the nursery after successful commits, direct insertion when
+pulling data from remote, or from subscription updates. During reads, the heap
+is checked after the nursery. Unlike the nursery which only holds local changes,
+the heap represents the authoritative state as known by the server. The heap
+persists for the entire session.
+
+## Storage - Nursery
+
+A temporary cache layer that stores only locally-initiated changes before
+they're confirmed by the remote server. This enables optimistic updates - when
+you make a local change, it immediately goes into the nursery so the UI can
+reflect changes instantly without waiting for server confirmation. The nursery
+never stores incoming subscription data from the remote server. If a commit
+succeeds, facts are promoted from nursery to heap. If a commit fails, facts
+are deleted from the nursery to prevent building on rejected state. The nursery
+"shadows" the heap, meaning reads check here first, and any local unconfirmed
+change will be returned even if the heap has a newer version from the server.
+
+Nursery eviction occurs in several scenarios:
+- When the remote server returns a matching state, indicating the server has
+  caught up with the local change
+- When conflicts occur, which will purge conflicting entries from the nursery
+- When an update arrives that matches what was expected from the server, but
+  local changes have been built on top of those changes (in this case, the
+  nursery copy is retained to preserve the local changes)
+
 ## TCB (Trusted Computing Base)
 
 The minimal set of components that must be trusted to enforce security. This
