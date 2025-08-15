@@ -102,7 +102,6 @@ async function main() {
     settings: {
       maxSubscriptionsPerSpace: 50_000,
       connectionTimeout: 30_000,
-      useSchemaQueries: true,
     },
   }).open(spaceDID);
   // Before writing data, we need to read it to check if it's changed.
