@@ -7,7 +7,8 @@ type Child = {
 };
 
 type Elem = {
-  id?: string
+  id?: string;
+  style?: string;
 }
 
 type HandlerEvent<T> = {

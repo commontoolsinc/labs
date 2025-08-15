@@ -1,0 +1,8 @@
+- you can start local dev using `scripts/start-local-dev.sh`
+- read `ct.md` to understand the `ct` binary
+- IMPORTANT: when you load the shell in the browser, you will have to complete login by generating a one-time passphrase
+- use playwright MCP to explore recipes and charms from the browser
+  - use ct to support and debug your exporation
+- if the user gives an instruction like 'explore packages/patterns/counter.tsx` you should work out how to deploy it using ct, load it in the browser using playwright and explore it based on the recipe's sourcecode
+  - then you should describe what you find to the user
+- you can stop the server using `scripts/stop-local-dev.sh`
