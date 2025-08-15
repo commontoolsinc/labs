@@ -223,7 +223,7 @@ Deno.bench("resolveLink with infinitely growing path (A->A/foo)", () => {
   const resolved = resolveLink(tx, cellA.getAsNormalizedFullLink());
 
   // Verify it returned the empty document
-  if (resolved.id !== "data:application/json,") {
+  if (resolved.id !== "data:application/json,{}") {
     throw new Error("Expected empty document for growing path cycle");
   }
 
