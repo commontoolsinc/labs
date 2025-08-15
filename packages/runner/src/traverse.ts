@@ -502,13 +502,13 @@ export function loadSource<S extends BaseMemoryAddress>(
     return;
   }
   cycleCheck.add(of);
-  const entryDoc = manager.toAddress(of);
-  const entry = manager.load(entryDoc);
-  if (entry === null || entry.value === undefined || !entry.address) {
+  const address = manager.toAddress(of);
+  const entry = manager.load(address);
+  if (entry === null || entry.value === undefined) {
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
   }
   loadSource(manager, entry, cycleCheck, schemaTracker);
 }
@@ -532,26 +532,26 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
   if (!isObject(value)) {
     return;
   }
-  let entryDoc;
+  let address;
   // Check for a spell link first, since this is more efficient
   // Older recipes will only have a $TYPE
   if ("spell" in value && isAnyCellLink(value["spell"])) {
     const link = parseLink(value["spell"])!;
-    entryDoc = manager.toAddress(fromURI(link.id!));
+    address = manager.toAddress(fromURI(link.id!));
   } else if ("$TYPE" in value && isString(value["$TYPE"])) {
     const recipeId = value["$TYPE"];
     const entityId = refer({ causal: { recipeId, type: "recipe" } });
-    entryDoc = manager.toAddress(entityId.toJSON()["/"]);
+    address = manager.toAddress(entityId.toJSON()["/"]);
   }
-  if (entryDoc === undefined) {
+  if (address === undefined) {
     return;
   }
-  const entry = manager.load(entryDoc);
+  const entry = manager.load(address);
   if (entry === null || entry.value === undefined) {
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
   }
 }
 
