@@ -106,11 +106,6 @@ export interface IRemoteStorageProviderSettings {
    * abort.
    */
   connectionTimeout: number;
-
-  /**
-   * Flag to enable or disable remote schema subscriptions
-   */
-  useSchemaQueries: boolean;
 }
 
 export interface LocalStorageOptions {

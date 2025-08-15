@@ -487,7 +487,6 @@ export class Replica {
     public nursery: Nursery = new Nursery(),
     public queue: PullQueue = new PullQueue(),
     public pullRetryLimit: number = 100,
-    public useSchemaQueries: boolean = false,
     // Promises for commits that are in flight
     public commitPromises: Set<Consumer.TransactionResult<MemorySpace>> =
       new Set(),
@@ -564,23 +563,18 @@ export class Replica {
     // If we don't actually have those, the server will reject our request.
     const classifications = new Set<string>();
     for (const [{ the, of }, schemaPathSelector] of entries) {
-      if (this.useSchemaQueries) {
-        // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-        const selector = schemaPathSelector ??
-          { path: [], schemaContext: SchemaNone };
-        setSelector(schemaSelector, of, the, "_", selector);
-        // Since we're accessing the entire document, we should base our
-        // classification on the rootSchema
-        const rootSchema = selector.schemaContext?.rootSchema ?? false;
-        ContextualFlowControl.joinSchema(
-          classifications,
-          rootSchema,
-          rootSchema,
-        );
-      } else {
-        // We're using the "cached" mode, and we don't use schema queries
-        setSelector(querySelector, of, the, "_", {});
-      }
+      // If we don't have a schema, use SchemaNone, which will only fetch the specified object
+      const selector = schemaPathSelector ??
+        { path: [], schemaContext: SchemaNone };
+      setSelector(schemaSelector, of, the, "_", selector);
+      // Since we're accessing the entire document, we should base our
+      // classification on the rootSchema
+      const rootSchema = selector.schemaContext?.rootSchema ?? false;
+      ContextualFlowControl.joinSchema(
+        classifications,
+        rootSchema,
+        rootSchema,
+      );
     }
 
     // We provided schema for the top level fact that we selected, but we
@@ -1098,11 +1092,6 @@ export interface RemoteStorageProviderSettings {
    * abort.
    */
   connectionTimeout: number;
-
-  /**
-   * Flag to enable or disable remote schema subscriptions
-   */
-  useSchemaQueries: boolean;
 }
 
 export interface RemoteStorageProviderOptions {
@@ -1116,7 +1105,6 @@ export interface RemoteStorageProviderOptions {
 export const defaultSettings: IRemoteStorageProviderSettings = {
   maxSubscriptionsPerSpace: 50_000,
   connectionTimeout: 30_000,
-  useSchemaQueries: true,
 };
 
 export interface ConnectionOptions {
@@ -1482,7 +1470,6 @@ export class Provider implements IStorageProvider {
         this.subscription,
         new NoCache(),
       );
-      replica.useSchemaQueries = this.settings.useSchemaQueries;
       replica.poll();
       this.spaces.set(space, replica);
       return replica;
