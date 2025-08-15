@@ -56,11 +56,6 @@ const logger = getLogger("space-schema", {
   level: "info",
 });
 
-type ExtendedMemoryAddress = BaseMemoryAddress & {
-  cause: Cause;
-  since: number;
-};
-
 // This class is used to manage the underlying objects in storage, so the
 // class that traverses the docs doesn't need to know the implementation.
 // It also lets us use one system on the server (where we have the sqlite db)
@@ -259,7 +254,7 @@ function loadFactsForDoc(
   if (isObject(fact.value)) {
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
-      const [newDoc, newSelector] = getAtPath<ExtendedMemoryAddress>(
+      const [newDoc, newSelector] = getAtPath(
         manager,
         { address: fact.address, value: factValue, rootValue: factValue },
         selector.path,
