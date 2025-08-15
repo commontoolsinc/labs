@@ -20,3 +20,5 @@ claude-research.key
 .page-agent-config.json
 .common.json
 .knowledge
+packages/local-dev-toolshed.log
+local-dev-shell.log

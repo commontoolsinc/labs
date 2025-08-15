@@ -5,7 +5,8 @@ type Child = {
 };
 
 type Elem = {
-  id?: string
+  id?: string;
+  style?: string;
 }
 
 type Cell<T> = any
