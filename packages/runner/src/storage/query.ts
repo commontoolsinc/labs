@@ -8,7 +8,7 @@ import type {
 import type { JSONObject, JSONValue } from "../builder/types.ts";
 import type { DocImpl } from "../doc.ts";
 import { entityIdStr } from "../doc-map.ts";
-import type { StorageValue } from "./interface.ts";
+import type { IMemoryAddress, StorageValue } from "./interface.ts";
 import type { IDocumentMap, IStorageProvider } from "../runtime.ts";
 import {
   type BaseMemoryAddress,
@@ -55,22 +55,20 @@ export class StoreObjectManager extends ClientObjectManager {
   }
 
   // Returns null if there is no matching fact
-  override load(
-    doc: BaseMemoryAddress,
-  ): IAttestation | null {
-    const key = this.toKey(doc);
+  override load(address: BaseMemoryAddress): IAttestation | null {
+    const key = this.toKey(address);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
     // we should only have one match
     if (this.store.has(key)) {
       const storeValue = this.store.get(key);
-      const rv = { address: { path: [], ...doc }, value: storeValue?.is };
+      const rv = { address: { path: [], ...address }, value: storeValue?.is };
       this.readValues.set(key, rv);
       return rv;
     } else {
       if (!this.missingDocs.has(key)) {
-        this.missingDocs.set(key, doc);
+        this.missingDocs.set(key, address);
       }
     }
     return null;
@@ -88,13 +86,13 @@ export class DocObjectManager extends ClientObjectManager {
   ) {
     super();
   }
-  override load(doc: BaseMemoryAddress): IAttestation | null {
-    const key = this.toKey(doc);
+  override load(address: BaseMemoryAddress): IAttestation | null {
+    const key = this.toKey(address);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
     // strip off the leading "of:"
-    const entityId = uriToEntityId(doc.id);
+    const entityId = uriToEntityId(address.id);
     // First, check the document map
     const docMapEntry = this.documentMap.getDocByEntityId(
       this.space,
@@ -116,14 +114,14 @@ export class DocObjectManager extends ClientObjectManager {
         valEntryValue.source = { "/": entityIdStr(storageValue.source) };
       }
       const rv: IAttestation = {
-        address: { path: [], ...doc },
+        address: { path: [], ...address },
         value: valEntryValue,
       };
       this.readValues.set(key, rv);
       return rv;
     }
     // Next, check the storage provider
-    const storageEntry = this.storageProvider.get<JSONValue>(doc.id);
+    const storageEntry = this.storageProvider.get<JSONValue>(address.id);
     if (storageEntry !== undefined) {
       const valEntryValue: { value: JSONValue; source?: { "/": string } } = {
         value: storageEntry.value,
@@ -132,7 +130,7 @@ export class DocObjectManager extends ClientObjectManager {
         valEntryValue.source = { "/": entityIdStr(storageEntry.source) };
       }
       const rv: IAttestation = {
-        address: { path: [], ...doc },
+        address: { path: [], ...address },
         value: valEntryValue,
       };
       this.readValues.set(key, rv);
@@ -140,7 +138,7 @@ export class DocObjectManager extends ClientObjectManager {
     }
     // Looks like it's missing
     if (!this.missingDocs.has(key)) {
-      this.missingDocs.set(key, doc);
+      this.missingDocs.set(key, address);
     }
     return null;
   }
@@ -148,8 +146,7 @@ export class DocObjectManager extends ClientObjectManager {
 
 export function querySchema(
   selector: SchemaPathSelector,
-  path: readonly string[],
-  factAddress: BaseMemoryAddress,
+  address: IMemoryAddress,
   manager: ClientObjectManager,
 ): {
   missing: BaseMemoryAddress[];
@@ -163,16 +160,16 @@ export function querySchema(
   const schemaTracker = new MapSet<string, SchemaPathSelector>();
 
   const rv = new Set<IAttestation>();
-  const valueEntry = manager.load(factAddress);
+  const valueEntry = manager.load(address);
   if (valueEntry === null) {
     // If we don't have the top document, we don't have all the documents
-    return { missing: [factAddress], loaded: rv, selected: schemaTracker };
+    return { missing: [address], loaded: rv, selected: schemaTracker };
   } else if (valueEntry.value === undefined) {
     // we have a retracted fact
     rv.add(valueEntry);
     return { missing: [], loaded: rv, selected: schemaTracker };
   }
-  schemaTracker.add(manager.toKey(factAddress), selector);
+  schemaTracker.add(manager.toKey(address), selector);
   // Also load any source links
   loadSource(
     manager,
@@ -185,11 +182,11 @@ export function querySchema(
   const [newDoc, _] = getAtPath(
     manager,
     {
-      address: { ...factAddress, path: [] },
+      address: { ...address, path: [] },
       value: factValue,
       rootValue: factValue,
     },
-    path,
+    address.path,
     tracker,
     schemaTracker,
     MinimalSchemaSelector,

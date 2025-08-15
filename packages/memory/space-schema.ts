@@ -82,33 +82,36 @@ export class ServerObjectManager extends BaseObjectManager<
   }
 
   /**
-   * Load the facts for the provided doc
+   * Load the facts for the provided address
    *
-   * @param doc the address of the fact to load
+   * @param address the address of the fact to load
    * @returns an IAttestation with the value for the specified doc,
    * null if there is no matching fact, or undefined if there is a retraction.
    */
   override load(
-    doc: BaseMemoryAddress,
+    address: BaseMemoryAddress,
   ): IAttestation | null {
-    const key = this.toKey(doc);
+    const key = this.toKey(address);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     } else if (this.restrictedValues.has(key)) {
       return null;
     }
-    const fact = selectFact(this.session, { of: doc.id, the: doc.type });
+    const fact = selectFact(this.session, {
+      of: address.id,
+      the: address.type,
+    });
     if (fact !== undefined) {
       const address = { id: fact.of, type: fact.the, path: [] };
       const valueEntry = {
         address: address,
         value: fact.is ? (fact.is as JSONObject) : undefined,
       };
-      if (!this.readLabels.has(doc.id)) {
-        const label = getLabel(this.session, doc.id);
-        this.readLabels.set(doc.id, label);
+      if (!this.readLabels.has(address.id)) {
+        const label = getLabel(this.session, address.id);
+        this.readLabels.set(address.id, label);
       }
-      const labelEntry = this.readLabels.get(doc.id);
+      const labelEntry = this.readLabels.get(address.id);
       if (labelEntry?.is) {
         const requiredClassifications = getClassifications({
           is: labelEntry.is,

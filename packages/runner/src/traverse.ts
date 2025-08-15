@@ -130,27 +130,22 @@ export type PointerCycleTracker = CycleTracker<
 >;
 
 export interface ObjectStorageManager<K, S, V> {
-  addRead(doc: K, value: V, source: S): void;
-  addWrite(doc: K, value: V, source: S): void;
+  addRead(address: K, value: V, source: S): void;
+  addWrite(address: K, value: V, source: S): void;
   // get the key for the doc pointed to by the cell target
   getTarget(uri: URI): K;
   // load the object for the specified key
-  load(doc: K): IAttestation | null;
+  load(address: K): IAttestation | null;
 }
-
-// This is very similar to the IAttestation class.
-// There's a difference where the address will not include the initial
-// "value" in the path, and the rootValue is actually the contents of the
-// "value" property of the document.
-type BaseValueAtPath = {
-  readonly address: IMemoryAddress;
-  readonly value: Immutable<JSONValue> | undefined;
-};
 
 export type BaseMemoryAddress = Omit<IMemoryAddress, "path">;
 
-// This adds the rootValue property to the BaseValueAtPath
-export type ValueAtPath = BaseValueAtPath & {
+// This is very similar to the IAttestation class.
+// We do use the IAttestation class a little differently.
+// The address doesn't include the initial "value" in the path.
+// This adds the rootValue property to the BaseValueAtPath, which is actually
+//  the contents of the "value" property of the document.
+export type ValueAtPath = IAttestation & {
   readonly rootValue: Immutable<JSONValue> | undefined;
 };
 
@@ -171,24 +166,24 @@ export abstract class BaseObjectManager<
     protected writeValues = new Map<string, IAttestation>(),
   ) {}
 
-  addRead(doc: S, value: V, source: S) {
-    const key = this.toKey(doc);
+  addRead(address: S, value: V, source: S) {
+    const key = this.toKey(address);
     this.readValues.set(key, {
       value: value,
       address: { path: [], ...source },
     });
   }
 
-  addWrite(doc: S, value: V, source: S) {
-    const key = this.toKey(doc);
+  addWrite(address: S, value: V, source: S) {
+    const key = this.toKey(address);
     this.writeValues.set(key, {
       value: value,
       address: { path: [], ...source },
     });
   }
 
-  toKey(doc: BaseMemoryAddress): string {
-    return `${doc.id}/${doc.type}`;
+  toKey(address: BaseMemoryAddress): string {
+    return `${address.id}/${address.type}`;
   }
 
   toAddress(str: string): BaseMemoryAddress {
@@ -198,7 +193,7 @@ export abstract class BaseObjectManager<
   abstract getTarget(uri: URI): BaseMemoryAddress;
   // load the doc from the underlying system.
   // implementations are responsible for adding this to the readValues
-  abstract load(doc: BaseMemoryAddress): IAttestation | null;
+  abstract load(address: BaseMemoryAddress): IAttestation | null;
 }
 
 export type OptJSONValue =

@@ -467,9 +467,9 @@ export class Storage implements IStorage {
       this.runtime.documentMap,
       Storage._cellLinkToJSON,
     );
-    const docAddress = { id: uri, type: "application/json" };
+    const docAddress = { id: uri, type: "application/json", path: [] };
     const selector = { path: [], schemaContext: schemaContext };
-    return querySchema(selector, [], docAddress, manager);
+    return querySchema(selector, docAddress, manager);
   }
 
   // Update storage with the new doc value
