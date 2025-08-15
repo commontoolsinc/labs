@@ -84,9 +84,7 @@ export class ServerObjectManager extends BaseObjectManager<
    * @returns an IAttestation with the value for the specified doc,
    * null if there is no matching fact, or undefined if there is a retraction.
    */
-  override load(
-    address: BaseMemoryAddress,
-  ): IAttestation | null {
+  override load(address: BaseMemoryAddress): IAttestation | null {
     const key = this.toKey(address);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
