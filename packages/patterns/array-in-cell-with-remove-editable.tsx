@@ -61,14 +61,16 @@ export default recipe(
     return {
       [NAME]: title,
       [UI]: (
-        <div style="padding: 1rem; max-width: 600px;">
+        <div style={{ padding: "1rem", maxWidth: "600px" }}>
           <h3>{title}</h3>
           <p>Editable Array with Remove</p>
-          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}
+          >
             {items.map((item: Item, index: number) => (
               <div
                 key={index}
-                style="display: flex; align-items: center; gap: 0.5rem;"
+                style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
               >
                 <ct-button
                   variant="destructive"
@@ -77,7 +79,7 @@ export default recipe(
                 >
                   Remove
                 </ct-button>
-                <div style="flex: 1;">
+                <div style={{ flex: 1 }}>
                   <ct-input
                     value={item.text}
                     onct-change={updateItem({ items, index })}
@@ -87,7 +89,7 @@ export default recipe(
               </div>
             ))}
           </div>
-          <div style="margin-top: 1rem;">
+          <div style={{ marginTop: "1rem" }}>
             <common-send-message
               name="Send"
               placeholder="Type a message..."
