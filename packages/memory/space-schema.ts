@@ -1,5 +1,6 @@
 import type { JSONObject, JSONValue, URI } from "@commontools/runner";
 import {
+  BaseMemoryAddress,
   BaseObjectManager,
   CycleTracker,
   DefaultSchemaSelector,
@@ -18,7 +19,6 @@ import { TheAuthorizationError } from "./error.ts";
 import type {
   Cause,
   Entity,
-  FactAddress,
   FactSelection,
   MemorySpace,
   SchemaQuery,
@@ -49,20 +49,24 @@ import {
 
 export type * from "./interface.ts";
 
-type FullFactAddress = FactAddress & { cause: Cause; since: number };
+//type FullFactAddress = FactAddress & { cause: Cause; since: number };
 
 const logger = getLogger("space-schema", {
   enabled: false,
   level: "info",
 });
 
+type ExtendedMemoryAddress = BaseMemoryAddress & {
+  cause: Cause;
+  since: number;
+};
+
 // This class is used to manage the underlying objects in storage, so the
 // class that traverses the docs doesn't need to know the implementation.
 // It also lets us use one system on the server (where we have the sqlite db)
 // and another system on the client.
 export class ServerObjectManager extends BaseObjectManager<
-  FactAddress,
-  FullFactAddress,
+  ExtendedMemoryAddress,
   Immutable<JSONValue> | undefined
 > {
   // Cache our read labels, and any docs we can't read
@@ -76,16 +80,16 @@ export class ServerObjectManager extends BaseObjectManager<
     super();
   }
 
-  override toKey(doc: FactAddress): string {
-    return `${doc.of}/${doc.the}`;
+  override toKey(doc: BaseMemoryAddress): string {
+    return `${doc.id}/${doc.type}`;
   }
 
-  override toAddress(str: string): FactAddress {
-    return { of: `of:${str}`, the: "application/json" };
+  override toAddress(str: string): BaseMemoryAddress {
+    return { id: `of:${str}`, type: "application/json" };
   }
 
-  override getTarget(uri: URI): FactAddress {
-    return { of: uri, the: "application/json" };
+  override getTarget(uri: URI): BaseMemoryAddress {
+    return { id: uri, type: "application/json" };
   }
 
   /**
@@ -96,30 +100,30 @@ export class ServerObjectManager extends BaseObjectManager<
    * null if there is no matching fact, or undefined if there is a retraction.
    */
   override load(
-    doc: FactAddress,
-  ): ValueEntry<FullFactAddress, JSONValue | undefined> | null {
+    doc: BaseMemoryAddress,
+  ): ValueEntry<ExtendedMemoryAddress, JSONValue | undefined> | null {
     const key = this.toKey(doc);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     } else if (this.restrictedValues.has(key)) {
       return null;
     }
-    const fact = selectFact(this.session, doc);
+    const fact = selectFact(this.session, { of: doc.id, the: doc.type });
     if (fact !== undefined) {
       const valueEntry = {
         source: {
-          of: fact.of,
-          the: fact.the,
+          id: fact.of,
+          type: fact.the,
           cause: fact.cause,
           since: fact.since,
         },
         value: fact.is ? (fact.is as JSONObject) : undefined,
       };
-      if (!this.readLabels.has(doc.of)) {
-        const label = getLabel(this.session, doc.of);
-        this.readLabels.set(doc.of, label);
+      if (!this.readLabels.has(doc.id)) {
+        const label = getLabel(this.session, doc.id);
+        this.readLabels.set(doc.id, label);
       }
-      const labelEntry = this.readLabels.get(doc.of);
+      const labelEntry = this.readLabels.get(doc.id);
       if (labelEntry?.is) {
         const requiredClassifications = getClassifications({
           is: labelEntry.is,
@@ -139,7 +143,9 @@ export class ServerObjectManager extends BaseObjectManager<
     return null;
   }
 
-  getReadDocs(): Iterable<ValueEntry<FullFactAddress, JSONValue | undefined>> {
+  getReadDocs(): Iterable<
+    ValueEntry<ExtendedMemoryAddress, JSONValue | undefined>
+  > {
     return this.readValues.values();
   }
 
@@ -175,10 +181,7 @@ export const selectSchema = <Space extends MemorySpace>(
     };
     const matchingFacts = getMatchingFacts(session, factSelector);
     for (const entry of matchingFacts) {
-      const factKey = manager.toKey({
-        of: entry.source.of,
-        the: entry.source.the,
-      });
+      const factKey = manager.toKey(entry.source);
       // TODO(@ubik2): need to remove this or schemaTracker
       selectionTracker?.add(factKey, selectorEntry.value);
       // The top level facts we accessed should be included
@@ -248,23 +251,20 @@ export const selectSchema = <Space extends MemorySpace>(
   return includedFacts;
 };
 
-function loadFactsForDoc(
+function loadFactsForDoc<S extends BaseMemoryAddress>(
   manager: ServerObjectManager,
-  fact: ValueEntry<FullFactAddress, Immutable<JSONValue> | undefined>,
+  fact: ValueEntry<S, Immutable<JSONValue> | undefined>,
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (isObject(fact.value)) {
-    const factAddress = { of: fact.source.of, the: fact.source.the };
+    const factAddress = { ...fact.source, path: [] };
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
-      const [newDoc, newSelector] = getAtPath<
-        FactAddress,
-        FullFactAddress
-      >(
+      const [newDoc, newSelector] = getAtPath<ExtendedMemoryAddress>(
         manager,
-        { doc: factAddress, docRoot: factValue, path: [], value: factValue },
+        { address: factAddress, value: factValue, rootValue: factValue },
         selector.path,
         tracker,
         schemaTracker,
@@ -330,12 +330,12 @@ const redactCommits = <Space extends MemorySpace>(
 // into the `is` field.
 function addToSelection(
   includedFacts: FactSelection,
-  entry: ValueEntry<FullFactAddress, JSONValue | undefined>,
+  entry: ValueEntry<ExtendedMemoryAddress, JSONValue | undefined>,
 ) {
   setRevision(
     includedFacts,
-    entry.source.of,
-    entry.source.the,
+    entry.source.id,
+    entry.source.type,
     entry.source.cause,
     (entry.value !== undefined)
       ? { is: entry.value, since: entry.source.since }
@@ -347,14 +347,14 @@ function addToSelection(
 function getMatchingFacts<Space extends MemorySpace>(
   session: Session<Space>,
   factSelector: FactSelector,
-): Iterable<ValueEntry<FullFactAddress, JSONValue | undefined>> {
+): Iterable<ValueEntry<ExtendedMemoryAddress, JSONValue | undefined>> {
   const results = [];
   for (const fact of selectFacts(session, factSelector)) {
     results.push({
       value: fact.is,
       source: {
-        of: fact.of,
-        the: fact.the,
+        id: fact.of,
+        type: fact.the,
         cause: fact.cause,
         since: fact.since,
       },

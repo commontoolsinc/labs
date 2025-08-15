@@ -9,9 +9,10 @@ import type {
 import type { JSONObject, JSONValue } from "../builder/types.ts";
 import type { DocImpl } from "../doc.ts";
 import { entityIdStr } from "../doc-map.ts";
-import type { StorageValue } from "./interface.ts";
+import type { IMemoryAddress, StorageValue } from "./interface.ts";
 import type { IDocumentMap, IStorageProvider } from "../runtime.ts";
 import {
+  type BaseMemoryAddress,
   BaseObjectManager,
   CycleTracker,
   getAtPath,
@@ -23,36 +24,35 @@ import {
 } from "../traverse.ts";
 import { uriToEntityId } from "./transaction-shim.ts";
 
-export abstract class ClientObjectManager extends BaseObjectManager<
-  FactAddress,
-  FactAddress,
-  JSONValue | undefined
-> {
+export abstract class ClientObjectManager
+  extends BaseObjectManager<BaseMemoryAddress, JSONValue | undefined> {
   // Cache our read labels, and any docs we can't read
-  public missingDocs = new Map<string, FactAddress>();
+  public missingDocs = new Map<string, BaseMemoryAddress>();
 
   constructor() {
     super();
   }
 
-  override toKey(doc: FactAddress): string {
-    return `${doc.of}/${doc.the}`;
+  override toKey(doc: BaseMemoryAddress): string {
+    return `${doc.id}/${doc.type}`;
   }
 
-  override toAddress(str: string): FactAddress {
-    return { of: `of:${str}`, the: "application/json" };
+  override toAddress(str: string): BaseMemoryAddress {
+    return { id: `of:${str}`, type: "application/json" };
   }
 
   // get the fact address for the doc pointed to by the cell target
-  override getTarget(uri: URI): FactAddress {
-    return { of: uri, the: "application/json" };
+  override getTarget(uri: URI): BaseMemoryAddress {
+    return { id: uri, type: "application/json" };
   }
 
-  getReadDocs(): Iterable<ValueEntry<FactAddress, JSONValue | undefined>> {
+  getReadDocs(): Iterable<
+    ValueEntry<BaseMemoryAddress, JSONValue | undefined>
+  > {
     return this.readValues.values();
   }
 
-  getMissingDocs(): Iterable<FactAddress> {
+  getMissingDocs(): Iterable<BaseMemoryAddress> {
     return this.missingDocs.values();
   }
 }
@@ -67,16 +67,12 @@ export class StoreObjectManager extends ClientObjectManager {
 
   // Returns null if there is no matching fact
   override load(
-    doc: FactAddress,
-  ): ValueEntry<FactAddress, JSONValue | undefined> | null {
+    doc: BaseMemoryAddress,
+  ): ValueEntry<BaseMemoryAddress, JSONValue | undefined> | null {
     const key = this.toKey(doc);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
-    const factSelector: FactAddress = {
-      of: doc.of,
-      the: doc.the,
-    };
     // we should only have one match
     if (this.store.has(key)) {
       const storeValue = this.store.get(key);
@@ -104,14 +100,14 @@ export class DocObjectManager extends ClientObjectManager {
     super();
   }
   override load(
-    doc: FactAddress,
-  ): ValueEntry<FactAddress, JSONValue | undefined> | null {
+    doc: BaseMemoryAddress,
+  ): ValueEntry<BaseMemoryAddress, JSONValue | undefined> | null {
     const key = this.toKey(doc);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     }
     // strip off the leading "of:"
-    const entityId = uriToEntityId(doc.of);
+    const entityId = uriToEntityId(doc.id);
     // First, check the document map
     const docMapEntry = this.documentMap.getDocByEntityId(
       this.space,
@@ -132,7 +128,7 @@ export class DocObjectManager extends ClientObjectManager {
       if (storageValue.source !== undefined) {
         valEntryValue.source = { "/": entityIdStr(storageValue.source) };
       }
-      const rv: ValueEntry<FactAddress, JSONValue> = {
+      const rv: ValueEntry<BaseMemoryAddress, JSONValue> = {
         source: doc,
         value: valEntryValue,
       };
@@ -140,7 +136,7 @@ export class DocObjectManager extends ClientObjectManager {
       return rv;
     }
     // Next, check the storage provider
-    const storageEntry = this.storageProvider.get<JSONValue>(doc.of);
+    const storageEntry = this.storageProvider.get<JSONValue>(doc.id);
     if (storageEntry !== undefined) {
       const valEntryValue: { value: JSONValue; source?: { "/": string } } = {
         value: storageEntry.value,
@@ -148,7 +144,7 @@ export class DocObjectManager extends ClientObjectManager {
       if (storageEntry.source !== undefined) {
         valEntryValue.source = { "/": entityIdStr(storageEntry.source) };
       }
-      const rv: ValueEntry<FactAddress, JSONValue> = {
+      const rv: ValueEntry<BaseMemoryAddress, JSONValue> = {
         source: doc,
         value: valEntryValue,
       };
@@ -166,11 +162,11 @@ export class DocObjectManager extends ClientObjectManager {
 export function querySchema(
   selector: SchemaPathSelector,
   path: readonly string[],
-  factAddress: FactAddress,
+  factAddress: BaseMemoryAddress,
   manager: ClientObjectManager,
 ): {
-  missing: FactAddress[];
-  loaded: Set<ValueEntry<FactAddress, JSONValue | undefined>>;
+  missing: BaseMemoryAddress[];
+  loaded: Set<ValueEntry<BaseMemoryAddress, JSONValue | undefined>>;
   selected: MapSet<string, SchemaPathSelector>;
 } {
   // Then filter the facts by the associated schemas, which will dereference
@@ -179,7 +175,7 @@ export function querySchema(
   const tracker = new CycleTracker<JSONValue>();
   const schemaTracker = new MapSet<string, SchemaPathSelector>();
 
-  const rv = new Set<ValueEntry<FactAddress, JSONValue | undefined>>();
+  const rv = new Set<ValueEntry<BaseMemoryAddress, JSONValue | undefined>>();
   const valueEntry = manager.load(factAddress);
   if (valueEntry === null) {
     // If we don't have the top document, we don't have all the documents
@@ -199,12 +195,13 @@ export function querySchema(
   );
   // We store the actual doc in the value field of the object
   const factValue = (valueEntry.value as JSONObject).value;
-  const [newDoc, _] = getAtPath<
-    FactAddress,
-    FactAddress
-  >(
+  const [newDoc, _] = getAtPath(
     manager,
-    { doc: factAddress, docRoot: factValue, path: [], value: factValue },
+    {
+      address: { ...factAddress, path: [] },
+      value: factValue,
+      rootValue: factValue,
+    },
     path,
     tracker,
     schemaTracker,
@@ -218,7 +215,7 @@ export function querySchema(
       selected: schemaTracker,
     };
   }
-  selector = { ...selector, path: newDoc.path };
+  selector = { ...selector, path: newDoc.address.path };
   // We've provided a schema context for this, so traverse it
   const traverser = new SchemaObjectTraverser(
     manager,
