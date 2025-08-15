@@ -1,12 +1,11 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { beforeAll, describe, it } from "@std/testing/bdd";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
+import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -15,42 +14,45 @@ describe("ct-list integration test", () => {
   shell.bindLifecycle();
 
   let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
   beforeAll(async () => {
-    const { identity } = shell.get();
-
-    // Register the ct-list charm once for all tests
-    charmId = await registerCharm({
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
           "ct-list.tsx",
         ),
       ),
-    });
+    );
+    charmId = charm.id;
+  });
+
+  afterAll(async () => {
+    if (cc) await cc.dispose();
   });
 
   it("should load the ct-list charm", async () => {
-    const { page } = shell.get();
-
-    // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${SPACE_NAME}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Login
-    const state = await shell.login();
-    assertEquals(state.spaceName, SPACE_NAME);
-    assertEquals(state.activeCharmId, charmId);
-
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
+    });
     await page.waitForSelector("ct-list", { strategy: "pierce" });
   });
 
   it("should add items to the list", async () => {
-    const { page } = shell.get();
+    const page = shell.page();
 
     // Find the add item input in ct-list
     const addInput = await page.waitForSelector(".add-item-input", {
@@ -127,7 +129,7 @@ describe("ct-list integration test", () => {
   });
 
   it("should update the list title", async () => {
-    const { page } = shell.get();
+    const page = shell.page();
 
     // Find the title input
     const titleInput = await page.$("input[placeholder='List title']", {
@@ -155,7 +157,7 @@ describe("ct-list integration test", () => {
   // This appears to be an issue with how ct-list handles synthetic click events
   // versus real user clicks.
   it.skip("should remove items from the list", async () => {
-    const { page } = shell.get();
+    const page = shell.page();
 
     // Wait for the component to fully stabilize after adding items
     console.log("Waiting for component to stabilize...");
@@ -251,7 +253,7 @@ describe("ct-list integration test", () => {
 
   // Skip this test too - similar Shadow DOM issues prevent reliable editing
   it.skip("should edit items in the list", () => {
-    const { page } = shell.get();
+    const page = shell.page();
 
     // The test reveals that:
     // 1. Direct DOM queries don't work due to Shadow DOM encapsulation

@@ -361,7 +361,7 @@ export function normalizeAndDiff(
     }
 
     // Handle array length changes
-    if (Array.isArray(currentValue) && currentValue.length > newValue.length) {
+    if (Array.isArray(currentValue) && currentValue.length != newValue.length) {
       // We need to add the schema here, since the array may be secret, so the length should be too
       const lub = (link.schema !== undefined)
         ? runtime.cfc.lubSchema(link.schema)

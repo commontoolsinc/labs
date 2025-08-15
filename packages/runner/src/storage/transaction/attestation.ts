@@ -164,7 +164,7 @@ export const read = (
 > => resolve(source, address);
 
 /**
- * Takes a source fact {@link State} and derives an attestion describing it's
+ * Takes a source fact {@link State} and derives an attestion describing its
  * state.
  */
 export const attest = ({ the, of, is }: Omit<State, "cause">): IAttestation => {

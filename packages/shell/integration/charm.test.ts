@@ -1,29 +1,32 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { describe, it } from "@std/testing/bdd";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assert } from "@std/assert";
 import "../src/globals.ts";
+import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
-const { API_URL, FRONTEND_URL } = env;
+const { API_URL, SPACE_NAME, FRONTEND_URL } = env;
 
 describe("shell charm tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  it("can view and interact with a charm", async () => {
-    const { page, identity } = shell.get();
-    const spaceName = globalThis.crypto.randomUUID();
+  let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
-    const charmId = await registerCharm({
-      spaceName: spaceName,
+  beforeAll(async () => {
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
@@ -33,34 +36,36 @@ describe("shell charm tests", () => {
           "counter.tsx",
         ),
       ),
+    );
+    charmId = charm.id;
+  });
+
+  afterAll(async () => {
+    if (cc) await cc.dispose();
+  });
+
+  it("can view and interact with a charm", async () => {
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
     });
 
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
-    assertEquals(state.activeCharmId, charmId);
-    assertEquals(
-      state.identity?.serialize().privateKey,
-      identity.serialize().privateKey,
-    );
-
-    await sleep(2000);
-    let handle = await page.$(
+    let handle = await page.waitForSelector(
       "ct-button",
       { strategy: "pierce" },
     );
-    assert(handle);
     handle.click();
     await sleep(1000);
     handle.click();
     await sleep(1000);
-    handle = await page.$(
+    handle = await page.waitForSelector(
       "#counter-result",
       { strategy: "pierce" },
     );
-    await sleep(2000);
+    await sleep(1000);
     const text = await handle?.innerText();
     assert(text === "Counter is the -2th number");
   });

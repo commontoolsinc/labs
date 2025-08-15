@@ -4,7 +4,8 @@
     "test": "deno test --allow-read --allow-write --allow-run --allow-env=TOOLSHED_API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts"
   },
   "imports": {
-    "source-map-js": "npm:source-map-js"
+    "typescript": "npm:typescript",
+    "source-map-js": "npm:source-map-js@^1.2.1"
   },
   "exports": {
     ".": "./mod.ts",

@@ -1,12 +1,11 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { beforeAll, describe, it } from "@std/testing/bdd";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assert } from "@std/assert";
+import { Identity } from "@commontools/identity";
+import { CharmsController } from "@commontools/charm/ops";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
@@ -15,36 +14,41 @@ describe("instantiate-recipe integration test", () => {
   shell.bindLifecycle();
 
   let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
   beforeAll(async () => {
-    const { identity } = shell.get();
-
-    // Register the instantiate-recipe charm
-    charmId = await registerCharm({
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
       spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
           "instantiate-recipe.tsx",
         ),
       ),
-    });
+    );
+    charmId = charm.id;
+  });
+
+  afterAll(async () => {
+    if (cc) await cc.dispose();
   });
 
   it("should deploy recipe, click button, and navigate to counter", async () => {
-    const { page } = shell.get();
+    const page = shell.page();
 
-    // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${SPACE_NAME}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Login
-    const state = await shell.login();
-    assertEquals(state.spaceName, SPACE_NAME);
-    assertEquals(state.activeCharmId, charmId);
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
+    });
 
     // Wait for charm to load and render
     await sleep(2000);

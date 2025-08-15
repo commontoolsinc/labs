@@ -38,7 +38,49 @@ const nodeASchema = {
         }
     }
 } as const satisfies JSONSchema;
-export { nodeASchema };
+interface A {
+    b: B;
+}
+interface B {
+    c: C;
+}
+interface C {
+    a: A;
+}
+const aSchema = {
+    $ref: "#/definitions/A",
+    $schema: "http://json-schema.org/draft-07/schema#",
+    definitions: {
+        C: {
+            type: "object",
+            properties: {
+                a: {
+                    $ref: "#/definitions/A"
+                }
+            },
+            required: ["a"]
+        },
+        B: {
+            type: "object",
+            properties: {
+                c: {
+                    $ref: "#/definitions/C"
+                }
+            },
+            required: ["c"]
+        },
+        A: {
+            type: "object",
+            properties: {
+                b: {
+                    $ref: "#/definitions/B"
+                }
+            },
+            required: ["b"]
+        }
+    }
+} as const satisfies JSONSchema;
+export { nodeASchema, aSchema };
 // Add a recipe export for ct dev testing
 export default recipe("Mutually Recursive Types Test", () => {
     return {

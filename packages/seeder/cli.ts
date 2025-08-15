@@ -43,8 +43,9 @@ if (!name) {
 // Storage and blobby server URL are now configured in Runtime constructor
 setLLMUrl(apiUrl);
 
+const identity = await Identity.fromPassphrase("common user");
 const session = await createSession({
-  identity: await Identity.fromPassphrase("common user"),
+  identity,
   name,
 });
 
@@ -59,7 +60,7 @@ const runtime = new Runtime({
 const charmManager = new CharmManager(session, runtime);
 
 const verifier =
-  await (noVerify ? undefined : Verifier.initialize({ apiUrl, headless }));
+  await (noVerify ? undefined : Verifier.initialize({ apiUrl, headless, identity }));
 const processor = new Processor({ name, model, cache, charmManager, verifier });
 
 let processed: ExecutedScenario[] | undefined;
