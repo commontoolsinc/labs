@@ -132,8 +132,6 @@ export type PointerCycleTracker = CycleTracker<
 export interface ObjectStorageManager<K, S, V> {
   addRead(address: K, value: V, source: S): void;
   addWrite(address: K, value: V, source: S): void;
-  // get the key for the doc pointed to by the cell target
-  getTarget(uri: URI): K;
   // load the object for the specified key
   load(address: K): IAttestation | null;
 }
@@ -190,7 +188,6 @@ export abstract class BaseObjectManager<
     return { id: `of:${str}`, type: "application/json" };
   }
 
-  abstract getTarget(uri: URI): BaseMemoryAddress;
   // load the doc from the underlying system.
   // implementations are responsible for adding this to the readValues
   abstract load(address: BaseMemoryAddress): IAttestation | null;
@@ -402,7 +399,7 @@ function followPointer<S extends BaseMemoryAddress>(
   }
   const link = parseLink(doc.value)!;
   const target = (link.id !== undefined)
-    ? manager.getTarget(link.id)
+    ? { id: link.id, type: "application/json" }
     : doc.address;
   let [targetDoc, targetDocRoot] = [doc.address, doc.rootValue];
   if (selector !== undefined) {

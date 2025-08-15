@@ -77,10 +77,6 @@ export class ServerObjectManager extends BaseObjectManager<
     super();
   }
 
-  override getTarget(uri: URI): BaseMemoryAddress {
-    return { id: uri, type: "application/json" };
-  }
-
   /**
    * Load the facts for the provided address
    *

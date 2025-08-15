@@ -32,11 +32,6 @@ export abstract class ClientObjectManager
     super();
   }
 
-  // get the fact address for the doc pointed to by the cell target
-  override getTarget(uri: URI): BaseMemoryAddress {
-    return { id: uri, type: "application/json" };
-  }
-
   getReadDocs(): Iterable<IAttestation> {
     return this.readValues.values();
   }
