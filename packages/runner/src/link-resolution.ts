@@ -107,7 +107,6 @@ export function resolveLink(
 
       if (lastValid) {
         lastValid?.shift(); // remove `value` prefix
-        lastValid?.pop(); // remove the failing path segment
 
         if (lastValid.length === link.path.length) {
           // full path candidate, only check legacy-at full path
