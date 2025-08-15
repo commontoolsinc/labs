@@ -57,8 +57,9 @@ Summary and code links
 ## Remaining Work (prioritized, consolidated)
 
 - Reliability (WS v2)
-  - [ ] Fix ordering and re-enable the integration test for resume with acks
-        after reconnect
+  - [x] Fix ordering and re-enable the integration test for resume with acks
+        after reconnect (re-implemented as epoch-based resume in
+        `packages/storage/integration/ws_v2_resume_epoch.test.ts`)
 
 - Types / DX
   - [ ] Optional: introduce branded types for `DocId`, `BranchId`, `BranchName`
@@ -498,8 +499,8 @@ Action items for phase 2 (expanded):
 - [ ] Testing
   - [x] JSON cache tests: verify tip reads utilize cache, historical reads
         bypass, and cache updates on write.
-  - [ ] WS resume/acks test: unskip and fix ordering issues; ensure deliveries
-        resume from last ack.
+  - [x] WS resume/acks test: re-implemented with epoch-based resume semantics;
+        ensures deliveries resume from the last acknowledged epoch.
   - [ ] Merge actor/seq tests for synthesized merges.
   - [x] PIT determinism tests.
 
@@ -592,8 +593,8 @@ Action items for phase 2 (expanded):
 - [ ] Client helpers for UCAN-wrapped calls and ack batching
 - [x] Integration tests: get-only complete; basic subscribe+deliver+ack; tx over
       WS
-- [ ] Integration test (resume with acks): fix enqueue/pump ordering after
-      reconnect; currently skipped. Re-enable once fixed.
+- [x] Integration test (resume with acks): implemented as epoch-based resume and
+      enabled (`packages/storage/integration/ws_v2_resume_epoch.test.ts`).
 - [x] Remove/deprecate HTTP routes from docs and codepaths: tracked in Remaining
       Work cleanup
 - Add invariant hook points within submitTx pipeline and basic invariant
@@ -626,7 +627,91 @@ Action items for phase 2 (expanded):
 - [ ] Tests
   - [x] Integration: multi-consumer subscribe; epoch-batched deliver + ack.
   - [x] Integration: get-only backfill then complete.
-  - [ ] Integration: resume with acks (reconnect) — fix and re-enable.
+  - [x] Integration: resume with acks (reconnect) — re-implemented with
+        epoch-based resume and enabled.
+
+#### WS v2 resume (epoch ACK) — implementation plan
+
+We will replace the outdated deliveryNo-based resume test with an epoch-based
+reconnect suite that verifies both "exact resume" and "earlier-than-last-ack"
+scenarios. This validates that the server correctly interprets client-known
+epochs and chooses an appropriate payload (snapshot vs delta) on reconnect.
+
+Test file: `packages/storage/integration/ws_v2_resume_epoch.test.ts`
+
+Connections used:
+
+- **conn0 (seeder)**: sends tx to create and update the doc
+- **conn1 (resumer-exact)**: subscribes, ACKs latest epoch, drops, reconnects
+  with `/storage/hello { sinceEpoch = lastAck }`
+- **conn2 (resumer-stale)**: subscribes, ACKs latest epoch, drops, reconnects
+  with `/storage/hello { sinceEpoch = firstAck }` (earlier than latest)
+
+Protocol recap (already implemented):
+
+- Hello: `/storage/hello` with `{ clientId, sinceEpoch }`
+- Subscribe: `/storage/subscribe` with `{ consumerId, query }`
+- Deliver:
+  `{ type: "deliver", streamId, epoch, docs: [{ kind: "snapshot"|"delta", body: ... }] }`
+- Ack: `{ type: "ack", streamId, epoch }`
+- Complete: task/return with `is.type === "complete"`
+
+Plan and expected behavior:
+
+1. Boot a WS v2 server on an ephemeral port with a temp `SPACES_DIR`.
+2. Open three sockets (conn0, conn1, conn2) for the same `spaceDid`.
+3. conn1 and conn2: send `/storage/subscribe` for the test doc (e.g. `doc:s1`,
+   path [], schema:false).
+   - Expect one initial `deliver` each (snapshot or delta) then `complete`.
+   - Send an ACK for the `deliver.epoch` on each.
+   - Record the first ACK epoch as `ack1` and the latest as `ack2`.
+4. conn0: seed the doc using `createGenesisDoc` + `/storage/tx`.
+   - Wait until both conn1 and conn2 receive the initial deliver and ACK it;
+     capture that epoch as `ack1`.
+5. conn0: apply one more change via `/storage/tx`.
+   - Both conn1 and conn2 receive another deliver; ACK and record this as
+     `ack2`.
+6. Close conn1 and conn2.
+7. Reconnect conn1 and conn2, send `/storage/hello`:
+   - conn1: `sinceEpoch = ack2` (exact resume)
+   - conn2: `sinceEpoch = ack1` (stale resume)
+8. Re-subscribe on both conn1 and conn2 for the same doc.
+   - conn1: server already knows client is current (sinceEpoch == lastAck), so
+     there should be no backfill deliver upon subscribe (only `complete`).
+   - conn2: server sees a stale baseline; it must send a backfill deliver for
+     the doc before `complete`. Payload may be a `snapshot` or a `delta` chain
+     based on server policy. Test accepts either kind.
+9. conn0: apply another change via `/storage/tx`.
+   - Both conn1 and conn2 should receive a deliver for this new epoch and ACK
+     it.
+
+Assertions:
+
+- Exact resume (conn1): after re-subscribe, no initial deliver is required;
+  after the next tx, a single deliver is received whose `epoch` > `ack2`. Kind
+  may be `delta` depending on server policy; the critical check is that no
+  redundant snapshot is sent at re-subscribe time.
+- Stale resume (conn2): after re-subscribe, a backfill deliver is received prior
+  to `complete`. The deliver kind is either `snapshot` or `delta[]`; the test
+  only asserts that a content deliver occurs to bring the client up-to-date.
+- After the subsequent tx from conn0, both conn1 and conn2 receive one new
+  deliver and successfully ACK by epoch.
+
+Notes:
+
+- Use the same `clientId` across reconnects per socket to exercise
+  `client_known_docs` resume behavior.
+- Reconnection timing is guarded with watchdog timeouts to avoid hangs.
+- The test should be resilient to snapshot vs delta selection and only assert
+  the presence of an expected content deliver and correct epoch monotonicity.
+
+Acceptance criteria:
+
+- New test file added; passes reliably on CI and locally.
+- conn1 (exact resume) observed with no backfill on subscribe and a single
+  deliver after the next tx.
+- conn2 (stale resume) observed with a backfill deliver on subscribe and a
+  deliver after the next tx.
 
 ## Cleanup tasks
 
