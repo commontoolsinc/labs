@@ -1,40 +1,204 @@
 # Access Recovery
 
-There are multiple choices available for setting up account recovery. It is also probably best to let users make their own decision which recovery method to opt-into based on their risk profile.
+## Overview
 
-It is also important to observe that convenience of recovery mechanism is at odds with privacy concerns, specifically if you can recover access to multiple spaces with single principal that leaves the trace in the delegation chain as all access will come downstream from that principal.
+Access recovery mechanisms balance convenience with privacy. Users should choose recovery methods based on their security requirements and risk tolerance. The fundamental tension is that convenient recovery methods often create linkability between spaces through shared recovery principals in the delegation chain.
 
-## Recovery Using Mnemonics
+## Recovery Methods
 
-Easiest and most common recovery mechanism is based on [BIP39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic phrase. During space creation keypair can be serialized into a mnemonic phrase and handed out to the user.
+### 1. Mnemonic-Based Recovery
 
-This mechanism is probably reasonable for account recovery, but not for a space access recovery because larger the number of mnemonics greater the chance of them getting lost or not being saved securely.
+The simplest recovery mechanism uses [BIP39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki) mnemonic phrases to serialize keypairs during space creation.
 
-## Recovery Using Verifiable Claims
+```mermaid
+sequenceDiagram
+    participant User
+    participant System
+    participant Space
+    
+    User->>System: Create new space
+    System->>Space: Generate keypair
+    Space->>System: Serialize to mnemonic
+    System->>User: Display 12/24 word phrase
+    User->>User: Store securely
+    
+    Note over User,Space: Recovery Process
+    User->>System: Enter mnemonic phrase
+    System->>Space: Restore keypair
+    Space->>User: Access restored
+```
 
-Keybase pioneered this interaction flow and then was adopted by web3.storage to implement email based recovery mechanism. General idea is to represent arbirtary identity via [did](https://www.w3.org/TR/did-core/) identifier so that full access could be delegated to it when setting up a recovery. On recovery that identity can then redelagate access to new [did:key] principal by making a verifiable claim claim like "I delegate `/query/*` capability to did:key:z6Mk......". That claim if verifiable can be used more or less like cryptographic signature. In fact [varsig] can be leveraged to define custom signature type so it would be verifiable.
+**Advantages:**
 
-The [did:mailto] specification defines [did] principals for emails so that described scheme can be used to delegate access to email handle and recover it from the email handle, support for which was implemented and shipped in web3.storage.
+- User-controlled, no third-party dependencies
+- Familiar pattern from cryptocurrency wallets
+- Works offline
 
-> Verification process implies resolving domain keys and ensuring that provided claim has being signed by that key.
+**Limitations:**
 
-It is worth calling out that proof creation and verification in this flow is pretty novel which posed challenge, as users need to send out an email with specific text.
+- Not scalable for multiple spaces (mnemonic fatigue)
+- Single point of failure if phrase is lost
+- Security depends entirely on user storage practices
 
-To mitigate this challenge web3.storage also came up with a [solution that allowed verification through conventional email flow](https://github.com/storacha/specs/blob/main/w3-session.md#authorization-session). General idea is that when recovery with email is initiated, trusted party can perform verification that user indeed controls email handle by sending them a confirmation prompt. If user confirms request trusted third party can issue attestation that indeed request to delegate from email to specific [did:key] has being verified and sign it with their own key. This attestation can then be used when verifying delegation chain, if verifier trusts issuer of the attestation they can trust the delegation chain. If verifier does not trust issuer of the attestation they can initiate another email verification process through a trusted third party (or themselves).
+### 2. Verifiable Claims Recovery
 
+Pioneered by Keybase and adopted by web3.storage, this method represents identities as [DID](https://www.w3.org/TR/did-core/) identifiers that can receive delegated access.
 
-Please note that this solution is not tied to an email identifiers, same principal can apply to any other identifier which is what keybase did. For example similar approach can be used with bluesky identifiers, where recovery could be posted as special message and that message along with merkle-proof could be used to verify delegation chain.
+```mermaid
+graph TD
+    A[User Space] -->|Delegates access to| B["did:mailto:alice\@example.com"]
+    B -->|Recovery claim| C["did:key:z6Mk..."]
+    D[Email Provider] -->|DKIM signature| E[Verification]
+    C -->|Verified via| E
+    E -->|Grants access| F[Recovered Space Access]
+```
 
-## Recovery Using Trusted Third Party
+#### Email-Based Recovery Flow
 
-This is perhaps very simple yet pragmatic solution. When new space is created user can delegate access to trusted third party e.g. `did:web:common.tools`. For recovery user will have to prove to common.tools out of bound that they were the ones who delegated access to the space and request that it be redelegated to desired [`did:key`](https://www.w3.org/TR/did-core/#did-key).
+The [did:mailto](https://github.com/storacha/specs/blob/main/did-mailto.md) specification enables email-based recovery:
 
-Unlike all other mechanisms this would disguise any relation across spaces as single principal at play will be the same `did:web:common.tools` across them. Tradeoff however is that `did:web:common.tools` could be compelled to redelegate access to any other [did:key] principal regardless if they are under user control or not.
+1. **Setup**: User delegates space access to their `did:mailto:user@example.com`
+2. **Recovery**: User creates verifiable claim via email
+3. **Verification**: System verifies DKIM signatures to confirm email authenticity
+4. **Redelegation**: Verified claim enables access delegation to new `did:key`
 
-## Recovery Using Threshold Signatures
+#### Attestation-Based Verification
 
-[BLS](https://en.wikipedia.org/wiki/BLS_digital_signature) keys and signatures could be used to setup recovery through threshold signatures. Specifically when setting up recovery user may choose `n` principals from which `m` principals would have to cooperate to authorize recovery request.
+To simplify the UX, [web3.storage session protocol](https://github.com/storacha/specs/blob/main/w3-session.md#authorization-session) introduces trusted attestations:
 
-[varsig]:https://github.com/ChainAgnostic/varsig
-[did:mailto]:https://github.com/storacha/specs/blob/main/did-mailto.md
-[did:key]:https://www.w3.org/TR/did-core/#did-key
+```mermaid
+sequenceDiagram
+    participant User
+    participant TrustedParty
+    participant EmailProvider
+    participant Verifier
+    
+    User->>TrustedParty: Request recovery
+    TrustedParty->>EmailProvider: Send verification email
+    EmailProvider->>User: Confirmation link
+    User->>TrustedParty: Confirm ownership
+    TrustedParty->>User: Issue attestation
+    User->>Verifier: Present attestation
+    Verifier->>Verifier: Validate issuer trust
+    Verifier->>User: Grant access
+```
+
+**Extensibility**: This pattern works with any verifiable identity system:
+
+- Bluesky handles (using post merkle proofs)
+- GitHub accounts (using signed gists)
+- DNS domains (using TXT records)
+- Phone numbers (using SMS verification)
+
+### 3. Trusted Third Party Recovery
+
+A pragmatic approach where users delegate recovery rights to a trusted service provider.
+
+```mermaid
+stateDiagram-v2
+    [*] --> SpaceCreation
+    SpaceCreation --> DelegateToTTP: User delegates to TTP
+    DelegateToTTP --> NormalOperation
+    
+    NormalOperation --> RecoveryRequest: User loses access
+    RecoveryRequest --> IdentityVerification: Out-of-band verification
+    IdentityVerification --> AccessRestored: TTP redelegates access
+    AccessRestored --> NormalOperation
+```
+
+**Privacy Advantage**: All spaces show the same recovery principal (`did:web:common.tools`), preventing cross-space correlation.
+
+**Trust Tradeoff**: The trusted party could be compelled to grant access to unauthorized parties.
+
+### 4. Threshold Signature Recovery
+
+Using [BLS signatures](https://en.wikipedia.org/wiki/BLS_digital_signature) enables distributed recovery where `m` of `n` guardians must cooperate.
+
+```mermaid
+graph LR
+    A[User] -->|Splits key| B[Guardian 1]
+    A -->|Splits key| C[Guardian 2]
+    A -->|Splits key| D[Guardian 3]
+    A -->|Splits key| E[Guardian n]
+    
+    B -->|Share 1| F[Recovery Process]
+    C -->|Share 2| F
+    D -->|Share 3| F
+    F -->|m of n shares| G[Reconstructed Access]
+```
+
+**Configuration Options:**
+
+- Social recovery: Friends/family as guardians
+- Institutional: Mix of personal and service provider guardians
+- Geographic distribution: Guardians in different jurisdictions
+
+**Implementation Considerations:**
+
+- Guardian availability requirements
+- Key share secure distribution
+- Coordination protocols for recovery
+- Time-locked recovery for additional security
+
+## Security Considerations
+
+### Delegation Chain Privacy
+
+Each recovery method creates different privacy implications:
+
+| Method | Cross-Space Linkability | Third-Party Trust | User Responsibility |
+|--------|------------------------|-------------------|-------------------|
+| Mnemonic | None | None | High |
+| Verifiable Claims | Medium (by identity) | Verifier only | Medium |
+| Trusted Third Party | Low | High | Low |
+| Threshold | None | Distributed | Medium |
+
+### Recovery Attack Vectors
+
+1. **Phishing**: Attackers may create fake recovery interfaces
+2. **Guardian Compromise**: In threshold schemes, targeting guardians
+3. **Identity Takeover**: Email/social account compromise in verifiable claims
+4. **Coercion**: Forcing users to initiate recovery
+
+## Implementation Guidelines
+
+### Choosing Recovery Methods
+
+Users should consider:
+
+- **Value at Risk**: Higher value spaces need stronger recovery
+- **Usage Patterns**: Frequently accessed spaces benefit from convenient recovery
+- **Threat Model**: Corporate vs personal use cases differ
+- **Technical Expertise**: Some methods require more user sophistication
+
+### Best Practices
+
+1. **Multiple Recovery Methods**: Allow users to set up redundant recovery
+2. **Recovery Testing**: Prompt users to test recovery before it's needed
+3. **Time Delays**: Add configurable delays to recovery processes
+4. **Audit Logs**: Record all recovery attempts and successes
+5. **Notification**: Alert users of recovery attempts via multiple channels
+
+## Future Directions
+
+### Emerging Technologies
+
+- **Secure Enclaves**: Hardware-based key recovery
+- **Biometric Recovery**: Using biometric data for threshold signatures
+- **Decentralized Recovery Networks**: P2P guardian networks
+- **Smart Contract Recovery**: On-chain recovery logic for Web3 integration
+
+### Standardization Efforts
+
+Work is ongoing to standardize recovery protocols across:
+
+- [DIF Recovery Methods](https://identity.foundation/)
+- [W3C DID Working Group](https://www.w3.org/2019/did-wg/)
+- [IETF OAuth Working Group](https://datatracker.ietf.org/wg/oauth/about/)
+
+## References
+
+- [varsig](https://github.com/ChainAgnostic/varsig): Variable signature schemes
+- [did:mailto](https://github.com/storacha/specs/blob/main/did-mailto.md): Email DID method
+- [did:key](https://www.w3.org/TR/did-core/#did-key): Key-based DID method
+- [BIP39](https://github.com/bitcoin/bips/blob/master/bip-0039.mediawiki): Mnemonic code for generating deterministic keys
