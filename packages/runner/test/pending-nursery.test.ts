@@ -50,7 +50,7 @@ describe("Provider Subscriptions", () => {
       let s1Count = 0;
 
       provider.replica.heap.subscribe(
-        { of: uri, the: "application/json" },
+        { id: uri, type: "application/json" },
         (_v) => {
           s1Count++;
         },

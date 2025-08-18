@@ -8,7 +8,7 @@ import * as Fact from "../fact.ts";
 import type { UTCUnixTimestampInSeconds } from "../interface.ts";
 import * as Provider from "../provider.ts";
 import * as Selection from "../selection.ts";
-import { LABEL_THE } from "../space.ts";
+import { LABEL_TYPE } from "../space.ts";
 import * as Transaction from "../transaction.ts";
 import { alice, bob, space as subject } from "./principal.ts";
 import { Identity } from "../../identity/src/identity.ts";
@@ -749,7 +749,7 @@ test(
     });
 
     const v1_label = Fact.assert({
-      the: LABEL_THE,
+      the: LABEL_TYPE,
       of: doc,
       is: { classification: ["confidential"] },
     });
@@ -795,7 +795,7 @@ test(
     });
 
     const v1_label = Fact.assert({
-      the: LABEL_THE,
+      the: LABEL_TYPE,
       of: doc,
       is: { classification: ["confidential"] },
     });
@@ -875,7 +875,7 @@ test(
     });
 
     const v1_label = Fact.assert({
-      the: LABEL_THE,
+      the: LABEL_TYPE,
       of: doc,
       is: { classification: ["confidential"] },
     });
@@ -990,7 +990,7 @@ test(
     });
 
     const v1_label = Fact.assert({
-      the: LABEL_THE,
+      the: LABEL_TYPE,
       of: doc,
       is: { classification: ["confidential"] },
     });
@@ -1116,7 +1116,7 @@ test(
       cause: v2,
     });
     const v3_label = Fact.assert({
-      the: LABEL_THE,
+      the: LABEL_TYPE,
       of: doc,
       is: { classification: ["confidential"] },
     });
@@ -1181,7 +1181,7 @@ test(
     });
 
     const v1_label = Fact.assert({
-      the: LABEL_THE,
+      the: LABEL_TYPE,
       of: doc,
       is: { classification: ["confidential"] },
     });
