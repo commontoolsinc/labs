@@ -13,7 +13,7 @@ import {
 } from "@commontools/runner/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
-import { the as COMMIT_THE } from "./commit.ts";
+import { COMMIT_LOG_TYPE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";
 import type {
@@ -286,7 +286,7 @@ const redactCommits = <Space extends MemorySpace>(
   includedFacts: FactSelection,
   session: Session<Space>,
 ) => {
-  const change = getChange(includedFacts, session.subject, COMMIT_THE);
+  const change = getChange(includedFacts, session.subject, COMMIT_LOG_TYPE);
   if (change !== undefined) {
     const [cause, value] = change;
     const commitData = value.is as CommitData;
@@ -308,7 +308,7 @@ const redactCommits = <Space extends MemorySpace>(
     setRevision<FactSelectionValue>(
       includedFacts,
       session.subject,
-      COMMIT_THE,
+      COMMIT_LOG_TYPE,
       cause,
       redactedValue,
     );

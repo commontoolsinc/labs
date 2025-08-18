@@ -216,7 +216,7 @@ describe("Storage Subscription", () => {
       }, { version: 2 });
 
       // Check that before commit provider.replica.get returns undefined
-      const factAddress = { the: "application/json", of: entityId };
+      const factAddress = { id: entityId, type: "application/json" };
       expect(replica.get(factAddress)).toBeUndefined();
 
       // Send commit (without await) and check optimistic update
@@ -303,7 +303,7 @@ describe("Storage Subscription", () => {
 
       // Call pull on the replica
       const { replica } = storageManager.open(space);
-      const factAddress = { the: "application/json", of: entityId };
+      const factAddress = { id: entityId, type: "application/json" };
 
       await (replica as any).pull([[factAddress, undefined]]);
 

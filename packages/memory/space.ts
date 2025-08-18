@@ -4,7 +4,7 @@ import {
   Transaction as DBTransaction,
 } from "@db/sqlite";
 
-import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
+import { COMMIT_LOG_TYPE, create as createCommit } from "./commit.ts";
 import { unclaimed } from "./fact.ts";
 import { fromString, refer } from "./reference.ts";
 import { addMemoryAttributes, traceAsync, traceSync } from "./telemetry.ts";
@@ -708,7 +708,7 @@ const commit = <Space extends MemorySpace>(
   session: Session<Space>,
   transaction: Transaction<Space>,
 ): Commit<Space> => {
-  const the = COMMIT_THE;
+  const the = COMMIT_LOG_TYPE;
   const of = transaction.sub;
   const row = session.store.prepare(EXPORT).get({ the, of }) as
     | StateRow
@@ -878,7 +878,7 @@ export const querySchema = <Space extends MemorySpace>(
   });
 };
 
-export const LABEL_THE = "application/label+json" as const;
+export const LABEL_TYPE = "application/label+json" as const;
 export type FactSelectionValue = { is?: JSONValue; since: number };
 // Get the labels associated with a set of commits.
 // It's possible to get more than one label for a single doc because our
@@ -893,7 +893,7 @@ export function getLabels<
   const labels: OfTheCause<FactSelectionValue> = {};
   for (const fact of iterate(includedFacts)) {
     // We don't restrict acccess to labels
-    if (fact.the === LABEL_THE) {
+    if (fact.the === LABEL_TYPE) {
       continue;
     }
     const labelFact = getLabel(session, fact.of);
@@ -918,7 +918,7 @@ export function getLabel<Space extends MemorySpace>(
   session: Session<Space>,
   of: Entity,
 ) {
-  return selectFact(session, { of, the: LABEL_THE });
+  return selectFact(session, { of, the: LABEL_TYPE });
 }
 
 // Get the various classification tags required based on the collection of labels.
@@ -973,12 +973,12 @@ export function redactCommitData(
       continue;
     }
     // We treat all labels as unclassified
-    if (fact.the === LABEL_THE) {
+    if (fact.the === LABEL_TYPE) {
       set(newChanges, fact.of, fact.the, fact.cause, fact.value);
       continue;
     }
     // FIXME(@ubik2): Re-enable this once we've tracked down other issues
-    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_THE);
+    // const labelFact = getRevision(commitData.labels, fact.of, LABEL_TYPE);
     // if (labelFact !== undefined && getClassifications(labelFact).size > 0) {
     //   setEmptyObj(newChanges, fact.of, fact.the);
     // } else {

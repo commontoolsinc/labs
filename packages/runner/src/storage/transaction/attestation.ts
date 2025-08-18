@@ -184,8 +184,8 @@ export const claim = (
   { address, value: expected }: IAttestation,
   replica: ISpaceReplica,
 ): Result<State, IStorageTransactionInconsistent> => {
-  const [the, of] = [address.type, address.id];
-  const state = replica.get({ the, of }) ?? unclaimed({ the, of });
+  const state = replica.get(address) ??
+    unclaimed({ of: address.id, the: address.type });
   const source = attest(state);
   const actual = read(source, address)?.ok?.value;
 

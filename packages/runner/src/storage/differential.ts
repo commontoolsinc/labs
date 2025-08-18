@@ -1,12 +1,16 @@
-import { FactAddress } from "@commontools/memory";
 import { unclaimed } from "@commontools/memory/fact";
-import { IMemoryChange, IMergedChanges, State } from "./interface.ts";
+import type {
+  IMemoryAddress,
+  IMemoryChange,
+  IMergedChanges,
+  State,
+} from "./interface.ts";
 import * as Address from "./transaction/address.ts";
 
 export const create = () => new Changes();
 
 interface Memory {
-  get(entry: FactAddress): State | undefined;
+  get(entry: IMemoryAddress): State | undefined;
 }
 
 const toKey = (state: State) => `/${state.the}/${state.of}`;
@@ -23,7 +27,8 @@ const toAddress = (state: State) => ({
 export const checkout = (memory: Memory, facts: Iterable<State>) => {
   const checkout = new Checkout();
   for (const member of facts) {
-    const existing = memory.get(member);
+    const address = toAddress(member);
+    const existing = memory.get(address);
     if (existing) {
       checkout.add(existing);
     } else {
@@ -45,16 +50,13 @@ class Checkout {
     const changes = new Changes();
     for (const fact of this.#model.values()) {
       const before = fact?.is;
-      const after = memory.get(fact)?.is;
+      const address = toAddress(fact);
+      const after = memory.get(address)?.is;
       if (
         before !== after &&
         JSON.stringify(before) !== JSON.stringify(after)
       ) {
-        changes.add({
-          address: toAddress(fact),
-          before,
-          after,
-        });
+        changes.add({ address, before, after });
       }
     }
     return changes;
@@ -87,17 +89,14 @@ class Changes implements IMergedChanges {
    */
   update(memory: Memory, facts: Iterable<State>) {
     for (const fact of facts) {
-      const before = memory.get(fact)?.is;
+      const address = toAddress(fact);
+      const before = memory.get(address)?.is;
       const after = fact.is;
       if (
         before !== after &&
         JSON.stringify(before) !== JSON.stringify(after)
       ) {
-        this.add({
-          address: toAddress(fact),
-          before,
-          after,
-        });
+        this.add({ address, before, after });
       }
     }
     return this;
