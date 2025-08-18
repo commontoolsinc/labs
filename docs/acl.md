@@ -292,7 +292,7 @@ Choose Recovery Method
 - **Testing**: Can be fully tested without system integration
 - **Backwards Compatibility**: Must not break existing invocations
 
-**S1.2: Space Delegation API** 
+**S1.2: Space Delegation API**
 - **Core Components**:
   - Space abstraction with `authorize()` method
   - UCAN delegation creation and JSON encoding
@@ -302,7 +302,7 @@ Choose Recovery Method
 
 **S1.3: Account Import Functionality (Lo-Fi)**
 - **Core Components**:
-  - Account abstraction with `importAuthorization()` method  
+  - Account abstraction with `importAuthorization()` method
   - Local delegation storage and validation
   - UI for token import (paste, QR scan, file upload)
 - **User Flow**: Copy token → paste in app → gain access to space
@@ -321,7 +321,7 @@ Choose Recovery Method
 **S2.1: Delegation Storage in Spaces**
 - **Dependencies**: Completion of Stage 1
 - **Core Components**:
-  - Storage schema for delegations as `application/ucan+json` 
+  - Storage schema for delegations as `application/ucan+json`
   - Indexing by issuer/audience DIDs
   - Cleanup for expired delegations
 - **Storage Location**: Both issuer and audience spaces for discoverability
@@ -346,13 +346,13 @@ Choose Recovery Method
 
 **Stage 1 Complete: Lo-Fi Invites**
 - Tasks: S1.1, S1.2, S1.3, S1.4
-- Enables: 
+- Enables:
   - Testable delegation chains
   - Manual invite sharing (copy/paste tokens)
   - URL support for shared spaces
 - User Experience: "Share this token with collaborators"
 
-**Stage 2 Complete: Hi-Fi Invites**  
+**Stage 2 Complete: Hi-Fi Invites**
 - Tasks: S2.1, S2.2, S2.3
 - Enables:
   - Automatic delegation discovery
@@ -364,7 +364,7 @@ Choose Recovery Method
 - Tasks: S3.1, S3.2, S3.3
 - Enables:
   - Seamless multi-space access
-  - Account recovery capability  
+  - Account recovery capability
   - Security monitoring
 - User Experience: "Access all your spaces with one identity"
 
