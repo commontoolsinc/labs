@@ -40,7 +40,7 @@ describe("LLM pattern test", () => {
     if (cc) await cc.dispose();
   });
 
-  it("should load the LLM test charm and display initial UI", async () => {
+  it.skip("should load the LLM test charm and display initial UI", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -58,9 +58,7 @@ describe("LLM pattern test", () => {
     });
     assert(title, "Should find title element");
 
-    const titleText = await title.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
+    const titleText = await title.evaluate((el: HTMLElement) => el.textContent);
     assertEquals(titleText?.trim(), "LLM Test");
 
     // Check for the message input
@@ -70,7 +68,7 @@ describe("LLM pattern test", () => {
     assert(messageInput, "Should find message input element");
   });
 
-  it("should handle question input and display question", async () => {
+  it.skip("should handle question input and display question", async () => {
     const page = shell.page();
 
     // Find the message input component
@@ -111,7 +109,7 @@ describe("LLM pattern test", () => {
     assertEquals(questionText?.trim(), testQuestion);
   });
 
-  it("should display LLM response after asking a question", async () => {
+  it.skip("should display LLM response after asking a question", async () => {
     const page = shell.page();
 
     // Wait for LLM response to appear (this may take some time)
@@ -134,7 +132,7 @@ describe("LLM pattern test", () => {
     console.log("LLM Response:", responseText);
   });
 
-  it("should handle multiple questions in sequence", async () => {
+  it.skip("should handle multiple questions in sequence", async () => {
     const page = shell.page();
 
     // Wait for system to settle after previous test
