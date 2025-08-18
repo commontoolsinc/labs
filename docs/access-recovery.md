@@ -110,7 +110,82 @@ stateDiagram-v2
 
 **Trust Tradeoff**: The trusted party could be compelled to grant access to unauthorized parties.
 
-### 4. Threshold Signature Recovery
+### 4. Web-Based Identity Recovery
+
+Instead of ephemeral `did:key` identifiers, spaces can use persistent `did:web` identifiers that enable key rotation through web infrastructure control.
+
+```mermaid
+graph TD
+    A[Space Creation] -->|Assigns| B["did:web:common.tools:space:cats"]
+    B -->|Contains| C["Current did:key:z6Mk..."]
+    C -->|Signs| D[Space Operations]
+    
+    E[Key Loss] -->|User proves ownership| F[common.tools]
+    F -->|Updates| G["New did:key:z6Mk..."]
+    G -->|Replaces| C
+    
+    H["did:web document"] -->|Resolves to| C
+    H -->|After rotation| G
+```
+
+#### Implementation Patterns
+
+**1. Provider-Managed Identities**
+- Space gets identifier like `did:web:common.tools:space:cats`
+- Provider maintains did:web document mapping to current `did:key`
+- Recovery through provider's authentication system
+- Clear authority model: provider controls the namespace
+
+**2. Bring Your Own Domain (BYOD)**
+- Users provide `did:web:gozala.io` or `did:dns:gozala.io`
+- Full control over key rotation
+- Requires DNS/web server management
+- Suitable for technical users or organizations
+
+**3. Hybrid Delegation Model**
+```mermaid
+sequenceDiagram
+    participant User
+    participant UserDomain as gozala.io
+    participant Provider as common.tools
+    participant Space
+    
+    User->>UserDomain: Configure DNS/redirect
+    UserDomain->>Provider: Delegates resolution
+    Provider->>Space: Manages did:key rotation
+    
+    Note over User,Space: Recovery Process
+    User->>Provider: Prove ownership
+    Provider->>Space: Rotate keys
+    UserDomain->>Space: Continues resolving
+```
+
+**Advantages:**
+- User-friendly URLs with custom domains
+- Provider switching without identifier changes
+- Gradual decentralization path
+- Clear authority and recovery model
+
+**Configuration Example:**
+```json
+{
+  "id": "did:web:gozala.io:space:projects",
+  "controller": "did:web:gozala.io",
+  "alsoKnownAs": ["did:web:common.tools:u:gozala:space:projects"],
+  "verificationMethod": [{
+    "id": "#key-1",
+    "type": "Ed25519VerificationKey2020",
+    "controller": "did:web:gozala.io:space:projects",
+    "publicKeyMultibase": "z6Mk..."
+  }],
+  "service": [{
+    "type": "SpaceProvider",
+    "serviceEndpoint": "https://common.tools/api/v1/spaces/projects"
+  }]
+}
+```
+
+### 5. Threshold Signature Recovery
 
 Using [BLS signatures](https://en.wikipedia.org/wiki/BLS_digital_signature) enables distributed recovery where `m` of `n` guardians must cooperate.
 
@@ -151,6 +226,7 @@ Each recovery method creates different privacy implications:
 | Mnemonic | None | None | High |
 | Verifiable Claims | Medium (by identity) | Verifier only | Medium |
 | Trusted Third Party | Low | High | Low |
+| Web-Based Identity | High (by domain) | Domain owner | Variable |
 | Threshold | None | Distributed | Medium |
 
 ### Recovery Attack Vectors
