@@ -1,10 +1,10 @@
 /// <cts-enable />
 import {
-  h,
   Cell,
   cell,
   Default,
   derive,
+  h,
   handler,
   NAME,
   recipe,
@@ -30,21 +30,11 @@ interface ListState {
   items_list: Cell<LinkedList>;
 }
 
-// Helper function to copy a linked list
-function copyList(list: LinkedList): LinkedList {
-  return {
-    value: list.value,
-    next: list.next ? copyList(list.next) : undefined,
-  };
-}
-
 // Helper function to add a node to the linked list
-// copy the list because it has reactive symbols in it
-// FIXME(@ellyxir): why do these symbols break things?
 function addNodeToList(list: LinkedList, value: string): LinkedList {
   return {
     value: value,
-    next: copyList(list),
+    next: list,
   };
 }
 
