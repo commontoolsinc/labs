@@ -54,89 +54,40 @@ describe("ct-checkbox-simple integration test", () => {
   it("should show disabled content initially", async () => {
     const page = shell.page();
 
-    // Wait for component to stabilize
-    await sleep(1000);
-
-    // Initially, feature should be disabled
-    const disabledContent = await page.$("[data-testid='disabled-content']", {
+    const featureStatus = await page.waitForSelector("#feature-status", {
       strategy: "pierce",
     });
-    assert(disabledContent, "Should show disabled content initially");
-
-    // Enabled content should not be present
-    const enabledContent = await page.$("[data-testid='enabled-content']", {
-      strategy: "pierce",
-    });
-    assertEquals(enabledContent, null, "Enabled content should be hidden initially");
-
-    // Status should show "OFF"
-    const status = await page.$("[data-testid='status']", {
-      strategy: "pierce",
-    });
-    const statusText = await status?.evaluate((el: HTMLElement) => el.textContent);
-    assertEquals(statusText?.trim(), "Status: OFF");
+    const statusText = await featureStatus.evaluate((el: HTMLElement) => el.textContent);
+    assertEquals(statusText?.trim(), "⚠ Feature is disabled");
   });
 
   it("should toggle to enabled content when checkbox is clicked", async () => {
     const page = shell.page();
 
     // Find and click the checkbox
-    const checkbox = await page.waitForSelector(
-      "[data-testid='main-checkbox']",
-      { strategy: "pierce" }
-    );
+    const checkbox = await page.waitForSelector("ct-checkbox", { strategy: "pierce" });
     await checkbox.click();
     await sleep(500);
 
-    // Now enabled content should appear
-    const enabledContent = await page.waitForSelector(
-      "[data-testid='enabled-content']",
-      { strategy: "pierce" }
-    );
-    assert(enabledContent, "Should show enabled content after clicking checkbox");
-
-    // Disabled content should be gone
-    const disabledContent = await page.$("[data-testid='disabled-content']", {
-      strategy: "pierce",
-    });
-    assertEquals(disabledContent, null, "Disabled content should be hidden when enabled");
-
-    // Status should show "ON"
-    const status = await page.$("[data-testid='status']", {
-      strategy: "pierce",
-    });
-    const statusText = await status?.evaluate((el: HTMLElement) => el.textContent);
-    assertEquals(statusText?.trim(), "Status: ON");
+    // Check that the feature status changed to enabled
+    const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
+    const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
+    assertEquals(statusText?.trim(), "✓ Feature is enabled!");
   });
 
   it("should toggle back to disabled content when checkbox is clicked again", async () => {
     const page = shell.page();
 
     // Click the checkbox again to disable
-    const checkbox = await page.$("[data-testid='main-checkbox']", {
+    const checkbox = await page.$("ct-checkbox", {
       strategy: "pierce",
     });
     await checkbox?.click();
-    await sleep(500);
+    await sleep(1000);
 
-    // Disabled content should reappear
-    const disabledContent = await page.waitForSelector(
-      "[data-testid='disabled-content']",
-      { strategy: "pierce" }
-    );
-    assert(disabledContent, "Should show disabled content after unchecking");
-
-    // Enabled content should be gone
-    const enabledContent = await page.$("[data-testid='enabled-content']", {
-      strategy: "pierce",
-    });
-    assertEquals(enabledContent, null, "Enabled content should be hidden when disabled");
-
-    // Status should show "OFF"
-    const status = await page.$("[data-testid='status']", {
-      strategy: "pierce",
-    });
-    const statusText = await status?.evaluate((el: HTMLElement) => el.textContent);
-    assertEquals(statusText?.trim(), "Status: OFF");
+    // Check that the feature status changed back to disabled
+    const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
+    const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
+    assertEquals(statusText?.trim(), "⚠ Feature is disabled");
   });
 });

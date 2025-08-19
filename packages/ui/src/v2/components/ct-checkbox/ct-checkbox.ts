@@ -103,8 +103,8 @@ export class CTCheckbox extends BaseElement {
     .checkbox.checked .checkmark::after {
       content: "";
       position: absolute;
-      left: 0;
-      top: 2px;
+      left: 2.5px;
+      top: -2.5px;
       width: 4px;
       height: 7px;
       border: solid var(--primary-foreground, #f8fafc);
@@ -209,9 +209,21 @@ export class CTCheckbox extends BaseElement {
     this._updateAriaAttributes();
     // Bind initial checked value
     this._checkedCellController.bind(this.checked);
+    // Add event listeners to the host element to make entire component clickable
+    this.addEventListener("click", this._handleClick);
+    this.addEventListener("keydown", this._handleKeydown);
   }
 
-  override willUpdate(changedProperties: Map<string | number | symbol, unknown>) {
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    // Clean up event listeners
+    this.removeEventListener("click", this._handleClick);
+    this.removeEventListener("keydown", this._handleKeydown);
+  }
+
+  override willUpdate(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ) {
     super.willUpdate(changedProperties);
 
     // If the checked property itself changed (e.g., switched to a different cell)
@@ -255,8 +267,6 @@ export class CTCheckbox extends BaseElement {
       <div
         class="${classString}"
         part="checkbox"
-        @click="${this._handleClick}"
-        @keydown="${this._handleKeydown}"
       >
         <span class="checkmark" part="checkmark"></span>
       </div>
