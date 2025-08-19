@@ -304,6 +304,34 @@ export class StringCellController extends CellController<string> {
 }
 
 /**
+ * Specialized CellController for boolean values with common checkbox patterns
+ */
+export class BooleanCellController extends CellController<boolean> {
+  constructor(
+    host: ReactiveControllerHost,
+    options: CellControllerOptions<boolean> = {},
+  ) {
+    super(host, {
+      timing: { strategy: "immediate" }, // Booleans usually update immediately
+      ...options,
+      getValue: options.getValue || ((value) => {
+        if (isCell(value)) {
+          return value.get?.() || false;
+        }
+        return value || false;
+      }),
+    });
+  }
+
+  /**
+   * Toggle the boolean value
+   */
+  toggle(): void {
+    this.setValue(!this.getValue());
+  }
+}
+
+/**
  * Specialized CellController for array values with common list patterns
  */
 export class ArrayCellController<T> extends CellController<T[]> {
@@ -392,6 +420,16 @@ export function createStringCellController(
   options?: CellControllerOptions<string>,
 ): StringCellController {
   return new StringCellController(host, options);
+}
+
+/**
+ * Factory function for boolean CellControllers (common case)
+ */
+export function createBooleanCellController(
+  host: ReactiveControllerHost,
+  options?: CellControllerOptions<boolean>,
+): BooleanCellController {
+  return new BooleanCellController(host, options);
 }
 
 /**

@@ -93,6 +93,15 @@ declare global {
         "onct-submit"?: any,
         "onct-invalid"?: any,
       } & Children & HTMLElementProps;
+      "ct-checkbox": {
+        "$checked"?: OpaqueRef<boolean>,
+        "checked"?: boolean,
+        "disabled"?: boolean,
+        "indeterminate"?: boolean,
+        "name"?: string,
+        "value"?: string,
+        "onct-change"?: any,
+      } & Children & HTMLElementProps;
     }
   }
 }

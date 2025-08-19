@@ -17,7 +17,7 @@ export function toURI(value: unknown): URI {
     if (value.includes(":")) {
       // TODO(seefeld): Remove this once we want to support any URI, ideally
       // once there are no bare ids anymore
-      if (!value.startsWith("of:")) {
+      if (!value.startsWith("of:") && !value.startsWith("data:")) {
         throw new Error(`Invalid URI: ${value}`);
       }
       return value as URI;
