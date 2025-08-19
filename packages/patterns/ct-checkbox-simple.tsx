@@ -49,17 +49,11 @@ export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
 
           {ifElse(
             enabled,
-            <div
-              style="padding: 1rem; background: #e8f5e8; border: 1px solid #4caf50; border-radius: 4px;"
-              data-testid="enabled-content"
-            >
-              <p style="margin: 0; color: #2e7d32;">✓ Feature is enabled!</p>
+            <div data-testid="enabled-content">
+              <p>✓ Feature is enabled!</p>
             </div>,
-            <div
-              style="padding: 1rem; background: #fff3e0; border: 1px solid #ff9800; border-radius: 4px;"
-              data-testid="disabled-content"
-            >
-              <p style="margin: 0; color: #e65100;">⚠ Feature is disabled</p>
+            <div data-testid="disabled-content">
+              <p>⚠ Feature is disabled</p>
             </div>,
           )}
 
