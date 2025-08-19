@@ -10,7 +10,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commontools/runner";
-import { type Child, isVNode, type Props, type VNode } from "./jsx.ts";
+import { isVNode, type Props, type RenderNode, type VNode } from "./jsx.ts";
 import * as logger from "./logger.ts";
 
 export const vdomSchema: JSONSchema = {
@@ -100,15 +100,17 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
   const cancelProps = bindProps(element, sanitizedNode.props);
   addCancel(cancelProps);
 
-  const cancelChildren = bindChildren(element, sanitizedNode.children);
-  addCancel(cancelChildren);
+  if (sanitizedNode.children !== undefined) {
+    const cancelChildren = bindChildren(element, sanitizedNode.children);
+    addCancel(cancelChildren);
+  }
 
   return [element, cancel];
 };
 
 const bindChildren = (
   element: HTMLElement,
-  children: Array<Child> | Cell<Array<Child>>,
+  children: RenderNode,
 ): Cancel => {
   // Mapping from stable key to its rendered node and cancel function.
   let keyedChildren = new Map<string, { node: ChildNode; cancel: Cancel }>();
@@ -117,7 +119,7 @@ const bindChildren = (
   // the already-rendered node (using replaceWith) so that we never add an extra
   // container.
   const renderChild = (
-    child: Child,
+    child: RenderNode,
     key: string,
   ): { node: ChildNode; cancel: Cancel } => {
     let currentNode: ChildNode | null = null;
@@ -162,7 +164,7 @@ const bindChildren = (
 
   // When the children array changes, diff its flattened values against what we previously rendered.
   const updateChildren = (
-    childrenArr: Array<Child | Array<Child>> | undefined | null,
+    childrenArr: RenderNode | RenderNode[] | undefined | null,
   ) => {
     const newChildren = Array.isArray(childrenArr) ? childrenArr.flat() : [];
     const newKeyOrder: string[] = [];

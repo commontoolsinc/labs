@@ -387,11 +387,11 @@ type ObjectFromPropertiesWithoutCell<P extends Record<string, JSONSchema>, R ext
  * @param children - Child elements
  * @returns A virtual DOM node
  */
-export declare const h: ((name: string | ((...args: any[]) => any), props: {
+export declare const h: ((name: string | ((...args: any[]) => VNode), props: {
     [key: string]: any;
-} | null, ...children: Child[]) => VNode) & {
+} | null, ...children: RenderNode[]) => VNode) & {
     fragment({ children }: {
-        children: Child[];
+        children: RenderNode[];
     }): VNode;
 };
 /**
@@ -402,13 +402,13 @@ export type Props = {
     [key: string]: string | number | boolean | object | Array<any> | null | Cell<any> | Stream<any>;
 };
 /** A child in a view can be one of a few things */
-export type Child = VNode | string | number | boolean | Cell<Child> | Array<Child>;
+export type RenderNode = VNode | string | number | boolean | Cell<RenderNode> | RenderNode[];
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
     type: "vnode";
     name: string;
     props: Props;
-    children: Array<Child> | Cell<Array<Child>>;
+    children?: RenderNode;
     [UI]?: VNode;
 };
 export {};
