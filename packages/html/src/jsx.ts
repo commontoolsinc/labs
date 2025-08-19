@@ -1,6 +1,6 @@
 import { isObject } from "@commontools/utils/types";
 import { UI, type VNode } from "@commontools/runner";
-export type { Child, Props } from "@commontools/runner";
+export type { Props, RenderNode } from "@commontools/runner";
 export { type VNode };
 
 /**
