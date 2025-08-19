@@ -523,11 +523,6 @@ export function normalizeAndDiff(
     seen.set(newValue, link);
 
     for (const key in newValue) {
-      // Skip symbol keys
-      //if (typeof key === "symbol") {
-      //  continue;
-      //}
-
       const childPath = [...link.path, key].join(".");
       diffLogger.debug(() =>
         `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`
