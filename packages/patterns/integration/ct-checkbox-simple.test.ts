@@ -1,5 +1,4 @@
 import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -64,30 +63,28 @@ describe("ct-checkbox-simple integration test", () => {
   it("should toggle to enabled content when checkbox is clicked", async () => {
     const page = shell.page();
 
-    // Find and click the checkbox
     const checkbox = await page.waitForSelector("ct-checkbox", { strategy: "pierce" });
     await checkbox.click();
-    await sleep(500);
-
-    // Check that the feature status changed to enabled
-    const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
-    const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
-    assertEquals(statusText?.trim(), "✓ Feature is enabled!");
+    
+    // Use Astral's idiomatic waitForFunction
+    await page.waitForFunction(() => {
+      const el = document.querySelector("#feature-status");
+      return el?.textContent?.trim() === "✓ Feature is enabled!";
+    });
   });
 
   it("should toggle back to disabled content when checkbox is clicked again", async () => {
     const page = shell.page();
 
-    // Click the checkbox again to disable
     const checkbox = await page.$("ct-checkbox", {
       strategy: "pierce",
     });
     await checkbox?.click();
-    await sleep(1000);
-
-    // Check that the feature status changed back to disabled
-    const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
-    const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
-    assertEquals(statusText?.trim(), "⚠ Feature is disabled");
+    
+    // Use Astral's idiomatic waitForFunction
+    await page.waitForFunction(() => {
+      const el = document.querySelector("#feature-status");
+      return el?.textContent?.trim() === "⚠ Feature is disabled";
+    });
   });
 });
