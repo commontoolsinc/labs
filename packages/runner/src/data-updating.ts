@@ -523,10 +523,10 @@ export function normalizeAndDiff(
     seen.set(newValue, link);
 
     for (const key in newValue) {
-      const childPath = [...link.path, key].join(".");
-      diffLogger.debug(() =>
-        `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`
-      );
+      diffLogger.debug(() => {
+        const childPath = [...link.path, key].join(".");
+        return `[DIFF_RECURSE] Recursing into key='${key}' childPath=${childPath}`;
+      });
 
       const childSchema = runtime.cfc.getSchemaAtPath(
         link.schema,
