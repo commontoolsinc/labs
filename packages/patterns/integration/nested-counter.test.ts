@@ -10,7 +10,7 @@ import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-describe("counter direct operations test", () => {
+describe("nested counter integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
@@ -30,7 +30,7 @@ describe("counter direct operations test", () => {
         join(
           import.meta.dirname!,
           "..",
-          "counter.tsx",
+          "nested-counter.tsx",
         ),
       ),
     );
@@ -41,7 +41,7 @@ describe("counter direct operations test", () => {
     if (cc) await cc.dispose();
   });
 
-  it("should load the counter charm and verify initial state", async () => {
+  it("should load the nested counter charm and verify initial state", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -61,58 +61,51 @@ describe("counter direct operations test", () => {
     );
     assertEquals(initialText?.trim(), "Counter is the 0th number");
 
+    // Verify via direct operations that the nested structure works
     const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
     assertEquals(value, 0);
   });
 
-  // Bug Reproduction for CT-753: Live updates across sessions don't work currently
-  // The browser has its own runtime/session that doesn't receive
-  // live updates from our test CharmManager's operations
-  it("should update counter value via direct operation (live)", async () => {
+  it("should click the increment button and update the counter", async () => {
     const page = shell.page();
-    const manager = cc!.manager();
 
-    // Get the counter result element
-    const counterResult = await page.waitForSelector("#counter-result", {
+    // Find all buttons and click the increment button (second button)
+    const buttons = await page.$$("[data-ct-button]", {
       strategy: "pierce",
     });
+    assert(buttons.length >= 2, "Should find at least 2 buttons");
+    
+    // Click increment button (second button - first is decrement)
+    await buttons[1].click();
 
-    // Update value to 42 via direct operation
-    console.log("Setting counter value to 42 via direct operation");
-    await setCharmResult(manager, charmId, ["value"], 42);
+    await sleep(1000);
 
-    // Wait for the update to propagate
-    await sleep(3000);
-
-    // Verify the UI updated
-    const updatedText = await counterResult.evaluate((el: HTMLElement) =>
+    const counterResult = await page.$("#counter-result", {
+      strategy: "pierce",
+    });
+    assert(counterResult, "Should find counter-result element");
+    const counterText = await counterResult.evaluate((el: HTMLElement) =>
       el.textContent
     );
-    assertEquals(
-      updatedText?.trim(),
-      "Counter is the 42th number",
-      "UI should update to show 42th",
-    );
+    assertEquals(counterText?.trim(), "Counter is the 1st number");
 
-    // Verify we can also read the value back
-    const finalValue = await getCharmResult(manager, charmId, ["value"]);
-    assertEquals(finalValue, 42);
+    // Verify via direct operations
+    const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
+    assertEquals(value, 1);
   });
 
-  it("should update counter value and verify after page refresh", async () => {
+  it("should update counter value via direct operations and verify UI", async () => {
     const page = shell.page();
     const manager = cc!.manager();
 
-    // Update value to 42 via direct operation
-    console.log("Setting counter value to 42 via direct operation");
-    await setCharmResult(manager, charmId, ["value"], 42);
+    // Set value to 5 via direct operation
+    await setCharmResult(manager, charmId, ["value"], 5);
 
     // Verify we can read the value back via operations
     const updatedValue = await getCharmResult(manager, charmId, ["value"]);
-    assertEquals(updatedValue, 42, "Value should be 42 in backend");
+    assertEquals(updatedValue, 5, "Value should be 5 in backend");
 
-    // Now refresh the page by navigating to the same URL
-    console.log("Refreshing the page...");
+    // Navigate to the charm to see if UI reflects the change
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       spaceName: SPACE_NAME,
@@ -120,20 +113,33 @@ describe("counter direct operations test", () => {
       identity,
     });
 
-    // Get the counter result element after refresh
+    // Check if the UI shows the updated value
     const counterResult = await page.waitForSelector("#counter-result", {
       strategy: "pierce",
     });
-    assert(counterResult, "Should find counter-result element after refresh");
-
-    // Check if the UI shows the updated value after refresh
-    const textAfterRefresh = await counterResult.evaluate((el: HTMLElement) =>
+    const textAfterUpdate = await counterResult.evaluate((el: HTMLElement) =>
       el.textContent
     );
     assertEquals(
-      textAfterRefresh?.trim(),
-      "Counter is the 42th number",
-      "UI should show persisted value after refresh",
+      textAfterUpdate?.trim(),
+      "Counter is the 5th number",
+      "UI should show updated value from direct operation",
     );
+  });
+
+  it("should verify nested counter has multiple counter displays", async () => {
+    const page = shell.page();
+
+    // Find all counter result elements (should be 2 for nested counter)
+    const counterResults = await page.$$("#counter-result", {
+      strategy: "pierce",
+    });
+    assertEquals(counterResults.length, 2, "Should find exactly 2 counter-result elements in nested counter");
+
+    // Verify both show the same value
+    for (const counter of counterResults) {
+      const text = await counter.evaluate((el: HTMLElement) => el.textContent);
+      assertEquals(text?.trim(), "Counter is the 5th number", "Both nested counters should show same value");
+    }
   });
 });

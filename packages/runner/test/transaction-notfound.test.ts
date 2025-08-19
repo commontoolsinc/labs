@@ -6,7 +6,6 @@ import type {
   IStorageManager,
   MemorySpace,
 } from "../src/storage/interface.ts";
-import { unclaimed } from "@commontools/memory/fact";
 
 // Mock replica that simulates non-existent documents
 class MockReplica implements ISpaceReplica {
@@ -18,8 +17,8 @@ class MockReplica implements ISpaceReplica {
     return this.space;
   }
 
-  get(entry: { the: string; of: string }) {
-    const key = `${entry.of}:${entry.the}`;
+  get(entry: { id: string; type: string }) {
+    const key = `${entry.id}:${entry.type}`;
     return this.data.get(key);
   }
 

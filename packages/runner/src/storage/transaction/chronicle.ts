@@ -86,10 +86,10 @@ export class Chronicle {
    * such fact exists yet.
    */
   load(address: Omit<IMemoryAddress, "path">): State {
-    const [the, of] = [address.type, address.id];
     // If we have not read nor written into overlapping memory address,
     // we'll read it from the local replica.
-    return this.#replica.get({ the, of }) ?? unclaimed({ the, of });
+    return this.#replica.get(address) ??
+      unclaimed({ of: address.id, the: address.type });
   }
 
   /**

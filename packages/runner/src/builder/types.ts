@@ -56,7 +56,6 @@ export {
 export { h } from "@commontools/api";
 export type {
   Cell,
-  Child,
   CreateCellFunction,
   Handler,
   HandlerFactory,
@@ -72,6 +71,7 @@ export type {
   Props,
   Recipe,
   RecipeFactory,
+  RenderNode,
   Stream,
   StripCell,
   toJSON,

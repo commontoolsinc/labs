@@ -34,7 +34,7 @@ import {
   retract,
   unclaimed,
 } from "@commontools/memory/fact";
-import { the, toRevision } from "@commontools/memory/commit";
+import { COMMIT_LOG_TYPE, toRevision } from "@commontools/memory/commit";
 import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import type { Cancel } from "@commontools/runner";
@@ -42,7 +42,7 @@ import { getLogger } from "@commontools/utils/logger";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
-import { MapSet } from "../traverse.ts";
+import { BaseMemoryAddress, MapSet } from "../traverse.ts";
 import { fromString, refer } from "merkle-reference";
 import { isBrowser } from "@commontools/utils/env";
 import { isObject } from "@commontools/utils/types";
@@ -133,15 +133,15 @@ interface NotFoundError extends Error {
   address: FactAddress;
 }
 
-const toKey = ({ the, of }: FactAddress) => `${of}/${the}`;
-const fromKey = (key: string): FactAddress => {
+const toKey = ({ id, type }: BaseMemoryAddress) => `${id}/${type}`;
+const fromKey = (key: string): BaseMemoryAddress => {
   const separatorIndex = key.indexOf("/");
   if (separatorIndex === -1) {
     throw new Error(`Invalid key format: ${key}`);
   }
-  const of = key.substring(0, separatorIndex);
-  const the = key.substring(separatorIndex + 1);
-  return { of: of as Entity, the };
+  const id = key.substring(0, separatorIndex);
+  const type = key.substring(separatorIndex + 1);
+  return { id: id as URI, type };
 };
 
 export class NoCache<Model extends object, Address>
@@ -191,13 +191,14 @@ class Nursery implements SyncPush<State> {
 
   constructor(public store: Map<string, State> = new Map()) {
   }
-  get(entry: FactAddress) {
+  get(entry: BaseMemoryAddress) {
     return this.store.get(toKey(entry));
   }
 
   merge(entries: Iterable<State>, merge: Merge<State>) {
     for (const entry of entries) {
-      const key = toKey(entry);
+      const address = { id: entry.of, type: entry.the };
+      const key = toKey(address);
       const stored = this.store.get(key);
       const merged = merge(stored, entry);
       if (merged === undefined) {
@@ -218,7 +219,7 @@ class Heap implements SyncPush<Revision<State>> {
   ) {
   }
 
-  get(entry: FactAddress) {
+  get(entry: BaseMemoryAddress) {
     return this.store.get(toKey(entry));
   }
 
@@ -229,7 +230,8 @@ class Heap implements SyncPush<Revision<State>> {
   ) {
     const updated = new Set<string>();
     for (const entry of entries) {
-      const key = toKey(entry);
+      const address = { id: entry.of, type: entry.the };
+      const key = toKey(address);
       const stored = this.store.get(key);
       const merged = merge(stored, entry);
       if (merged === undefined) {
@@ -254,7 +256,7 @@ class Heap implements SyncPush<Revision<State>> {
   }
 
   subscribe(
-    entry: FactAddress,
+    entry: BaseMemoryAddress,
     subscriber: (value?: Revision<State>) => void,
   ) {
     const key = toKey(entry);
@@ -268,7 +270,7 @@ class Heap implements SyncPush<Revision<State>> {
   }
 
   unsubscribe(
-    entry: FactAddress,
+    entry: BaseMemoryAddress,
     subscriber: (value?: Revision<State>) => void,
   ) {
     const key = toKey(entry);
@@ -317,17 +319,18 @@ class RevisionAddress {
 
 class PullQueue {
   constructor(
-    public members: Map<string, [FactAddress, SchemaPathSelector?]> = new Map(),
+    public members: Map<string, [BaseMemoryAddress, SchemaPathSelector?]> =
+      new Map(),
   ) {
   }
-  add(entries: Iterable<[FactAddress, SchemaPathSelector?]>) {
+  add(entries: Iterable<[BaseMemoryAddress, SchemaPathSelector?]>) {
     // TODO(@ubik2) Ensure the schema context matches
     for (const [entry, selector] of entries) {
       this.members.set(toKey(entry), [entry, selector]);
     }
   }
 
-  consume(): [FactAddress, SchemaPathSelector?][] {
+  consume(): [BaseMemoryAddress, SchemaPathSelector?][] {
     const entries = [...this.members.values()];
     this.members.clear();
     return entries;
@@ -341,7 +344,7 @@ class SelectorTracker<T = Result<Unit, Error>> {
   private selectorPromises = new Map<string, Promise<T>>();
 
   add(
-    doc: FactAddress,
+    doc: BaseMemoryAddress,
     selector: SchemaPathSelector | undefined,
     promise: Promise<T>,
   ) {
@@ -355,11 +358,11 @@ class SelectorTracker<T = Result<Unit, Error>> {
     this.selectorPromises.set(promiseKey, promise);
   }
 
-  has(doc: FactAddress): boolean {
+  has(doc: BaseMemoryAddress): boolean {
     return this.refTracker.has(toKey(doc));
   }
 
-  hasSelector(doc: FactAddress, selector: SchemaPathSelector): boolean {
+  hasSelector(doc: BaseMemoryAddress, selector: SchemaPathSelector): boolean {
     const selectorRefs = this.refTracker.get(toKey(doc));
     if (selectorRefs !== undefined) {
       const selectorRef = refer(JSON.stringify(selector)).toString();
@@ -368,7 +371,7 @@ class SelectorTracker<T = Result<Unit, Error>> {
     return false;
   }
 
-  get(doc: FactAddress): IteratorObject<SchemaPathSelector> {
+  get(doc: BaseMemoryAddress): IteratorObject<SchemaPathSelector> {
     const selectorRefs = this.refTracker.get(toKey(doc)) ?? [];
     return selectorRefs.values().map((selectorRef) =>
       this.selectors.get(selectorRef)!
@@ -376,7 +379,7 @@ class SelectorTracker<T = Result<Unit, Error>> {
   }
 
   getPromise(
-    doc: FactAddress,
+    doc: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
     const selectorRef = refer(JSON.stringify(selector)).toString();
@@ -392,11 +395,11 @@ class SelectorTracker<T = Result<Unit, Error>> {
    * Return all tracked subscriptions as an array of {factAddress, selector} pairs
    */
   getAllSubscriptions(): {
-    factAddress: FactAddress;
+    factAddress: BaseMemoryAddress;
     selector: SchemaPathSelector;
   }[] {
     const subscriptions: {
-      factAddress: FactAddress;
+      factAddress: BaseMemoryAddress;
       selector: SchemaPathSelector;
     }[] = [];
     for (const [factKey, selectorRefs] of this.refTracker) {
@@ -521,7 +524,7 @@ export class Replica {
       //     },
       //   },
       // },
-      select: { [this.space]: { [the]: { "_": {} } } },
+      select: { [this.space]: { [COMMIT_LOG_TYPE]: { "_": {} } } },
     });
 
     const reader = query.subscribe().getReader();
@@ -541,7 +544,7 @@ export class Replica {
    * local store in this session.
    */
   async pull(
-    entries: [FactAddress, SchemaPathSelector?][] = this.queue.consume(),
+    entries: [BaseMemoryAddress, SchemaPathSelector?][] = this.queue.consume(),
   ): Promise<
     Result<
       Unit,
@@ -562,11 +565,11 @@ export class Replica {
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
     const classifications = new Set<string>();
-    for (const [{ the, of }, schemaPathSelector] of entries) {
+    for (const [{ id, type }, schemaPathSelector] of entries) {
       // If we don't have a schema, use SchemaNone, which will only fetch the specified object
       const selector = schemaPathSelector ??
         { path: [], schemaContext: SchemaNone };
-      setSelector(schemaSelector, of, the, "_", selector);
+      setSelector(schemaSelector, id, type, "_", selector);
       // Since we're accessing the entire document, we should base our
       // classification on the rootSchema
       const rootSchema = selector.schemaContext?.rootSchema ?? false;
@@ -641,9 +644,9 @@ export class Replica {
     const notFound = [];
     for (const [entry, _selector] of entries) {
       if (!this.get(entry)) {
+        const unclaimedEntry = unclaimed({ of: entry.id, the: entry.type });
         // Note we use `-1` as `since` timestamp so that any change will appear greater.
-        const revision = { ...unclaimed(entry), since: -1 };
-        notFound.push(revision);
+        notFound.push({ ...unclaimedEntry, since: -1 });
       }
     }
 
@@ -666,8 +669,8 @@ export class Replica {
     const result = await this.cache.merge(revisions, Replica.put);
 
     for (const [revision, selector] of fetchedEntries) {
-      const factAddress = { the: revision.the, of: revision.of };
-      this.selectorTracker.add(factAddress, selector, Promise.resolve(result));
+      const address = { id: revision.of, type: revision.the };
+      this.selectorTracker.add(address, selector, Promise.resolve(result));
     }
 
     if (result.error) {
@@ -683,7 +686,7 @@ export class Replica {
    * be fetched from the remote.
    */
   async load(
-    entries: [FactAddress, SchemaPathSelector?][],
+    entries: [BaseMemoryAddress, SchemaPathSelector?][],
   ): Promise<
     Result<
       Unit,
@@ -691,7 +694,7 @@ export class Replica {
     >
   > {
     // First we identify entries that we need to load from the store.
-    const need: [FactAddress, SchemaPathSelector?][] = [];
+    const need: [BaseMemoryAddress, SchemaPathSelector?][] = [];
     for (const [address, selector] of entries) {
       if (!this.get(address)) {
         need.push([address, selector]);
@@ -710,8 +713,8 @@ export class Replica {
     }
 
     // We also include the commit entity to keep track of the current head.
-    if (!this.get({ the, of: this.space })) {
-      need.unshift([{ the, of: this.space }, undefined]);
+    if (!this.get({ id: this.space, type: COMMIT_LOG_TYPE })) {
+      need.unshift([{ id: this.space, type: COMMIT_LOG_TYPE }, undefined]);
     }
 
     // If all the entries were already loaded we don't need to do anything
@@ -725,7 +728,9 @@ export class Replica {
     // to track our subscription for the entries with a schema.
     const schemaless = need
       .filter(([_addr, selector]) => selector === undefined)
-      .map(([addr, _selector]) => addr);
+      .map(([addr, _selector]) => {
+        return { of: addr.id, the: addr.type };
+      });
     const { ok: pulled, error } = await this.cache.pull(schemaless);
 
     if (error) {
@@ -791,16 +796,15 @@ export class Replica {
     >
   > {
     // Generate the selectors for the various change objects
-    const loadArgs: [(Assert | Retract | Claim), SchemaPathSelector?][] =
-      changes.map((
-        change,
-      ) => {
-        const schema = generateSchemaFromLabels(change);
-        const selector = schema === undefined
-          ? undefined
-          : { path: [], schemaContext: { schema: schema, rootSchema: schema } };
-        return [change, selector];
-      });
+    const loadArgs: [BaseMemoryAddress, SchemaPathSelector?][] = changes.map((
+      change,
+    ) => {
+      const schema = generateSchemaFromLabels(change);
+      const selector = schema === undefined
+        ? undefined
+        : { path: [], schemaContext: { schema: schema, rootSchema: schema } };
+      return [{ id: change.of, type: change.the }, selector];
+    });
     // First we pull all the affected entries into heap so we can build a
     // transaction that is aware of latest state.
     const { error } = await this.load(loadArgs);
@@ -812,7 +816,7 @@ export class Replica {
       const facts: Fact[] = [];
       const claims: Invariant[] = [];
       for (const { the, of, is, claim } of changes) {
-        const fact = this.get({ the, of });
+        const fact = this.get({ id: of, type: the });
 
         if (claim) {
           claims.push(claimState(fact!));
@@ -847,15 +851,23 @@ export class Replica {
     // This will also exclude facts that match the nursery version, but these
     // should have already been sent.
     const changedAddresses = [...changes].map((change) => change.address);
-    const changedFacts = facts.filter((fact) =>
+    // Generate pairs of address and facts
+    const changedFactEntries = facts.map((
+      fact,
+    ) => [
       changedAddresses.find((addr) =>
         fact.of === addr.id && fact.the === addr.type
-      )
-    );
+      ),
+      fact,
+    ]).filter(([addr, _fact]) => addr !== undefined) as [
+      BaseMemoryAddress,
+      Fact,
+    ][];
     // Store facts in a nursery so that subsequent changes will be build
     // optimistically assuming that push will succeed.
     // We only add the changedFacts here, because the facts that are unchanged
     // will have an invalid cause chain (we're not going to write them).
+    const changedFacts = changedFactEntries.map(([_addr, fact]) => fact);
     this.nursery.merge(changedFacts, Nursery.put);
     // Notify storage subscribers about the committed changes.
     this.subscription.next({
@@ -865,8 +877,11 @@ export class Replica {
       source,
     });
     // Track all our pending changes
-    changedFacts.map((fact) =>
-      this.pendingNurseryChanges.add(toKey(fact), fact.cause.toString())
+    changedFactEntries.map(([address, fact]) =>
+      this.pendingNurseryChanges.add(
+        toKey(address),
+        fact.cause.toString(),
+      )
     );
 
     // These push transaction that will commit desired state to a remote.
@@ -882,9 +897,9 @@ export class Replica {
     // transactions that already were built upon our facts they will also fail.
     // It's possible we should also purge claims here, but I'm not doing that.
     if (result.error) {
-      for (const fact of changedFacts) {
+      for (const [address, fact] of changedFactEntries) {
         this.pendingNurseryChanges.deleteValue(
-          toKey(fact),
+          toKey(address),
           fact.cause.toString(),
         );
       }
@@ -946,18 +961,22 @@ export class Replica {
       // This is mostly redundant, since any current Fact isn't pending, but
       // this also purges Unclaimed items in case the server ever sends them.
       for (const fact of current) {
-        this.pendingNurseryChanges.delete(toKey(fact));
+        const address = { id: fact.of, type: fact.the };
+        this.pendingNurseryChanges.delete(toKey(address));
       }
     }
 
     return result;
   }
 
-  subscribe(entry: FactAddress, subscriber: (value?: Revision<State>) => void) {
+  subscribe(
+    entry: BaseMemoryAddress,
+    subscriber: (value?: Revision<State>) => void,
+  ) {
     this.heap.subscribe(entry, subscriber);
   }
   unsubscribe(
-    entry: FactAddress,
+    entry: BaseMemoryAddress,
     subscriber: (value?: Revision<State>) => void,
   ) {
     this.heap.unsubscribe(entry, subscriber);
@@ -994,7 +1013,7 @@ export class Replica {
    * Returns state corresponding to the requested entry. If there is a pending
    * state returns it otherwise returns recent state.
    */
-  get(entry: FactAddress): State | undefined {
+  get(entry: BaseMemoryAddress): State | undefined {
     const nurseryState = this.nursery.get(entry);
     if (nurseryState) return nurseryState;
 
@@ -1034,10 +1053,11 @@ export class Replica {
         current.push(revision);
         continue;
       }
-      const heapVersion = this.heap.get(revision);
+      const address = { id: revision.of, type: revision.the };
+      const heapVersion = this.heap.get(address);
       const revisionIsNew = heapVersion === undefined ||
         revision.since > heapVersion.since;
-      const factKey = toKey(revision);
+      const factKey = toKey(address);
       const changes = this.pendingNurseryChanges.get(factKey);
       const factCause = revision.cause.toString();
       if (changes?.has(factCause)) {
@@ -1484,7 +1504,7 @@ export class Provider implements IStorageProvider {
     // Capture workspace locally, so that if it changes later, our cancel
     // will unsubscribe with the same object.
     const { workspace } = this;
-    const address = { the: this.the, of: uri };
+    const address = { id: uri, type: this.the };
     const subscriber = (revision?: Revision<State>) => {
       // If since is -1, this is not a real revision, so don't notify subscribers
       if (revision && revision.since !== -1) {
@@ -1507,8 +1527,7 @@ export class Provider implements IStorageProvider {
     uri: URI,
     selector?: SchemaPathSelector,
   ) {
-    const { the } = this;
-    const factAddress = { the, of: uri };
+    const factAddress = { id: uri, type: this.the };
     if (selector) {
       // We track this server subscription, and don't re-issue it --
       // we will instead return the existing promise, so we can wait until
@@ -1536,7 +1555,7 @@ export class Provider implements IStorageProvider {
   }
 
   get<T = any>(uri: URI): StorageValue<T> | undefined {
-    const entity = this.workspace.get({ the: this.the, of: uri });
+    const entity = this.workspace.get({ id: uri, type: this.the });
 
     return entity?.is as StorageValue<T> | undefined;
   }
@@ -1555,32 +1574,35 @@ export class Provider implements IStorageProvider {
     >
   > {
     const { the, workspace } = this;
-    const TheLabel = "application/label+json" as const;
+    const LABEL_TYPE = "application/label+json" as const;
 
     const changes = [];
     for (const { uri, value } of batch) {
-      const of = uri;
       const content = value.value !== undefined
         ? JSON.stringify({ value: value.value, source: value.source })
         : undefined;
 
-      const current = workspace.get({ the, of });
+      const current = workspace.get({ id: uri, type: this.the });
       if (JSON.stringify(current?.is) !== content) {
         if (content !== undefined) {
           // ⚠️ We do JSON roundtrips to strip off the undefined values that
           // cause problems with serialization.
-          changes.push({ the, of, is: JSON.parse(content) as JSONValue });
+          changes.push({ of: uri, the, is: JSON.parse(content) as JSONValue });
         } else {
-          changes.push({ the, of });
+          changes.push({ of: uri, the });
         }
       }
       if (value.labels !== undefined) {
-        const currentLabel = workspace.get({ the: TheLabel, of });
+        const currentLabel = workspace.get({ id: uri, type: LABEL_TYPE });
         if (!deepEqual(currentLabel?.is, value.labels)) {
           if (value.labels !== undefined) {
-            changes.push({ the: TheLabel, of, is: value.labels as JSONValue });
+            changes.push({
+              of: uri,
+              the: LABEL_TYPE,
+              is: value.labels as JSONValue,
+            });
           } else {
-            changes.push({ the: TheLabel, of });
+            changes.push({ of: uri, the: LABEL_TYPE });
           }
         }
       }
@@ -1625,12 +1647,12 @@ export class Provider implements IStorageProvider {
     this.workspace.reset();
 
     // Re-establish subscriptions
-    const need: [FactAddress, SchemaPathSelector?][] = [];
+    const need: [BaseMemoryAddress, SchemaPathSelector?][] = [];
 
     // Always include the space commit object to ensure proper query context
-    const spaceCommitAddress: FactAddress = {
-      the: "application/commit+json",
-      of: this.workspace.space,
+    const spaceCommitAddress: BaseMemoryAddress = {
+      type: COMMIT_LOG_TYPE,
+      id: this.workspace.space,
     };
     need.push([spaceCommitAddress, undefined]);
 

@@ -792,9 +792,9 @@ const FRAGMENT_ELEMENT = "common-fragment";
  * @returns A virtual DOM node
  */
 export const h = Object.assign(function h(
-  name: string | ((...args: any[]) => any),
+  name: string | ((...args: any[]) => VNode),
   props: { [key: string]: any } | null,
-  ...children: Child[]
+  ...children: RenderNode[]
 ): VNode {
   if (typeof name === "function") {
     return name({
@@ -810,8 +810,8 @@ export const h = Object.assign(function h(
     };
   }
 }, {
-  fragment({ children }: { children: Child[] }) {
-    return h(FRAGMENT_ELEMENT, null, children);
+  fragment({ children }: { children: RenderNode[] }) {
+    return h(FRAGMENT_ELEMENT, null, ...children);
   },
 });
 
@@ -832,19 +832,19 @@ export type Props = {
 };
 
 /** A child in a view can be one of a few things */
-export type Child =
+export type RenderNode =
   | VNode
   | string
   | number
   | boolean
-  | Cell<Child>
-  | Array<Child>;
+  | Cell<RenderNode>
+  | RenderNode[];
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
   type: "vnode";
   name: string;
   props: Props;
-  children: Array<Child> | Cell<Array<Child>>;
+  children?: RenderNode;
   [UI]?: VNode;
 };

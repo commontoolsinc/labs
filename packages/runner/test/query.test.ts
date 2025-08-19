@@ -122,10 +122,9 @@ describe("Query", () => {
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      doc: { the: assert2.the, of: assert2.of },
-      docRoot: assert2.is.value,
-      path: [],
+      address: { id: assert2.of, type: assert2.the, path: [] },
       value: assert2.is.value,
+      rootValue: assert2.is.value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
@@ -209,14 +208,11 @@ describe("Query", () => {
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
-    traverser.traverse(
-      {
-        doc: { the: assert2.the, of: assert2.of },
-        docRoot: assert2.is.value,
-        path: [],
-        value: assert2.is.value,
-      },
-    );
+    traverser.traverse({
+      address: { id: assert2.of, type: assert2.the, path: [] },
+      value: assert2.is.value,
+      rootValue: assert2.is.value,
+    });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
     );
@@ -292,14 +288,11 @@ describe("Query", () => {
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
-    traverser.traverse(
-      {
-        doc: { the: assert1.the, of: assert1.of },
-        docRoot: assert1.is.value,
-        path: [],
-        value: assert1.is.value,
-      },
-    );
+    traverser.traverse({
+      address: { id: assert1.of, type: assert1.the, path: [] },
+      value: assert1.is.value,
+      rootValue: assert1.is.value,
+    });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
     );
@@ -379,14 +372,11 @@ describe("Query", () => {
       schemaTracker,
     );
     // We've provided a schema context for this, so traverse it
-    traverser.traverse(
-      {
-        doc: { the: assert2.the, of: assert2.of },
-        docRoot: assert2.is.value,
-        path: [],
-        value: assert2.is.value,
-      },
-    );
+    traverser.traverse({
+      address: { id: assert2.of, type: assert2.the, path: [] },
+      value: assert2.is.value,
+      rootValue: assert2.is.value,
+    });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
     );

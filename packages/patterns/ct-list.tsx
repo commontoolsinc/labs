@@ -36,6 +36,8 @@ export default recipe<ListInput, ListOutput>(
 
           <ct-card>
             <ct-list
+              // $ prefix implied passing a Cell<Item[]> rather than just the Item[] itself
+              // this allows components like ct-list to manage the cell internally.
               $value={items}
               editable
               title="Items"
