@@ -1,24 +1,24 @@
 import type { JSONObject, JSONValue, URI } from "@commontools/runner";
 import {
+  BaseMemoryAddress,
   BaseObjectManager,
   CycleTracker,
   DefaultSchemaSelector,
   getAtPath,
+  type IAttestation,
   loadSource,
   MapSet,
   type PointerCycleTracker,
   SchemaObjectTraverser,
-  type ValueEntry,
 } from "@commontools/runner/traverse";
 import { type Immutable, isObject } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
-import { the as COMMIT_THE } from "./commit.ts";
+import { COMMIT_LOG_TYPE } from "./commit.ts";
 import type { CommitData, SchemaPathSelector } from "./consumer.ts";
 import { TheAuthorizationError } from "./error.ts";
 import type {
   Cause,
   Entity,
-  FactAddress,
   FactSelection,
   MemorySpace,
   SchemaQuery,
@@ -49,7 +49,7 @@ import {
 
 export type * from "./interface.ts";
 
-type FullFactAddress = FactAddress & { cause: Cause; since: number };
+//type FullFactAddress = FactAddress & { cause: Cause; since: number };
 
 const logger = getLogger("space-schema", {
   enabled: false,
@@ -61,12 +61,13 @@ const logger = getLogger("space-schema", {
 // It also lets us use one system on the server (where we have the sqlite db)
 // and another system on the client.
 export class ServerObjectManager extends BaseObjectManager<
-  FactAddress,
-  FullFactAddress,
+  BaseMemoryAddress,
   Immutable<JSONValue> | undefined
 > {
   // Cache our read labels, and any docs we can't read
   private readLabels = new Map<Entity, SelectedFact | undefined>();
+  // Mapping from factKey to object with cause and since
+  private factDetails = new Map<string, { cause: Cause; since: number }>();
   private restrictedValues = new Set<string>();
 
   constructor(
@@ -76,50 +77,35 @@ export class ServerObjectManager extends BaseObjectManager<
     super();
   }
 
-  override toKey(doc: FactAddress): string {
-    return `${doc.of}/${doc.the}`;
-  }
-
-  override toAddress(str: string): FactAddress {
-    return { of: `of:${str}`, the: "application/json" };
-  }
-
-  override getTarget(uri: URI): FactAddress {
-    return { of: uri, the: "application/json" };
-  }
-
   /**
-   * Load the facts for the provided doc
+   * Load the facts for the provided address
    *
-   * @param doc the address of the fact to load
-   * @returns a ValueEntry with the value for the specified doc,
+   * @param address the address of the fact to load
+   * @returns an IAttestation with the value for the specified doc,
    * null if there is no matching fact, or undefined if there is a retraction.
    */
-  override load(
-    doc: FactAddress,
-  ): ValueEntry<FullFactAddress, JSONValue | undefined> | null {
-    const key = this.toKey(doc);
+  override load(address: BaseMemoryAddress): IAttestation | null {
+    const key = this.toKey(address);
     if (this.readValues.has(key)) {
       return this.readValues.get(key)!;
     } else if (this.restrictedValues.has(key)) {
       return null;
     }
-    const fact = selectFact(this.session, doc);
+    const fact = selectFact(this.session, {
+      of: address.id,
+      the: address.type,
+    });
     if (fact !== undefined) {
+      const address = { id: fact.of, type: fact.the, path: [] };
       const valueEntry = {
-        source: {
-          of: fact.of,
-          the: fact.the,
-          cause: fact.cause,
-          since: fact.since,
-        },
+        address: address,
         value: fact.is ? (fact.is as JSONObject) : undefined,
       };
-      if (!this.readLabels.has(doc.of)) {
-        const label = getLabel(this.session, doc.of);
-        this.readLabels.set(doc.of, label);
+      if (!this.readLabels.has(address.id)) {
+        const label = getLabel(this.session, address.id);
+        this.readLabels.set(address.id, label);
       }
-      const labelEntry = this.readLabels.get(doc.of);
+      const labelEntry = this.readLabels.get(address.id);
       if (labelEntry?.is) {
         const requiredClassifications = getClassifications({
           is: labelEntry.is,
@@ -133,18 +119,27 @@ export class ServerObjectManager extends BaseObjectManager<
           return null;
         }
       }
+      // Any entry in readValues should also have an entry in factDetails
+      this.factDetails.set(this.toKey(address), {
+        cause: fact.cause,
+        since: fact.since,
+      });
       this.readValues.set(key, valueEntry);
       return valueEntry;
     }
     return null;
   }
 
-  getReadDocs(): Iterable<ValueEntry<FullFactAddress, JSONValue | undefined>> {
+  getReadDocs(): Iterable<IAttestation> {
     return this.readValues.values();
   }
 
   getLabels(): Iterable<[Entity, SelectedFact | undefined]> {
     return this.readLabels.entries();
+  }
+
+  getDetails(address: BaseMemoryAddress) {
+    return this.factDetails.get(this.toKey(address));
   }
 }
 
@@ -175,14 +170,11 @@ export const selectSchema = <Space extends MemorySpace>(
     };
     const matchingFacts = getMatchingFacts(session, factSelector);
     for (const entry of matchingFacts) {
-      const factKey = manager.toKey({
-        of: entry.source.of,
-        the: entry.source.the,
-      });
+      const factKey = manager.toKey(entry.address);
       // TODO(@ubik2): need to remove this or schemaTracker
       selectionTracker?.add(factKey, selectorEntry.value);
       // The top level facts we accessed should be included
-      addToSelection(includedFacts, entry);
+      addToSelection(includedFacts, entry, entry.cause, entry.since);
 
       // Then filter the facts by the associated schemas, which will dereference
       // pointers as we walk through the structure.
@@ -196,8 +188,9 @@ export const selectSchema = <Space extends MemorySpace>(
 
       // Add any facts that we accessed while traversing the object with its schema
       // We'll need the same set of objects on the client to traverse it there.
-      for (const entry of manager.getReadDocs()) {
-        addToSelection(includedFacts, entry);
+      for (const included of manager.getReadDocs()) {
+        const details = manager.getDetails(included.address)!;
+        addToSelection(includedFacts, included, details.cause, details.since);
       }
     }
   }
@@ -250,21 +243,17 @@ export const selectSchema = <Space extends MemorySpace>(
 
 function loadFactsForDoc(
   manager: ServerObjectManager,
-  fact: ValueEntry<FullFactAddress, Immutable<JSONValue> | undefined>,
+  fact: IAttestation,
   selector: SchemaPathSelector,
   tracker: PointerCycleTracker,
   schemaTracker: MapSet<string, SchemaPathSelector>,
 ) {
   if (isObject(fact.value)) {
-    const factAddress = { of: fact.source.of, the: fact.source.the };
     if (selector.schemaContext !== undefined) {
       const factValue = (fact.value as Immutable<JSONObject>).value;
-      const [newDoc, newSelector] = getAtPath<
-        FactAddress,
-        FullFactAddress
-      >(
+      const [newDoc, newSelector] = getAtPath(
         manager,
-        { doc: factAddress, docRoot: factValue, path: [], value: factValue },
+        { address: fact.address, value: factValue, rootValue: factValue },
         selector.path,
         tracker,
         schemaTracker,
@@ -286,7 +275,7 @@ function loadFactsForDoc(
     } else {
       // If we didn't provide a schema context, we still want the selected
       // object in our manager, so load it directly.
-      manager.load(factAddress);
+      manager.load(fact.address);
     }
     // Also load any source links and recipes
     loadSource(manager, fact, new Set<string>(), schemaTracker);
@@ -297,7 +286,7 @@ const redactCommits = <Space extends MemorySpace>(
   includedFacts: FactSelection,
   session: Session<Space>,
 ) => {
-  const change = getChange(includedFacts, session.subject, COMMIT_THE);
+  const change = getChange(includedFacts, session.subject, COMMIT_LOG_TYPE);
   if (change !== undefined) {
     const [cause, value] = change;
     const commitData = value.is as CommitData;
@@ -319,7 +308,7 @@ const redactCommits = <Space extends MemorySpace>(
     setRevision<FactSelectionValue>(
       includedFacts,
       session.subject,
-      COMMIT_THE,
+      COMMIT_LOG_TYPE,
       cause,
       redactedValue,
     );
@@ -330,16 +319,16 @@ const redactCommits = <Space extends MemorySpace>(
 // into the `is` field.
 function addToSelection(
   includedFacts: FactSelection,
-  entry: ValueEntry<FullFactAddress, JSONValue | undefined>,
+  entry: IAttestation,
+  cause: Cause,
+  since: number,
 ) {
   setRevision(
     includedFacts,
-    entry.source.of,
-    entry.source.the,
-    entry.source.cause,
-    (entry.value !== undefined)
-      ? { is: entry.value, since: entry.source.since }
-      : { since: entry.source.since },
+    entry.address.id,
+    entry.address.type,
+    cause,
+    (entry.value !== undefined) ? { is: entry.value, since } : { since },
   );
 }
 
@@ -347,17 +336,14 @@ function addToSelection(
 function getMatchingFacts<Space extends MemorySpace>(
   session: Session<Space>,
   factSelector: FactSelector,
-): Iterable<ValueEntry<FullFactAddress, JSONValue | undefined>> {
+): Iterable<IAttestation & { cause: Cause; since: number }> {
   const results = [];
   for (const fact of selectFacts(session, factSelector)) {
     results.push({
       value: fact.is,
-      source: {
-        of: fact.of,
-        the: fact.the,
-        cause: fact.cause,
-        since: fact.since,
-      },
+      address: { id: fact.of, type: fact.the, path: [] },
+      cause: fact.cause,
+      since: fact.since,
     });
   }
   return results;

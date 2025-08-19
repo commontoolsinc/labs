@@ -5,7 +5,6 @@ import {
   type Immutable,
   isNumber,
   isObject,
-  isRecord,
   isString,
 } from "../../utils/src/types.ts";
 import { getLogger } from "../../utils/src/logger.ts";
@@ -20,8 +19,11 @@ import { deepEqual } from "./path-utils.ts";
 import { isAnyCellLink, parseLink } from "./link-utils.ts";
 import type { URI } from "./sigil-types.ts";
 import { fromURI } from "./uri-utils.ts";
+import type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 const logger = getLogger("traverse", { enabled: true, level: "warn" });
+
+export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
 export type SchemaPathSelector = {
   path: readonly string[];
@@ -127,27 +129,22 @@ export type PointerCycleTracker = CycleTracker<
   Immutable<JSONValue>
 >;
 
-export type CellTarget = { path: string[]; cellTarget: string | undefined };
-
 export interface ObjectStorageManager<K, S, V> {
-  addRead(doc: K, value: V, source: S): void;
-  addWrite(doc: K, value: V, source: S): void;
-  // get the key for the doc pointed to by the cell target
-  getTarget(uri: URI): K;
+  addRead(address: K, value: V, source: S): void;
+  addWrite(address: K, value: V, source: S): void;
   // load the object for the specified key
-  load(doc: K): ValueEntry<S, V | undefined> | null;
+  load(address: K): IAttestation | null;
 }
 
-export type ValueEntry<T, V> = {
-  value: V;
-  source: T;
-};
+export type BaseMemoryAddress = Omit<IMemoryAddress, "path">;
 
-export type ValueAtPath<K> = {
-  doc: K;
-  docRoot: Immutable<JSONValue> | undefined;
-  path: string[];
-  value: Immutable<JSONValue> | undefined;
+// This is very similar to the IAttestation class.
+// We do use the IAttestation class a little differently.
+// The address doesn't include the initial "value" in the path.
+// This adds the rootValue property to the BaseValueAtPath, which is actually
+//  the contents of the "value" property of the document.
+export type ValueAtPath = IAttestation & {
+  readonly rootValue: Immutable<JSONValue> | undefined;
 };
 
 // I've really got two different concepts here.
@@ -158,29 +155,42 @@ export type ValueAtPath<K> = {
 //  1. Loading objects from the DB (on the server)
 //  2. Loading objects from our memory interface (on the client)
 
-export abstract class BaseObjectManager<K, S, V>
-  implements ObjectStorageManager<K, S, V> {
+export abstract class BaseObjectManager<
+  S extends BaseMemoryAddress,
+  V extends JSONValue | undefined,
+> implements ObjectStorageManager<BaseMemoryAddress, S, V> {
   constructor(
-    protected readValues = new Map<string, ValueEntry<S, V>>(),
-    protected writeValues = new Map<string, ValueEntry<S, V>>(),
+    protected readValues = new Map<string, IAttestation>(),
+    protected writeValues = new Map<string, IAttestation>(),
   ) {}
 
-  addRead(doc: K, value: V, source: S) {
-    const key = this.toKey(doc);
-    this.readValues.set(key, { value: value, source: source });
+  addRead(address: S, value: V, source: S) {
+    const key = this.toKey(address);
+    this.readValues.set(key, {
+      value: value,
+      address: { path: [], ...source },
+    });
   }
 
-  addWrite(doc: K, value: V, source: S) {
-    const key = this.toKey(doc);
-    this.writeValues.set(key, { value: value, source: source });
+  addWrite(address: S, value: V, source: S) {
+    const key = this.toKey(address);
+    this.writeValues.set(key, {
+      value: value,
+      address: { path: [], ...source },
+    });
   }
-  abstract getTarget(uri: URI): K;
+
+  toKey(address: BaseMemoryAddress): string {
+    return `${address.id}/${address.type}`;
+  }
+
+  toAddress(str: string): BaseMemoryAddress {
+    return { id: `of:${str}`, type: "application/json" };
+  }
+
   // load the doc from the underlying system.
   // implementations are responsible for adding this to the readValues
-  abstract load(doc: K): ValueEntry<S, V | undefined> | null;
-  // get a string version of a key
-  abstract toKey(doc: K): string;
-  abstract toAddress(str: string): K;
+  abstract load(address: BaseMemoryAddress): IAttestation | null;
 }
 
 export type OptJSONValue =
@@ -195,15 +205,11 @@ interface OptJSONObject {
 
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
-export abstract class BaseObjectTraverser<K, S> {
+export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
   constructor(
-    protected manager: BaseObjectManager<
-      K,
-      S,
-      Immutable<JSONValue> | undefined
-    >,
+    protected manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
   ) {}
-  abstract traverse(doc: ValueAtPath<K>): Immutable<OptJSONValue>;
+  abstract traverse(doc: ValueAtPath): Immutable<OptJSONValue>;
 
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -215,7 +221,7 @@ export abstract class BaseObjectTraverser<K, S> {
    * @returns
    */
   protected traverseDAG(
-    doc: ValueAtPath<K>,
+    doc: ValueAtPath,
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
   ): Immutable<JSONValue> | undefined {
@@ -228,7 +234,14 @@ export abstract class BaseObjectTraverser<K, S> {
       }
       return doc.value.map((item, index) =>
         this.traverseDAG(
-          { ...doc, path: [...doc.path, index.toString()], value: item },
+          {
+            ...doc,
+            address: {
+              ...doc.address,
+              path: [...doc.address.path, index.toString()],
+            },
+            value: item,
+          },
           tracker,
           schemaTracker,
         )
@@ -244,7 +257,7 @@ export abstract class BaseObjectTraverser<K, S> {
           schemaTracker,
           DefaultSchemaSelector,
         );
-        if (newDoc.value === undefined || newDoc.docRoot === undefined) {
+        if (newDoc.value === undefined || newDoc.rootValue === undefined) {
           return null;
         }
         return this.traverseDAG(newDoc, tracker, schemaTracker);
@@ -261,7 +274,7 @@ export abstract class BaseObjectTraverser<K, S> {
             this.traverseDAG(
               {
                 ...doc,
-                path: [...doc.path, k],
+                address: { ...doc.address, path: [...doc.address.path, k] },
                 value: value,
               },
               tracker,
@@ -292,16 +305,15 @@ export abstract class BaseObjectTraverser<K, S> {
  * docRoot, path, and value and also containing the updated selector that
  * applies to that target doc.
  */
-export function getAtPath<K, S>(
-  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
-  doc: ValueAtPath<K>,
+export function getAtPath<S extends BaseMemoryAddress>(
+  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+  doc: ValueAtPath,
   path: readonly string[],
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): [ValueAtPath<K>, SchemaPathSelector | undefined] {
-  // we may mutate curDoc's value and path, so copy the object and the path
-  let curDoc = { ...doc, path: [...doc.path] };
+): [ValueAtPath, SchemaPathSelector | undefined] {
+  let curDoc = doc;
   let remaining = [...path];
   while (isAnyCellLink(curDoc.value)) {
     [curDoc, selector] = followPointer(
@@ -320,17 +332,27 @@ export function getAtPath<K, S>(
     part = remaining.shift()
   ) {
     if (Array.isArray(curDoc.value)) {
-      curDoc.value = elementAt(curDoc.value, part);
-      curDoc.path.push(part);
+      curDoc = {
+        ...curDoc,
+        address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+        value: elementAt(curDoc.value, part),
+      };
     } else if (
       isObject(curDoc.value) && part in (curDoc.value as Immutable<JSONObject>)
     ) {
       const cursorObj = curDoc.value as Immutable<JSONObject>;
-      curDoc.value = cursorObj[part] as Immutable<JSONValue>;
-      curDoc.path.push(part);
+      curDoc = {
+        ...curDoc,
+        address: { ...curDoc.address, path: [...curDoc.address.path, part] },
+        value: cursorObj[part] as Immutable<JSONValue>,
+      };
     } else {
       // we can only descend into pointers, objects, and arrays
-      return [{ ...curDoc, path: [], value: undefined }, selector];
+      return [{
+        ...curDoc,
+        address: { ...curDoc.address, path: [] },
+        value: undefined,
+      }, selector];
     }
     // If this next value is a pointer, use the pointer resolution code
     while (isAnyCellLink(curDoc.value)) {
@@ -360,35 +382,44 @@ export function getAtPath<K, S>(
  *
  * @returns a ValueAtPath object with the target doc, docRoot, path, and value.
  */
-function followPointer<K, S>(
-  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
-  doc: ValueAtPath<K>,
+function followPointer<S extends BaseMemoryAddress>(
+  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+  doc: ValueAtPath,
   path: readonly string[],
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): [ValueAtPath<K>, SchemaPathSelector | undefined] {
+): [ValueAtPath, SchemaPathSelector | undefined] {
   using t = tracker.include(doc.value!, doc);
   if (t === null) {
-    return [{ ...doc, path: [], value: undefined }, selector];
+    return [
+      { ...doc, address: { ...doc.address, path: [] }, value: undefined },
+      selector,
+    ];
   }
   const link = parseLink(doc.value)!;
-  const target = (link.id !== undefined) ? manager.getTarget(link.id) : doc.doc;
-  let [targetDoc, targetDocRoot] = [doc.doc, doc.docRoot];
+  const target = (link.id !== undefined)
+    ? { id: link.id, type: "application/json" }
+    : doc.address;
+  let [targetDoc, targetDocRoot] = [doc.address, doc.rootValue];
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
     // Remove the portions of doc.path from selector.path, limiting schema if needed
     // Also insert the portions of cellTarget.path, so selector is relative to new target doc
     // We do this even if the target doc is the same doc, since we want the
     // selector path to match.
-    selector = narrowSchema(doc.path, selector, link.path as string[]);
+    selector = narrowSchema(doc.address.path, selector, link.path as string[]);
   }
   if (link.id !== undefined) {
     // We have a reference to a different cell, so track the dependency
     // and update our targetDoc and targetDocRoot
     const valueEntry = manager.load(target);
     if (valueEntry === null) {
-      return [{ ...doc, path: [], value: undefined }, selector];
+      return [{
+        ...doc,
+        address: { ...doc.address, path: [] },
+        value: undefined,
+      }, selector];
     }
     if (schemaTracker !== undefined && selector !== undefined) {
       schemaTracker.add(manager.toKey(target), selector);
@@ -397,14 +428,18 @@ function followPointer<K, S>(
     // We can't do a better match, but we do want to include the result so we watch this doc
     if (valueEntry.value === undefined) {
       return [
-        { doc: target, docRoot: undefined, path: [], value: undefined },
+        {
+          address: { ...target, path: [] },
+          value: undefined,
+          rootValue: undefined,
+        },
         selector,
       ];
     }
     // Otherwise, we can continue with the target.
     // an assertion fact.is will be an object with a value property, and
     // that's what our schema is relative to.
-    targetDoc = target;
+    targetDoc = { ...target, path: [] };
     const targetObj = valueEntry.value as Immutable<JSONObject>;
     targetDocRoot = targetObj["value"];
     // Load any sources (recursively) if they exist and any linked recipes
@@ -421,10 +456,9 @@ function followPointer<K, S>(
   return getAtPath(
     manager,
     {
-      doc: targetDoc,
-      docRoot: targetDocRoot,
-      path: [],
+      address: { ...targetDoc, path: [] },
       value: targetDocRoot,
+      rootValue: targetDocRoot,
     },
     [...link.path, ...path] as string[],
     tracker,
@@ -435,9 +469,9 @@ function followPointer<K, S>(
 
 // Recursively load the source from the doc ()
 // This will also load any recipes linked by the doc.
-export function loadSource<K, S>(
-  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
-  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+export function loadSource<S extends BaseMemoryAddress>(
+  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+  valueEntry: IAttestation,
   cycleCheck: Set<string> = new Set<string>(),
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
@@ -455,7 +489,7 @@ export function loadSource<K, S>(
     // undefined is strange, but acceptable
     if (source !== undefined) {
       logger.warn(
-        () => ["Invalid source link", source, "in", valueEntry.source],
+        () => ["Invalid source link", source, "in", valueEntry.address],
       );
     }
     return;
@@ -465,22 +499,22 @@ export function loadSource<K, S>(
     return;
   }
   cycleCheck.add(of);
-  const entryDoc = manager.toAddress(of);
-  const entry = manager.load(entryDoc);
-  if (entry === null || entry.value === undefined || !entry.source) {
+  const address = manager.toAddress(of);
+  const entry = manager.load(address);
+  if (entry === null || entry.value === undefined) {
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
   }
   loadSource(manager, entry, cycleCheck, schemaTracker);
 }
 
 // Load the linked recipe from the doc ()
 // We don't recurse, since that's not required for recipe links
-function loadLinkedRecipe<K, S>(
-  manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
-  valueEntry: ValueEntry<S, Immutable<JSONValue> | undefined>,
+function loadLinkedRecipe<S extends BaseMemoryAddress>(
+  manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
+  valueEntry: IAttestation,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
 ) {
   if (!isObject(valueEntry.value)) {
@@ -495,26 +529,26 @@ function loadLinkedRecipe<K, S>(
   if (!isObject(value)) {
     return;
   }
-  let entryDoc;
+  let address;
   // Check for a spell link first, since this is more efficient
   // Older recipes will only have a $TYPE
   if ("spell" in value && isAnyCellLink(value["spell"])) {
     const link = parseLink(value["spell"])!;
-    entryDoc = manager.toAddress(fromURI(link.id!));
+    address = manager.toAddress(fromURI(link.id!));
   } else if ("$TYPE" in value && isString(value["$TYPE"])) {
     const recipeId = value["$TYPE"];
     const entityId = refer({ causal: { recipeId, type: "recipe" } });
-    entryDoc = manager.toAddress(entityId.toJSON()["/"]);
+    address = manager.toAddress(entityId.toJSON()["/"]);
   }
-  if (entryDoc === undefined) {
+  if (address === undefined) {
     return;
   }
-  const entry = manager.load(entryDoc);
-  if (entry === null || entry.value === undefined || !entry.source) {
+  const entry = manager.load(address);
+  if (entry === null || entry.value === undefined) {
     return;
   }
   if (schemaTracker !== undefined) {
-    schemaTracker.add(manager.toKey(entryDoc), MinimalSchemaSelector);
+    schemaTracker.add(manager.toKey(address), MinimalSchemaSelector);
   }
 }
 
@@ -523,7 +557,7 @@ function loadLinkedRecipe<K, S>(
 // we want them relative to the new doc.
 // targetPath is the path in the target doc that the pointer points to
 function narrowSchema(
-  docPath: string[],
+  docPath: readonly string[],
   selector: SchemaPathSelector,
   targetPath: readonly string[],
 ): SchemaPathSelector {
@@ -584,9 +618,10 @@ export function isPrimitive(val: unknown): val is Primitive {
   return val === null || (type !== "object" && type !== "function");
 }
 
-export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
+export class SchemaObjectTraverser<S extends BaseMemoryAddress>
+  extends BaseObjectTraverser<S> {
   constructor(
-    manager: BaseObjectManager<K, S, Immutable<JSONValue> | undefined>,
+    manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
     private selector: SchemaPathSelector,
     private tracker: PointerCycleTracker = new CycleTracker<
       Immutable<JSONValue>
@@ -600,9 +635,9 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   }
 
   override traverse(
-    doc: ValueAtPath<K>,
+    doc: ValueAtPath,
   ): Immutable<OptJSONValue> {
-    this.schemaTracker.add(this.manager.toKey(doc.doc), this.selector);
+    this.schemaTracker.add(this.manager.toKey(doc.address), this.selector);
     return this.traverseWithSelector(doc, this.selector);
   }
 
@@ -610,21 +645,26 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   // The selector should have been re-rooted if needed to be relative to the specified doc
   // The selector must have a valid (defined) schemaContext
   traverseWithSelector(
-    doc: ValueAtPath<K>,
+    doc: ValueAtPath,
     selector: SchemaPathSelector,
   ): Immutable<OptJSONValue> {
-    if (deepEqual(doc.path, selector.path)) {
+    if (deepEqual(doc.address.path, selector.path)) {
       return this.traverseWithSchemaContext(doc, selector.schemaContext!);
-    } else if (doc.path.length > selector.path.length) {
+    } else if (doc.address.path.length > selector.path.length) {
       throw new Error("Doc path should never exceed selector path");
-    } else if (!deepEqual(doc.path, selector.path.slice(0, doc.path.length))) {
+    } else if (
+      !deepEqual(
+        doc.address.path,
+        selector.path.slice(0, doc.address.path.length),
+      )
+    ) {
       // There's a mismatch in the initial part, so this will not match
       return undefined;
     } else { // doc path length < selector.path.length
       const [nextDoc, nextSelector] = getAtPath(
         this.manager,
         doc,
-        selector.path.slice(doc.path.length),
+        selector.path.slice(doc.address.path.length),
         this.tracker,
         this.schemaTracker,
         selector,
@@ -632,7 +672,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       if (nextDoc.value === undefined) {
         return undefined;
       }
-      if (!deepEqual(nextDoc.path, nextSelector!.path)) {
+      if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
         throw new Error("New doc path doesn't match selector path");
       }
       return this.traverseWithSchemaContext(
@@ -643,7 +683,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   }
 
   traverseWithSchemaContext(
-    doc: ValueAtPath<K>,
+    doc: ValueAtPath,
     schemaContext: Readonly<SchemaContext>,
   ): Immutable<OptJSONValue> {
     if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
@@ -742,7 +782,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   }
 
   private traverseArrayWithSchema(
-    doc: ValueAtPath<K>,
+    doc: ValueAtPath,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
     const arrayObj = [];
@@ -757,11 +797,14 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
         : true;
       const curDoc = {
         ...doc,
-        path: [...doc.path, index.toString()],
+        address: {
+          ...doc.address,
+          path: [...doc.address.path, index.toString()],
+        },
         value: item,
       };
       const selector = {
-        path: curDoc.path,
+        path: curDoc.address.path,
         schemaContext: {
           schema: itemSchema,
           rootSchema: schemaContext.rootSchema,
@@ -778,7 +821,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
   }
 
   private traverseObjectWithSchema(
-    doc: ValueAtPath<K>,
+    doc: ValueAtPath,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
     const filteredObj: Record<string, Immutable<OptJSONValue>> = {};
@@ -804,7 +847,10 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       }
       const val = this.traverseWithSchemaContext({
         ...doc,
-        path: [...doc.path, propKey],
+        address: {
+          ...doc.address,
+          path: [...doc.address.path, propKey],
+        },
         value: propValue,
       }, {
         schema: propSchema,
@@ -828,9 +874,10 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
     return filteredObj;
   }
 
-  // This just has a schemaContext, since the doc.path would match the selector.path
+  // This just has a schemaContext, since the doc.address.path would match the
+  // selector.path
   private traversePointerWithSchema(
-    doc: ValueAtPath<K>,
+    doc: ValueAtPath,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
     const [newDoc, newSelector] = getAtPath(
@@ -839,7 +886,7 @@ export class SchemaObjectTraverser<K, S> extends BaseObjectTraverser<K, S> {
       [],
       this.tracker,
       this.schemaTracker,
-      { path: [...doc.path], schemaContext: schemaContext },
+      { path: [...doc.address.path], schemaContext: schemaContext },
     );
     if (newDoc.value === undefined) {
       return null;

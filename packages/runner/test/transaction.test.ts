@@ -507,8 +507,8 @@ describe("StorageTransaction", () => {
 
       // Verify the replica state actually changed
       const updatedState = replica.get({
-        the: "application/json",
-        of: "user:consistency",
+        id: "user:consistency",
+        type: "application/json",
       });
       expect(updatedState?.is).toEqual({ name: "Modified", version: 2 });
 

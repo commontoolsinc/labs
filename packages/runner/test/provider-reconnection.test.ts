@@ -6,6 +6,7 @@ import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
 import type { SchemaContext, URI } from "@commontools/memory/interface";
 import * as Subscription from "../src/storage/subscription.ts";
+import { BaseMemoryAddress } from "@commontools/runner/traverse";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -60,10 +61,12 @@ describe("Provider Reconnection", () => {
       await provider.sync(uri2, selector2);
 
       // Override the workspace's pull function to track calls
-      const pullCalls: Array<[any, any?][]> = [];
+      const pullCalls: Array<
+        [BaseMemoryAddress, Memory.SchemaPathSelector?][]
+      > = [];
       const originalPull = provider.workspace.pull.bind(provider.workspace);
-      (provider.workspace as any).pull = function (
-        entries: [any, any?][],
+      provider.workspace.pull = function (
+        entries: [BaseMemoryAddress, Memory.SchemaPathSelector?][],
       ) {
         pullCalls.push(entries);
         return originalPull(entries);
@@ -81,21 +84,21 @@ describe("Provider Reconnection", () => {
 
       // First entry should be space commit object
       expect(pullEntries[0][0]).toEqual({
-        the: "application/commit+json",
-        of: signer.did(),
+        id: signer.did(),
+        type: "application/commit+json",
       });
       expect(pullEntries[0][1]).toBeUndefined();
 
       // Check user-1 subscription
       const user1Entry = pullEntries.find(
-        ([addr]) => addr.of === "of:user-1" && addr.the === "application/json",
+        ([addr]) => addr.id === "of:user-1" && addr.type === "application/json",
       );
       expect(user1Entry).toBeDefined();
       expect(user1Entry![1]).toEqual(selector1);
 
       // Check user-2 subscription
       const user2Entry = pullEntries.find(
-        ([addr]) => addr.of === "of:user-2" && addr.the === "application/json",
+        ([addr]) => addr.id === "of:user-2" && addr.type === "application/json",
       );
       expect(user2Entry).toBeDefined();
       expect(user2Entry![1]).toEqual(selector2);
@@ -116,8 +119,8 @@ describe("Provider Reconnection", () => {
       // Make pull fail
       const originalPull = provider.workspace.pull.bind(provider.workspace);
       let pullCalled = false;
-      (provider.workspace as any).pull = function (
-        entries: [any, any?][],
+      provider.workspace.pull = function (
+        _entries: [BaseMemoryAddress, Memory.SchemaPathSelector?][],
       ) {
         pullCalled = true;
         throw new Error("Network error");

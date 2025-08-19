@@ -12,7 +12,7 @@ import type {
 import { assert } from "./fact.ts";
 import { fromString } from "merkle-reference";
 
-export const the = "application/commit+json" as const;
+export const COMMIT_LOG_TYPE = "application/commit+json" as const;
 export const create = <Space extends MemorySpace>({
   space,
   cause,
@@ -23,9 +23,9 @@ export const create = <Space extends MemorySpace>({
   since?: number;
   transaction: Transaction;
   cause?: Reference<Assertion> | Assertion | null | undefined;
-}): Assertion<typeof the, Space, CommitData> =>
+}): Assertion<typeof COMMIT_LOG_TYPE, Space, CommitData> =>
   assert({
-    the,
+    the: COMMIT_LOG_TYPE,
     of: space,
     is: {
       since,
@@ -38,11 +38,11 @@ export const toRevision = (
   commit: Commit,
 ): Revision<CommitFact> => {
   const [[space, attributes]] = Object.entries(commit);
-  const [[cause, { is }]] = Object.entries(attributes[the]);
+  const [[cause, { is }]] = Object.entries(attributes[COMMIT_LOG_TYPE]);
 
   return {
     ...assert({
-      the,
+      the: COMMIT_LOG_TYPE,
       of: space as MemorySpace,
       is,
       cause: fromString(cause) as Reference<Fact>,

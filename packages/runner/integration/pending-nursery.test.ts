@@ -52,7 +52,7 @@ async function test() {
 
   let s1Count = 0;
   provider1.replica.heap.subscribe(
-    { of: uri, the: "application/json" },
+    { id: uri, type: "application/json" },
     (v) => {
       s1Count++;
     },
@@ -71,7 +71,7 @@ async function test() {
     (runtime2.storageManager.open(identity.did()) as any).provider;
   let s2Count = 0;
   provider2.replica.heap.subscribe(
-    { of: uri, the: "application/json" },
+    { id: uri, type: "application/json" },
     (_v) => {
       s2Count++;
     },
@@ -88,7 +88,7 @@ async function test() {
   // Set up a wait for the last value (45)
   const deferred = Promise.withResolvers();
   provider2.replica.heap.subscribe(
-    { of: uri, the: "application/json" },
+    { id: uri, type: "application/json" },
     (v) => {
       if ((v?.is as any).value.count === 45) {
         deferred.resolve(true);

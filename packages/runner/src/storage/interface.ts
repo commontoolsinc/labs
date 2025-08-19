@@ -21,6 +21,7 @@ import type {
   URI,
   Variant,
 } from "@commontools/memory/interface";
+import { BaseMemoryAddress } from "@commontools/runner/traverse";
 
 export type {
   Assertion,
@@ -773,7 +774,7 @@ export interface ISpaceReplica extends ISpace {
    * Return a state for the requested entry or returns `undefined` if replica
    * does not have it.
    */
-  get(entry: FactAddress): State | undefined;
+  get(entry: BaseMemoryAddress): State | undefined;
 
   commit(
     transaction: ITransaction,

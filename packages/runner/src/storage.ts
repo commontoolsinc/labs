@@ -1,12 +1,13 @@
 import { refer } from "merkle-reference";
 import { Immutable, isRecord } from "@commontools/utils/types";
 import type {
-  FactAddress,
   JSONValue,
   MemorySpace,
   SchemaContext,
   SchemaPathSelector,
 } from "@commontools/memory/interface";
+import type { BaseMemoryAddress } from "@commontools/runner/traverse";
+import { getLogger } from "@commontools/utils/logger";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { type DocImpl, isDoc } from "./doc.ts";
@@ -20,7 +21,6 @@ import type {
   StorageValue,
   URI,
 } from "./storage/interface.ts";
-import { getLogger } from "@commontools/utils/logger";
 import type { IRuntime, IStorage } from "./runtime.ts";
 import { DocObjectManager, querySchema } from "./storage/query.ts";
 import { deepEqual } from "./path-utils.ts";
@@ -298,7 +298,7 @@ export class Storage implements IStorage {
     // Run a schema query against our local content, so we can either send
     // the set of linked docs, or load them.
     const uri = Storage.toURI(doc.entityId);
-    const { missing, loaded, selected } = this._queryLocal(
+    const { missing, loaded } = this._queryLocal(
       doc.space,
       uri,
       storageProvider,
@@ -308,18 +308,18 @@ export class Storage implements IStorage {
     // per-space transaction entry, and may have labels.
     // We'll also ensure we're only dealing with the entity ids that will
     // be managed in our document map.
-    const uris = loaded.values().map((valueEntry) => valueEntry.source)
+    const uris = loaded.values().map((valueEntry) => valueEntry.address)
       .filter((docAddr) =>
-        docAddr.the === "application/json" && docAddr.of.startsWith("of:")
-      ).map((docAddr) => docAddr.of).toArray();
+        docAddr.type === "application/json" && docAddr.id.startsWith("of:")
+      ).map((docAddr) => docAddr.id).toArray();
 
     // It's ok to be missing the primary record (this is the case when we are
     // creating it for the first time).
     if (
       missing.length === 1 &&
-      missing[0].of === uri
+      missing[0].id === uri
     ) {
-      uris.push(missing[0].of);
+      uris.push(missing[0].id);
       // } else if (missing.length > 1) {
       //   console.debug("missing", missing);
     }
@@ -467,9 +467,9 @@ export class Storage implements IStorage {
       this.runtime.documentMap,
       Storage._cellLinkToJSON,
     );
-    const docAddress = { of: uri, the: "application/json" };
+    const docAddress = { id: uri, type: "application/json", path: [] };
     const selector = { path: [], schemaContext: schemaContext };
-    return querySchema(selector, [], docAddress, manager);
+    return querySchema(selector, docAddress, manager);
   }
 
   // Update storage with the new doc value
@@ -517,9 +517,9 @@ export class Storage implements IStorage {
       // TODO(@ubik2) I've lost the schema here
       const linkedDoc = this.runtime.documentMap.getDocByEntityId(
         doc.space,
-        factAddress.of,
+        factAddress.id,
       );
-      logger.info(() => ["calling sync cell on missing doc", factAddress.of]);
+      logger.info(() => ["calling sync cell on missing doc", factAddress.id]);
       // We do need to call syncCell, because we may have pushed a new cell
       // without calling syncCell (e.g. map will create these cells).
       // I can modify the DocImpl class to automatically relay the doc updates
@@ -533,7 +533,7 @@ export class Storage implements IStorage {
     // Our queryLocal call has determined which docs are linked, so make sure
     // we're sending those to storage as well. If they're redundant, they will
     // be skipped by storage.
-    const docAddrs = [...missing, ...loaded.values().map((sv) => sv.source)];
+    const docAddrs = [...missing, ...loaded.values().map((sv) => sv.address)];
     const docToStoragePromise = this._sendDocValue(doc, docAddrs, labels);
     this.docToStoragePromises.add(docToStoragePromise);
     docToStoragePromise.finally(() =>
@@ -543,7 +543,7 @@ export class Storage implements IStorage {
 
   private async _sendDocValue(
     doc: DocImpl<unknown>,
-    docAddrs: FactAddress[],
+    docAddrs: BaseMemoryAddress[],
     labels?: Labels,
   ) {
     await this.runtime.idle();
@@ -569,7 +569,7 @@ export class Storage implements IStorage {
     for (const docAddr of docAddrs) {
       const linkedDoc = this.runtime.documentMap.getDocByEntityId(
         doc.space,
-        docAddr.of,
+        docAddr.id,
         false,
       );
       // if we don't have a local doc, the server's version should be fine
@@ -584,7 +584,7 @@ export class Storage implements IStorage {
       const linkedLabels = linkedDoc === doc ? labels : undefined;
       // Create storage value using the helper to ensure consistency
       const linkedValue = Storage._cellLinkToJSON(linkedDoc, linkedLabels);
-      docsToSend.push({ uri: docAddr.of, value: linkedValue });
+      docsToSend.push({ uri: docAddr.id, value: linkedValue });
     }
     await storageProvider.send(docsToSend);
   }
