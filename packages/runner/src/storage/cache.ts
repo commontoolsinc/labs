@@ -1,3 +1,4 @@
+import { fromString, refer } from "merkle-reference";
 import type {
   Changes as MemoryChanges,
   Commit,
@@ -34,13 +35,13 @@ import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import type { Cancel } from "@commontools/runner";
 import { getLogger } from "@commontools/utils/logger";
+import { isBrowser } from "@commontools/utils/env";
+import { SchemaNone } from "@commontools/memory/schema";
+import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
 import { BaseMemoryAddress, MapSet } from "../traverse.ts";
-import { fromString, refer } from "merkle-reference";
-import { isBrowser } from "@commontools/utils/env";
-import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import type {
   Assert,
   Claim,
@@ -61,7 +62,6 @@ import type {
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
-import { SchemaNone } from "@commontools/memory/schema";
 import * as Transaction from "./transaction.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";

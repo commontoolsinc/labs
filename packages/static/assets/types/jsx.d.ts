@@ -1,15 +1,13 @@
-import type { OpaqueRef, Cell } from "commontools";
+import type { OpaqueRef, Cell, Props, RenderNode, VNode } from "commontools";
 
-type Children = JSX.Element[] | JSX.Element | string | number | boolean | null | undefined;
-
-type Child = {
-  children?: Children;
-};
-
-type Elem = {
-  id?: string;
+type HTMLElementProps = {
+  id?: string,
   style?: string;
 }
+
+type Children = {
+  children?: RenderNode;
+};
 
 type HandlerEvent<T> = {
   detail: T,
@@ -31,11 +29,16 @@ type CtListItem = {
 
 declare global {
   namespace JSX {
-    interface Element {
+    // The output of a JSX renderer is a JSX.Element.
+    // Our renderer (`@commontools/api#h`) outputs
+    // `VNode`s. Redefine `JSX.Element` here as a `VNode`
+    // for consistency.
+    interface Element extends VNode {
       type: "vnode";
       name: string;
-      props: any;
-      children: any;
+      props: Props;
+      children?: RenderNode;
+      $UI?: VNode;
     }
 
     interface IntrinsicElements {
@@ -44,7 +47,7 @@ declare global {
         "$value": OpaqueRef<Cell<{ root: OutlinerNode }>>,
         "$mentionable"?: OpaqueRef<Cell<Charm[]>>,
         "oncharm-link-click"?: OpaqueRef<HandlerEvent<{ charm: Cell<Charm> }>>,
-      } & Child & Elem;
+      } & Children & HTMLElementProps;
       "ct-list": {
         "$value": OpaqueRef<CtListItem[]>,
         /** setting this allows editing items inline */
@@ -53,7 +56,7 @@ declare global {
         "readonly"?: boolean,
         "title"?: string,
         "onct-remove-item"?: OpaqueRef<HandlerEvent<{ item: CtListItem }>>,
-      } & Child & Elem;
+      } & Children & HTMLElementProps;
       "ct-input": {
         "$value"?: OpaqueRef<string>,
         "customStyle"?: string, // bf: I think this is going to go away one day soon
@@ -89,7 +92,7 @@ declare global {
         "onct-keydown"?: any,
         "onct-submit"?: any,
         "onct-invalid"?: any,
-      } & Child & Elem;
+      } & Children & HTMLElementProps;
     }
   }
 }

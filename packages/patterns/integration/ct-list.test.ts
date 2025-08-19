@@ -156,7 +156,7 @@ describe("ct-list integration test", () => {
   // remove ALL items instead of just one. Manual clicking works correctly.
   // This appears to be an issue with how ct-list handles synthetic click events
   // versus real user clicks.
-  it.skip("should remove items from the list", async () => {
+  it("should remove items from the list", async () => {
     const page = shell.page();
 
     // Wait for the component to fully stabilize after adding items
@@ -251,15 +251,109 @@ describe("ct-list integration test", () => {
     }
   });
 
-  // Skip this test too - similar Shadow DOM issues prevent reliable editing
-  it.skip("should edit items in the list", () => {
+  it("should edit items in the list", async () => {
     const page = shell.page();
 
-    // The test reveals that:
-    // 1. Direct DOM queries don't work due to Shadow DOM encapsulation
-    // 2. Edit button clicks don't trigger edit mode programmatically
-    // 3. ElementHandle.evaluate fails on shadow DOM elements
-    // Similar to the delete test, this appears to be a limitation of
-    // programmatic interaction with the ct-list component
+    // Wait for the component to fully stabilize
+    console.log("Waiting for component to stabilize...");
+    await sleep(2000);
+
+    // Get initial items
+    const initialItems = await page.$$(".list-item", { strategy: "pierce" });
+    const initialCount = initialItems.length;
+    console.log(`Initial item count: ${initialCount}`);
+    assert(initialCount > 0, "Should have items to edit");
+
+    // Get the initial text of the first item
+    const initialText = await initialItems[0].evaluate((el: HTMLElement) => {
+      const content = el.querySelector(".item-content") ||
+        el.querySelector("div.item-content");
+      return content?.textContent || el.textContent;
+    });
+    console.log(`Initial text of first item: "${initialText?.trim()}"`);
+
+    // Find and click the first edit button
+    const editButtons = await page.$$("button.item-action.edit", {
+      strategy: "pierce",
+    });
+    console.log(`Found ${editButtons.length} edit buttons`);
+    assert(editButtons.length > 0, "Should find edit buttons");
+
+    // Debug: check what we're about to click
+    const buttonText = await editButtons[0].evaluate((el: HTMLElement) => {
+      return {
+        className: el.className,
+        title: el.title,
+        innerText: el.innerText,
+        parentText: el.parentElement?.innerText || "no parent",
+      };
+    });
+    console.log("About to click edit button:", buttonText);
+
+    // Click the edit button to enter edit mode
+    await editButtons[0].evaluate((button: HTMLElement) => {
+      console.log("About to dispatch click event on edit button:", button);
+      button.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        }),
+      );
+    });
+    console.log("Dispatched click event on first edit button");
+
+    // Wait for edit mode to activate and look for the editing state
+    await page.waitForSelector(".list-item.editing", { strategy: "pierce" });
+    console.log("Edit mode activated - found .list-item.editing");
+
+    // Look for the specific edit input field that appears only during editing
+    const editInput = await page.$(".edit-input", {
+      strategy: "pierce",
+    });
+    assert(editInput, "Should find .edit-input field during editing");
+
+    // Verify the input is focused (it should have autofocus)
+    const isFocused = await editInput.evaluate((el: HTMLInputElement) => 
+      document.activeElement === el
+    );
+    console.log(`Edit input is focused: ${isFocused}`);
+
+    // Clear the existing text and type new text
+    await editInput.evaluate((el: HTMLInputElement) => {
+      el.select(); // Select all text
+    });
+    const newText = "Edited First Item";
+    await editInput.type(newText);
+    console.log(`Typed new text: "${newText}"`);
+
+    // Press Enter to confirm the edit
+    await page.keyboard.press("Enter");
+    console.log("Pressed Enter to confirm edit");
+
+    // Wait for the edit to be processed
+    await sleep(1000);
+
+    // Verify the item was edited
+    const updatedItems = await page.$$(".list-item", { strategy: "pierce" });
+    assertEquals(
+      updatedItems.length,
+      initialCount,
+      "Should have same number of items after edit",
+    );
+
+    // Check that the first item's text has been updated
+    const updatedText = await updatedItems[0].evaluate((el: HTMLElement) => {
+      const content = el.querySelector(".item-content") ||
+        el.querySelector("div.item-content");
+      return content?.textContent || el.textContent;
+    });
+    console.log(`Updated text of first item: "${updatedText?.trim()}"`);
+
+    assertEquals(
+      updatedText?.trim(),
+      newText,
+      "First item should have updated text",
+    );
   });
 });

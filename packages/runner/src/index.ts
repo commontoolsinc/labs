@@ -73,7 +73,6 @@ export {
 export {
   AuthSchema,
   type Cell as BuilderCell,
-  type Child,
   type Frame,
   h,
   type HandlerFactory,
@@ -97,6 +96,7 @@ export {
   type Props,
   type Recipe,
   type RecipeFactory,
+  type RenderNode,
   type Schema,
   schema,
   type SchemaContext,
