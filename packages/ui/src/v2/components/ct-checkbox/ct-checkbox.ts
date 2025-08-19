@@ -1,13 +1,15 @@
 import { css, html } from "lit";
 import { ifDefined } from "lit/directives/if-defined.js";
 import { BaseElement } from "../../core/base-element.ts";
+import { type Cell } from "@commontools/runner";
+import { createBooleanCellController } from "../../core/cell-controller.ts";
 
 /**
  * CTCheckbox - Binary selection input with support for indeterminate state
  *
  * @element ct-checkbox
  *
- * @attr {boolean} checked - Whether the checkbox is checked
+ * @attr {boolean|Cell<boolean>} checked - Whether the checkbox is checked (supports both plain boolean and Cell<boolean>)
  * @attr {boolean} disabled - Whether the checkbox is disabled
  * @attr {string} name - Name attribute for form submission
  * @attr {string} value - Value attribute for form submission
@@ -20,15 +22,21 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @example
  * <ct-checkbox name="terms" checked>Accept terms</ct-checkbox>
+ *
+ * @example
+ * <!-- Reactive Cell binding -->
+ * <ct-checkbox $checked={enabledCell}>Enable feature</ct-checkbox>
  */
 
 export class CTCheckbox extends BaseElement {
   static override styles = css`
     :host {
-      display: inline-block;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
       position: relative;
       cursor: pointer;
-      line-height: 0;
+      line-height: 1.5;
 
       /* Default color values if not provided */
       --background: #ffffff;
@@ -157,11 +165,24 @@ export class CTCheckbox extends BaseElement {
     value: { type: String },
   };
 
-  declare checked: boolean;
+  declare checked: Cell<boolean> | boolean;
   declare disabled: boolean;
   declare indeterminate: boolean;
   declare name: string;
   declare value: string;
+
+  private _checkedCellController = createBooleanCellController(this, {
+    timing: {
+      strategy: "immediate",
+      delay: 0,
+    },
+    onChange: (newValue: boolean, oldValue: boolean) => {
+      this.emit("ct-change", {
+        checked: newValue,
+        indeterminate: this.indeterminate,
+      });
+    },
+  });
 
   constructor() {
     super();
@@ -172,12 +193,32 @@ export class CTCheckbox extends BaseElement {
     this.value = "on";
   }
 
+  private getChecked(): boolean {
+    return this._checkedCellController.getValue();
+  }
+
+  private setChecked(newValue: boolean): void {
+    this._checkedCellController.setValue(newValue);
+  }
+
   override connectedCallback() {
     super.connectedCallback();
     // Make the element focusable
     this.tabIndex = this.disabled ? -1 : 0;
     this.setAttribute("role", "checkbox");
     this._updateAriaAttributes();
+    // Bind initial checked value
+    this._checkedCellController.bind(this.checked);
+  }
+
+  override willUpdate(changedProperties: Map<string | number | symbol, unknown>) {
+    super.willUpdate(changedProperties);
+
+    // If the checked property itself changed (e.g., switched to a different cell)
+    if (changedProperties.has("checked")) {
+      // Bind the new checked (Cell or plain) to the controller
+      this._checkedCellController.bind(this.checked);
+    }
   }
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
@@ -197,9 +238,10 @@ export class CTCheckbox extends BaseElement {
   }
 
   override render() {
+    const isChecked = this.getChecked();
     const checkboxClasses = {
       "checkbox": true,
-      "checked": this.checked && !this.indeterminate,
+      "checked": isChecked && !this.indeterminate,
       "indeterminate": this.indeterminate,
       "disabled": this.disabled,
     };
@@ -218,10 +260,11 @@ export class CTCheckbox extends BaseElement {
       >
         <span class="checkmark" part="checkmark"></span>
       </div>
+      <slot></slot>
       <input
         type="checkbox"
         class="sr-only"
-        ?checked="${this.checked}"
+        ?checked="${isChecked}"
         ?disabled="${this.disabled}"
         name="${ifDefined(this.name || undefined)}"
         value="${this.value}"
@@ -232,9 +275,10 @@ export class CTCheckbox extends BaseElement {
   }
 
   private _updateAriaAttributes() {
+    const isChecked = this.getChecked();
     this.setAttribute(
       "aria-checked",
-      this.indeterminate ? "mixed" : String(this.checked),
+      this.indeterminate ? "mixed" : String(isChecked),
     );
     this.setAttribute("aria-disabled", String(this.disabled));
   }
@@ -247,19 +291,15 @@ export class CTCheckbox extends BaseElement {
     }
 
     // Toggle checked state
-    const oldChecked = this.checked;
-    this.checked = !this.checked;
+    const oldChecked = this.getChecked();
+    this.setChecked(!oldChecked);
 
     // Clear indeterminate state when clicked
     if (this.indeterminate) {
       this.indeterminate = false;
     }
 
-    // Emit change event
-    this.emit("ct-change", {
-      checked: this.checked,
-      indeterminate: this.indeterminate,
-    });
+    // Note: ct-change event is emitted by the cell controller's onChange callback
   }
 
   private _handleKeydown(event: KeyboardEvent) {
