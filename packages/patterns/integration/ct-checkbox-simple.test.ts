@@ -1,4 +1,5 @@
 import { env } from "@commontools/integration";
+import { sleep } from "@commontools/utils/sleep";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
@@ -65,12 +66,11 @@ describe("ct-checkbox-simple integration test", () => {
 
     const checkbox = await page.waitForSelector("ct-checkbox", { strategy: "pierce" });
     await checkbox.click();
+    await sleep(500);
     
-    // Use Astral's idiomatic waitForFunction
-    await page.waitForFunction(() => {
-      const el = document.querySelector("#feature-status");
-      return el?.textContent?.trim() === "✓ Feature is enabled!";
-    });
+    const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
+    const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
+    assertEquals(statusText?.trim(), "✓ Feature is enabled!");
   });
 
   it("should toggle back to disabled content when checkbox is clicked again", async () => {
@@ -80,11 +80,10 @@ describe("ct-checkbox-simple integration test", () => {
       strategy: "pierce",
     });
     await checkbox?.click();
+    await sleep(1000);
     
-    // Use Astral's idiomatic waitForFunction
-    await page.waitForFunction(() => {
-      const el = document.querySelector("#feature-status");
-      return el?.textContent?.trim() === "⚠ Feature is disabled";
-    });
+    const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
+    const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
+    assertEquals(statusText?.trim(), "⚠ Feature is disabled");
   });
 });
