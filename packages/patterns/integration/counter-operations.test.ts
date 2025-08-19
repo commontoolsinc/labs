@@ -68,7 +68,7 @@ describe("counter direct operations test", () => {
   // Bug Reproduction for CT-753: Live updates across sessions don't work currently
   // The browser has its own runtime/session that doesn't receive
   // live updates from our test CharmManager's operations
-  it.skip("should update counter value via direct operation (live)", async () => {
+  it("should update counter value via direct operation (live)", async () => {
     const page = shell.page();
     const manager = cc!.manager();
 
