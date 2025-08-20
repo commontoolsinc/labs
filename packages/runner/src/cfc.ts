@@ -413,6 +413,23 @@ export class ContextualFlowControl {
     return result === false ? undefined : result === true ? {} : result;
   }
 
+  /**
+   * This gets the schema at a specific path.
+   * This is a leaky abstraction, since you can have changes in a parent object
+   * that shape the potential values and types of child objects.
+   *
+   * For example, if you have anyOf USAddress, CanadaAddress and the USAddress
+   * differentiated by country name, when you ask for the postalCode, the schema
+   * if the parent portions were a USAddress is a a sequence of 5 numbers.
+   * However if the parent portions were a CanadaAddress, the postalCode is a
+   * sequence of 6 letters or numbers.
+   *
+   * You can't know how the schema will be narrowed without evaluating it
+   * against a candidate object.
+   *
+   * Nonetheless, it's very convenient to have a schema without knowing, so we
+   * provide this method and use it.
+   */
   schemaAtPath(
     schema: JSONSchema | boolean,
     path: string[],
@@ -423,7 +440,11 @@ export class ContextualFlowControl {
       ? new Set<string>(extraClassifications)
       : new Set<string>();
     let cursor = schema;
-    for (const part of path) {
+    for (
+      const [index, part] of path.map((value, index) =>
+        [index, value] as [number, string]
+      )
+    ) {
       // If the cursor is a $ref, get the target location
       if (isObject(cursor) && "$ref" in cursor) {
         // Support ifc tags beside the ref tag
@@ -437,6 +458,39 @@ export class ContextualFlowControl {
           rootSchema,
           cursor.$ref,
         );
+      }
+      if (isObject(cursor) && "anyOf" in cursor) {
+        const subSchemas: JSONSchema[] = [];
+        const subSchemaStrings: string[] = [];
+        for (const entry of cursor.anyOf!) {
+          const subSchema = this.schemaAtPath(
+            entry,
+            path.slice(index),
+            rootSchema,
+            extraClassifications,
+          );
+          if (subSchema === false) {
+            continue;
+          } else if (ContextualFlowControl.isTrueSchema(subSchema)) {
+            cursor = true;
+            break;
+          } else {
+            const subSchemaString = JSON.stringify(subSchema);
+            if (subSchemaStrings.includes(subSchemaString)) {
+              continue;
+            }
+            subSchemas.push(subSchema as JSONSchema);
+            subSchemaStrings.push(subSchemaString);
+          }
+        }
+        if (subSchemas.length === 0) {
+          cursor = false;
+        } else if (subSchemas.length === 1) {
+          cursor = subSchemas[0];
+        } else {
+          cursor = { "anyOf": subSchemas };
+        }
+        break;
       }
       if (typeof cursor === "boolean") {
         break;

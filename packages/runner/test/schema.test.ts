@@ -1,22 +1,18 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import "@commontools/utils/equal-ignoring-symbols";
-
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, isCell, isStream } from "../src/cell.ts";
 import { LegacyDocCellLink } from "../src/sigil-types.ts";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { toURI } from "../src/uri-utils.ts";
 import { parseLink, sanitizeSchemaForLinks } from "../src/link-utils.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
 import { sortAndCompactPaths } from "../src/reactive-dependencies.ts";
-import { toCell, toOpaqueRef } from "../src/back-to-cell.ts";
-import type {
-  IExtendedStorageTransaction,
-  IMemorySpaceAddress,
-} from "../src/storage/interface.ts";
+import { toCell } from "../src/back-to-cell.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
