@@ -1,124 +1,124 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import {
-  registerCharm,
-  ShellIntegration,
-} from "@commontools/integration/shell-utils";
-import { beforeAll, describe, it } from "@std/testing/bdd";
+import { CharmsController } from "@commontools/charm/ops";
+import { ShellIntegration } from "@commontools/integration/shell-utils";
+import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import {
-  getCharmResult,
-  setCharmInput,
-  setCharmResult,
-} from "@commontools/charm/ops";
-import { getCharmInput } from "../../charm/src/ops/cell-operations.ts";
+import { getCharmInput, setCharmInput } from "@commontools/charm/ops";
+import { Identity } from "@commontools/identity";
 
-const { API_URL, FRONTEND_URL } = env;
+const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
-describe("fetchData() test", () => {
+// Fetch data tests may require network access and are skipped in CI until we handle external dependencies properly in CI environments.
+// This requires either:
+// 1. Adding a flag to enable network tests in CI with proper mocking
+// 2. Using mock data or fixtures for CI testing
+
+describe("fetch data integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let spaceName: string;
   let charmId: string;
+  let identity: Identity;
+  let cc: CharmsController;
 
   beforeAll(async () => {
-    const { identity } = shell.get();
-    spaceName = globalThis.crypto.randomUUID();
-
-    // Register the counter charm
-    charmId = await registerCharm({
-      spaceName: spaceName,
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await CharmsController.initialize({
+      spaceName: SPACE_NAME,
       apiUrl: new URL(API_URL),
       identity: identity,
-      source: await Deno.readTextFile(
+    });
+    const charm = await cc.create(
+      await Deno.readTextFile(
         join(
           import.meta.dirname!,
           "..",
           "fetch-data.tsx",
         ),
       ),
-    });
-
-    // Setup the CharmManager for direct operations
-    await shell.setupManager(spaceName, API_URL);
+    );
+    charmId = charm.id;
   });
 
-  it("should load the github fetcher charm and verify initial state", async () => {
-    const { page } = shell.get();
+  afterAll(async () => {
+    if (cc) await cc.dispose();
+  });
 
-    // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
+  it({
+    name: "should load the github fetcher charm and verify initial state",
+    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    fn: async () => {
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
+    });
 
-    // Login
-    const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
-    assertEquals(state.activeCharmId, charmId);
-
-    // Wait for charm to load and verify counter exists
-    await sleep(5000);
-    const counterResult = await page.$("#github-title", {
+    // Wait for charm to load and verify github title exists
+    const titleElement = await page.waitForSelector("#github-title", {
       strategy: "pierce",
     });
-    assert(counterResult, "Should find github title element");
+    assert(titleElement, "Should find github title element");
 
-    // Verify initial value is 0
-    const initialText = await counterResult.evaluate((el: HTMLElement) =>
+    // Verify initial value
+    const initialText = await titleElement.evaluate((el: HTMLElement) =>
       el.textContent
     );
     assertEquals(initialText?.trim(), "next.js");
 
     // Also verify via direct operations
-    const manager = shell.manager!;
+    const manager = cc.manager();
     const repoUrl = await getCharmInput(manager, charmId, ["repoUrl"]);
     assertEquals(repoUrl, "https://github.com/vercel/next.js");
+    },
   });
 
-  it("should load the github fetcher charm and verify initial state", async () => {
-    const { page } = shell.get();
-    const manager = shell.manager!;
+  it({
+    name: "should update repo URL and verify data refetches",
+    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    fn: async () => {
+    const page = shell.page();
+    const manager = cc.manager();
 
-    // Navigate to the charm
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    await page.applyConsoleFormatter();
-
-    // Login
-    const state = await shell.login();
-    assertEquals(state.spaceName, spaceName);
-    assertEquals(state.activeCharmId, charmId);
-
-    // Wait for charm to load and verify counter exists
-    await sleep(1000);
+    // Set new repo URL via direct operation
     await setCharmInput(
       manager,
       charmId,
       ["repoUrl"],
       "https://github.com/commontoolsinc/labs",
     );
-    await sleep(5000);
 
-    // Now refresh the page by navigating to the same URL
-    console.log("Refreshing the page...");
-    await page.goto(`${FRONTEND_URL}${spaceName}/${charmId}`);
-    // Need to login again after navigation
-    await shell.login();
-    await sleep(5000);
+    await sleep(200); // Reduced wait time
 
-    const counterResult = await page.$("#github-title", {
+    // Navigate to the charm to see updated data
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      spaceName: SPACE_NAME,
+      charmId,
+      identity,
+    });
+
+    // Wait for data to load
+    await sleep(3000); // Allow time for fetch
+
+    const titleElement = await page.waitForSelector("#github-title", {
       strategy: "pierce",
     });
-    assert(counterResult, "Should find github title element");
+    assert(titleElement, "Should find github title element");
 
-    // Verify initial value is 0
-    const initialText = await counterResult.evaluate((el: HTMLElement) =>
+    // Verify updated value
+    const updatedText = await titleElement.evaluate((el: HTMLElement) =>
       el.textContent
     );
-    assertEquals(initialText?.trim(), "labs");
+    assertEquals(updatedText?.trim(), "labs");
 
     // Also verify via direct operations
-    const repoUrl = await getCharmInput(shell.manager!, charmId, ["repoUrl"]);
+    const repoUrl = await getCharmInput(manager, charmId, ["repoUrl"]);
     assertEquals(repoUrl, "https://github.com/commontoolsinc/labs");
+    },
   });
 });
