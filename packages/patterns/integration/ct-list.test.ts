@@ -63,17 +63,17 @@ describe("ct-list integration test", () => {
     await addInput.click();
     await addInput.type("First item");
     await page.keyboard.press("Enter");
-    await sleep(500);
+    await sleep(50); // Quick wait for DOM update
 
     // Add second item - the input should be cleared automatically
     await addInput.type("Second item");
     await page.keyboard.press("Enter");
-    await sleep(500);
+    await sleep(50); // Quick wait for DOM update
 
     // Add third item
     await addInput.type("Third item");
     await page.keyboard.press("Enter");
-    await sleep(500);
+    await sleep(50); // Quick wait for DOM update
 
     // Verify items were added
     const listItems = await page.$$(".list-item", { strategy: "pierce" });
@@ -102,8 +102,8 @@ describe("ct-list integration test", () => {
       console.log(`Item ${i}:`, itemInfo);
     }
 
-    // Wait a bit for content to render
-    await sleep(500);
+    // Quick wait for content to render
+    await sleep(100);
 
     // Verify item content
     const firstItemText = await listItems[0].evaluate((el: HTMLElement) => {
@@ -143,9 +143,8 @@ describe("ct-list integration test", () => {
       el.select(); // Select all text
     });
     await titleInput.type("My Shopping List");
-    await sleep(500);
 
-    // Verify title was updated
+    // Verify title was updated (no wait needed for input value)
     const titleValue = await titleInput.evaluate((el: HTMLInputElement) =>
       el.value
     );
@@ -159,9 +158,8 @@ describe("ct-list integration test", () => {
   it("should remove items from the list", async () => {
     const page = shell.page();
 
-    // Wait for the component to fully stabilize after adding items
     console.log("Waiting for component to stabilize...");
-    await sleep(2000);
+    await sleep(500);
 
     // Get initial count
     const initialItems = await page.$$(".list-item", { strategy: "pierce" });
@@ -189,7 +187,7 @@ describe("ct-list integration test", () => {
 
     // Try clicking more carefully
     console.log("Waiting before click...");
-    await sleep(500);
+    await sleep(100);
 
     // Alternative approach: dispatch click event
     await removeButtons[0].evaluate((button: HTMLElement) => {
@@ -205,14 +203,17 @@ describe("ct-list integration test", () => {
     console.log("Dispatched click event on first remove button");
 
     // Check immediately after click
-    await sleep(100);
+    await sleep(50);
     const immediateItems = await page.$$(".list-item", { strategy: "pierce" });
     console.log(
       `Immediately after click, found ${immediateItems.length} items`,
     );
 
-    // Wait longer for the DOM to update after removal
-    await sleep(2000);
+    // Wait for DOM to update after removal using Astral's waitForFunction
+    await page.waitForFunction((expectedCount) => {
+      const items = document.querySelectorAll(".list-item");
+      return items.length !== expectedCount;
+    }, { args: [initialCount] });
 
     // Verify item was removed - try multiple times
     let remainingItems = await page.$$(".list-item", { strategy: "pierce" });
@@ -221,7 +222,7 @@ describe("ct-list integration test", () => {
     // If still showing same count, wait a bit more and try again
     if (remainingItems.length === initialCount) {
       console.log("DOM not updated yet, waiting more...");
-      await sleep(2000);
+      await sleep(500);
       remainingItems = await page.$$(".list-item", { strategy: "pierce" });
       console.log(
         `After additional wait, found ${remainingItems.length} items`,
@@ -254,9 +255,8 @@ describe("ct-list integration test", () => {
   it("should edit items in the list", async () => {
     const page = shell.page();
 
-    // Wait for the component to fully stabilize
     console.log("Waiting for component to stabilize...");
-    await sleep(2000);
+    await sleep(500);
 
     // Get initial items
     const initialItems = await page.$$(".list-item", { strategy: "pierce" });
@@ -314,7 +314,7 @@ describe("ct-list integration test", () => {
     assert(editInput, "Should find .edit-input field during editing");
 
     // Verify the input is focused (it should have autofocus)
-    const isFocused = await editInput.evaluate((el: HTMLInputElement) => 
+    const isFocused = await editInput.evaluate((el: HTMLInputElement) =>
       document.activeElement === el
     );
     console.log(`Edit input is focused: ${isFocused}`);
@@ -332,7 +332,7 @@ describe("ct-list integration test", () => {
     console.log("Pressed Enter to confirm edit");
 
     // Wait for the edit to be processed
-    await sleep(1000);
+    await sleep(200);
 
     // Verify the item was edited
     const updatedItems = await page.$$(".list-item", { strategy: "pierce" });

@@ -208,6 +208,15 @@ export class Page extends EventTarget {
     return await this.page!.waitForSelector(selector, options);
   }
 
+  // Passthru of `@astral/astral`'s `Page#waitForFunction`
+  async waitForFunction<T, R extends readonly unknown[]>(
+    func: EvaluateFunction<T, R>,
+    evaluateOptions?: EvaluateOptions<R>,
+  ): Promise<void> {
+    this.checkIsOk();
+    await this.page!.waitForFunction(func, evaluateOptions);
+  }
+
   // Passthru of `@astral/astral`'s `Page#$`
   async $(
     selector: string,

@@ -65,9 +65,6 @@ describe("counter direct operations test", () => {
     assertEquals(value, 0);
   });
 
-  // Bug Reproduction for CT-753: Live updates across sessions don't work currently
-  // The browser has its own runtime/session that doesn't receive
-  // live updates from our test CharmManager's operations
   it("should update counter value via direct operation (live)", async () => {
     const page = shell.page();
     const manager = cc!.manager();
@@ -77,12 +74,11 @@ describe("counter direct operations test", () => {
       strategy: "pierce",
     });
 
-    // Update value to 42 via direct operation
     console.log("Setting counter value to 42 via direct operation");
     await setCharmResult(manager, charmId, ["value"], 42);
 
     // Wait for the update to propagate
-    await sleep(3000);
+    await sleep(1000);
 
     // Verify the UI updated
     const updatedText = await counterResult.evaluate((el: HTMLElement) =>
@@ -103,11 +99,9 @@ describe("counter direct operations test", () => {
     const page = shell.page();
     const manager = cc!.manager();
 
-    // Update value to 42 via direct operation
     console.log("Setting counter value to 42 via direct operation");
     await setCharmResult(manager, charmId, ["value"], 42);
 
-    // Verify we can read the value back via operations
     const updatedValue = await getCharmResult(manager, charmId, ["value"]);
     assertEquals(updatedValue, 42, "Value should be 42 in backend");
 

@@ -64,12 +64,10 @@ describe("ct-checkbox-simple integration test", () => {
   it("should toggle to enabled content when checkbox is clicked", async () => {
     const page = shell.page();
 
-    // Find and click the checkbox
     const checkbox = await page.waitForSelector("ct-checkbox", { strategy: "pierce" });
     await checkbox.click();
     await sleep(500);
-
-    // Check that the feature status changed to enabled
+    
     const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
     const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
     assertEquals(statusText?.trim(), "✓ Feature is enabled!");
@@ -78,14 +76,12 @@ describe("ct-checkbox-simple integration test", () => {
   it("should toggle back to disabled content when checkbox is clicked again", async () => {
     const page = shell.page();
 
-    // Click the checkbox again to disable
     const checkbox = await page.$("ct-checkbox", {
       strategy: "pierce",
     });
     await checkbox?.click();
     await sleep(1000);
-
-    // Check that the feature status changed back to disabled
+    
     const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
     const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
     assertEquals(statusText?.trim(), "⚠ Feature is disabled");

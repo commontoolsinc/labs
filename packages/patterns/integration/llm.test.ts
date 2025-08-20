@@ -9,6 +9,10 @@ import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
 
+// LLM tests are skipped in CI until we handle llm() calls properly in CI environments.
+// This requires either:
+// 1. Adding a flag to enable LLM tests in CI with proper API keys
+// 2. Resurrecting the LLM cache functionality from toolshed
 describe("LLM pattern test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
@@ -40,7 +44,10 @@ describe("LLM pattern test", () => {
     if (cc) await cc.dispose();
   });
 
-  it.skip("should load the LLM test charm and display initial UI", async () => {
+  it({
+    name: "should load the LLM test charm and display initial UI",
+    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    fn: async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -49,10 +56,7 @@ describe("LLM pattern test", () => {
       identity,
     });
 
-    // Wait for the component to render
-    await sleep(1000);
-
-    // Check for the title
+    // Wait for the component to render by waiting for title
     const title = await page.waitForSelector("h2", {
       strategy: "pierce",
     });
@@ -66,9 +70,13 @@ describe("LLM pattern test", () => {
       strategy: "pierce",
     });
     assert(messageInput, "Should find message input element");
+    },
   });
 
-  it.skip("should handle question input and display question", async () => {
+  it({
+    name: "should handle question input and display question",
+    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    fn: async () => {
     const page = shell.page();
 
     // Find the message input component
@@ -94,10 +102,7 @@ describe("LLM pattern test", () => {
     assert(sendButton, "Should find send button");
     await sendButton.click();
 
-    // Wait for the question to appear
-    await sleep(500);
-
-    // Check that the question is displayed
+    // Wait for the question to appear by waiting for blockquote
     const questionSection = await page.waitForSelector("blockquote", {
       strategy: "pierce",
     });
@@ -107,9 +112,13 @@ describe("LLM pattern test", () => {
       el.textContent
     );
     assertEquals(questionText?.trim(), testQuestion);
+    },
   });
 
-  it.skip("should display LLM response after asking a question", async () => {
+  it({
+    name: "should display LLM response after asking a question",
+    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    fn: async () => {
     const page = shell.page();
 
     // Wait for LLM response to appear (this may take some time)
@@ -130,13 +139,17 @@ describe("LLM pattern test", () => {
     // We'll just check that we got some text back rather than checking exact content
     // since LLM responses can vary
     console.log("LLM Response:", responseText);
+    },
   });
 
-  it.skip("should handle multiple questions in sequence", async () => {
+  it({
+    name: "should handle multiple questions in sequence",
+    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    fn: async () => {
     const page = shell.page();
 
-    // Wait for system to settle after previous test
-    await sleep(2000);
+    // Reduced wait for system to settle (was 2000ms)
+    await sleep(200);
 
     // Ask a second question - need to refocus the input first
     const inputElement = await page.waitForSelector("input", {
@@ -159,7 +172,7 @@ describe("LLM pattern test", () => {
     await sendButton.click();
 
     // Wait for UI to update
-    await sleep(500);
+    await sleep(200);
 
     // Check that the new question is displayed
     const questionSection = await page.waitForSelector("blockquote", {
@@ -180,5 +193,6 @@ describe("LLM pattern test", () => {
     );
     assert(responseText, "Should have response text for second question");
     console.log("Second LLM Response:", responseText);
+    },
   });
 });
