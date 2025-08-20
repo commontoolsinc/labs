@@ -36,6 +36,7 @@ interface ChatMessage {
 // mapping (`messages.map(...)`). Writes should be performed in handlers.
 type MainRecipeInput = {
   messages: Default<ChatMessage[], []>;
+  // Shared directory of userId -> username (display names)
   users: Default<Record<string, string>, Record<PropertyKey, never>>;
 };
 
@@ -59,6 +60,23 @@ function generateUserId(): string {
   return `id${n.toString().padStart(4, "0")}`;
 }
 
+// Helper to get or initialize userId from a Cell
+function getId(userId: Cell<string>): string {
+  let id = typeof userId.get === "function" ? userId.get() : "";
+  if (!id) {
+    id = generateUserId();
+    userId.set(id);
+    console.log("[getId] initialized userId:", id);
+  }
+  return id;
+}
+
+// Helper to get username from a Cell, with fallback to userId
+function getUsername(username: Cell<string>, userId: string): string {
+  const uname = typeof username.get === "function" ? username.get() : "";
+  return (uname && uname.trim()) || userId;
+}
+
 // Event payload type for ct-message-input's ct-send event
 type InputEventType = {
   detail: {
@@ -76,9 +94,6 @@ function formatTime(ts: number): string {
 }
 
 // Handler to send a new chat message.
-// NOTE: CTS will infer a schema from the types. Because `messages` is typed as
-// Cell<ChatMessage[]>, the generated schema marks it `asCell: true`, so we can
-// call `.push(...)` here. UI reads remain reactive via mapping.
 const sendMessage = handler<
   InputEventType,
   {
@@ -90,14 +105,8 @@ const sendMessage = handler<
 >((event, { messages, userId, username }) => {
   const text = event.detail?.message?.trim();
   if (!text) return;
-  let id = typeof userId.get === "function" ? userId.get() : "";
-  if (!id) {
-    id = generateUserId();
-    userId.set(id);
-    console.log("[sendMessage] initialized userId:", id);
-  }
-  const uname = typeof username.get === "function" ? username.get() : "";
-  const display = (uname && uname.trim()) || id;
+  const id = getId(userId);
+  const display = getUsername(username, id);
   console.log("[sendMessage] userId:", id, "display:", display);
   messages.push({
     userId: id,
@@ -117,12 +126,7 @@ const setUsername = handler<
   }
 >((event, { username, users, userId }) => {
   const name = (event.detail?.message ?? "").trim();
-  let id = typeof userId.get === "function" ? userId.get() : "";
-  if (!id) {
-    id = generateUserId();
-    userId.set(id);
-    console.log("[setUsername] initialized userId:", id);
-  }
+  const id = getId(userId);
   username.set(name);
   users.update({ [id]: name } as any);
   console.log("[setUsername] userId:", id, "name:", name);
@@ -221,37 +225,4 @@ export const UserSession = recipe<
 
 // Handler to create a new user session. We use `{ proxy: true }` so the handler
 // receives the live reactive references (OpaqueRefs), not a readonly snapshot.
-// That allows us to pass `state.messages` directly into the child recipe and
-// keep all sessions linked to the same underlying state.
-const createUserSession = handler((_, state: { messages: any; users: any }) => {
-  const sessionCharm = UserSession({
-    messages: state.messages,
-    users: state.users,
-  });
-
-  return navigateTo(sessionCharm);
-}, { proxy: true });
-
-// Main chat recipe: a state container with a button to spawn per-user sessions.
-// All sessions get the same `messages` reference so changes are shared.
-export default recipe<MainRecipeInput>(
-  "Main Chat State Container",
-  ({ messages, users }) => {
-    return {
-      [NAME]: "Chat State Container",
-      [UI]: (
-        <div>
-          <h2>Chat State Container</h2>
-          <p>This charm stores the shared chat state.</p>
-          <p>Messages: {messages.length}</p>
-          <p>Click below to create your personal chat session:</p>
-          <ct-button onClick={createUserSession({ messages, users })}>
-            Generate User Session
-          </ct-button>
-        </div>
-      ),
-      messages,
-      users,
-    };
-  },
-);
+// That allows us to pass `
