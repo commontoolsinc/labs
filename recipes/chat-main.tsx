@@ -113,11 +113,12 @@ export const UserSession = recipe<
             </ul>
           </div>
           <div>
-            <ct-message-input
-              button-text="Send"
+            {/* Use v1 common-send-message which supports Enter-to-send by default */}
+            <common-send-message
+              name="Send"
               placeholder="Type your message..."
               appearance="rounded"
-              onct-send={sendMessage({ messages, userId })}
+              onmessagesend={sendMessage({ messages, userId })}
             />
           </div>
         </div>
