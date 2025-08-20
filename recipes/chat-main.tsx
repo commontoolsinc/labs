@@ -1,4 +1,14 @@
 /// <cts-enable />
+// Teaching example: CTS (CommonTools TypeScript) generates JSON Schemas from the
+// TypeScript types below. The recipes use typed inputs/outputs, while handlers
+// add small JSON Schemas only where mutation is required (e.g. marking fields
+// as cells). The key ideas demonstrated:
+// - Typed recipe inputs let the UI map/read reactive values without extra JSON
+//   schema boilerplate.
+// - Mutations happen inside handlers. Their state schema uses `asCell` so the
+//   state arrives as a real Cell<T>, enabling `.set()`/`.push()`.
+// - `proxy: true` on a handler passes through live OpaqueRefs so we can forward
+//   references (e.g., into `navigateTo`) without losing reactivity.
 import {
   Cell,
   Default,
@@ -11,23 +21,29 @@ import {
   UI,
 } from "commontools";
 
-// Data Types for Chat Application
+// Data types for the chat messages. CTS will derive the matching schema.
 interface ChatMessage {
   userId: string;
   message: string;
   timestamp: number;
 }
 
+// Recipe input (typed). The UI receives a reactive reference that supports
+// mapping (`messages.map(...)`). Writes should be performed in handlers.
 type MainRecipeInput = {
   messages: Default<ChatMessage[], []>;
 };
 
+// Example of per-session local state. Currently unused; left here to show how
+// a Cell-backed local field could be added to a session recipe.
 interface LocalUserState {
   username: Cell<string>;
 }
 
 type UserSessionInput = MainRecipeInput;
 
+// Session recipe result (typed): return extra fields (e.g., userId/username)
+// alongside [NAME] and [UI]. CTS will carry these in the recipe result schema.
 type UserSessionResult = {
   userId: string;
   username: string;
@@ -38,7 +54,10 @@ function generateUserId(): string {
   return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// Handler to send a new chat message
+// Handler to send a new chat message.
+// NOTE: We provide a tiny JSON Schema here so that `messages` is a Cell in the
+// handler state (via `asCell: true`), enabling `.push(...)`. The UI reads a
+// reactive list, but writes should be done in handlers against Cells.
 const sendMessage = handler<
   { detail: { message: string } },
   { messages: Cell<ChatMessage[]>; userId: string }
@@ -57,7 +76,8 @@ export const UserSession = recipe<
   ({ messages }) => {
     const userId = generateUserId();
 
-    // (removed debug derives)
+    // UI reads: `messages.map(...)` renders the list reactively. No writes here;
+    // those happen via the `sendMessage` handler above.
 
     return {
       [NAME]: str`Chat Session - User ${userId.slice(0, 8)}`,
@@ -101,7 +121,10 @@ export const UserSession = recipe<
   },
 );
 
-// Handler to create a new user session - defined outside to match pattern
+// Handler to create a new user session. We use `{ proxy: true }` so the handler
+// receives the live reactive references (OpaqueRefs), not a readonly snapshot.
+// That allows us to pass `state.messages` directly into the child recipe and
+// keep all sessions linked to the same underlying state.
 const createUserSession = handler((_, state: { messages: any }) => {
   const sessionCharm = UserSession({
     messages: state.messages,
@@ -110,12 +133,11 @@ const createUserSession = handler((_, state: { messages: any }) => {
   return navigateTo(sessionCharm);
 }, { proxy: true });
 
-// Main Chat Recipe - State container only, no chat display
-// This recipe only stores the shared state and provides a button to create user sessions
+// Main chat recipe: a state container with a button to spawn per-user sessions.
+// All sessions get the same `messages` reference so changes are shared.
 export default recipe<MainRecipeInput>(
   "Main Chat State Container",
   ({ messages }) => {
-    // (removed debug derives)
     return {
       [NAME]: "Chat State Container",
       [UI]: (
