@@ -50,8 +50,8 @@ describe("instantiate-recipe integration test", () => {
       identity,
     });
 
-    // Wait for charm to load and render
-    await sleep(2000);
+    // Wait for charm to load by waiting for first interactive element
+    await page.waitForSelector("[data-ct-input]", { strategy: "pierce" });
 
     // Store the current URL before any action
     const urlBefore = await page.evaluate(() => globalThis.location.href);
@@ -63,8 +63,8 @@ describe("instantiate-recipe integration test", () => {
 
     await input.type("New counter");
 
-    // Wait for input to be processed
-    await sleep(500);
+    // Quick wait for input processing
+    await sleep(200);
 
     const button = await page.waitForSelector("[data-ct-button]", {
       strategy: "pierce",
@@ -72,8 +72,8 @@ describe("instantiate-recipe integration test", () => {
 
     await button.click();
 
-    // Wait longer for navigation to complete in CI environment
-    await sleep(2000);
+    // Reduced wait for navigation (was 2000ms)
+    await sleep(800);
 
     // Check if we navigated to a new counter instance
     const urlAfter = await page.evaluate(() => globalThis.location.href);

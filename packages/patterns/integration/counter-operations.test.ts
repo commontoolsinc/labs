@@ -81,8 +81,8 @@ describe("counter direct operations test", () => {
     console.log("Setting counter value to 42 via direct operation");
     await setCharmResult(manager, charmId, ["value"], 42);
 
-    // Wait for the update to propagate
-    await sleep(3000);
+    // Wait for the update to propagate (reduced from 3000ms)
+    await sleep(1000);
 
     // Verify the UI updated
     const updatedText = await counterResult.evaluate((el: HTMLElement) =>
