@@ -39,8 +39,7 @@ type MainRecipeInput = {
   users: Default<Record<string, string>, Record<PropertyKey, never>>;
 };
 
-// Example of per-session local state. Currently unused; left here to show how
-// a Cell-backed local field could be added to a session recipe.
+// Example of local state.
 interface LocalUserState {
   username: Cell<string>;
 }
@@ -54,10 +53,10 @@ type UserSessionResult = {
   username: string;
 };
 
-// Helper function to generate a unique user ID
+// Helper to generate a user id when first needed
 function generateUserId(): string {
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `user_${rand}`;
+  const n = Math.floor(Math.random() * 10000);
+  return `id${n.toString().padStart(4, "0")}`;
 }
 
 // Event payload type for ct-message-input's ct-send event
@@ -84,35 +83,49 @@ const sendMessage = handler<
   InputEventType,
   {
     messages: Cell<ChatMessage[]>;
-    userId: string;
+    userId: Cell<string>;
     username: Cell<string>;
     users?: Cell<Record<string, string>>;
   }
 >((event, { messages, userId, username }) => {
   const text = event.detail?.message?.trim();
   if (!text) return;
+  let id = typeof userId.get === "function" ? userId.get() : "";
+  if (!id) {
+    id = generateUserId();
+    userId.set(id);
+    console.log("[sendMessage] initialized userId:", id);
+  }
   const uname = typeof username.get === "function" ? username.get() : "";
-  const display = (uname && uname.trim()) || userId;
+  const display = (uname && uname.trim()) || id;
+  console.log("[sendMessage] userId:", id, "display:", display);
   messages.push({
-    userId,
+    userId: id,
     author: display,
     message: text,
     timestamp: Date.now(),
   });
 });
 
-// Handler to set/update the username for this session (local-only field)
+// Handler to set/update the username (local-only field)
 const setUsername = handler<
   InputEventType,
   {
     username: Cell<string>;
     users: Cell<Record<string, string>>;
-    userId: string;
+    userId: Cell<string>;
   }
 >((event, { username, users, userId }) => {
   const name = (event.detail?.message ?? "").trim();
+  let id = typeof userId.get === "function" ? userId.get() : "";
+  if (!id) {
+    id = generateUserId();
+    userId.set(id);
+    console.log("[setUsername] initialized userId:", id);
+  }
   username.set(name);
-  users.update({ [userId]: name } as any);
+  users.update({ [id]: name } as any);
+  console.log("[setUsername] userId:", id, "name:", name);
 }, { proxy: true });
 
 // User Session Recipe - Individual instance with local state
@@ -122,18 +135,20 @@ export const UserSession = recipe<
 >(
   "User Chat Session",
   ({ messages, users }) => {
-    const userId = generateUserId();
     const username = cell<string>("");
+    const userId = cell<string>("");
 
     // UI reads: `messages.map(...)` renders the list reactively. No writes here;
     // those happen via the `sendMessage` handler above.
     return {
-      [NAME]: str`Chat Session - User ${userId.slice(0, 8)}`,
+      [NAME]: str`Chat Session` as any,
       [UI]: (
         <div>
           <h2>Your Chat Session</h2>
           <div>
-            <label>Your User ID: {userId}</label>
+            <label>
+              Your User ID: {derive(userId, (k) => k || "(pending)")}
+            </label>
           </div>
           <div>
             <h4>Set your display name</h4>
@@ -148,8 +163,10 @@ export const UserSession = recipe<
             data-testid="current-username"
             style={{ marginTop: "6px", fontSize: "12px", color: "#444" }}
           >
-            Your current username is:{" "}
-            {derive(username, (v) => (v?.trim() || userId))}
+            Your current username is: {derive(
+              { u: username, id: userId },
+              ({ u, id }) => (u?.trim() || id || "(pending)"),
+            )}
           </div>
           <hr />
           <div>
@@ -186,12 +203,17 @@ export const UserSession = recipe<
               name="Send"
               placeholder="Type your message..."
               appearance="rounded"
-              onmessagesend={sendMessage({ messages, userId, username, users })}
+              onmessagesend={sendMessage({
+                messages,
+                userId,
+                username,
+                users,
+              })}
             />
           </div>
         </div>
       ),
-      userId: userId,
+      userId: derive(userId, (k) => k || "") as any,
       username: username,
     };
   },
