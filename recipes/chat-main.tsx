@@ -54,12 +54,19 @@ function generateUserId(): string {
   return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+// Event payload type for ct-message-input's ct-send event
+type InputEventType = {
+  detail: {
+    message: string;
+  };
+};
+
 // Handler to send a new chat message.
-// NOTE: We provide a tiny JSON Schema here so that `messages` is a Cell in the
-// handler state (via `asCell: true`), enabling `.push(...)`. The UI reads a
-// reactive list, but writes should be done in handlers against Cells.
+// NOTE: CTS will infer a schema from the types. Because `messages` is typed as
+// Cell<ChatMessage[]>, the generated schema marks it `asCell: true`, so we can
+// call `.push(...)` here. UI reads remain reactive via mapping.
 const sendMessage = handler<
-  { detail: { message: string } },
+  InputEventType,
   { messages: Cell<ChatMessage[]>; userId: string }
 >((event, { messages, userId }) => {
   const text = event.detail?.message?.trim();
