@@ -4,7 +4,6 @@ import {
   Default,
   h,
   handler,
-  JSONSchema,
   NAME,
   navigateTo,
   recipe,
@@ -19,54 +18,20 @@ interface ChatMessage {
   timestamp: number;
 }
 
-const ChatMessageSchema = {
-  type: "object",
-  properties: {
-    userId: { type: "string" },
-    message: { type: "string" },
-    timestamp: { type: "number" },
-  },
-  required: ["userId", "message", "timestamp"],
-} as const satisfies JSONSchema;
-
-interface MainRecipeInputSchema {
+type MainRecipeInput = {
   messages: Default<ChatMessage[], []>;
-}
-
-// No explicit SharedState type; rely on handler inference for readonly props
+};
 
 interface LocalUserState {
   username: Cell<string>;
 }
 
-interface UserSessionInputSchema {
-  messages: Default<ChatMessage[], []>;
-}
+type UserSessionInput = MainRecipeInput;
 
-// Use JSON Schemas with asCell so both main and sessions share the same Cell
-const MainChatInputSchema = {
-  type: "object",
-  properties: {
-    messages: {
-      type: "array",
-      items: ChatMessageSchema,
-      default: [],
-      asCell: true,
-    },
-  },
-  required: ["messages"],
-} as const satisfies JSONSchema;
-
-// (removed debug/lift helpers)
-
-const UserSessionResultSchema = {
-  type: "object",
-  properties: {
-    userId: { type: "string" },
-    username: { type: "string" },
-  },
-  required: ["userId", "username"],
-} as const satisfies JSONSchema;
+type UserSessionResult = {
+  userId: string;
+  username: string;
+};
 
 // Helper function to generate a unique user ID
 function generateUserId(): string {
@@ -84,9 +49,11 @@ const sendMessage = handler<
 });
 
 // User Session Recipe - Individual instance with local state
-export const UserSession = recipe(
-  MainChatInputSchema,
-  UserSessionResultSchema,
+export const UserSession = recipe<
+  UserSessionInput,
+  UserSessionResult
+>(
+  "User Chat Session",
   ({ messages }) => {
     const userId = generateUserId();
 
@@ -113,7 +80,7 @@ export const UserSession = recipe(
           <div>
             <h3>Chat Messages</h3>
             <ul>
-              {messages.map((chatMsg: ChatMessage, index: number) => (
+              {messages.map((chatMsg, index) => (
                 <li key={index}>{chatMsg.message}</li>
               ))}
             </ul>
@@ -145,22 +112,8 @@ const createUserSession = handler((_, state: { messages: any }) => {
 
 // Main Chat Recipe - State container only, no chat display
 // This recipe only stores the shared state and provides a button to create user sessions
-const MainChatResultSchema = {
-  type: "object",
-  properties: {
-    messages: {
-      type: "array",
-      items: ChatMessageSchema,
-      default: [],
-      asCell: true,
-    },
-  },
-  required: ["messages"],
-} as const satisfies JSONSchema;
-
-export default recipe(
-  MainChatInputSchema,
-  MainChatResultSchema,
+export default recipe<MainRecipeInput>(
+  "Main Chat State Container",
   ({ messages }) => {
     // (removed debug derives)
     return {
