@@ -12,8 +12,10 @@
 import {
   Cell,
   Default,
+  derive,
   h,
   handler,
+  ifElse,
   NAME,
   navigateTo,
   recipe,
@@ -61,6 +63,15 @@ type InputEventType = {
   };
 };
 
+// Simple messenger-style time format (e.g., 3:05 PM). No full date per message.
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 // Handler to send a new chat message.
 // NOTE: CTS will infer a schema from the types. Because `messages` is typed as
 // Cell<ChatMessage[]>, the generated schema marks it `asCell: true`, so we can
@@ -74,6 +85,14 @@ const sendMessage = handler<
   messages.push({ userId, message: text, timestamp: Date.now() });
 });
 
+// Handler to set/update the username for this session (local-only field)
+const setUsername = handler<
+  InputEventType,
+  { username: Cell<string> }
+>((event, { username }) => {
+  username.set((event.detail?.message ?? "").trim());
+});
+
 // User Session Recipe - Individual instance with local state
 export const UserSession = recipe<
   UserSessionInput,
@@ -83,9 +102,11 @@ export const UserSession = recipe<
   ({ messages }) => {
     const userId = generateUserId();
 
+    // Local-only username for this session
+    const username = "" as Default<string, "">;
+
     // UI reads: `messages.map(...)` renders the list reactively. No writes here;
     // those happen via the `sendMessage` handler above.
-
     return {
       [NAME]: str`Chat Session - User ${userId.slice(0, 8)}`,
       [UI]: (
@@ -95,22 +116,34 @@ export const UserSession = recipe<
             <label>Your User ID: {userId}</label>
           </div>
           <div>
-            <label>
-              Username:
-              <input
-                type="text"
-                placeholder="Enter your username"
-              />
-            </label>
+            <h4>Set your display name</h4>
+            <common-send-message
+              name="Set"
+              placeholder="Choose a display name"
+              appearance="rounded"
+              onmessagesend={setUsername({ username })}
+            />
           </div>
           <hr />
           <div>
             <h3>Chat Messages</h3>
-            <ul>
-              {messages.map((chatMsg, index) => (
-                <li key={index}>{chatMsg.message}</li>
+            <div style="display: grid; gap: 8px;">
+              {messages.map((m) => (
+                <div style="display: grid; gap: 2px;">
+                  <div style="font-size: 12px; color: #666;">
+                    <b>
+                      {ifElse(
+                        derive(m.userId, (id) => id === userId),
+                        derive(username, (u) => (u && u.trim() ? u : "You")),
+                        derive(m.userId, (id) => id.slice(0, 6)),
+                      )}
+                    </b>
+                    <span>· {derive(m.timestamp, formatTime)}</span>
+                  </div>
+                  <div style="font-size: 14px;">{m.message}</div>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
           <div>
             {/* Use v1 common-send-message which supports Enter-to-send by default */}
@@ -124,7 +157,7 @@ export const UserSession = recipe<
         </div>
       ),
       userId: userId,
-      username: "",
+      username: username,
     };
   },
 );
