@@ -57,6 +57,8 @@ const MainChatInputSchema = {
   required: ["messages"],
 } as const satisfies JSONSchema;
 
+// (removed debug/lift helpers)
+
 const UserSessionResultSchema = {
   type: "object",
   properties: {
@@ -87,6 +89,8 @@ export const UserSession = recipe(
   UserSessionResultSchema,
   ({ messages }) => {
     const userId = generateUserId();
+
+    // (removed debug derives)
 
     return {
       [NAME]: str`Chat Session - User ${userId.slice(0, 8)}`,
@@ -158,6 +162,7 @@ export default recipe(
   MainChatInputSchema,
   MainChatResultSchema,
   ({ messages }) => {
+    // (removed debug derives)
     return {
       [NAME]: "Chat State Container",
       [UI]: (
