@@ -63,17 +63,17 @@ describe("ct-list integration test", () => {
     await addInput.click();
     await addInput.type("First item");
     await page.keyboard.press("Enter");
-    await sleep(100); // Quick wait for DOM update
+    await sleep(50); // Quick wait for DOM update
 
     // Add second item - the input should be cleared automatically
     await addInput.type("Second item");
     await page.keyboard.press("Enter");
-    await sleep(100); // Quick wait for DOM update
+    await sleep(50); // Quick wait for DOM update
 
     // Add third item
     await addInput.type("Third item");
     await page.keyboard.press("Enter");
-    await sleep(100); // Quick wait for DOM update
+    await sleep(50); // Quick wait for DOM update
 
     // Verify items were added
     const listItems = await page.$$(".list-item", { strategy: "pierce" });
@@ -143,9 +143,8 @@ describe("ct-list integration test", () => {
       el.select(); // Select all text
     });
     await titleInput.type("My Shopping List");
-    await sleep(100); // Quick wait for update
 
-    // Verify title was updated
+    // Verify title was updated (no wait needed for input value)
     const titleValue = await titleInput.evaluate((el: HTMLInputElement) =>
       el.value
     );

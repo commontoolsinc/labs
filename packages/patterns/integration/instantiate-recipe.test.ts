@@ -64,7 +64,7 @@ describe("instantiate-recipe integration test", () => {
     await input.type("New counter");
 
     // Quick wait for input processing
-    await sleep(200);
+    await sleep(100);
 
     const button = await page.waitForSelector("[data-ct-button]", {
       strategy: "pierce",
@@ -73,7 +73,7 @@ describe("instantiate-recipe integration test", () => {
     await button.click();
 
     // Reduced wait for navigation (was 2000ms)
-    await sleep(800);
+    await sleep(400);
 
     // Check if we navigated to a new counter instance
     const urlAfter = await page.evaluate(() => globalThis.location.href);
@@ -94,6 +94,6 @@ describe("instantiate-recipe integration test", () => {
       "Should find counter-result element after navigation",
     );
 
-    await sleep(500);
+    await sleep(200);
   });
 });

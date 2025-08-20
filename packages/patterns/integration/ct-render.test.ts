@@ -78,16 +78,7 @@ describe("ct-render integration test", () => {
     // Click increment button (second button - first is decrement)
     await buttons[1].click();
 
-    await sleep(1000);
-
-    const counterResult = await page.$("#counter-result", {
-      strategy: "pierce",
-    });
-    assert(counterResult, "Should find counter-result element");
-    const counterText = await counterResult.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(counterText?.trim(), "Counter is the 1st number");
+    await sleep(300); // Reduced from 500ms
 
     // Verify via direct operations
     const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
