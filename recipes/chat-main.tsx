@@ -11,6 +11,7 @@
 //   references (e.g., into `navigateTo`) without losing reactivity.
 import {
   Cell,
+  cell,
   Default,
   derive,
   h,
@@ -35,7 +36,7 @@ interface ChatMessage {
 // mapping (`messages.map(...)`). Writes should be performed in handlers.
 type MainRecipeInput = {
   messages: Default<ChatMessage[], []>;
-  users: Default<Record<string, string>, {}>;
+  users: Default<Record<string, string>, Record<PropertyKey, never>>;
 };
 
 // Example of per-session local state. Currently unused; left here to show how
@@ -81,11 +82,17 @@ function formatTime(ts: number): string {
 // call `.push(...)` here. UI reads remain reactive via mapping.
 const sendMessage = handler<
   InputEventType,
-  { messages: Cell<ChatMessage[]>; userId: string; username: string }
+  {
+    messages: Cell<ChatMessage[]>;
+    userId: string;
+    username: Cell<string>;
+    users?: Cell<Record<string, string>>;
+  }
 >((event, { messages, userId, username }) => {
   const text = event.detail?.message?.trim();
   if (!text) return;
-  const display = (username && username.trim()) || userId;
+  const uname = typeof username.get === "function" ? username.get() : "";
+  const display = (uname && uname.trim()) || userId;
   messages.push({
     userId,
     author: display,
@@ -99,20 +106,14 @@ const setUsername = handler<
   InputEventType,
   {
     username: Cell<string>;
-    users?: Cell<Record<string, string>>;
-    userId?: string;
+    users: Cell<Record<string, string>>;
+    userId: string;
   }
 >((event, { username, users, userId }) => {
-  username.set((event.detail?.message ?? "").trim());
-  // If a shared users map is provided, update it too so all sessions reactively
-  // re-render names by userId.
-  if (users && userId) {
-    const current = users.get();
-    const next = { ...(current || {}) } as Record<string, string>;
-    next[userId] = (event.detail?.message ?? "").trim();
-    users.set(next as any);
-  }
-});
+  const name = (event.detail?.message ?? "").trim();
+  username.set(name);
+  users.update({ [userId]: name } as any);
+}, { proxy: true });
 
 // User Session Recipe - Individual instance with local state
 export const UserSession = recipe<
@@ -122,9 +123,7 @@ export const UserSession = recipe<
   "User Chat Session",
   ({ messages, users }) => {
     const userId = generateUserId();
-
-    // Local-only username for this session
-    const username = "" as Default<string, "">;
+    const username = cell<string>("");
 
     // UI reads: `messages.map(...)` renders the list reactively. No writes here;
     // those happen via the `sendMessage` handler above.
@@ -145,22 +144,39 @@ export const UserSession = recipe<
               onmessagesend={setUsername({ username, users, userId })}
             />
           </div>
+          <div
+            data-testid="current-username"
+            style={{ marginTop: "6px", fontSize: "12px", color: "#444" }}
+          >
+            Your current username is:{" "}
+            {derive(username, (v) => (v?.trim() || userId))}
+          </div>
           <hr />
           <div>
             <h3>Chat Messages</h3>
-            <div style="display: grid; gap: 8px;">
+            <div style={{ display: "grid", gap: "8px" }}>
               {messages.map((m) => (
-                <div style="display: grid; gap: 2px;">
-                  <div style="font-size: 12px; color: #666;">
+                <div style={{ display: "grid", gap: "2px" }}>
+                  <div
+                    data-testid="message-header"
+                    style={{ fontSize: "12px", color: "#666" }}
+                  >
                     <b>
-                      {derive({ a: m.author, id: m.userId }, ({ a, id }) => {
-                        const name = typeof a === "string" ? a.trim() : "";
-                        return name || id;
-                      })}
+                      {derive(
+                        { u: users, id: m.userId, a: m.author },
+                        ({ u, id, a }) => {
+                          const fromMap = u?.[id as any];
+                          const snapshot = typeof a === "string"
+                            ? a.trim()
+                            : "";
+                          const name = (fromMap && fromMap.trim()) || snapshot;
+                          return name || id;
+                        },
+                      )}
                     </b>
                     <span>· {derive(m.timestamp, formatTime)}</span>
                   </div>
-                  <div style="font-size: 14px;">{m.message}</div>
+                  <div style={{ fontSize: "14px" }}>{m.message}</div>
                 </div>
               ))}
             </div>
@@ -170,7 +186,7 @@ export const UserSession = recipe<
               name="Send"
               placeholder="Type your message..."
               appearance="rounded"
-              onmessagesend={sendMessage({ messages, userId, username })}
+              onmessagesend={sendMessage({ messages, userId, username, users })}
             />
           </div>
         </div>
