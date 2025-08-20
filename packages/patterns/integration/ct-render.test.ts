@@ -74,11 +74,11 @@ describe("ct-render integration test", () => {
       strategy: "pierce",
     });
     assert(buttons.length >= 2, "Should find at least 2 buttons");
-    
+
     // Click increment button (second button - first is decrement)
     await buttons[1].click();
 
-    await sleep(300); // Reduced from 500ms
+    await sleep(300);
 
     // Verify via direct operations
     const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
@@ -125,11 +125,19 @@ describe("ct-render integration test", () => {
     const counterResults = await page.$$("#counter-result", {
       strategy: "pierce",
     });
-    assertEquals(counterResults.length, 1, "Should find exactly 1 counter-result element in ct-render");
+    assertEquals(
+      counterResults.length,
+      1,
+      "Should find exactly 1 counter-result element in ct-render",
+    );
 
     // Verify it shows the correct value
     const counter = counterResults[0];
     const text = await counter.evaluate((el: HTMLElement) => el.textContent);
-    assertEquals(text?.trim(), "Counter is the 5th number", "Single counter should show correct value");
+    assertEquals(
+      text?.trim(),
+      "Counter is the 5th number",
+      "Single counter should show correct value",
+    );
   });
 });

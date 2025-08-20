@@ -158,9 +158,8 @@ describe("ct-list integration test", () => {
   it("should remove items from the list", async () => {
     const page = shell.page();
 
-    // Wait for the component to fully stabilize after adding items
     console.log("Waiting for component to stabilize...");
-    await sleep(500); // Reduced from 2000ms
+    await sleep(500);
 
     // Get initial count
     const initialItems = await page.$$(".list-item", { strategy: "pierce" });
@@ -223,7 +222,7 @@ describe("ct-list integration test", () => {
     // If still showing same count, wait a bit more and try again
     if (remainingItems.length === initialCount) {
       console.log("DOM not updated yet, waiting more...");
-      await sleep(500); // Reduced from 2000ms
+      await sleep(500);
       remainingItems = await page.$$(".list-item", { strategy: "pierce" });
       console.log(
         `After additional wait, found ${remainingItems.length} items`,
@@ -256,9 +255,8 @@ describe("ct-list integration test", () => {
   it("should edit items in the list", async () => {
     const page = shell.page();
 
-    // Wait for the component to fully stabilize
     console.log("Waiting for component to stabilize...");
-    await sleep(500); // Reduced from 2000ms
+    await sleep(500);
 
     // Get initial items
     const initialItems = await page.$$(".list-item", { strategy: "pierce" });
@@ -316,7 +314,7 @@ describe("ct-list integration test", () => {
     assert(editInput, "Should find .edit-input field during editing");
 
     // Verify the input is focused (it should have autofocus)
-    const isFocused = await editInput.evaluate((el: HTMLInputElement) => 
+    const isFocused = await editInput.evaluate((el: HTMLInputElement) =>
       document.activeElement === el
     );
     console.log(`Edit input is focused: ${isFocused}`);
