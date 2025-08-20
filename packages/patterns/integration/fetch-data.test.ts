@@ -1,5 +1,5 @@
 import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
+// Removed sleep import as we're using more reliable waiting mechanisms
 import { CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -92,8 +92,6 @@ describe("fetch data integration test", () => {
       "https://github.com/commontoolsinc/labs",
     );
 
-    await sleep(200); // Reduced wait time
-
     // Navigate to the charm to see updated data
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -102,19 +100,33 @@ describe("fetch data integration test", () => {
       identity,
     });
 
-    // Wait for data to load
-    await sleep(3000); // Allow time for fetch
-
+    // Wait for the title to update to "labs" after fetch completes
+    // We need to wait for the specific content rather than just the element
     const titleElement = await page.waitForSelector("#github-title", {
       strategy: "pierce",
     });
     assert(titleElement, "Should find github title element");
 
-    // Verify updated value
-    const updatedText = await titleElement.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(updatedText?.trim(), "labs");
+    // Wait for the title content to change from "next.js" to "labs"
+    // Use a poll-based approach to wait for the fetch to complete
+    let updatedText = "";
+    let attempts = 0;
+    const maxAttempts = 30; // 30 attempts * 200ms = 6 seconds max wait
+    
+    while (attempts < maxAttempts) {
+      updatedText = await titleElement.evaluate((el: HTMLElement) =>
+        el.textContent?.trim() ?? ""
+      );
+      
+      if (updatedText === "labs") {
+        break;
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      attempts++;
+    }
+    
+    assertEquals(updatedText, "labs", "Title should update to 'labs' after fetch completes");
 
     // Also verify via direct operations
     const repoUrl = await getCharmInput(manager, charmId, ["repoUrl"]);
