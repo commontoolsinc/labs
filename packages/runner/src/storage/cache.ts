@@ -1,9 +1,7 @@
+import { fromString, refer } from "merkle-reference";
 import type {
-  AuthorizationError,
   Changes as MemoryChanges,
   Commit,
-  ConflictError,
-  ConnectionError,
   ConsumerCommandInvocation,
   Entity,
   Fact,
@@ -13,7 +11,6 @@ import type {
   MemorySpace,
   Protocol,
   ProviderCommand,
-  QueryError,
   Result,
   Revision,
   SchemaPathSelector,
@@ -22,7 +19,6 @@ import type {
   State,
   Statement,
   The,
-  TransactionError,
   UCAN,
   Unit,
 } from "@commontools/memory/interface";
@@ -39,13 +35,13 @@ import * as Consumer from "@commontools/memory/consumer";
 import * as Codec from "@commontools/memory/codec";
 import type { Cancel } from "@commontools/runner";
 import { getLogger } from "@commontools/utils/logger";
+import { isBrowser } from "@commontools/utils/env";
+import { SchemaNone } from "@commontools/memory/schema";
+import { Immutable, isObject, isRecord } from "@commontools/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { deepEqual } from "../path-utils.ts";
 import { BaseMemoryAddress, MapSet } from "../traverse.ts";
-import { fromString, refer } from "merkle-reference";
-import { isBrowser } from "@commontools/utils/env";
-import { isObject } from "@commontools/utils/types";
 import type {
   Assert,
   Claim,
@@ -57,6 +53,7 @@ import type {
   IStorageTransaction,
   IStoreError,
   ITransaction,
+  PullError,
   PushError,
   Retract,
   StorageValue,
@@ -65,10 +62,10 @@ import type {
 import * as IDB from "./idb.ts";
 export * from "@commontools/memory/interface";
 import { Channel, RawCommand } from "./inspector.ts";
-import { SchemaNone } from "@commontools/memory/schema";
 import * as Transaction from "./transaction.ts";
 import * as SubscriptionManager from "./subscription.ts";
 import * as Differential from "./differential.ts";
+import * as Address from "./transaction/address.ts";
 
 export type { Result, Unit };
 export interface Selector<Key> extends Iterable<Key> {
@@ -338,32 +335,51 @@ class PullQueue {
 }
 
 // This class helps us maintain a client model of our server side subscriptions
-class SelectorTracker<T = Result<Unit, Error>> {
+export class SelectorTracker<T = Result<Unit, Error>> {
+  // Map from BaseMemoryAddress key string to set of selectorRef strings
   private refTracker = new MapSet<string, string>();
+  // Map from selectorRef string to selector
   private selectors = new Map<string, SchemaPathSelector>();
+  private standardizedSelector = new Map<string, SchemaPathSelector>();
+  // Map from string combination of BaseMemoryAddress and selectorRef to
+  // promise that contains the result of querying that selector.
   private selectorPromises = new Map<string, Promise<T>>();
 
   add(
-    doc: BaseMemoryAddress,
-    selector: SchemaPathSelector | undefined,
+    address: BaseMemoryAddress,
+    selector: SchemaPathSelector,
     promise: Promise<T>,
   ) {
-    if (selector === undefined) {
+    if (selector === undefined || selector.schemaContext === undefined) {
       return;
     }
     const selectorRef = refer(JSON.stringify(selector)).toString();
-    this.refTracker.add(toKey(doc), selectorRef);
+    this.refTracker.add(toKey(address), selectorRef);
     this.selectors.set(selectorRef, selector);
-    const promiseKey = `${toKey(doc)}?${selectorRef}`;
+    this.standardizedSelector.set(selectorRef, {
+      path: selector.path,
+      schemaContext: {
+        schema: SelectorTracker.getStandardSchema(
+          selector.schemaContext.schema,
+        ),
+        rootSchema: SelectorTracker.getStandardSchema(
+          selector.schemaContext.rootSchema,
+        ),
+      },
+    });
+    const promiseKey = `${toKey(address)}?${selectorRef}`;
     this.selectorPromises.set(promiseKey, promise);
   }
 
-  has(doc: BaseMemoryAddress): boolean {
-    return this.refTracker.has(toKey(doc));
+  has(address: BaseMemoryAddress): boolean {
+    return this.refTracker.has(toKey(address));
   }
 
-  hasSelector(doc: BaseMemoryAddress, selector: SchemaPathSelector): boolean {
-    const selectorRefs = this.refTracker.get(toKey(doc));
+  hasSelector(
+    address: BaseMemoryAddress,
+    selector: SchemaPathSelector,
+  ): boolean {
+    const selectorRefs = this.refTracker.get(toKey(address));
     if (selectorRefs !== undefined) {
       const selectorRef = refer(JSON.stringify(selector)).toString();
       return selectorRefs.has(selectorRef);
@@ -371,19 +387,97 @@ class SelectorTracker<T = Result<Unit, Error>> {
     return false;
   }
 
-  get(doc: BaseMemoryAddress): IteratorObject<SchemaPathSelector> {
-    const selectorRefs = this.refTracker.get(toKey(doc)) ?? [];
+  getSupersetSelector(
+    address: BaseMemoryAddress,
+    selector: SchemaPathSelector,
+    cfc: ContextualFlowControl,
+  ): [SchemaPathSelector?, Promise<T>?] {
+    const selectorRefs = this.refTracker.get(toKey(address));
+    const noMatch: [SchemaPathSelector?, Promise<T>?] = [undefined, undefined];
+    if (selectorRefs === undefined) {
+      return noMatch;
+    }
+    const newSelectorRef = refer(JSON.stringify(selector)).toString();
+    // A selector is its own superset
+    if (selectorRefs.has(newSelectorRef)) {
+      const promiseKey = `${toKey(address)}?${newSelectorRef}`;
+      return [
+        this.standardizedSelector.get(newSelectorRef)!,
+        this.selectorPromises.get(promiseKey)!,
+      ];
+    }
+    const newAddress = { ...address, path: selector.path };
+    const newRootSchemaString = JSON.stringify(
+      selector.schemaContext?.rootSchema
+        ? SelectorTracker.getStandardSchema(selector.schemaContext.rootSchema)
+        : undefined,
+    );
+    const newSchema = selector.schemaContext?.schema
+      ? SelectorTracker.getStandardSchema(selector.schemaContext.schema)
+      : false;
+    const newSchemaString = JSON.stringify(newSchema);
+    const hasRefs = SelectorTracker.hasRefs(newSchema);
+    for (const selectorRef of selectorRefs) {
+      const existingSelector = this.standardizedSelector.get(selectorRef)!;
+      const existingAddress = { ...address, path: existingSelector.path };
+      if (Address.includes(existingAddress, newAddress)) {
+        const existingSchema = existingSelector.schemaContext?.schema;
+        const existingRootSchema = existingSelector.schemaContext?.rootSchema;
+        if (existingSchema === undefined) {
+          continue;
+        }
+        if (hasRefs) {
+          // If we have refs, we may need to resolve them in the rootSchema,
+          // so check that those match
+          const existingRootSchemaString = JSON.stringify(existingRootSchema);
+          // If the root schema doesn't match, the selectors aren't similar enough
+          if (existingRootSchemaString !== newRootSchemaString) {
+            continue;
+          }
+        }
+        const subPath = newAddress.path.slice(existingAddress.path.length);
+        const subSchema = cfc.schemaAtPath(
+          existingSchema,
+          subPath,
+          existingRootSchema,
+        );
+        // Basic matching -- we may not recognize some supersets
+        // If the subSchema has ifc flags, but the new schema does not, the
+        // existing selector can still be a superset.
+        // The logic here around anyOf is a bit problematic. These require the
+        // real data to narrow, and without data, all we can do is generate
+        // a union of all possible anyOf. In this case, the narrowed schema
+        // is not a subset of the original query, but we treat it as such.
+        if (
+          ContextualFlowControl.isTrueSchema(subSchema) ||
+          JSON.stringify(subSchema) === newSchemaString ||
+          SelectorTracker.checkAnyOf(
+            subSchema,
+            existingRootSchema,
+            newSchemaString,
+          ) || newSchema === false
+        ) {
+          const promiseKey = `${toKey(address)}?${selectorRef}`;
+          return [existingSelector, this.selectorPromises.get(promiseKey)!];
+        }
+      }
+    }
+    return noMatch;
+  }
+
+  get(address: BaseMemoryAddress): IteratorObject<SchemaPathSelector> {
+    const selectorRefs = this.refTracker.get(toKey(address)) ?? [];
     return selectorRefs.values().map((selectorRef) =>
       this.selectors.get(selectorRef)!
     );
   }
 
   getPromise(
-    doc: BaseMemoryAddress,
+    address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
     const selectorRef = refer(JSON.stringify(selector)).toString();
-    const promiseKey = `${toKey(doc)}?${selectorRef}`;
+    const promiseKey = `${toKey(address)}?${selectorRef}`;
     return this.selectorPromises.get(promiseKey);
   }
 
@@ -395,23 +489,97 @@ class SelectorTracker<T = Result<Unit, Error>> {
    * Return all tracked subscriptions as an array of {factAddress, selector} pairs
    */
   getAllSubscriptions(): {
-    factAddress: BaseMemoryAddress;
+    address: BaseMemoryAddress;
     selector: SchemaPathSelector;
   }[] {
     const subscriptions: {
-      factAddress: BaseMemoryAddress;
+      address: BaseMemoryAddress;
       selector: SchemaPathSelector;
     }[] = [];
     for (const [factKey, selectorRefs] of this.refTracker) {
-      const factAddress = fromKey(factKey);
+      const address = fromKey(factKey);
       for (const selectorRef of selectorRefs) {
         const selector = this.selectors.get(selectorRef);
         if (selector) {
-          subscriptions.push({ factAddress, selector });
+          subscriptions.push({ address, selector });
         }
       }
     }
     return subscriptions;
+  }
+
+  // Check whether the schema is an anyOf with an item that matches our
+  // schemaString.
+  // If the anyOf items are `$ref` items, resolve them, then check.
+  static checkAnyOf(
+    schema: boolean | JSONSchema,
+    rootSchema: boolean | JSONSchema | undefined,
+    schemaString: string,
+  ): boolean {
+    return isRecord(schema) && Array.isArray(schema.anyOf) &&
+      (schema.anyOf.some((item) => {
+        // We might match before resolving the `$ref`
+        if (JSON.stringify(item) === schemaString) {
+          return true;
+        }
+        if (item.$ref !== undefined && isObject(rootSchema)) {
+          item = ContextualFlowControl.resolveSchemaRef(
+            rootSchema,
+            item.$ref,
+          );
+          // We might match after resolving the `$ref`
+          return JSON.stringify(item) === schemaString;
+        }
+        return false;
+      }));
+  }
+
+  // Despite the name, we will still include any "ifc" properties
+  static getStandardSchema(schema: JSONSchema | boolean): JSONSchema | boolean {
+    if (typeof schema === "boolean") {
+      return schema;
+    }
+    const traverse = (
+      value: Readonly<any>,
+    ): JSONValue => {
+      if (isRecord(value)) {
+        if (Array.isArray(value)) {
+          return value.map((val) => traverse(val));
+        } else {
+          return Object.fromEntries(
+            Object.entries(value).filter(([key, _val]) =>
+              key !== "asCell" && key !== "asStream"
+            ).map(([key, val]: [PropertyKey, any]) => [
+              key.toString(),
+              traverse(val),
+            ]),
+          );
+        }
+      } else return value;
+    };
+    return traverse(schema) as JSONSchema;
+  }
+
+  static hasRefs(schema: JSONSchema | boolean): boolean {
+    const traverse = (value: Immutable<any>): boolean => {
+      if (isRecord(value)) {
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            if (traverse(item)) {
+              return true;
+            }
+          }
+        } else {
+          for (const [_k, v] of Object.entries(value)) {
+            if (traverse(v)) {
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    };
+    return traverse(schema);
   }
 }
 
@@ -495,7 +663,7 @@ export class Replica {
       new Set(),
     // Track the selectors used for top level docs -- we only add to this
     // once we've gotten our results (so the promise is resolved).
-    private selectorTracker: SelectorTracker = new SelectorTracker(),
+    private selectorTracker = new SelectorTracker<Result<Unit, Error>>(),
     private cfc: ContextualFlowControl = new ContextualFlowControl(),
   ) {
     this.pull = this.pull.bind(this);
@@ -546,10 +714,7 @@ export class Replica {
   async pull(
     entries: [BaseMemoryAddress, SchemaPathSelector?][] = this.queue.consume(),
   ): Promise<
-    Result<
-      Unit,
-      IStoreError | QueryError | AuthorizationError | ConnectionError
-    >
+    Result<Unit, PullError>
   > {
     // If requested entry list is empty there is nothing to fetch so we return
     // immediately.
@@ -561,15 +726,41 @@ export class Replica {
     // remote.
     // this is the object with the of/the/cause nesting, then a SchemaPathSelector inside
     const schemaSelector = {};
-    const querySelector = {};
     // We'll assert that we need all the classifications we expect to need.
     // If we don't actually have those, the server will reject our request.
     const classifications = new Set<string>();
-    for (const [{ id, type }, schemaPathSelector] of entries) {
+    // Patch to have a valid selector for each entry
+    const defaultSelector = { path: [], schemaContext: SchemaNone };
+    const schemaEntries: [BaseMemoryAddress, SchemaPathSelector][] = entries
+      .map((
+        [address, schemaPathSelector],
+      ) => [address, schemaPathSelector ?? defaultSelector]);
+    const promises = [];
+    const newEntries: [BaseMemoryAddress, SchemaPathSelector][] = [];
+    for (const [address, selector] of schemaEntries) {
+      // Even though we have our doc in local store, we may need to re-issue
+      // our query, since our cached copy may have been run with a different
+      // schema, and thus have different linked documents.
+      // The superSelector may also just be an existing copy of our selector
+      const [superSelector, superPromise] = this.selectorTracker
+        .getSupersetSelector(
+          address,
+          selector,
+          this.cfc,
+        );
+      if (superSelector !== undefined) {
+        // If we already have a subscription that includes this query running
+        // on the server, we don't need to send a new one -- however, that
+        // may be in progress, so get the Promise
+        promises.push(superPromise);
+      } else {
+        newEntries.push([address, selector]);
+      }
+    }
+
+    for (const [address, selector] of newEntries) {
       // If we don't have a schema, use SchemaNone, which will only fetch the specified object
-      const selector = schemaPathSelector ??
-        { path: [], schemaContext: SchemaNone };
-      setSelector(schemaSelector, id, type, "_", selector);
+      setSelector(schemaSelector, address.id, address.type, "_", selector);
       // Since we're accessing the entire document, we should base our
       // classification on the rootSchema
       const rootSchema = selector.schemaContext?.rootSchema ?? false;
@@ -582,42 +773,62 @@ export class Replica {
 
     // We provided schema for the top level fact that we selected, but we
     // will have undefined schema for the entries included as links.
-    let fetchedEntries: [Revision<State>, SchemaPathSelector | undefined][] =
-      [];
-    // Run all our schema queries first
+    const queryArgs: SchemaQueryArgs = {
+      selectSchema: schemaSelector,
+      subscribe: true,
+      excludeSent: true,
+    };
     if (Object.entries(schemaSelector).length > 0) {
-      const queryArgs: SchemaQueryArgs = {
-        selectSchema: schemaSelector,
-        subscribe: true,
-        excludeSent: true,
-      };
       if (classifications.size > 0) {
         const lubClassification = this.cfc.lub(classifications);
         queryArgs.classification = [lubClassification];
       }
-      const query = this.remote.query(queryArgs);
-      const { error } = await query.promise;
-      // If query fails we propagate the error.
-      if (error) {
-        logger.error(() => ["query failure", queryArgs, error]);
-        return { error };
-      }
-      fetchedEntries = query.schemaFacts;
       // TODO(@ubik2) we're not actually handling the data from this
       // subscription properly. We get the data through the commit changes,
       // because the server knows we're watching, but we should be able
       // to use the data from the subscription instead.
-    }
-    // Now run our regular queries (this will include our commit+json)
-    if (Object.entries(querySelector).length > 0) {
-      const query = this.remote.query({ select: querySelector });
-      const { error } = await query.promise;
-      // If query fails we propagate the error.
-      if (error) {
-        return { error };
+      const query = this.remote.query(queryArgs);
+      // What we store in the selector tracker is the promise for when we've
+      // not only gotten the server results back, but also integrated them into
+      // the nursery/heap and sent out change information.
+      const integratedPromise = query.promise.then(async (result) => {
+        if (result.error) {
+          logger.error(() => ["query failure", queryArgs, result.error]);
+          return Promise.resolve({ error: result.error });
+        } else {
+          const integrated = await this.integrateResults(
+            newEntries,
+            result.ok.schemaFacts,
+          );
+          return Promise.resolve({ ok: {} });
+        }
+      });
+      // Track this pending query and promise in the selector tracker
+      for (const [address, selector] of newEntries) {
+        this.selectorTracker.add(address, selector, integratedPromise);
       }
-      fetchedEntries = [...fetchedEntries, ...query.schemaFacts];
+      // Add this to the front of promises
+      promises.unshift(integratedPromise);
     }
+    // If all the entries were already loaded we don't need to do anything
+    // so we return immediately.
+    const results = await Promise.all(promises);
+
+    // Check for errors
+    for (const result of results) {
+      if ((result as any).error) {
+        logger.error(() => ["query failure", queryArgs, (result as any).error]);
+        return { error: (result as any).error as PullError };
+      }
+    }
+    return { ok: {} };
+  }
+
+  // Integrate the query results triggered by a pull
+  private async integrateResults(
+    requestedEntries: [BaseMemoryAddress, SchemaPathSelector?][],
+    fetchedEntries: [Revision<Fact>, SchemaPathSelector?][],
+  ): Promise<Result<Unit, IStoreError>> {
     const revisions = fetchedEntries.map(([revision, _selector]) => revision);
     // resolved is the set of facts we received that were pending
     // current is the set of facts we received that are now live
@@ -642,9 +853,9 @@ export class Replica {
     // `unclaimed` revisions for those that we store. By doing this we can avoid
     // network round trips if such are pulled again in the future.
     const notFound = [];
-    for (const [entry, _selector] of entries) {
-      if (!this.get(entry)) {
-        const unclaimedEntry = unclaimed({ of: entry.id, the: entry.type });
+    for (const [address, _selector] of requestedEntries) {
+      if (!this.get(address)) {
+        const unclaimedEntry = unclaimed({ of: address.id, the: address.type });
         // Note we use `-1` as `since` timestamp so that any change will appear greater.
         notFound.push({ ...unclaimedEntry, since: -1 });
       }
@@ -668,11 +879,6 @@ export class Replica {
     // Store the revisions we got from the server in the cache
     const result = await this.cache.merge(revisions, Replica.put);
 
-    for (const [revision, selector] of fetchedEntries) {
-      const address = { id: revision.of, type: revision.the };
-      this.selectorTracker.add(address, selector, Promise.resolve(result));
-    }
-
     if (result.error) {
       return result;
     } else {
@@ -687,28 +893,15 @@ export class Replica {
    */
   async load(
     entries: [BaseMemoryAddress, SchemaPathSelector?][],
-  ): Promise<
-    Result<
-      Unit,
-      IStoreError | QueryError | AuthorizationError | ConnectionError
-    >
-  > {
+  ): Promise<Result<Unit, PullError>> {
     // First we identify entries that we need to load from the store.
     const need: [BaseMemoryAddress, SchemaPathSelector?][] = [];
     for (const [address, selector] of entries) {
       if (!this.get(address)) {
         need.push([address, selector]);
       } else if (selector !== undefined) {
-        // Even though we have our root doc in local store, we may need
-        // to re-issue our query, since our cached copy may have been run with a
-        // different schema, and thus have different linked documents.
-        if (!this.selectorTracker.hasSelector(address, selector)) {
-          // If we already have a subscription for the query running on the
-          // server for this selector, we don't need to send a new one
-          // (revisit this when we allow unsubscribe)
-          // Otherwise, add it to the set of things we need
-          need.push([address, selector]);
-        }
+        // Otherwise, add it to the set of things we need
+        need.push([address, selector]);
       }
     }
 
@@ -720,7 +913,7 @@ export class Replica {
     // If all the entries were already loaded we don't need to do anything
     // so we return immediately.
     if (need.length === 0) {
-      return { ok: new Map() };
+      return { ok: {} };
     }
 
     // Otherwise we attempt pull needed entries from the local store.
@@ -1563,15 +1756,7 @@ export class Provider implements IStorageProvider {
   async send<T = any>(
     batch: { uri: URI; value: StorageValue<T> }[],
   ): Promise<
-    Result<
-      Unit,
-      | ConflictError
-      | TransactionError
-      | ConnectionError
-      | AuthorizationError
-      | QueryError
-      | IStoreError
-    >
+    Result<Unit, PushError>
   > {
     const { the, workspace } = this;
     const LABEL_TYPE = "application/label+json" as const;
@@ -1657,7 +1842,7 @@ export class Provider implements IStorageProvider {
     need.push([spaceCommitAddress, undefined]);
 
     // Add all tracked subscriptions
-    for (const { factAddress, selector } of subscriptions) {
+    for (const { address: factAddress, selector } of subscriptions) {
       need.push([factAddress, selector]);
     }
 

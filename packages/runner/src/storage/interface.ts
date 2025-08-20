@@ -6,7 +6,6 @@ import type {
   ConflictError as IConflictError,
   ConnectionError as IConnectionError,
   Fact,
-  FactAddress,
   Invariant as IClaim,
   JSONValue,
   MemorySpace,
@@ -788,6 +787,12 @@ export type PushError =
   | IConnectionError
   | IConflictError
   | TransactionError
+  | IAuthorizationError;
+
+export type PullError =
+  | IQueryError
+  | IStoreError
+  | IConnectionError
   | IAuthorizationError;
 
 export interface IStoreError extends Error {
