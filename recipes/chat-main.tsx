@@ -27,7 +27,6 @@ import {
 // Data types for the chat messages. CTS will derive the matching schema.
 interface ChatMessage {
   userId: string;
-  author?: string;
   message: string;
   timestamp: number;
 }
@@ -71,12 +70,6 @@ function getId(userId: Cell<string>): string {
   return id;
 }
 
-// Helper to get username from a Cell, with fallback to userId
-function getUsername(username: Cell<string>, userId: string): string {
-  const uname = typeof username.get === "function" ? username.get() : "";
-  return (uname && uname.trim()) || userId;
-}
-
 // Event payload type for ct-message-input's ct-send event
 type InputEventType = {
   detail: {
@@ -93,6 +86,16 @@ function formatTime(ts: number): string {
   });
 }
 
+// Helper to resolve a user's display name from the shared map, falling back to userId
+function resolveDisplayName(
+  usersMap: Record<string, string> | undefined | null,
+  userId: string,
+): string {
+  const fromMap = usersMap?.[userId];
+  const name = typeof fromMap === "string" ? fromMap.trim() : "";
+  return name || userId;
+}
+
 // Handler to send a new chat message.
 const sendMessage = handler<
   InputEventType,
@@ -106,11 +109,9 @@ const sendMessage = handler<
   const text = event.detail?.message?.trim();
   if (!text) return;
   const id = getId(userId);
-  const display = getUsername(username, id);
-  console.log("[sendMessage] userId:", id, "display:", display);
+  console.log("[sendMessage] userId:", id);
   messages.push({
     userId: id,
-    author: display,
     message: text,
     timestamp: Date.now(),
   });
@@ -184,15 +185,8 @@ export const UserSession = recipe<
                   >
                     <b>
                       {derive(
-                        { u: users, id: m.userId, a: m.author },
-                        ({ u, id, a }) => {
-                          const fromMap = u?.[id as any];
-                          const snapshot = typeof a === "string"
-                            ? a.trim()
-                            : "";
-                          const name = (fromMap && fromMap.trim()) || snapshot;
-                          return name || id;
-                        },
+                        { u: users, id: m.userId },
+                        ({ u, id }) => resolveDisplayName(u as any, id as any),
                       )}
                     </b>
                     <span>· {derive(m.timestamp, formatTime)}</span>
@@ -225,4 +219,37 @@ export const UserSession = recipe<
 
 // Handler to create a new user session. We use `{ proxy: true }` so the handler
 // receives the live reactive references (OpaqueRefs), not a readonly snapshot.
-// That allows us to pass `
+// That allows us to pass `state.messages` directly into the child recipe and
+// keep all sessions linked to the same underlying state.
+const createUserSession = handler((_, state: { messages: any; users: any }) => {
+  const sessionCharm = UserSession({
+    messages: state.messages,
+    users: state.users,
+  });
+
+  return navigateTo(sessionCharm);
+}, { proxy: true });
+
+// Main chat recipe: a state container with a button to spawn per-user sessions.
+// All sessions get the same `messages` reference so changes are shared.
+export default recipe<MainRecipeInput>(
+  "Main Chat State Container",
+  ({ messages, users }) => {
+    return {
+      [NAME]: "Chat State Container",
+      [UI]: (
+        <div>
+          <h2>Chat State Container</h2>
+          <p>This charm stores the shared chat state.</p>
+          <p>Messages: {messages.length}</p>
+          <p>Click below to create your personal chat session:</p>
+          <ct-button onClick={createUserSession({ messages, users })}>
+            Generate User Session
+          </ct-button>
+        </div>
+      ),
+      messages,
+      users,
+    };
+  },
+);
