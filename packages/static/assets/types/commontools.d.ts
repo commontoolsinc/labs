@@ -65,17 +65,17 @@ export interface IDFields {
 export type JSONSchemaTypes = "object" | "array" | "string" | "integer" | "number" | "boolean" | "null";
 export type JSONSchema = {
     readonly $ref?: string;
-    readonly $defs?: Readonly<Record<string, JSONSchema>>;
+    readonly $defs?: Readonly<Record<string, JSONSchema | boolean>>;
     /** @deprecated Use `$defs` for 2019-09/Draft 8 or later */
     readonly definitions?: Readonly<Record<string, JSONSchema | boolean>>;
     readonly allOf?: readonly (JSONSchema | boolean)[];
-    readonly anyOf?: readonly JSONSchema[];
+    readonly anyOf?: readonly (JSONSchema | boolean)[];
     readonly oneOf?: readonly (JSONSchema | boolean)[];
     readonly not?: JSONSchema | boolean;
     readonly if?: JSONSchema | boolean;
     readonly then?: JSONSchema | boolean;
     readonly else?: JSONSchema | boolean;
-    readonly dependentSchemas?: Readonly<Record<string, JSONSchema>>;
+    readonly dependentSchemas?: Readonly<Record<string, JSONSchema | boolean>>;
     readonly prefixItems?: (JSONSchema | boolean)[];
     readonly items?: Readonly<JSONSchema>;
     readonly contains?: JSONSchema | boolean;

@@ -709,3 +709,46 @@ export function validateAndTransform(
   seen.push([seenKey, value]);
   return annotateWithBackToCellSymbols(value, runtime, link, tx);
 }
+
+/**
+ * This assumes that there will not be a conflict in definitions between the
+ * eventSchema and the stateSchema.
+ */
+// TODO(@ubik2): We also need to re-write any relative refs
+export function generateHandlerSchema(
+  eventSchema?: JSONSchema,
+  stateSchema?: JSONSchema,
+): JSONSchema | undefined {
+  if (eventSchema === undefined && stateSchema === undefined) {
+    return undefined;
+  }
+  const mergedDefs: Record<string, JSONSchema> = {};
+  const mergedDefinitions: Record<string, JSONSchema> = {};
+  if (eventSchema) {
+    // extract $defs and definitions and remove them from eventSchema
+    const { $defs, definitions, ...rest } = eventSchema;
+    eventSchema = rest;
+    Object.assign(mergedDefs, $defs);
+    Object.assign(mergedDefinitions, definitions);
+  }
+  if (stateSchema) {
+    // extract $defs and definitions and remove them from stateSchema
+    const { $defs, definitions, ...rest } = stateSchema;
+    stateSchema = rest;
+    Object.assign(mergedDefs, $defs);
+    Object.assign(mergedDefinitions, definitions);
+  }
+  // TODO(@ubik2): Defaults here should be true, but I haven't changed the JSONSchema type
+  // to allow that yet
+  return {
+    type: "object",
+    properties: {
+      "$event": eventSchema ?? {},
+      "$ctx": stateSchema ?? {},
+    },
+    ...(Object.keys(mergedDefs).length ? { $defs: mergedDefs } : {}),
+    ...(Object.keys(mergedDefinitions).length
+      ? { definitions: mergedDefinitions }
+      : {}),
+  };
+}

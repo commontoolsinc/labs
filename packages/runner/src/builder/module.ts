@@ -21,6 +21,7 @@ import {
 import { moduleToJSON } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import { getTopFrame } from "./recipe.ts";
+import { generateHandlerSchema } from "../schema.ts";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
@@ -136,15 +137,10 @@ export function handler<E, T>(
     }
   }
 
-  const schema: JSONSchema | undefined = eventSchema || stateSchema
-    ? {
-      type: "object",
-      properties: {
-        $event: eventSchema ?? {},
-        $ctx: (stateSchema ?? {}) as JSONSchema,
-      },
-    }
-    : undefined;
+  const schema = generateHandlerSchema(
+    eventSchema,
+    stateSchema as JSONSchema | undefined,
+  );
 
   const module: Handler<T, E> & toJSON & {
     bind: (inputs: Opaque<StripCell<T>>) => OpaqueRef<E>;
