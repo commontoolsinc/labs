@@ -7,6 +7,8 @@ import {
   waitForEvent,
 } from "./utils.ts";
 
+type TestCase = [string, string, string | null | RegExp];
+
 setIframeTestHandler();
 
 // Cookies should not be set with SameSite=None, but
@@ -62,7 +64,7 @@ const ORIGIN_URL = new URL(globalThis.location.href).origin;
 const BASE64_IMG_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
 
-function openWindow(target: any) {
+function openWindow(target: string) {
   return `<script>
     let win = window.open("${HTML_URL}", "${target}");
     if (win) throw new Error("Window Opened");</script>`;
@@ -77,7 +79,7 @@ anchor.click();
 </script>`;
 }
 
-const cases = [[
+const cases: TestCase[] = [[
   "allows inline script",
   `<script>console.log("foo")</script><style>* { background-color: red; }</style><div>foo</div>`,
   null,
@@ -178,7 +180,7 @@ const cases = [[
 // /!\ These tests do not report correctly.
 // /!\ Not sure why! But they correctly are blocked
 // /!\ in practice. How can we ensure this is properly tested?
-const falseNegatives = [[
+const falseNegatives: TestCase[] = [[
   "disallows iframes",
   `<iframe src="${HTML_URL}"></iframe>`,
   "CSP:frame-src",
@@ -191,13 +193,13 @@ const falseNegatives = [[
 // /!\ These tests do not report correctly.
 // /!\ Not sure why! But they appear to be allowed
 // /!\ but are not in practice.
-const falsePositives = [[
+const falsePositives: TestCase[] = [[
   "Allows anchor link target (_blank)",
   clickAnchor("_blank"),
   null,
 ]];
 
-const unknownStatuses = [
+const unknownStatuses: TestCase[] = [
   [
     // `prerender` is a Chrome-only feature-flagged
     // source of exfiltration. This *should* be
@@ -221,7 +223,11 @@ for (const [name, html, expected] of unknownStatuses) {
   definePending(name, html, expected);
 }
 
-function defineTest(name: any, html: any, expected: any) {
+function defineTest(
+  name: string,
+  html: string,
+  expected: string | null | RegExp,
+) {
   Deno.test(name, async () => {
     const body = `
         ${CSP_REPORTER}
@@ -244,6 +250,10 @@ function defineTest(name: any, html: any, expected: any) {
   });
 }
 
-function definePending(name: any, _html: any, _expected: any) {
+function definePending(
+  name: string,
+  _html: string,
+  _expected: string | null | RegExp,
+) {
   Deno.test(name, () => {});
 }

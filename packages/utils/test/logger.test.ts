@@ -45,7 +45,9 @@ describe("logger", () => {
     const calls: unknown[][] = [];
 
     // Mock the console method
-    (console[method] as any) = (...args: unknown[]) => {
+    (console[method] as (...args: unknown[]) => void) = (
+      ...args: unknown[]
+    ) => {
       calls.push(args);
     };
 
@@ -54,7 +56,7 @@ describe("logger", () => {
       return { result, calls };
     } finally {
       // Restore original method
-      (console[method] as any) = originalMethod;
+      (console[method] as unknown) = originalMethod;
     }
   }
 

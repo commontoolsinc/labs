@@ -1,4 +1,4 @@
-import { streamText } from "ai";
+import { CoreMessage, streamText } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
 import { type LLMMessage, type LLMRequest } from "@commontools/llm/types";
 import { findModel } from "./models.ts";
@@ -37,7 +37,7 @@ export interface GenerateTextResult {
 
 // Configure the model parameters for JSON mode based on provider
 export function configureJsonMode(
-  streamParams: Record<string, any>,
+  streamParams: Record<string, unknown>,
   modelName: string,
   messages: LLMMessage[],
   isStreaming: boolean,
@@ -52,7 +52,7 @@ export function configureJsonMode(
 
     // Ensure it's also passed through providerOptions for the Vercel AI SDK
     streamParams.providerOptions = {
-      ...streamParams.providerOptions,
+      ...(streamParams.providerOptions as object | undefined),
       groq: {
         response_format: { type: "json_object" },
       },
@@ -74,7 +74,7 @@ export function configureJsonMode(
 
     // Ensure it's also passed through providerOptions for the Vercel AI SDK
     streamParams.providerOptions = {
-      ...streamParams.providerOptions,
+      ...(streamParams.providerOptions as object | undefined),
       openai: {
         response_format: { type: "json_object" },
       },
@@ -142,11 +142,16 @@ export async function generateText(
     throw new Error("Groq models don't support streaming in JSON mode");
   }
 
-  const messages = params.messages;
-  const streamParams: Record<string, any> = {
+  // `streamText` messages only support "user", "assistant" roles
+  // and string content.
+  const messages = params.messages.filter((message) => {
+    return (message.role === "user" || message.role === "assistant") &&
+      typeof message.content === "string";
+  });
+
+  const streamParams: Parameters<typeof streamText>[0] = {
     model: modelConfig.model || params.model,
-    messages,
-    stream: params.stream,
+    messages: messages as CoreMessage[],
     system: params.system,
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
@@ -185,12 +190,21 @@ export async function generateText(
 
   streamParams.experimental_telemetry = {
     isEnabled: true,
-    metadata: params.metadata,
+    metadata: params.metadata
+      ? Object.keys(params.metadata).reduce((out, prop) => {
+        const value = params.metadata![prop];
+        // Only overlap between LLMRequestMetadata values
+        // and AttributeValue are string-type values.
+        if (typeof value !== "string") return out;
+        out[prop] = value;
+        return out;
+      }, {} as Record<string, AttributeValue>)
+      : undefined,
     tracer: otelProvider.getTracer(env.OTEL_SERVICE_NAME || "toolshed-dev"),
   };
 
   // This is where the LLM API call is made
-  const llmStream = await streamText(streamParams as any);
+  const llmStream = await streamText(streamParams);
 
   // Get the active span from OpenTelemetry and set attributes
   const activeSpan = trace.getActiveSpan();

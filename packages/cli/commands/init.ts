@@ -35,7 +35,7 @@ function createTsConfig() {
       }
       return output;
     },
-    {} as Record<string, any>,
+    {} as Record<string, unknown>,
   );
 
   return {

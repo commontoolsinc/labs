@@ -25,6 +25,7 @@ import {
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 import { ValidationError } from "@cliffy/command";
+import { isVNode } from "@commontools/html";
 
 export interface EntryConfig {
   mainPath: string;
@@ -376,8 +377,8 @@ export async function inspectCharm(
   id: string;
   name?: string;
   recipeName?: string;
-  source: any;
-  result: any;
+  source: Readonly<Charm>;
+  result: Readonly<Charm>;
   readingFrom: Array<{ id: string; name?: string }>;
   readBy: Array<{ id: string; name?: string }>;
 }> {
@@ -418,10 +419,6 @@ export async function getCharmView(
 }
 
 export function formatViewTree(view: unknown): string {
-  const isVNode = (v: any): v is { name: string; children: any[] } => {
-    return v && typeof v === "object" && v.type === "vnode" && v.name;
-  };
-
   const format = (
     node: unknown,
     prefix: string,
@@ -450,7 +447,7 @@ export async function getCellValue(
   config: CharmConfig,
   path: (string | number)[],
   options?: { input?: boolean },
-): Promise<any> {
+): Promise<unknown> {
   const manager = await loadManager(config);
   if (options?.input) {
     return await getCharmInput(manager, config.charm, path);
@@ -462,7 +459,7 @@ export async function getCellValue(
 export async function setCellValue(
   config: CharmConfig,
   path: (string | number)[],
-  value: any,
+  value: unknown,
   options?: { input?: boolean },
 ): Promise<void> {
   const manager = await loadManager(config);
@@ -479,7 +476,7 @@ export async function setCellValue(
 export async function callCharmHandler(
   config: CharmConfig,
   handlerName: string,
-  args: any,
+  args: unknown,
 ): Promise<void> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);

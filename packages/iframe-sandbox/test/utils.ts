@@ -1,10 +1,11 @@
+import { isRecord } from "@commontools/utils/types";
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 import { setIframeContextHandler } from "../src/index.ts";
 import { sleep } from "@commontools/utils/sleep";
 
-type Callback = (key: string, value: any) => void;
+type Callback = (key: string, value: unknown) => void;
 interface Context {
-  [name: string]: any;
+  [name: string]: unknown;
 }
 
 export class ContextShim {
@@ -17,7 +18,7 @@ export class ContextShim {
     this.callbacks = [];
     this.receiptIds = 0;
   }
-  set(_element: CommonIframeSandboxElement, key: string, value: any) {
+  set(_element: CommonIframeSandboxElement, key: string, value: unknown) {
     this.data[key] = value;
     for (let i = 0; i < this.callbacks.length; i++) {
       const [_, callback_key, callback] = this.callbacks[i];
@@ -27,7 +28,7 @@ export class ContextShim {
     }
   }
 
-  get(_element: CommonIframeSandboxElement, key: string): any {
+  get(_element: CommonIframeSandboxElement, key: string): unknown {
     return this.data[key];
   }
 
@@ -55,16 +56,16 @@ export class ContextShim {
 export function setIframeTestHandler() {
   setIframeContextHandler({
     read(element, context, key) {
-      return context.get(element, key);
+      return (context as ContextShim).get(element, key);
     },
     write(element, context, key, value) {
-      context.set(element, key, value);
+      (context as ContextShim).set(element, key, value);
     },
     subscribe(element, context, key, callback) {
-      return context.subscribe(element, key, callback);
+      return (context as ContextShim).subscribe(element, key, callback);
     },
     unsubscribe(element, context, receipt) {
-      context.unsubscribe(element, receipt);
+      (context as ContextShim).unsubscribe(element, receipt as number);
     },
     onLLMRequest(element, context, payload) {
       // Not implemented
@@ -86,7 +87,7 @@ export function assert(condition: boolean) {
   }
 }
 
-export function assertEquals(a: any, b: any) {
+export function assertEquals(a: unknown, b: unknown) {
   if (a !== b) {
     throw new Error(`${a} does not equal ${b}.`);
   }
@@ -115,7 +116,7 @@ export function render(
   });
 }
 
-export function invertPromise(promise: Promise<any>): Promise<any> {
+export function invertPromise(promise: Promise<unknown>): Promise<unknown> {
   return new Promise((resolve, reject) => promise.then(reject, resolve));
 }
 

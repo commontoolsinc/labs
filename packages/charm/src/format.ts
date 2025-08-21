@@ -40,7 +40,7 @@ export async function formatPromptWithMentions(
     text: string;
     sources: Record<
       string,
-      { name: string; cell: Cell<Charm>; recipe?: Recipe | Module }
+      { name: string; cell: Cell<unknown>; recipe?: Recipe | Module }
     >;
   }
 > {
@@ -50,7 +50,10 @@ export async function formatPromptWithMentions(
   );
 
   // Create a mapping of IDs to source objects
-  const sourcesMap: Record<string, any> = {};
+  const sourcesMap: Record<
+    string,
+    { name: string; cell: Cell<unknown>; recipe?: Recipe | Module }
+  > = {};
 
   // Process the text to inject IDs where mentions are
   let processedText = payload.text;
@@ -78,8 +81,8 @@ export async function formatPromptWithMentions(
 }
 
 export function getCharmNameAsCamelCase(
-  cell: Cell<any>,
-  usedKeys: Record<string, any>,
+  cell: Cell<unknown>,
+  usedKeys: Record<string, unknown>,
 ): string {
   const charmName = toCamelCase(cell.asSchema(charmSchema).key(NAME).get());
 
@@ -104,12 +107,16 @@ type Descendant = {
 
 // Helper to add markdown styling based on node type
 async function processNode(
-  node: any,
+  node: Descendant,
   state: {
     fullText: string;
     mentions: string[];
     sources: {
-      [id: string]: { name: string; cell: Cell<any>; recipe?: Recipe | Module };
+      [id: string]: {
+        name: string;
+        cell: Cell<unknown>;
+        recipe?: Recipe | Module;
+      };
     };
     mentionIndices: Record<string, number>;
   },
@@ -227,7 +234,11 @@ export async function parseComposerDocument(
   text: string;
   mentions: string[];
   sources: {
-    [id: string]: { name: string; cell: Cell<any>; recipe?: Recipe | Module };
+    [id: string]: {
+      name: string;
+      cell: Cell<unknown>;
+      recipe?: Recipe | Module;
+    };
   };
 }> {
   try {
@@ -257,7 +268,7 @@ export async function parseComposerDocument(
       sources: {} as {
         [id: string]: {
           name: string;
-          cell: Cell<any>;
+          cell: Cell<unknown>;
           recipe?: Recipe | Module;
         };
       },
@@ -278,24 +289,4 @@ export async function parseComposerDocument(
     console.warn("Failed to parse document, treating as plain text:", error);
     return { text: serializedDocument, mentions: [], sources: {} };
   }
-}
-
-// Helper function to replace mentions with their actual content
-export function replaceMentionsWithContent(
-  parsedDocument: { text: string; mentions: string[] },
-  mentionContent: Record<string, any>,
-): string {
-  let result = parsedDocument.text;
-
-  // Replace each mention with its content
-  for (const mentionId of parsedDocument.mentions) {
-    const content = mentionContent[mentionId];
-    if (content) {
-      // Find the mention pattern in the text and replace it with content
-      const mentionRegex = new RegExp(`@[^@]+(#${mentionId})\\)`, "g");
-      result = result.replace(mentionRegex, content);
-    }
-  }
-
-  return result;
 }

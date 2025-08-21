@@ -341,7 +341,7 @@ test("list multiple facts using schema query", store, async (session) => {
     },
   });
 
-  const expectedFacts: Record<string, any> = {};
+  const expectedFacts: Record<string, unknown> = {};
   for (const fact of facts) {
     expectedFacts[fact.cause.toString()] = { is: fact.is, since: commit.since };
   }
@@ -1339,7 +1339,7 @@ test(
     });
     assert(tr.ok);
     const commit = Commit.toRevision(tr.ok);
-    const expectedFacts: Record<string, any> = {};
+    const expectedFacts: Record<string, unknown> = {};
     for (const fact of facts) {
       expectedFacts[fact.cause.toString()] = {
         is: fact.is,

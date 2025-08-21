@@ -15,7 +15,12 @@ export class Verifier {
   private identity: Identity;
 
   private constructor(
-    { browser, page, apiUrl, identity }: { browser: Browser; page: Page; apiUrl: string; identity: Identity },
+    { browser, page, apiUrl, identity }: {
+      browser: Browser;
+      page: Page;
+      apiUrl: string;
+      identity: Identity;
+    },
   ) {
     this.browser = browser;
     this.page = page;
@@ -26,7 +31,11 @@ export class Verifier {
   }
 
   static async initialize(
-    { headless, apiUrl, identity }: { headless: boolean; apiUrl: string; identity: Identity },
+    { headless, apiUrl, identity }: {
+      headless: boolean;
+      apiUrl: string;
+      identity: Identity;
+    },
   ) {
     const browser = await Browser.launch({
       headless,
@@ -126,14 +135,18 @@ async function llmVerifyCharm(
   return JSON.stringify(result);
 }
 
-async function checkPageForErrors(page: Page): Promise<any> {
-  return await page.evaluate(() => {
+async function checkPageForErrors(page: Page): Promise<Array<unknown>> {
+  const errors = await page.evaluate(() => {
     // @ts-ignore: this code is stringified and sent to browser context
     return globalThis.charmRuntimeErrors;
   });
+  if (!Array.isArray(errors)) {
+    throw new Error("Page errors malformed.");
+  }
+  return errors;
 }
 
-async function addErrorListeners(page: Page): Promise<any> {
+async function addErrorListeners(page: Page): Promise<unknown> {
   return await page.evaluate(() => {
     // @ts-ignore: this code is stringified and sent to browser context
     globalThis.charmRuntimeErrors = [];

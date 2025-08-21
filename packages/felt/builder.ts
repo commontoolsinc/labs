@@ -26,8 +26,8 @@ export class Builder extends EventTarget {
     const fn = debounce(async () => {
       try {
         await this.build();
-      } catch (e: any) {
-        const message = e && "message" in e ? e.message : e;
+      } catch (e: unknown) {
+        const message = e && typeof e === "object" && "message" in e ? e.message : e;
         console.error(`   ${red("✗")} ${red("Error:")} ${message}`);
       }
     }, debounceTimeout);

@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertExists, assertMatch } from "@std/assert";
 import { refer } from "merkle-reference";
-import { JSONSchema, SchemaContext } from "@commontools/runner";
+import { JSONSchema, JSONValue, SchemaContext } from "@commontools/runner";
 import * as Changes from "../changes.ts";
 import * as Commit from "../commit.ts";
 import * as Fact from "../fact.ts";
@@ -17,29 +17,6 @@ const doc = `of:${refer({ hello: "world" })}` as const;
 const doc1 = doc; // convenient name
 const doc2 = `of:${refer({ goodbye: "world" })}` as const;
 const doc3 = `of:${refer({ goodbye: "cruel world" })}` as const;
-
-// Helper function to make query comparisons easier
-// Since our result is returned with a match for each selector schema,
-// it comes back wrapped in another array, we'll compare it to a fact
-// assert of an array version.
-function getResultAtPath(
-  obj: Record<string, AssertFact<any>>,
-  path: string[],
-): any {
-  const entries = Object.entries(obj);
-  assertEquals(entries.length, 1);
-  for (const [cause, val] of entries) {
-    // Our isResults will contain an entry for each selector, so it will
-    // always have an array as its value type.
-    let current = val.is;
-    for (const key of path) {
-      if (current === undefined || current === null) return undefined;
-      current = current[key];
-    }
-    assertEquals(current.length, 1);
-    return current[0];
-  }
-}
 
 function assertConflictEquals(
   conflict1: Conflict,

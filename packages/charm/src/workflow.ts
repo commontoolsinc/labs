@@ -23,6 +23,7 @@ import { VNode } from "@commontools/html";
 import { applyDefaults, GenerationOptions } from "@commontools/llm";
 import { CharmSearchResult, searchCharms } from "./search.ts";
 import { console } from "./conditional-console.ts";
+import { isRecord } from "@commontools/utils/types";
 
 export interface RecipeRecord {
   argumentSchema: JSONSchema; // Schema type from jsonschema
@@ -31,7 +32,7 @@ export interface RecipeRecord {
     $NAME?: string;
     $UI?: VNode;
   };
-  initial?: any;
+  initial?: unknown;
 }
 
 export interface SpellRecord {
@@ -303,7 +304,7 @@ export interface WorkflowForm {
     rawInput: string;
     processedInput: string;
     existingCharm?: Cell<Charm>;
-    references: Record<string, Cell<any>>;
+    references: Record<string, Cell<unknown>>;
   };
 
   // Classification information
@@ -750,7 +751,7 @@ export async function processWorkflow(
           throw new Error("No references found");
         }
 
-        refs.forEach((cell: Cell<Charm>) => {
+        refs.forEach((cell) => {
           const schema = cell.schema;
           if (schema) {
             schemas.push(schema);
@@ -775,7 +776,7 @@ export async function processWorkflow(
 
         for (const [key, charm] of Object.entries(form.input.references)) {
           const schema = charm.schema?.properties;
-          const id = charmId(charm);
+          const id = charmId(charm as Cell<Charm>);
           if (!id) continue;
 
           castable[id] = [];
@@ -1018,7 +1019,7 @@ export function executeImagineWorkflow(
   console.log("Executing IMAGINE workflow");
 
   // Process references - this allows the new charm to access data from multiple sources
-  let allReferences: Record<string, Cell<any>> = {};
+  let allReferences: Record<string, Cell<unknown>> = {};
 
   // Add all external references first with validation
   if (form.input.references && Object.keys(form.input.references).length > 0) {
@@ -1034,8 +1035,11 @@ export function executeImagineWorkflow(
       try {
         // Create a valid camelCase identifier
         const cellData = cell.get();
-        const charmName = cellData && cellData["NAME"] ? cellData["NAME"] : id;
-        const camelCaseId = toCamelCase(charmName);
+        const charmName =
+          (isRecord(cellData) && "NAME" in cellData && cellData["NAME"])
+            ? cellData["NAME"]
+            : id;
+        const camelCaseId = toCamelCase(charmName as string);
 
         // Make sure the ID is unique
         let uniqueId = camelCaseId;
@@ -1072,7 +1076,10 @@ export function executeImagineWorkflow(
 
       // HACK: avoid nesting for a single self reference
       if (Object.keys(allReferences).length === 0) {
-        allReferences = form.input.existingCharm as any;
+        allReferences = form.input.existingCharm as unknown as Record<
+          string,
+          Cell<unknown>
+        >;
       } else {
         allReferences[uniqueId] = form.input.existingCharm;
       }

@@ -69,7 +69,8 @@ export class XAppView extends BaseView {
     this.debuggerController.clearTelemetry();
   };
 
-  private _activeCharm = new Task(this, {
+  // Do not make private, integration tests access this directly.
+  _activeCharm = new Task(this, {
     task: async ([app, rt]): Promise<CharmController | undefined> => {
       if (!app || !app.activeCharmId || !rt) {
         this.#setTitleSubscription();

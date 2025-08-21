@@ -40,7 +40,7 @@ export async function generateText(
   if ("content" in data) {
     // bf: this is actually the case that runs, even if the types disagree
     // no idea why
-    return (data as any).content;
+    return (data as Record<string, LLMContent>).content;
   }
 
   throw new Error("Unexpected response from LLM server");

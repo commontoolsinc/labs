@@ -14,7 +14,7 @@ export function bufferSourceToArrayBuffer(
 export function once(
   target: EventTarget,
   eventName: string,
-  callback: (e: any) => any,
+  callback: (e: Event) => void,
 ) {
   const wrap = (e: Event) => {
     callback(e);

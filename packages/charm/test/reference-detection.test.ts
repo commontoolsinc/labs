@@ -1,5 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
+import { isObject, isRecord } from "@commontools/utils/types";
 
 /**
  * These tests focus on the core functionality used by our charm reference detection
@@ -92,18 +93,21 @@ describe("Reference detection core functionality", () => {
     const foundReferences: string[] = [];
 
     // Mock a recursive search function similar to what we use in getReadingFrom
-    const recursiveSearch = (value: any) => {
+    const recursiveSearch = (value: unknown) => {
       if (!value) return;
 
       // Check for alias
-      if (value && typeof value === "object" && value.$alias) {
-        foundReferences.push(value.$alias.cell.id);
+      if (
+        isRecord(value) && isRecord(value.$alias) && isRecord(value.$alias.cell)
+      ) {
+        // FIXME: types
+        foundReferences.push(value.$alias.cell.id as string);
       }
 
       // Recursively search through object properties
-      if (value && typeof value === "object" && !Array.isArray(value)) {
+      if (isObject(value)) {
         for (const key in value) {
-          recursiveSearch(value[key]);
+          recursiveSearch((value as Record<string, unknown>)[key]);
         }
       } // Recursively search through array items
       else if (Array.isArray(value)) {
@@ -164,33 +168,36 @@ describe("Reference detection core functionality", () => {
     const foundReferences: Array<{ type: string; id: string }> = [];
 
     // Mock a detection function that handles both cell links and aliases
-    const detectReferences = (value: any) => {
+    const detectReferences = (value: unknown) => {
       if (!value) return;
 
       // Check if value might be a cell link
-      const isCellLink = value &&
-        typeof value === "object" &&
-        "cell" in value &&
+      const isCellLink = isRecord(value) &&
+        isRecord(value.cell) &&
         "path" in value;
       if (isCellLink) {
         foundReferences.push({
           type: "cellLink",
-          id: value.cell.id,
+          // FIXME: types
+          id: (value.cell as Record<string, unknown>).id as string,
         });
       }
 
       // Check for alias
-      if (value && typeof value === "object" && "$alias" in value) {
+      if (
+        isRecord(value) && isRecord(value.$alias) && isRecord(value.$alias.cell)
+      ) {
         foundReferences.push({
           type: "alias",
-          id: value.$alias.cell.id,
+          // FIXME: types
+          id: (value.$alias.cell as Record<string, unknown>).id as string,
         });
       }
 
       // Recursively search
-      if (value && typeof value === "object" && !Array.isArray(value)) {
+      if (isObject(value)) {
         for (const key in value) {
-          detectReferences(value[key]);
+          detectReferences((value as Record<string, unknown>)[key]);
         }
       } else if (Array.isArray(value)) {
         for (const item of value) {

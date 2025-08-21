@@ -10,7 +10,7 @@ import { sleep } from "@commontools/utils/sleep";
 
 setIframeTestHandler();
 
-function compareDeepEquals(a: any, b: any) {
+function compareDeepEquals(a: unknown, b: unknown) {
   return JSON.stringify(a) !== JSON.stringify(b);
 }
 

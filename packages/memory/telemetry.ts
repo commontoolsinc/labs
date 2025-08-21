@@ -5,6 +5,7 @@ import {
   SpanStatusCode,
   trace,
 } from "@opentelemetry/api";
+import { isRecord } from "@commontools/utils/types";
 
 const tracer = trace.getTracer("common-memory", "1.0.0");
 
@@ -183,7 +184,7 @@ export function addMemoryAttributes(
  */
 export function addChangesAttributes(
   span: Span | undefined,
-  changes: any,
+  changes: object,
 ): void {
   if (!span || !config.enabled || !changes) return;
 
@@ -205,25 +206,25 @@ export function addChangesAttributes(
  *
  * @returns the original result unchanged
  */
-export function recordResult<T extends { error?: any; ok?: any }>(
+export function recordResult<T extends { error?: unknown; ok?: unknown }>(
   span: Span | undefined,
   result: T,
 ): T {
   if (!span || !config.enabled) return result;
 
-  if (result.error) {
+  if (isRecord(result.error)) {
     span.setAttribute("memory.status", "error");
-    span.setAttribute("memory.error.type", result.error.name || "unknown");
+    span.setAttribute("memory.error.type", `${result.error.name || "unknown"}`);
     if (result.error.message) {
-      span.setAttribute("memory.error.message", result.error.message);
+      span.setAttribute("memory.error.message", `${result.error.message}`);
     }
     if (result.error.code) {
-      span.setAttribute("memory.error.code", result.error.code);
+      span.setAttribute("memory.error.code", `${result.error.code}`);
     }
 
     span.setStatus({
       code: SpanStatusCode.ERROR,
-      message: result.error.message || "Error in memory operation",
+      message: `${result.error.message || "Error in memory operation"}`,
     });
   } else {
     span.setAttribute("memory.status", "success");

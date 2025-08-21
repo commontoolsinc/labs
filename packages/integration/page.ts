@@ -102,7 +102,7 @@ export class Page extends EventTarget {
       const trueConsole = globalThis.console;
       const newConsole = Object.create(null);
       for (const method of methods) {
-        newConsole[method] = (...args: any[]) => {
+        newConsole[method] = (...args: unknown[]) => {
           const formatted = args.map((value) => {
             if (value && typeof value === "object") {
               try {

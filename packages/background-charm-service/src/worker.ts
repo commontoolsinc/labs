@@ -10,7 +10,12 @@ import {
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 
-import { createAdminSession, type DID, Identity } from "@commontools/identity";
+import {
+  createAdminSession,
+  type DID,
+  Identity,
+  Session,
+} from "@commontools/identity";
 import {
   InitializationData,
   isWorkerIPCRequest,
@@ -21,7 +26,7 @@ import {
 let initialized = false;
 let spaceId: DID;
 let latestError: Error | null = null;
-let currentSession: any = null;
+let currentSession: Session | null = null;
 let manager: CharmManager | null = null;
 let runtime: Runtime | null = null;
 const loadedCharms = new Map<string, Cell<Charm>>();
@@ -34,10 +39,10 @@ const errorHandler: ErrorHandler = (e: ErrorWithContext) => {
 const trueConsole = globalThis.console;
 // Console for "worker" messages
 const console = {
-  log(...args: any[]) {
+  log(...args: unknown[]) {
     trueConsole.log(this.context(), ...args);
   },
-  error(...args: any[]) {
+  error(...args: unknown[]) {
     trueConsole.error(this.context(), ...args);
   },
   context() {
@@ -50,7 +55,7 @@ const consoleHandler: ConsoleHandler = (
     | { charmId?: string; recipeId?: string; space?: string }
     | undefined,
   _method: ConsoleMethod,
-  args: any[],
+  args: unknown[],
 ) => {
   if (!spaceId) {
     // Shouldn't happen.
@@ -197,9 +202,7 @@ async function runCharm(data: RunData): Promise<void> {
     const errorMessage =
       (error instanceof Error && "space" in error && "charmId" in error &&
           "recipeId" in error)
-        ? `${error.message} @ ${(error as any).space}:${
-          (error as any).charmId
-        } running ${(error as any).recipeId}`
+        ? `${error.message} @ ${error.space}:${error.charmId} running ${error.recipeId}`
         : String(error);
     console.error(
       `Error executing charm ${spaceId}/${charmId}: ${errorMessage}`,
@@ -215,7 +218,7 @@ async function runCharm(data: RunData): Promise<void> {
 // Logs here are often viewed through observability dashboards
 // that don't render objects well. Attempt to stringify any objects
 // here.
-function safeFormat(value: any): any {
+function safeFormat(value: unknown): unknown {
   if (value && typeof value === "object") {
     try {
       // While we use this formatter for runtime code, we also use

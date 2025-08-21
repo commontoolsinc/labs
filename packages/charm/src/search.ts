@@ -7,6 +7,7 @@ import {
 import { NAME, Recipe } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm";
 import { Cell } from "@commontools/runner";
+import { isObject } from "@commontools/utils/types";
 
 export type CharmSearchResult = {
   charm: Cell<Charm>;
@@ -124,10 +125,12 @@ export async function searchCharms(
       thinking,
       charms: selectedCharms,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error(
       "Search charms error:",
-      error?.message ?? JSON.stringify(error),
+      (isObject(error) && "message" in error)
+        ? error.message
+        : JSON.stringify(error),
     );
 
     return {

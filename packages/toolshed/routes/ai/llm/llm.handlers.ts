@@ -7,7 +7,7 @@ import type {
   GetModelsRoute,
 } from "./llm.routes.ts";
 import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
-import { hashKey, loadFromCache, saveToCache } from "./cache.ts";
+import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
 import type { Context } from "@hono/hono";
 import { generateText as generateTextCore } from "./generateText.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
@@ -15,9 +15,13 @@ import { findModel } from "./models.ts";
 import env from "@/env.ts";
 import { isLLMRequest, type LLMMessage } from "@commontools/llm/types";
 
-const removeNonCacheableFields = (obj: any) => {
-  const { cache, metadata, ...rest } = obj;
-  return rest;
+const removeNonCacheableFields = (
+  obj: object,
+): CacheItem => {
+  const { cache, metadata, ...rest } = obj as Record<string, unknown>;
+  // FIXME: typing
+  // No guarantee that `messages` exists here.
+  return rest as unknown as CacheItem;
 };
 
 /**

@@ -59,9 +59,9 @@ export enum IPCHostMessageType {
  * sending message to the guest through the host.
  */
 export type IPCHostMessage =
-  | { id: any; type: IPCHostMessageType.Init }
-  | { id: any; type: IPCHostMessageType.LoadDocument; data: string }
-  | { id: any; type: IPCHostMessageType.Passthrough; data: HostMessage };
+  | { id: number; type: IPCHostMessageType.Init }
+  | { id: number; type: IPCHostMessageType.LoadDocument; data: string }
+  | { id: number; type: IPCHostMessageType.Passthrough; data: HostMessage };
 
 export enum IPCGuestMessageType {
   // Guest alerting the host that it is ready.
@@ -80,12 +80,17 @@ export enum IPCGuestMessageType {
  */
 export type IPCGuestMessage =
   | { type: IPCGuestMessageType.Ready }
-  | { id: any; type: IPCGuestMessageType.Load }
-  | { id: any; type: IPCGuestMessageType.Error; data: any }
-  | { id: any; type: IPCGuestMessageType.Passthrough; data: GuestMessage };
+  | { id: number; type: IPCGuestMessageType.Load }
+  | { id: number; type: IPCGuestMessageType.Error; data: unknown }
+  | { id: number; type: IPCGuestMessageType.Passthrough; data: GuestMessage };
 
-export function isIPCGuestMessage(message: any): message is IPCGuestMessage {
-  if (typeof message !== "object" || !("type" in message)) {
+export function isIPCGuestMessage(
+  message: unknown,
+): message is IPCGuestMessage {
+  if (typeof message !== "object" || message === null) {
+    return false;
+  }
+  if (!("type" in message)) {
     return false;
   }
   switch (message.type) {
@@ -103,6 +108,7 @@ export function isIPCGuestMessage(message: any): message is IPCGuestMessage {
       }
       if (
         message.type === IPCGuestMessageType.Passthrough &&
+        "data" in message &&
         !isGuestMessage(message.data)
       ) {
         return false;
@@ -148,18 +154,18 @@ export enum HostMessageType {
 
 export type HostMessage =
   | { type: HostMessageType.Ping; data: string }
-  | { type: HostMessageType.Update; data: [string, any] }
+  | { type: HostMessageType.Update; data: [string, unknown] }
   | {
     type: HostMessageType.LLMResponse;
     request: string;
     data: object | null;
-    error: any;
+    error: unknown;
   }
   | {
     type: HostMessageType.ReadWebpageResponse;
     request: string;
     data: object | null;
-    error: any;
+    error: unknown;
   }
   | Effect;
 
@@ -195,7 +201,7 @@ export type GuestMessage =
   | { type: GuestMessageType.Subscribe; data: string | string[] }
   | { type: GuestMessageType.Unsubscribe; data: string | string[] }
   | { type: GuestMessageType.Read; data: string }
-  | { type: GuestMessageType.Write; data: [string, any] }
+  | { type: GuestMessageType.Write; data: [string, unknown] }
   | { type: GuestMessageType.LLMRequest; data: string }
   | { type: GuestMessageType.WebpageRequest; data: string }
   | { type: GuestMessageType.Perform; data: TaskPerform }
@@ -233,9 +239,10 @@ export interface TaskPerform {
   id: string;
 }
 
-export function isGuestMessage(message: any): message is GuestMessage {
+export function isGuestMessage(message: unknown): message is GuestMessage {
   if (
     typeof message !== "object" ||
+    message === null ||
     !("type" in message) ||
     typeof message.type !== "string" ||
     !("data" in message) ||
@@ -258,7 +265,7 @@ export function isGuestMessage(message: any): message is GuestMessage {
     case GuestMessageType.Unsubscribe: {
       return typeof message.data === "string" ||
         (Array.isArray(message.data) &&
-          message.data.every((key: any) => typeof key === "string"));
+          message.data.every((key: unknown) => typeof key === "string"));
     }
     case GuestMessageType.Write: {
       return Array.isArray(message.data) &&

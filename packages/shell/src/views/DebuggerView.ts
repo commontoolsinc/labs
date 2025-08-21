@@ -2,6 +2,7 @@ import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
 import type { RuntimeTelemetryMarkerResult } from "@commontools/runner";
+import { isRecord } from "@commontools/utils/types";
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -701,7 +702,7 @@ export class XDebuggerView extends LitElement {
     this.fullHeightEvents = newSet;
   }
 
-  private async copyJson(data: any) {
+  private async copyJson(data: RuntimeTelemetryMarkerResult) {
     try {
       const jsonString = JSON.stringify(data, null, 2);
       await navigator.clipboard.writeText(jsonString);
@@ -795,20 +796,21 @@ export class XDebuggerView extends LitElement {
 
     // Special handling for different event types
     if (type === "scheduler.run" || type === "scheduler.invocation") {
-      const eventData = rest as any;
+      const eventData = rest as Record<string, unknown>;
       if (eventData.action || eventData.handler) {
         const fn = eventData.action || eventData.handler;
 
         // Check if it's an annotated action/handler with metadata
-        if (typeof fn === "object" && fn.recipe) {
+        if (isRecord(fn) && isRecord(fn.recipe)) {
           details.push(html`
             <div class="event-detail">
               <span class="event-detail-label">recipe:</span>
-              <span class="event-detail-value">${fn.recipe?.name ||
-              "unknown"}</span>
+              <span class="event-detail-value">${"name" in fn.recipe
+              ? fn.recipe.name
+              : "unknown"}</span>
             </div>
           `);
-          if (fn.module?.name) {
+          if (isRecord(fn.module) && fn.module?.name) {
             details.push(html`
               <div class="event-detail">
                 <span class="event-detail-label">module:</span>
@@ -816,7 +818,7 @@ export class XDebuggerView extends LitElement {
               </div>
             `);
           }
-          if (fn.reads?.length > 0) {
+          if (Array.isArray(fn.reads) && fn.reads?.length > 0) {
             details.push(html`
               <div class="event-detail">
                 <span class="event-detail-label">reads:</span>
@@ -825,7 +827,7 @@ export class XDebuggerView extends LitElement {
               </div>
             `);
           }
-          if (fn.writes?.length > 0) {
+          if (Array.isArray(fn.writes) && fn.writes?.length > 0) {
             details.push(html`
               <div class="event-detail">
                 <span class="event-detail-label">writes:</span>
@@ -854,33 +856,36 @@ export class XDebuggerView extends LitElement {
         }
       }
     } else if (type === "cell.update") {
-      const change = (rest as any).change;
-      if (change) {
-        if (change.address?.id) {
-          details.push(html`
-            <div class="event-detail">
-              <span class="event-detail-label">cell:</span>
-              <span class="event-detail-value">${change.address.id}</span>
-            </div>
-          `);
-        }
-        if (change.address?.path) {
-          details.push(html`
-            <div class="event-detail">
-              <span class="event-detail-label">path:</span>
-              <span class="event-detail-value">${change.address.path.join(
-              "/",
-            )}</span>
-            </div>
-          `);
-        }
-        if (change.address?.type) {
-          details.push(html`
-            <div class="event-detail">
-              <span class="event-detail-label">type:</span>
-              <span class="event-detail-value">${change.address.type}</span>
-            </div>
-          `);
+      const change = (rest as Record<string, unknown>).change;
+      if (isRecord(change)) {
+        if (isRecord(change.address)) {
+          if (change.address?.id) {
+            details.push(html`
+              <div class="event-detail">
+                <span class="event-detail-label">cell:</span>
+                <span class="event-detail-value">${change.address.id}</span>
+              </div>
+            `);
+          }
+          if (change.address?.path) {
+            details.push(html`
+              <div class="event-detail">
+                <span class="event-detail-label">path:</span>
+                <span class="event-detail-value">${(change.address
+                .path as string[]).join(
+                  "/",
+                )}</span>
+              </div>
+            `);
+          }
+          if (change.address?.type) {
+            details.push(html`
+              <div class="event-detail">
+                <span class="event-detail-label">type:</span>
+                <span class="event-detail-value">${change.address.type}</span>
+              </div>
+            `);
+          }
         }
         // Show a summary of the change
         const hasBeforeAfter = change.before !== undefined ||

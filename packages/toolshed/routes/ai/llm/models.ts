@@ -58,7 +58,7 @@ const addModel = ({
   name: string;
   aliases: string[];
   capabilities: Capabilities;
-  providerOptions?: Record<string, any>;
+  providerOptions?: Record<string, unknown>;
 }) => {
   let modelName = name.includes(":")
     ? name.split(":").slice(1).join(":")
@@ -466,7 +466,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   console.log(" Adding 🤖 google");
   const vertexProvider = createVertex({
     googleAuthOptions: {
-      credentials: credentials as any,
+      credentials,
     },
     project: env.CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
     location: env.CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION,

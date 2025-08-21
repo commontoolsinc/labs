@@ -2,7 +2,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import { Runtime } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { BackgroundCharmService } from "./service.ts";
-import { getIdentity, log } from "./utils.ts";
+import { getIdentity } from "./utils.ts";
 import { env } from "./env.ts";
 
 const { timeout } = parseArgs(Deno.args, {
@@ -50,6 +50,6 @@ Deno.addSignalListener("SIGINT", shutdown);
 Deno.addSignalListener("SIGTERM", shutdown);
 
 service.initialize().then(() => {
-  log("Background Charm Service started successfully");
-  log("Press Ctrl+C to stop");
+  console.log("Background Charm Service started successfully");
+  console.log("Press Ctrl+C to stop");
 });

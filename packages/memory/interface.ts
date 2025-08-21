@@ -252,6 +252,9 @@ export type InferOf<T> = keyof T extends DID ? keyof T : never;
 /**
  * Utility type that takes union type `U` and produces intersection type of it's members.
  */
+// Can `U extends any` ever be falsy?
+// FIXME: typing
+// deno-lint-ignore no-explicit-any
 type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends
   (k: infer I) => void ? I
   : never;

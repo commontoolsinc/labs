@@ -9,7 +9,7 @@ if (env.ENV !== "test") {
 
 describe("configureJsonMode", () => {
   it("configures JSON mode correctly for Groq models", () => {
-    const streamParams: Record<string, any> = {};
+    const streamParams: Record<string, unknown> = {};
     const messages = [{
       role: "user" as const,
       content: "Generate a JSON response",
@@ -19,18 +19,24 @@ describe("configureJsonMode", () => {
 
     assertEquals(streamParams.mode, undefined);
     assertEquals(streamParams.response_format, { type: "json_object" });
-    assertEquals(streamParams.providerOptions?.groq?.response_format, {
-      type: "json_object",
-    });
+    assertEquals(
+      (streamParams.providerOptions as Record<string, Record<string, object>>)
+        .groq?.response_format,
+      {
+        type: "json_object",
+      },
+    );
     assertEquals(typeof streamParams.system, "string");
     assertEquals(
-      streamParams.system.includes("respond with pure, correct JSON only"),
+      (streamParams.system as string).includes(
+        "respond with pure, correct JSON only",
+      ),
       true,
     );
   });
 
   it("configures JSON mode correctly for OpenAI models", () => {
-    const streamParams: Record<string, any> = {};
+    const streamParams: Record<string, unknown> = {};
     const messages = [{
       role: "user" as const,
       content: "Generate a JSON response",
@@ -40,13 +46,17 @@ describe("configureJsonMode", () => {
 
     assertEquals(streamParams.mode, undefined);
     assertEquals(streamParams.response_format, { type: "json_object" });
-    assertEquals(streamParams.providerOptions?.openai?.response_format, {
-      type: "json_object",
-    });
+    assertEquals(
+      (streamParams.providerOptions as Record<string, Record<string, object>>)
+        .openai?.response_format,
+      {
+        type: "json_object",
+      },
+    );
   });
 
   it("configures JSON mode correctly for Anthropic models", () => {
-    const streamParams: Record<string, any> = {};
+    const streamParams: Record<string, unknown> = {};
     const messages = [{
       role: "user" as const,
       content: "Generate a JSON response",
@@ -61,14 +71,14 @@ describe("configureJsonMode", () => {
 
     assertEquals(streamParams.mode, "json");
     assertEquals(
-      streamParams.system.includes("JSON generation assistant"),
+      (streamParams.system as string).includes("JSON generation assistant"),
       true,
     );
-    assertEquals(streamParams.prefill?.text, "{\n");
+    assertEquals((streamParams.prefill as Record<string, string>)?.text, "{\n");
   });
 
   it("preserves existing system prompt while adding JSON instructions", () => {
-    const streamParams: Record<string, any> = {
+    const streamParams: Record<string, unknown> = {
       system: "You are an expert assistant.",
     };
     const messages = [{
@@ -84,19 +94,21 @@ describe("configureJsonMode", () => {
     );
 
     assertEquals(
-      streamParams.system.includes(
+      (streamParams.system as string).includes(
         "You are a JSON generation assistant. You are an expert assistant.",
       ),
       true,
     );
     assertEquals(
-      streamParams.system.includes("response must be ONLY valid JSON"),
+      (streamParams.system as string).includes(
+        "response must be ONLY valid JSON",
+      ),
       true,
     );
   });
 
   it("configures JSON mode correctly for other providers", () => {
-    const streamParams: Record<string, any> = {};
+    const streamParams: Record<string, unknown> = {};
     const messages = [{
       role: "user" as const,
       content: "Generate a JSON response",
@@ -106,13 +118,15 @@ describe("configureJsonMode", () => {
 
     assertEquals(streamParams.mode, "json");
     assertEquals(
-      streamParams.system.includes("Ensure the response is valid JSON"),
+      (streamParams.system as string).includes(
+        "Ensure the response is valid JSON",
+      ),
       true,
     );
   });
 
   it("adds JSON instructions to existing system prompt for other providers", () => {
-    const streamParams: Record<string, any> = {
+    const streamParams: Record<string, unknown> = {
       system: "You are an expert assistant.",
     };
     const messages = [{
@@ -129,7 +143,7 @@ describe("configureJsonMode", () => {
   });
 
   it("always adds JSON instructions even when system prompt already mentions JSON", () => {
-    const streamParams: Record<string, any> = {
+    const streamParams: Record<string, unknown> = {
       system: "You are an expert assistant who responds in JSON format.",
     };
     const messages = [{

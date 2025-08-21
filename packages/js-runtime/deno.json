@@ -14,5 +14,8 @@
   },
   "fmt": {
     "exclude": ["test/fixtures/"]
+  },
+  "lint": {
+    "exclude": ["test/fixtures/"]
   }
 }

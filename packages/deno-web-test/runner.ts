@@ -36,8 +36,8 @@ export class Runner {
 
       try {
         await this.browser.load(tsTestPath);
-      } catch (e: any) {
-        this.reporter.onLoadError(tsTestPath, e);
+      } catch (e: unknown) {
+        this.reporter.onLoadError(tsTestPath, e as TestResultError);
         await this.browser.close();
         return false;
       }

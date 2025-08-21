@@ -30,7 +30,11 @@ type AuthEventType =
 
 interface AuthEventDetail {
   type: AuthEventType;
-  data?: any;
+  data?: {
+    descriptor?: PublicKeyCredentialDescriptor;
+  } | {
+    mnemonic?: string;
+  };
 }
 
 const AUTH_EVENT = "auth-event";
@@ -236,7 +240,12 @@ export class XLoginView extends BaseView {
     throw new Error("Keystore not set.");
   }
 
-  private dispatchAuthEvent(type: AuthEventType, data?: any) {
+  private dispatchAuthEvent(
+    type: AuthEventType,
+    data?: { mnemonic?: string } | {
+      descriptor?: PublicKeyCredentialDescriptor;
+    },
+  ) {
     this.dispatchEvent(
       new CustomEvent(AUTH_EVENT, {
         detail: { type, data },
@@ -251,20 +260,25 @@ export class XLoginView extends BaseView {
     e.stopPropagation(); // Ensure event doesn't bubble up
 
     const { type, data } = e.detail;
-
+    const descriptor = data && "descriptor" in data
+      ? data.descriptor
+      : undefined;
     try {
       switch (type) {
         case "passkey-register":
           await this.handlePasskeyRegister();
           break;
         case "passkey-authenticate":
-          await this.handlePasskeyAuthenticate(data?.descriptor);
+          await this.handlePasskeyAuthenticate(descriptor);
           break;
         case "passphrase-generate":
           await this.handlePassphraseGenerate();
           break;
         case "passphrase-authenticate":
-          await this.handlePassphraseAuthenticate(data?.mnemonic);
+          if (!data || !("mnemonic" in data) || !data.mnemonic) {
+            throw new Error("Invalid mnemonic.");
+          }
+          await this.handlePassphraseAuthenticate(data.mnemonic);
           break;
         case "clear-stored-credential":
           this.handleClearStoredCredential();

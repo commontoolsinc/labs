@@ -3,18 +3,26 @@ import type { Async, Expected } from "@std/expect";
 import { isRecord } from "@commontools/utils/types";
 
 // Define MatcherContext interface since it's not exported from @std/expect
-interface MatcherContext {
+interface MatcherContext<IsAsync = false> extends Expected<IsAsync> {
   value: unknown;
   isNot: boolean;
   equal: (a: unknown, b: unknown) => boolean;
-  customTesters: Array<(a: any, b: any, customTesters: any[]) => void>;
+  customTesters: Array<
+    (a: unknown, b: unknown, customTesters: unknown[]) => void
+  >;
   customMessage: string | undefined;
+
+  // NOTE: You also need to overrides the following typings to allow modifiers to correctly infer typing
+  not: IsAsync extends true ? Async<MatcherContext<true>>
+    : ExtendedExpected<false>;
+  resolves: Async<MatcherContext<true>>;
+  rejects: Async<MatcherContext<true>>;
 }
 
 /**
  * Strips all symbol properties from an object recursively
  */
-export function stripSymbols(obj: any): any {
+export function stripSymbols(obj: unknown): unknown {
   if (!isRecord(obj)) return obj;
 
   // Handle arrays
@@ -23,7 +31,7 @@ export function stripSymbols(obj: any): any {
   }
 
   // Handle plain objects
-  const result: any = {};
+  const result: Record<string, unknown> = {};
   for (const key of Object.keys(obj)) {
     result[key] = stripSymbols(obj[key]);
   }
@@ -34,7 +42,10 @@ export function stripSymbols(obj: any): any {
  * Custom matchers that compare objects while ignoring symbol properties
  */
 expect.extend({
-  toEqualIgnoringSymbols(context: MatcherContext, expected: unknown) {
+  toEqualIgnoringSymbols(
+    context,
+    expected,
+  ): { message: () => string; pass: boolean } {
     const cleanReceived = stripSymbols(context.value);
     const cleanExpected = stripSymbols(expected);
 
@@ -60,12 +71,12 @@ expect.extend({
     }
   },
 
-  toMatchObjectIgnoringSymbols(context: MatcherContext, expected: unknown) {
+  toMatchObjectIgnoringSymbols(context, expected) {
     const cleanReceived = stripSymbols(context.value);
     const cleanExpected = stripSymbols(expected);
 
     // Implement partial matching logic similar to toMatchObject
-    const matches = (obj: any, subset: any): boolean => {
+    const matches = (obj: unknown, subset: unknown): boolean => {
       if (subset === obj) return true;
       if (
         typeof subset !== "object" || subset === null ||
@@ -75,14 +86,17 @@ expect.extend({
       }
 
       for (const key in subset) {
+        if (!(key in subset)) return false;
         if (!(key in obj)) return false;
-        if (!context.equal(obj[key], subset[key])) {
+        const objValue = (subset as Record<string, unknown>)[key] as unknown;
+        const subsetValue = (subset as Record<string, unknown>)[key] as unknown;
+        if (!context.equal(objValue, subsetValue)) {
           // For nested objects, apply partial matching
           if (
-            typeof obj[key] === "object" && obj[key] !== null &&
-            typeof subset[key] === "object" && subset[key] !== null
+            typeof objValue === "object" && objValue !== null &&
+            typeof subsetValue === "object" && subsetValue !== null
           ) {
-            if (!matches(obj[key], subset[key])) return false;
+            if (!matches(objValue, subsetValue)) return false;
           } else {
             return false;
           }

@@ -1,4 +1,5 @@
 import { Schema, Validator } from "jsonschema";
+import { isRecord } from "@commontools/utils/types";
 
 function checkSubtrees(
   obj: unknown,
@@ -40,9 +41,10 @@ export function checkSchemaMatch(
       properties: Object.keys(schema).reduce(
         (acc: Record<string, unknown>, key) => {
           try {
-            const schemaValue = schema[key as keyof Schema];
+            const schemaValue = schema[key as keyof Schema] as unknown;
             acc[key] = {
-              type: (schemaValue as any)?.type || typeof schemaValue,
+              type: (isRecord(schemaValue) && schemaValue.type) ||
+                typeof schemaValue,
             };
             return acc;
           } catch (err) {

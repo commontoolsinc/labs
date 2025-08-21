@@ -3,19 +3,20 @@ import { SourceMapParser } from "../source-map.ts";
 
 export class UnsafeEvalJsValue {
   private internals: IsolateInternals;
-  private value: any;
-  constructor(internals: IsolateInternals, value: any) {
+  private value: unknown;
+  constructor(internals: IsolateInternals, value: unknown) {
     this.internals = internals;
     this.value = value;
   }
-  invoke(...args: any[]): UnsafeEvalJsValue {
+  invoke(...args: unknown[]): UnsafeEvalJsValue {
     if (typeof this.value !== "function") {
       throw new Error("Cannot invoke non function");
     }
-    const result = this.internals.exec(() => this.value.apply(null, args));
+    const func = this.value as (...args: unknown[]) => unknown;
+    const result = this.internals.exec(() => func.apply(null, args));
     return new UnsafeEvalJsValue(this.internals, result);
   }
-  inner(): any {
+  inner(): unknown {
     return this.value;
   }
   asObject(): object {
@@ -25,7 +26,7 @@ export class UnsafeEvalJsValue {
     return this.value as object;
   }
   isObject(): boolean {
-    return this.value && typeof this.value === "object";
+    return !!(this.value && typeof this.value === "object");
   }
 }
 
@@ -35,7 +36,7 @@ class IsolateInternals {
   exec<T>(callback: () => T) {
     try {
       return callback();
-    } catch (e: any) {
+    } catch (e: unknown) {
       const error = e as Error;
       if (error.stack) {
         error.stack = this.sourceMaps.parse(error.stack);

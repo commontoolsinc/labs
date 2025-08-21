@@ -463,7 +463,7 @@ class ConsumerInvocation<Ability extends The, Protocol extends Proto> {
     onResolve: (
       value: ConsumerResultFor<Ability, Protocol>,
     ) => T | PromiseLike<T>,
-    onReject: (reason: any) => X | Promise<X>,
+    onReject: (reason: unknown) => X | Promise<X>,
   ) {
     return this.promise.then(onResolve, onReject);
   }
@@ -498,6 +498,8 @@ class QueryView<
     const view: QueryView<Space, MemoryProtocol> = new QueryView(
       session,
       invocation,
+      // FIXME: typing
+      // deno-lint-ignore no-explicit-any
       invocation.promise.then((result: any) => {
         if (result.error) {
           return result;
@@ -529,7 +531,7 @@ class QueryView<
       effect:
         | ConsumerEffectFor<"/memory/query", MemoryProtocol>
         | ConsumerEffectFor<"/memory/graph/query", MemoryProtocol>,
-    ) => this.perform(effect as any);
+    ) => this.perform(effect as Selection<Space>);
     this.selection = { [this.space]: {} } as Selection<InferOf<Protocol>>;
     this.selector = ("select" in this.invocation.args)
       ? (this.invocation.args as { select?: Selector }).select as Selector
@@ -555,7 +557,7 @@ class QueryView<
         QueryError | AuthorizationError | ConnectionError
       >,
     ) => T | PromiseLike<T>,
-    onReject: (reason: any) => X | Promise<X>,
+    onReject: (reason: unknown) => X | Promise<X>,
   ) {
     return this.promise.then(onResolve, onReject);
   }

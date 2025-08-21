@@ -60,7 +60,7 @@ class VirtualFs implements ModuleResolutionHost {
     this.debug = !!debug;
   }
 
-  writeFile(fileName: any, content: any) {
+  writeFile(fileName: unknown, content: unknown) {
     if (typeof fileName !== "string") {
       throw new Error("file name not string:" + typeof fileName);
     }
@@ -153,7 +153,7 @@ class TypeScriptHost extends VirtualFs implements CompilerHost {
     throw new Error("ResolveTypeReferenceDirectiveReferences");
   }
 
-  getCanonicalFileName(fileName: any) {
+  getCanonicalFileName(fileName: string): string {
     return fileName;
   }
 

@@ -1,6 +1,12 @@
 import { assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { EntityId } from "@commontools/runner";
+import { isObject, isRecord } from "@commontools/utils/types";
+
+type MockDoc = {
+  get: () => unknown;
+  getEntityId: () => unknown;
+};
 
 // Create a mock environment for testing reference detection
 describe("Charm reference detection", () => {
@@ -38,22 +44,26 @@ describe("Charm reference detection", () => {
     const foundRefs: EntityId[] = [];
 
     // Direct manual detection (not using maybeGetCellLink which requires proper Cell implementation)
-    const findDirectReferences = (value: any): void => {
+    const findDirectReferences = (value: unknown): void => {
       if (!value) return;
 
       // Check if the value has cell and path properties directly
       if (
-        value && typeof value === "object" && value.cell &&
+        isRecord(value) && value.cell && isRecord(value.cell) &&
         value.path !== undefined
       ) {
-        const id = { "/": value.cell["/"] };
+        const addr = value.cell["/"];
+        if (typeof addr !== "string" && !(addr instanceof Uint8Array)) {
+          return;
+        }
+        const id = { "/": addr };
         if (!foundRefs.some((ref) => ref["/"] === id["/"])) {
           foundRefs.push(id);
         }
       }
 
       // Recursively search objects and arrays
-      if (value && typeof value === "object") {
+      if (isRecord(value)) {
         // Check all properties of objects
         if (!Array.isArray(value)) {
           for (const key in value) {
@@ -132,26 +142,31 @@ describe("Charm reference detection", () => {
     };
 
     // Let's implement our own reference finding logic to compare with what the system does
-    const findAllReferences = (obj: any): EntityId[] => {
+    const findAllReferences = (obj: unknown): EntityId[] => {
       const refs: EntityId[] = [];
       const seenIds = new Set<string>();
 
-      const traverse = (value: any): void => {
-        if (!value || typeof value !== "object") return;
+      const traverse = (value: unknown): void => {
+        if (!isRecord(value)) return;
 
         // Check for direct cell reference
         if (value.cell && value.path !== undefined) {
-          if (value.cell["/"] && !seenIds.has(value.cell["/"])) {
-            refs.push({ "/": value.cell["/"] });
-            seenIds.add(value.cell["/"]);
+          // FIXME: types
+          const addr = (value.cell as Record<string, unknown>)["/"] as string;
+
+          if (addr && !seenIds.has(addr)) {
+            refs.push({ "/": addr });
+            seenIds.add(addr);
           }
         }
 
         // Check for $alias reference
-        if (value.$alias && value.$alias.cell) {
-          if (value.$alias.cell["/"] && !seenIds.has(value.$alias.cell["/"])) {
-            refs.push({ "/": value.$alias.cell["/"] });
-            seenIds.add(value.$alias.cell["/"]);
+        if (isRecord(value.$alias) && isRecord(value.$alias.cell)) {
+          // FIXME: types
+          const addr = value.$alias.cell["/"] as string;
+          if (addr && !seenIds.has(addr)) {
+            refs.push({ "/": addr });
+            seenIds.add(addr);
           }
         }
 
@@ -247,15 +262,16 @@ describe("Charm reference detection", () => {
 
     // Simulate the followSourceToResultRef function from the implementation
     const followSourceToResultRef = (
-      doc: any,
+      doc: unknown,
       visited = new Set<string>(),
       depth = 0,
-    ): any => {
+    ): unknown => {
       if (depth > 10) return undefined; // Prevent infinite recursion
 
       // Get the doc ID
-      const docId = doc.getEntityId?.();
-      if (!docId) return undefined;
+      // FIXME: types
+      const docId = (doc as MockDoc).getEntityId?.();
+      if (!isObject(docId) || !("/" in docId)) return undefined;
 
       // If we've already seen this doc, stop to prevent cycles
       const docIdStr = typeof docId["/"] === "string"
@@ -266,15 +282,16 @@ describe("Charm reference detection", () => {
       visited.add(docIdStr);
 
       // Get the doc value
-      const value = doc.get?.();
+      // FIXME: types
+      const value = (doc as MockDoc).get?.();
 
       // If document has a sourceCell, follow it
-      if (value && typeof value === "object" && value.sourceCell) {
+      if (isRecord(value) && value.sourceCell) {
         return followSourceToResultRef(value.sourceCell, visited, depth + 1);
       }
 
       // If we've reached the end and have a resultRef, return it
-      if (value && typeof value === "object" && value.resultRef) {
+      if (isRecord(value) && isRecord(value.resultRef)) {
         return value.resultRef.cell;
       }
 
@@ -283,7 +300,10 @@ describe("Charm reference detection", () => {
     };
 
     // Follow the sourceCell chain to find the ultimate reference
-    const ultimateRef = followSourceToResultRef(mockDoc);
+    const ultimateRef = followSourceToResultRef(mockDoc) as Record<
+      string,
+      unknown
+    >;
 
     // Verify we found the final target (charm3)
     assertEquals(

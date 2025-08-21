@@ -1,4 +1,4 @@
-import { render } from "@commontools/html";
+import { render, VNode } from "@commontools/html";
 import { Cell, effect, UI } from "@commontools/runner";
 import { inspectCharm, loadManager } from "./charm.ts";
 import { CharmsController } from "@commontools/charm/ops";
@@ -61,7 +61,7 @@ export async function renderCharm(
     if (options.watch) {
       // 4a. Reactive rendering - pass the Cell directly
       const uiCell = cell.key(UI);
-      const cancel = render(container, uiCell);
+      const cancel = render(container, uiCell as Cell<VNode>); // FIXME: types
 
       // 5a. Set up monitoring for changes
       let updateCount = 0;
@@ -88,7 +88,7 @@ export async function renderCharm(
     } else {
       // 4b. Static rendering - render once with current value
       const vnode = staticValue[UI];
-      render(container, vnode);
+      render(container, vnode as VNode); // FIXME: types
 
       // 5b. Return the rendered HTML
       return container.innerHTML;

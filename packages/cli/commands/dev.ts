@@ -2,6 +2,7 @@ import { Command } from "@cliffy/command";
 import { join } from "@std/path";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
+import { isRecord } from "@commontools/utils/types";
 
 export const dev = new Command()
   .name("dev")
@@ -51,7 +52,11 @@ export const dev = new Command()
         // recipe is a function with extra properties via Object.assign
         render(JSON.stringify(mainExport, null, 2));
       } catch (_) {
-        render(mainExport.toString());
+        if (isRecord(mainExport) && typeof mainExport.toString === "function") {
+          render(mainExport.toString());
+        } else {
+          throw new Error("Main export not serializable.");
+        }
       }
     }
   });

@@ -1,5 +1,6 @@
 import { UI } from "@commontools/runner";
 import type { Runtime } from "@commontools/runner";
+import { isRecord } from "@commontools/utils/types";
 
 export interface Spell {
   id: string;
@@ -7,8 +8,8 @@ export interface Spell {
   description: string;
   author: string;
   tags: string[];
-  ui: any;
-  data: any;
+  ui: unknown;
+  data: unknown;
   likes: string[];
   shares: number;
   runs: number;
@@ -94,7 +95,7 @@ export async function getSpellBlob(spellId: string): Promise<object> {
 
 export async function saveSpell(
   spellId: string,
-  spell: any,
+  spell: unknown,
   title: string,
   description: string,
   tags: string[],
@@ -104,7 +105,12 @@ export async function saveSpell(
     // Get all the required data from commontools first
     const recipeMetaResult = runtime.recipeManager.getRecipeMeta(spell);
     const { src, spec, parents } = recipeMetaResult || {};
-    const ui = spell.resultRef?.[UI];
+    if (!isRecord(spell)) {
+      throw new Error("Invalid spell.");
+    }
+    const ui = ("resultRef" in spell && isRecord(spell.resultRef))
+      ? spell.resultRef[UI]
+      : undefined;
 
     if (spellId === undefined) {
       throw new Error("Spell ID is undefined");
