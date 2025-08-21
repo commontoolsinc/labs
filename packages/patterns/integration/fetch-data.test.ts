@@ -9,12 +9,12 @@ import { getCharmInput, setCharmInput } from "@commontools/charm/ops";
 import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
+const ignore = ["1", "true"].includes(Deno.env.get("CI") || ""); // Skip in CI
 
 // Fetch data tests may require network access and are skipped in CI until we handle external dependencies properly in CI environments.
 // This requires either:
 // 1. Adding a flag to enable network tests in CI with proper mocking
 // 2. Using mock data or fixtures for CI testing
-
 describe("fetch data integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
@@ -23,32 +23,34 @@ describe("fetch data integration test", () => {
   let identity: Identity;
   let cc: CharmsController;
 
-  beforeAll(async () => {
-    identity = await Identity.generate({ implementation: "noble" });
-    cc = await CharmsController.initialize({
-      spaceName: SPACE_NAME,
-      apiUrl: new URL(API_URL),
-      identity: identity,
-    });
-    const charm = await cc.create(
-      await Deno.readTextFile(
-        join(
-          import.meta.dirname!,
-          "..",
-          "fetch-data.tsx",
+  if (!ignore) {
+    beforeAll(async () => {
+      identity = await Identity.generate({ implementation: "noble" });
+      cc = await CharmsController.initialize({
+        spaceName: SPACE_NAME,
+        apiUrl: new URL(API_URL),
+        identity: identity,
+      });
+      const charm = await cc.create(
+        await Deno.readTextFile(
+          join(
+            import.meta.dirname!,
+            "..",
+            "fetch-data.tsx",
+          ),
         ),
-      ),
-    );
-    charmId = charm.id;
-  });
+      );
+      charmId = charm.id;
+    });
 
-  afterAll(async () => {
-    if (cc) await cc.dispose();
-  });
+    afterAll(async () => {
+      if (cc) await cc.dispose();
+    });
+  }
 
   it({
     name: "should load the github fetcher charm and verify initial state",
-    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    ignore,
     fn: async () => {
       const page = shell.page();
       await shell.goto({
@@ -79,7 +81,7 @@ describe("fetch data integration test", () => {
 
   it({
     name: "should update repo URL and verify data refetches",
-    ignore: Deno.env.get("CI") === "true", // Skip in CI - see comment above
+    ignore,
     fn: async () => {
       const page = shell.page();
       const manager = cc.manager();

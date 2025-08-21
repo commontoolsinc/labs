@@ -1,8 +1,8 @@
 {
   "name": "@commontools/patterns",
   "tasks": {
-    "integration": "deno test -A ./integration/*.test.ts",
-    "integration:ci": "CI=true deno test -A ./integration/*.test.ts",
+    "integration": "deno test --trace-leaks -A ./integration/*.test.ts",
+    "integration:ci": "CI=1 deno test --trace-leaks -A ./integration/*.test.ts",
     "test": "echo 'No tests defined.'"
   },
   "exports": {
