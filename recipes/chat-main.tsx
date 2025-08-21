@@ -217,18 +217,23 @@ export const UserSession = recipe<
   },
 );
 
-// Handler to create a new user session. We use `{ proxy: true }` so the handler
-// receives the live reactive references (OpaqueRefs), not a readonly snapshot.
-// That allows us to pass `state.messages` directly into the child recipe and
+// Handler to create a new user session. Receives typed parameters so the handler
+// can pass the reactive references directly into the child recipe and
 // keep all sessions linked to the same underlying state.
-const createUserSession = handler((_, state: { messages: any; users: any }) => {
+const createUserSession = handler<
+  never,
+  {
+    messages: Default<ChatMessage[], []>;
+    users: Default<Record<string, string>, Record<PropertyKey, never>>;
+  }
+>((_, { messages, users }) => {
   const sessionCharm = UserSession({
-    messages: state.messages,
-    users: state.users,
+    messages: messages as any,
+    users: users as any,
   });
 
   return navigateTo(sessionCharm);
-}, { proxy: true });
+});
 
 // Main chat recipe: a state container with a button to spawn per-user sessions.
 // All sessions get the same `messages` reference so changes are shared.
