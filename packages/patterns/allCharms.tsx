@@ -34,7 +34,7 @@ export default recipe<CharmListInput, CharmListOutput>(
       [NAME]: str`Charms (${charmCount})`,
       ignore: true, // ignore ourselves when rendering recursively
       [UI]: (
-        <div style="padding: 2rem; max-width: 600px;">
+        <div>
           <h2 id="charms-heading" >Charms ({charmCount})</h2>
           <div id="charms-grid">
             {/*NOTE: we should NOT need a derive wrapper around this BUT in practice, without one, items will sometimes render as undefined and never recover in a multi-user scenario.
@@ -42,7 +42,7 @@ export default recipe<CharmListInput, CharmListOutput>(
               This affects the tests, if you wanted to watch them, but also a real recipe. */}
             {derive(allCharms, (allCharms) =>
               allCharms.map((charm, index) => (
-                <div id={`charm-card-${index}`}>
+                <fieldset id={`charm-card-${index}`}>
                   <div>
                     <span id={`charm-name-${index}`}>
                       {charm[NAME] || "Untitled Charm"}
@@ -58,7 +58,7 @@ export default recipe<CharmListInput, CharmListOutput>(
                       {charm}
                     </div>
                   )}
-                </div>
+                </fieldset>
               )),
             )}
             {/* This SHOULD work but does not, with the behaviour explained above. */}
