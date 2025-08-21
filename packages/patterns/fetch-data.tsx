@@ -1,43 +1,19 @@
 /// <cts-enable />
 import {
+  Cell,
   cell,
   derive,
   fetchData,
   h,
   handler,
+  lift,
   NAME,
   recipe,
+  Default,
   schema,
   str,
   UI,
 } from "commontools";
-
-const model = schema({
-  type: "object",
-  properties: {
-    repoUrl: {
-      type: "string",
-      default: "https://github.com/vercel/next.js",
-      asCell: true,
-    },
-  },
-  default: { repoUrl: "https://github.com/vercel/next.js" },
-});
-
-const updateUrl = handler(
-  {
-    type: "object",
-    properties: {
-      detail: { type: "object", properties: { value: { type: "string" } } },
-    },
-  },
-  model,
-  (event, state) => {
-    if (event.detail?.value) {
-      state.repoUrl.set(event.detail.value);
-    }
-  },
-);
 
 type GithubResponse = {
   id: number;
@@ -172,84 +148,98 @@ type GithubResponse = {
   subscribers_count: number;
 };
 
-export default recipe(model, {}, (state) => {
-  // Parse URL and create API endpoint
-  const apiUrl = derive({ url: state.repoUrl }, ({ url }) => {
-    const match = url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-    if (match) {
-      return `https://api.github.com/repos/${match[1]}/${match[2]}`;
-    }
-    return "";
-  });
+function parseUrl(url: string): { org: string; user: string } {
+  const match = url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+  if (match) {
+    return { org: match[1], user: match[2] };
+  }
+  return { org: "", user: "" };
+}
 
-  // Fetch repository data
-  const repoData = fetchData<GithubResponse>({
-    url: apiUrl,
-    mode: "json",
-  });
-  const data = repoData.result;
+export default recipe<{ repoUrl: Default<string, "https://github.com/vercel/next.js"> }>(
+  "Github Fetcher Demo",
+  (state) => {
+    // lift() takes a pure function and 'lifts' it into the Cell domain, allowing it to be bound to reactive values
+    const output = lift(parseUrl)(state.repoUrl);
 
-  const validData = derive(data, (data) => {
-    return (
-      data ?? {
-        name: "Unknown",
-        owner: { login: "Unknown" },
-        description: "No description provided",
-        stargazers_count: 0,
-        forks_count: 0,
-        watchers_count: 0,
-        open_issues_count: 0,
-        network_count: 0,
-        subscribers_count: 0,
+    // Parse URL and create API endpoint
+    const apiUrl = derive(output, (output) => {
+      const { org, user } = output;
+      if (org && user) {
+        return `https://api.github.com/repos/${org}/${user}`;
       }
-    );
-  });
+      return "";
+    });
 
-  return {
-    [NAME]: "GitHub Repository Details",
-    [UI]: (
-      <div>
-        <div>
-          <ct-input
-            $value={state.repoUrl}
-            placeholder="https://github.com/owner/repo"
-            customStyle="width: 100%; padding: 8px; font-size: 14px;"
-          />
-        </div>
+    // Fetch repository data
+    const repoData = fetchData<GithubResponse>({
+      url: apiUrl,
+      mode: "json",
+    });
+    const data = repoData.result;
 
+    const validData = derive(data, (data) => {
+      return (
+        data ?? {
+          name: "Unknown",
+          owner: { login: "Unknown" },
+          description: "No description provided",
+          stargazers_count: 0,
+          forks_count: 0,
+          watchers_count: 0,
+          open_issues_count: 0,
+          network_count: 0,
+          subscribers_count: 0,
+        }
+      );
+    });
+
+    return {
+      [NAME]: "GitHub Repository Details",
+      [UI]: (
         <div>
-          <h3 id="github-title">
-            {validData.name}
-          </h3>
-          <p>
-            by {validData.owner.login}
-          </p>
-          <p>{validData.description}</p>
           <div>
+            <ct-input
+              $value={state.repoUrl}
+              placeholder="https://github.com/owner/repo"
+              customStyle="width: 100%; padding: 8px; font-size: 14px;"
+            />
+          </div>
+
+          <div>
+            <h3 id="github-title">
+              {validData.name}
+            </h3>
+            <p>
+              by {validData.owner.login}
+            </p>
+            <p>{validData.description}</p>
             <div>
-              <span>⭐</span>
-              <strong>{validData.stargazers_count}</strong> stars
-            </div>
-            <div>
-              <span>🍴</span>
-              <strong>{validData.forks_count}</strong> forks
-            </div>
-            <div>
-              <span>🔤</span>
-              <strong>{validData.language}</strong>
-            </div>
-            <div>
-              <a
-                href={validData.html_url}
-                target="_blank"
-              >
-                View on GitHub →
-              </a>
+              <div>
+                <span>⭐</span>
+                <strong>{validData.stargazers_count}</strong> stars
+              </div>
+              <div>
+                <span>🍴</span>
+                <strong>{validData.forks_count}</strong> forks
+              </div>
+              <div>
+                <span>🔤</span>
+                <strong>{validData.language}</strong>
+              </div>
+              <div>
+                <a
+                  href={validData.html_url}
+                  target="_blank"
+                >
+                  View on GitHub →
+                </a>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    ),
-    repo: validData,
-  };
-});
+      ),
+      repo: validData,
+    };
+  },
+);
