@@ -402,11 +402,8 @@ jobs:
   deploy-toolshed:
     name: "Deploy to Toolshed (Staging)"
     if: github.ref == 'refs/heads/main'
-    needs: [
-      "integration-test",
-      "cli-integration-test",
-      "shell-integration-test",
-    ]
+    needs:
+      ["integration-test", "cli-integration-test", "shell-integration-test"]
     runs-on: ubuntu-latest
     environment: toolshed
     steps:
@@ -462,4 +459,5 @@ jobs:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          capture_stdout: true
           script: /opt/ct/run-pattern-tests-against-toolshed.sh ${{ github.sha }} https://toolshed.saga-castor.ts.net https://toolshed.saga-castor.ts.net
