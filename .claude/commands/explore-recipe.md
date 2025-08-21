@@ -7,3 +7,6 @@
   - then you should describe what you find to the user
 - if the user gives no spacename, use the current date + a descriptive suffix e.g. `2025-06-01-counter`
 - you can stop the server using `scripts/stop-local-dev.sh`
+- you can restart the server using `scripts/start-local-dev.sh --force`
+- you should visit the charm directly using http://localhost:8000/<SPACE_NAME>/<CHARM_ID>
+- DO NOT deploy the charms to the remote server, make sure you use `--api-url http://localhost:8000` with `ct`
