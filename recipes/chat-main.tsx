@@ -2,13 +2,7 @@
 // Teaching example: CTS (CommonTools TypeScript) generates JSON Schemas from the
 // TypeScript types below. The recipes use typed inputs/outputs, while handlers
 // add small JSON Schemas only where mutation is required (e.g. marking fields
-// as cells). The key ideas demonstrated:
-// - Typed recipe inputs let the UI map/read reactive values without extra JSON
-//   schema boilerplate.
-// - Mutations happen inside handlers. Their state schema uses `asCell` so the
-//   state arrives as a real Cell<T>, enabling `.set()`/`.push()`.
-// - `proxy: true` on a handler passes through live OpaqueRefs so we can forward
-//   references (e.g., into `navigateTo`) without losing reactivity.
+// as cells). 
 import {
   Cell,
   cell,
@@ -86,15 +80,7 @@ function formatTime(ts: number): string {
   });
 }
 
-// Helper to resolve a user's display name from the shared map, falling back to userId
-function resolveDisplayName(
-  usersMap: Record<string, string> | undefined | null,
-  userId: string,
-): string {
-  const fromMap = usersMap?.[userId];
-  const name = typeof fromMap === "string" ? fromMap.trim() : "";
-  return name || userId;
-}
+// Display name is derived inline in the UI from `users` with fallback to userId
 
 // Handler to send a new chat message.
 const sendMessage = handler<
@@ -103,13 +89,19 @@ const sendMessage = handler<
     messages: Cell<ChatMessage[]>;
     userId: Cell<string>;
     username: Cell<string>;
-    users?: Cell<Record<string, string>>;
+    users: Cell<Record<string, string>>;
   }
->((event, { messages, userId, username }) => {
+>((event, { messages, userId, username, users }) => {
   const text = event.detail?.message?.trim();
   if (!text) return;
   const id = getId(userId);
   console.log("[sendMessage] userId:", id);
+  try {
+    const snapshot = typeof users?.get === "function" ? users.get() : undefined;
+    console.log("[users map at sendMessage]", snapshot);
+  } catch (_e) {
+    // ignore
+  }
   messages.push({
     userId: id,
     message: text,
@@ -131,6 +123,12 @@ const setUsername = handler<
   username.set(name);
   users.update({ [id]: name } as any);
   console.log("[setUsername] userId:", id, "name:", name);
+  try {
+    const snapshot = typeof users.get === "function" ? users.get() : undefined;
+    console.log("[users map after setUsername]", snapshot);
+  } catch (_e) {
+    // ignore
+  }
 }, { proxy: true });
 
 // User Session Recipe - Individual instance with local state
@@ -186,7 +184,14 @@ export const UserSession = recipe<
                     <b>
                       {derive(
                         { u: users, id: m.userId },
-                        ({ u, id }) => resolveDisplayName(u as any, id as any),
+                        ({ u, id }) => {
+                          console.log("[derive display] users:", u);
+                          const fromMap = u?.[id as any];
+                          const name = typeof fromMap === "string"
+                            ? fromMap.trim()
+                            : "";
+                          return name || (id as any);
+                        },
                       )}
                     </b>
                     <span>· {derive(m.timestamp, formatTime)}</span>
