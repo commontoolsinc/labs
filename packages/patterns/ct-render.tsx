@@ -71,18 +71,18 @@ export const Counter = recipe<RecipeState>("Counter", (state) => {
   };
 });
 
-/*
-This demonstrates a pattern of passing a Cell to a sub-recipe and keeping the value in sync between all locations.
-It also demonstrates that any recipe can be invoked using JSX syntax.
-*/
 export default recipe<RecipeState>("Counter", (state) => {
   const counter = Counter({ value: state.value });
 
   return {
-    [NAME]: str`Double counter: ${state.value}`,
+    [NAME]: str`Counters: ${state.value}`,
+    // These three methods are all functionally equivalent
     [UI]: (
       <div>
-        <ct-render $cell={counter} />
+        <div>{counter}</div>
+        <Counter value={state.value} />
+        {/* ct-render will NOT usually appear in a recipe, rather, it's used within other ct- component internals */}
+        <div><ct-render $cell={counter} /></div>
       </div>
     ),
     value: state.value,
