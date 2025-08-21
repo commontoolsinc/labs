@@ -31,8 +31,8 @@ export default recipe<CharmListInput, CharmListOutput>(
     const charmCount = derive(allCharms, (mentions) => mentions.length);
 
     return {
-      [NAME]: 'Charm List',
-      ignore: true,
+      [NAME]: str`Charms (${charmCount})`,
+      ignore: true, // ignore ourselves when rendering recursively
       [UI]: (
         <div style="padding: 2rem; max-width: 600px;">
           <h2 style="margin-bottom: 1.5rem;">Charms ({charmCount})</h2>
@@ -48,8 +48,7 @@ export default recipe<CharmListInput, CharmListOutput>(
                       Visit
                     </ct-button>
                   </div>
-                  {/* Ignore the charm list itself to prevent recursion overflow*/}
-                  {charm[NAME] === "Charm List" ? (
+                  {charm.ignore ? (
                     <></>
                   ) : (
                     <div style="max-height: 256px; overflow-y: auto;">
