@@ -2,7 +2,7 @@
 // Teaching example: CTS (CommonTools TypeScript) generates JSON Schemas from the
 // TypeScript types below. The recipes use typed inputs/outputs, while handlers
 // add small JSON Schemas only where mutation is required (e.g. marking fields
-// as cells). 
+// as cells).
 import {
   Cell,
   cell,
@@ -96,12 +96,6 @@ const sendMessage = handler<
   if (!text) return;
   const id = getId(userId);
   console.log("[sendMessage] userId:", id);
-  try {
-    const snapshot = typeof users?.get === "function" ? users.get() : undefined;
-    console.log("[users map at sendMessage]", snapshot);
-  } catch (_e) {
-    // ignore
-  }
   messages.push({
     userId: id,
     message: text,
@@ -123,12 +117,6 @@ const setUsername = handler<
   username.set(name);
   users.update({ [id]: name } as any);
   console.log("[setUsername] userId:", id, "name:", name);
-  try {
-    const snapshot = typeof users.get === "function" ? users.get() : undefined;
-    console.log("[users map after setUsername]", snapshot);
-  } catch (_e) {
-    // ignore
-  }
 }, { proxy: true });
 
 // User Session Recipe - Individual instance with local state
