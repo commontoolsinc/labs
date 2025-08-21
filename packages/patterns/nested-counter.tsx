@@ -76,12 +76,14 @@ This demonstrates a pattern of passing a Cell to a sub-recipe and keeping the va
 It also demonstrates that any recipe can be invoked using JSX syntax.
 */
 export default recipe<RecipeState>("Counter", (state) => {
+  const counter = Counter({ value: state.value })
+
   return {
     [NAME]: str`Double counter: ${state.value}`,
     [UI]: (
       <div>
         <Counter value={state.value} />
-        <Counter value={state.value} />
+        {counter}
       </div>
     ),
     value: state.value,
