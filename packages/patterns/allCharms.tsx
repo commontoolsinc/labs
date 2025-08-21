@@ -37,6 +37,9 @@ export default recipe<CharmListInput, CharmListOutput>(
         <div style="padding: 2rem; max-width: 600px;">
           <h2 id="charms-heading" style="margin-bottom: 1.5rem;">Charms ({charmCount})</h2>
           <div id="charms-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.75rem; width: 100%;">
+            {/*NOTE: we should NOT need a derive wrapper around this BUT in practice, without one, items will sometimes render as undefined and never recover in a multi-user scenario.
+              This is likely related to our known issues with shared arrays.
+              This affects the tests, if you wanted to watch them, but also a real recipe. */}
             {derive(allCharms, (allCharms) =>
               allCharms.map((charm, index) => (
                 <div id={`charm-card-${index}`} style="display: flex; flex-direction: column; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; min-width: 0;">
@@ -58,6 +61,28 @@ export default recipe<CharmListInput, CharmListOutput>(
                 </div>
               )),
             )}
+            {/* This SHOULD work but does not, with the behaviour explained above. */}
+            {/*{
+              allCharms.map((charm, index) => (
+                <div id={str`charm-card-${index}`} style="display: flex; flex-direction: column; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; min-width: 0;">
+                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <span id={str`charm-name-${index}`} style="font-weight: 500;">
+                      {str`${charm[NAME] || "Untitled Charm"}`}
+                    </span>
+                    <ct-button id={str`visit-button-${index}`} size="sm" onClick={visit({ charm })}>
+                      Visit
+                    </ct-button>
+                  </div>
+                  {ifElse(
+                    charm.ignore,
+                    <></>,
+                    <div style="max-height: 256px; overflow-y: auto;">
+                      {charm}
+                    </div>
+                  )}
+                </div>
+              ))
+            }*/}
           </div>
         </div>
       ),
