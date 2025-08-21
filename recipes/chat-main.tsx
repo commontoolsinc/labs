@@ -18,9 +18,14 @@ import {
   UI,
 } from "commontools";
 
+// User object for better data modeling
+interface User {
+  name: string;
+}
+
 // Data types for the chat messages. CTS will derive the matching schema.
 interface ChatMessage {
-  userId: string;
+  author: User; // User data (will be kept in sync via shared state)
   message: string;
   timestamp: number;
 }
@@ -29,40 +34,19 @@ interface ChatMessage {
 // mapping (`messages.map(...)`). Writes should be performed in handlers.
 type MainRecipeInput = {
   messages: Default<ChatMessage[], []>;
-  // Shared directory of userId -> username (display names)
-  users: Default<Record<string, string>, Record<PropertyKey, never>>;
 };
 
-// Example of local state.
-interface LocalUserState {
-  username: Cell<string>;
-}
+type UserSessionInput = {
+  messages: Default<ChatMessage[], []>;
+  user: User;
+};
 
-type UserSessionInput = MainRecipeInput;
-
-// Session recipe result (typed): return extra fields (e.g., userId/username)
-// alongside [NAME] and [UI]. CTS will carry these in the recipe result schema.
+// Session recipe result (typed): return User object alongside [NAME] and [UI].
+// CTS will carry these in the recipe result schema.
 type UserSessionResult = {
-  userId: string;
-  username: string;
+  messages: Default<ChatMessage[], []>;
+  user: User;
 };
-
-// Helper to generate a user id when first needed
-function generateUserId(): string {
-  const n = Math.floor(Math.random() * 10000);
-  return `id${n.toString().padStart(4, "0")}`;
-}
-
-// Helper to get or initialize userId from a Cell
-function getId(userId: Cell<string>): string {
-  let id = typeof userId.get === "function" ? userId.get() : "";
-  if (!id) {
-    id = generateUserId();
-    userId.set(id);
-    console.log("[getId] initialized userId:", id);
-  }
-  return id;
-}
 
 // Event payload type for ct-message-input's ct-send event
 type InputEventType = {
@@ -80,24 +64,21 @@ function formatTime(ts: number): string {
   });
 }
 
-// Display name is derived inline in the UI from `users` with fallback to userId
-
 // Handler to send a new chat message.
 const sendMessage = handler<
   InputEventType,
   {
     messages: Cell<ChatMessage[]>;
-    userId: Cell<string>;
-    username: Cell<string>;
-    users: Cell<Record<string, string>>;
+    user: Cell<User>;
   }
->((event, { messages, userId, username, users }) => {
+>((event, { messages, user }) => {
   const text = event.detail?.message?.trim();
   if (!text) return;
-  const id = getId(userId);
-  console.log("[sendMessage] userId:", id);
+
+  console.log("[sendMessage] user:", user);
+  console.log("[sendMessage] text:", text);
   messages.push({
-    userId: id,
+    author: user.get(),
     message: text,
     timestamp: Date.now(),
   });
@@ -107,16 +88,16 @@ const sendMessage = handler<
 const setUsername = handler<
   InputEventType,
   {
-    username: Cell<string>;
-    users: Cell<Record<string, string>>;
-    userId: Cell<string>;
+    user: Cell<User>;
   }
->((event, { username, users, userId }) => {
+>((event, { user }) => {
+  console.log("[setUsername] event:", event);
+
   const name = (event.detail?.message ?? "").trim();
-  const id = getId(userId);
-  username.set(name);
-  users.update({ [id]: name } as any);
-  console.log("[setUsername] userId:", id, "name:", name);
+  console.log("[setUsername] name:", name);
+
+  // Update user cell with new value
+  user.set({ name: name });
 });
 
 // User Session Recipe - Individual instance with local state
@@ -125,12 +106,9 @@ export const UserSession = recipe<
   UserSessionResult
 >(
   "User Chat Session",
-  ({ messages, users }) => {
-    const username = cell<string>("");
-    const userId = cell<string>("");
+  ({ messages, user }) => {
+    //const user = cell<User>({ name: "" });
 
-    // UI reads: `messages.map(...)` renders the list reactively. No writes here;
-    // those happen via the `sendMessage` handler above.
     return {
       [NAME]: str`Chat Session` as any,
       [UI]: (
@@ -138,7 +116,7 @@ export const UserSession = recipe<
           <h2>Your Chat Session</h2>
           <div>
             <label>
-              Your User ID: {derive(userId, (k) => k || "(pending)")}
+              Your username: {derive(user, (user) => user.name ?? "undefined")}
             </label>
           </div>
           <div>
@@ -147,17 +125,10 @@ export const UserSession = recipe<
               name="Set"
               placeholder="Choose a display name"
               appearance="rounded"
-              onmessagesend={setUsername({ username, users, userId })}
+              onmessagesend={setUsername({
+                user,
+              })}
             />
-          </div>
-          <div
-            data-testid="current-username"
-            style={{ marginTop: "6px", fontSize: "12px", color: "#444" }}
-          >
-            Your current username is: {derive(
-              { u: username, id: userId },
-              ({ u, id }) => (u?.trim() || id || "(pending)"),
-            )}
           </div>
           <hr />
           <div>
@@ -170,17 +141,7 @@ export const UserSession = recipe<
                     style={{ fontSize: "12px", color: "#666" }}
                   >
                     <b>
-                      {derive(
-                        { u: users, id: m.userId },
-                        ({ u, id }) => {
-                          console.log("[derive display] users:", u);
-                          const fromMap = u?.[id as any];
-                          const name = typeof fromMap === "string"
-                            ? fromMap.trim()
-                            : "";
-                          return name || (id as any);
-                        },
-                      )}
+                      {m.author.name}
                     </b>
                     <span>· {derive(m.timestamp, formatTime)}</span>
                   </div>
@@ -196,16 +157,14 @@ export const UserSession = recipe<
               appearance="rounded"
               onmessagesend={sendMessage({
                 messages,
-                userId,
-                username,
-                users,
+                user,
               })}
             />
           </div>
         </div>
       ),
-      userId: derive(userId, (k) => k || "") as any,
-      username: username,
+      messages,
+      user,
     };
   },
 );
@@ -217,12 +176,11 @@ const createUserSession = handler<
   never,
   {
     messages: Default<ChatMessage[], []>;
-    users: Default<Record<string, string>, Record<PropertyKey, never>>;
   }
->((_, { messages, users }) => {
+>((_, { messages }) => {
   const sessionCharm = UserSession({
     messages: messages as any,
-    users: users as any,
+    user: cell<User>({ name: "not set yet" }),
   });
 
   return navigateTo(sessionCharm);
@@ -232,7 +190,7 @@ const createUserSession = handler<
 // All sessions get the same `messages` reference so changes are shared.
 export default recipe<MainRecipeInput>(
   "Main Chat State Container",
-  ({ messages, users }) => {
+  ({ messages }) => {
     return {
       [NAME]: "Chat State Container",
       [UI]: (
@@ -241,13 +199,12 @@ export default recipe<MainRecipeInput>(
           <p>This charm stores the shared chat state.</p>
           <p>Messages: {messages.length}</p>
           <p>Click below to create your personal chat session:</p>
-          <ct-button onClick={createUserSession({ messages, users })}>
+          <ct-button onClick={createUserSession({ messages })}>
             Generate User Session
           </ct-button>
         </div>
       ),
       messages,
-      users,
     };
   },
 );
