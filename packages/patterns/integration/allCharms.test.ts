@@ -62,14 +62,14 @@ describe("allCharms integration test", () => {
       identity,
     });
     
-    await page.waitForSelector("h2", { strategy: "pierce" });
+    await page.waitForSelector("#charms-heading", { strategy: "pierce" });
     await sleep(1000);
   });
 
   it("should display the correct number of charms", async () => {
     const page = shell.page();
 
-    const heading = await page.waitForSelector("h2", { strategy: "pierce" });
+    const heading = await page.waitForSelector("#charms-heading", { strategy: "pierce" });
     const headingText = await heading.evaluate((el: HTMLElement) => el.textContent);
     
     assert(headingText?.includes("Charms ("));
@@ -79,8 +79,8 @@ describe("allCharms integration test", () => {
   it("should display charm cards in a grid", async () => {
     const page = shell.page();
 
-    await page.waitForSelector("div[style*='grid-template-columns']", { strategy: "pierce" });
-    const charmCards = await page.$$("div[style*='padding: 1rem'][style*='border: 1px solid']", { strategy: "pierce" });
+    await page.waitForSelector("#charms-grid", { strategy: "pierce" });
+    const charmCards = await page.$$("[id^='charm-card-']", { strategy: "pierce" });
     
     assertEquals(charmCards.length, 2);
   });
@@ -88,7 +88,7 @@ describe("allCharms integration test", () => {
   it("should show charm names correctly", async () => {
     const page = shell.page();
 
-    const charmNames = await page.$$("span[style*='font-weight: 500']", { strategy: "pierce" });
+    const charmNames = await page.$$("[id^='charm-name-']", { strategy: "pierce" });
     assertEquals(charmNames.length, 2);
 
     const nameTexts = await Promise.all(
@@ -107,15 +107,7 @@ describe("allCharms integration test", () => {
   it("should have Visit buttons for each charm", async () => {
     const page = shell.page();
 
-    const visitButtons = await page.$$("ct-button", { strategy: "pierce" });
-    const visitButtonsWithText = await Promise.all(
-      visitButtons.map(async (button) => {
-        const text = await button.evaluate((el: HTMLElement) => el.textContent?.trim());
-        return text === "Visit" ? button : null;
-      })
-    );
-    
-    const actualVisitButtons = visitButtonsWithText.filter(button => button !== null);
+    const actualVisitButtons = await page.$$("[id^='visit-button-']", { strategy: "pierce" });
     assertEquals(actualVisitButtons.length, 2);
   });
 
@@ -123,18 +115,9 @@ describe("allCharms integration test", () => {
     const page = shell.page();
 
     const urlBefore = await page.evaluate(() => globalThis.location.href);
-    const visitButtons = await page.$$("ct-button", { strategy: "pierce" });
-    
-    let visitButton = null;
-    for (const button of visitButtons) {
-      const text = await button.evaluate((el: HTMLElement) => el.textContent?.trim());
-      if (text === "Visit") {
-        visitButton = button;
-        break;
-      }
-    }
-    
-    assert(visitButton);
+    const visitButtons = await page.$$("[id^='visit-button-']", { strategy: "pierce" });
+    assert(visitButtons.length > 0);
+    const visitButton = visitButtons[0];
     await visitButton.click();
     
     await sleep(400);
@@ -153,15 +136,15 @@ describe("allCharms integration test", () => {
       identity,
     });
     
-    await page.waitForSelector("h2", { strategy: "pierce" });
+    await page.waitForSelector("#charms-heading", { strategy: "pierce" });
     await sleep(1000);
 
-    const charmCards = await page.$$("div[style*='padding: 1rem'][style*='border: 1px solid']", { strategy: "pierce" });
+    const charmCards = await page.$$("[id^='charm-card-']", { strategy: "pierce" });
     assertEquals(charmCards.length, 2);
     
     for (const card of charmCards) {
-      const nameElement = await card.$("span[style*='font-weight: 500']");
-      const visitButton = await card.$("ct-button");
+      const nameElement = await card.$("[id^='charm-name-']");
+      const visitButton = await card.$("[id^='visit-button-']");
       
       assert(nameElement);
       assert(visitButton);

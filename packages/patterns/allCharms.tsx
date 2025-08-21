@@ -35,16 +35,16 @@ export default recipe<CharmListInput, CharmListOutput>(
       ignore: true, // ignore ourselves when rendering recursively
       [UI]: (
         <div style="padding: 2rem; max-width: 600px;">
-          <h2 style="margin-bottom: 1.5rem;">Charms ({charmCount})</h2>
-          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.75rem; width: 100%;">
+          <h2 id="charms-heading" style="margin-bottom: 1.5rem;">Charms ({charmCount})</h2>
+          <div id="charms-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 0.75rem; width: 100%;">
             {derive(allCharms, (allCharms) =>
-              allCharms.map((charm) => (
-                <div style="display: flex; flex-direction: column; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; min-width: 0;">
+              allCharms.map((charm, index) => (
+                <div id={`charm-card-${index}`} style="display: flex; flex-direction: column; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; min-width: 0;">
                   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
-                    <span style="font-weight: 500;">
+                    <span id={`charm-name-${index}`} style="font-weight: 500;">
                       {charm[NAME] || "Untitled Charm"}
                     </span>
-                    <ct-button size="sm" onClick={visit({ charm })}>
+                    <ct-button id={`visit-button-${index}`} size="sm" onClick={visit({ charm })}>
                       Visit
                     </ct-button>
                   </div>
