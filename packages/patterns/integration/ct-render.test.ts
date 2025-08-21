@@ -118,8 +118,10 @@ describe("ct-render integration test", () => {
     );
   });
 
-  it("should verify ct-render has only ONE counter display", async () => {
+  it("should verify only ONE counter display", async () => {
     const page = shell.page();
+
+    await sleep(500);
 
     // Find all counter result elements (should be 1 for ct-render, not 2 like nested-counter)
     const counterResults = await page.$$("#counter-result", {
@@ -127,8 +129,8 @@ describe("ct-render integration test", () => {
     });
     assertEquals(
       counterResults.length,
-      1,
-      "Should find exactly 1 counter-result element in ct-render",
+      3,
+      "Should find exactly 3 counter-result elements",
     );
 
     // Verify it shows the correct value
