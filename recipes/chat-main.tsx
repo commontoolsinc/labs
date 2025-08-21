@@ -25,7 +25,7 @@ interface User {
 
 // Data types for the chat messages. CTS will derive the matching schema.
 interface ChatMessage {
-  author: User; // User data (will be kept in sync via shared state)
+  author: User;
   message: string;
   timestamp: number;
 }
@@ -110,7 +110,7 @@ export const UserSession = recipe<
           <h2>Your Chat Session</h2>
           <div>
             <label>
-              Your username: {derive(user, (user) => user.name ?? "undefined")}
+              Your username: {user.name}
             </label>
           </div>
           <div>
@@ -174,7 +174,7 @@ const createUserSession = handler<
 >((_, { messages }) => {
   const sessionCharm = UserSession({
     messages: messages as any,
-    user: cell<User>({ name: "not set yet" }),
+    user: cell<User>({ name: "<anon>" }),
   });
 
   return navigateTo(sessionCharm);
