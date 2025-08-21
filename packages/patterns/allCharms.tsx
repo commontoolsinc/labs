@@ -19,7 +19,7 @@ type CharmListOutput = {
   ignore: boolean;
 };
 
-const visit = handler<{}, { charm: any }>((_, state) => {
+const visit = handler<Record<string, never>, { charm: any }>((_, state) => {
   return navigateTo(state.charm);
 });
 
@@ -52,7 +52,7 @@ export default recipe<CharmListInput, CharmListOutput>(
                     </ct-button>
                   </div>
                   {charm.ignore ? (
-                    <></>
+                    null
                   ) : (
                     <div>
                       {charm}
