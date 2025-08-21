@@ -75,8 +75,6 @@ const sendMessage = handler<
   const text = event.detail?.message?.trim();
   if (!text) return;
 
-  console.log("[sendMessage] user:", user);
-  console.log("[sendMessage] text:", text);
   messages.push({
     author: user.get(),
     message: text,
@@ -91,11 +89,7 @@ const setUsername = handler<
     user: Cell<User>;
   }
 >((event, { user }) => {
-  console.log("[setUsername] event:", event);
-
   const name = (event.detail?.message ?? "").trim();
-  console.log("[setUsername] name:", name);
-
   // Update user cell with new value
   user.set({ name: name });
 });
