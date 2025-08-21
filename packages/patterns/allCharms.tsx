@@ -62,6 +62,7 @@ export default recipe<CharmListInput, CharmListOutput>(
               )),
             )}
             {/* This SHOULD work but does not, with the behaviour explained above. */}
+            {/* Specifically, this works on the first render but breaks thereafter */}
             {/*{
               allCharms.map((charm, index) => (
                 <div id={str`charm-card-${index}`} style="display: flex; flex-direction: column; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; min-width: 0;">
