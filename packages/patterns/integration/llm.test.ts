@@ -6,9 +6,10 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
+import { TEST_LLM } from "./flags.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-const ignore = ["1", "true"].includes(Deno.env.get("CI") || ""); // Skip in CI
+const ignore = !TEST_LLM;
 
 // LLM tests are skipped in CI until we handle llm() calls properly in CI environments.
 // This requires either:

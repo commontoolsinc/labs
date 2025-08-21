@@ -389,7 +389,7 @@ jobs:
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           FRONTEND_URL=http://localhost:8000/ \
-          deno task integration:ci
+          deno task integration
 
       - name: 🧪 Run end-to-end shell integration tests
         working-directory: packages/shell

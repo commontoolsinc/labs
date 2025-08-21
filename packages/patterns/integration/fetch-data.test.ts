@@ -7,9 +7,10 @@ import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import { getCharmInput, setCharmInput } from "@commontools/charm/ops";
 import { Identity } from "@commontools/identity";
+import { TEST_HTTP } from "./flags.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-const ignore = ["1", "true"].includes(Deno.env.get("CI") || ""); // Skip in CI
+const ignore = !TEST_HTTP;
 
 // Fetch data tests may require network access and are skipped in CI until we handle external dependencies properly in CI environments.
 // This requires either:
