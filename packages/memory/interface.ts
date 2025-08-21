@@ -905,6 +905,11 @@ export type Conflict = {
   actual: Revision<Fact> | null;
 
   /**
+   * Whether the fact exists in the history of the entity.
+   */
+  existsInHistory: boolean;
+
+  /**
    * Actual history
    */
   history: Revision<Fact>[];

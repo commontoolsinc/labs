@@ -439,34 +439,71 @@ type CauseRow = {
   fact: string;
 };
 
+/**
+ * Get the chain of facts leading to the current state
+ *
+ * This may take an `excludeFact` to prevent including a fact that was just
+ * inserted, but will be rolled back when the transaction fails.
+ *
+ * @param session
+ * @param match an object with `the` and `of` properties used to filter
+ * @param excludeFact fact to exclude from the chain
+ * @returns an array of Revisions constructed from the associated facts
+ */
 const causeChain = <Space extends MemorySpace>(
-  { store }: Session<Space>,
+  session: Session<Space>,
   { the, of }: { the: The; of: Entity },
+  excludeFact: string | undefined,
 ): Revision<Fact>[] => {
+  const { store } = session;
   const rows = store.prepare(CAUSE_CHAIN).all({ of, the }) as CauseRow[];
   const revisions = [];
   if (rows && rows.length) {
     for (const result of rows) {
-      const row = store.prepare(GET_FACT).get({ fact: result.fact }) as
-        | StateRow
-        | undefined;
-      if (row) {
-        const revision: Revision<Fact> = {
-          the,
-          of,
-          cause: row.cause
-            ? (fromString(row.cause) as Reference<Assertion>)
-            : refer(unclaimed(row)),
-          since: row.since,
-        };
-        if (row.is) {
-          revision.is = JSON.parse(row.is);
-        }
+      if (result.fact === excludeFact) {
+        continue;
+      }
+      const revision = getFact(session, { fact: result.fact });
+      if (revision) {
         revisions.push(revision);
       }
     }
   }
   return revisions;
+};
+
+/**
+ * Gets a matching fact from the store.
+ *
+ * @param session
+ * @param match an object with a `fact` property that is the reference string.
+ * @returns a Revision constructed from the fact's details or undefined if
+ *     there was no match.
+ */
+const getFact = <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { fact }: { fact: string },
+): Revision<Fact> | undefined => {
+  const row = store.prepare(GET_FACT).get({ fact }) as StateRow | undefined;
+  if (row === undefined) {
+    return undefined;
+  }
+  // It's possible to have more than one matching fact, but since the fact's id
+  // incorporates its cause chain, we would have to have issued a retraction,
+  // followed by the same chain of facts. At that point, it really is the same.
+  // Since `the` and `of` are part of the fact reference, they are also unique.
+  const revision: Revision<Fact> = {
+    the: row.the,
+    of: row.of,
+    cause: row.cause
+      ? (fromString(row.cause) as Reference<Assertion>)
+      : refer(unclaimed(row)),
+    since: row.since,
+  };
+  if (row.is) {
+    revision.is = JSON.parse(row.is);
+  }
+  return revision;
 };
 
 const select = <Space extends MemorySpace>(
@@ -640,10 +677,11 @@ const swap = <Space extends MemorySpace>(
 
   // If this is an assertion we need to import asserted datum and then insert
   // fact referencing it.
+  let imported = 0;
   if (source.assert || source.retract) {
-    // First we import datum and and then use it's primary key as `is` field
+    // First we import datum and and then use its primary key as `is` field
     // in the `fact` table upholding foreign key constraint.
-    session.store.run(IMPORT_FACT, {
+    imported = session.store.run(IMPORT_FACT, {
       this: fact,
       the,
       of,
@@ -662,7 +700,7 @@ const swap = <Space extends MemorySpace>(
   // ignore as opposed to do insert in if clause and update in the else block,
   // that is because we may also have assertions in this order `a, b, c, c`
   // where second `c` insert is redundant yet we do not want to fail transaction,
-  // therefor we insert or ignore here to ensure fact record exists and then
+  // therefore we insert or ignore here to ensure fact record exists and then
   // use update afterwards to update to desired state from expected `cause` state.
   if (expected == null) {
     session.store.run(IMPORT_MEMORY, { the, of, fact });
@@ -691,13 +729,18 @@ const swap = <Space extends MemorySpace>(
       // Disable including history tracking for performance.
       // Re-enable this if you need to debug cause chains.
       const revisions: Revision<Fact>[] = [];
-      // const revisions = causeChain(session, { the, of });
+      // const revisions = causeChain(
+      //   session,
+      //   { the, of },
+      //   (imported !== 0) ? fact : undefined,
+      // );
       throw Error.conflict(transaction, {
         space: transaction.sub,
         the,
         of,
         expected,
         actual: revision as Revision<Fact>,
+        existsInHistory: imported === 0,
         history: revisions,
       });
     }

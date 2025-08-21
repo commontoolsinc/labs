@@ -173,6 +173,7 @@ test("create memory fails if already exists", store, async (session) => {
     the,
     of: doc,
     expected: null,
+    existsInHistory: false,
     actual: { ...v1, since: 0 },
   });
 });

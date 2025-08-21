@@ -1096,8 +1096,14 @@ export class Replica {
           fact.cause.toString(),
         );
       }
-
-      logger.error(() => ["Transaction failed", result.error]);
+      if (
+        result.error.name === "ConflictError" &&
+        result.error.conflict.existsInHistory
+      ) {
+        logger.info(() => ["Transaction failed (aready exists)", result.error]);
+      } else {
+        logger.error(() => ["Transaction failed", result.error]);
+      }
 
       // Checkout current state of facts so we can compute
       // changes after we update underlying stores.
