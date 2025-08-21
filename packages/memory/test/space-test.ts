@@ -347,6 +347,7 @@ test("fails updating non-existing memory", DB, async (session) => {
     the,
     of: doc,
     expected: refer(v1),
+    existsInHistory: false,
     actual: null,
   });
 });
@@ -382,6 +383,7 @@ test("create memory fails if already exists", DB, async (session) => {
     the,
     of: doc,
     expected: null,
+    existsInHistory: false,
     actual: { ...v1, since: 0 },
   });
 });
@@ -419,6 +421,7 @@ test("update does not confuse the/of", DB, async (session) => {
     the,
     of: malformed.of,
     expected: refer(initial),
+    existsInHistory: false,
     actual: null,
   });
 });
@@ -473,6 +476,7 @@ test("concurrent update fails", DB, async (session) => {
     the,
     of: doc,
     expected: refer(v1),
+    existsInHistory: false,
     actual: { ...v2, since: 1 },
   });
 });
@@ -748,6 +752,7 @@ test(
       the,
       of: doc,
       expected: refer(v2),
+      existsInHistory: false,
       actual: { ...v3, since: 2 },
     });
 
@@ -819,6 +824,7 @@ test(
       the,
       of: doc,
       expected: null,
+      existsInHistory: false,
       actual: { ...v2, since: 1 },
     });
   },
@@ -990,6 +996,7 @@ test("batch updates", DB, async (session) => {
     the,
     of: hi,
     expected: refer(hi1),
+    existsInHistory: true,
     actual: { ...hi2, since: 1 },
   });
 
