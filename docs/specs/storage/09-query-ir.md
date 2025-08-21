@@ -21,10 +21,10 @@ subgraphs):
 
 Two places may follow links while evaluating the same IR node:
 
-1) **Path normalization time**: While consuming the requested `path` tokens,
+1. **Path normalization time**: While consuming the requested `path` tokens,
    encountering a link causes an immediate hop to the target `(id, path)` and
    continues normalization on the target, decrementing `linkBudget`.
-2) **Value evaluation time**: If the current value (post-normalization) is a
+2. **Value evaluation time**: If the current value (post-normalization) is a
    link and the context allows exploring values (e.g., schema `true`), follow to
    the target and continue, also decrementing `linkBudget`.
 

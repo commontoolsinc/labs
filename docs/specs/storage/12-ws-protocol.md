@@ -22,6 +22,7 @@ untied Deliver frames. Initial snapshot completion is signaled by a task/return
 ## Server → Client
 
 - Deliver (untied to any job, grouped by epoch):
+
   ```json
   {
     "type": "deliver",
@@ -38,7 +39,9 @@ untied Deliver frames. Initial snapshot completion is signaled by a task/return
     ]
   }
   ```
+
 - Complete (task/return tied to the job):
+
   ```json
   {
     "the": "task/return",
@@ -51,7 +54,9 @@ untied Deliver frames. Initial snapshot completion is signaled by a task/return
     }
   }
   ```
+
 - Tx result (task/return):
+
   ```json
   { "the": "task/return", "of": "job:<hash>", "is": {/* TxReceipt */} }
   ```

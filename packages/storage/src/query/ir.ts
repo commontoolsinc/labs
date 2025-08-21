@@ -157,7 +157,14 @@ export function compileSchema(
 
   const nodes: IRId[] = [];
   const typeVal = sch.type;
-  const allowed = ["object", "array", "string", "number", "boolean", "null"] as const;
+  const allowed = [
+    "object",
+    "array",
+    "string",
+    "number",
+    "boolean",
+    "null",
+  ] as const;
   type Allowed = typeof allowed[number];
   if (
     typeof typeVal === "string" &&
@@ -190,7 +197,13 @@ export function compileSchema(
     sch.maximum !== undefined ||
     sch.exclusiveMinimum || sch.exclusiveMaximum
   ) {
-    const range: { kind: "Range"; min?: number; max?: number; exclMin?: boolean; exclMax?: boolean } = {
+    const range: {
+      kind: "Range";
+      min?: number;
+      max?: number;
+      exclMin?: boolean;
+      exclMax?: boolean;
+    } = {
       kind: "Range",
       ...(typeof sch.minimum === "number" ? { min: sch.minimum } : {}),
       ...(typeof sch.maximum === "number" ? { max: sch.maximum } : {}),
@@ -203,12 +216,20 @@ export function compileSchema(
   if (
     sch.properties || sch.required || sch.additionalProperties !== undefined
   ) {
-    const required = new Set<string>(Array.isArray(sch.required)
-      ? (sch.required as unknown[]).filter((x): x is string => typeof x === "string")
-      : []);
+    const required = new Set<string>(
+      Array.isArray(sch.required)
+        ? (sch.required as unknown[]).filter((x): x is string =>
+          typeof x === "string"
+        )
+        : [],
+    );
     const props = new Map<string, IRId>();
     if (isObject(sch.properties)) {
-      for (const [k, v] of Object.entries(sch.properties as Record<string, unknown>)) {
+      for (
+        const [k, v] of Object.entries(
+          sch.properties as Record<string, unknown>,
+        )
+      ) {
         props.set(k, pushId(compileSchema(pool, v, { root, memo })));
       }
     }
@@ -229,10 +250,6 @@ export function compileSchema(
             }),
           ),
         };
-           
-          
-           
-          
       }
     }
     nodes.push(
@@ -245,37 +262,35 @@ export function compileSchema(
       nodes.push(
         pushId(intern(pool, {
           kind: "Items",
-          tuple: (sch.items as unknown[]).map((s) => compileSchema(pool, s, { root, memo })),
+          tuple: (sch.items as unknown[]).map((s) =>
+            compileSchema(pool, s, { root, memo })
+          ),
         })),
-       
-      
       );
     } else {
-       
-      
       nodes.push(
         pushId(intern(pool, {
-       
-      
           kind: "Items",
           item: compileSchema(pool, sch.items as JsonSchema, { root, memo }),
         })),
       );
-       
-      
     }
   }
 
   if (Array.isArray(sch.allOf)) {
     nodes.push(pushId(intern(pool, {
       kind: "AllOf",
-      nodes: (sch.allOf as unknown[]).map((s) => compileSchema(pool, s, { root, memo })),
+      nodes: (sch.allOf as unknown[]).map((s) =>
+        compileSchema(pool, s, { root, memo })
+      ),
     })));
   }
   if (Array.isArray(sch.anyOf)) {
     nodes.push(pushId(intern(pool, {
       kind: "AnyOf",
-      nodes: (sch.anyOf as unknown[]).map((s) => compileSchema(pool, s, { root, memo })),
+      nodes: (sch.anyOf as unknown[]).map((s) =>
+        compileSchema(pool, s, { root, memo })
+      ),
     })));
   }
 
