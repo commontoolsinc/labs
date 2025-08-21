@@ -39,7 +39,6 @@ export default recipe<CheckboxSimpleInput, CheckboxSimpleOutput>(
 
           <ct-checkbox
             $checked={enabled}
-            onct-change={toggleHandler}
           >
             Enable Feature
           </ct-checkbox>
