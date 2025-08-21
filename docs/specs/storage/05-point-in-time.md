@@ -59,9 +59,11 @@ WHERE doc_id = ?
 Both fast-path and fallback enforce deterministic ordering by `seq_no`:
 
 - `am_chunks` rows are appended in `ORDER BY seq_no`.
-- Fallback scans `am_change_index` joined to `am_change_blobs` in `ORDER BY i.seq_no`.
+- Fallback scans `am_change_index` joined to `am_change_blobs` in
+  `ORDER BY i.seq_no`.
 
-Given the same `(doc_id, branch_id, upto_seq_no)`, repeated reconstructions return identical Automerge bytes.
+Given the same `(doc_id, branch_id, upto_seq_no)`, repeated reconstructions
+return identical Automerge bytes.
 
 ## Timestamp → Epoch → Branch State
 

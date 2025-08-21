@@ -68,7 +68,12 @@ export type Complete = {
 
 // Command-specific invocations
 import type { JsonSchema } from "../query/ir.ts";
-import type { BranchRef, Heads, ReadAssert, SubmittedChange } from "../types.ts";
+import type {
+  BranchRef,
+  Heads,
+  ReadAssert,
+  SubmittedChange,
+} from "../types.ts";
 
 export type QueryArgs = {
   docId: string;

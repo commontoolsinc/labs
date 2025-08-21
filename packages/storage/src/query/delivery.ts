@@ -2,7 +2,13 @@ import { DocId, EngineEvent, Version } from "../types.ts";
 import { Reader } from "./storage.ts";
 
 export type OutMsg =
-  | { id: string; type: "DOC_UPDATE"; docId: DocId; version: Version; doc: unknown }
+  | {
+    id: string;
+    type: "DOC_UPDATE";
+    docId: DocId;
+    version: Version;
+    doc: unknown;
+  }
   | { id: string; type: "QUERY_SYNCED"; queryId: string; watermark: Version };
 
 export interface Outbox {

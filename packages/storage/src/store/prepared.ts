@@ -72,11 +72,20 @@ type Statements = {
   selectJsonCache: Prepared<SelectJsonCacheParams, SelectJsonCacheRow>;
   upsertJsonCache: Prepared<UpsertJsonCacheParams, never>;
   // PIT
-  selectLatestSnapshot: Prepared<SelectLatestSnapshotParams, SelectLatestSnapshotRow>;
+  selectLatestSnapshot: Prepared<
+    SelectLatestSnapshotParams,
+    SelectLatestSnapshotRow
+  >;
   selectChunksRange: Prepared<SelectChunksRangeParams, SelectChunksRangeRow>;
-  selectChangeBytesRange: Prepared<SelectChangeBytesRangeParams, SelectChangeBytesRangeRow>;
+  selectChangeBytesRange: Prepared<
+    SelectChangeBytesRangeParams,
+    SelectChangeBytesRangeRow
+  >;
   // Heads
-  selectHeadsByDocName: Prepared<SelectHeadsByDocNameParams, SelectHeadsByDocNameRow>;
+  selectHeadsByDocName: Prepared<
+    SelectHeadsByDocNameParams,
+    SelectHeadsByDocNameRow
+  >;
   updateHeads: Prepared<UpdateHeadsParams, never>;
 };
 
