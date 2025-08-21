@@ -21,6 +21,7 @@ export class CTTags extends BaseElement {
     tags: { type: Array },
     readonly: { type: Boolean },
     editingIndex: { type: Number, state: true },
+    originalTagValue: { type: String, state: true },
     newTagValue: { type: String, state: true },
     showingNewInput: { type: Boolean, state: true },
   };
@@ -28,6 +29,7 @@ export class CTTags extends BaseElement {
   declare tags: string[];
   declare readonly: boolean;
   declare editingIndex: number | null;
+  declare originalTagValue: string;
   declare newTagValue: string;
   declare showingNewInput: boolean;
 
@@ -181,6 +183,7 @@ export class CTTags extends BaseElement {
     this.tags = [];
     this.readonly = false;
     this.editingIndex = null;
+    this.originalTagValue = "";
     this.newTagValue = "";
     this.showingNewInput = false;
   }
@@ -190,6 +193,7 @@ export class CTTags extends BaseElement {
     
     event.preventDefault();
     this.editingIndex = index;
+    this.originalTagValue = this.tags[index]; // Store original value
     this.requestUpdate();
 
     // Focus the input after render
@@ -228,11 +232,19 @@ export class CTTags extends BaseElement {
       this.finishEditingTag(index);
     } else if (event.key === "Escape") {
       event.preventDefault();
+      // Restore original value
+      const newTags = [...this.tags];
+      newTags[index] = this.originalTagValue;
+      this.tags = newTags;
       this.editingIndex = null;
       this.requestUpdate();
-    } else if (event.key === "Backspace" && this.tags[index] === "") {
-      event.preventDefault();
-      this.handleTagRemove(index, new MouseEvent("click"));
+    } else if (event.key === "Backspace") {
+      // Check if the input is empty
+      const input = event.target as HTMLInputElement;
+      if (input.value === "") {
+        event.preventDefault();
+        this.handleTagRemove(index, new MouseEvent("click"));
+      }
     }
   }
 
