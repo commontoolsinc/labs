@@ -117,7 +117,7 @@ const setUsername = handler<
   username.set(name);
   users.update({ [id]: name } as any);
   console.log("[setUsername] userId:", id, "name:", name);
-}, { proxy: true });
+});
 
 // User Session Recipe - Individual instance with local state
 export const UserSession = recipe<
