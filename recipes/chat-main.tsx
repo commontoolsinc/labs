@@ -1,8 +1,8 @@
 /// <cts-enable />
 // Teaching example: CTS (CommonTools TypeScript) generates JSON Schemas from the
-// TypeScript types below. The recipes use typed inputs/outputs, while handlers
-// add small JSON Schemas only where mutation is required (e.g. marking fields
-// as cells).
+// TypeScript types below. Recipes use typed inputs/outputs, and handlers take
+// explicit `Cell<T>` parameters; the transform emits the correct asCell schema
+// automatically where mutation is required.
 import {
   Cell,
   cell,
@@ -90,8 +90,8 @@ const setUsername = handler<
   }
 >((event, { user }) => {
   const name = (event.detail?.message ?? "").trim();
-  // Update user cell with new value
-  user.set({ name: name });
+  // Update only the "name" field to avoid clearing other properties
+  user.key("name").set(name);
 });
 
 // User Session Recipe - Individual instance with local state
@@ -101,8 +101,6 @@ export const UserSession = recipe<
 >(
   "User Chat Session",
   ({ messages, user }) => {
-    //const user = cell<User>({ name: "" });
-
     return {
       [NAME]: str`Chat Session` as any,
       [UI]: (
