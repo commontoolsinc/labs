@@ -18,5 +18,3 @@ export class Scheduler {
     for (const cb of this.#cbs) cb(e);
   }
 }
-
-
