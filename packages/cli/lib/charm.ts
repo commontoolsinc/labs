@@ -86,14 +86,45 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
 export async function loadManager(config: SpaceConfig): Promise<CharmManager> {
   const spaceName = parseSpace(config.space);
   const session = await makeSession(config);
+  // Use a const ref object so we can assign later while keeping const binding
+  const charmManagerRef: { current?: CharmManager } = {};
   const runtime = new Runtime({
     storageManager: StorageManager.open({
       as: session.as,
       address: new URL("/api/storage/memory", config.apiUrl),
     }),
     blobbyServerUrl: config.apiUrl,
+    navigateCallback: (target) => {
+      try {
+        const id = charmId(target);
+        if (!id) {
+          console.error("navigateTo: target missing charm id");
+          return;
+        }
+        // Emit greppable line immediately so scripts can capture without waiting
+        console.log(`navigateTo new charm id ${id}`);
+        // Best-effort: ensure charm is present in list
+        runtime.storage.synced().then(async () => {
+          try {
+            const mgr = charmManagerRef.current!;
+            const list = mgr.getCharms().get();
+            const exists = list.some((c) => charmId(c) === id);
+            if (!exists) {
+              await mgr.add([target]);
+            }
+          } catch (e) {
+            console.error("navigateTo add error:", e);
+          }
+        }).catch((_err) => {
+          // ignore; we already emitted the id
+        });
+      } catch (e) {
+        console.error("navigateTo callback error:", e);
+      }
+    },
   });
   const charmManager = new CharmManager(session, runtime);
+  charmManagerRef.current = charmManager;
   await charmManager.synced();
   return charmManager;
 }
