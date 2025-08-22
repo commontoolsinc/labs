@@ -775,3 +775,115 @@ Acceptance criteria:
 - [x] New `keyPath()` used where paths are stringified in runtime code.
 - [x] Tests and `deno task check` pass.
 - [x] Follow-up items tracked for types/migrations/flags.
+
+### Client Library (WS v2)
+
+Goals: Provide a TypeScript client for the storage backend that manages WS v2
+connections per space with epoch-based resume, maintains a client-side Automerge
+store (server-confirmed head + pending local txs), exposes `get`, `subscribe`,
+and a transactional API (`read`, `write`, `commit`, `abort`, `log`), and emits
+scheduler callbacks on effective composed-view changes.
+
+Spec: `docs/specs/storage/20-client-library.md`.
+
+Implementation plan (phased):
+
+- [ ] Client core scaffolding
+  - [ ] Create `packages/storage/src/client/` with modules:
+    - `connection.ts`: per-space socket manager (hello/resume, acks, queue)
+    - `store.ts`: per-space/doc server head + pending chain + composed view
+    - `scheduler.ts`: change notifications
+      `{ space, docId, path, before, after }`
+    - `tx.ts`: transaction object (read/write/log/commit/abort, single-space
+      writes)
+    - `index.ts`: public API (StorageClient, Transaction)
+  - [ ] Types: reuse `src/ws/protocol.ts`; add narrow client types
+
+- [ ] Wire protocol integration
+  - [ ] Connect to `/api/storage/new/v2/:space/ws` (optional Authorization)
+  - [ ] Send `/storage/hello { clientId, sinceEpoch }` on connect/reconnect
+  - [ ] Implement `/storage/get` and `/storage/subscribe` with completion
+        pairing
+  - [ ] Handle `Deliver { snapshot|delta }` and `Ack { epoch }`
+  - [ ] `subscribe(...)` returns a Promise that resolves after initial
+        `complete`
+
+- [ ] Client-side document store
+  - [ ] Track per-doc `server` state: `{ epoch, heads, baseBytes/baseDoc }`
+  - [ ] Maintain `pending` local changes per doc and recompute `composed`
+  - [ ] Incremental recomposition (apply staged changes; avoid full rebuilds)
+  - [ ] Map tx receipts (`newHeads`) to pending entries and prune on success
+  - [ ] Associate a local pending-head marker with each tx's writes for reads
+
+- [ ] Transaction engine
+  - [ ] `read(space, docId, path, nolog=false, validPathOut?)` returns composed
+        view; fills `validPathOut` with longest valid prefix; `undefined` for
+        invalid subpath
+  - [ ] `write(space, docId, path, mutate, validPathOut?)` returns boolean; on
+        first write bind tx to a single space; stage Automerge change at `path`
+  - [ ] `commit()`:
+    - [ ] If no writes: resolve ok; do not contact server (no tx id)
+    - [ ] If only writes: set `allowServerMerge = true`
+    - [ ] Build WSTxRequest with `baseHeads` from server head; send
+          `/storage/tx`
+    - [ ] On `ok`: advance server head/epoch, prune pending for this tx
+    - [ ] On `conflict|rejected`: rollback pending for this tx and cascade
+  - [ ] `abort()` removes staged writes and invalidates the tx
+  - [ ] Read-set tracking and invalidation (conservative doc-level policy)
+  - [ ] Dependency tracking and cascade rejection when depended-upon tx rejects
+  - [ ] New doc genesis: use `createGenesisDoc`/`computeGenesisHead` for first
+        write baseHeads
+
+- [ ] Scheduler notifications
+  - [ ] Register callbacks and emit `{ space, docId, path, before, after }`
+  - [ ] Start coarse (root-only) then refine to changed subpaths
+  - [ ] Expose `synced()` that resolves when all in-flight commits and initial
+        subscriptions (at call time) have settled
+
+- [ ] Testing
+  - [ ] Unit tests (in `packages/storage/test/client/*`):
+    - [ ] Store composition: server head + pending chain → composed view;
+          incremental recomposition
+    - [ ] Path navigation: `read()`/`readView()` with `validPathOut`;
+          `undefined` on invalid subpaths
+    - [ ] Transaction read/write logging: entries include
+          `{ space, docId, path, op }`
+    - [ ] Single-space write enforcement: cross-space writes in one tx throw
+    - [ ] Read-set invalidation: external doc change rejects tx conservatively
+          (doc-level)
+    - [ ] Cascade rejection: tx depending on pending writes rejects when
+          dependency rejects
+    - [ ] Write-only tx: sets `allowServerMerge = true`
+    - [ ] New doc genesis: first write uses
+          `createGenesisDoc`/`computeGenesisHead` heads
+    - [ ] Scheduler events: before/after JSON for changed paths (coarse root
+          acceptable)
+    - [ ] `synced()` resolution: resolves when all pending commits and initial
+          subs (at call time) settle
+    - [ ] Unsubscribe: after unsubscribe, no further scheduler events for that
+          subscription
+  - [ ] Integration tests (spin up `packages/storage/deno.ts`):
+    - [ ] Subscribe promise resolves after initial `complete`; subsequent
+          `readView` reflects delivered state
+    - [ ] Get-only completes with no follow-up delivers; later txs must not
+          deliver to that consumer
+    - [ ] Resume exact vs stale (hello sinceEpoch): exact → no backfill; stale →
+          backfill (snapshot or delta)
+    - [ ] Deliver/ack per epoch; ack recorded and used for resume
+    - [ ] Tx happy path: commit ok; receipts mapped; pending pruned; composed
+          view stable
+    - [ ] Tx conflict/rejected: rollback pending; cascade to dependents;
+          composed view reverts
+    - [ ] New doc creation path: first write based on genesis heads; server
+          accepts and subsequent reads match
+    - [ ] `synced()` end-to-end: with multiple concurrent txs and subs, resolves
+          only after all have settled
+
+- [ ] Developer experience
+  - [ ] README usage examples; strict TS; no `any`
+
+Acceptance:
+
+- [ ] Client passes unit and integration tests under `deno task test`
+- [ ] `deno task integration` (in `packages/storage`) passes
+- [ ] Works against dev server; scheduler callbacks match spec
