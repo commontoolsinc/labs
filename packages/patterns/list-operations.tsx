@@ -26,6 +26,11 @@ interface ListInput {
 
 interface ListOutput extends ListInput {}
 
+const typeTest = handler((_, state: { a: Cell<Item[]>, b: readonly Item[], c: readonly Cell<Item>[], d: Cell<Cell<Item>[]> }) => {
+  const { a, b, c, d } = state;
+  console.log({ a, b, c, d })
+});
+
 const resetList = handler((_, state: { items: Cell<Item[]> }) => {
   state.items.set([{ [ID]: Math.random(), title: "A" }, { [ID]: Math.random(), title: "B" }, { [ID]: Math.random(), title: "C" }, { [ID]: Math.random(), title: "D" }]);
 });
@@ -81,63 +86,71 @@ export default recipe<ListInput, ListOutput>(
     // A good use of lift() is to avoid repeatedly writing derive() inline in the JSX
     const show = lift(printList);
 
+    const x = typeTest({ a: items, b: items, c: items, d: items })
+
     return {
-      [NAME]: title,
+      [NAME]: 'List demo',
       [UI]: (
         <common-vstack gap="md">
           <ct-card>
             <ct-button
+              id="reset-demo"
               onClick={resetList({ items })}
             >
               Reset Demo
             </ct-button>
 
             <ct-button
+              id="delete-first"
               onClick={deleteFirstItem({ items })}
             >
               Delete First Item
             </ct-button>
 
             <ct-button
+              id="delete-last"
               onClick={deleteLastItem({ items })}
             >
               Delete Last Item
             </ct-button>
 
             <ct-button
+              id="delete-all"
               onClick={deleteAllItems({ items })}
             >
               Delete All Items
             </ct-button>
 
             <ct-button
+              id="insert-start"
               onClick={insertItemAtStart({ items })}
             >
               Insert Item at Start
             </ct-button>
 
             <ct-button
+              id="insert-end"
               onClick={insertItemAtEnd({ items })}
             >
               Insert Item at End
             </ct-button>
 
             <ct-button
+              id="shuffle"
               onClick={shuffleItems({ items })}
             >
               Shuffle Items
             </ct-button>
 
 
-            <pre>{show(items)}</pre>
-            <pre>{lowerCase}</pre>
-            <pre>{show(itemsLessThanB)}</pre>
-            <pre>{show(extendedItems)}</pre>
-            <pre>{combinedItems}</pre>
+            <pre id="main-list">{show(items)}</pre>
+            <pre id="lowercase-list">{lowerCase}</pre>
+            <pre id="filtered-list">{show(itemsLessThanB)}</pre>
+            <pre id="extended-list">{show(extendedItems)}</pre>
+            <pre id="combined-list">{combinedItems}</pre>
           </ct-card>
         </common-vstack>
       ),
-      title,
       items,
     };
   },
