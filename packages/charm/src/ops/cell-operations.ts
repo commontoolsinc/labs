@@ -1,4 +1,4 @@
-import { CharmManager } from "../manager.ts";
+import { Charm, CharmManager } from "../manager.ts";
 
 export type CellPath = readonly (string | number)[];
 
@@ -33,7 +33,7 @@ export async function getCharmResult(
     throw new Error(`Charm with ID "${charmId}" not found`);
   }
 
-  let currentValue: any = charmCell.get();
+  let currentValue = charmCell.get();
   for (const segment of path) {
     if (currentValue == null) {
       throw new Error(
@@ -73,7 +73,7 @@ export async function getCharmInput(
   }
 
   const inputCell = manager.getArgument(charmCell);
-  let currentValue: any = inputCell.get();
+  let currentValue = inputCell.get();
   for (const segment of path) {
     if (currentValue == null) {
       throw new Error(
@@ -115,15 +115,17 @@ export async function setCharmInput(
 
   const tx = manager.runtime.edit();
   const inputCell = manager.getArgument(charmCell);
-  
+
   // Build the path with transaction context
   let targetCell = inputCell.withTx(tx);
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
-  
+
   // Set the value
-  targetCell.set(value as any);
+  // FIXME: types
+  // Charm input is not a Charm
+  targetCell.set(value as Charm);
   await tx.commit();
 
   await manager.runtime.idle();
@@ -142,15 +144,17 @@ export async function setCharmResult(
   }
 
   const tx = manager.runtime.edit();
-  
+
   // Build the path with transaction context
   let targetCell = charmCell.withTx(tx);
   for (const segment of path) {
     targetCell = targetCell.key(segment);
   }
-  
+
   // Set the value
-  targetCell.set(value as any);
+  // FIXME: types
+  // Charm input is not a Charm
+  targetCell.set(value as Charm);
   await tx.commit();
 
   await manager.runtime.idle();

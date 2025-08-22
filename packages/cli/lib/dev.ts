@@ -61,7 +61,7 @@ export interface ProcessOptions {
 
 export async function process(
   options: ProcessOptions,
-): Promise<{ output: JsScript; main?: Record<string, any> }> {
+): Promise<{ output: JsScript; main?: Record<string, unknown> }> {
   const filename = options.filename
     ? basename(options.filename)
     : options.output

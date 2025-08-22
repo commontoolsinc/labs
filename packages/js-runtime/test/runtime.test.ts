@@ -71,7 +71,7 @@ describe("Runtime", () => {
     try {
       const { main, exportMap: _ } = execute(compiled);
       expect(main.default).toBe(12);
-    } catch (e: any) {
+    } catch (e: unknown) {
       thrown = e as Error;
     } finally {
       expect(thrown).toBeDefined();
@@ -124,8 +124,8 @@ function execute(
   bundled: JsScript,
   rtBundle?: object,
 ): {
-  main: Record<string, any>;
-  exportMap: Record<string, Record<string, any>>;
+  main: Record<string, unknown>;
+  exportMap: Record<string, Record<string, unknown>>;
 } {
   const runtime = new UnsafeEvalRuntime();
   const isolate = runtime.getIsolate("");
@@ -138,8 +138,8 @@ function execute(
     "exportMap" in result
   ) {
     return {
-      main: result.main as Record<string, any>,
-      exportMap: result.exportMap as Record<string, Record<string, any>>,
+      main: result.main as Record<string, unknown>,
+      exportMap: result.exportMap as Record<string, Record<string, unknown>>,
     };
   }
   throw new Error("Unexpected evaluation result.");

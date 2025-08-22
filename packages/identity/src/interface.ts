@@ -1,6 +1,8 @@
+import { isRecord } from "@commontools/utils/types";
+
 export type DID = `did:${string}:${string}`;
 export type DIDKey = `did:key:${string}`;
-export function isDID(input: any): input is DID {
+export function isDID(input: unknown): input is DID {
   // minimum string of `did:x:y`
   if (
     typeof input === "string" &&
@@ -97,26 +99,26 @@ export type TransferrableInsecureCryptoKeyPair = {
 
 export type KeyPairRaw = CryptoKeyPair | InsecureCryptoKeyPair;
 
-export function isCryptoKeyPair(input: any): input is CryptoKeyPair {
+export function isCryptoKeyPair(input: unknown): input is CryptoKeyPair {
   return !!(
     globalThis.CryptoKey &&
-    typeof input === "object" &&
+    isRecord(input) &&
     input.privateKey instanceof globalThis.CryptoKey &&
     input.publicKey instanceof globalThis.CryptoKey
   );
 }
 
 export function isInsecureCryptoKeyPair(
-  input: any,
+  input: unknown,
 ): input is InsecureCryptoKeyPair {
   return !!(
-    typeof input === "object" &&
+    isRecord(input) &&
     input.privateKey instanceof Uint8Array &&
     input.publicKey instanceof Uint8Array
   );
 }
 
-export function isKeyPairRaw(value: any): value is KeyPairRaw {
+export function isKeyPairRaw(value: unknown): value is KeyPairRaw {
   return isCryptoKeyPair(value) || isInsecureCryptoKeyPair(value);
 }
 

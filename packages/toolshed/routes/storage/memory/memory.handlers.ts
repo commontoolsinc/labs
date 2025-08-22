@@ -37,8 +37,7 @@ export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
         }
       }
     } catch (cause) {
-      const { message, stack, name } =
-        (cause ?? new Error(cause as any)) as Error;
+      const { message, stack, name } = (cause ?? new Error()) as Error;
       span.setAttribute("memory.status", "exception");
       span.setAttribute("error.message", message);
       span.setAttribute("error.type", name);
@@ -75,8 +74,7 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
         }
       }
     } catch (cause) {
-      const { message, stack, name } =
-        (cause ?? new Error(cause as any)) as Error;
+      const { message, stack, name } = (cause ?? new Error()) as Error;
       span.setAttribute("memory.status", "exception");
       span.setAttribute("error.message", message);
       span.setAttribute("error.type", name);

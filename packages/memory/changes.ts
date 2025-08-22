@@ -29,7 +29,7 @@ export const from = <T extends Statement>(statements: Iterable<T>) => {
 };
 
 export const set = (
-  target: Record<string, any>,
+  target: Record<string, unknown>,
   path: string[],
   key: string,
   value: RetractFact | AssertFact | ClaimFact | unknown,
@@ -41,7 +41,8 @@ export const set = (
       target = {};
       cursor[at] = target;
     }
-    cursor = target;
+    // FIXME: typing
+    cursor = target as Record<string, unknown>;
   }
   cursor[key] = value;
 };

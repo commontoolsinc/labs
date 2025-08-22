@@ -4,6 +4,7 @@ import {
   type Cell,
   createBuilder,
   type IExtendedStorageTransaction,
+  Opaque,
   Runtime,
 } from "@commontools/runner";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
@@ -87,9 +88,10 @@ describe("recipes with HTML", () => {
   });
 
   it("works with mapping over a list", async () => {
+    type Item = { title: string; done: boolean };
     const todoList = recipe<{
       title: string;
-      items: { title: string; done: boolean }[];
+      items: Item[];
     }>("todo list", ({ title, items }) => {
       title.setDefault("untitled");
       return {
@@ -100,9 +102,9 @@ describe("recipes with HTML", () => {
           h(
             "ul",
             null,
-            (items as unknown as any).map((item: any, i: any) =>
+            items.map((item: Opaque<Item>, i: Opaque<number>) =>
               h("li", { key: i.toString() }, item.title)
-            ),
+            ) as VNode[],
           ),
         ),
       };
@@ -149,7 +151,7 @@ describe("recipes with HTML", () => {
           return { [UI]: h("div", null, title.name) };
         },
       )({ title });
-      return { [UI]: h("div", null, summaryUI as any) };
+      return { [UI]: h("div", null, summaryUI as VNode) };
     });
 
     const result = runtime.run(
@@ -208,21 +210,24 @@ describe("recipes with HTML", () => {
       { test: 456, ok: true },
     ];
 
-    const nestedMapRecipe = recipe<any[]>("nested map recipe", (data) => ({
-      [UI]: h(
-        "div",
-        null,
-        (data as unknown as any).map((row: any) =>
-          h(
-            "ul",
-            null,
-            (entries(row) as unknown as any).map(([k, v]: any) =>
-              h("li", null, [k, ": ", v])
-            ),
-          )
+    const nestedMapRecipe = recipe<Record<string, unknown>[]>(
+      "nested map recipe",
+      (data) => ({
+        [UI]: h(
+          "div",
+          null,
+          data.map((row: Opaque<Record<string, unknown>>) =>
+            h(
+              "ul",
+              null,
+              entries(row).map((input: Opaque<[string, unknown]>) =>
+                h("li", null, [input[0] as string, ": ", input[1] as VNode])
+              ) as VNode[],
+            )
+          ) as VNode[],
         ),
-      ),
-    }));
+      }),
+    );
 
     const result = runtime.run(
       tx,

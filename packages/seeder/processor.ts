@@ -7,12 +7,9 @@ import type {
 import { Verifier } from "./verifier.ts";
 import { CharmManager } from "@commontools/charm";
 import { CommandType } from "./interfaces.ts";
-import {
-  castNewRecipe,
-  createDataCharm,
-  processWorkflow,
-} from "@commontools/charm";
+import { createDataCharm, processWorkflow } from "@commontools/charm";
 import { getEntityId } from "@commontools/runner";
+import { isRecord } from "@commontools/utils/types";
 
 export class Processor {
   private cache: boolean;
@@ -78,14 +75,16 @@ export class Processor {
           prevCharmId,
         });
         results.push(result);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(`Error processing step`, { step, scenario, error });
         failed = true;
         results.push({
           id: "error",
           prompt: step.prompt,
           status: "FAIL",
-          summary: error && error.message ? error.message : error,
+          summary: String(
+            isRecord(error) && error.message ? error.message : error,
+          ),
         });
         continue;
       }

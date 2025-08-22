@@ -8,19 +8,7 @@ import type {
   SyncTransactionsRoute,
 } from "./plaid-oauth.routes.ts";
 import {
-  createBackgroundIntegrationErrorResponse,
-  createBackgroundIntegrationSuccessResponse,
-  createExchangeErrorResponse,
-  createExchangeSuccessResponse,
-  createLinkTokenErrorResponse,
-  createLinkTokenSuccessResponse,
   createPlaidClient,
-  createRefreshErrorResponse,
-  createRefreshSuccessResponse,
-  createRemoveErrorResponse,
-  createRemoveSuccessResponse,
-  createSyncErrorResponse,
-  createSyncSuccessResponse,
   getAuthData,
   getPlaidItem,
   type PlaidItem,
@@ -35,7 +23,14 @@ import {
 } from "@commontools/runner";
 import { runtime } from "@/index.ts";
 import env from "@/env.ts";
-import { CountryCode } from "plaid";
+import {
+  CountryCode,
+  LinkTokenCreateRequest,
+  PlaidError,
+  Transaction,
+  TransactionsSyncRequest,
+} from "plaid";
+import { isRecord } from "@commontools/utils/types";
 
 /**
  * Plaid Create Link Token Handler
@@ -52,7 +47,7 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
 
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
-      return createLinkTokenErrorResponse(c, "Missing authCellId in request");
+      return c.json({ error: "Missing authCellId in request" }, 400);
     }
 
     const plaidClient = createPlaidClient();
@@ -61,7 +56,7 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
     const userId = "commontools-user";
 
     // Create link token request
-    const linkTokenRequest: any = {
+    const linkTokenRequest: LinkTokenCreateRequest = {
       user: {
         client_user_id: userId,
       },
@@ -86,12 +81,12 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
       linkToken: link_token,
       expiration,
     });
-  } catch (error: any) {
+  } catch (error) {
     logger.error({ error }, "Failed to create link token");
 
     // Extract Plaid error details if available
-    if (error.response?.data) {
-      const plaidError = error.response.data;
+    if (isRecord(error) && isRecord(error.response) && error.response.data) {
+      const plaidError = error.response.data as PlaidError;
       return c.json({
         error: plaidError.error_message || "Failed to create link token",
         error_code: plaidError.error_code,
@@ -100,10 +95,11 @@ export const createLinkToken: AppRouteHandler<CreateLinkTokenRoute> = async (
       }, 400);
     }
 
-    return createLinkTokenErrorResponse(
-      c,
-      error instanceof Error ? error.message : "Failed to create link token",
-    );
+    return c.json({
+      error: error instanceof Error
+        ? error.message
+        : "Failed to create link token",
+    }, 400) as any;
   }
 };
 
@@ -120,9 +116,9 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
 
     if (!payload.publicToken || !payload.authCellId) {
       logger.error("Missing required fields in request payload");
-      return createExchangeErrorResponse(
-        c,
-        "Missing publicToken or authCellId in request",
+      return c.json(
+        { error: "Missing publicToken or authCellId in request" },
+        400,
       );
     }
 
@@ -224,13 +220,21 @@ export const exchangeToken: AppRouteHandler<ExchangeTokenRoute> = async (c) => {
       );
     }
 
-    return createExchangeSuccessResponse(c, item_id);
+    return c.json(
+      {
+        success: true,
+        message: "Token exchanged successfully",
+        itemId: item_id,
+      },
+      200,
+    );
   } catch (error) {
     logger.error({ error }, "Failed to exchange token");
-    return createExchangeErrorResponse(
-      c,
-      error instanceof Error ? error.message : "Failed to exchange token",
-    );
+    return c.json({
+      error: error instanceof Error
+        ? error.message
+        : "Failed to exchange token",
+    }, 400);
   }
 };
 
@@ -249,7 +253,10 @@ export const refreshAccounts: AppRouteHandler<RefreshAccountsRoute> = async (
 
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
-      return createRefreshErrorResponse(c, "Missing authCellId in request");
+      return c.json(
+        { success: false, error: "Missing authCellId in request" },
+        400,
+      ) as any;
     }
 
     const plaidClient = createPlaidClient();
@@ -263,7 +270,14 @@ export const refreshAccounts: AppRouteHandler<RefreshAccountsRoute> = async (
 
     if (itemsToRefresh.length === 0) {
       logger.warn("No items found to refresh");
-      return createRefreshSuccessResponse(c, 0);
+      return c.json(
+        {
+          success: true,
+          message: "No items found to refresh",
+          updatedItems: 0,
+        },
+        200,
+      );
     }
 
     // Refresh each item
@@ -312,13 +326,22 @@ export const refreshAccounts: AppRouteHandler<RefreshAccountsRoute> = async (
       }
     }
 
-    return createRefreshSuccessResponse(c, updatedItems);
+    return c.json(
+      {
+        success: true,
+        message: "Accounts refreshed successfully",
+        updatedItems,
+      },
+      200,
+    );
   } catch (error) {
     logger.error({ error }, "Failed to refresh accounts");
-    return createRefreshErrorResponse(
-      c,
-      error instanceof Error ? error.message : "Failed to refresh accounts",
-    );
+    return c.json({
+      success: false,
+      error: error instanceof Error
+        ? error.message
+        : "Failed to refresh accounts",
+    }, 400);
   }
 };
 
@@ -337,13 +360,16 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
 
     if (!payload.authCellId) {
       logger.error("Missing authCellId in request payload");
-      return createSyncErrorResponse(c, "Missing authCellId in request");
+      return c.json({
+        success: false,
+        error: "Missing authCellId in request",
+      }, 400);
     }
 
     const plaidClient = createPlaidClient();
     const authData = await getAuthData(payload.authCellId);
-    const allAddedTransactions: any[] = [];
-    const allModifiedTransactions: any[] = [];
+    const allAddedTransactions: Transaction[] = [];
+    const allModifiedTransactions: Transaction[] = [];
     const allRemovedIds: string[] = [];
     let hasMoreOverall = false;
 
@@ -354,7 +380,17 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
 
     if (itemsToSync.length === 0) {
       logger.warn("No items found to sync");
-      return createSyncSuccessResponse(c, 0, 0, 0, false);
+      return c.json(
+        {
+          success: true,
+          message: "Transactions synced successfully",
+          added: 0,
+          modified: 0,
+          removed: 0,
+          hasMore: false,
+        },
+        200,
+      ) as any;
     }
 
     // Sync transactions for each item
@@ -365,7 +401,7 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
 
         // Continue syncing until no more updates
         while (hasMore) {
-          const syncRequest: any = {
+          const syncRequest: TransactionsSyncRequest = {
             access_token: item.accessToken,
             count: payload.count || 500,
           };
@@ -386,7 +422,7 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
           // Collect the actual transaction data
           allAddedTransactions.push(...added);
           allModifiedTransactions.push(...modified);
-          allRemovedIds.push(...removed.map((r: any) => r.transaction_id));
+          allRemovedIds.push(...removed.map((r) => r.transaction_id));
 
           cursor = next_cursor;
           hasMore = has_more;
@@ -433,10 +469,12 @@ export const syncTransactions: AppRouteHandler<SyncTransactionsRoute> = async (
     }, 200);
   } catch (error) {
     logger.error({ error }, "Failed to sync transactions");
-    return createSyncErrorResponse(
-      c,
-      error instanceof Error ? error.message : "Failed to sync transactions",
-    );
+    return c.json({
+      success: false,
+      error: error instanceof Error
+        ? error.message
+        : "Failed to sync transactions",
+    }, 400);
   }
 };
 
@@ -453,10 +491,10 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
 
     if (!payload.authCellId || !payload.itemId) {
       logger.error("Missing required fields in request payload");
-      return createRemoveErrorResponse(
-        c,
-        "Missing authCellId or itemId in request",
-      );
+      return c.json({
+        success: false,
+        error: "Missing authCellId or itemId in request",
+      }, 400) as any;
     }
 
     const plaidClient = createPlaidClient();
@@ -465,7 +503,10 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
     const item = await getPlaidItem(payload.authCellId, payload.itemId);
     if (!item) {
       logger.warn({ itemId: payload.itemId }, "Item not found");
-      return createRemoveErrorResponse(c, "Item not found");
+      return c.json({
+        success: false,
+        error: "Item not found",
+      }, 400) as any;
     }
 
     // Remove from Plaid
@@ -483,13 +524,19 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
     // Remove from auth cell
     await removePlaidItem(payload.authCellId, payload.itemId);
 
-    return createRemoveSuccessResponse(c);
+    return c.json(
+      {
+        success: true,
+        message: "Item removed successfully",
+      },
+      200,
+    );
   } catch (error) {
     logger.error({ error }, "Failed to remove item");
-    return createRemoveErrorResponse(
-      c,
-      error instanceof Error ? error.message : "Failed to remove item",
-    );
+    return c.json({
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to remove item",
+    }, 400) as any;
   }
 };
 
@@ -500,8 +547,6 @@ export const removeItem: AppRouteHandler<RemoveItemRoute> = async (c) => {
 export const backgroundIntegration: AppRouteHandler<
   BackgroundIntegrationRoute
 > = async (c) => {
-  const logger = c.get("logger");
-
   try {
     const payload = await c.req.json();
 
@@ -511,13 +556,11 @@ export const backgroundIntegration: AppRouteHandler<
       integration: payload.integration,
       runtime,
     });
-
-    return createBackgroundIntegrationSuccessResponse(c, "success");
+    return c.json({ success: true, message: "success" });
   } catch (error) {
-    logger.error({ error }, "Failed to process background integration request");
-    return createBackgroundIntegrationErrorResponse(
-      c,
-      "Failed to process background integration request",
-    );
+    return c.json({
+      success: false,
+      error: "Failed to process background integration request",
+    }, 400) as any;
   }
 };

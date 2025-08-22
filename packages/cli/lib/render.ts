@@ -45,10 +45,10 @@ export function render(value: unknown, { json }: { json?: boolean } = {}) {
 }
 
 // Helper function to safely stringify objects with circular references
-export function safeStringify(obj: any, maxDepth = 8): string {
+export function safeStringify(obj: unknown, maxDepth = 8): string {
   const seen = new WeakSet();
 
-  const stringify = (value: any, depth = 0): any => {
+  const stringify = (value: unknown, depth = 0): unknown => {
     if (depth > maxDepth) {
       return "<max depth reached>";
     }
@@ -67,7 +67,7 @@ export function safeStringify(obj: any, maxDepth = 8): string {
       return value.map((item) => stringify(item, depth + 1));
     }
 
-    const result: any = {};
+    const result: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
       result[key] = stringify(val, depth + 1);
     }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
-import { h, UI } from "@commontools/api";
+import { h, UI, VNode } from "@commontools/api";
 import { render, renderImpl } from "../src/render.ts";
 import * as assert from "./assert.ts";
 import { JSDOM } from "jsdom";
@@ -79,7 +79,7 @@ describe("renderImpl", () => {
       children: [],
     };
     const parent = document.createElement("div");
-    const cancel = renderImpl(parent, invalidVNode as any);
+    const cancel = renderImpl(parent, invalidVNode as VNode);
     assert.equal(parent.children.length, 0);
     cancel();
   });
@@ -104,7 +104,7 @@ describe("renderImpl", () => {
       [UI]: nestedVNode,
     };
     const parent = document.createElement("div");
-    const cancel = renderImpl(parent, vdomWithUI as any);
+    const cancel = renderImpl(parent, vdomWithUI);
     // Only the nestedVNode should be rendered
     const span = parent.querySelector("span#nested");
     const div = parent.querySelector("div#top");
@@ -117,15 +117,16 @@ describe("renderImpl", () => {
 });
 
 describe("serializableEvent", () => {
-  function isPlainSerializableObject(obj: any): boolean {
+  function isPlainSerializableObject(obj: unknown): boolean {
     if (typeof obj !== "object" || obj === null) return true; // primitives are serializable
     if (Array.isArray(obj)) {
       return obj.every(isPlainSerializableObject);
     }
     if (Object.getPrototypeOf(obj) !== Object.prototype) return false;
     for (const key in obj) {
-      if (typeof obj[key] === "function") return false;
-      if (!isPlainSerializableObject(obj[key])) return false;
+      const value = (obj as Record<string, unknown>)[key];
+      if (typeof value === "function") return false;
+      if (!isPlainSerializableObject(value)) return false;
     }
     return true;
   }
@@ -141,7 +142,7 @@ describe("serializableEvent", () => {
     );
     // Should not include non-allow-listed fields
     assert.equal(
-      "timeStamp" in (result as any),
+      "timeStamp" in (result as object),
       false,
       "Should not include timeStamp",
     );
@@ -174,7 +175,7 @@ describe("serializableEvent", () => {
       "Result should be a plain serializable object",
     );
     assert.equal(
-      "timeStamp" in (result as any),
+      "timeStamp" in (result as object),
       false,
       "Should not include timeStamp",
     );
@@ -205,7 +206,7 @@ describe("serializableEvent", () => {
       "Result should be a plain serializable object",
     );
     assert.equal(
-      "timeStamp" in (result as any),
+      "timeStamp" in (result as object),
       false,
       "Should not include timeStamp",
     );
@@ -220,7 +221,7 @@ describe("serializableEvent", () => {
       inputType: "insertText",
     });
     Object.defineProperty(event, "target", { value: input });
-    const result = serializableEvent(event);
+    const result = serializableEvent(event) as object;
     assert.matchObject(result, {
       type: "input",
       data: "h",
@@ -233,12 +234,13 @@ describe("serializableEvent", () => {
       "Result should be a plain serializable object",
     );
     assert.equal(
-      "timeStamp" in (result as any),
+      "timeStamp" in result,
       false,
       "Should not include timeStamp",
     );
     assert.equal(
-      (result as any).target && "id" in (result as any).target,
+      !!("target" in result && typeof result.target === "object" &&
+        result.target && "id" in result.target),
       false,
       "Should not include id on target",
     );
@@ -246,7 +248,7 @@ describe("serializableEvent", () => {
 
   it("serializes a CustomEvent with detail", () => {
     const event = new CustomEvent("custom", { detail: { foo: [42, 43] } });
-    const result = serializableEvent(event);
+    const result = serializableEvent(event) as object;
     assert.matchObject(result, {
       type: "custom",
       detail: { foo: [42, 43] },
@@ -257,7 +259,7 @@ describe("serializableEvent", () => {
       "Result should be a plain serializable object",
     );
     assert.equal(
-      "timeStamp" in (result as any),
+      "timeStamp" in result,
       false,
       "Should not include timeStamp",
     );
@@ -285,7 +287,7 @@ describe("serializableEvent", () => {
     option3.selected = true;
     const event = new Event("change");
     Object.defineProperty(event, "target", { value: select });
-    const result = serializableEvent(event);
+    const result = serializableEvent(event) as object;
     assert.matchObject(result, {
       type: "change",
       target: {
@@ -301,12 +303,13 @@ describe("serializableEvent", () => {
       "Result should be a plain serializable object",
     );
     assert.equal(
-      "timeStamp" in (result as any),
+      "timeStamp" in result,
       false,
       "Should not include timeStamp",
     );
     assert.equal(
-      (result as any).target && "id" in (result as any).target,
+      !!("target" in result && typeof result.target === "object" &&
+        result.target && "id" in result.target),
       false,
       "Should not include id on target",
     );
@@ -329,7 +332,7 @@ describe("serializableEvent", () => {
     option2.selected = true;
     const event = new Event("change");
     Object.defineProperty(event, "target", { value: select });
-    const result = serializableEvent(event);
+    const result = serializableEvent(event) as object;
     assert.matchObject(result, {
       type: "change",
       target: {
@@ -344,12 +347,13 @@ describe("serializableEvent", () => {
       "Result should be a plain serializable object",
     );
     assert.equal(
-      "timeStamp" in (result as any),
+      "timeStamp" in result,
       false,
       "Should not include timeStamp",
     );
     assert.equal(
-      (result as any).target && "id" in (result as any).target,
+      !!("target" in result && typeof result.target === "object" &&
+        result.target && "id" in result.target),
       false,
       "Should not include id on target",
     );

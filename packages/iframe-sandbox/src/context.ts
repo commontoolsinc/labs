@@ -1,36 +1,47 @@
 import { TaskPerform } from "./ipc.ts";
 import { CommonIframeSandboxElement } from "./common-iframe-sandbox.ts";
 
+// This is typically an `Action` (possibly a new or old implementation),
+// but type it as unknown, can handle in handler.
+export type Receipt = unknown;
+// This is typically a Cell, but can be anything passed into
+// an element attribute.
+export type Context = unknown;
+
 // An `IframeContextHandler` is used by consumers to
 // register how read/writing values from frames are handled.
 export interface IframeContextHandler {
-  read(element: CommonIframeSandboxElement, context: any, key: string): any;
+  read(
+    element: CommonIframeSandboxElement,
+    context: Context,
+    key: string,
+  ): unknown;
   write(
     element: CommonIframeSandboxElement,
-    context: any,
+    context: Context,
     key: string,
-    value: any,
+    value: unknown,
   ): void;
   subscribe(
     element: CommonIframeSandboxElement,
-    context: any,
+    context: Context,
     key: string,
-    callback: (key: string, value: any) => void,
+    callback: (key: string, value: unknown) => void,
     doNotSendMyDataBack: boolean,
-  ): any;
+  ): Receipt;
   unsubscribe(
     element: CommonIframeSandboxElement,
-    context: any,
-    receipt: any,
+    context: Context,
+    receipt: Receipt,
   ): void;
   onLLMRequest(
     element: CommonIframeSandboxElement,
-    context: any,
+    context: Context,
     payload: string,
   ): Promise<object>;
   onReadWebpageRequest(
     element: CommonIframeSandboxElement,
-    context: any,
+    context: Context,
     payload: string,
   ): Promise<object>;
 

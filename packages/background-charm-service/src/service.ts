@@ -5,7 +5,7 @@ import {
   BG_SYSTEM_SPACE_ID,
   type BGCharmEntry,
 } from "./schema.ts";
-import { getBGCharms, log } from "./utils.ts";
+import { getBGCharms } from "./utils.ts";
 import { SpaceManager } from "./space-manager.ts";
 import { useCancelGroup } from "@commontools/runner";
 
@@ -49,7 +49,7 @@ export class BackgroundCharmService {
     await this.runtime.storage.synced();
 
     if (this.isRunning) {
-      log("Service is already running");
+      console.log("Service is already running");
       return;
     }
 
@@ -60,7 +60,7 @@ export class BackgroundCharmService {
   stop() {
     // FIXME(ja): stop listening to the charms cell ?
     if (!this.isRunning) {
-      log("Service is not running");
+      console.log("Service is not running");
       return;
     }
 
@@ -75,7 +75,7 @@ export class BackgroundCharmService {
   // array / partial results!
   private ensureCharms(charms: readonly Cell<BGCharmEntry>[]) {
     if (!this.isRunning) {
-      log("ignoring charms update because service asked to stop");
+      console.log("ignoring charms update because service asked to stop");
       return;
     }
 
@@ -85,7 +85,7 @@ export class BackgroundCharmService {
     const charmContents = charms.map((c) => c.get()).filter(Boolean);
     const enabledCharms = charmContents.filter((c) => !c.disabledAt);
     const dids = new Set(enabledCharms.map((c) => c.space));
-    log(`monitoring ${dids.size} spaces`);
+    console.log(`monitoring ${dids.size} spaces`);
 
     const [cancel, addCancel] = useCancelGroup();
 

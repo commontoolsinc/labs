@@ -1,6 +1,7 @@
 import {
   type Cell,
   Classification,
+  DocImpl,
   EntityId,
   getEntityId,
   type IExtendedStorageTransaction,
@@ -35,7 +36,9 @@ export function charmId(charm: Cell<Charm>): string | undefined {
 
 export type Charm = {
   [NAME]?: string;
-  [UI]?: any;
+  [UI]?: unknown;
+  // FIXME: types
+  // Turning this into `unknown` causes cascading type failures.
   [key: string]: any;
 };
 
@@ -123,7 +126,7 @@ export class CharmManager {
   /**
    * Promise resolved when the charm manager gets the charm list.
    */
-  ready: Promise<any>;
+  ready: Promise<void>;
 
   constructor(
     private session: Session,
@@ -151,7 +154,7 @@ export class CharmManager {
       this.syncCharms(this.charms),
       this.syncCharms(this.pinnedCharms),
       this.syncCharms(this.trashedCharms),
-    ]);
+    ]).then(() => {});
   }
 
   getSpace(): MemorySpace {
@@ -292,55 +295,6 @@ export class CharmManager {
     return cell.asSchema(privilegedSchema).sync();
   }
 
-  // copies the recipe for a charm but clones the argument cell
-  // creating a branch of the data disconnected from its source
-  public async duplicate(charm: Charm) {
-    // Get the ID of the charm to duplicate
-    const id = getEntityId(charm);
-    if (!id) throw new Error("Cannot duplicate charm: missing ID");
-
-    // Get the recipe ID from the source cell
-    const sourceCell = charm.getSourceCell(processSchema);
-    const recipeId = sourceCell?.get()?.[TYPE];
-    if (!recipeId) throw new Error("Cannot duplicate charm: missing recipe ID");
-
-    // Get the recipe
-    const recipe = await this.runtime.recipeManager.loadRecipe(
-      recipeId,
-      this.space,
-    );
-    if (!recipe) throw new Error("Cannot duplicate charm: recipe not found");
-
-    // Get the original inputs
-    const originalInputs = sourceCell?.key("argument").get();
-
-    // Create a new deep clone of the inputs
-    const duplicateInputs = JSON.parse(JSON.stringify(originalInputs));
-
-    // Create a new charm with the cloned inputs
-    const duplicatedCharm = await this.runPersistent(
-      recipe,
-      duplicateInputs,
-      { relation: "duplicate", origin: id },
-    );
-
-    // Add a lineage record to track the relationship to the original
-    const lineage = duplicatedCharm.getSourceCell(charmSourceCellSchema)?.key(
-      "lineage",
-    );
-    if (lineage) {
-      lineage.push({
-        charm: charm,
-        relation: "duplicate",
-        timestamp: Date.now(),
-      });
-    }
-
-    await this.add([duplicatedCharm]);
-
-    return duplicatedCharm;
-  }
-
   // FIXME(ja): if we are already running the charm, can we just return it?
   // if a charm has sideeffects we might multiple versions...
   async get<T = Charm>(
@@ -444,7 +398,7 @@ export class CharmManager {
       if (!argumentCell) return result;
 
       // Get the raw argument value
-      let argumentValue: any;
+      let argumentValue;
 
       try {
         argumentValue = argumentCell.getRaw();
@@ -485,7 +439,7 @@ export class CharmManager {
 
       // Helper function to follow alias chain to its source
       const followSourceToResultRef = (
-        cell: Cell<any>,
+        cell: Cell<unknown>,
         visited = new Set<string>(),
         depth = 0,
       ): EntityId | undefined => {
@@ -506,10 +460,10 @@ export class CharmManager {
           try {
             // If document has a sourceCell, follow it
             const value = cell.getRaw();
-            if (value && typeof value === "object") {
+            if (isRecord(value)) {
               if (value.sourceCell) {
                 return followSourceToResultRef(
-                  value.sourceCell.asCell(),
+                  (value.sourceCell as DocImpl<unknown>).asCell(),
                   visited,
                   depth + 1,
                 );
@@ -535,9 +489,9 @@ export class CharmManager {
 
       // Find references in the argument structure
       const processValue = (
-        value: any,
-        parent: Cell<any>,
-        visited = new Set<any>(), // Track objects directly, not string representations
+        value: unknown,
+        parent: Cell<unknown>,
+        visited = new Set<unknown>(), // Track objects directly, not string representations
         depth = 0,
       ) => {
         if (!isRecord(value) || depth > maxDepth) return;
@@ -663,7 +617,7 @@ export class CharmManager {
 
     // Helper function to follow alias chain to its source
     const followSourceToResultRef = (
-      cell: Cell<any>,
+      cell: Cell<unknown>,
       visited = new Set<string>(),
       depth = 0,
     ): URI | undefined => {
@@ -677,16 +631,16 @@ export class CharmManager {
 
       // If document has a sourceCell, follow it
       const value = cell.getRaw();
-      if (value && typeof value === "object" && value.sourceCell) {
+      if (isRecord(value) && value.sourceCell) {
         return followSourceToResultRef(
-          value.sourceCell.asCell(),
+          (value.sourceCell as DocImpl<unknown>).asCell(),
           visited,
           depth + 1,
         );
       }
 
       // If we've reached the end and have a resultRef, return it
-      if (value && typeof value === "object" && value.resultRef) {
+      if (isRecord(value) && value.resultRef) {
         return parseLink(value.resultRef, cell)?.id;
       }
 
@@ -695,9 +649,9 @@ export class CharmManager {
 
     // Helper to check if a document refers to our target charm
     const checkRefersToTarget = (
-      value: any,
-      parent: Cell<any>,
-      visited = new Set<any>(), // Track objects directly, not string representations
+      value: unknown,
+      parent: Cell<unknown>,
+      visited = new Set<unknown>(), // Track objects directly, not string representations
       depth = 0,
     ): boolean => {
       if (!isRecord(value) || depth > maxDepth) return false;
@@ -831,7 +785,7 @@ export class CharmManager {
 
   // Return Cell with argument content of already loaded recipe according
   // to the schema of the charm.
-  getArgument<T = any>(
+  getArgument<T = unknown>(
     charm: Cell<Charm | T>,
   ): Cell<T> {
     const source = charm.getSourceCell(processSchema);
@@ -905,8 +859,8 @@ export class CharmManager {
 
   async runPersistent(
     recipe: Recipe | Module,
-    inputs?: any,
-    cause?: any,
+    inputs?: unknown,
+    cause?: unknown,
     llmRequestId?: string,
   ): Promise<Cell<Charm>> {
     await this.runtime.idle();
@@ -978,7 +932,7 @@ export class CharmManager {
     return recipe;
   }
 
-  async sync(entity: Cell<any>, waitForStorage: boolean = false) {
+  async sync(entity: Cell<unknown>, waitForStorage: boolean = false) {
     await entity.sync();
   }
 
@@ -1014,7 +968,10 @@ export class CharmManager {
     const tx = this.runtime.edit();
 
     // Navigate to the source path
-    let sourceResultCell = sourceCell.withTx(tx);
+    // Cannot navigate `Cell<unknown>`
+    // FIXME: types
+    // deno-lint-ignore no-explicit-any
+    let sourceResultCell = sourceCell.withTx(tx) as Cell<any>;
     // For charms, manager.get() already returns the result cell, so no need to add "result"
 
     for (const segment of sourcePath) {
@@ -1027,7 +984,10 @@ export class CharmManager {
       throw new Error("Target path cannot be empty");
     }
 
-    let targetInputCell = targetCell.withTx(tx);
+    // Cannot navigate `Cell<unknown>`
+    // FIXME: types
+    // deno-lint-ignore no-explicit-any
+    let targetInputCell = targetCell.withTx(tx) as Cell<any>;
     if (targetIsCharm) {
       // For charms, target fields are in the source cell's argument
       const sourceCell = targetCell.getSourceCell(processSchema);
@@ -1058,7 +1018,7 @@ async function getCellByIdOrCharm(
   manager: CharmManager,
   cellId: string,
   label: string,
-): Promise<{ cell: Cell<any>; isCharm: boolean }> {
+): Promise<{ cell: Cell<unknown>; isCharm: boolean }> {
   try {
     // Try to get as a charm first
     const charm = await manager.get(cellId, true);

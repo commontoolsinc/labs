@@ -123,7 +123,7 @@ const bindChildren = (
     key: string,
   ): { node: ChildNode; cancel: Cancel } => {
     let currentNode: ChildNode | null = null;
-    const cancel = effect(child, (childValue: any) => {
+    const cancel = effect(child, (childValue) => {
       let newRendered: { node: ChildNode; cancel: Cancel };
       if (isVNode(childValue)) {
         const [childElement, childCancel] = renderNode(childValue);
@@ -362,12 +362,12 @@ const allowListedEventTargetProperties = [
  * @returns The serializable event.
  */
 export function serializableEvent<T>(event: Event): T {
-  const eventObject: Record<string, any> = {};
+  const eventObject: Record<string, unknown> = {};
   for (const property of allowListedEventProperties) {
     eventObject[property] = event[property as keyof Event];
   }
 
-  const targetObject: Record<string, any> = {};
+  const targetObject: Record<string, unknown> = {};
   for (const property of allowListedEventTargetProperties) {
     targetObject[property] = event.target?.[property as keyof EventTarget];
   }

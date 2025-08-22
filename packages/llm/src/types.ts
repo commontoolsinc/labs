@@ -1,3 +1,4 @@
+import { isObject, isRecord } from "@commontools/utils/types";
 import { LlmPrompt } from "./prompts/prompting.ts";
 
 export const DEFAULT_MODEL_NAME: ModelName =
@@ -54,42 +55,45 @@ export interface LLMGenerateObjectResponse {
 }
 
 function isArrayOf<T>(
-  callback: (data: any) => boolean,
-  input: any,
+  callback: (data: unknown) => boolean,
+  input: unknown,
 ): input is T[] {
   return Array.isArray(input) &&
     input.map((value) => callback(value)).every(Boolean);
 }
 
-export function isLLMRequestMetadata(input: any): input is LLMRequestMetadata {
-  return input && typeof input === "object" &&
+export function isLLMRequestMetadata(
+  input: unknown,
+): input is LLMRequestMetadata {
+  return isRecord(input) && !Array.isArray(input) &&
     Object.entries(input).every(([k, v]) =>
       typeof k === "string" &&
       (v === undefined || typeof v === "string" || typeof v === "object")
     );
 }
 
-export function isLLMTypedContent(input: any): input is LLMTypedContent {
-  return input && typeof input === "object" &&
+export function isLLMTypedContent(input: unknown): input is LLMTypedContent {
+  return isRecord(input) && !Array.isArray(input) &&
     (input.type === "text" || input.type === "image") &&
     typeof input.data === "string";
 }
 
-export function isLLMContent(input: any): input is LLMContent {
+export function isLLMContent(input: unknown): input is LLMContent {
   return typeof input === "string"
     ? true
     : isArrayOf<LLMTypedContent>(isLLMTypedContent, input);
 }
 
-export function isLLMMessage(input: any): input is LLMMessage {
-  return input && (input.role === "user" || input.role === "assistant") &&
+export function isLLMMessage(input: unknown): input is LLMMessage {
+  return isRecord(input) && !Array.isArray(input) &&
+    (input.role === "user" || input.role === "assistant") &&
     isLLMContent(input.content);
 }
 
 export const isLLMMessages = (isArrayOf<LLMMessage>).bind(null, isLLMMessage);
 
-export function isLLMRequest(input: any): input is LLMRequest {
-  return input && typeof input === "object" &&
+export function isLLMRequest(input: unknown): input is LLMRequest {
+  return isRecord(input) && !Array.isArray(input) &&
     typeof input.model === "string" && isLLMMessages(input.messages) &&
     ("cache" in input) &&
     (!("system" in input) || typeof input.system === "string") &&

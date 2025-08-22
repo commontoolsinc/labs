@@ -1,4 +1,5 @@
 import { isKeyPairRaw, KeyPairRaw } from "@commontools/identity";
+import { isRecord } from "@commontools/utils/types";
 
 export enum WorkerIPCMessageType {
   Initialize = "initialize",
@@ -12,8 +13,10 @@ export type InitializationData = {
   rawIdentity: KeyPairRaw;
 };
 
-export function isInitializationData(value: any): value is InitializationData {
-  return !!(value && typeof value === "object" &&
+export function isInitializationData(
+  value: unknown,
+): value is InitializationData {
+  return !!(isRecord(value) &&
     typeof value.did === "string" &&
     typeof value.toolshedUrl === "string" &&
     isKeyPairRaw(value.rawIdentity));
@@ -23,8 +26,8 @@ export type RunData = {
   charmId: string;
 };
 
-export function isRunData(value: any): value is RunData {
-  return !!(value && typeof value === "object" &&
+export function isRunData(value: unknown): value is RunData {
+  return !!(isRecord(value) &&
     typeof value.charmId === "string");
 }
 
@@ -41,8 +44,8 @@ export type WorkerIPCRequest = {
   msgId: number;
 };
 
-export function isWorkerIPCRequest(value: any): value is WorkerIPCRequest {
-  if (!value || typeof value !== "object" || typeof value.msgId !== "number") {
+export function isWorkerIPCRequest(value: unknown): value is WorkerIPCRequest {
+  if (!isRecord(value) || typeof value.msgId !== "number") {
     return false;
   }
   if (value.type === WorkerIPCMessageType.Cleanup) {
@@ -63,8 +66,10 @@ export type WorkerIPCResponse = {
   type?: string;
 };
 
-export function isWorkerIPCResponse(value: any): value is WorkerIPCResponse {
-  return !!(value && typeof value === "object" &&
+export function isWorkerIPCResponse(
+  value: unknown,
+): value is WorkerIPCResponse {
+  return !!(isRecord(value) &&
     typeof value.msgId === "number" &&
     ("error" in value ? typeof value.error === "string" : true) &&
     ("type" in value ? typeof value.type === "string" : true));

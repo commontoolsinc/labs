@@ -221,7 +221,7 @@ export const generateNewRecipeVersion = async (
 // it should scrub the result1 and result2 and
 // return { calendar: scrub(result1), email: scrub(result2) }
 // FIXME(seefeld): might be able to use asSchema here...
-export function scrub(data: any): any {
+export function scrub(data: unknown): unknown {
   if (isCell(data)) {
     if (data.schema?.type === "object" && data.schema.properties) {
       // If there are properties, remove $UI and $NAME and any streams
@@ -278,7 +278,10 @@ export function scrub(data: any): any {
  * @param data The data to process
  * @param baseSpace Optional base space DID to make links relative to
  */
-function turnCellsIntoWriteRedirects(data: any, baseSpace?: MemorySpace): any {
+function turnCellsIntoWriteRedirects(
+  data: unknown,
+  baseSpace?: MemorySpace,
+): unknown {
   if (isCell(data)) {
     return data.getAsWriteRedirectLink(baseSpace ? { baseSpace } : undefined);
   } else if (Array.isArray(data)) {
@@ -559,7 +562,7 @@ export async function compileAndRunRecipe(
   charmManager: CharmManager,
   recipeSrc: string,
   spec: string,
-  runOptions: any,
+  runOptions: unknown,
   parents?: string[],
   llmRequestId?: string,
 ): Promise<Cell<Charm>> {

@@ -8,7 +8,10 @@
 
 import { createJsonSchema } from "@commontools/runner";
 
-export function formatJsonImportPrompt(title: string, jsonData: any): string {
+export function formatJsonImportPrompt(
+  title: string,
+  jsonData: unknown,
+): string {
   const schema = createJsonSchema(jsonData);
   const schemaString = JSON.stringify(schema, null, 2);
   return `${title}\n\nLook at the attached JSON schema and use it to create a new charm.\n\n${schemaString}`;

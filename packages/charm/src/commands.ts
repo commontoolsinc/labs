@@ -12,7 +12,7 @@ import { processWorkflow, ProcessWorkflowOptions } from "./workflow.ts";
 export const castSpellAsCharm = async (
   charmManager: CharmManager,
   recipeKey: string,
-  argument: Cell<any>,
+  argument: Cell<unknown>,
 ) => {
   if (recipeKey && argument) {
     console.log("Syncing...");
@@ -32,7 +32,7 @@ export const castSpellAsCharm = async (
 
 export const createDataCharm = (
   charmManager: CharmManager,
-  data: Record<string, any>,
+  data: Record<string, unknown>,
   schema?: JSONSchema,
   name?: string,
 ) => {
@@ -118,7 +118,7 @@ export async function addGithubRecipe(
   charmManager: CharmManager,
   filename: string,
   spec: string,
-  runOptions: any,
+  runOptions: unknown,
 ): Promise<Cell<Charm>> {
   const response = await fetch(
     `https://raw.githubusercontent.com/commontoolsinc/labs/refs/heads/main/recipes/${filename}?${Date.now()}`,

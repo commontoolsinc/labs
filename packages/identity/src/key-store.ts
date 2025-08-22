@@ -30,14 +30,15 @@ export class KeyStore {
   }
 
   // Clear the key store's table.
-  clear(): Promise<any> {
+  clear(): Promise<void> {
     return this.db.clear();
   }
 
   // Opens a new instance of `KeyStore`.
   // If no `name` provided, `KeyStore.DEFAULT_DB_NAME` is used.
   static async open(name = KeyStore.DEFAULT_DB_NAME): Promise<KeyStore> {
-    const db = await DB.open(name, DB_VERSION, (e: IDBVersionChangeEvent) => {
+    const db = await DB.open(name, DB_VERSION, (event: Event) => {
+      const e = event as IDBVersionChangeEvent;
       const { newVersion, oldVersion: _ } = e;
       if (newVersion !== DB_VERSION) {
         throw new Error("common-identity: Invalid DB version.");
@@ -63,7 +64,7 @@ class DB {
     return asyncWrap(store.get(key));
   }
 
-  set(key: string, value: any): Promise<void> {
+  set(key: string, value: unknown): Promise<void> {
     const store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
     return asyncWrap(store.put(value, key)).then(() => undefined);
   }
@@ -76,7 +77,7 @@ class DB {
   static async open(
     dbName: string,
     dbVersion: number,
-    onUpgrade: (e: IDBVersionChangeEvent) => any,
+    onUpgrade: (e: Event) => void,
   ) {
     const req = globalThis.indexedDB.open(dbName, dbVersion);
     once(req, "upgradeneeded", onUpgrade);
@@ -84,7 +85,8 @@ class DB {
       console.log("KeyStore: Blocked");
     });
     const db = await asyncWrap(req);
-    once(db, "versionchange", (e) => {
+    once(db, "versionchange", (event) => {
+      const e = event as IDBVersionChangeEvent;
       console.log("KeyStore: VersionChange", e.oldVersion, e.newVersion);
     });
     return new DB(db);
@@ -101,7 +103,7 @@ class DB {
 
 function asyncWrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    once(request, "success", (_e: Event): any => resolve(request.result));
-    once(request, "error", (_e: Event): any => reject(request.error));
+    once(request, "success", (_e: Event): unknown => resolve(request.result));
+    once(request, "error", (_e: Event): unknown => reject(request.error));
   });
 }

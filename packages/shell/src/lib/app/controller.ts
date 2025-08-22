@@ -15,9 +15,6 @@ export const ROOT_KEY = "$ROOT_KEY";
 // Interact with application state outside of the application.
 export class App extends EventTarget {
   #element: XRootView;
-  identity: any;
-  spaceName: any;
-  apiUrl: any;
   constructor(element: XRootView) {
     super();
     this.#element = element;

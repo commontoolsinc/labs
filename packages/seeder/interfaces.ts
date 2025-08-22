@@ -1,3 +1,5 @@
+import { JSONSchema } from "@commontools/runner";
+
 export enum CommandType {
   New,
   Extend,
@@ -16,7 +18,7 @@ export type Command = {
 } | {
   type: CommandType.ImportJSON;
   prompt: string;
-  data: any;
+  data: unknown;
 };
 
 export type CharmResult = {
@@ -30,8 +32,8 @@ export type CharmResult = {
 export type Step = {
   type: CommandType;
   prompt: string;
-  data?: any;
-  dataSchema?: any;
+  data?: Record<string, unknown>;
+  dataSchema?: JSONSchema;
 };
 
 export type Scenario = {

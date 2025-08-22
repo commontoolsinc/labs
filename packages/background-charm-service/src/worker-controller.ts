@@ -3,7 +3,10 @@ import { Cell } from "@commontools/runner";
 import { Identity } from "@commontools/identity";
 import { defer, type Deferred } from "@commontools/utils/defer";
 import {
+  InitializationData,
+  isWorkerIPCRequest,
   isWorkerIPCResponse,
+  RunData,
   WorkerIPCMessageType,
   WorkerIPCRequest,
   WorkerIPCResponse,
@@ -140,13 +143,19 @@ export class WorkerController extends EventTarget {
   }
 
   // send a message and return a promise that resolves with the response
-  private exec(type: WorkerIPCMessageType, data?: any): Promise<void> {
+  private exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
     const msgId = this.msgId++;
-    const message: WorkerIPCRequest = {
+
+    const message: Record<string, unknown> = {
       msgId,
       type,
-      data,
     };
+    if (data) {
+      message.data = data;
+    }
+    if (!isWorkerIPCRequest(message)) {
+      throw new Error("invalid IPC request.");
+    }
 
     const deferred = defer();
 

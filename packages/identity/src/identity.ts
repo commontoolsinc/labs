@@ -132,7 +132,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
 
   // Deserialize `input` from storage into an `Identity`.
   static async deserialize<ID extends DIDKey>(
-    input: any,
+    input: KeyPairRaw,
   ): Promise<Identity<ID>> {
     return new Identity(await Ed25519Signer.deserialize(input));
   }

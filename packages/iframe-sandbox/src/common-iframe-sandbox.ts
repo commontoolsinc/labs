@@ -2,7 +2,7 @@ import { css, html, LitElement, PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import * as IPC from "./ipc.ts";
-import { getIframeContextHandler } from "./context.ts";
+import { getIframeContextHandler, Receipt } from "./context.ts";
 import OuterFrame from "./outer-frame.ts";
 import {
   HealthCheck,
@@ -84,7 +84,7 @@ export class CommonIframeSandboxElement extends LitElement {
   private instanceId: number = 0;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
   private initialized: boolean = false;
-  private subscriptions: Map<string, any> = new Map();
+  private subscriptions: Map<string, Receipt> = new Map();
   // Timestamp of when the inner frame was loaded.
   private pageLoadTimestamp: number = 0;
 
@@ -267,7 +267,7 @@ export class CommonIframeSandboxElement extends LitElement {
               error: undefined,
             },
           });
-        }, (error: any) => {
+        }, (error: unknown) => {
           if (!this.ensureSameDocument(instanceId)) {
             return;
           }
@@ -444,7 +444,7 @@ export class CommonIframeSandboxElement extends LitElement {
     return this.instanceId === instanceId;
   }
 
-  private notifySubscribers(key: string, value: any) {
+  private notifySubscribers(key: string, value: unknown) {
     const response: IPC.IPCHostMessage = {
       id: this.frameId,
       type: IPC.IPCHostMessageType.Passthrough,
