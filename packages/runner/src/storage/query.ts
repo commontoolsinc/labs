@@ -179,7 +179,6 @@ export function querySchema(
     {
       address: { ...address, path: [] },
       value: factValue,
-      rootValue: factValue,
     },
     address.path,
     tracker,

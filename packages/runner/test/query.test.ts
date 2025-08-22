@@ -122,9 +122,8 @@ describe("Query", () => {
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: [] },
+      address: { id: assert2.of, type: assert2.the, path: ["value"] },
       value: assert2.is.value,
-      rootValue: assert2.is.value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
@@ -209,9 +208,8 @@ describe("Query", () => {
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: [] },
+      address: { id: assert2.of, type: assert2.the, path: ["value"] },
       value: assert2.is.value,
-      rootValue: assert2.is.value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
@@ -289,9 +287,8 @@ describe("Query", () => {
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert1.of, type: assert1.the, path: [] },
+      address: { id: assert1.of, type: assert1.the, path: ["value"] },
       value: assert1.is.value,
-      rootValue: assert1.is.value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
@@ -373,9 +370,8 @@ describe("Query", () => {
     );
     // We've provided a schema context for this, so traverse it
     traverser.traverse({
-      address: { id: assert2.of, type: assert2.the, path: [] },
+      address: { id: assert2.of, type: assert2.the, path: ["value"] },
       value: assert2.is.value,
-      rootValue: assert2.is.value,
     });
     const selectorSet1 = schemaTracker.get(
       `of:${entityId1["/"]}/application/json`,
