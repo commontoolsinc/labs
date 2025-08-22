@@ -5,6 +5,7 @@ export class SpaceConnection {
   readonly baseUrl: string;
   #socket: WebSocket | null = null;
   #helloSinceEpoch = -1;
+  #amDocs = new Map<string, unknown>();
   #awaitingComplete: Array<
     { resolve: () => void; reject: (e: unknown) => void }
   > = [];
@@ -47,21 +48,27 @@ export class SpaceConnection {
       // deno-lint-ignore no-floating-promises
       this.#onMessage(e);
     };
-    // Send hello; actual payload wiring added in follow-up edits
-    const hello = {
-      invocation: {
-        iss: "did:key:client", // placeholder
-        cmd: "/storage/hello",
-        sub: String(this.spaceId),
-        args: {
-          clientId: crypto.randomUUID(),
-          sinceEpoch: this.#helloSinceEpoch,
-        },
-        prf: [],
-      },
-      authorization: { signature: [], access: {} },
-    } as const;
-    this.#socket!.send(JSON.stringify(hello));
+    // Send hello if socket is open; otherwise skip (subscribe/get will still work in MVP)
+    if (this.#socket && this.#socket.readyState === WebSocket.OPEN) {
+      try {
+        const hello = {
+          invocation: {
+            iss: "did:key:client", // placeholder
+            cmd: "/storage/hello",
+            sub: String(this.spaceId),
+            args: {
+              clientId: crypto.randomUUID(),
+              sinceEpoch: this.#helloSinceEpoch,
+            },
+            prf: [],
+          },
+          authorization: { signature: [], access: {} },
+        } as const;
+        this.#socket.send(JSON.stringify(hello));
+      } catch {
+        // ignore send failures
+      }
+    }
   }
 
   close(): Promise<void> {
@@ -96,7 +103,29 @@ export class SpaceConnection {
       this.#awaitingComplete.push({ resolve, reject });
     });
     this.#pendingInitialSubs.add(p);
-    this.#socket!.send(JSON.stringify(msg));
+    if (this.#socket && this.#socket.readyState === WebSocket.OPEN) {
+      this.#socket.send(JSON.stringify(msg));
+    } else {
+      await new Promise<void>((resolve, reject) => {
+        if (!this.#socket) return reject(new Error("ws not initialized"));
+        const s = this.#socket;
+        const onOpen = () => {
+          cleanup();
+          resolve();
+        };
+        const onErr = (e: Event | ErrorEvent) => {
+          cleanup();
+          reject(e);
+        };
+        const cleanup = () => {
+          s.removeEventListener("open", onOpen as any);
+          s.removeEventListener("error", onErr as any);
+        };
+        s.addEventListener("open", onOpen as any, { once: true });
+        s.addEventListener("error", onErr as any, { once: true });
+      });
+      this.#socket!.send(JSON.stringify(msg));
+    }
     await p.catch((e) => {
       throw e;
     }).finally(() => this.#pendingInitialSubs.delete(p));
@@ -126,7 +155,7 @@ export class SpaceConnection {
           epoch: m.epoch,
         } as const;
         this.#socket?.send(JSON.stringify(ack));
-        // Populate store with snapshots only in this scaffold: if kind === snapshot
+        // Populate store with snapshots, and apply deltas when we have a baseline
         try {
           if (Array.isArray(m.docs)) {
             for (const d of m.docs) {
@@ -150,6 +179,7 @@ export class SpaceConnection {
                 try {
                   const AM = await import("@automerge/automerge");
                   const doc = AM.load(bytes);
+                  this.#amDocs.set(d.docId, doc);
                   json = AM.toJS(doc);
                 } catch {
                   try {
@@ -166,6 +196,39 @@ export class SpaceConnection {
                     heads: d.version?.heads ?? [],
                     json,
                   });
+                }
+              } else if (d && d.kind === "delta") {
+                // Apply delta changes when baseline doc exists
+                const baseline = this.#amDocs.get(d.docId);
+                if (baseline) {
+                  try {
+                    const AM = await import("@automerge/automerge");
+                    const changes = (Array.isArray(d.body) ? d.body : []).map(
+                      (b64: string) => {
+                        const bin = atob(b64);
+                        const out = new Uint8Array(bin.length);
+                        for (let i = 0; i < bin.length; i++) {
+                          out[i] = bin.charCodeAt(i) & 0xff;
+                        }
+                        return out;
+                      },
+                    );
+                    const applied = AM.applyChanges(
+                      baseline as any,
+                      changes as any,
+                    );
+                    const doc = Array.isArray(applied) ? applied[0] : applied;
+                    this.#amDocs.set(d.docId, doc);
+                    const json = AM.toJS(doc);
+                    this.onServerDoc?.({
+                      docId: d.docId,
+                      epoch: Number(m.epoch),
+                      heads: d.version?.heads ?? [],
+                      json,
+                    });
+                  } catch {
+                    // ignore delta failures in scaffold
+                  }
                 }
               }
             }
