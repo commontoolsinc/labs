@@ -9,6 +9,7 @@ import {
   handler,
   navigateTo,
   Default,
+  ifElse,
 } from "commontools";
 
 type CharmListInput = {
@@ -37,9 +38,6 @@ export default recipe<CharmListInput, CharmListOutput>(
         <div>
           <h2 id="charms-heading" >Charms ({charmCount})</h2>
           <div id="charms-grid">
-            {/*NOTE: we should NOT need a derive wrapper around this BUT in practice, without one, items will sometimes render as undefined and never recover in a multi-user scenario.
-              This is likely related to our known issues with shared arrays.
-              This affects the tests, if you wanted to watch them, but also a real recipe. */}
             {derive(allCharms, (allCharms) =>
               allCharms.map((charm, index) => (
                 <fieldset id={`charm-card-${index}`}>
@@ -61,29 +59,6 @@ export default recipe<CharmListInput, CharmListOutput>(
                 </fieldset>
               )),
             )}
-            {/* This SHOULD work but does not, with the behaviour explained above. */}
-            {/* Specifically, this works on the first render but breaks thereafter */}
-            {/*{
-              allCharms.map((charm, index) => (
-                <div id={str`charm-card-${index}`}>
-                  <div>
-                    <span id={str`charm-name-${index}`}>
-                      {str`${charm[NAME] || "Untitled Charm"}`}
-                    </span>
-                    <ct-button id={str`visit-button-${index}`} size="sm" onClick={visit({ charm })}>
-                      Visit
-                    </ct-button>
-                  </div>
-                  {ifElse(
-                    charm.ignore,
-                    <></>,
-                    <div>
-                      {charm}
-                    </div>
-                  )}
-                </div>
-              ))
-            }*/}
           </div>
         </div>
       ),
