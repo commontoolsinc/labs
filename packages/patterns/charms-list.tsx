@@ -51,7 +51,7 @@ export default recipe<CharmListInput, CharmListOutput>(
                   </div>
                   {ifElse(
                     charm.ignore,
-                    <></>,
+                    null,
                     <div>
                       {charm}
                     </div>
