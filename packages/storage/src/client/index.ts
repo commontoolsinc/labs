@@ -71,6 +71,29 @@ export class StorageClient {
     const { ClientTransaction } = await import("./tx.ts");
     return new ClientTransaction();
   }
+
+  async get(
+    space: DID | string,
+    opts: {
+      consumerId: string;
+      query: { docId: string; path?: string[]; schema?: unknown };
+    },
+  ): Promise<{ json: unknown; version: { epoch: number } }> {
+    const sc = await this.spaceConn(space);
+    await sc.get(opts);
+    const store = clientStoreMap.get(this)!;
+    const v = store.readView(String(space), opts.query.docId);
+    return v;
+  }
+
+  readView(
+    space: DID | string,
+    docId: string,
+  ): { json: unknown; version: { epoch: number } } {
+    const store = clientStoreMap.get(this);
+    if (!store) return { json: undefined, version: { epoch: -1 } };
+    return store.readView(String(space), docId);
+  }
 }
 
 // Intentionally minimal public surface for initial scaffold; detailed exports
@@ -78,4 +101,7 @@ export class StorageClient {
 
 // Further API (get) will be added incrementally.
 
-const clientStoreMap = new WeakMap<StorageClient, import("./store.ts").ClientStore>();
+const clientStoreMap = new WeakMap<
+  StorageClient,
+  import("./store.ts").ClientStore
+>();

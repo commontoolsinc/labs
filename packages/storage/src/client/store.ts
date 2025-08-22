@@ -41,7 +41,10 @@ export class ClientStore {
     }
   }
 
-  readView(space: string, docId: string): { json: JsonValue | undefined; version: { epoch: number } } {
+  readView(
+    space: string,
+    docId: string,
+  ): { json: JsonValue | undefined; version: { epoch: number } } {
     const spaceMap = this.#bySpace.get(space);
     const st = spaceMap?.get(docId);
     return { json: st?.json, version: { epoch: st?.serverEpoch ?? -1 } };

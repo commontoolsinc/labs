@@ -10,7 +10,9 @@ export class SpaceConnection {
   > = [];
   #pendingInitialSubs = new Set<Promise<void>>();
   // Hook for applying server docs (to be set by StorageClient)
-  onServerDoc?: (doc: { docId: string; epoch: number; heads?: string[]; json: unknown }) => void;
+  onServerDoc?: (
+    doc: { docId: string; epoch: number; heads?: string[]; json: unknown },
+  ) => void;
 
   constructor(spaceId: DID | string, opts: StorageClientOptions) {
     this.spaceId = spaceId;
@@ -40,7 +42,11 @@ export class SpaceConnection {
         reject(e instanceof Error ? e : new Error("ws error"));
       };
     });
-    this.#socket!.onmessage = (e) => this.#onMessage(e);
+    this.#socket!.onmessage = (e) => {
+      // fire-and-forget async handler
+      // deno-lint-ignore no-floating-promises
+      this.#onMessage(e);
+    };
     // Send hello; actual payload wiring added in follow-up edits
     const hello = {
       invocation: {
@@ -105,7 +111,7 @@ export class SpaceConnection {
     return Promise.all(arr).then(() => undefined);
   }
 
-  #onMessage(ev: MessageEvent): void {
+  async #onMessage(ev: MessageEvent): Promise<void> {
     try {
       const m = JSON.parse(String(ev.data));
       if (m && m.type === "deliver" && typeof m.epoch === "number") {
@@ -126,10 +132,41 @@ export class SpaceConnection {
             for (const d of m.docs) {
               if (d && d.kind === "snapshot") {
                 const bytesB64 = d.body as string;
-                // For scaffold: assume body is JSON string in base64 of utf8 JSON; real impl decodes AM
-                const jsonStr = atob(bytesB64);
-                const json = JSON.parse(jsonStr);
-                this.onServerDoc?.({ docId: d.docId, epoch: Number(m.epoch), heads: d.version?.heads ?? [], json });
+                const bytes = (() => {
+                  try {
+                    // Use global atob for base64 decode to Uint8Array
+                    const bin = atob(bytesB64);
+                    const out = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) {
+                      out[i] = bin.charCodeAt(i) & 0xff;
+                    }
+                    return out;
+                  } catch {
+                    return new Uint8Array();
+                  }
+                })();
+                // Try Automerge load first; fallback to JSON.parse
+                let json: unknown;
+                try {
+                  const AM = await import("@automerge/automerge");
+                  const doc = AM.load(bytes);
+                  json = AM.toJS(doc);
+                } catch {
+                  try {
+                    const jsonStr = new TextDecoder().decode(bytes);
+                    json = JSON.parse(jsonStr);
+                  } catch {
+                    json = undefined;
+                  }
+                }
+                if (json !== undefined) {
+                  this.onServerDoc?.({
+                    docId: d.docId,
+                    epoch: Number(m.epoch),
+                    heads: d.version?.heads ?? [],
+                    json,
+                  });
+                }
               }
             }
           }
@@ -144,5 +181,29 @@ export class SpaceConnection {
     } catch {
       // ignore malformed frames in this scaffold
     }
+  }
+
+  async get(
+    opts: {
+      consumerId: string;
+      query: { docId: string; path?: string[]; schema?: unknown };
+    },
+  ): Promise<void> {
+    await this.open();
+    const msg = {
+      invocation: {
+        iss: "did:key:client",
+        cmd: "/storage/get",
+        sub: String(this.spaceId),
+        args: { consumerId: opts.consumerId, query: opts.query },
+        prf: [],
+      },
+      authorization: { signature: [], access: {} },
+    } as const;
+    const p = new Promise<void>((resolve, reject) => {
+      this.#awaitingComplete.push({ resolve, reject });
+    });
+    this.#socket!.send(JSON.stringify(msg));
+    await p;
   }
 }
