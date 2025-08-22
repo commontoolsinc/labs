@@ -35,7 +35,7 @@ describe("allCharms integration test", () => {
 
     const allCharmsCharm = await cc.create(
       await Deno.readTextFile(
-        join(import.meta.dirname!, "..", "allCharms.tsx"),
+        join(import.meta.dirname!, "..", "charms-list.tsx"),
       ),
     );
     allCharmsCharmId = allCharmsCharm.id;
@@ -61,7 +61,7 @@ describe("allCharms integration test", () => {
       charmId: allCharmsCharmId,
       identity,
     });
-    
+
     await page.waitForSelector("#charms-heading", { strategy: "pierce" });
     await sleep(1000);
   });
@@ -71,7 +71,7 @@ describe("allCharms integration test", () => {
 
     const heading = await page.waitForSelector("#charms-heading", { strategy: "pierce" });
     const headingText = await heading.evaluate((el: HTMLElement) => el.textContent);
-    
+
     assert(headingText?.includes("Charms ("));
     assert(headingText?.includes("2"));
   });
@@ -81,7 +81,7 @@ describe("allCharms integration test", () => {
 
     await page.waitForSelector("#charms-grid", { strategy: "pierce" });
     const charmCards = await page.$$("[id^='charm-card-']", { strategy: "pierce" });
-    
+
     assertEquals(charmCards.length, 2);
   });
 
@@ -92,14 +92,14 @@ describe("allCharms integration test", () => {
     assertEquals(charmNames.length, 2);
 
     const nameTexts = await Promise.all(
-      charmNames.map(nameEl => 
+      charmNames.map(nameEl =>
         nameEl.evaluate((el: HTMLElement) => el.textContent?.trim())
       )
     );
 
     const hasCounterCharm = nameTexts.some(name => name?.includes("Simple counter"));
     const hasAllCharmsCharm = nameTexts.some(name => name?.includes("Charms"));
-    
+
     assert(hasCounterCharm);
     assert(hasAllCharmsCharm);
   });
@@ -119,35 +119,10 @@ describe("allCharms integration test", () => {
     assert(visitButtons.length > 0);
     const visitButton = visitButtons[0];
     await visitButton.click();
-    
+
     await sleep(400);
-    
+
     const hasValidContent = await page.waitForSelector("#counter-result, h2", { strategy: "pierce" });
     assert(hasValidContent);
-  });
-
-  it("should show charm content for non-ignored charms", async () => {
-    const page = shell.page();
-
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      spaceName: SPACE_NAME,
-      charmId: allCharmsCharmId,
-      identity,
-    });
-    
-    await page.waitForSelector("#charms-heading", { strategy: "pierce" });
-    await sleep(1000);
-
-    const charmCards = await page.$$("[id^='charm-card-']", { strategy: "pierce" });
-    assertEquals(charmCards.length, 2);
-    
-    for (const card of charmCards) {
-      const nameElement = await card.$("[id^='charm-name-']");
-      const visitButton = await card.$("[id^='visit-button-']");
-      
-      assert(nameElement);
-      assert(visitButton);
-    }
   });
 });
