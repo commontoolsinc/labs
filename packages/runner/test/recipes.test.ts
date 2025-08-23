@@ -915,7 +915,7 @@ describe("Recipe Runner", () => {
 
     await runtime.idle();
     expect((charm.getRaw() as any).result.$alias.cell).toEqual(
-      JSON.parse(JSON.stringify(charm.getSourceCell()?.getDoc())),
+      charm.getSourceCell()?.entityId,
     );
     expect(charm.getAsQueryResult()).toMatchObject({ result: 5 });
   });

@@ -1,11 +1,8 @@
 import { isObject, isRecord } from "@commontools/utils/types";
 import { type JSONSchema } from "./builder/types.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
 import { type Cell, isCell, type MemorySpace } from "./cell.ts";
-import { type IRuntime } from "./runtime.ts";
 import {
   type LegacyAlias,
-  type LegacyDocCellLink,
   type LegacyJSONCellLink,
   LINK_V1_TAG,
   type SigilLink,
@@ -53,8 +50,6 @@ export type CellLink =
   | Cell<any>
   | SigilLink
   | QueryResultInternals
-  | DocImpl<any> // @deprecated
-  | LegacyDocCellLink // @deprecated
   | LegacyJSONCellLink // @deprecated
   | LegacyAlias // @deprecated
   | { "/": string }; // @deprecated
@@ -81,22 +76,8 @@ export function isSigilValue(value: any): value is SigilValue<any> {
  */
 export function isLegacyCellLink(
   value: any,
-): value is LegacyDocCellLink | LegacyJSONCellLink {
-  return isLegacyDocCellLink(value) || isJSONCellLink(value);
-}
-
-/**
- * Check if value is a legacy cell link.
- *
- * @deprecated Switch to isLink instead.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isLegacyDocCellLink(value: any): value is LegacyDocCellLink {
-  return (
-    isRecord(value) && isDoc(value.cell) && Array.isArray(value.path)
-  );
+): value is LegacyJSONCellLink {
+  return isJSONCellLink(value);
 }
 
 /**
@@ -141,7 +122,7 @@ export function isSigilWriteRedirectLink(
  */
 export function isAnyCellLink(
   value: any,
-): value is LegacyDocCellLink | SigilLink | LegacyJSONCellLink | LegacyAlias {
+): value is SigilLink | LegacyJSONCellLink | LegacyAlias {
   return isLegacyCellLink(value) || isJSONCellLink(value) ||
     isSigilLink(value) ||
     isLegacyAlias(value);
@@ -157,7 +138,6 @@ export function isLink(
     isQueryResultForDereferencing(value) ||
     isAnyCellLink(value) ||
     isCell(value) ||
-    isDoc(value) ||
     (isRecord(value) && "/" in value && typeof value["/"] === "string") // EntityId format
   );
 }
@@ -218,10 +198,7 @@ export function isLegacyAlias(value: any): value is LegacyAlias {
  * in various combinations.
  */
 export function parseLink(
-  value:
-    | Cell<any>
-    | DocImpl<any>
-    | LegacyDocCellLink,
+  value: Cell<any>,
   base?: Cell | NormalizedLink,
 ): NormalizedFullLink;
 export function parseLink(
@@ -250,16 +227,6 @@ export function parseLink(
 
   if (isCell(value)) return value.getAsNormalizedFullLink();
 
-  if (isDoc(value)) {
-    // Extract from DocImpl
-    return {
-      id: toURI(value.entityId),
-      path: [],
-      space: value.space,
-      type: "application/json",
-    };
-  }
-
   // Handle new sigil format
   if (isSigilLink(value)) {
     const link = value["/"][LINK_V1_TAG];
@@ -282,18 +249,6 @@ export function parseLink(
       schema: link.schema,
       rootSchema: link.rootSchema,
       overwrite: link.overwrite === "redirect" ? "redirect" : undefined,
-    };
-  }
-
-  // Handle legacy CellLink format (runtime format with DocImpl)
-  if (isLegacyDocCellLink(value)) {
-    return {
-      id: toURI(value.cell.entityId),
-      path: value.path.map((p) => p.toString()),
-      space: value.cell.space,
-      type: "application/json",
-      schema: value.schema,
-      rootSchema: value.rootSchema,
     };
   }
 
@@ -320,14 +275,10 @@ export function parseLink(
   if (isLegacyAlias(value)) {
     const alias = value.$alias;
     let id: URI | undefined;
-    let resolvedSpace = base?.space;
 
     // If cell is provided, convert to URI
     if (alias.cell) {
-      if (isDoc(alias.cell)) {
-        id = toURI(alias.cell.entityId);
-        resolvedSpace = alias.cell.space;
-      } else if (isRecord(alias.cell) && "/" in alias.cell) {
+      if (isRecord(alias.cell) && "/" in alias.cell) {
         id = toURI(alias.cell);
       }
     }
@@ -342,7 +293,7 @@ export function parseLink(
       path: Array.isArray(alias.path)
         ? alias.path.map((p) => p.toString())
         : [],
-      space: resolvedSpace,
+      space: base?.space,
       type: "application/json",
       schema: alias.schema as JSONSchema | undefined,
       rootSchema: alias.rootSchema as JSONSchema | undefined,

@@ -1,4 +1,5 @@
-import { isDeno } from "@commontools/utils/env";
+import { StaticCache } from "@commontools/static";
+import { RuntimeTelemetry } from "@commontools/runner";
 import type {
   JSONSchema,
   Module,
@@ -42,8 +43,6 @@ import { RecipeManager, RecipeMeta } from "./recipe-manager.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
-import { StaticCache } from "@commontools/static";
-import { RuntimeTelemetry } from "@commontools/runner";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
@@ -285,7 +284,7 @@ export interface IRunner {
     recipe: Recipe | Module,
     inputs?: any,
   ): any;
-  stop<T>(resultCell: DocImpl<T> | Cell<T>): void;
+  stop<T>(resultCell: Cell<T>): void;
   stopAll(): void;
 }
 
@@ -565,7 +564,7 @@ export class Runtime implements IRuntime {
     recipeOrModule: Recipe | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-  ): DocImpl<R> | Cell<R> {
+  ): Cell<R> {
     return this.runner.run<T, R>(tx, recipeOrModule, argument, resultCell);
   }
 

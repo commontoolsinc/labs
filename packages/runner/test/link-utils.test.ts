@@ -12,11 +12,11 @@ import {
   parseLinkOrThrow,
   sanitizeSchemaForLinks,
 } from "../src/link-utils.ts";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { Runtime } from "../src/runtime.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -139,12 +139,6 @@ describe("link-utils", () => {
       expect(isLink(cell)).toBe(true);
     });
 
-    it("should identify docs as links", () => {
-      const cell = runtime.getCell(space, "test", undefined, tx);
-      const doc = cell.getDoc();
-      expect(isLink(doc)).toBe(true);
-    });
-
     it("should identify EntityId format as links", () => {
       expect(isLink({ "/": "of:test" })).toBe(true);
     });
@@ -196,7 +190,7 @@ describe("link-utils", () => {
 
     it("should identify legacy aliases with cell", () => {
       const cell = runtime.getCell(space, "test");
-      const legacyAlias = { $alias: { cell: cell.getDoc(), path: ["test"] } };
+      const legacyAlias = { $alias: { cell: cell.entityId, path: ["test"] } };
       expect(isLegacyAlias(legacyAlias)).toBe(true);
     });
 
@@ -239,10 +233,9 @@ describe("link-utils", () => {
       });
     });
 
-    it("should parse docs to normalized links", () => {
+    it("should parse toJSON to normalized links", () => {
       const cell = runtime.getCell(space, "test");
-      const doc = cell.getDoc();
-      const result = parseLink(doc);
+      const result = parseLink(cell.toJSON(), cell);
 
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
@@ -385,13 +378,13 @@ describe("link-utils", () => {
       const cell = runtime.getCell(space, "test");
       const legacyAlias = {
         $alias: {
-          cell: cell.getDoc(),
+          cell: cell.entityId,
           path: ["nested", "value"],
           schema: { type: "number" },
           rootSchema: { type: "object" },
         },
       };
-      const result = parseLink(legacyAlias);
+      const result = parseLink(legacyAlias, cell);
 
       expect(result).toEqual({
         id: expect.stringContaining("of:"),
@@ -533,7 +526,7 @@ describe("link-utils", () => {
 
     it("should omit id when same as base", () => {
       const baseCell = runtime.getCell(space, "base");
-      const baseId = baseCell.getDoc().entityId;
+      const baseId = baseCell.getAsNormalizedFullLink().id;
       const normalizedLink: NormalizedLink = {
         id: `of:${baseId}`,
         path: ["nested", "value"],

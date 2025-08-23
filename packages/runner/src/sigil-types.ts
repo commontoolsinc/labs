@@ -1,8 +1,7 @@
 import type { JSONSchema } from "@commontools/api";
 import type { MemorySpace } from "@commontools/memory/interface";
-import type { ShadowRef } from "./builder/types.ts";
-import type { DocImpl } from "./doc.ts";
 import type { URI } from "@commontools/memory/interface";
+import type { ShadowRef } from "./builder/types.ts";
 
 export type { URI } from "@commontools/memory/interface";
 
@@ -47,21 +46,6 @@ export type SigilWriteRedirectLink = SigilValue<WriteRedirectV1>;
  ****************/
 
 /**
- * Legacy doc cell link.
- *
- * @deprecated Switch to sigil links instead.
- *
- * A legacy doc cell link is a doc and a path within that doc.
- */
-export type LegacyDocCellLink = {
-  space?: MemorySpace;
-  cell: DocImpl<any>;
-  path: PropertyKey[];
-  schema?: JSONSchema;
-  rootSchema?: JSONSchema;
-};
-
-/**
  * Legacy alias.
  *
  * @deprecated Switch to sigil write redirect links instead.
@@ -70,7 +54,7 @@ export type LegacyDocCellLink = {
  */
 export type LegacyAlias = {
   $alias: {
-    cell?: DocImpl<any> | ShadowRef | number | { "/": string };
+    cell?: ShadowRef | number | { "/": string };
     path: readonly PropertyKey[];
     schema?: JSONSchema;
     rootSchema?: JSONSchema;

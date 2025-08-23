@@ -4,7 +4,7 @@ import "@commontools/utils/equal-ignoring-symbols";
 import { Identity } from "@commontools/identity";
 import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type Cell, isCell, isStream } from "../src/cell.ts";
-import { LegacyDocCellLink } from "../src/sigil-types.ts";
+import { SigilLink } from "../src/sigil-types.ts";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { toURI } from "../src/uri-utils.ts";
@@ -67,10 +67,10 @@ describe("Schema Support", () => {
       // This is what the system (or someone manually) would create to remap
       // data to match the desired schema
       const mappingCell = runtime.getCell<{
-        id: LegacyDocCellLink;
-        changes: LegacyDocCellLink[];
-        kind: LegacyDocCellLink;
-        tag: LegacyDocCellLink;
+        id: SigilLink;
+        changes: SigilLink[];
+        kind: SigilLink;
+        tag: SigilLink;
       }>(
         space,
         "allows mapping of fields via interim cells 2",

@@ -1,11 +1,9 @@
 import { isRecord } from "@commontools/utils/types";
 import { getLogger } from "@commontools/utils/logger";
 import { ID, ID_FIELD, type JSONSchema } from "./builder/types.ts";
-import { type DocImpl, isDoc } from "./doc.ts";
 import { createRef } from "./doc-map.ts";
 import { isCell, RegularCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
-import { toCell, toOpaqueRef } from "./back-to-cell.ts";
 import {
   areLinksSame,
   areMaybeLinkAndNormalizedLinkSame,
@@ -221,9 +219,6 @@ export function normalizeAndDiff(
     newValue = sigilLink;
   }
 
-  if (isDoc(newValue)) {
-    throw new Error("Docs are not supported anymore");
-  }
   // Track whether this link originates from a Cell value (either a cycle we wrapped
   // into a RegularCell above, or a user-supplied Cell). For Cell-origin links we
   // preserve the link (do NOT collapse). For links created via query-result
@@ -632,10 +627,7 @@ export function addCommonIDfromObjectID(
       obj[ID_FIELD] = fieldName;
     }
 
-    if (
-      isRecord(obj) && !isCell(obj) &&
-      !isAnyCellLink(obj) && !isDoc(obj)
-    ) {
+    if (isRecord(obj) && !isCell(obj) && !isAnyCellLink(obj)) {
       Object.values(obj).forEach((v) => traverse(v));
     }
   }

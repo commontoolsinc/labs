@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { ID } from "../src/builder/types.ts";
 import { Identity } from "@commontools/identity";
-import { type IStorage, Runtime } from "../src/runtime.ts";
-import { isAnyCellLink } from "../src/link-utils.ts";
 import * as Memory from "@commontools/memory";
 import * as Consumer from "@commontools/memory/consumer";
+import { ID } from "../src/builder/types.ts";
+import { type IStorage, Runtime } from "../src/runtime.ts";
+import { isAnyCellLink } from "../src/link-utils.ts";
 import { Provider } from "../src/storage/cache.ts";
 import * as Subscription from "../src/storage/subscription.ts";
 import {
@@ -71,7 +71,6 @@ describe.skip("Push conflict", () => {
       "list",
     );
     list.set([]);
-    const listDoc = list.getDoc();
     const listURI = list.getAsNormalizedFullLink().id;
     await list.sync();
 
@@ -96,17 +95,10 @@ describe.skip("Push conflict", () => {
 
     expect(memory.get(listURI)).toEqual({ value: [1, 2, 3] });
 
-    let retryCalled = false;
-    listDoc.retry = [(value) => {
-      retryCalled = true;
-      return value;
-    }];
-
     list.push(4);
 
     // This is locally ahead of the db, and retry wasn't called yet.
     expect(list.get()).toEqual([4]);
-    expect(retryCalled).toEqual(false);
 
     await storage.synced();
 
@@ -132,7 +124,6 @@ describe.skip("Push conflict", () => {
       "list 2",
     );
     list.set([]);
-    const listDoc = list.getDoc();
 
     await name.sync();
     await list.sync();
@@ -159,11 +150,6 @@ describe.skip("Push conflict", () => {
       { uri: nameURI, value: { value: "foo" } },
       { uri: listURI, value: { value: [1, 2, 3] } },
     ]);
-    let retryCalled = 0;
-    listDoc.retry = [(value) => {
-      retryCalled++;
-      return value;
-    }];
 
     name.set("bar");
     list.push(4);
@@ -171,7 +157,6 @@ describe.skip("Push conflict", () => {
     // This is locally ahead of the db, and retry wasn't called yet.
     expect(name.get()).toEqual("bar");
     expect(list.get()).toEqual([4]);
-    expect(retryCalled).toEqual(0);
 
     await storage.synced();
 
@@ -199,7 +184,6 @@ describe.skip("Push conflict", () => {
       "list 3",
     );
     list.set([]);
-    const listDoc = list.getDoc();
 
     await name.sync();
     await list.sync();
@@ -227,12 +211,6 @@ describe.skip("Push conflict", () => {
       { uri: listURI, value: { value: [{ n: 1 }, { n: 2 }, { n: 3 }] } },
     ]);
 
-    let retryCalled = 0;
-    listDoc.retry = [(value) => {
-      retryCalled++;
-      return value;
-    }];
-
     name.set("bar");
     list.push({ n: 4, [ID]: "4" });
 
@@ -240,8 +218,6 @@ describe.skip("Push conflict", () => {
     expect(name.get()).toEqual("bar");
     expect(list.get()).toEqual([{ n: 4 }]);
     expect(isAnyCellLink(list.getRaw()?.[0])).toBe(true);
-    //const entry = list.getRaw()[0].cell?.asCell();
-    expect(retryCalled).toEqual(0);
 
     await storage.synced();
 

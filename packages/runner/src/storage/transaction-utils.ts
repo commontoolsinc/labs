@@ -513,7 +513,7 @@ class TransactionWriter extends TransactionReader
 }
 
 /**
- * Implementation of IStorageTransaction that uses DocImpl and runtime.documentMap
+ * Implementation of IStorageTransaction that uses the runtime.documentMap
  */
 export class StorageTransaction implements IStorageTransaction {
   journal = new TransactionJournal();
