@@ -21,9 +21,7 @@ import { Labels, MemorySpace } from "./storage.ts";
 import { arrayEqual } from "./path-utils.ts";
 import { toURI } from "./uri-utils.ts";
 import type {
-  ICommitNotification,
   IExtendedStorageTransaction,
-  IMemoryChange,
   IStorageTransaction,
 } from "./storage/interface.ts";
 
@@ -336,34 +334,6 @@ export function createDoc<T>(
         for (const callback of [...callbacks]) {
           callback(value as T, path, labels);
         }
-
-        // Send notification if shim storage manager is available
-        if (runtime.storage.shim) {
-          let before = previousValue;
-          let after = newValue;
-          for (const key of ["value", ...path.map(String)].reverse()) {
-            before = { [key]: before };
-            after = { [key]: after };
-          }
-
-          const change: IMemoryChange = {
-            address: {
-              id: toURI(entityId),
-              type: "application/json",
-              path: ["value", ...path.map(String)],
-            },
-            before: before,
-            after: after,
-          };
-
-          const notification: ICommitNotification = {
-            type: "commit",
-            space: space,
-            changes: [change],
-            source: tx,
-          };
-          runtime.storage.shimNotifySubscribers(notification);
-        }
       }
       return changed;
     },
@@ -411,33 +381,6 @@ export function createDoc<T>(
             JSON.stringify(cell)
           }`,
         );
-      }
-
-      if (runtime.storage.shim) {
-        // EntityId may be in non-json form, so stringify and parse
-        const sourceBefore = sourceCell?.entityId
-          ? JSON.parse(JSON.stringify(sourceCell.entityId))
-          : undefined;
-        const sourceAfter = cell?.entityId
-          ? JSON.parse(JSON.stringify(cell.entityId))
-          : undefined;
-        const change: IMemoryChange = {
-          address: {
-            id: toURI(entityId),
-            type: "application/json",
-            path: ["source"],
-          },
-          before: { source: sourceBefore },
-          after: { source: sourceAfter },
-        };
-
-        const notification: ICommitNotification = {
-          type: "commit",
-          space: space,
-          changes: [change],
-          source: undefined,
-        };
-        runtime.storage.shimNotifySubscribers(notification);
       }
 
       sourceCell = cell;

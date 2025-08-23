@@ -21,7 +21,7 @@ import {
   MinimalSchemaSelector,
   SchemaObjectTraverser,
 } from "../traverse.ts";
-import { uriToEntityId } from "./transaction-shim.ts";
+import { uriToEntityId } from "./transaction-utils.ts";
 
 export abstract class ClientObjectManager
   extends BaseObjectManager<BaseMemoryAddress, JSONValue | undefined> {

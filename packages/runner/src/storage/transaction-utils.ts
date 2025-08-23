@@ -12,11 +12,8 @@ import type {
   IReadActivity,
   IReadOnlyAddressError,
   IReadOptions,
-  IStorageSubscription,
-  IStorageSubscriptionCapability,
   IStorageTransaction,
   IStorageTransactionComplete,
-  IStorageTransactionInconsistent,
   ITransactionJournal,
   ITransactionReader,
   ITransactionWriter,
@@ -25,17 +22,12 @@ import type {
   JSONValue,
   MemoryAddressPathComponent,
   MemorySpace,
-  Metadata,
-  Read,
   ReaderError,
   ReadError,
   Result,
-  StorageNotification,
-  StorageTransactionFailed,
   StorageTransactionStatus,
   Unit,
   URI,
-  Write,
   WriteError,
   WriterError,
 } from "./interface.ts";
@@ -238,7 +230,7 @@ class TransactionReader implements ITransactionReader {
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Result<Read, ReadError> {
+  ): Result<IAttestation, ReadError> {
     if (address.type !== "application/json") {
       const error = new Error(
         "Unsupported media type",
@@ -267,7 +259,7 @@ class TransactionReader implements ITransactionReader {
 
         const value = getValueAtPath(json, address.path);
 
-        const read: Read = {
+        const read: IAttestation = {
           address,
           value,
         };
@@ -322,7 +314,7 @@ class TransactionReader implements ITransactionReader {
       }
       // Read from doc itself
       const value = doc.getAtPath(rest);
-      const read: Read = {
+      const read: IAttestation = {
         address,
         value,
       };
@@ -344,7 +336,7 @@ class TransactionReader implements ITransactionReader {
         // Convert EntityId to nice form
         value = JSON.parse(JSON.stringify(sourceCell.entityId));
       }
-      const read: Read = {
+      const read: IAttestation = {
         address,
         value,
       };
@@ -377,7 +369,7 @@ class TransactionWriter extends TransactionReader
     address: IMemorySpaceAddress,
     value?: any,
   ): Result<
-    Write,
+    IAttestation,
     | INotFoundError
     | InactiveTransactionError
     | IUnsupportedMediaTypeError
@@ -454,7 +446,7 @@ class TransactionWriter extends TransactionReader
         undefined,
         this.transaction,
       );
-      const write: Write = {
+      const write: IAttestation = {
         address,
         value,
       };
@@ -504,7 +496,7 @@ class TransactionWriter extends TransactionReader
         return { ok: undefined, error: notFoundError };
       }
       doc.sourceCell = sourceDoc;
-      const write: Write = {
+      const write: IAttestation = {
         address,
         value: value as JSONValue | undefined,
       };
@@ -561,7 +553,7 @@ export class StorageTransaction implements IStorageTransaction {
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Result<Read, ReadError> {
+  ): Result<IAttestation, ReadError> {
     const readerResult = this.reader(address.space);
     if (readerResult.error) {
       return { ok: undefined, error: readerResult.error };
@@ -610,7 +602,7 @@ export class StorageTransaction implements IStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value: any,
-  ): Result<Write, WriteError | WriterError> {
+  ): Result<IAttestation, WriteError | WriterError> {
     const writerResult = this.writer(address.space);
     if (writerResult.error) {
       return { ok: undefined, error: writerResult.error };
@@ -680,7 +672,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   read(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Result<Read, ReadError> {
+  ): Result<IAttestation, ReadError> {
     const result = this.tx.read(address, options);
     logResult("read", result, address, options);
     return result;
@@ -723,7 +715,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   write(
     address: IMemorySpaceAddress,
     value: any,
-  ): Result<Write, WriteError | WriterError> {
+  ): Result<IAttestation, WriteError | WriterError> {
     const result = this.tx.write(address, value);
     logResult("write", result, address, value);
     return result;
@@ -797,51 +789,5 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
   commit(): Promise<Result<Unit, CommitError>> {
     return this.tx.commit();
-  }
-}
-
-/**
- * Factory for creating shim storage transactions.
- * Implements the same interface as IStorageManager.edit() for creating transactions.
- */
-export class ShimStorageManager implements IStorageSubscriptionCapability {
-  private subscriptions: IStorageSubscription[] = [];
-
-  constructor(private runtime: IRuntime) {}
-
-  /**
-   * Creates a new storage transaction that can be used to read / write data into
-   * locally replicated memory spaces. Transaction allows reading from many
-   * multiple spaces but writing only to one space.
-   */
-  edit(): IStorageTransaction {
-    return new StorageTransaction(this.runtime);
-  }
-
-  /**
-   * Subscribes to the storage manager's notifications.
-   *
-   * For the shim implementation, this is a no-op since shim transactions
-   * don't generate storage notifications.
-   */
-  subscribe(subscription: IStorageSubscription): void {
-    this.subscriptions.push(subscription);
-  }
-
-  /**
-   * Internal method to notify subscribers of storage events.
-   * This is called by transactions when they commit or encounter errors.
-   */
-  notifySubscribers(notification: StorageNotification): void {
-    // Filter out subscriptions that have been cancelled
-    this.subscriptions = this.subscriptions.filter((subscription) => {
-      try {
-        const result = subscription.next(notification);
-        return result?.done !== true;
-      } catch (error) {
-        // If subscription throws an error, remove it
-        return false;
-      }
-    });
   }
 }

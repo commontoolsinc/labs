@@ -15,7 +15,6 @@ import type {
   IStorageProvider,
   IStorageSubscriptionCapability,
   MemorySpace,
-  StorageNotification,
 } from "./storage/interface.ts";
 import { type Cell, createCell } from "./cell.ts";
 import type { DocImpl } from "./doc.ts";
@@ -30,7 +29,6 @@ import {
 import type { RuntimeProgram } from "./harness/types.ts";
 import { Engine } from "./harness/index.ts";
 import { ConsoleMethod } from "./harness/console.ts";
-import { ShimStorageManager } from "./storage/transaction-shim.ts";
 import {
   type CellLink,
   isLink,
@@ -49,10 +47,6 @@ import { RuntimeTelemetry } from "@commontools/runner";
 
 // @ts-ignore - This is temporary to debug integration test
 Error.stackTraceLimit = 500;
-
-const DEFAULT_USE_REAL_TRANSACTIONS = isDeno()
-  ? !["1", "true", "on", "yes"].includes(Deno.env.get("USE_TRANSACTIONS_SHIM")!)
-  : true;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
@@ -89,13 +83,6 @@ export interface RuntimeOptions {
   navigateCallback?: NavigateCallback;
   staticAssetServerUrl?: URL;
   debug?: boolean;
-  /**
-   * When true, uses the StorageManager's native transaction API instead of the
-   * transaction shim. This allows for better integration with the underlying
-   * storage system's transaction capabilities.
-   * @default false
-   */
-  useStorageManagerTransactions?: boolean;
   telemetry?: RuntimeTelemetry;
 }
 
@@ -112,9 +99,7 @@ export interface IRuntime {
   readonly navigateCallback?: NavigateCallback;
   readonly cfc: ContextualFlowControl;
   readonly staticCache: StaticCache;
-  readonly useStorageManagerTransactions?: boolean;
   readonly storageManager: IStorageManager;
-  readonly shimStorageManager?: ShimStorageManager;
   readonly telemetry: RuntimeTelemetry;
 
   idle(): Promise<void>;
@@ -222,9 +207,6 @@ export interface IStorage extends IStorageSubscriptionCapability {
   ): Promise<Cell<T>> | Cell<T>;
   synced(): Promise<void>;
   cancelAll(): Promise<void>;
-
-  shim: boolean;
-  shimNotifySubscribers(notification: StorageNotification): void;
 }
 
 export interface IRecipeManager {
@@ -364,7 +346,6 @@ export class Runtime implements IRuntime {
     this.storage = new Storage(
       this,
       options.storageManager,
-      options.useStorageManagerTransactions ?? DEFAULT_USE_REAL_TRANSACTIONS,
     );
 
     this.documentMap = new DocumentMap(this);
@@ -410,7 +391,6 @@ export class Runtime implements IRuntime {
         documentMap: !!this.documentMap,
         harness: !!this.harness,
         runner: !!this.runner,
-        useStorageManagerTransactions: !!this.storage.shim,
         telemetry: !!this.telemetry,
       });
     }

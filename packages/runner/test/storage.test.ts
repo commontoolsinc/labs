@@ -51,8 +51,6 @@ describe("Storage", () => {
       await tx.commit();
       tx = runtime.edit();
 
-      if (runtime.storage.shim) await testCell.sync();
-
       const query = storageManager
         .mount(space)
         .query({
@@ -87,8 +85,6 @@ describe("Storage", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      if (runtime.storage.shim) await testCell.sync();
-
       const entry = storageManager.open(space).get(
         refCell.getAsNormalizedFullLink().id,
       );
@@ -115,8 +111,6 @@ describe("Storage", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      if (runtime.storage.shim) await testCell.sync();
-
       const refCellURI = refCell.getAsNormalizedFullLink().id;
       const entry = storageManager.open(space).get(refCellURI);
       expect(entry?.value).toEqual("hello");
@@ -132,8 +126,6 @@ describe("Storage", () => {
       await tx.commit();
       await runtime.idle();
       tx = runtime.edit();
-
-      if (runtime.storage.shim) await testCell.sync();
 
       const query = storageManager
         .mount(space)
@@ -202,28 +194,6 @@ describe("Storage", () => {
     });
   });
 
-  describe("ephemeral docs", () => {
-    it("should not be loaded from storage", async () => {
-      if (!runtime.storage.shim) return;
-
-      const ephemeralCell = runtime.getCell<string>(
-        space,
-        "ephemeral",
-        undefined,
-        tx,
-      );
-      ephemeralCell.set("transient");
-      ephemeralCell.getDoc().ephemeral = true;
-      await ephemeralCell.sync();
-      const provider = storageManager.open(space);
-
-      const ephemeralCellURI = ephemeralCell.getAsNormalizedFullLink().id;
-      await provider.sync(ephemeralCellURI);
-      const record = provider.get(ephemeralCellURI);
-      expect(record).toBeUndefined();
-    });
-  });
-
   describe("doc updates", () => {
     it("should persist doc updates with schema", async () => {
       testCell.send("value 1");
@@ -232,8 +202,6 @@ describe("Storage", () => {
       await tx.commit();
       await runtime.idle();
       tx = runtime.edit();
-
-      if (runtime.storage.shim) await testCell.sync();
 
       await runtime.storage.synced();
 

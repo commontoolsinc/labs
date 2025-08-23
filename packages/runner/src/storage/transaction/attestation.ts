@@ -78,6 +78,10 @@ export const write = (
 
     if (error) {
       return { error };
+    } else if (ok.value === undefined) {
+      return {
+        error: new NotFound(source, address, path),
+      };
     } else {
       const type = ok.value === null
         ? "null"
