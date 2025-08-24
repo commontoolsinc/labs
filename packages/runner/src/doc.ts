@@ -17,12 +17,13 @@ import {
 import { type EntityId } from "./doc-map.ts";
 import type { IRuntime } from "./runtime.ts";
 import { type Cancel } from "./cancel.ts";
-import { Labels, MemorySpace } from "./storage.ts";
 import { arrayEqual } from "./path-utils.ts";
 import { toURI } from "./uri-utils.ts";
 import type {
   IExtendedStorageTransaction,
   IStorageTransaction,
+  Labels,
+  MemorySpace,
 } from "./storage/interface.ts";
 
 /**

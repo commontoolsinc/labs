@@ -10,7 +10,7 @@ import type {
   Labels,
 } from "./storage/interface.ts";
 import type { IRuntime, IStorage } from "./runtime.ts";
-import { ExtendedStorageTransaction } from "./storage/transaction-utils.ts";
+import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 export type { Labels, MemorySpace };
 
 const logger = getLogger("storage", { enabled: false, level: "debug" });

@@ -26,7 +26,7 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
-export { type MemorySpace, Storage } from "./storage.ts";
+export { type MemorySpace } from "./storage.ts";
 export {
   Console,
   type ConsoleEvent,
