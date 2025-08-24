@@ -68,7 +68,7 @@ export function createRef(
     }
 
     // If referencing other docs, return their ids (or random as fallback).
-    if (isDoc(obj) || isCell(obj)) return obj.entityId ?? crypto.randomUUID();
+    if (isCell(obj)) return obj.entityId ?? crypto.randomUUID();
     else if (Array.isArray(obj)) return obj.map(traverse);
     else if (isRecord(obj)) {
       return Object.fromEntries(
@@ -144,19 +144,6 @@ export class DocumentMap implements IDocumentMap {
     doc = this.createDoc<T>(undefined as T, normalizedId, space);
     doc.sourceCell = sourceIfCreated;
     return doc;
-  }
-
-  setDocByEntityId(
-    space: string,
-    entityId: EntityId,
-    doc: DocImpl<any>,
-  ): void {
-    // throw if doc already exists
-    if (this.entityIdToDocMap.get(this._getDocKey(space, entityId))) {
-      throw new Error("Doc already exists");
-    }
-
-    this.entityIdToDocMap.set(this._getDocKey(space, entityId), doc);
   }
 
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
