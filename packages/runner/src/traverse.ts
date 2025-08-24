@@ -25,6 +25,7 @@ const logger = getLogger("traverse", { enabled: true, level: "warn" });
 
 export type { IAttestation, IMemoryAddress } from "./storage/interface.ts";
 
+// Both path and schemaContext are relative to the fact.is.value
 export type SchemaPathSelector = {
   path: readonly string[];
   schemaContext?: Readonly<SchemaContext>;
@@ -138,15 +139,6 @@ export interface ObjectStorageManager<K, S, V> {
 
 export type BaseMemoryAddress = Omit<IMemoryAddress, "path">;
 
-// This is very similar to the IAttestation class.
-// We do use the IAttestation class a little differently.
-// The address doesn't include the initial "value" in the path.
-// This adds the rootValue property to the BaseValueAtPath, which is actually
-//  the contents of the "value" property of the document.
-export type ValueAtPath = IAttestation & {
-  readonly rootValue: Immutable<JSONValue> | undefined;
-};
-
 // I've really got two different concepts here.
 // A. How we traverse the object
 //  1. For a schema query, we traverse the object, but avoid visiting branches that don't match our schema
@@ -209,7 +201,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
   constructor(
     protected manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
   ) {}
-  abstract traverse(doc: ValueAtPath): Immutable<OptJSONValue>;
+  abstract traverse(doc: IAttestation): Immutable<OptJSONValue>;
 
   /**
    * Attempt to traverse the document as a directed acyclic graph.
@@ -221,7 +213,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
    * @returns
    */
   protected traverseDAG(
-    doc: ValueAtPath,
+    doc: IAttestation,
     tracker: PointerCycleTracker,
     schemaTracker?: MapSet<string, SchemaPathSelector>,
   ): Immutable<JSONValue> | undefined {
@@ -257,7 +249,7 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
           schemaTracker,
           DefaultSchemaSelector,
         );
-        if (newDoc.value === undefined || newDoc.rootValue === undefined) {
+        if (newDoc.value === undefined) {
           return null;
         }
         return this.traverseDAG(newDoc, tracker, schemaTracker);
@@ -295,24 +287,24 @@ export abstract class BaseObjectTraverser<S extends BaseMemoryAddress> {
  * If we load any additional documents, we will also let the helper know.
  *
  * @param manager - Storage manager for document access.
- * @param doc - ValueAtPath for the current document
+ * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
  * @param tracker - Prevents pointer cycles
  * @param schemaTracker: Tracks schema used for loaded docs
  * @param selector: The selector being used (its path is relative to doc's root)
  *
- * @returns a tuple containing a ValueAtPath object with the target doc,
+ * @returns a tuple containing an IAttestation object with the target doc,
  * docRoot, path, and value and also containing the updated selector that
  * applies to that target doc.
  */
 export function getAtPath<S extends BaseMemoryAddress>(
   manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
-  doc: ValueAtPath,
+  doc: IAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): [ValueAtPath, SchemaPathSelector | undefined] {
+): [IAttestation, SchemaPathSelector | undefined] {
   let curDoc = doc;
   let remaining = [...path];
   while (isAnyCellLink(curDoc.value)) {
@@ -370,56 +362,66 @@ export function getAtPath<S extends BaseMemoryAddress>(
   return [curDoc, selector];
 }
 
+function notFound(address: BaseMemoryAddress): IAttestation {
+  return {
+    address: { ...address, path: [] },
+    value: undefined,
+  };
+}
 /**
  * Resolves a pointer reference to its target value.
  *
  * @param manager - Object storage manager for document access
- * @param doc - ValueAtPath for the current document
+ * @param doc - IAttestation for the current document
  * @param path - Property/index path to follow
  * @param tracker - Prevents infinite pointer cycles
  * @param schemaTracker: Tracks schema to use for loaded docs
  * @param selector?: SchemaPathSelector used to query the target doc
  *
- * @returns a ValueAtPath object with the target doc, docRoot, path, and value.
+ * @returns an IAttestation object with the target doc, docRoot, path, and value.
  */
 function followPointer<S extends BaseMemoryAddress>(
   manager: BaseObjectManager<S, Immutable<JSONValue> | undefined>,
-  doc: ValueAtPath,
+  doc: IAttestation,
   path: readonly string[],
   tracker: PointerCycleTracker,
   schemaTracker?: MapSet<string, SchemaPathSelector>,
   selector?: SchemaPathSelector,
-): [ValueAtPath, SchemaPathSelector | undefined] {
+): [IAttestation, SchemaPathSelector | undefined] {
   using t = tracker.include(doc.value!, doc);
   if (t === null) {
-    return [
-      { ...doc, address: { ...doc.address, path: [] }, value: undefined },
-      selector,
-    ];
+    // Cycle detected - treat this as notFound to avoid traversal
+    return [notFound(doc.address), selector];
   }
   const link = parseLink(doc.value)!;
-  const target = (link.id !== undefined)
+  const target: BaseMemoryAddress = (link.id !== undefined)
     ? { id: link.id, type: "application/json" }
     : doc.address;
-  let [targetDoc, targetDocRoot] = [doc.address, doc.rootValue];
+  const targetDoc = {
+    address: doc.address,
+    value: doc.value,
+  };
   if (selector !== undefined) {
     // We'll need to re-root the selector for the target doc
-    // Remove the portions of doc.path from selector.path, limiting schema if needed
-    // Also insert the portions of cellTarget.path, so selector is relative to new target doc
-    // We do this even if the target doc is the same doc, since we want the
-    // selector path to match.
-    selector = narrowSchema(doc.address.path, selector, link.path as string[]);
+    // Remove the portions of doc.path from selector.path, limiting schema if
+    // needed.
+    // Also insert the portions of cellTarget.path, so selector is relative to
+    // new target doc. We do this even if the target doc is the same doc, since
+    // we want the selector path to match.
+    // We also remove the initial "value" from the doc path, since that won't
+    // be included in the selector or link path.
+    selector = narrowSchema(
+      doc.address.path.slice(1),
+      selector,
+      link.path as string[],
+    );
   }
   if (link.id !== undefined) {
     // We have a reference to a different cell, so track the dependency
-    // and update our targetDoc and targetDocRoot
+    // and update our targetDoc
     const valueEntry = manager.load(target);
     if (valueEntry === null) {
-      return [{
-        ...doc,
-        address: { ...doc.address, path: [] },
-        value: undefined,
-      }, selector];
+      return [notFound(doc.address), selector];
     }
     if (schemaTracker !== undefined && selector !== undefined) {
       schemaTracker.add(manager.toKey(target), selector);
@@ -427,21 +429,13 @@ function followPointer<S extends BaseMemoryAddress>(
     // If the object we're pointing to is a retracted fact, just return undefined.
     // We can't do a better match, but we do want to include the result so we watch this doc
     if (valueEntry.value === undefined) {
-      return [
-        {
-          address: { ...target, path: [] },
-          value: undefined,
-          rootValue: undefined,
-        },
-        selector,
-      ];
+      return [notFound(target), selector];
     }
     // Otherwise, we can continue with the target.
     // an assertion fact.is will be an object with a value property, and
     // that's what our schema is relative to.
-    targetDoc = { ...target, path: [] };
-    const targetObj = valueEntry.value as Immutable<JSONObject>;
-    targetDocRoot = targetObj["value"];
+    targetDoc.address = { ...target, path: ["value"] };
+    targetDoc.value = (valueEntry.value as Immutable<JSONObject>)["value"];
     // Load any sources (recursively) if they exist and any linked recipes
     loadSource(
       manager,
@@ -456,9 +450,8 @@ function followPointer<S extends BaseMemoryAddress>(
   return getAtPath(
     manager,
     {
-      address: { ...targetDoc, path: [] },
-      value: targetDocRoot,
-      rootValue: targetDocRoot,
+      address: targetDoc.address,
+      value: targetDoc.value,
     },
     [...link.path, ...path] as string[],
     tracker,
@@ -552,31 +545,33 @@ function loadLinkedRecipe<S extends BaseMemoryAddress>(
   }
 }
 
-// docPath is where we found the pointer and are doing this work
-// Selector path and schema used to be relative to the top of the doc, but
-// we want them relative to the new doc.
-// targetPath is the path in the target doc that the pointer points to
+// docPath is where we found the pointer and are doing this work. It does not
+// include the initial "value" portion.
+// Selector path and schema used to be relative to the "value" of the doc, but
+// we want them relative to the "value" of the new doc.
+// targetPath is the path in the target doc that the pointer points to -- the
+// targetPath does not include the initial "value"
 function narrowSchema(
   docPath: readonly string[],
   selector: SchemaPathSelector,
   targetPath: readonly string[],
 ): SchemaPathSelector {
-  let docPathIndex = 0;
-  while (docPathIndex < docPath.length && docPathIndex < selector.path.length) {
-    if (docPath[docPathIndex] !== selector.path[docPathIndex]) {
+  let pathIndex = 0;
+  while (pathIndex < docPath.length && pathIndex < selector.path.length) {
+    if (docPath[pathIndex] !== selector.path[pathIndex]) {
       logger.warn(() => ["Mismatched paths", docPath, selector.path]);
       return MinimalSchemaSelector;
     }
-    docPathIndex++;
+    pathIndex++;
   }
-  if (docPathIndex < docPath.length) {
+  if (pathIndex < docPath.length) {
     // we've reached the end of our selector path, but still have parts in our doc path, so narrow the schema
     // Some of the schema may have been applicable to other parts of the doc, but we only want to use the
     // portion that will apply to the next doc.
     const cfc = new ContextualFlowControl();
     const schema = cfc.schemaAtPath(
       selector.schemaContext!.schema,
-      docPath.slice(docPathIndex),
+      docPath.slice(pathIndex),
       selector.schemaContext!.rootSchema,
     );
     return {
@@ -587,8 +582,9 @@ function narrowSchema(
       },
     };
   } else {
-    // We've reached the end of the doc path, but still have stuff in our selector path, so remove
-    // the path parts we've already walked from the selector.
+    // We've reached the end of the doc path, but may still have stuff in our
+    // selector path, so remove the path parts we've already walked from the
+    // selector.
     return {
       path: [...targetPath, ...selector.path.slice(docPath.length)],
       schemaContext: selector.schemaContext,
@@ -635,7 +631,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   }
 
   override traverse(
-    doc: ValueAtPath,
+    doc: IAttestation,
   ): Immutable<OptJSONValue> {
     this.schemaTracker.add(this.manager.toKey(doc.address), this.selector);
     return this.traverseWithSelector(doc, this.selector);
@@ -645,26 +641,26 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   // The selector should have been re-rooted if needed to be relative to the specified doc
   // The selector must have a valid (defined) schemaContext
   traverseWithSelector(
-    doc: ValueAtPath,
+    doc: IAttestation,
     selector: SchemaPathSelector,
   ): Immutable<OptJSONValue> {
-    if (deepEqual(doc.address.path, selector.path)) {
+    // Remove the leading "value" from the doc's address for comparison with
+    // the schema path (which does not include the "value" portion).
+    const valuePath = doc.address.path.slice(1);
+    if (deepEqual(valuePath, selector.path)) {
       return this.traverseWithSchemaContext(doc, selector.schemaContext!);
-    } else if (doc.address.path.length > selector.path.length) {
+    } else if (valuePath.length > selector.path.length) {
       throw new Error("Doc path should never exceed selector path");
     } else if (
-      !deepEqual(
-        doc.address.path,
-        selector.path.slice(0, doc.address.path.length),
-      )
+      !deepEqual(valuePath, selector.path.slice(0, valuePath.length))
     ) {
       // There's a mismatch in the initial part, so this will not match
       return undefined;
-    } else { // doc path length < selector.path.length
+    } else { // valuePath length < selector.path.length
       const [nextDoc, nextSelector] = getAtPath(
         this.manager,
         doc,
-        selector.path.slice(doc.address.path.length),
+        selector.path.slice(valuePath.length),
         this.tracker,
         this.schemaTracker,
         selector,
@@ -672,7 +668,8 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
       if (nextDoc.value === undefined) {
         return undefined;
       }
-      if (!deepEqual(nextDoc.address.path, nextSelector!.path)) {
+      const nextValuePath = nextDoc.address.path.slice(1);
+      if (!deepEqual(nextValuePath, nextSelector!.path)) {
         throw new Error("New doc path doesn't match selector path");
       }
       return this.traverseWithSchemaContext(
@@ -683,7 +680,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   }
 
   traverseWithSchemaContext(
-    doc: ValueAtPath,
+    doc: IAttestation,
     schemaContext: Readonly<SchemaContext>,
   ): Immutable<OptJSONValue> {
     if (ContextualFlowControl.isTrueSchema(schemaContext.schema)) {
@@ -782,7 +779,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   }
 
   private traverseArrayWithSchema(
-    doc: ValueAtPath,
+    doc: IAttestation,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
     const arrayObj = [];
@@ -803,8 +800,9 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
         },
         value: item,
       };
+      // Selector paths don't include the initial "value"
       const selector = {
-        path: curDoc.address.path,
+        path: curDoc.address.path.slice(1),
         schemaContext: {
           schema: itemSchema,
           rootSchema: schemaContext.rootSchema,
@@ -821,7 +819,7 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
   }
 
   private traverseObjectWithSchema(
-    doc: ValueAtPath,
+    doc: IAttestation,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
     const filteredObj: Record<string, Immutable<OptJSONValue>> = {};
@@ -874,19 +872,23 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
     return filteredObj;
   }
 
-  // This just has a schemaContext, since the doc.address.path would match the
-  // selector.path
+  // This just has a schemaContext, since the portion of the doc.address.path
+  // after "value" would match the selector.path.
   private traversePointerWithSchema(
-    doc: ValueAtPath,
+    doc: IAttestation,
     schemaContext: SchemaContext,
   ): Immutable<OptJSONValue> {
+    const selector = {
+      path: [...doc.address.path.slice(1)],
+      schemaContext: schemaContext,
+    };
     const [newDoc, newSelector] = getAtPath(
       this.manager,
       doc,
       [],
       this.tracker,
       this.schemaTracker,
-      { path: [...doc.address.path], schemaContext: schemaContext },
+      selector,
     );
     if (newDoc.value === undefined) {
       return null;
@@ -911,6 +913,9 @@ export class SchemaObjectTraverser<S extends BaseMemoryAddress>
  * @param schemaB
  * @returns true if schemaA is a superset, or false if it cannot be determined.
  */
+// TDDO(@ubik2): In cache.ts, we have a SelectorTracker which does more
+// sophisticated matching. Break that out into a schema module so we can use
+// that logic here.
 export function isSchemaSuperset(
   schemaA: JSONSchema | boolean,
   schemaB: JSONSchema | boolean,

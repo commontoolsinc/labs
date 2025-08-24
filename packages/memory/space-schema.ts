@@ -241,6 +241,8 @@ export const selectSchema = <Space extends MemorySpace>(
   return includedFacts;
 };
 
+// The fact passed in is the IAttestation for the top level 'is', so path
+// is empty.
 function loadFactsForDoc(
   manager: ServerObjectManager,
   fact: IAttestation,
@@ -250,10 +252,13 @@ function loadFactsForDoc(
 ) {
   if (isObject(fact.value)) {
     if (selector.schemaContext !== undefined) {
-      const factValue = (fact.value as Immutable<JSONObject>).value;
+      const factValue: IAttestation = {
+        address: { ...fact.address, path: [...fact.address.path, "value"] },
+        value: (fact.value as Immutable<JSONObject>).value,
+      };
       const [newDoc, newSelector] = getAtPath(
         manager,
-        { address: fact.address, value: factValue, rootValue: factValue },
+        factValue,
         selector.path,
         tracker,
         schemaTracker,
