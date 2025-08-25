@@ -245,11 +245,7 @@ export const resolve = (
       // write onto it. Return error with last valid path component.
       if (value === undefined) {
         return {
-          error: new NotFound(
-            source,
-            address,
-            path.slice(0, Math.max(0, at - 1)),
-          ),
+          error: new NotFound(source, address, path.slice(0, Math.max(0, at))),
         };
       }
       // Type mismatch - trying to access property on non-object

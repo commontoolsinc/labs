@@ -106,7 +106,13 @@ export function resolveLink(
       const lastValid = sigilProbe.error.path?.slice(); // undefined => doc missing
 
       if (lastValid) {
-        lastValid?.shift(); // remove `value` prefix
+        // remove `value` prefix
+        lastValid.shift();
+
+        // remove last path element (it's valid in that it can be addressed,
+        // but we want to assume it doesn't exist and look for a link there
+        // instead)
+        lastValid.pop();
 
         if (lastValid.length === link.path.length) {
           // full path candidate, only check legacy-at full path
