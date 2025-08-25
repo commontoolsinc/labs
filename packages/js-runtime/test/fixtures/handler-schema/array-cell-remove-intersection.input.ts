@@ -17,6 +17,14 @@ const removeItem = handler<unknown, ListState & { index: number }>(
     },
 );
 
-export { removeItem };
+// alias-based intersection variant
+type ListStateWithIndex = ListState & { index: number };
+const removeItemAlias = handler<unknown, ListStateWithIndex>(
+    (_, { items, index }) => {
+        const next = items.get().slice();
+        if (index >= 0 && index < next.length) next.splice(index, 1);
+        items.set(next);
+    },
+);
 
-
+export { removeItem, removeItemAlias };
