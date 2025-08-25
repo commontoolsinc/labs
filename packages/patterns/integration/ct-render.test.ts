@@ -1,5 +1,5 @@
 import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
+import { sleep, waitFor } from "@commontools/utils/sleep";
 import { CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -121,17 +121,16 @@ describe("ct-render integration test", () => {
   it("should verify only ONE counter display", async () => {
     const page = shell.page();
 
-    await sleep(500);
-
-    // Find all counter result elements (should be 1 for ct-render, not 2 like nested-counter)
+    await waitFor(async () => {
+      // Find all counter result elements (should be 1 for ct-render, not 2 like nested-counter)
+      const counterResults = await page.$$("#counter-result", {
+        strategy: "pierce",
+      });
+      return counterResults.length === 3;
+    });
     const counterResults = await page.$$("#counter-result", {
       strategy: "pierce",
     });
-    assertEquals(
-      counterResults.length,
-      3,
-      "Should find exactly 3 counter-result elements",
-    );
 
     // Verify it shows the correct value
     const counter = counterResults[0];
