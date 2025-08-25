@@ -78,9 +78,11 @@ describe("ct-render integration test", () => {
     // Click increment button (second button - first is decrement)
     await buttons[1].click();
 
-    await sleep(300);
+    await waitFor(async () => {
+      const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
+      return value === 1;
+    });
 
-    // Verify via direct operations
     const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
     assertEquals(value, 1);
   });
