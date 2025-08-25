@@ -36,7 +36,7 @@ const addItem = handler<InputEventType, ListState>(
   },
 );
 
-const removeItem = handler<unknown, { items: Cell<Item[]>; index: number }>(
+const removeItem = handler<unknown, ListState & { index: number }>(
   (_, { items, index }) => {
     const next = items.get().slice();
     if (index >= 0 && index < next.length) next.splice(index, 1);

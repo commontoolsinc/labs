@@ -517,6 +517,77 @@ function typeToJsonSchemaHelper(
     return { type: "string", format: "date-time" };
   }
 
+  // Handle intersection types (A & B & ...)
+  if (type.flags & ts.TypeFlags.Intersection) {
+    const intersection = type as ts.IntersectionType;
+    const constituents = intersection.types;
+
+    const failureReasons: string[] = [];
+    const isObjectLike = (t: ts.Type) => (t.flags & ts.TypeFlags.Object) !== 0;
+
+    for (const t of constituents) {
+      // Must be object-like
+      if (!isObjectLike(t)) {
+        failureReasons.push("non-object constituent");
+        break;
+      }
+
+      try {
+        // Disallow index signatures for now (would require patternProperties/additionalProperties merging)
+        const stringIndex = checker.getIndexTypeOfType(t, ts.IndexKind.String);
+        const numberIndex = checker.getIndexTypeOfType(t, ts.IndexKind.Number);
+        if (stringIndex || numberIndex) {
+          failureReasons.push("index signature on constituent");
+          break;
+        }
+
+        // Disallow callable/constructable constituents (not meaningful for handler state schemas)
+        const callSigs = checker.getSignaturesOfType(t, ts.SignatureKind.Call);
+        const constructSigs = checker.getSignaturesOfType(
+          t,
+          ts.SignatureKind.Construct,
+        );
+        if (callSigs.length > 0 || constructSigs.length > 0) {
+          failureReasons.push("call/construct signatures on constituent");
+          break;
+        }
+      } catch (_err) {
+        // If the checker throws, err on the side of not merging
+        failureReasons.push("checker error while validating intersection");
+        break;
+      }
+    }
+
+    if (failureReasons.length > 0) {
+      try {
+        logger.warn(() =>
+          `typeToJsonSchema: not merging intersection — ${failureReasons[0]}`
+        );
+      } catch (_e) {
+        // Swallow logging issues to remain safe
+      }
+      return {
+        type: "object",
+        additionalProperties: true,
+        $comment: `Unsupported intersection pattern: ${failureReasons[0]}`,
+      };
+    }
+
+    // Safe to merge: build merged object schema via existing helper
+    return buildObjectSchema(
+      type,
+      checker,
+      typeNode,
+      depth,
+      newSeenTypes,
+      cyclicTypes,
+      definitions,
+      definitionStack,
+      inProgressNames,
+      emittedRefs,
+    );
+  }
+
   // Handle object types (interfaces, type literals)
   if (type.flags & ts.TypeFlags.Object) {
     // If this is a named type and we can emit definitions, build via a placeholder and decide whether to keep a $ref
