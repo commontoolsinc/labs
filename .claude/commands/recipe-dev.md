@@ -214,6 +214,7 @@ Multi-file recipes allow you to compose functionality from multiple source files
 ### Common Recipe Development Tasks
 
 **Finding recipe examples:**
+- **Search patterns package first:** Look in `packages/patterns` for related examples and reusable components
 - Search user's recipe repo: `find [recipe-path] -name "*.tsx" -type f | xargs grep -l "[pattern]"`
 - Show similar recipes as examples
 - Help adapt existing recipes for new purposes

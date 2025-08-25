@@ -1,246 +1,149 @@
 # Interactive Recipe Imagination and Creation
 
-This command guides Claude through an AI-assisted recipe creation workflow that uses specialized subagents to research, plan, and implement new CommonTools recipes based on user prompts.
+This script guides Claude through creating new CommonTools recipes based on user ideas. It follows a streamlined approach similar to recipe development but focuses on bringing new recipe concepts to life.
 
 ## Prerequisites
 
 **Before starting recipe imagination:**
 - User should have an existing space or have run the space setup script
-- Claude should read the common CT setup instructions in `.claude/commands/common/ct.md`
-- Recipe development environment should be set up (user should have run `ct init` in recipes directory)
+- Claude MUST read the common CT setup instructions in `.claude/commands/common/ct.md`
 
-**Important: UI Components and Framework Reference**
-- All UI components prefixed with `ct-` (like `ct-button`, `ct-input`, `ct-list`) come from the `ui` package in this repository
-- The recipe framework implementations are also located in the packages within this repository
-- When stuck on UI components, recipe patterns, or framework behavior, search the packages for reference implementations
-- Use `find packages/ -name "*.ts" -o -name "*.tsx" | xargs grep -l "ct-button"` type searches to find component usage examples
+**Recipe Documentation Reference:**
+Before working on recipes, search for these documentation files in the user's `recipes` folder:
+- `RECIPES.md` - Core recipe development patterns and examples
+- `COMPONENTS.md` - Available UI components and usage patterns
+- `HANDLERS.md` - Event handler patterns and troubleshooting
 
 The user provides an initial prompt describing what they want their recipe to do: $ARGUMENTS
 
-## Workflow Overview
-
-The imagine-recipe command uses a multi-agent approach:
-1. **Main Claude**: Orchestrates the entire process, handles handoffs between agents
-2. **Spec-subagent**: Clarifies requirements, researches existing recipes, examines spaces
-3. **Recipe-subagent**: Implements the recipe, deploys it, and refines based on feedback
-
 ## Script Flow for Claude
 
-### STEP 1: Initial Setup and Prompt Processing
+### STEP 1: Initial Setup and Context
 
 **Read common setup instructions:**
 - First, read `.claude/commands/common/ct.md` for shared CT binary setup
 - Follow those instructions for CT binary check, identity management, environment setup
 - Collect required parameters (API URL, space name, recipe path, identity file)
 
-**Process user prompt:**
-- Capture the user's initial recipe idea from $ARGUMENTS
-- Explain the multi-agent workflow to the user
-- Set expectations about the process: research → planning → implementation → refinement
+**Verify existing space:**
+- Run: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
+- Show user the existing charms in their space for context
+- Ask clarifying questions about the recipe idea
 
-### STEP 2: Launch Spec-Subagent for Requirements and Research
+### STEP 2: Requirements Gathering and Research
 
-**Create spec-subagent with these responsibilities:**
+**Clarify the recipe requirements:**
+1. Ask targeted questions about:
+   - What inputs the recipe needs (other charm results, user inputs, external APIs)
+   - What outputs it should produce
+   - What UI interactions are needed
+   - How it should integrate with existing charms
 
-**Task: Recipe Specification and Research**
-- Take the user's initial prompt and ask clarifying questions to narrow the requirements
-- Research existing recipes in the user's recipe repository to understand patterns and avoid duplication
-  - the `/research` slash command can be used for deep research
-- Optionally examine the user's current space using CT commands to understand existing charms and data flow
-- Produce a detailed specification document for the new recipe
+**Research existing patterns:**
+1. Search user's recipe repo: `find [recipe-path] -name "*.tsx" -type f | head -20`
+2. **Search patterns package:** Look in `packages/patterns` for related examples and reusable components
+3. Look for similar recipes or reusable patterns
+4. Check existing space charms for potential data sources and targets
+5. Reference the recipe documentation files for patterns and components
 
-**Spec-subagent workflow:**
-1. **Requirements clarification:**
-   - Ask targeted questions about inputs, outputs, and behavior
-   - Clarify data sources (other charms, user inputs, external APIs)
-   - Understand UI requirements and user interactions
-   - Identify integration points with existing charms
-
-2. **Recipe repository research:**
-   - Search existing recipes: `find [recipe-path] -name "*.tsx" -type f | head -20`
-   - Analyze similar recipes for patterns and reusable components
-   - Identify potential base recipes to extend or adapt
-   - Look for shared schemas and utilities that could be reused
-   - **Reference framework implementations:** Search packages for UI component usage and recipe patterns: `find packages/ -name "*.ts" -o -name "*.tsx" | xargs grep -l "[pattern]"`
-
-3. **Space examination (optional):**
-   - List current charms: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
-   - Inspect key charms to understand data structures: `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id]`
-   - Identify potential data sources and integration opportunities
-   - Map existing data flow for integration planning
-
-4. **Specification output:**
-   - Recipe purpose and behavior description
-   - Input schema (from other charms, user inputs, external data)
-   - Output schema (what other charms will consume)
-   - UI components and user interaction patterns
-   - Integration requirements (which charms to link to/from)
-   - Implementation approach and architecture notes
-   - Potential challenges and considerations
-
-**Spec-subagent should return a comprehensive specification document that the main Claude can use for planning.**
-
-### STEP 3: Planning and Architecture (Main Claude)
-
-**Review specification:**
-- Analyze the spec-subagent's research and requirements
-- Validate the proposed approach against CommonTools patterns
-- Identify implementation complexity and potential issues
+### STEP 3: Design and Plan
 
 **Create implementation plan:**
-- Break down the recipe into implementable components
-- Plan the file structure (single file vs multi-file recipe)
-- Design the deployment strategy (new charm vs updating existing)
-- Plan integration and linking steps
-- Identify testing and validation approach
+1. Design the recipe structure (single file vs multi-file)
+2. Plan the input/output schemas
+3. Identify UI components needed (reference COMPONENTS.md)
+4. Plan integration and linking strategy
+5. Present plan to user and get approval
 
-**Present plan to user:**
-- Show the detailed implementation plan
-- Explain the proposed recipe architecture
-- Get user approval before proceeding to implementation
-- Allow user to request modifications to the plan
+### STEP 4: Implementation
 
-### STEP 4: Launch Recipe-Subagent for Implementation
+**Create the recipe:**
+1. Ensure TypeScript setup: User should have run `ct init` in recipes directory
+2. Create the recipe file following CommonTools patterns
+3. Implement UI components using `ct-` prefixed components
+4. Define proper schemas and handlers (reference HANDLERS.md for patterns)
+5. Add error handling and validation
 
-**Create recipe-subagent with these responsibilities:**
+**Test syntax (if requested or if deployment fails):**
+- Run: `./dist/ct dev [recipe-file] --no-run`
+- Fix any syntax errors
 
-**Task: Recipe Implementation and Deployment**
-- Implement the recipe based on the approved specification and plan
-- Ensure TypeScript correctness and CommonTools compliance
-- Deploy the recipe and handle any deployment issues
-- Test the recipe and refine based on results
-- Debug using CT inspection commands as needed
+### STEP 5: Deploy and Test
 
-**Recipe-subagent workflow:**
+**Deploy new charm:**
+1. Deploy: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-file]`
+2. Record the new CHARM_ID
+3. Verify deployment: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
 
-1. **Recipe implementation:**
-   - Create the recipe file(s) following CommonTools patterns
-   - Implement the UI components and interaction handlers using `ct-` prefixed components from the `ui` package
-   - **Reference component implementations:** When unsure about UI components, search packages: `find packages/ui -name "*.tsx" | xargs grep -l "ct-[component]"`
-   - Define proper input/output schemas matching the specification
-   - Add error handling and validation
-   - Include helpful comments and documentation
+**Create integrations:**
+1. Link to data sources: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source]/[field] [target]/[input]`
+2. Verify links work: `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id]`
 
-2. **Syntax validation and testing:**
-   - Test recipe syntax: `./dist/ct dev [recipe-file] --no-run`
-   - Fix any TypeScript or syntax errors
-   - Ensure imports and dependencies are correct
-   - Validate against CommonTools recipe requirements
+**Test and refine:**
+1. Use inspection commands to verify behavior
+2. Use cell operations for testing: `./dist/ct charm get/set` commands
+3. **Use Playwright for UI testing (if MCP available):** Test the recipe's user interface by navigating to the space URL and interacting with the deployed charm
+4. Make refinements using `./dist/ct charm setsrc` if needed
+5. Iterate based on user feedback
 
-3. **Deployment:**
-   - Deploy the new charm: `./dist/ct charm new --identity [keyfile] --api-url [api-url] --space [spacename] [recipe-file]`
-   - Record the new CHARM_ID
-   - Verify successful deployment: `./dist/ct charm ls --identity [keyfile] --api-url [api-url] --space [spacename]`
+### STEP 6: Documentation and Handoff
 
-4. **Integration and linking:**
-   - Create planned links to other charms: `./dist/ct charm link --identity [keyfile] --api-url [api-url] --space [spacename] [source]/[field] [target]/[input]`
-   - Verify links are working: `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id]`
-   - Test data flow through the network
+**Finalize the recipe:**
+- Verify it meets original requirements
+- Ensure proper integration with existing charms
+- Add helpful comments and documentation
 
-5. **Testing and debugging:**
-   - Use inspection commands to verify behavior: `./dist/ct charm inspect --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] --json`
-   - Use cell operations for debugging: `./dist/ct charm get --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] [path]`
-   - Set test data if needed: `echo '[test-data]' | ./dist/ct charm set --identity [keyfile] --api-url [api-url] --space [spacename] --charm [charm-id] [path]`
-   - Iterate on the recipe based on test results
+**Repository management:**
+- Help save recipe to correct location
+- Guide git workflow if user wants to commit
+- Provide usage instructions
 
-6. **User feedback and refinement:**
-   - Present the deployed recipe to the user
-   - Gather feedback on functionality and UI
-   - Make refinements using `./dist/ct charm setsrc` for updates
-   - Continue testing and refinement cycles as needed
+## Common Recipe Patterns
 
-**Recipe-subagent should return a fully functional, deployed, and tested recipe.**
+**Recipe types to consider:**
+- **Filter recipes**: Process collections, output filtered subsets
+- **Transformer recipes**: Convert data between formats
+- **Aggregator recipes**: Combine multiple inputs
+- **Generator recipes**: Create new data based on inputs
+- **UI recipes**: Provide interactive interfaces
+- **Integration recipes**: Connect to external APIs
 
-### STEP 5: Review and Repository Management (Main Claude)
+## Key Commands Reference
 
-**Final recipe review:**
-- Verify the recipe meets the original requirements
-- Check that all planned integrations are working
-- Ensure the recipe follows CommonTools best practices
-- Validate error handling and edge cases
+```bash
+# List charms
+./dist/ct charm ls --identity [key] --api-url [url] --space [space]
 
-**Repository preparation:**
-- Review the final recipe code for quality and maintainability
-- Ensure proper documentation and comments
-- Check for any cleanup needed (temporary files, test data)
-- Verify the recipe file is in the correct location in the recipe repository
+# Create new charm
+./dist/ct charm new --identity [key] --api-url [url] --space [space] [recipe-file]
 
-**Git workflow assistance:**
-- Help user stage the new recipe file: `git add [recipe-file]`
-- Review changes: `git diff --staged`
-- Guide commit message creation following repository conventions
-- Create commit: `git commit -m "[descriptive commit message]"`
-- Optionally help create a pull request if using external recipe repository
+# Link charms
+./dist/ct charm link --identity [key] --api-url [url] --space [space] [source]/[field] [target]/[input]
 
-**Documentation and handoff:**
-- Provide usage instructions for the new recipe
-- Document any special configuration or setup requirements
-- Explain how the recipe integrates with existing charms
-- Suggest next steps or potential enhancements
+# Inspect charm
+./dist/ct charm inspect --identity [key] --api-url [url] --space [space] --charm [id]
 
-## Subagent Handoff Protocol
+# Update recipe source
+./dist/ct charm setsrc --identity [key] --api-url [url] --space [space] --charm [id] [recipe-file]
 
-**Between Main Claude and Spec-subagent:**
-- Main Claude provides: User prompt, recipe repository path, space context
-- Spec-subagent returns: Detailed specification document with requirements, research findings, and implementation notes
+# Test recipe syntax
+./dist/ct dev [recipe-file] --no-run
 
-**Between Main Claude and Recipe-subagent:**
-- Main Claude provides: Approved specification, implementation plan, deployment parameters
-- Recipe-subagent returns: Working recipe file, deployed charm ID, integration status, test results
-
-**Error handling between agents:**
-- If subagent encounters blocking issues, it should return partial results with clear error descriptions
-- Main Claude should handle subagent failures gracefully and potentially retry with modified parameters
-- User should be informed of any issues and given options to adjust the approach
-
-## Advanced Features
-
-**Multi-file recipe support:**
-- Spec-subagent should identify when multi-file architecture is beneficial
-- Recipe-subagent should handle proper import/export patterns
-- Plan for shared schema and utility files
-
-**API integration recipes:**
-- Spec-subagent should research API requirements and authentication needs
-- Recipe-subagent should implement proper error handling for external services
-- Consider rate limiting and data caching strategies
-
-**Complex data transformation recipes:**
-- Identify data format mismatches between existing charms
-- Plan intermediate transformation steps
-- Implement robust data validation and error recovery
-
-## Error Handling and Troubleshooting
-
-**Common issues and solutions:**
-- Recipe syntax errors: Recipe-subagent should iterate until syntax is valid
-- UI component issues: Search packages for component implementations and usage examples
-- Framework pattern confusion: Reference recipe framework implementations in packages
-- Deployment failures: Check network connectivity, identity permissions, space access
-- Integration problems: Verify charm IDs, field names, and data schema compatibility
-- Runtime errors: Use inspection and cell operations for debugging
-
-**Escalation path:**
-- If subagents cannot resolve issues, escalate to user with specific problem description
-- Provide diagnostic information and suggested next steps
-- Allow user to modify requirements or approach based on technical constraints
-
-## Success Criteria
-
-**A successful imagine-recipe session should result in:**
-- A working recipe that meets the user's original requirements
-- Proper integration with existing space charms
-- Clean, well-documented code following CommonTools patterns
-- Successful deployment and testing
-- Committed code ready for sharing or collaboration
+# Cell operations for testing
+./dist/ct charm get --identity [key] --api-url [url] --space [space] --charm [id] [path]
+echo '[json-value]' | ./dist/ct charm set --identity [key] --api-url [url] --space [space] --charm [id] [path]
+```
 
 ## Notes for Claude
 
-- Always maintain context between subagent handoffs
-- Keep user informed of progress through each phase
-- Don't proceed to implementation without user approval of the plan
-- Use the subagents' specialized focus to ensure thorough work in each phase
-- Be prepared to iterate if requirements change during the process
-- Document lessons learned for future recipe development
+- **Always search `packages/patterns` and the recipes repository first** - Look for related examples before writing new code
+- Start simple and iterate - build basic functionality first
+- Reference the recipe documentation files frequently
+- Test incrementally after each major change
+- Don't test syntax before deploying unless explicitly requested or deployment fails
+- Keep track of charm IDs when creating new ones
+- Use cell operations for precise testing and debugging
+- **Use Playwright MCP for comprehensive UI testing** - Navigate to the space URL and test the recipe's interface directly in the browser
+- Focus on user needs and practical functionality
 
-Remember: This is a collaborative AI-assisted development process. The goal is to leverage specialized subagents for deep research and implementation while maintaining human oversight and approval at key decision points.
+Remember: Recipe imagination is about turning ideas into working code. Help users build step by step, testing along the way, and creating recipes that solve real problems in their CommonTools spaces.
