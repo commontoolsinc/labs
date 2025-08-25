@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Recipe Framework appears to be a declarative, reactive system for building
+The Recipe Framework is a declarative, reactive system for building
 integrations and data transformations. It uses a component-based architecture
 where recipes are autonomous modules that can import, process, and export data.
 
@@ -13,45 +13,29 @@ where recipes are autonomous modules that can import, process, and export data.
 A recipe is the fundamental building block, defined using the `recipe()`
 function. It takes three parameters:
 
-- Input Schema: Defines the input parameters and their types using JSON Schema
-- Output Schema: Defines the output structure
+- Input Types: Defines the input parameters and their types using TypeScript
+- Output Types: Defines the output structure using TypeScript
 - Implementation Function: A function that receives the inputs and returns
   outputs
 
-### Schemas and Type Safety
+### Types and Runtime Safety
 
-The framework provides two ways to define schemas for recipes, handlers, and
-lifted functions:
+The framework uses a TypeScript-first approach for defining types in recipes, handlers, and lifted functions:
 
-1. **TypeScript Generics**: Directly pass TypeScript interfaces as type
-   parameters
+```typescript
+const myHandler = handler<InputType, StateType>(
+  (input, state) => {/* ... */},
+);
+```
 
-   ```typescript
-   const myHandler = handler<InputType, StateType>(
-     (input, state) => {/* ... */},
-   );
-   ```
+This TypeScript-first approach provides several benefits:
 
-2. **JSON Schema**: Define schemas in JSON format (recommended approach)
+- Full TypeScript type inference and checking
+- Clean, readable type definitions
+- Integration with IDE tooling
+- Express Cell vs readonly value requirements directly in types
 
-   ```typescript
-   const myHandler = handler(
-     { type: "object", properties: {/* input schema */} },
-     { type: "object", properties: {/* state schema */} },
-     (input, state) => {/* ... */},
-   );
-   ```
-
-The JSON Schema approach provides several benefits:
-
-- Runtime validation
-- Self-documentation
-- Better serialization support
-- Integration with framework tooling
-
-Importantly, the framework automatically derives TypeScript types from JSON
-Schemas, giving you full type inference and type checking in your handler and
-lift functions.
+Importantly, the framework automatically derives JSON Schema from your TypeScript types at runtime using the CTS (CommonTools Schema) system. This gives you runtime validation, self-documentation, and serialization support without having to write JSON Schema manually. You can express your desire for Cells vs readonly values directly in TypeScript types, and the system will fulfill the values by reflecting on the types as derived JSON Schema.
 
 ### Data Flow
 
@@ -69,26 +53,16 @@ There are important differences between the types of functions in the framework:
 
 #### Handlers
 
+(For even more detail, see `HANDLERS.md`)
+
 Handlers are functions that declare node types in the reactive graph that
 respond to events:
 
 - Created with `handler()` function
-- Can be defined with JSON Schema or TypeScript generics (see Schemas section)
-- The state schema can use `asCell: true` to receive cells directly:
+- Use `Cell<>` to indicate you want a reactive value (for mutation, usually):
 
   ```typescript
-  // Using asCell: true
-  const updateCounter = handler(
-    { type: "object" }, // Input schema
-    {
-      type: "object",
-      properties: {
-        count: {
-          type: "number",
-          asCell: true, // Will receive a Cell instance
-        },
-      },
-    },
+  const updateCounter = handler<Record<string, never>, { count: Cell<number> }>(
     (input, { count }) => {
       // Now count is a Cell<number> instance
       count.set(count.get() + 1);
@@ -116,25 +90,10 @@ respond to events:
 
 - `lift`: Declares a reactive node type that transforms data in the reactive
   graph
-  - Can also use JSON Schema for type safety with input and output schemas:
 
     ```typescript
     const transformData = lift(
-      // Input schema
-      {
-        type: "object",
-        properties: {
-          value: { type: "number" },
-          multiplier: { type: "number" },
-        },
-        required: ["value", "multiplier"],
-      },
-      // Output schema
-      {
-        type: "number",
-      },
-      // Function with inferred types
-      ({ value, multiplier }) => value * multiplier,
+      ({ value, multiplier }: { value: number, multiplier: number }) => value * multiplier,
     );
     ```
 
@@ -282,9 +241,7 @@ logic.
    runtime validation, self-documentation, and compatibility with framework
    tooling.
 
-2. **Use `asCell: true` for Handler State**: When defining handler state schema,
-   use `asCell: true` for properties that need to be updated. This gives you
-   direct access to the Cell methods like `.set()` and `.get()`.
+2. **Use `Cell<>` for Handler State**: When defining handler state types, use `Cell<>` for properties that need to be updated. This gives you direct access to the Cell methods like `.set()` and `.get()`.
 
 3. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements,
    ternary operators, or any other conditionals inside a recipe function - they
@@ -395,208 +352,162 @@ logic.
 9. **Minimize Side Effects**: Side effects should be managed through handlers
    rather than directly in recipes.
 
-10. **Schema Reuse**: Define schemas once and reuse them across recipes,
-    handlers, and lifted functions to maintain consistency.
+10. **Type Reuse**: Define types once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
 
-11. **Follow Type Through Schema**: Leverage the framework's automatic type
-    inference from JSON Schema rather than duplicating type definitions with
-    TypeScript interfaces.
+## Type Best Practices
 
-## Schema Best Practices
-
-When defining schemas in the Recipe Framework, follow these guidelines for best
+When defining types in the Recipe Framework, follow these guidelines for best
 results:
 
-1. **Define Schemas as Constants**: Declare schemas as constants for reuse and
+1. **Define Types as Reusable Interfaces**: Declare types as interfaces or type aliases for reuse and
    reference:
 
    ```typescript
-   const UserSchema = {
-     type: "object",
-     properties: {
-       id: { type: "string" },
-       name: { type: "string" },
-       email: { type: "string", format: "email" },
-     },
-     required: ["id", "name"],
-   } as const satisfies JSONSchema;
-   ```
-
-2. **Use `as const satisfies JSONSchema`**: Always use this pattern to ensure
-   proper type inference and compile-time validation:
-
-   ```typescript
-   // DO THIS
-   const schema = {/*...*/} as const satisfies JSONSchema;
-
-   // NOT THIS
-   const schema = {/*...*/} as JSONSchema; // Doesn't provide proper type checking
-   ```
-
-3. **Always Include Reasonable Defaults**: Where possible, provide sensible
-   default values to improve usability and reduce errors:
-
-   ```typescript
-   const SettingsSchema = {
-     type: "object",
-     properties: {
-       theme: {
-         type: "string",
-         enum: ["light", "dark", "system"],
-         default: "system", // Sensible default
-       },
-       fontSize: {
-         type: "number",
-         minimum: 8,
-         maximum: 32,
-         default: 14, // Reasonable default
-       },
-       notifications: {
-         type: "boolean",
-         default: true, // Sensible default
-       },
-     },
-   } as const satisfies JSONSchema;
-   ```
-
-4. **Extract Types from Schemas**: Use the `Schema` utility to derive TypeScript
-   types from JSON Schemas:
-
-   ```typescript
-   const UserSchema = {/*...*/} as const satisfies JSONSchema;
-   type User = Schema<typeof UserSchema>;
-
-   // Now User is a TypeScript type matching the schema
-   ```
-
-5. **Reference Schemas Instead of Duplicating**: For nested objects, reference
-   existing schemas:
-
-   ```typescript
-   // Instead of duplicating user properties
-   const PostSchema = {
-     type: "object",
-     properties: {
-       author: UserSchema, // Reference the existing schema
-       content: { type: "string" },
-       timestamp: { type: "string", format: "date-time" },
-     },
-     required: ["author", "content"],
-   } as const satisfies JSONSchema;
-   ```
-
-6. **Document Schemas with Descriptions**: Add descriptions to schemas and
-   properties for better self-documentation:
-
-   ```typescript
-   {
-     type: "string",
-     title: "Email",
-     description: "User's primary email address used for notifications",
-     format: "email"
-   }
-   ```
-
-7. **Use `asCell: true` for Reactive State**: In handler state schemas, use
-   `asCell: true` for properties that need direct access to Cell methods:
-
-   ```typescript
-   const stateSchema = {
-     type: "object",
-     properties: {
-       counter: {
-         type: "number",
-         asCell: true, // Will be received as Cell<number>
-         description: "Counter value that can be directly manipulated",
-         default: 0, // Provide a default value
-       },
-     },
+   type User = {
+     id: string;
+     name: string;
+     email?: string;
    };
    ```
 
-8. **Define Required Properties Explicitly**: Always specify which properties
-   are required:
+2. **Use Descriptive Type Names**: Always use clear, descriptive names that explain what the type represents:
 
    ```typescript
-   {
-     // Properties definition...
-     required: ["id", "name", "email"];
-   }
+   // DO THIS
+   type UserPreferences = {
+     theme: "light" | "dark" | "system";
+     fontSize: number;
+     notifications: boolean;
+   };
+
+   // NOT THIS
+   type Config = { theme: string; size: number; alerts: boolean };
    ```
 
-9. **Use Schema Composition**: Break down complex schemas into smaller, reusable
-   parts:
+3. **Use Default<> for Sensible Defaults**: Where possible, provide sensible default values using the CTS Default<> type:
 
    ```typescript
-   const AddressSchema = {/*...*/} as const satisfies JSONSchema;
-   const ContactSchema = {/*...*/} as const satisfies JSONSchema;
-
-   const UserSchema = {
-     type: "object",
-     properties: {
-       // Basic info
-       id: { type: "string" },
-       name: { type: "string" },
-       // Composed schemas
-       address: AddressSchema,
-       contact: ContactSchema,
-     },
-     required: ["id", "name"],
-   } as const satisfies JSONSchema;
+   type UserSettings = {
+     theme: Default<"light" | "dark" | "system", "system">;
+     fontSize: Default<number, 14>;
+     notifications: Default<boolean, true>;
+   };
    ```
 
-10. **Define Enums with Constant Arrays**:
+4. **Compose Types Instead of Duplicating**: For complex objects, compose existing types:
 
-    ```typescript
-    const StatusValues = ["pending", "active", "suspended", "deleted"] as const;
+   ```typescript
+   type User = {
+     id: string;
+     name: string;
+     email: string;
+   };
 
-    const UserSchema = {
-      // ...
-      properties: {
-        // ...
-        status: {
-          type: "string",
-          enum: StatusValues,
-          default: "pending", // Provide a reasonable default
-        },
-      },
-    } as const satisfies JSONSchema;
-    ```
+   type Post = {
+     author: User; // Reference the existing type
+     content: string;
+     timestamp: Date;
+   };
+   ```
+
+5. **Document Types with Comments**: Add JSDoc comments to types for better self-documentation:
+
+   ```typescript
+   /** User's primary email address used for notifications */
+   type Email = string;
+
+   type User = {
+     id: string;
+     name: string;
+     /** User's primary email address used for notifications */
+     email?: Email;
+   };
+   ```
+
+6. **Use Cell<> for Reactive State**: In handler state types, use `Cell<>` for properties that need direct access to Cell methods:
+
+   ```typescript
+   type HandlerState = {
+     /** Counter value that can be directly manipulated */
+     counter: Cell<number>;
+     readonlyValue: string; // Regular values are readonly
+   };
+   ```
+
+7. **Make Optional vs Required Explicit**: Use TypeScript's optional properties (?) to clearly indicate what's required:
+
+   ```typescript
+   type User = {
+     id: string;        // Required
+     name: string;      // Required
+     email?: string;    // Optional
+   };
+   ```
+
+8. **Use Type Composition**: Break down complex types into smaller, reusable parts:
+
+   ```typescript
+   type Address = {
+     street: string;
+     city: string;
+     zipCode: string;
+   };
+
+   type Contact = {
+     phone?: string;
+     email: string;
+   };
+
+   type User = {
+     // Basic info
+     id: string;
+     name: string;
+     // Composed types
+     address: Address;
+     contact: Contact;
+   };
+   ```
+
+9. **Use Union Types for Enums**: Define enums with union types and const assertions:
+
+   ```typescript
+   const StatusValues = ["pending", "active", "suspended", "deleted"] as const;
+   type Status = typeof StatusValues[number]; // "pending" | "active" | "suspended" | "deleted"
+
+   type User = {
+     id: string;
+     name: string;
+     status: Default<Status, "pending">; // Provide a reasonable default
+   };
+   ```
 
 ## Advanced Type Concepts
 
-### Schema to TypeScript Inference
+### TypeScript to Runtime Schema
 
-The framework provides automatic type inference from JSON Schema to TypeScript
-types:
+The CTS framework automatically generates JSON Schema from your TypeScript types at runtime:
 
 ```typescript
-// Define a schema
-const PersonSchema = {
-  type: "object",
-  properties: {
-    name: { type: "string" },
-    age: { type: "number" },
-  },
-  required: ["name"],
-} as const;
+// Define TypeScript types
+type Person = {
+  name: string;
+  age?: number;
+};
 
-// Automatically infer TypeScript type
-type Person = Schema<typeof PersonSchema>;
-// Equivalent to: type Person = { name: string; age?: number; };
+// The framework automatically derives JSON Schema from this TypeScript type
+// No manual schema definition needed - it's all handled by CTS reflection
 ```
 
 ### Cell Type vs Value Type
 
-When working with handlers that use `asCell: true`, it's important to understand
-the distinction:
+When working with handlers, it's important to understand the distinction:
 
 ```typescript
 // Regular state property (value type)
-{ count: number } // Handler receives the number directly
+{ count: number } // Handler receives the number directly (readonly)
 
 // Cell-typed property
-{ count: { type: "number", asCell: true } } // Handler receives Cell<number>
+{ count: Cell<number> } // Handler receives Cell<number> for mutation
 ```
 
 With Cell-typed properties, the handler function receives actual Cell instances
@@ -619,9 +530,8 @@ effective data flow analysis. In this system:
 
 - Recipes are transparent to data flow analysis
 - Functions passed to `handler` or `lift` aren't transparent (they're "tainted")
-- JSON Schema provides a clean abstraction for data validation and type safety
-- The `asCell: true` pattern maintains reactivity while allowing direct
-  manipulation
+- TypeScript types provide clean abstractions that are automatically converted to runtime validation
+- The `Cell<>` pattern maintains reactivity while allowing direct manipulation
 
 By following these principles, applications built with this framework can
 achieve predictable data flow, easier testing, and better security through data
@@ -642,9 +552,9 @@ export default recipe(
   OutputSchema,
   ({ input1, input2 }) => {
     const state = cell<SomeState>([]);
-    
+
     // Define handlers and side effects
-    
+
     return {
       [NAME]: "Recipe Name",
       [UI]: (
@@ -715,13 +625,12 @@ A common pattern in recipes is:
 ## Example Pattern for Data Transformation Recipes
 
 ```typescript
-export default recipe(
-  InputSchema,
-  OutputSchema,
+export default recipe<Input, Output>(
+  "Recipe Name",
   ({ inputData, settings }) => {
     // Initialize state
     const processedData = cell<ProcessedData[]>([]);
-    
+
     // Process data with LLM (directly in recipe)
     // Notice we call map() directly on the cell - inputData is a cell
     const processedItems = inputData.map(item => {
@@ -733,23 +642,23 @@ export default recipe(
         })
       };
     });
-    
+
     // Create derived value from LLM results
-    const summaries = derive(processedItems, items => 
+    const summaries = derive(processedItems, items =>
       items.map(item => ({
         id: item.originalItem.id,
         summary: item.llmResult.result || "Processing...",
       }))
     );
-    
+
     // Handler for user interactions
-    const refreshData = handler<{}, { processedData: Cell<ProcessedData[]> }>(
+    const refreshData = handler<Record<string, never>, { processedData: Cell<ProcessedData[]> }>(
       (_, state) => {
         // Update state based on user action
         // Note: Cannot call llm() directly here
       }
     );
-    
+
     return {
       [NAME]: "Recipe Name",
       [UI]: (
