@@ -6,10 +6,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "./link-utils.ts";
-import type {
-  IExtendedStorageTransaction,
-  MemoryAddressPathComponent,
-} from "./storage/interface.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 
 const logger = getLogger("link-resolution");
@@ -26,7 +23,7 @@ export type ResolvedFullLink = NormalizedFullLink & {
   [resolvedFullLinkBrand]: true;
 };
 
-const MAX_PATH_RESOLUTION_LENGTH = 1000;
+const MAX_PATH_RESOLUTION_LENGTH = 100;
 
 /**
  * Resolves a document path with support for links inside documents.
@@ -69,83 +66,120 @@ export function resolveLink(
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
-  const remainingPath = [...link.path];
-  const traversedPath: MemoryAddressPathComponent[] = [];
-  let last: NormalizedFullLink = link;
-
   let iteration = 0;
 
   while (true) {
     if (iteration++ > MAX_PATH_RESOLUTION_LENGTH) {
       logger.warn(`Link resolution iteration limit reached`);
-      return emptyResolvedFullLink; // = return link to empty document
+      return createEmptyResolvedFullLink(link); // = return link to empty document
     }
 
-    if (lastNode === "top" && remainingPath.length === 0) {
-      break; // = return before following links on last path segment
+    // Detect cycles.
+    const key = JSON.stringify([link.space, link.id, link.path]);
+    if (seen.has(key)) {
+      logger.warn(`Link cycle detected ${key}`);
+      return createEmptyResolvedFullLink(link); // = return link to empty document
     }
+    seen.add(key);
 
-    // Detect cycles. Only have to do this at top of path, since link folloowing
-    // will always go through this at least once.
-    if (traversedPath.length === 0) {
-      const key = JSON.stringify([last.space, last.id, remainingPath]);
-      if (seen.has(key)) {
-        logger.warn(`Link cycle detected ${key}`);
-        return emptyResolvedFullLink; // = return link to empty document
+    // Optimized fast-path: a single sigil probe at the full remaining path.
+    // If not a sigil link, use that error's path to check legacy or parent once.
+    let nextLink: NormalizedFullLink | undefined;
+
+    // Sigil probe at full path
+    const sigilProbe = tx.read({
+      ...link,
+      path: ["value", ...link.path, "/", LINK_V1_TAG],
+    });
+    if (
+      sigilProbe.ok &&
+      isRecord(sigilProbe.ok.value) &&
+      lastNode !== "top" &&
+      (lastNode !== "writeRedirect" ||
+        sigilProbe.ok.value.overwrite === "redirect")
+    ) {
+      // Read the full value at this path to ensure correct reactivity logging
+      // (we need to be reactive to siblings that could invalidate the link)
+      const whole = tx.readValueOrThrow({ ...link, path: link.path });
+      nextLink = parseLink(whole as CellLink, link);
+    } else if (sigilProbe.error?.name === "NotFoundError") {
+      const lastValid = sigilProbe.error.path?.slice(); // undefined => doc missing
+
+      if (lastValid) {
+        // remove `value` prefix
+        lastValid.shift();
+
+        // remove last path element (it's valid in that it can be addressed,
+        // but we want to assume it doesn't exist and look for a link there
+        // instead)
+        lastValid.pop();
+
+        if (lastValid.length === link.path.length) {
+          // full path candidate, only check legacy-at full path
+          const legacy = checkLegacyAt(
+            tx,
+            link,
+            lastValid,
+            lastNode === "writeRedirect",
+          );
+          if (legacy) {
+            nextLink = legacy;
+          }
+        } else {
+          // Check sigil at this parent, then legacy
+          const parentSigil = tx.read({
+            ...link,
+            path: ["value", ...lastValid, "/", LINK_V1_TAG],
+          });
+          if (parentSigil.ok && isRecord(parentSigil.ok.value)) {
+            // Read the full value at the parent to ensure proper reactivity
+            const whole = tx.readValueOrThrow({ ...link, path: lastValid });
+            nextLink = parseLink(whole as CellLink, {
+              ...link,
+              path: lastValid,
+            });
+          } else {
+            nextLink = checkLegacyAt(tx, link, lastValid, false);
+          }
+        }
+
+        if (nextLink) {
+          const remainingPath = link.path.slice(lastValid.length);
+          let linkSchema = nextLink.schema;
+          if (linkSchema !== undefined && remainingPath.length > 0) {
+            const cfc = new ContextualFlowControl();
+            linkSchema = cfc.getSchemaAtPath(
+              linkSchema,
+              remainingPath,
+              nextLink.rootSchema,
+            );
+          }
+          nextLink = {
+            ...nextLink,
+            path: [...nextLink.path, ...remainingPath],
+            ...(linkSchema ? { schema: linkSchema } : {}),
+          };
+        }
       }
-      seen.add(key);
+      // If still nothing found we fall through and break the loop
     }
 
-    const onlyRedirects = remainingPath.length === 0 &&
-      lastNode === "writeRedirect"; // For "value", follow all
-    const nextLink = readMaybeLink(
-      tx,
-      { ...last, path: traversedPath },
-      onlyRedirects,
-    );
     if (nextLink !== undefined) {
-      // Schemas on link overwrite the current schema. We have to adjust it for
-      // the deeper remaining path we're accessing. If after that, the schema is
-      // empty (or more specifically "any"), we keep the current schema.
-      // TODO(ubik2,seefeld): This should really be a schema intersection.
-      let linkSchema = nextLink.schema;
-      if (linkSchema !== undefined && remainingPath.length > 0) {
-        const cfc = new ContextualFlowControl();
-        linkSchema = cfc.getSchemaAtPath(
-          linkSchema,
-          remainingPath,
-          nextLink.rootSchema,
-        );
-      }
-      if (linkSchema !== undefined) {
-        last = { ...nextLink, schema: linkSchema };
-      } else if (last.schema !== undefined) {
-        last = {
+      if (nextLink.schema === undefined && link.schema !== undefined) {
+        link = {
           ...nextLink,
-          schema: last.schema,
-          rootSchema: last.rootSchema,
+          schema: link.schema,
+          rootSchema: link.rootSchema,
         };
       } else {
-        last = nextLink;
+        link = nextLink;
       }
-
-      // We have to start walking the the destination from the top, as it might
-      // contain links in the middle, so we prepend it's path to the remaining
-      // path and reset the current path to empty.
-      remainingPath.unshift(...nextLink.path);
-      traversedPath.length = 0;
-      // Note: we already updated 'last' above with the proper schema handling
-      continue; // = continue following links at same remainingPath
+    } else {
+      break;
     }
-
-    if (remainingPath.length === 0) {
-      break; // = both the "value" and "writeRedirect" cases
-    }
-
-    traversedPath.push(remainingPath.shift()!);
   }
 
-  const result = { ...last, path: traversedPath } satisfies NormalizedFullLink;
+  const result = { ...link } satisfies NormalizedFullLink;
 
   // Remove overwrite field, i.e. when the last followed link was a write
   // redirect. The idea is that this is a link pointing to the final value, it
@@ -155,6 +189,36 @@ export function resolveLink(
   // The casting is a workaround for the branding, we don't actually want to add
   // the symbol to the result.
   return result as unknown as ResolvedFullLink;
+}
+
+function checkLegacyAt(
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  atPath: readonly string[],
+  onlyRedirects: boolean,
+): NormalizedFullLink | undefined {
+  const aliasPath = tx.read({
+    ...link,
+    path: ["value", ...atPath, "$alias", "path"],
+  });
+  if (Array.isArray(aliasPath.ok?.value)) {
+    return parseLink(
+      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
+      { ...link, path: atPath },
+    );
+  }
+  if (onlyRedirects) return undefined;
+  const legacyCell = tx.read({
+    ...link,
+    path: ["value", ...atPath, "cell", "/"],
+  });
+  if (typeof legacyCell.ok?.value === "string") {
+    return parseLink(
+      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
+      { ...link, path: atPath },
+    );
+  }
+  return undefined;
 }
 
 /**
@@ -195,9 +259,14 @@ export function readMaybeLink(
   }
 }
 
-const emptyResolvedFullLink: ResolvedFullLink = {
-  space: "did:null:null",
-  id: "data:application/json,{}",
-  path: [],
-  type: "application/json",
-} satisfies NormalizedFullLink as unknown as ResolvedFullLink;
+function createEmptyResolvedFullLink(
+  link: NormalizedFullLink,
+): ResolvedFullLink {
+  return {
+    ...link,
+    id: "data:application/json,{}",
+    path: [],
+    type: "application/json",
+    space: "did:null:null",
+  } satisfies NormalizedFullLink as unknown as ResolvedFullLink;
+}
