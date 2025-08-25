@@ -1,0 +1,23 @@
+// Public type surface; export from unified types module for backward compatibility
+export type {
+  ActorId,
+  BranchId,
+  BranchName,
+  BranchRef,
+  BranchState,
+  ChangeHash,
+  DecodedChangeHeader,
+  DocId,
+  Head,
+  Heads,
+  ReadAssert,
+  Seq,
+  SpaceStorage,
+  StorageProvider,
+  StorageProviderInfo,
+  SubmittedChange,
+  TxDocResult,
+  TxReceipt,
+  TxRequest,
+  WriteRequest,
+} from "./types.ts";

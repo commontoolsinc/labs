@@ -160,7 +160,7 @@ export class Logger {
     this._disabled = options?.enabled === undefined ? false : !options.enabled;
 
     // Set logger-specific level if provided
-    this.level = options?.level;
+    if (options && options.level !== undefined) this.level = options.level;
   }
 
   /**
