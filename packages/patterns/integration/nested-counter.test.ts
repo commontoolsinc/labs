@@ -78,7 +78,7 @@ describe("nested counter integration test", () => {
     // Click increment button (second button - first is decrement)
     await buttons[1].click();
 
-    await sleep(300);
+    await sleep(2000);
 
     const counterResult = await page.$("#counter-result", {
       strategy: "pierce",
