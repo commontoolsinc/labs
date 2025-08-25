@@ -27,10 +27,11 @@ Recipe Construction API
   invoked, yields a Recipe object. Within `fn`, authors operate on an
   `OpaqueRef` representing the argument, construct outputs using OpaqueRefs and
   literals, and compose modules.
-- `lift`, `handler`, `derive`, `compute`, `render`: Builder utilities to
-  construct modules from functions, define event handlers/transformations, and
-  renderers. Lifted code runs within a frame that provides a cause (used for
-  causal ids) and materialization helpers.
+- `lift`, `handler`, `derive`: Builder utilities to construct modules from
+  functions, define event handlers/transformations, and renderers. Lifted code
+  runs within a frame that provides a cause (used for causal ids) and
+  materialization helpers. (`derive` is just a shortcut for `lift`:
+  `lift(f)(x) == derive(x, f)`).
 - `cell(schema?, name?, value?)`: Produces an `OpaqueRef` that represents a cell
   to be created; new implementations must associate it with a runtime space and
   tx available from the current builder frame; optionally set an initial value.
