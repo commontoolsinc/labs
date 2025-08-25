@@ -1,4 +1,6 @@
 import type { DID, StorageClientOptions } from "./types.ts";
+import { encodeBase64 } from "../codec/bytes.ts";
+import { refer } from "merkle-reference/json";
 
 export class SpaceConnection {
   readonly spaceId: DID | string;
@@ -10,6 +12,10 @@ export class SpaceConnection {
     { resolve: () => void; reject: (e: unknown) => void }
   > = [];
   #pendingInitialSubs = new Set<Promise<void>>();
+  #awaitingTask = new Map<
+    string,
+    { resolve: (v: unknown) => void; reject: (e: unknown) => void }
+  >();
   // Hook for applying server docs (to be set by StorageClient)
   onServerDoc?: (
     doc: { docId: string; epoch: number; heads?: string[]; json: unknown },
@@ -48,8 +54,11 @@ export class SpaceConnection {
       // deno-lint-ignore no-floating-promises
       this.#onMessage(e);
     };
-    // Send hello if socket is open; otherwise skip (subscribe/get will still work in MVP)
-    if (this.#socket && this.#socket.readyState === WebSocket.OPEN) {
+    // Only send hello if we have a known epoch baseline (>= 0). Avoid -1 to force snapshot backfill.
+    if (
+      this.#socket && this.#socket.readyState === WebSocket.OPEN &&
+      this.#helloSinceEpoch >= 0
+    ) {
       try {
         const hello = {
           invocation: {
@@ -240,6 +249,23 @@ export class SpaceConnection {
       if (m && m.the === "task/return" && m.is?.type === "complete") {
         const next = this.#awaitingComplete.shift();
         if (next) next.resolve();
+        // Also attempt to resolve awaitingTask by job id if present
+        const jobId = typeof m.of === "string" ? (m.of as string) : undefined;
+        if (jobId && this.#awaitingTask.has(jobId)) {
+          const wait = this.#awaitingTask.get(jobId)!;
+          this.#awaitingTask.delete(jobId);
+          wait.resolve(m.is);
+        }
+        return;
+      }
+      if (m && m.the === "task/return" && m.of) {
+        const jobId = String(m.of);
+        const wait = this.#awaitingTask.get(jobId);
+        if (wait) {
+          this.#awaitingTask.delete(jobId);
+          wait.resolve(m.is);
+        }
+        return;
       }
     } catch {
       // ignore malformed frames in this scaffold
@@ -268,5 +294,66 @@ export class SpaceConnection {
     });
     this.#socket!.send(JSON.stringify(msg));
     await p;
+  }
+
+  async submitTx(req: {
+    clientTxId?: string;
+    reads: ReadonlyArray<
+      { ref: { docId: string; branch: string }; heads: readonly string[] }
+    >;
+    writes: ReadonlyArray<{
+      ref: { docId: string; branch: string };
+      baseHeads: readonly string[];
+      changes: ReadonlyArray<{ bytes: Uint8Array }>;
+      allowServerMerge?: boolean;
+    }>;
+  }): Promise<import("../types.ts").TxReceipt> {
+    await this.open();
+    const invocation = {
+      iss: "did:key:client",
+      cmd: "/storage/tx",
+      sub: String(this.spaceId),
+      args: {
+        ...(req.clientTxId !== undefined ? { clientTxId: req.clientTxId } : {}),
+        reads: (req.reads ?? []).map((r) => ({ ref: r.ref, heads: r.heads })),
+        writes: req.writes.map((w) => ({
+          ref: w.ref,
+          baseHeads: w.baseHeads,
+          changes: w.changes.map((c) => ({ bytes: encodeBase64(c.bytes) })),
+          ...(w.allowServerMerge !== undefined
+            ? { allowServerMerge: w.allowServerMerge }
+            : {}),
+        })),
+      },
+      prf: [],
+    } as const;
+    const jobId = `job:${refer(invocation)}` as const;
+    const msg = {
+      invocation,
+      authorization: { signature: [], access: {} },
+    } as const;
+    const p: Promise<import("../types.ts").TxReceipt> = new Promise(
+      (resolve, reject) => {
+        this.#awaitingTask.set(jobId, {
+          resolve: resolve as (v: unknown) => void,
+          reject,
+        });
+      },
+    ) as Promise<import("../types.ts").TxReceipt>;
+    this.#socket!.send(JSON.stringify(msg));
+    const res = await p;
+    return res;
+  }
+
+  async getAutomergeDoc(docId: string): Promise<unknown | null> {
+    const cur = this.#amDocs.get(docId);
+    if (!cur) return null;
+    try {
+      const AM = await import("@automerge/automerge");
+      // Clone to avoid mutating internal baseline
+      return AM.clone(cur as any);
+    } catch {
+      return cur;
+    }
   }
 }

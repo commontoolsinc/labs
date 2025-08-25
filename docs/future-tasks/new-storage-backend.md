@@ -83,6 +83,14 @@ Summary and code links
   - [ ] Client helpers for UCAN-wrapped calls and ack batching
   - [ ] Consider modelling ACK as a UCAN invocation or mirrored response type
 
+- HIGH PRIORITY: Client baseline commit behavior
+  - [ ] Ensure first client tx builds changes on the exact delivered Automerge
+        baseline and uses those heads for `baseHeads`, so that a fresh space/doc
+        commit returns `ok` reliably. Investigate/resolve any remaining cases
+        where the client constructs changes that do not depend on server heads
+        despite awaiting initial delivery. Add focused tests to cover this path
+        (fresh tmp SPACES_DIR, seed + client tx).
+
 ## Implementation map (spec → modules)
 
 - SQLite provider: `packages/storage/src/sqlite/*` implements `SpaceStorage`

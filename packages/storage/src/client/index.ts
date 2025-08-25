@@ -1,9 +1,11 @@
 import type { DID, StorageClientOptions } from "./types.ts";
+import { Scheduler } from "./scheduler.ts";
 
 export class StorageClient {
   #baseUrl: string;
   #token?: string | (() => Promise<string>);
   #spaces = new Map<string, import("./connection.ts").SpaceConnection>();
+  #scheduler = new Scheduler();
   constructor(opts: StorageClientOptions = {}) {
     const loc = (globalThis as { location?: { origin?: string } }).location;
     this.#baseUrl = opts.baseUrl ?? (loc?.origin ?? "http://localhost:8002");
@@ -24,7 +26,10 @@ export class StorageClient {
       const store = clientStoreMap.get(this) ?? new ClientStore();
       clientStoreMap.set(this, store);
       sc.onServerDoc = ({ docId, epoch, heads, json }) => {
+        const before = store.readView(key, docId).json;
         store.applyServerDoc({ space: key, docId, epoch, heads, json });
+        const after = store.readView(key, docId).json;
+        this.#scheduler.emit({ space: key, docId, path: [], before, after });
       };
       this.#spaces.set(key, sc);
     }
@@ -69,7 +74,27 @@ export class StorageClient {
 
   async newTransaction() {
     const { ClientTransaction } = await import("./tx.ts");
-    return new ClientTransaction();
+    const commitAdapter = async (
+      space: string,
+      req: Parameters<import("./connection.ts").SpaceConnection["submitTx"]>[0],
+    ) => {
+      const sc = await this.spaceConn(space);
+      return await sc.submitTx(req as any);
+    };
+    const baselineProvider = async (space: string, docId: string) => {
+      const sc = await this.spaceConn(space);
+      let d = await sc.getAutomergeDoc(docId);
+      if (!d) {
+        // Force a one-shot backfill for this doc, then read again
+        await sc.get({
+          consumerId: crypto.randomUUID(),
+          query: { docId, path: [], schema: false },
+        });
+        d = await sc.getAutomergeDoc(docId);
+      }
+      return d as any;
+    };
+    return new ClientTransaction(commitAdapter, baselineProvider);
   }
 
   async get(
@@ -84,6 +109,20 @@ export class StorageClient {
     const store = clientStoreMap.get(this)!;
     const v = store.readView(String(space), opts.query.docId);
     return v;
+  }
+
+  onChange(
+    cb: (e: import("./scheduler.ts").SchedulerEvent) => void,
+  ): () => void {
+    return this.#scheduler.on(cb);
+  }
+
+  async submitTx(
+    space: DID | string,
+    req: Parameters<import("./connection.ts").SpaceConnection["submitTx"]>[0],
+  ): Promise<import("../types.ts").TxReceipt> {
+    const sc = await this.spaceConn(space);
+    return sc.submitTx(req as any);
   }
 
   readView(
