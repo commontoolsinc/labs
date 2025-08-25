@@ -78,7 +78,7 @@ describe("ct-tags integration test", () => {
     // Add first tag
     await addTag("frontend");
 
-    // Add second tag  
+    // Add second tag
     await addTag("javascript");
 
     // Add third tag
@@ -234,7 +234,7 @@ describe("ct-tags integration test", () => {
 
     // Hover over the first tag to make the remove button visible
     await initialTags[0].evaluate((el: HTMLElement) => {
-      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
     await sleep(100); // Wait for hover effect
 
@@ -324,13 +324,13 @@ describe("ct-tags integration test", () => {
     };
 
     let tags = await page.$$(".tag", { strategy: "pierce" });
-    
+
     // Add a tag if none exist
     if (tags.length === 0) {
       await addTag("test-tag");
       tags = await page.$$(".tag", { strategy: "pierce" });
     }
-    
+
     assert(tags.length > 0, "Should have tags to test escape behavior");
 
     // Get the original text of the first tag
@@ -399,13 +399,13 @@ describe("ct-tags integration test", () => {
 
     // Get initial count
     let initialTags = await page.$$(".tag", { strategy: "pierce" });
-    
+
     // Add a tag if none exist
     if (initialTags.length === 0) {
       await addTag("test-tag");
       initialTags = await page.$$(".tag", { strategy: "pierce" });
     }
-    
+
     const initialCount = initialTags.length;
 
     // Click on the first tag to edit it
@@ -418,7 +418,7 @@ describe("ct-tags integration test", () => {
     const editInput = await page.waitForSelector(".tag-input", {
       strategy: "pierce",
     });
-    
+
     // Select all text and delete it
     await editInput.evaluate((el: HTMLInputElement) => {
       el.select();

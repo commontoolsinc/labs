@@ -1,4 +1,4 @@
-name: CLI (Mac) 
+name: CLI (Mac)
 
 on:
   workflow_dispatch:
@@ -33,11 +33,11 @@ jobs:
             ~/.cache/deno
           key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
 
-      - name: 🧪 Build CLI 
+      - name: 🧪 Build CLI
         run: |
           deno task build-binaries --cli-only
 
-      - name: 📤 Upload CLI 
+      - name: 📤 Upload CLI
         uses: actions/upload-artifact@v4
         with:
           name: macos-cli

@@ -5,13 +5,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { LitElement } from "lit";
-import { 
-  CellController, 
-  StringCellController, 
+import {
+  CellController,
+  StringCellController,
   ArrayCellController,
   createCellController,
   createStringCellController,
-  createArrayCellController 
+  createArrayCellController
 } from "./cell-controller.ts";
 
 // Tests will be re-enabled once mock implementations are updated

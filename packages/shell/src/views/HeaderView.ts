@@ -100,13 +100,11 @@ export class XHeaderView extends BaseView {
   @property({ attribute: false })
   isLoggedIn = false;
 
-
   @property()
   showShellCharmListView = false;
 
   @property()
   showDebuggerView = false;
-
 
   private handleAuthClick(e: Event) {
     e.preventDefault();
@@ -140,7 +138,6 @@ export class XHeaderView extends BaseView {
   private getConnectionStatus(): ConnectionStatus {
     return this.rt ? "connected" : "disconnected";
   }
-
 
   override render() {
     const spaceLink = this.spaceName

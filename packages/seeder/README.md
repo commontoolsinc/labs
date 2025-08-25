@@ -16,8 +16,8 @@ You can run the seeder on your local branch
 
 local:
 
-You will need to run the toolshed and shell in other tabs, you will want to
-have an `.env` file for toolshed with keys for LLMs and API/project setup for
+You will need to run the toolshed and shell in other tabs, you will want to have
+an `.env` file for toolshed with keys for LLMs and API/project setup for
 phoenix.
 
     cd toolshed; deno task dev

@@ -1,11 +1,4 @@
-import {
-  h,
-  handler,
-  JSONSchema,
-  NAME,
-  recipe,
-  UI,
-} from "commontools";
+import { h, handler, JSONSchema, NAME, recipe, UI } from "commontools";
 
 const InputSchema = {
   type: "object",

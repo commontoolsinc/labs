@@ -153,8 +153,14 @@ export interface PathBasedOutlinerOperations {
   cancelEditing(): void;
 
   // Node creation
-  createNodeAfterPath(path: number[], nodeData: { body: string }): Promise<TreeOperationResult>;
-  createChildNodeAtPath(path: number[], nodeData: { body: string }): Promise<TreeOperationResult>;
+  createNodeAfterPath(
+    path: number[],
+    nodeData: { body: string },
+  ): Promise<TreeOperationResult>;
+  createChildNodeAtPath(
+    path: number[],
+    nodeData: { body: string },
+  ): Promise<TreeOperationResult>;
 
   // UI operations
   requestUpdate(): void;

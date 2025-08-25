@@ -2,7 +2,7 @@ name: "Deno Setup"
 description: "Setup deno"
 inputs:
   cache:
-    description: 'Load deno dependencies from github cache'
+    description: "Load deno dependencies from github cache"
     default: true
 runs:
   using: "composite"
@@ -14,7 +14,7 @@ runs:
         deno-version: "2.3.5"
 
     - name: 📦 Cache Deno dependencies
-      if: inputs.cache 
+      if: inputs.cache
       uses: actions/cache@v3
       with:
         path: |

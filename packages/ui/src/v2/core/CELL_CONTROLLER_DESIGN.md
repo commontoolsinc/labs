@@ -2,11 +2,15 @@
 
 ## Overview
 
-The `CellController` is a reactive controller for Lit components that provides a unified interface for handling both plain values and reactive `Cell<T>` objects. It eliminates boilerplate code by centralizing Cell subscription management, transaction handling, and timing strategies.
+The `CellController` is a reactive controller for Lit components that provides a
+unified interface for handling both plain values and reactive `Cell<T>` objects.
+It eliminates boilerplate code by centralizing Cell subscription management,
+transaction handling, and timing strategies.
 
 ## Problem Statement
 
-Before CellController, each UI component that needed to work with `Cell<T>` values had to implement:
+Before CellController, each UI component that needed to work with `Cell<T>`
+values had to implement:
 
 1. **Subscription Management** (~15 lines per component)
    - `_setupCellSubscription()` method
@@ -31,7 +35,8 @@ Before CellController, each UI component that needed to work with `Cell<T>` valu
    - Safe `.get()` calls with fallbacks
    - Consistent setValue patterns
 
-This resulted in **~50-70 lines of boilerplate per component** with high duplication and maintenance overhead.
+This resulted in **~50-70 lines of boilerplate per component** with high
+duplication and maintenance overhead.
 
 ## Solution Design
 
@@ -49,22 +54,24 @@ class CellController<T> implements ReactiveController {
 
 #### 1. Configuration-Driven Approach
 
-Instead of inheritance, we use a configuration object that allows customization of specific behaviors:
+Instead of inheritance, we use a configuration object that allows customization
+of specific behaviors:
 
 ```typescript
 interface CellControllerOptions<T> {
-  timing?: InputTimingOptions;           // Timing strategy config
-  getValue?: (value: Cell<T> | T) => T;  // Custom value extraction
-  setValue?: (value: Cell<T> | T, newValue: T, oldValue: T) => void;  // Custom update logic
-  onChange?: (newValue: T, oldValue: T) => void;  // Change callback
-  transactionStrategy?: "auto" | "manual" | "batch";  // Transaction handling
-  triggerUpdate?: boolean;               // Auto-update host
-  onFocus?: () => void;                 // Focus handling
-  onBlur?: () => void;                  // Blur handling
+  timing?: InputTimingOptions; // Timing strategy config
+  getValue?: (value: Cell<T> | T) => T; // Custom value extraction
+  setValue?: (value: Cell<T> | T, newValue: T, oldValue: T) => void; // Custom update logic
+  onChange?: (newValue: T, oldValue: T) => void; // Change callback
+  transactionStrategy?: "auto" | "manual" | "batch"; // Transaction handling
+  triggerUpdate?: boolean; // Auto-update host
+  onFocus?: () => void; // Focus handling
+  onBlur?: () => void; // Blur handling
 }
 ```
 
 This approach provides:
+
 - **Flexibility**: Each component can customize only what it needs
 - **Reusability**: Common patterns can be shared
 - **Type Safety**: Full TypeScript support with generics
@@ -81,7 +88,7 @@ Components have different transaction needs:
 ```typescript
 // Auto strategy (most common)
 const controller = new CellController(host, {
-  transactionStrategy: "auto"  // Default
+  transactionStrategy: "auto", // Default
 });
 
 // Manual strategy (complex scenarios)
@@ -100,7 +107,7 @@ const controller = new CellController(host, {
         // Don't commit on error
       }
     }
-  }
+  },
 });
 ```
 
@@ -110,7 +117,7 @@ Instead of one monolithic controller, we provide specialized versions:
 
 ```typescript
 // Base controller - fully configurable
-class CellController<T> { /* ... */ }
+class CellController<T> {/* ... */}
 
 // String-optimized controller
 class StringCellController extends CellController<string> {
@@ -119,7 +126,7 @@ class StringCellController extends CellController<string> {
   // Empty string fallbacks
 }
 
-// Array-optimized controller  
+// Array-optimized controller
 class ArrayCellController<T> extends CellController<T[]> {
   // Preconfigured for array handling
   // Immediate timing
@@ -135,14 +142,14 @@ Built-in integration with `InputTimingController`:
 const controller = new CellController(host, {
   timing: {
     strategy: "debounce",
-    delay: 300
-  }
+    delay: 300,
+  },
 });
 
 // Timing is handled automatically:
-controller.setValue("new value");  // Debounced
-controller.onFocus();              // Passed to timing controller
-controller.onBlur();               // Triggers immediate update if needed
+controller.setValue("new value"); // Debounced
+controller.onFocus(); // Passed to timing controller
+controller.onBlur(); // Triggers immediate update if needed
 ```
 
 #### 5. Lifecycle Management
@@ -201,27 +208,31 @@ createArrayCellController<T>(host, options?) => ArrayCellController<T>
 
 ```typescript
 class MyInput extends BaseElement {
-  @property() value: Cell<string> | string = "";
-  
+  @property()
+  value: Cell<string> | string = "";
+
   private cellController = createStringCellController(this, {
     onChange: (newValue, oldValue) => {
       this.emit("value-changed", { value: newValue, oldValue });
-    }
+    },
   });
-  
+
   override updated(changedProperties: Map<string, any>) {
     if (changedProperties.has("value")) {
       this.cellController.bind(this.value);
     }
   }
-  
+
   private handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
     this.cellController.setValue(input.value);
   }
-  
+
   override render() {
-    return html`<input .value="${this.cellController.getValue()}" @input="${this.handleInput}">`;
+    return html`
+      <input .value="${this.cellController.getValue()}" @input="${this
+        .handleInput}">
+    `;
   }
 }
 ```
@@ -230,27 +241,30 @@ class MyInput extends BaseElement {
 
 ```typescript
 class MyList<T> extends BaseElement {
-  @property() items: Cell<T[]> | T[] = [];
-  
+  @property()
+  items: Cell<T[]> | T[] = [];
+
   private cellController = createArrayCellController<T>(this);
-  
+
   override updated(changedProperties: Map<string, any>) {
     if (changedProperties.has("items")) {
       this.cellController.bind(this.items);
     }
   }
-  
+
   private addItem(item: T) {
     this.cellController.addItem(item);
   }
-  
+
   private removeItem(item: T) {
     this.cellController.removeItem(item);
   }
-  
+
   override render() {
     const items = this.cellController.getValue();
-    return html`/* render items */`;
+    return html`
+      /* render items */
+    `;
   }
 }
 ```
@@ -271,7 +285,7 @@ class ComplexEditor extends BaseElement {
     onChange: (newValue, oldValue) => {
       this.updateUI(newValue);
       this.emit("data-changed", { newValue, oldValue });
-    }
+    },
   });
 }
 ```
@@ -279,21 +293,25 @@ class ComplexEditor extends BaseElement {
 ## Benefits
 
 ### Code Reduction
+
 - **70% less boilerplate** per component
 - **Consistent patterns** across all Cell-using components
 - **Fewer bugs** due to centralized logic
 
 ### Maintainability
+
 - **Single source of truth** for Cell handling
 - **Easy to update** Cell behavior across all components
 - **Better testing** through focused unit tests
 
 ### Type Safety
+
 - **Full TypeScript support** with generics
 - **Compile-time checking** for value types
 - **IDE autocompletion** for all methods
 
 ### Flexibility
+
 - **Highly configurable** through options
 - **Custom logic** support for complex scenarios
 - **Multiple strategies** for different use cases
@@ -303,27 +321,28 @@ class ComplexEditor extends BaseElement {
 ### From Manual Cell Handling
 
 **Before:**
+
 ```typescript
 class OldComponent extends BaseElement {
   private _cellUnsubscribe: (() => void) | null = null;
-  
+
   override connectedCallback() {
     super.connectedCallback();
     this._setupCellSubscription();
   }
-  
+
   override disconnectedCallback() {
     super.disconnectedCallback();
     this._cleanupCellSubscription();
   }
-  
+
   override updated(changedProperties: Map<string, any>) {
     if (changedProperties.has("value")) {
       this._cleanupCellSubscription();
       this._setupCellSubscription();
     }
   }
-  
+
   private _setupCellSubscription(): void {
     if (isCell(this.value)) {
       this._cellUnsubscribe = this.value.sink(() => {
@@ -331,21 +350,21 @@ class OldComponent extends BaseElement {
       });
     }
   }
-  
+
   private _cleanupCellSubscription(): void {
     if (this._cellUnsubscribe) {
       this._cellUnsubscribe();
       this._cellUnsubscribe = null;
     }
   }
-  
+
   private getValue(): string {
     if (isCell(this.value)) {
       return this.value.get?.() || "";
     }
     return this.value || "";
   }
-  
+
   private setValue(newValue: string): void {
     if (isCell(this.value)) {
       const tx = this.value.runtime.edit();
@@ -359,23 +378,27 @@ class OldComponent extends BaseElement {
 ```
 
 **After:**
+
 ```typescript
 class NewComponent extends BaseElement {
   private cellController = createStringCellController(this);
-  
+
   override updated(changedProperties: Map<string, any>) {
     if (changedProperties.has("value")) {
       this.cellController.bind(this.value);
     }
   }
-  
+
   private handleInput(event: Event) {
     const input = event.target as HTMLInputElement;
     this.cellController.setValue(input.value);
   }
-  
+
   override render() {
-    return html`<input .value="${this.cellController.getValue()}" @input="${this.handleInput}">`;
+    return html`
+      <input .value="${this.cellController.getValue()}" @input="${this
+        .handleInput}">
+    `;
   }
 }
 ```
@@ -391,17 +414,20 @@ class NewComponent extends BaseElement {
 ## Testing Strategy
 
 ### Unit Tests
+
 - **Mock Cell implementation** for isolated testing
 - **Mock Lit host** for controller lifecycle testing
 - **Test all configuration options** independently
 - **Test error conditions** and edge cases
 
 ### Integration Tests
+
 - **Real Lit components** using CellController
 - **Actual Cell instances** from runner
 - **End-to-end workflows** with timing and transactions
 
 ### Performance Tests
+
 - **Memory leak detection** for subscription cleanup
 - **Performance comparison** vs manual implementation
 - **Stress testing** with rapid value changes
@@ -409,10 +435,11 @@ class NewComponent extends BaseElement {
 ## Future Enhancements
 
 ### Batch Transaction Strategy
+
 ```typescript
 const controller = new CellController(host, {
   transactionStrategy: "batch",
-  batchWindow: 100  // ms
+  batchWindow: 100, // ms
 });
 
 // Multiple setValue calls batched into single transaction
@@ -423,18 +450,20 @@ controller.setValue("value3");
 ```
 
 ### Validation Integration
+
 ```typescript
 const controller = new CellController(host, {
   validate: (value) => value.length > 0,
-  onValidationError: (error) => this.showError(error)
+  onValidationError: (error) => this.showError(error),
 });
 ```
 
 ### Undo/Redo Support
+
 ```typescript
 const controller = new CellController(host, {
   enableHistory: true,
-  historySize: 10
+  historySize: 10,
 });
 
 controller.undo();
@@ -442,13 +471,17 @@ controller.redo();
 ```
 
 ### Schema Integration
+
 ```typescript
 const controller = new CellController(host, {
   schema: myJSONSchema,
-  autoValidate: true
+  autoValidate: true,
 });
 ```
 
 ## Conclusion
 
-The CellController design provides a robust, flexible, and type-safe solution for Cell integration in Lit components. It eliminates boilerplate, centralizes logic, and provides a foundation for future enhancements while maintaining backward compatibility and supporting complex use cases through configuration.
+The CellController design provides a robust, flexible, and type-safe solution
+for Cell integration in Lit components. It eliminates boilerplate, centralizes
+logic, and provides a foundation for future enhancements while maintaining
+backward compatibility and supporting complex use cases through configuration.

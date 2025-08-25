@@ -1,10 +1,10 @@
-import { 
-  LLMContent, 
-  LLMMessage, 
-  LLMRequest, 
-  LLMResponse,
+import {
+  LLMContent,
   LLMGenerateObjectRequest,
-  LLMGenerateObjectResponse
+  LLMGenerateObjectResponse,
+  LLMMessage,
+  LLMRequest,
+  LLMResponse,
 } from "./types.ts";
 
 type PartialCallback = (text: string) => void;

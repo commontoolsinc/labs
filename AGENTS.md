@@ -18,7 +18,9 @@ Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
 
 ### Recipe Development
 
-Whenever you work on recipes, look in the `recipes` folder provided by the user for the `RECIPES.md` and `COMPONENTS.md` files. These are your bible. You can re-read `.claude/commands/recipe-dev.md` any time to refresh your memory.
+Whenever you work on recipes, look in the `recipes` folder provided by the user
+for the `RECIPES.md` and `COMPONENTS.md` files. These are your bible. You can
+re-read `.claude/commands/recipe-dev.md` any time to refresh your memory.
 
 ### Formatting
 

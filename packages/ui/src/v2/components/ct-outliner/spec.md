@@ -27,9 +27,9 @@ interface Tree {
 }
 ```
 
-**Key Design Decision**: The component uses CommonTools' Cell reactive data 
-structure. All nodes must have `[ID]` properties to work correctly with Cell 
-array operations. The component properly uses `.getAsQueryResult()` for reading 
+**Key Design Decision**: The component uses CommonTools' Cell reactive data
+structure. All nodes must have `[ID]` properties to work correctly with Cell
+array operations. The component properly uses `.getAsQueryResult()` for reading
 data to ensure link resolution works correctly.
 
 ## Component Properties
@@ -123,8 +123,8 @@ data to ensure link resolution works correctly.
 
 ## Tree Operations
 
-All tree operations use path-based APIs and return TreeOperationResult with 
-diffs describing what changed. Operations properly use Cell's transactional 
+All tree operations use path-based APIs and return TreeOperationResult with
+diffs describing what changed. Operations properly use Cell's transactional
 updates and `.getAsQueryResult()` for link resolution.
 
 ### Node Creation
@@ -213,7 +213,7 @@ updates and `.getAsQueryResult()` for link resolution.
 
 ### Cell-based Reactive Design
 
-The component uses CommonTools' Cell reactive data structure for automatic 
+The component uses CommonTools' Cell reactive data structure for automatic
 change propagation and link resolution:
 
 - All nodes must have `[ID]` properties for Cell array operations
@@ -255,13 +255,16 @@ change propagation and link resolution:
 
 This component underwent major refactoring to:
 
-1. **Fix Cell API usage**: Properly use `.getAsQueryResult()` for link resolution
+1. **Fix Cell API usage**: Properly use `.getAsQueryResult()` for link
+   resolution
 2. **Add [ID] properties**: All nodes now have required IDs for Cell operations
 3. **Path-based operations**: Moved from node references to path-based tracking
 4. **Comprehensive testing**: Added link resolution tests and improved coverage
 
 Recent fixes (December 2024):
-- Fixed all `.get()` calls to use `.getAsQueryResult()` for proper link resolution
+
+- Fixed all `.get()` calls to use `.getAsQueryResult()` for proper link
+  resolution
 - Added type casting for Charm[] in attachment rendering
 - Removed unused debug files and utilities
 - Updated to follow Cell API best practices

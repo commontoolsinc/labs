@@ -1310,15 +1310,16 @@ export default recipe(
               "https://www.googleapis.com/auth/contacts.readonly",
             ]}
           />
-          
+
           <div style="margin: 15px 0;">
             <div style="font-size: 14px; color: #666;">
-              {derive(contacts, (allContacts) => 
-                `Showing ${allContacts.length} contact${allContacts.length !== 1 ? 's' : ''}`
-              )}
+              {derive(contacts, (allContacts) =>
+                `Showing ${allContacts.length} contact${
+                  allContacts.length !== 1 ? "s" : ""
+                }`)}
             </div>
           </div>
-          
+
           <div style="overflow-x: auto;">
             <table style="border-collapse: collapse; font-size: 14px;">
               <thead>
@@ -1350,7 +1351,7 @@ export default recipe(
                 </tr>
               </thead>
               <tbody>
-                {derive(contacts, (allContacts) => 
+                {derive(contacts, (allContacts) =>
                   allContacts.map((contact) => (
                     <tr style="vertical-align: top;">
                       <td style="border: 1px solid #ddd; padding: 10px; position: sticky; left: 0; background-color: white; z-index: 1;">
@@ -1373,381 +1374,386 @@ export default recipe(
                             );
                         })}
                       </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
-                      <div>
-                        <strong>
-                          {contact.displayName || "(No display name)"}
-                        </strong>
-                        {derive(contact, (contact) => {
-                          const parts = [];
-                          if (contact.givenName) {
-                            parts.push(`Given: ${contact.givenName}`);
-                          }
-                          if (contact.middleName) {
-                            parts.push(`Middle: ${contact.middleName}`);
-                          }
-                          if (contact.familyName) {
-                            parts.push(`Family: ${contact.familyName}`);
-                          }
-                          return parts.length > 0
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
+                        <div>
+                          <strong>
+                            {contact.displayName || "(No display name)"}
+                          </strong>
+                          {derive(contact, (contact) => {
+                            const parts = [];
+                            if (contact.givenName) {
+                              parts.push(`Given: ${contact.givenName}`);
+                            }
+                            if (contact.middleName) {
+                              parts.push(`Middle: ${contact.middleName}`);
+                            }
+                            if (contact.familyName) {
+                              parts.push(`Family: ${contact.familyName}`);
+                            }
+                            return parts.length > 0
+                              ? (
+                                <div style="font-size: 0.85em; color: #666; margin-top: 4px;">
+                                  {parts.map((part, idx) => (
+                                    <div key={idx}>{part}</div>
+                                  ))}
+                                </div>
+                              )
+                              : null;
+                          })}
+                        </div>
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; font-size: 0.85em; color: #666; word-break: break-all; max-width: 200px;">
+                        {contact.resourceName}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
+                        {derive(contact, (contact) =>
+                          contact?.emails?.length > 0
                             ? (
-                              <div style="font-size: 0.85em; color: #666; margin-top: 4px;">
-                                {parts.map((part, idx) => (
-                                  <div key={idx}>{part}</div>
-                                ))}
-                              </div>
-                            )
-                            : null;
-                        })}
-                      </div>
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; font-size: 0.85em; color: #666; word-break: break-all; max-width: 200px;">
-                      {contact.resourceName}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
-                      {derive(contact, (contact) =>
-                        contact?.emails?.length > 0
-                          ? (
-                            contact.emails.map((email, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                <div>{email.value}</div>
-                                {(email.type || email.formattedType) && (
-                                  <div style="color: #666; font-size: 0.85em;">
-                                    {email.formattedType || email.type}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No emails</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 180px;">
-                      {derive(contact, (contact) =>
-                        contact?.phoneNumbers?.length > 0
-                          ? (
-                            contact.phoneNumbers.map((phone, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                <div>{phone.value}</div>
-                                {(phone.type || phone.formattedType) && (
-                                  <div style="color: #666; font-size: 0.85em;">
-                                    {phone.formattedType || phone.type}
-                                  </div>
-                                )}
-                                {phone.canonicalForm &&
-                                  phone.canonicalForm !== phone.value && (
-                                  <div style="color: #888; font-size: 0.8em;">
-                                    Canonical: {phone.canonicalForm}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No phones</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
-                      {derive(contact, (contact) =>
-                        contact?.organizations?.length > 0
-                          ? (
-                            contact.organizations.map((org, idx) => (
-                              <div
-                                key={idx}
-                                style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: idx < contact.organizations.length - 1 ? '1px solid #eee' : 'none';"
-                              >
-                                {org.name && (
-                                  <div style="font-weight: 500;">
-                                    {org.name}
-                                  </div>
-                                )}
-                                {org.title && (
-                                  <div style="font-size: 0.9em;">
-                                    {org.title}
-                                  </div>
-                                )}
-                                {org.department && (
-                                  <div style="font-size: 0.85em; color: #666;">
-                                    Dept: {org.department}
-                                  </div>
-                                )}
-                                {(org.type || org.formattedType) && (
-                                  <div style="font-size: 0.85em; color: #888;">
-                                    {org.formattedType || org.type}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No organizations</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 250px;">
-                      {derive(contact, (contact) =>
-                        contact?.addresses?.length > 0
-                          ? (
-                            contact.addresses.map((addr, idx) => (
-                              <div
-                                key={idx}
-                                style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: idx < contact.addresses.length - 1 ? '1px solid #eee' : 'none';"
-                              >
-                                {addr.formattedValue && (
-                                  <div style="margin-bottom: 4px;">
-                                    {addr.formattedValue}
-                                  </div>
-                                )}
-                                <div style="font-size: 0.85em; color: #666;">
-                                  {addr.streetAddress && (
-                                    <div>Street: {addr.streetAddress}</div>
-                                  )}
-                                  {addr.city && <div>City: {addr.city}</div>}
-                                  {addr.region && (
-                                    <div>Region: {addr.region}</div>
-                                  )}
-                                  {addr.postalCode && (
-                                    <div>Postal: {addr.postalCode}</div>
-                                  )}
-                                  {addr.country && (
-                                    <div>Country: {addr.country}</div>
-                                  )}
-                                  {addr.countryCode && (
-                                    <div>Code: {addr.countryCode}</div>
-                                  )}
-                                </div>
-                                {(addr.type || addr.formattedType) && (
-                                  <div style="font-size: 0.85em; color: #888; margin-top: 2px;">
-                                    {addr.formattedType || addr.type}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No addresses</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
-                      {derive(contact, (contact) =>
-                        contact?.birthdays?.length > 0
-                          ? (
-                            contact.birthdays.map((birthday, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                {birthday.text ||
-                                  (birthday.date && (
-                                    <div>
-                                      {birthday.date.month ||
-                                        "?"}/{birthday.date.day || "?"}
-                                      {birthday.date.year &&
-                                        `/${birthday.date.year}`}
+                              contact.emails.map((email, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  <div>{email.value}</div>
+                                  {(email.type || email.formattedType) && (
+                                    <div style="color: #666; font-size: 0.85em;">
+                                      {email.formattedType || email.type}
                                     </div>
-                                  )) ||
-                                  <span style="color: #999;">No date</span>}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No birthdays</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px; max-width: 300px;">
-                      {derive(contact, (contact) =>
-                        contact?.biographies?.length > 0
-                          ? (
-                            contact.biographies.map((bio, idx) => (
-                              <div key={idx} style="margin-bottom: 8px;">
-                                <div style="font-size: 0.9em; white-space: pre-wrap; word-break: break-word;">
-                                  {bio.value}
+                                  )}
                                 </div>
-                                {bio.contentType && (
-                                  <div style="font-size: 0.85em; color: #666; margin-top: 2px;">
-                                    Type: {bio.contentType}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No biographies</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
-                      {derive(contact, (contact) =>
-                        contact?.ageRanges?.length > 0
-                          ? (
-                            contact.ageRanges.map((age, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                {age.ageRange}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No age ranges</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
-                      {derive(contact, (contact) =>
-                        contact?.calendarUrls?.length > 0
-                          ? (
-                            contact.calendarUrls.map((cal, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                <a
-                                  href={cal.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style="color: #0066cc;"
+                              ))
+                            )
+                            : <span style="color: #999;">No emails</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 180px;">
+                        {derive(contact, (contact) =>
+                          contact?.phoneNumbers?.length > 0
+                            ? (
+                              contact.phoneNumbers.map((phone, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  <div>{phone.value}</div>
+                                  {(phone.type || phone.formattedType) && (
+                                    <div style="color: #666; font-size: 0.85em;">
+                                      {phone.formattedType || phone.type}
+                                    </div>
+                                  )}
+                                  {phone.canonicalForm &&
+                                    phone.canonicalForm !== phone.value && (
+                                    <div style="color: #888; font-size: 0.8em;">
+                                      Canonical: {phone.canonicalForm}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No phones</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
+                        {derive(contact, (contact) =>
+                          contact?.organizations?.length > 0
+                            ? (
+                              contact.organizations.map((org, idx) => (
+                                <div
+                                  key={idx}
+                                  style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: idx < contact.organizations.length - 1 ? '1px solid #eee' : 'none';"
                                 >
-                                  {cal.formattedType || cal.type || "Calendar"}
-                                </a>
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No calendar URLs</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
-                      {derive(contact, (contact) =>
-                        contact?.events?.length > 0
-                          ? (
-                            contact.events.map((event, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                <div>{event.formattedType || event.type}</div>
-                                {event.date && (
-                                  <div style="font-size: 0.85em; color: #666;">
-                                    {event.date.month || "?"}/
-                                    {event.date.day || "?"}
-                                    {event.date.year && `/${event.date.year}`}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No events</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
-                      {derive(contact, (contact) =>
-                        contact?.genders?.length > 0
-                          ? (
-                            contact.genders.map((gender, idx) => (
-                              <div key={idx}>
-                                {gender.formattedValue || gender.value}
-                                {gender.addressMeAs && (
-                                  <div style="font-size: 0.85em; color: #666;">
-                                    Address as: {gender.addressMeAs}
-                                  </div>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No gender info</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 180px;">
-                      {derive(contact, (contact) =>
-                        contact?.imClients?.length > 0
-                          ? (
-                            contact.imClients.map((im, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                <div>{im.username}</div>
-                                <div style="font-size: 0.85em; color: #666;">
-                                  {im.formattedProtocol || im.protocol}
-                                  {im.formattedType && ` - ${im.formattedType}`}
+                                  {org.name && (
+                                    <div style="font-weight: 500;">
+                                      {org.name}
+                                    </div>
+                                  )}
+                                  {org.title && (
+                                    <div style="font-size: 0.9em;">
+                                      {org.title}
+                                    </div>
+                                  )}
+                                  {org.department && (
+                                    <div style="font-size: 0.85em; color: #666;">
+                                      Dept: {org.department}
+                                    </div>
+                                  )}
+                                  {(org.type || org.formattedType) && (
+                                    <div style="font-size: 0.85em; color: #888;">
+                                      {org.formattedType || org.type}
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No IM clients</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
-                      {derive(contact, (contact) =>
-                        contact?.interests?.length > 0
-                          ? (
-                            contact.interests.map((interest, idx) => (
-                              <div key={idx} style="margin-bottom: 2px;">
-                                {interest.value}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No interests</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
-                      {derive(contact, (contact) =>
-                        contact?.nicknames?.length > 0
-                          ? (
-                            contact.nicknames.map((nickname, idx) => (
-                              <div key={idx} style="margin-bottom: 2px;">
-                                {nickname.value}
-                                {nickname.type && (
-                                  <span style="font-size: 0.85em; color: #666;">
-                                    {` (${nickname.type})`}
-                                  </span>
-                                )}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No nicknames</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
-                      {derive(contact, (contact) =>
-                        contact?.occupations?.length > 0
-                          ? (
-                            contact.occupations.map((occupation, idx) => (
-                              <div key={idx} style="margin-bottom: 2px;">
-                                {occupation.value}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No occupations</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 180px;">
-                      {derive(contact, (contact) =>
-                        contact?.relations?.length > 0
-                          ? (
-                            contact.relations.map((relation, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                <div>{relation.person}</div>
-                                <div style="font-size: 0.85em; color: #666;">
-                                  {relation.formattedType || relation.type}
-                                </div>
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No relations</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
-                      {derive(contact, (contact) =>
-                        contact?.skills?.length > 0
-                          ? (
-                            contact.skills.map((skill, idx) => (
-                              <div key={idx} style="margin-bottom: 2px;">
-                                {skill.value}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No skills</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
-                      {derive(contact, (contact) =>
-                        contact?.urls?.length > 0
-                          ? (
-                            contact.urls.map((url, idx) => (
-                              <div key={idx} style="margin-bottom: 4px;">
-                                <a
-                                  href={url.value}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  style="color: #0066cc; word-break: break-all;"
+                              ))
+                            )
+                            : (
+                              <span style="color: #999;">No organizations</span>
+                            ))}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 250px;">
+                        {derive(contact, (contact) =>
+                          contact?.addresses?.length > 0
+                            ? (
+                              contact.addresses.map((addr, idx) => (
+                                <div
+                                  key={idx}
+                                  style="margin-bottom: 8px; padding-bottom: 8px; border-bottom: idx < contact.addresses.length - 1 ? '1px solid #eee' : 'none';"
                                 >
-                                  {url.formattedType || url.type || url.value}
-                                </a>
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No URLs</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; min-width: 100px;">
-                      {derive(contact, (contact) =>
-                        contact?.locales?.length > 0
-                          ? (
-                            contact.locales.map((locale, idx) => (
-                              <div key={idx}>
-                                {locale.value}
-                              </div>
-                            ))
-                          )
-                          : <span style="color: #999;">No locales</span>)}
-                    </td>
-                    <td style="border: 1px solid #ddd; padding: 10px; font-size: 0.8em; color: #888; word-break: break-all; max-width: 150px;">
-                      {contact.etag || "(No etag)"}
-                    </td>
-                  </tr>
-                  ))
-                )}
+                                  {addr.formattedValue && (
+                                    <div style="margin-bottom: 4px;">
+                                      {addr.formattedValue}
+                                    </div>
+                                  )}
+                                  <div style="font-size: 0.85em; color: #666;">
+                                    {addr.streetAddress && (
+                                      <div>Street: {addr.streetAddress}</div>
+                                    )}
+                                    {addr.city && <div>City: {addr.city}</div>}
+                                    {addr.region && (
+                                      <div>Region: {addr.region}</div>
+                                    )}
+                                    {addr.postalCode && (
+                                      <div>Postal: {addr.postalCode}</div>
+                                    )}
+                                    {addr.country && (
+                                      <div>Country: {addr.country}</div>
+                                    )}
+                                    {addr.countryCode && (
+                                      <div>Code: {addr.countryCode}</div>
+                                    )}
+                                  </div>
+                                  {(addr.type || addr.formattedType) && (
+                                    <div style="font-size: 0.85em; color: #888; margin-top: 2px;">
+                                      {addr.formattedType || addr.type}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No addresses</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
+                        {derive(contact, (contact) =>
+                          contact?.birthdays?.length > 0
+                            ? (
+                              contact.birthdays.map((birthday, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  {birthday.text ||
+                                    (birthday.date && (
+                                      <div>
+                                        {birthday.date.month ||
+                                          "?"}/{birthday.date.day || "?"}
+                                        {birthday.date.year &&
+                                          `/${birthday.date.year}`}
+                                      </div>
+                                    )) ||
+                                    <span style="color: #999;">No date</span>}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No birthdays</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px; max-width: 300px;">
+                        {derive(contact, (contact) =>
+                          contact?.biographies?.length > 0
+                            ? (
+                              contact.biographies.map((bio, idx) => (
+                                <div key={idx} style="margin-bottom: 8px;">
+                                  <div style="font-size: 0.9em; white-space: pre-wrap; word-break: break-word;">
+                                    {bio.value}
+                                  </div>
+                                  {bio.contentType && (
+                                    <div style="font-size: 0.85em; color: #666; margin-top: 2px;">
+                                      Type: {bio.contentType}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No biographies</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
+                        {derive(contact, (contact) =>
+                          contact?.ageRanges?.length > 0
+                            ? (
+                              contact.ageRanges.map((age, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  {age.ageRange}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No age ranges</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
+                        {derive(contact, (contact) =>
+                          contact?.calendarUrls?.length > 0
+                            ? (
+                              contact.calendarUrls.map((cal, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  <a
+                                    href={cal.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style="color: #0066cc;"
+                                  >
+                                    {cal.formattedType || cal.type ||
+                                      "Calendar"}
+                                  </a>
+                                </div>
+                              ))
+                            )
+                            : (
+                              <span style="color: #999;">No calendar URLs</span>
+                            ))}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
+                        {derive(contact, (contact) =>
+                          contact?.events?.length > 0
+                            ? (
+                              contact.events.map((event, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  <div>{event.formattedType || event.type}</div>
+                                  {event.date && (
+                                    <div style="font-size: 0.85em; color: #666;">
+                                      {event.date.month || "?"}/
+                                      {event.date.day || "?"}
+                                      {event.date.year && `/${event.date.year}`}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No events</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
+                        {derive(contact, (contact) =>
+                          contact?.genders?.length > 0
+                            ? (
+                              contact.genders.map((gender, idx) => (
+                                <div key={idx}>
+                                  {gender.formattedValue || gender.value}
+                                  {gender.addressMeAs && (
+                                    <div style="font-size: 0.85em; color: #666;">
+                                      Address as: {gender.addressMeAs}
+                                    </div>
+                                  )}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No gender info</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 180px;">
+                        {derive(contact, (contact) =>
+                          contact?.imClients?.length > 0
+                            ? (
+                              contact.imClients.map((im, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  <div>{im.username}</div>
+                                  <div style="font-size: 0.85em; color: #666;">
+                                    {im.formattedProtocol || im.protocol}
+                                    {im.formattedType &&
+                                      ` - ${im.formattedType}`}
+                                  </div>
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No IM clients</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
+                        {derive(contact, (contact) =>
+                          contact?.interests?.length > 0
+                            ? (
+                              contact.interests.map((interest, idx) => (
+                                <div key={idx} style="margin-bottom: 2px;">
+                                  {interest.value}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No interests</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 120px;">
+                        {derive(contact, (contact) =>
+                          contact?.nicknames?.length > 0
+                            ? (
+                              contact.nicknames.map((nickname, idx) => (
+                                <div key={idx} style="margin-bottom: 2px;">
+                                  {nickname.value}
+                                  {nickname.type && (
+                                    <span style="font-size: 0.85em; color: #666;">
+                                      {` (${nickname.type})`}
+                                    </span>
+                                  )}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No nicknames</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
+                        {derive(contact, (contact) =>
+                          contact?.occupations?.length > 0
+                            ? (
+                              contact.occupations.map((occupation, idx) => (
+                                <div key={idx} style="margin-bottom: 2px;">
+                                  {occupation.value}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No occupations</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 180px;">
+                        {derive(contact, (contact) =>
+                          contact?.relations?.length > 0
+                            ? (
+                              contact.relations.map((relation, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  <div>{relation.person}</div>
+                                  <div style="font-size: 0.85em; color: #666;">
+                                    {relation.formattedType || relation.type}
+                                  </div>
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No relations</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 150px;">
+                        {derive(contact, (contact) =>
+                          contact?.skills?.length > 0
+                            ? (
+                              contact.skills.map((skill, idx) => (
+                                <div key={idx} style="margin-bottom: 2px;">
+                                  {skill.value}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No skills</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 200px;">
+                        {derive(contact, (contact) =>
+                          contact?.urls?.length > 0
+                            ? (
+                              contact.urls.map((url, idx) => (
+                                <div key={idx} style="margin-bottom: 4px;">
+                                  <a
+                                    href={url.value}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style="color: #0066cc; word-break: break-all;"
+                                  >
+                                    {url.formattedType || url.type || url.value}
+                                  </a>
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No URLs</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; min-width: 100px;">
+                        {derive(contact, (contact) =>
+                          contact?.locales?.length > 0
+                            ? (
+                              contact.locales.map((locale, idx) => (
+                                <div key={idx}>
+                                  {locale.value}
+                                </div>
+                              ))
+                            )
+                            : <span style="color: #999;">No locales</span>)}
+                      </td>
+                      <td style="border: 1px solid #ddd; padding: 10px; font-size: 0.8em; color: #888; word-break: break-all; max-width: 150px;">
+                        {contact.etag || "(No etag)"}
+                      </td>
+                    </tr>
+                  )))}
               </tbody>
             </table>
           </div>

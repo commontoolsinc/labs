@@ -6,7 +6,7 @@ import type {
   NodeCreationOptions,
   Tree,
 } from "./types.ts";
-import { ID, Cell } from "@commontools/runner";
+import { Cell, ID } from "@commontools/runner";
 
 /**
  * Executes a mutation on a Cell within a transaction
@@ -161,7 +161,10 @@ export const TreeOperations = {
   /**
    * Find the parent node containing a child (for Cell<Node>)
    */
-  findParentNodeCell(node: Cell<Node>, targetNode: Cell<Node>): Cell<Node> | null {
+  findParentNodeCell(
+    node: Cell<Node>,
+    targetNode: Cell<Node>,
+  ): Cell<Node> | null {
     const nodeChildren = node.key("children");
     const childrenArray = nodeChildren.getAsQueryResult();
 
@@ -222,10 +225,15 @@ export const TreeOperations = {
   /**
    * Navigate to a node's children Cell by path
    */
-  getChildrenCellByPath(rootCell: Cell<Node>, nodePath: number[]): Cell<Node[]> {
+  getChildrenCellByPath(
+    rootCell: Cell<Node>,
+    nodePath: number[],
+  ): Cell<Node[]> {
     let childrenCell = rootCell.key("children") as Cell<Node[]>;
     for (const pathIndex of nodePath) {
-      childrenCell = childrenCell.key(pathIndex).key("children") as Cell<Node[]>;
+      childrenCell = childrenCell.key(pathIndex).key("children") as Cell<
+        Node[]
+      >;
     }
     return childrenCell;
   },
@@ -282,7 +290,7 @@ export const TreeOperations = {
   async moveNodeUpCell(
     rootCell: Cell<Node>,
     nodeCell: Cell<Node>,
-    nodePath: number[]
+    nodePath: number[],
   ): Promise<boolean> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
@@ -323,7 +331,7 @@ export const TreeOperations = {
   async moveNodeDownCell(
     rootCell: Cell<Node>,
     nodeCell: Cell<Node>,
-    nodePath: number[]
+    nodePath: number[],
   ): Promise<boolean> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
@@ -409,7 +417,7 @@ export const TreeOperations = {
   async deleteNodeCell(
     rootCell: Cell<Node>,
     nodeCell: Cell<Node>,
-    nodePath: number[]
+    nodePath: number[],
   ): Promise<number[] | null> {
     const parentNode = TreeOperations.findParentNodeCell(rootCell, nodeCell);
     if (!parentNode) {
@@ -476,7 +484,7 @@ export const TreeOperations = {
    */
   async indentNodeCell(
     rootCell: Cell<Node>,
-    nodePath: number[]
+    nodePath: number[],
   ): Promise<number[] | null> {
     // Check if we can indent (must not be first child)
     if (nodePath.length === 0 || nodePath[nodePath.length - 1] === 0) {
@@ -489,10 +497,14 @@ export const TreeOperations = {
     const previousSiblingIndex = nodeIndex - 1;
 
     // Navigate to parent's children Cell
-    const parentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, parentPath);
+    const parentChildrenCell = TreeOperations.getChildrenCellByPath(
+      rootCell,
+      parentPath,
+    );
 
     // Navigate to sibling's children Cell
-    const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex).key("children") as Cell<Node[]>;
+    const siblingChildrenCell = parentChildrenCell.key(previousSiblingIndex)
+      .key("children") as Cell<Node[]>;
 
     // Get the node to move before any modifications
     const parentChildren = parentChildrenCell.getAsQueryResult();
@@ -528,7 +540,7 @@ export const TreeOperations = {
    */
   async outdentNodeCell(
     rootCell: Cell<Node>,
-    nodePath: number[]
+    nodePath: number[],
   ): Promise<number[] | null> {
     // Check if we can outdent (must have grandparent)
     if (nodePath.length < 2) {
@@ -542,10 +554,16 @@ export const TreeOperations = {
     const parentIndex = parentPath[parentPath.length - 1];
 
     // Navigate to parent's children Cell (source)
-    const parentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, parentPath);
+    const parentChildrenCell = TreeOperations.getChildrenCellByPath(
+      rootCell,
+      parentPath,
+    );
 
     // Navigate to grandparent's children Cell (destination)
-    const grandParentChildrenCell = TreeOperations.getChildrenCellByPath(rootCell, grandParentPath);
+    const grandParentChildrenCell = TreeOperations.getChildrenCellByPath(
+      rootCell,
+      grandParentPath,
+    );
 
     // Get the node to move before any modifications
     const parentChildren = parentChildrenCell.getAsQueryResult();

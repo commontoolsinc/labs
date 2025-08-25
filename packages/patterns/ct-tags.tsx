@@ -1,23 +1,23 @@
 /// <cts-enable />
 
 import {
-  h,
+  Cell,
   cell,
   compileAndRun,
+  Default,
   derive,
+  h,
   handler,
   ifElse,
+  Mutable,
   NAME,
   navigateTo,
+  Opaque,
+  OpaqueRef,
   recipe,
   render,
   str,
   UI,
-  OpaqueRef,
-  Cell,
-  Default,
-  Opaque,
-  Mutable,
 } from "commontools";
 
 type Input = {

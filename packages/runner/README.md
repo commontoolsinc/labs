@@ -107,9 +107,12 @@ storage:
 
 ### Sigil-based Links
 
-Cells can reference other cells through a unified sigil-based linking system. This approach replaces the previous distinction between CellLinks and Aliases.
+Cells can reference other cells through a unified sigil-based linking system.
+This approach replaces the previous distinction between CellLinks and Aliases.
 
-- **Sigil Links**: A flexible, JSON-based format for representing references to other cells. They can be simple links to other documents or write-redirects (previously aliases).
+- **Sigil Links**: A flexible, JSON-based format for representing references to
+  other cells. They can be simple links to other documents or write-redirects
+  (previously aliases).
 - These mechanisms allow building complex, interconnected data structures
 - The system automatically traverses links when needed
 
@@ -710,7 +713,8 @@ components interact:
 2. **Validation** → Schema validation ensures data conforms to expected
    structure (so far only on get, not yet on write)
 3. **Processing** → Recipes transform data according to their logic
-4. **Reactivity** → Changes propagate to dependent cells and recipes through the unified sigil-based linking system
+4. **Reactivity** → Changes propagate to dependent cells and recipes through the
+   unified sigil-based linking system
 5. **Storage** → Updated data is persisted to storage if configured
 6. **Synchronization** → Changes are synchronized across clients if enabled
 

@@ -77,7 +77,7 @@ It also demonstrates that any recipe can be invoked using JSX syntax.
 */
 export default recipe<RecipeState>("Counter", (state) => {
   // A recipe can be 'invoked' directly
-  const counter = Counter({ value: state.value })
+  const counter = Counter({ value: state.value });
 
   return {
     [NAME]: str`Double counter: ${state.value}`,

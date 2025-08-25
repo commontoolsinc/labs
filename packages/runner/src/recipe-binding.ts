@@ -1,7 +1,7 @@
 import { isRecord } from "@commontools/utils/types";
 import {
-  type JSONValue,
   isShadowRef,
+  type JSONValue,
   type Recipe,
   unsafe_originalRecipe,
   unsafe_parentRecipe,

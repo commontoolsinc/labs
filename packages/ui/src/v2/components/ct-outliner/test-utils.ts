@@ -2,7 +2,12 @@
  * Shared test utilities for CT Outliner component tests
  */
 import { CTOutliner } from "./ct-outliner.ts";
-import type { KeyboardContext, PathBasedKeyboardContext, Tree, Node } from "./types.ts";
+import type {
+  KeyboardContext,
+  Node,
+  PathBasedKeyboardContext,
+  Tree,
+} from "./types.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import { getNodeByPath } from "./node-path.ts";
 import { type Cell, Runtime, toOpaqueRef } from "@commontools/runner";
@@ -156,12 +161,10 @@ export const createKeyboardContext = (
     outliner.tree.root,
     new Set(),
   );
-  const focusedNode = outliner.focusedNodePath 
+  const focusedNode = outliner.focusedNodePath
     ? getNodeByPath(outliner.tree, outliner.focusedNodePath)
     : null;
-  const currentIndex = focusedNode
-    ? allNodes.indexOf(focusedNode)
-    : -1;
+  const currentIndex = focusedNode ? allNodes.indexOf(focusedNode) : -1;
 
   return {
     event,
@@ -183,10 +186,10 @@ export const createPathBasedKeyboardContext = (
     outliner.tree.root,
     new Set(),
   );
-  const focusedNode = outliner.focusedNodePath 
+  const focusedNode = outliner.focusedNodePath
     ? getNodeByPath(outliner.tree, outliner.focusedNodePath)
     : null;
-  
+
   // Find current index by comparing node content instead of object identity
   // since Cell-based nodes might have different proxy references
   let currentIndex = -1;
@@ -214,13 +217,13 @@ export const createPathBasedKeyboardContext = (
  */
 export const getAllVisibleNodePaths = (tree: Tree): number[][] => {
   const paths: number[][] = [];
-  
+
   const traverse = (node: Node, currentPath: number[]) => {
     // Add current path if not root (root is at empty path)
     if (currentPath.length > 0) {
       paths.push([...currentPath]);
     }
-    
+
     // Traverse children
     if (node.children && node.children.length > 0) {
       node.children.forEach((child, index) => {
@@ -260,9 +263,11 @@ export const waitForCellUpdate = async (): Promise<void> => {
  * Wait for Cell updates to propagate by observing an outliner
  * This waits for the outliner's Cell to actually update and trigger the sink
  */
-export const waitForOutlinerUpdate = async (outliner: CTOutliner): Promise<void> => {
-  // Since tree operations use transactions and await tx.commit(), 
+export const waitForOutlinerUpdate = async (
+  outliner: CTOutliner,
+): Promise<void> => {
+  // Since tree operations use transactions and await tx.commit(),
   // they should be synchronous by the time they return.
   // We just need a small delay to let any microtasks complete.
-  await new Promise(resolve => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
 };

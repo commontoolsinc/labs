@@ -131,24 +131,25 @@ pipeline that flows through input [cell]s into output [cell]s.
 
 ## Storage - Cache (IndexDB)
 
-The persistent storage layer using IndexedDB (when
-available) that survives across browser sessions and stores historical revisions
-fetched from the remote server. The cache is only accessed during load()
-operations when explicitly loading data into the heap at session start or when
-accessing new entities. Writes to the cache occur as a write-through persistence
-layer: after successful pulls from remote, when receiving subscription updates,
-or during load operations. The cache never stores data directly from local
-changes. If IndexedDB is unavailable, it falls back to NoCache which provides no
+The persistent storage layer using IndexedDB (when available) that survives
+across browser sessions and stores historical revisions fetched from the remote
+server. The cache is only accessed during load() operations when explicitly
+loading data into the heap at session start or when accessing new entities.
+Writes to the cache occur as a write-through persistence layer: after successful
+pulls from remote, when receiving subscription updates, or during load
+operations. The cache never stores data directly from local changes. If
+IndexedDB is unavailable, it falls back to NoCache which provides no
 persistence. This tier aims to improve startup performance.
 
 > Note: While IndexedDB provides the storage layer, queries are currently
 > performed through schema queries rather than direct IndexedDB queries. Direct
-> IndexedDB query functionality would require additional development to be useful.
+> IndexedDB query functionality would require additional development to be
+> useful.
 
 ## Storage - Heap
 
-The in-memory cache for the current session that stores confirmed revisions
-from the remote server. All incoming subscription data and remote updates flow
+The in-memory cache for the current session that stores confirmed revisions from
+the remote server. All incoming subscription data and remote updates flow
 directly into the heap (does not touch nursery). The heap maintains subscribers
 to notify them when facts change. Facts enter the heap through three paths:
 promotion from the nursery after successful commits, direct insertion when
@@ -164,12 +165,13 @@ they're confirmed by the remote server. This enables optimistic updates - when
 you make a local change, it immediately goes into the nursery so the UI can
 reflect changes instantly without waiting for server confirmation. The nursery
 never stores incoming subscription data from the remote server. If a commit
-succeeds, facts are promoted from nursery to heap. If a commit fails, facts
-are deleted from the nursery to prevent building on rejected state. The nursery
+succeeds, facts are promoted from nursery to heap. If a commit fails, facts are
+deleted from the nursery to prevent building on rejected state. The nursery
 "shadows" the heap, meaning reads check here first, and any local unconfirmed
 change will be returned even if the heap has a newer version from the server.
 
 Nursery eviction occurs in several scenarios:
+
 - When the remote server returns a matching state, indicating the server has
   caught up with the local change
 - When conflicts occur, which will purge conflicting entries from the nursery

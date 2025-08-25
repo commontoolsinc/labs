@@ -2,9 +2,9 @@ import type {
   EditingKeyboardContext,
   KeyboardCommand,
   KeyboardContext,
-  PathBasedKeyboardContext,
   PathBasedEditingKeyboardContext,
   PathBasedKeyboardCommand,
+  PathBasedKeyboardContext,
 } from "./types.ts";
 import { getNodeByPath, getNodePath } from "./node-path.ts";
 import { TreeOperations } from "./tree-operations.ts";
@@ -73,7 +73,10 @@ export const PathBasedKeyboardCommands = {
       if (ctx.event.altKey) {
         // Alt+Left collapses current node
         if (ctx.focusedNodePath) {
-          const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+          const focusedNode = getNodeByPath(
+            ctx.component.tree,
+            ctx.focusedNodePath,
+          );
           if (focusedNode && focusedNode.children.length > 0) {
             ctx.component.collapsedNodePaths.add(ctx.focusedNodePath.join(","));
             ctx.component.requestUpdate();
@@ -81,7 +84,10 @@ export const PathBasedKeyboardCommands = {
         }
       } else {
         if (ctx.focusedNodePath) {
-          const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+          const focusedNode = getNodeByPath(
+            ctx.component.tree,
+            ctx.focusedNodePath,
+          );
           if (
             focusedNode &&
             focusedNode.children.length > 0 &&
@@ -110,19 +116,33 @@ export const PathBasedKeyboardCommands = {
       if (ctx.event.altKey) {
         // Alt+Right expands current node
         if (ctx.focusedNodePath) {
-          const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+          const focusedNode = getNodeByPath(
+            ctx.component.tree,
+            ctx.focusedNodePath,
+          );
           if (focusedNode && focusedNode.children.length > 0) {
-            ctx.component.collapsedNodePaths.delete(ctx.focusedNodePath.join(","));
+            ctx.component.collapsedNodePaths.delete(
+              ctx.focusedNodePath.join(","),
+            );
             ctx.component.requestUpdate();
           }
         }
       } else {
         if (ctx.focusedNodePath) {
-          const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+          const focusedNode = getNodeByPath(
+            ctx.component.tree,
+            ctx.focusedNodePath,
+          );
           if (focusedNode && focusedNode.children.length > 0) {
-            if (ctx.component.collapsedNodePaths.has(ctx.focusedNodePath.join(","))) {
+            if (
+              ctx.component.collapsedNodePaths.has(
+                ctx.focusedNodePath.join(","),
+              )
+            ) {
               // Expand node if collapsed
-              ctx.component.collapsedNodePaths.delete(ctx.focusedNodePath.join(","));
+              ctx.component.collapsedNodePaths.delete(
+                ctx.focusedNodePath.join(","),
+              );
               ctx.component.requestUpdate();
             } else {
               // Move to first child if expanded
@@ -139,7 +159,10 @@ export const PathBasedKeyboardCommands = {
     execute(ctx: PathBasedKeyboardContext): void {
       ctx.event.preventDefault();
       if (ctx.focusedNodePath) {
-        const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+        const focusedNode = getNodeByPath(
+          ctx.component.tree,
+          ctx.focusedNodePath,
+        );
         const initialContent = focusedNode?.body || "";
         ctx.component.startEditingByPath(ctx.focusedNodePath, initialContent);
       }
@@ -181,7 +204,10 @@ export const PathBasedKeyboardCommands = {
   c: {
     execute(ctx: PathBasedKeyboardContext): void {
       if ((ctx.event.metaKey || ctx.event.ctrlKey) && ctx.focusedNodePath) {
-        const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+        const focusedNode = getNodeByPath(
+          ctx.component.tree,
+          ctx.focusedNodePath,
+        );
         if (focusedNode) {
           // Copy node as markdown
           const nodeMarkdown = TreeOperations.toMarkdown({
@@ -221,12 +247,18 @@ export const PathBasedKeyboardCommands = {
       if (ctx.event.metaKey || ctx.event.ctrlKey) {
         ctx.event.preventDefault();
         if (ctx.focusedNodePath) {
-          const focusedNode = getNodeByPath(ctx.component.tree, ctx.focusedNodePath);
+          const focusedNode = getNodeByPath(
+            ctx.component.tree,
+            ctx.focusedNodePath,
+          );
           if (focusedNode) {
             // Check if we're editing this node
             const isEditingThisNode = ctx.component.editingNodePath &&
-              ctx.component.editingNodePath.length === ctx.focusedNodePath.length &&
-              ctx.component.editingNodePath.every((val, idx) => val === ctx.focusedNodePath![idx]);
+              ctx.component.editingNodePath.length ===
+                ctx.focusedNodePath.length &&
+              ctx.component.editingNodePath.every((val, idx) =>
+                val === ctx.focusedNodePath![idx]
+              );
 
             if (isEditingThisNode) {
               ctx.component.finishEditing();
@@ -240,10 +272,14 @@ export const PathBasedKeyboardCommands = {
         if (ctx.focusedNodePath) {
           if (ctx.event.shiftKey) {
             // Shift+Enter creates a child node
-            ctx.component.createChildNodeAtPath(ctx.focusedNodePath, { body: "" });
+            ctx.component.createChildNodeAtPath(ctx.focusedNodePath, {
+              body: "",
+            });
           } else {
             // Enter creates a sibling node
-            ctx.component.createNodeAfterPath(ctx.focusedNodePath, { body: "" });
+            ctx.component.createNodeAfterPath(ctx.focusedNodePath, {
+              body: "",
+            });
           }
         }
       }
@@ -560,7 +596,8 @@ export function executePathBasedKeyboardCommand(
   key: string,
   context: PathBasedKeyboardContext,
 ): boolean {
-  const command = PathBasedKeyboardCommands[key as keyof typeof PathBasedKeyboardCommands];
+  const command =
+    PathBasedKeyboardCommands[key as keyof typeof PathBasedKeyboardCommands];
   if (command) {
     command.execute(context);
     return true;

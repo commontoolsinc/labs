@@ -29,7 +29,7 @@ export default {
   pipeConsole: true,
   include: {
     "path/static-asset.json": "static/asset.json",
-  }
+  },
 };
 ```
 

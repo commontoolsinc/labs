@@ -20,7 +20,10 @@ Deno.test("smoke test", async function () {
   assert(/add-async ... ok/.test(stdoutText), "test output ok");
   assert(/ok | 2 passed | 0 failed/.test(stdoutText), "test output ok");
   assert(/deno run/.test(stderrText), "stderr has deno task run");
-  assert(/experimentalDecorators/.test(stderrText), "stderr has compiler options warning");
+  assert(
+    /experimentalDecorators/.test(stderrText),
+    "stderr has compiler options warning",
+  );
   assert(stderrText.split("\n").length === 3, "stderr has no other messages");
   assert(stderrText.split("\n")[2] === "", "stderr has no other messages");
 });

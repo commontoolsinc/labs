@@ -150,7 +150,6 @@ export const NodeUtils = {
   isLeaf(node: Node): boolean {
     return node.children.length === 0;
   },
-
   /**
    * Get siblings of a node
    * @deprecated Not used - outliner uses path-based operations
