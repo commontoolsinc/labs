@@ -1,5 +1,5 @@
 import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
+import { waitFor } from "@commontools/utils/sleep";
 import { CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -77,22 +77,17 @@ describe("counter direct operations test", () => {
     console.log("Setting counter value to 42 via direct operation");
     await setCharmResult(manager, charmId, ["value"], 42);
 
-    // Wait for the update to propagate
-    await sleep(1000);
-
-    // Verify the UI updated
-    const updatedText = await counterResult.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(
-      updatedText?.trim(),
-      "Counter is the 42th number",
-      "UI should update to show 42th",
-    );
+    await waitFor(async () => {
+      const updatedText = await counterResult.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
+      return updatedText?.trim() === "Counter is the 42th number";
+    });
 
     // Verify we can also read the value back
-    const finalValue = await getCharmResult(manager, charmId, ["value"]);
-    assertEquals(finalValue, 42);
+    await waitFor(async () =>
+      (await getCharmResult(manager, charmId, ["value"])) === 42
+    );
   });
 
   it("should update counter value and verify after page refresh", async () => {

@@ -1,5 +1,5 @@
-import { env } from "@commontools/integration";
-import { sleep } from "@commontools/utils/sleep";
+import { env, Page } from "@commontools/integration";
+import { waitFor } from "@commontools/utils/sleep";
 import { CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -78,20 +78,11 @@ describe("nested counter integration test", () => {
     // Click increment button (second button - first is decrement)
     await buttons[1].click();
 
-    await sleep(2000);
-
-    const counterResult = await page.$("#counter-result", {
-      strategy: "pierce",
+    // Wait for charm result update
+    await waitFor(async () => {
+      return (await getCharmResult(cc!.manager(), charmId, ["value"])) === 1;
     });
-    assert(counterResult, "Should find counter-result element");
-    const counterText = await counterResult.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(counterText?.trim(), "Counter is the 1st number");
-
-    // Verify via direct operations
-    const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
-    assertEquals(value, 1);
+    await waitForCounter(page, "Counter is the 1st number");
   });
 
   it("should update counter value via direct operations and verify UI", async () => {
@@ -113,41 +104,39 @@ describe("nested counter integration test", () => {
       identity,
     });
 
-    // Check if the UI shows the updated value
-    const counterResult = await page.waitForSelector("#counter-result", {
-      strategy: "pierce",
-    });
-    const textAfterUpdate = await counterResult.evaluate((el: HTMLElement) =>
-      el.textContent
-    );
-    assertEquals(
-      textAfterUpdate?.trim(),
-      "Counter is the 5th number",
-      "UI should show updated value from direct operation",
-    );
+    await waitForCounter(page, "Counter is the 5th number");
   });
 
   it("should verify nested counter has multiple counter displays", async () => {
     const page = shell.page();
 
-    // Find all counter result elements (should be 2 for nested counter)
-    const counterResults = await page.$$("#counter-result", {
-      strategy: "pierce",
+    await waitFor(async () => {
+      // Find all counter result elements (should be 2 for nested counter)
+      const counterResults = await page.$$("#counter-result", {
+        strategy: "pierce",
+      });
+      if (counterResults.length !== 2) {
+        return false;
+      }
+      // Verify both show the same value
+      for (const counter of counterResults) {
+        const text = await counter.evaluate((el: HTMLElement) =>
+          el.textContent
+        );
+        if (text?.trim() !== "Counter is the 5th number") {
+          return false;
+        }
+      }
+      return true;
     });
-    assertEquals(
-      counterResults.length,
-      2,
-      "Should find exactly 2 counter-result elements in nested counter",
-    );
-
-    // Verify both show the same value
-    for (const counter of counterResults) {
-      const text = await counter.evaluate((el: HTMLElement) => el.textContent);
-      assertEquals(
-        text?.trim(),
-        "Counter is the 5th number",
-        "Both nested counters should show same value",
-      );
-    }
   });
 });
+
+async function waitForCounter(page: Page, text: string) {
+  await waitFor(async () => {
+    const counterResult = await page.waitForSelector("#counter-result", {
+      strategy: "pierce",
+    });
+    return (await counterResult?.innerText())?.trim() === text;
+  });
+}
