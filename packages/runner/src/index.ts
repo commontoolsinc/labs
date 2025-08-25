@@ -7,12 +7,11 @@ export type {
   RuntimeOptions,
 } from "./runtime.ts";
 export { raw } from "./module.ts";
-export type { DocImpl } from "./doc.ts";
 export type { Cell, Stream } from "./cell.ts";
 export type { NormalizedLink } from "./link-utils.ts";
-export type { LegacyDocCellLink, SigilLink, URI } from "./sigil-types.ts";
+export type { SigilLink, URI } from "./sigil-types.ts";
 export type { EntityId } from "./doc-map.ts";
-export { createRef, entityIdStr, getEntityId } from "./doc-map.ts";
+export { createRef, getEntityId } from "./doc-map.ts";
 export type { QueryResult } from "./query-result-proxy.ts";
 export type { Action, ErrorWithContext, ReactivityLog } from "./scheduler.ts";
 export * as StorageInspector from "./storage/inspector.ts";
@@ -27,7 +26,7 @@ export {
 } from "./query-result-proxy.ts";
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
-export { type MemorySpace, Storage } from "./storage.ts";
+export { type MemorySpace } from "./storage.ts";
 export {
   Console,
   type ConsoleEvent,

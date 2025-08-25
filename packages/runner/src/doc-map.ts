@@ -17,15 +17,6 @@ export type EntityId = {
   toJSON?: () => { "/": string };
 };
 
-export function entityIdStr(entityId: EntityId) {
-  const slashVal = entityId["/"];
-  if (typeof slashVal === "string") {
-    return slashVal;
-  } else {
-    return JSON.parse(JSON.stringify(entityId))["/"];
-  }
-}
-
 /**
  * Generates an entity ID.
  *
@@ -68,7 +59,7 @@ export function createRef(
     }
 
     // If referencing other docs, return their ids (or random as fallback).
-    if (isDoc(obj) || isCell(obj)) return obj.entityId ?? crypto.randomUUID();
+    if (isCell(obj)) return obj.entityId ?? crypto.randomUUID();
     else if (Array.isArray(obj)) return obj.map(traverse);
     else if (isRecord(obj)) {
       return Object.fromEntries(
@@ -113,7 +104,7 @@ export class DocumentMap implements IDocumentMap {
 
   constructor(readonly runtime: IRuntime) {}
 
-  private _getDocKey(space: string, entityId: EntityId | string): string {
+  private _getDocKey(space: string, entityId: EntityId): string {
     return space + "/" + JSON.stringify(normalizeEntityId(entityId));
   }
 
@@ -141,22 +132,9 @@ export class DocumentMap implements IDocumentMap {
     if (doc) return doc;
     if (!createIfNotFound) return undefined;
 
-    doc = this.createDoc<T>(undefined as T, normalizedId, space);
+    doc = createDoc<T>(undefined as T, normalizedId, space, this.runtime);
     doc.sourceCell = sourceIfCreated;
     return doc;
-  }
-
-  setDocByEntityId(
-    space: string,
-    entityId: EntityId,
-    doc: DocImpl<any>,
-  ): void {
-    // throw if doc already exists
-    if (this.entityIdToDocMap.get(this._getDocKey(space, entityId))) {
-      throw new Error("Doc already exists");
-    }
-
-    this.entityIdToDocMap.set(this._getDocKey(space, entityId), doc);
   }
 
   registerDoc<T>(entityId: EntityId, doc: DocImpl<T>, space: string): void {
@@ -172,15 +150,7 @@ export class DocumentMap implements IDocumentMap {
    */
   getDoc<T>(value: T, cause: any, space: MemorySpace): DocImpl<T> {
     // Generate entity ID from value and cause
-    const entityId = this.generateEntityId(value, cause);
-    const existing = this.getDocByEntityId<T>(space, entityId, false);
-    if (existing) return existing;
-
-    return this.createDoc(value, entityId, space);
-  }
-
-  private generateEntityId(value: any, cause?: any): EntityId {
-    return createRef(
+    const entityId = createRef(
       isRecord(value)
         ? (value as object)
         : value !== undefined
@@ -188,19 +158,14 @@ export class DocumentMap implements IDocumentMap {
         : {},
       cause,
     );
-  }
+    const existing = this.getDocByEntityId<T>(space, entityId, false);
+    if (existing) return existing;
 
-  private createDoc<T>(
-    value: T,
-    entityId: EntityId,
-    space: MemorySpace,
-  ): DocImpl<T> {
-    // Use the full createDoc implementation with runtime parameter
     return createDoc(value, entityId, space, this.runtime);
   }
 }
 
-function normalizeEntityId(entityId: EntityId | string): EntityId {
+function normalizeEntityId(entityId: EntityId | URI): EntityId {
   if (typeof entityId === "string") {
     if (entityId.startsWith("of:")) {
       return { "/": fromURI(entityId) };

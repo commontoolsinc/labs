@@ -177,11 +177,7 @@ async function main() {
       const localSpace = (value.space ?? spaceDID) as MemorySpace;
       return runtime.getCellFromLink({
         space: localSpace,
-        cell: runtime.documentMap.getDocByEntityId(
-          space,
-          value.cell as { "/": string },
-          true,
-        )!,
+        id: `of:${value.cell["/"]}`,
         path: value.path,
       });
     } else if (Array.isArray(value)) {

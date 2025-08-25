@@ -180,11 +180,6 @@ describe("Storage Subscription", () => {
 
   describe("revert notifications", () => {
     it("should receive revert notification on conflict", async () => {
-      if (runtime.storage.shim) {
-        expect(true, "Revert notifications not supported in shim storage");
-        return;
-      }
-
       // Create memory from session before subscribing
       const memory = storageManager.session().mount(space);
       const entityId = `test:conflict-${Date.now()}` as Entity;
@@ -249,11 +244,6 @@ describe("Storage Subscription", () => {
 
   describe("load notifications", () => {
     it("should receive load notification when data is loaded from cache", async () => {
-      if (runtime.storage.shim) {
-        expect(true, "Load notifications not supported in shim storage");
-        return;
-      }
-
       // Subscribe to notifications
       const subscription = new Subscription();
       runtime.storage.subscribe(subscription);
@@ -281,11 +271,6 @@ describe("Storage Subscription", () => {
 
   describe("pull notifications", () => {
     it("should receive pull notification when data is pulled from remote", async () => {
-      if (runtime.storage.shim) {
-        expect(true, "Pull notifications not supported in shim storage");
-        return;
-      }
-
       // Put something in the memory first
       const memory = storageManager.session().mount(space);
       const entityId = `test:pull-${Date.now()}` as Entity;
@@ -322,11 +307,6 @@ describe("Storage Subscription", () => {
 
   describe("integrate notifications", () => {
     it("should receive integrate notification when data is integrated", async () => {
-      if (runtime.storage.shim) {
-        expect(true, "Integrate notifications not supported in shim storage");
-        return;
-      }
-
       // Subscribe to notifications
       const subscription = new Subscription();
       runtime.storage.subscribe(subscription);
@@ -369,11 +349,6 @@ describe("Storage Subscription", () => {
 
   describe("reset notifications", () => {
     it("should receive reset notification when storage is reset", async () => {
-      if (runtime.storage.shim) {
-        expect(true, "Reset notifications not supported in shim storage");
-        return;
-      }
-
       // Create a cell first
       const cell = runtime.getCell<{ data: string }>(
         space,

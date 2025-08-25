@@ -1,5 +1,5 @@
-import { getLogger } from "@commontools/utils/logger";
 import { refer } from "merkle-reference/json";
+import { getLogger } from "@commontools/utils/logger";
 import { isObject, isRecord, type Mutable } from "@commontools/utils/types";
 import { vdomSchema } from "@commontools/html";
 import {
@@ -954,7 +954,7 @@ export class Runner implements IRunner {
         );
       },
       addCancel,
-      { inputs: inputsCell, parents: processCell.getDoc() },
+      { inputs: inputsCell, parents: processCell.entityId },
       processCell,
       this.runtime,
     );
@@ -1000,7 +1000,7 @@ export class Runner implements IRunner {
       processCell.space,
       {
         recipe: module.implementation,
-        parent: processCell.getDoc(),
+        parent: processCell.entityId,
         inputBindings,
         outputBindings,
       },

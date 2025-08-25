@@ -48,15 +48,6 @@ export interface IReadOptions {
   meta?: Metadata;
 }
 
-/**
- * @deprecated - Use IAttestation instead
- */
-export type Read = IAttestation;
-/**
- * @deprecated - Use IAttestation instead
- */
-export type Write = IAttestation;
-
 // This type is used to tag a document with any important metadata.
 // Currently, the only supported type is the classification.
 export type Labels = {

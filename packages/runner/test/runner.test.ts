@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commontools/identity";
+import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { NAME, type Recipe } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { extractDefaultValues, mergeObjects } from "../src/runner.ts";
-import { Identity } from "@commontools/identity";
-import { StorageManager } from "@commontools/runner/storage/cache.deno";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -73,7 +73,7 @@ describe("runRecipe", () => {
       output: {
         $alias: {
           path: ["internal", "output"],
-          cell: JSON.parse(JSON.stringify(result.getSourceCell()?.getDoc())),
+          cell: result.getSourceCell()?.entityId,
         },
       },
     });

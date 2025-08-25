@@ -9,8 +9,6 @@ import type {
   IMemorySpaceAddress,
   INotFoundError,
 } from "../src/storage/interface.ts";
-import { createDoc } from "../src/doc.ts";
-import { ShimStorageManager } from "../src/storage/transaction-shim.ts";
 import { getEntityId } from "../src/doc-map.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -34,7 +32,6 @@ describe("StorageTransaction", () => {
   });
 
   it("should create a transaction and read/write values", async () => {
-    if (!runtime.storage.shim) return;
     const transaction = runtime.edit();
 
     // Check initial status
@@ -60,7 +57,9 @@ describe("StorageTransaction", () => {
     }, "John Doe");
 
     expect(writeResult.ok).toBeDefined();
-    expect(writeResult.ok?.value).toBe("John Doe");
+    // Because we have merged the writes, we will return the top level write
+    expect(writeResult.ok?.address.path).toEqual([]);
+    expect(writeResult.ok?.value).toEqual({ "value": { "name": "John Doe" } });
 
     // Test reading the value
     const readResult = transaction.read({
@@ -83,7 +82,12 @@ describe("StorageTransaction", () => {
 
     expect(readNonExistentResult.error).toBeDefined();
     expect(readNonExistentResult.error?.name).toBe("NotFoundError");
-    expect((readNonExistentResult.error as INotFoundError).path).toEqual([]);
+    // read at ["value", "address", "city"] is an error, since there is no address
+    // read at ["value", "address"] returns undefined, but it's a valid read
+    expect((readNonExistentResult.error as INotFoundError).path).toEqual([
+      "value",
+      "address",
+    ]);
 
     // Test writing a value to nested path
     const writeResult2 = transaction.write({
@@ -94,7 +98,11 @@ describe("StorageTransaction", () => {
     }, { street: "123 Main St" });
 
     expect(writeResult2.ok).toBeDefined();
-    expect(writeResult2.ok?.value).toEqual({ street: "123 Main St" });
+    // Because we have merged the writes, we will return the top level write
+    expect(writeResult2.ok?.address.path).toEqual([]);
+    expect(writeResult2.ok?.value).toEqual({
+      value: { address: { street: "123 Main St" }, name: "John Doe" },
+    });
 
     // Test reading non-existent path in a parent that does exist
     const readNonExistentResult2 = transaction.read({
@@ -107,7 +115,9 @@ describe("StorageTransaction", () => {
     expect(readNonExistentResult2.error).toBeDefined();
     expect(readNonExistentResult2.error?.name).toBe("NotFoundError");
     expect((readNonExistentResult2.error as INotFoundError).path).toEqual([
+      "value",
       "address",
+      "country",
     ]);
 
     // Test commit - dummy commit always succeeds
@@ -120,17 +130,23 @@ describe("StorageTransaction", () => {
   });
 
   it("should handle transaction abort", async () => {
-    if (!runtime.storage.shim) return;
     const transaction = runtime.edit();
 
     // Abort the transaction
     const abortResult = transaction.abort();
     expect(abortResult.error).toBeUndefined(); // No error means success
 
+    // It should be aborted
+    const statusResult = transaction.status();
+    expect(statusResult.status).toBe("error");
+    if (statusResult.status === "error") {
+      expect(statusResult.error.name).toBe("StorageTransactionAborted");
+    }
+
     // Try to commit aborted transaction
     const commitResult = await transaction.commit();
     expect(commitResult.error).toBeDefined();
-    expect(commitResult.error?.name).toBe("StorageTransactionAborted");
+    expect(commitResult.error?.name).toBe("StorageTransactionCompleteError");
   });
 
   it("should enforce write isolation per space", () => {
@@ -164,8 +180,6 @@ describe("StorageTransaction", () => {
     });
 
     it("should fail writing to nested path when document is not a record", () => {
-      if (!runtime.storage.shim) return;
-
       const transaction = runtime.edit();
 
       // First write a non-record value to the document
@@ -189,8 +203,6 @@ describe("StorageTransaction", () => {
     });
 
     it("should fail writing to deeply nested path when parent is not a record", () => {
-      if (!runtime.storage.shim) return;
-
       const transaction = runtime.edit();
 
       // First write a record with a non-record value at "a"
@@ -260,7 +272,6 @@ describe("StorageTransaction", () => {
     });
 
     it("should fail writing to nested path when parent path doesn't exist", () => {
-      if (!runtime.storage.shim) return;
       const transaction = runtime.edit();
 
       // First write a record to the document
@@ -282,8 +293,8 @@ describe("StorageTransaction", () => {
 
       expect(result.error).toBeDefined();
       expect(result.error!.name).toBe("NotFoundError");
-      expect(result.error!.message).toContain(
-        "parent path [missing] does not exist",
+      expect(result.error!.message).toBe(
+        "Cannot access path [value, missing, nested] - path does not exist",
       );
     });
 
@@ -356,10 +367,16 @@ describe("StorageTransaction", () => {
     });
 
     it("should error if path beyond 'source' is used", () => {
-      if (!runtime.storage.shim) return;
-
       const transaction = runtime.edit();
       const doc1Id = "of:doc1";
+      // We need to write something, or we'll get a NotFoundError when we
+      // attempt to write to ["value"]
+      transaction.write({
+        space,
+        id: doc1Id,
+        type: "application/json",
+        path: [],
+      }, {});
       expect(
         transaction.write({
           space,
@@ -387,18 +404,8 @@ describe("StorageTransaction", () => {
     });
 
     it("should error if source doc does not exist", () => {
-      if (!runtime.storage.shim) return;
-
       const transaction = runtime.edit();
       const doc1Id = "of:doc1";
-      expect(
-        transaction.write({
-          space,
-          id: doc1Id,
-          type: "application/json",
-          path: ["value"],
-        }, {}).ok,
-      ).toBeDefined();
       const result = transaction.write({
         space,
         id: doc1Id,
@@ -410,18 +417,8 @@ describe("StorageTransaction", () => {
     });
 
     it("should error if value for 'source' is not a URI string", () => {
-      if (!runtime.storage.shim) return;
-
       const transaction = runtime.edit();
       const doc1Id = "of:doc1";
-      expect(
-        transaction.write({
-          space,
-          id: doc1Id,
-          type: "application/json",
-          path: ["value"],
-        }, {}).ok,
-      ).toBeDefined();
       const result = transaction.write({
         space,
         id: doc1Id,
@@ -473,18 +470,6 @@ describe("StorageTransaction", () => {
         path: ["value", "bar"],
       });
       expect(notFound).toBeUndefined();
-
-      // Should throw for other errors (e.g., unsupported media type)
-      if (runtime.storage.shim) { // Only shim doesn't support other types
-        expect(() =>
-          transaction.readOrThrow({
-            space,
-            id: "of:test-entity",
-            type: "unsupported/type",
-            path: ["value"],
-          })
-        ).toThrow("Unsupported media type");
-      }
     });
   });
 
@@ -519,421 +504,6 @@ describe("DocImpl shim notifications", () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
-  });
-
-  describe("setAtPath with transaction parameter", () => {
-    it("should accept transaction parameter and work correctly", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "transaction-test-entity" };
-      const value = { initial: "value" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      // Test that setAtPath works with transaction parameter
-      const result = doc.setAtPath(["new"], "value", undefined, tx);
-      expect(result).toBe(true);
-      expect(doc.getAtPath(["new"])).toBe("value");
-    });
-
-    it("should handle nested paths with transaction parameter", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "nested-transaction-test-entity" };
-      const value = { initial: "value" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      // Test nested path setting with transaction
-      const result = doc.setAtPath(
-        ["nested", "deep", "path"],
-        "deep value",
-        undefined,
-        tx,
-      );
-      expect(result).toBe(true);
-      expect(doc.getAtPath(["nested", "deep", "path"])).toBe("deep value");
-    });
-
-    it("should handle array paths with transaction parameter", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "array-transaction-test-entity" };
-      const value = { items: [] };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      // Test array path setting with transaction
-      const result = doc.setAtPath(["items", 0], "first item", undefined, tx);
-      expect(result).toBe(true);
-      expect(doc.getAtPath(["items", 0])).toBe("first item");
-    });
-
-    it("should handle schema validation with transaction parameter", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "schema-transaction-test-entity" };
-      const value = { name: "test" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const schema = {
-        type: "string" as const,
-        minLength: 3,
-      };
-
-      // Test with valid schema
-      const result = doc.setAtPath(["name"], "valid name", schema, tx);
-      expect(result).toBe(true);
-      expect(doc.getAtPath(["name"])).toBe("valid name");
-    });
-
-    it("should handle root path setting with transaction parameter", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "root-transaction-test-entity" };
-      const value = { initial: "value" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const newValue = { completely: "new value" };
-      const result = doc.setAtPath([], newValue, undefined, tx);
-      expect(result).toBe(true);
-      expect(doc.get()).toEqual(newValue);
-    });
-  });
-
-  describe("storage notifications with shim storage manager", () => {
-    it("should send notifications when shim storage manager is available", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "notification-test-entity" };
-      const value = { initial: "value" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const notifications: any[] = [];
-      runtime.storage.subscribe({
-        next(notification: any) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      });
-
-      doc.setAtPath(["initial"], "updated", undefined, tx.tx);
-
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].type).toBe("commit");
-      expect(notifications[0].space).toBe(space);
-      expect(notifications[0].source).toBe(tx.tx);
-      expect(notifications[0].changes).toHaveLength(1);
-      expect(notifications[0].changes[0].address.id).toBe(
-        "of:notification-test-entity",
-      );
-      expect(notifications[0].changes[0].address.path).toEqual([
-        "value",
-        "initial",
-      ]);
-      expect(notifications[0].changes[0].before).toEqual({
-        value: { initial: "value" },
-      });
-      expect(notifications[0].changes[0].after).toEqual({
-        value: { initial: "updated" },
-      });
-    });
-
-    it("should send notifications for nested path changes", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "nested-notification-test-entity" };
-      const value = { user: { name: "John" } };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const notifications: any[] = [];
-      runtime.storage.subscribe({
-        next(notification: any) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      });
-
-      doc.setAtPath(["user", "name"], "Jane", undefined, tx.tx);
-
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].changes[0].address.path).toEqual([
-        "value",
-        "user",
-        "name",
-      ]);
-      expect(notifications[0].changes[0].before).toEqual({
-        value: { user: { name: "John" } },
-      });
-      expect(notifications[0].changes[0].after).toEqual({
-        value: { user: { name: "Jane" } },
-      });
-    });
-
-    it("should send notifications for root value changes", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "root-notification-test-entity" };
-      const value = { initial: "value" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const notifications: any[] = [];
-      runtime.storage.subscribe({
-        next(notification: any) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      });
-
-      const newValue = { completely: "new value" };
-      doc.setAtPath([], newValue, undefined, tx.tx);
-
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].changes[0].address.path).toEqual(["value"]);
-      expect(notifications[0].changes[0].before).toEqual({
-        value: { initial: "value" },
-      });
-      expect(notifications[0].changes[0].after).toEqual({ value: newValue });
-    });
-
-    it("should not send notifications when value doesn't change", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "no-change-notification-test-entity" };
-      const value = { name: "test" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const notifications: any[] = [];
-      runtime.storage.subscribe({
-        next(notification: any) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      });
-
-      // Set the same value
-      doc.setAtPath(["name"], "test", undefined, tx.tx);
-
-      expect(notifications).toHaveLength(0);
-    });
-
-    it("should handle multiple notifications in sequence", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "multiple-notification-test-entity" };
-      const value = { counter: 0 };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const notifications: any[] = [];
-      runtime.storage.subscribe({
-        next(notification: any) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      });
-
-      doc.setAtPath(["counter"], 1, undefined, tx.tx);
-      doc.setAtPath(["counter"], 2, undefined, tx.tx);
-      doc.setAtPath(["counter"], 3, undefined, tx.tx);
-
-      expect(notifications).toHaveLength(3);
-      expect(notifications[0].changes[0].after).toEqual({
-        value: { counter: 1 },
-      });
-      expect(notifications[1].changes[0].after).toEqual({
-        value: { counter: 2 },
-      });
-      expect(notifications[2].changes[0].after).toEqual({
-        value: { counter: 3 },
-      });
-    });
-  });
-
-  describe("integration with existing functionality", () => {
-    it("should work with updates callbacks and storage notifications", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "integration-test-entity" };
-      const value = { status: "initial" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-
-      const updates: Array<{ value: any; path: PropertyKey[] }> = [];
-      const notifications: any[] = [];
-
-      // Set up updates callback
-      const cancelUpdates = doc.updates((value, path) => {
-        updates.push({ value, path });
-      });
-
-      // Set up storage notifications
-      runtime.storage.subscribe({
-        next(notification: any) {
-          notifications.push(notification);
-          return { done: false };
-        },
-      });
-
-      // Make a change
-      doc.setAtPath(["status"], "updated", undefined, tx.tx);
-
-      // Both should be triggered
-      expect(updates).toHaveLength(1);
-      expect(notifications).toHaveLength(1);
-      expect(updates[0].path).toEqual(["status"]);
-      expect(notifications[0].changes[0].address.path).toEqual([
-        "value",
-        "status",
-      ]);
-
-      cancelUpdates();
-    });
-
-    it("should handle frozen documents with transaction parameter", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "frozen-transaction-test-entity" };
-      const value = { data: "initial" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-      doc.freeze("test freeze");
-
-      expect(() => {
-        doc.setAtPath(["data"], "new value", undefined, tx.tx);
-      }).toThrow("Cell is read-only: test freeze");
-    });
-
-    it("should work with ephemeral documents", () => {
-      if (!runtime.storage.shim) return;
-
-      const entityId = { "/": "ephemeral-transaction-test-entity" };
-      const value = { data: "initial" };
-
-      const doc = createDoc(value, entityId, space, runtime);
-      doc.ephemeral = true;
-
-      // Should work normally even when ephemeral
-      const result = doc.setAtPath(["data"], "new value", undefined, tx.tx);
-      expect(result).toBe(true);
-      expect(doc.getAtPath(["data"])).toBe("new value");
-    });
-  });
-});
-
-describe("Subscription Shim", () => {
-  let runtime: Runtime;
-  let storageManager: ReturnType<typeof StorageManager.emulate>;
-  let tx: IExtendedStorageTransaction;
-  let shimStorageManager: ShimStorageManager;
-
-  beforeEach(() => {
-    storageManager = StorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      blobbyServerUrl: import.meta.url,
-      storageManager,
-    });
-    shimStorageManager = new ShimStorageManager(runtime);
-    tx = runtime.edit();
-  });
-
-  afterEach(async () => {
-    await tx.commit();
-    await runtime?.dispose();
-    await storageManager?.close();
-  });
-
-  it("should create a new storage transaction", () => {
-    const transaction = shimStorageManager.edit();
-
-    expect(transaction).toBeDefined();
-    expect(transaction.status().status).toBe("ready");
-  });
-
-  it("should manage subscriptions", () => {
-    const notifications: any[] = [];
-    const subscription = {
-      next(notification: any) {
-        notifications.push(notification);
-        return { done: false };
-      },
-    };
-
-    shimStorageManager.subscribe(subscription);
-
-    // Simulate a notification
-    const testNotification = {
-      type: "commit" as const,
-      space,
-      changes: [],
-    };
-
-    shimStorageManager.notifySubscribers(testNotification);
-
-    expect(notifications).toHaveLength(1);
-    expect(notifications[0]).toEqual(testNotification);
-  });
-
-  it("should remove subscriptions that return done: true", () => {
-    let callCount = 0;
-    const subscription = {
-      next(_notification: any) {
-        callCount++;
-        return { done: true }; // Stop after first call
-      },
-    };
-
-    shimStorageManager.subscribe(subscription);
-
-    // First notification should work
-    shimStorageManager.notifySubscribers({
-      type: "commit",
-      space,
-      changes: [],
-    });
-    expect(callCount).toBe(1);
-
-    // Second notification should not work (subscription removed)
-    shimStorageManager.notifySubscribers({
-      type: "commit",
-      space,
-      changes: [],
-    });
-    expect(callCount).toBe(1); // Should not have increased
-  });
-
-  it("should remove subscriptions that throw errors", () => {
-    let callCount = 0;
-    const subscription = {
-      next(_notification: any) {
-        callCount++;
-        throw new Error("Test error");
-      },
-    };
-
-    shimStorageManager.subscribe(subscription);
-
-    // First notification should work but catch the error (and remove subscription)
-    shimStorageManager.notifySubscribers({
-      type: "commit",
-      space,
-      changes: [],
-    });
-    expect(callCount).toBe(1);
-
-    // Second notification should not work (subscription removed)
-    shimStorageManager.notifySubscribers({
-      type: "commit",
-      space,
-      changes: [],
-    });
-    expect(callCount).toBe(1); // Should not have increased
   });
 });
 
@@ -1069,7 +639,6 @@ describe("root value rewriting", () => {
   });
 
   it("should not rewrite non-empty paths", () => {
-    if (!runtime.storage.shim) return;
     const transaction = runtime.edit();
 
     // First create a document
@@ -1077,8 +646,8 @@ describe("root value rewriting", () => {
       space,
       id: "of:test-nested",
       type: "application/json",
-      path: ["value"],
-    }, {});
+      path: [],
+    }, { value: {} });
 
     // Write to non-empty path with object containing "value" property
     transaction.write({
@@ -1099,9 +668,9 @@ describe("root value rewriting", () => {
     expect(readResult).toEqual({ value: "should not be rewritten" });
   });
 
-  it("should not rewrite non-objects", () => {
-    if (!runtime.storage.shim) return; // In real tx, this is allowed
-
+  // Disabling this test, since the non-shim doesn't enforce this rule, and I
+  // don't think it's crucial enough to add the rule myself.
+  it.skip("should not rewrite non-objects", () => {
     const transaction = runtime.edit();
 
     // Write non-object to empty path

@@ -1,7 +1,6 @@
 import {
   type Cell,
   Classification,
-  DocImpl,
   EntityId,
   getEntityId,
   type IExtendedStorageTransaction,
@@ -460,20 +459,13 @@ export class CharmManager {
           try {
             // If document has a sourceCell, follow it
             const value = cell.getRaw();
-            if (isRecord(value)) {
-              if (value.sourceCell) {
-                return followSourceToResultRef(
-                  (value.sourceCell as DocImpl<unknown>).asCell(),
-                  visited,
-                  depth + 1,
-                );
-              }
-
+            const sourceCell = cell.getSourceCell();
+            if (sourceCell) {
+              return followSourceToResultRef(sourceCell, visited, depth + 1);
+            } else if (isRecord(value) && value.resultRef) {
               // If we've reached the end and have a resultRef, return it
-              if (value.resultRef) {
-                const { id: source } = parseLink(value.resultRef, cell)!;
-                if (source) return getEntityId(source);
-              }
+              const { id: source } = parseLink(value.resultRef, cell)!;
+              if (source) return getEntityId(source);
             }
           } catch (err) {
             // Ignore errors getting doc value
@@ -631,12 +623,9 @@ export class CharmManager {
 
       // If document has a sourceCell, follow it
       const value = cell.getRaw();
-      if (isRecord(value) && value.sourceCell) {
-        return followSourceToResultRef(
-          (value.sourceCell as DocImpl<unknown>).asCell(),
-          visited,
-          depth + 1,
-        );
+      const sourceCell = cell.getSourceCell();
+      if (sourceCell) {
+        return followSourceToResultRef(sourceCell, visited, depth + 1);
       }
 
       // If we've reached the end and have a resultRef, return it
