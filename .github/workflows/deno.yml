@@ -14,8 +14,8 @@ env:
   BINARIES: "toolshed bg-charm-service ct"
 
 jobs:
-  workspace-checks-and-tests:
-    name: "Workspace Checks and Tests"
+  build:
+    name: "Test and Build"
     runs-on: ubuntu-24.04-32-core
     steps:
       - name: 📥 Checkout repository
@@ -57,10 +57,138 @@ jobs:
       - name: 🧪 Run parallel workspace tests
         run: deno task test
 
-  build-binaries:
-    name: "Build Binaries"
+      - name: 🏗️ Build application binaries
+        run: deno task build-binaries
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+
+      # Upload binaries as artifacts for the integration tests
+      - name: 📤 Upload binaries for integration tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: common-binaries
+          path: |
+            ./dist/toolshed
+            ./dist/bg-charm-service
+            ./dist/ct
+
+  package-integration-test:
+    name: "Package Integration Tests"
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    environment: ci
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 📥 Download built binaries
+        uses: actions/download-artifact@v4
+
+      - name: 🚀 Start Toolshed server for testing
+        run: |
+          chmod +x ./common-binaries/toolshed
+          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          ./common-binaries/toolshed &
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor for browser tests
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: 🧪 Run end-to-end runner integration tests
+        working-directory: packages/runner
+        run: |
+          API_URL=http://localhost:8000/ \
+          deno task integration
+
+      - name: 🧪 Run end-to-end shell integration tests
+        working-directory: packages/shell
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          deno task integration
+
+      - name: 🧪 Run background worker integration tests
+        working-directory: packages/background-charm-service
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          deno task integration
+
+  cli-integration-test:
+    name: "CLI Integration Tests"
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    environment: ci
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 📥 Download built binaries
+        uses: actions/download-artifact@v4
+
+      - name: 🚀 Start Toolshed server for testing
+        run: |
+          chmod +x ./common-binaries/ct
+          chmod +x ./common-binaries/toolshed
+          # Set tools to path
+          # Integration script needs `ct`
+          echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
+          ./common-binaries/toolshed &
+
+      - name: 🧪 Run CLI integration tests
+        working-directory: packages/cli
+        run: |
+          API_URL=http://localhost:8000 ./integration/integration.sh
+
+  pattern-integration-test:
+    name: "Pattern Integration Tests"
+    runs-on: ubuntu-latest
+    needs: ["build"]
+    environment: ci
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 📥 Download built binaries
+        uses: actions/download-artifact@v4
+
+      - name: 🚀 Start Toolshed server for testing
+        run: |
+          chmod +x ./common-binaries/toolshed
+          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
+          ./common-binaries/toolshed &
+
+      # For Astral
+      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
+      - name: 🛡️ Disable AppArmor for browser tests
+        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+
+      - name: 🧩 Run end-to-end patterns integration tests
+        working-directory: packages/patterns
+        run: |
+          HEADLESS=1 \
+          API_URL=http://localhost:8000/ \
+          deno task integration
+
+  attest-binaries:
+    name: "Attest and Upload Binaries"
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-32-core
-    needs: ["workspace-checks-and-tests"]
+    needs: [
+      "pattern-integration-test",
+      "package-integration-test",
+      "cli-integration-test",
+    ]
     environment: ci
     permissions:
       id-token: write
@@ -71,22 +199,15 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 🏗️ Build application binaries
-        run: deno task build-binaries
-        env:
-          VITE_COMMIT_SHA: ${{ github.sha }}
-          COMMIT_SHA: ${{ github.sha }}
-          VITE_BUILD_SOURCEMAPS: "true"
-          VITE_STORAGE_TYPE: "schema"
+      - name: 📥 Download built binaries
+        uses: actions/download-artifact@v4
 
       - name: 🔐 Process & sign binaries
-        if: github.ref == 'refs/heads/main'
         run: |
           mkdir -p release
           mkdir -p signed
+
+          mv ./common-binaries ./dist
 
           # Process toolshed binary
           echo "Processing binary: toolshed"
@@ -141,7 +262,6 @@ jobs:
         id: binary_processing
 
       - name: 📝 Generate attestation for toolshed binary
-        if: github.ref == 'refs/heads/main'
         id: attest_toolshed
         uses: actions/attest-build-provenance@v1
         with:
@@ -149,7 +269,6 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.toolshed_hash }}
 
       - name: 📝 Generate attestation for bg-charm-service binary
-        if: github.ref == 'refs/heads/main'
         id: attest_bg_charm_service
         uses: actions/attest-build-provenance@v1
         with:
@@ -157,7 +276,6 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.bg_charm_service_hash }}
 
       - name: 📝 Generate attestation for ct binary
-        if: github.ref == 'refs/heads/main'
         id: attest_ct
         uses: actions/attest-build-provenance@v1
         with:
@@ -165,7 +283,6 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.ct_hash }}
 
       - name: 📝 Generate attestation for tarball
-        if: github.ref == 'refs/heads/main'
         id: attest_tarball
         uses: actions/attest-build-provenance@v1
         with:
@@ -173,7 +290,6 @@ jobs:
           subject-digest: sha256:${{ steps.binary_processing.outputs.tarball_hash }}
 
       - name: 📤 Upload attestations as artifacts
-        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: binary_attestations
@@ -185,7 +301,6 @@ jobs:
             ${{ steps.attest_tarball.outputs.bundle-path }}
 
       - name: 🔍 Verify binary attestations
-        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -234,17 +349,14 @@ jobs:
           fi
 
       - name: 🔑 Authenticate to Google Cloud
-        if: github.ref == 'refs/heads/main'
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
       - name: ⚙️ Setup Google Cloud SDK
-        if: github.ref == 'refs/heads/main'
         uses: google-github-actions/setup-gcloud@v1
 
       - name: 🚀 Upload artifacts to Google Cloud Storage
-        if: github.ref == 'refs/heads/main'
         run: |
           gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
           gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
@@ -255,135 +367,11 @@ jobs:
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
           echo "::endgroup::"
 
-      # Upload binaries as artifacts for the integration tests
-      - name: 📤 Upload binaries for integration tests
-        uses: actions/upload-artifact@v4
-        with:
-          name: common-binaries
-          path: |
-            ./dist/toolshed
-            ./dist/bg-charm-service
-            ./dist/ct
-
-  integration-test:
-    name: "Integration Tests"
-    runs-on: ubuntu-latest
-    needs: ["build-binaries"]
-    environment: ci
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
-
-      - name: 🚀 Start Toolshed server for testing
-        run: |
-          chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed &
-
-      # For Astral
-      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
-
-      - name: 🧪 Run end-to-end runner integration tests
-        working-directory: packages/runner
-        run: |
-          API_URL=http://localhost:8000/ \
-          deno task integration
-
-      - name: 🧪 Run background worker integration tests
-        working-directory: packages/background-charm-service
-        run: |
-          HEADLESS=1 \
-          API_URL=http://localhost:8000/ \
-          FRONTEND_URL=http://localhost:8000/ \
-          deno task integration
-
-  cli-integration-test:
-    name: "CLI Integration Tests"
-    runs-on: ubuntu-latest
-    needs: ["build-binaries"]
-    environment: ci
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
-
-      - name: 🚀 Start Toolshed server for testing
-        run: |
-          chmod +x ./common-binaries/ct
-          chmod +x ./common-binaries/toolshed
-          # Set tools to path
-          # Integration script needs `ct`
-          echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          ./common-binaries/toolshed &
-
-      - name: 🧪 Run CLI integration tests
-        working-directory: packages/cli
-        run: |
-          API_URL=http://localhost:8000 ./integration/integration.sh
-
-  shell-integration-test:
-    name: "Shell Integration Tests"
-    runs-on: ubuntu-latest
-    needs: ["build-binaries"]
-    environment: ci
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 📥 Download built binaries
-        uses: actions/download-artifact@v4
-
-      - name: 🚀 Start Toolshed server for testing
-        run: |
-          chmod +x ./common-binaries/toolshed
-          CTTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed &
-
-      # For Astral
-      # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
-
-      - name: 🧩 Run end-to-end patterns integration tests
-        working-directory: packages/patterns
-        run: |
-          HEADLESS=1 \
-          API_URL=http://localhost:8000/ \
-          FRONTEND_URL=http://localhost:8000/ \
-          deno task integration
-
-      - name: 🧪 Run end-to-end shell integration tests
-        working-directory: packages/shell
-        run: |
-          HEADLESS=1 \
-          API_URL=http://localhost:8000/ \
-          deno task integration
-
   # Automatic deployment to staging (toolshed)
   deploy-toolshed:
     name: "Deploy to Toolshed (Staging)"
     if: github.ref == 'refs/heads/main'
-    needs: [
-      "integration-test",
-      "cli-integration-test",
-      "shell-integration-test",
-    ]
+    needs: ["attest-binaries"]
     runs-on: ubuntu-latest
     environment: toolshed
     steps:
