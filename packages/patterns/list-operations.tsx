@@ -65,7 +65,7 @@ const shuffleItems = handler((_, state: { items: Cell<Item[]> }) => {
 });
 
 function printList(items: Item[]) {
-  return `${items.map((item) => item.title).join(", ")} (${items.length})`;
+  return `${items.filter(item => item && item.title).map((item) => item.title).join(", ")} (${items.length})`;
 }
 
 export default recipe<ListInput, ListOutput>(
