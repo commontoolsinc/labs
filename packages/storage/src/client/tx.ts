@@ -27,6 +27,16 @@ type BaselineProvider = (
   docId: string,
 ) => Promise<AM.Doc<any> | null>;
 
+type OverlayFns = {
+  applyPending?: (
+    space: string,
+    docId: string,
+    id: string,
+    json: unknown,
+  ) => void;
+  clearPending?: (space: string, docId: string, id: string) => void;
+};
+
 export class ClientTransaction {
   #status: TxStatus = "open";
   readonly log: Array<
@@ -35,6 +45,7 @@ export class ClientTransaction {
   #writeSpace: string | null = null;
   #commitAdapter: CommitAdapter | null = null;
   #baselineProvider: BaselineProvider | null = null;
+  #overlay: OverlayFns | null = null;
   #stagedByDoc = new Map<
     string,
     {
@@ -49,9 +60,11 @@ export class ClientTransaction {
   constructor(
     commitAdapter?: CommitAdapter,
     baselineProvider?: BaselineProvider,
+    overlay?: OverlayFns,
   ) {
     this.#commitAdapter = commitAdapter ?? null;
     this.#baselineProvider = baselineProvider ?? null;
+    this.#overlay = overlay ?? null;
   }
 
   read(
@@ -120,8 +133,21 @@ export class ClientTransaction {
     if (!this.#writeSpace) throw new Error("no write space bound");
     if (!this.#commitAdapter) throw new Error("no commit adapter available");
 
-    const writeOnly = this.log.every((l) => l.op === "write");
+    const clientTxId = crypto.randomUUID();
 
+    // Apply optimistic overlays synchronously from staged pending docs
+    if (this.#overlay?.applyPending) {
+      for (const st of this.#stagedByDoc.values()) {
+        try {
+          const json = AM.toJS(st.pendingDoc);
+          this.#overlay.applyPending(st.space, st.docId, clientTxId, json);
+        } catch {
+          // ignore overlay failure
+        }
+      }
+    }
+
+    const writeOnly = this.log.every((l) => l.op === "write");
     const writes: CommitAdapterReq["writes"] = [];
     for (const st of this.#stagedByDoc.values()) {
       // Build on server baseline when available
@@ -146,6 +172,7 @@ export class ClientTransaction {
     }
 
     const req: CommitAdapterReq = {
+      clientTxId,
       reads: [],
       writes,
     };
@@ -158,6 +185,14 @@ export class ClientTransaction {
       : anyConflict
       ? "conflict"
       : "ok";
+
+    // Clear overlays on failure; keep on ok until server doc arrives
+    if (status !== "ok" && this.#overlay?.clearPending) {
+      for (const st of this.#stagedByDoc.values()) {
+        this.#overlay.clearPending(st.space, st.docId, clientTxId);
+      }
+    }
+
     this.#status = "committed";
     this.#stagedByDoc.clear();
     return { status, receipt };

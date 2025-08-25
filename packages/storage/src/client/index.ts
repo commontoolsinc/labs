@@ -25,6 +25,9 @@ export class StorageClient {
       const { ClientStore } = await import("./store.ts");
       const store = clientStoreMap.get(this) ?? new ClientStore();
       clientStoreMap.set(this, store);
+      sc.onServerDocConfirm = (docId: string) => {
+        store.clearAllPendingForDoc(key, docId);
+      };
       sc.onServerDoc = ({ docId, epoch, heads, json }) => {
         const before = store.readView(key, docId).json;
         store.applyServerDoc({ space: key, docId, epoch, heads, json });
@@ -74,6 +77,12 @@ export class StorageClient {
 
   async newTransaction() {
     const { ClientTransaction } = await import("./tx.ts");
+    // Ensure a store exists for overlays even if connect() hasn't been called yet
+    const { ClientStore } = await import("./store.ts");
+    const existing = clientStoreMap.get(this);
+    const store = existing ?? new ClientStore();
+    if (!existing) clientStoreMap.set(this, store);
+
     const commitAdapter = async (
       space: string,
       req: Parameters<import("./connection.ts").SpaceConnection["submitTx"]>[0],
@@ -83,18 +92,16 @@ export class StorageClient {
     };
     const baselineProvider = async (space: string, docId: string) => {
       const sc = await this.spaceConn(space);
-      let d = await sc.getAutomergeDoc(docId);
-      if (!d) {
-        // Force a one-shot backfill for this doc, then read again
-        await sc.get({
-          consumerId: crypto.randomUUID(),
-          query: { docId, path: [], schema: false },
-        });
-        d = await sc.getAutomergeDoc(docId);
-      }
+      const d = await sc.getAutomergeDoc(docId);
       return d as any;
     };
-    return new ClientTransaction(commitAdapter, baselineProvider);
+    const overlay = {
+      applyPending: (space: string, docId: string, id: string, json: unknown) =>
+        store.applyPending({ space, docId, id, json }),
+      clearPending: (space: string, docId: string, id: string) =>
+        store.clearPending({ space, docId, id }),
+    } as const;
+    return new ClientTransaction(commitAdapter, baselineProvider, overlay);
   }
 
   async get(

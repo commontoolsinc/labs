@@ -6,7 +6,7 @@ export class SpaceConnection {
   readonly spaceId: DID | string;
   readonly baseUrl: string;
   #socket: WebSocket | null = null;
-  #helloSinceEpoch = -1;
+  #helloSinceEpoch = 0;
   #amDocs = new Map<string, unknown>();
   #awaitingComplete: Array<
     { resolve: () => void; reject: (e: unknown) => void }
@@ -20,6 +20,8 @@ export class SpaceConnection {
   onServerDoc?: (
     doc: { docId: string; epoch: number; heads?: string[]; json: unknown },
   ) => void;
+  // Optional hook to clear all client pending overlays for a doc when server confirms
+  onServerDocConfirm?: (docId: string) => void;
 
   constructor(spaceId: DID | string, opts: StorageClientOptions) {
     this.spaceId = spaceId;
@@ -54,29 +56,24 @@ export class SpaceConnection {
       // deno-lint-ignore no-floating-promises
       this.#onMessage(e);
     };
-    // Only send hello if we have a known epoch baseline (>= 0). Avoid -1 to force snapshot backfill.
-    if (
-      this.#socket && this.#socket.readyState === WebSocket.OPEN &&
-      this.#helloSinceEpoch >= 0
-    ) {
-      try {
-        const hello = {
-          invocation: {
-            iss: "did:key:client", // placeholder
-            cmd: "/storage/hello",
-            sub: String(this.spaceId),
-            args: {
-              clientId: crypto.randomUUID(),
-              sinceEpoch: this.#helloSinceEpoch,
-            },
-            prf: [],
+    // Always send hello on open to register client and request backfill from sinceEpoch
+    try {
+      const hello = {
+        invocation: {
+          iss: "did:key:client", // placeholder
+          cmd: "/storage/hello",
+          sub: String(this.spaceId),
+          args: {
+            clientId: crypto.randomUUID(),
+            sinceEpoch: this.#helloSinceEpoch,
           },
-          authorization: { signature: [], access: {} },
-        } as const;
-        this.#socket.send(JSON.stringify(hello));
-      } catch {
-        // ignore send failures
-      }
+          prf: [],
+        },
+        authorization: { signature: [], access: {} },
+      } as const;
+      this.#socket.send(JSON.stringify(hello));
+    } catch {
+      // ignore send failures
     }
   }
 
@@ -199,6 +196,8 @@ export class SpaceConnection {
                   }
                 }
                 if (json !== undefined) {
+                  // Clear any optimistic overlays now that server confirmed this epoch
+                  this.onServerDocConfirm?.(d.docId);
                   this.onServerDoc?.({
                     docId: d.docId,
                     epoch: Number(m.epoch),
@@ -229,6 +228,8 @@ export class SpaceConnection {
                     const doc = Array.isArray(applied) ? applied[0] : applied;
                     this.#amDocs.set(d.docId, doc);
                     const json = AM.toJS(doc);
+                    // Clear any optimistic overlays for this doc on server confirm
+                    this.onServerDocConfirm?.(d.docId);
                     this.onServerDoc?.({
                       docId: d.docId,
                       epoch: Number(m.epoch),
