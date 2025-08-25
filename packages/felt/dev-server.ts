@@ -13,14 +13,23 @@ export class DevServer {
   private redirectToIndex?: RegExp;
   private staticDirs: Array<{ from: string; to: string }>;
 
-  constructor({ useReloadSocket, outDir, port, hostname, redirectToIndex, staticDirs = [] }: {
-    useReloadSocket: boolean;
-    port: number;
-    hostname: string;
-    outDir: string;
-    redirectToIndex?: RegExp;
-    staticDirs?: Array<{ from: string; to: string }>;
-  }) {
+  constructor(
+    {
+      useReloadSocket,
+      outDir,
+      port,
+      hostname,
+      redirectToIndex,
+      staticDirs = [],
+    }: {
+      useReloadSocket: boolean;
+      port: number;
+      hostname: string;
+      outDir: string;
+      redirectToIndex?: RegExp;
+      staticDirs?: Array<{ from: string; to: string }>;
+    },
+  ) {
     this.useReloadSocket = useReloadSocket;
     this.outDir = outDir;
     this.redirectToIndex = redirectToIndex;
@@ -77,23 +86,26 @@ export class DevServer {
             },
           });
         }
-        
+
         // Create a new request with the path adjusted to remove the URL prefix
         const relativePath = url.pathname.slice(to.length);
         const adjustedUrl = new URL(req.url);
         adjustedUrl.pathname = relativePath || "/";
         const adjustedReq = new Request(adjustedUrl, req);
-        
+
         const response = await serveDir(adjustedReq, {
           fsRoot: from,
           quiet: true,
         });
-        
+
         // Add CORS headers for all responses
         response.headers.set("Access-Control-Allow-Origin", "*");
-        response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS, HEAD");
+        response.headers.set(
+          "Access-Control-Allow-Methods",
+          "GET, OPTIONS, HEAD",
+        );
         response.headers.set("Access-Control-Allow-Headers", "*");
-        
+
         return response;
       }
     }

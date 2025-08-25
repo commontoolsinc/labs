@@ -48,10 +48,10 @@ export class TreeDiffCalculator {
     tree: any,
   ): TreeOperationResult {
     const changes: PathChange[] = [];
-    
+
     // Calculate new focus path
     let newFocusedPath: number[] | null = null;
-    
+
     if (targetPath.length === 0) {
       // Cannot delete root
       return {
@@ -71,7 +71,7 @@ export class TreeDiffCalculator {
     // Calculate new focus: try next sibling, then previous sibling, then parent
     const parentPath = targetPath.slice(0, -1);
     const nodeIndex = targetPath[targetPath.length - 1];
-    
+
     // Get parent to check sibling count
     const parent = this.getNodeByPath(tree, parentPath);
     if (parent && parent.children) {
@@ -132,7 +132,7 @@ export class TreeDiffCalculator {
     // New path: becomes last child of previous sibling
     const previousSiblingPath = [...parentPath, nodeIndex - 1];
     const previousSibling = this.getNodeByPath(tree, previousSiblingPath);
-    
+
     if (!previousSibling) {
       return {
         changes: [],
@@ -142,7 +142,9 @@ export class TreeDiffCalculator {
       };
     }
 
-    const newChildIndex = previousSibling.children ? previousSibling.children.length : 0;
+    const newChildIndex = previousSibling.children
+      ? previousSibling.children.length
+      : 0;
     const newPath = [...previousSiblingPath, newChildIndex];
 
     changes.push({
@@ -276,9 +278,11 @@ export class TreeDiffCalculator {
 
     const parentPath = targetPath.slice(0, -1);
     const nodeIndex = targetPath[targetPath.length - 1];
-    
+
     const parent = this.getNodeByPath(tree, parentPath);
-    if (!parent || !parent.children || nodeIndex >= parent.children.length - 1) {
+    if (
+      !parent || !parent.children || nodeIndex >= parent.children.length - 1
+    ) {
       return {
         changes: [],
         newFocusedPath: targetPath,
@@ -373,14 +377,14 @@ export class TreeDiffCalculator {
    */
   private static getNodeByPath(tree: any, path: number[]): any {
     let current = tree.root;
-    
+
     for (const index of path) {
       if (!current.children || !current.children[index]) {
         return null;
       }
       current = current.children[index];
     }
-    
+
     return current;
   }
 }
@@ -420,7 +424,7 @@ export class PathDiffApplier {
             if (newFocused && this.pathsEqual(newFocused, change.path)) {
               newFocused = [...change.newPath];
             }
-            
+
             // Update editing path if it was the moved node
             if (newEditing && this.pathsEqual(newEditing, change.path)) {
               newEditing = [...change.newPath];
@@ -464,8 +468,8 @@ export class PathDiffApplier {
    * Check if two paths are equal
    */
   private static pathsEqual(path1: number[], path2: number[]): boolean {
-    return path1.length === path2.length && 
-           path1.every((val, idx) => val === path2[idx]);
+    return path1.length === path2.length &&
+      path1.every((val, idx) => val === path2[idx]);
   }
 
   /**

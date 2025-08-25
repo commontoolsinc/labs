@@ -328,21 +328,26 @@ From `packages/runner/src/builder/json-utils.ts`:
 
 ### The Issue with Nested Recipes
 
-When a recipe contains another recipe (nested recipes), a subtle issue can arise during JSON serialization:
+When a recipe contains another recipe (nested recipes), a subtle issue can arise
+during JSON serialization:
 
-1. **Build Time**: `toJSONWithLegacyAliases` processes the outer recipe and converts shadowrefs to proper aliases
-2. **The Problem**: Nested recipes retain their original `toJSON()` method, which has a closure referencing the un-transformed recipe containing shadowrefs
-3. **Runtime**: When the nested recipe's `toJSON()` is called, it returns the original structure with shadowrefs, which the runtime cannot handle
+1. **Build Time**: `toJSONWithLegacyAliases` processes the outer recipe and
+   converts shadowrefs to proper aliases
+2. **The Problem**: Nested recipes retain their original `toJSON()` method,
+   which has a closure referencing the un-transformed recipe containing
+   shadowrefs
+3. **Runtime**: When the nested recipe's `toJSON()` is called, it returns the
+   original structure with shadowrefs, which the runtime cannot handle
 
 ### Example
 
 ```typescript
-const innerRecipe = recipe<{ x: number }>('Inner', ({ x }) => {
+const innerRecipe = recipe<{ x: number }>("Inner", ({ x }) => {
   // This recipe might capture variables from parent scope
   return { squared: x * x };
 });
 
-const outerRecipe = recipe<{ value: number }>('Outer', ({ value }) => {
+const outerRecipe = recipe<{ value: number }>("Outer", ({ value }) => {
   // When serialized, innerRecipe keeps its original toJSON method
   const nested = innerRecipe({ x: value });
   return { nested };
@@ -354,7 +359,7 @@ const outerRecipe = recipe<{ value: number }>('Outer', ({ value }) => {
 In `toJSONWithLegacyAliases`, nested recipes must be handled specially:
 
 ```typescript
-if (isRecipe(value) && typeof value.toJSON === 'function') {
+if (isRecipe(value) && typeof value.toJSON === "function") {
   // Call toJSON() to get the properly serialized version
   value = value.toJSON();
 }
@@ -362,18 +367,22 @@ if (isRecipe(value) && typeof value.toJSON === 'function') {
 ```
 
 This ensures that:
+
 - Shadowrefs are resolved during the build phase
 - Nested recipes don't keep their original `toJSON` method
 - The runtime never encounters shadowrefs
 
 ### Key Insight
 
-**ShadowRefs should never reach the runtime**. They are build-time constructs that must be resolved during recipe serialization. The runtime only understands:
+**ShadowRefs should never reach the runtime**. They are build-time constructs
+that must be resolved during recipe serialization. The runtime only understands:
+
 - Numbers (for nested recipe references)
 - Entity IDs (in the format `{ "/": "..." }`)
 - Resolved cell references
 
-If shadowrefs appear at runtime, it indicates a serialization bug where the build-time resolution process was incomplete.
+If shadowrefs appear at runtime, it indicates a serialization bug where the
+build-time resolution process was incomplete.
 
 ## Summary
 

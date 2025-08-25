@@ -31,7 +31,7 @@ export type CancelGroup = {
 
 export function createCancelGroup(): CancelGroup {
   const callbacks: Array<() => void> = [];
-  
+
   return {
     add: (fn: () => void) => {
       callbacks.push(fn);
@@ -41,6 +41,6 @@ export function createCancelGroup(): CancelGroup {
         fn();
       }
       callbacks.length = 0;
-    }
+    },
   };
 }

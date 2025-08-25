@@ -1,4 +1,14 @@
-import { derive, h, handler, ifElse, str, JSONSchema, NAME, recipe, UI } from "commontools";
+import {
+  derive,
+  h,
+  handler,
+  ifElse,
+  JSONSchema,
+  NAME,
+  recipe,
+  str,
+  UI,
+} from "commontools";
 
 const WikiSchema = {
   type: "object",
@@ -119,7 +129,11 @@ const hideRenameFormHandler = handler<
 // Handle rename submission
 const handleRename = handler<
   { detail: { value: string } },
-  { pages: Record<string, string>; currentPage: string; showRenameForm: boolean }
+  {
+    pages: Record<string, string>;
+    currentPage: string;
+    showRenameForm: boolean;
+  }
 >(
   ({ detail }, state) => {
     const newSlug = detail?.value?.trim() ?? "";
@@ -228,17 +242,25 @@ export default recipe(
                   </ct-button>
                 </ct-hstack>
 
-                {ifElse(showRenameForm, (
-                  <div style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc;">
-                    <ct-message-input
-                      placeholder={str`Enter new name for "${currentPage}"`}
-                      onSubmit={handleRename({ pages, currentPage, showRenameForm })}
-                      onCancel={hideRenameFormHandler({ showRenameForm })}
-                      submitLabel="Rename"
-                      cancelLabel="Cancel"
-                    />
-                  </div>
-                ), null)}
+                {ifElse(
+                  showRenameForm,
+                  (
+                    <div style="margin-bottom: 1rem; padding: 1rem; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc;">
+                      <ct-message-input
+                        placeholder={str`Enter new name for "${currentPage}"`}
+                        onSubmit={handleRename({
+                          pages,
+                          currentPage,
+                          showRenameForm,
+                        })}
+                        onCancel={hideRenameFormHandler({ showRenameForm })}
+                        submitLabel="Rename"
+                        cancelLabel="Cancel"
+                      />
+                    </div>
+                  ),
+                  null,
+                )}
 
                 <div style="flex: 1; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden;">
                   <ct-code-editor

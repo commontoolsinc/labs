@@ -82,7 +82,9 @@ export default recipe<RecipeState>("Counter", (state) => {
         <div>{counter}</div>
         <Counter value={state.value} />
         {/* ct-render will NOT usually appear in a recipe, rather, it's used within other ct- component internals */}
-        <div><ct-render $cell={counter} /></div>
+        <div>
+          <ct-render $cell={counter} />
+        </div>
       </div>
     ),
     value: state.value,

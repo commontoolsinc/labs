@@ -92,34 +92,33 @@ export class CommonIframeElement extends LitElement {
   override render() {
     return html`
       <common-iframe-sandbox
-        .context=${this.context}
-        .src=${this.src}
+        .context="${this.context}"
+        .src="${this.src}"
         height="100%"
         width="100%"
         style="border: none;"
-        @load=${this.onLoad}
-        @error=${this.onError}
-      ></iframe>
-      ${
-      this._errorDetails
+        @load="${this.onLoad}"
+        @error="${this.onError}"
+      ></common-iframe-sandbox>
+      ${this._errorDetails
         ? html`
-            <div class="error-modal">
-              <div class="error-content">
-                <h2>Error</h2>
-                <p><strong>Description:</strong> ${this._errorDetails.description}</p>
-                <p><strong>Source:</strong> ${this._errorDetails.source}</p>
-                <p><strong>Line:</strong> ${this._errorDetails.lineno}</p>
-                <p><strong>Column:</strong> ${this._errorDetails.colno}</p>
-                <pre><code>${this._errorDetails.stacktrace}</code></pre>
-                <div class="error-actions">
-                  <button @click=${this.fixError}>Fix</button>
-                  <button @click=${this.dismissError}>Dismiss</button>
-                </div>
+          <div class="error-modal">
+            <div class="error-content">
+              <h2>Error</h2>
+              <p><strong>Description:</strong> ${this._errorDetails
+            .description}</p>
+              <p><strong>Source:</strong> ${this._errorDetails.source}</p>
+              <p><strong>Line:</strong> ${this._errorDetails.lineno}</p>
+              <p><strong>Column:</strong> ${this._errorDetails.colno}</p>
+              <pre><code>${this._errorDetails.stacktrace}</code></pre>
+              <div class="error-actions">
+                <button @click="${this.fixError}">Fix</button>
+                <button @click="${this.dismissError}">Dismiss</button>
               </div>
             </div>
-          `
-        : ""
-    }
+          </div>
+        `
+        : ""}
     `;
   }
 }

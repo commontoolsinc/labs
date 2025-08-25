@@ -2,9 +2,9 @@
 
 ## Overview
 
-The Recipe Framework is a declarative, reactive system for building
-integrations and data transformations. It uses a component-based architecture
-where recipes are autonomous modules that can import, process, and export data.
+The Recipe Framework is a declarative, reactive system for building integrations
+and data transformations. It uses a component-based architecture where recipes
+are autonomous modules that can import, process, and export data.
 
 ## Core Concepts
 
@@ -20,7 +20,8 @@ function. It takes three parameters:
 
 ### Types and Runtime Safety
 
-The framework uses a TypeScript-first approach for defining types in recipes, handlers, and lifted functions:
+The framework uses a TypeScript-first approach for defining types in recipes,
+handlers, and lifted functions:
 
 ```typescript
 const myHandler = handler<InputType, StateType>(
@@ -35,7 +36,12 @@ This TypeScript-first approach provides several benefits:
 - Integration with IDE tooling
 - Express Cell vs readonly value requirements directly in types
 
-Importantly, the framework automatically derives JSON Schema from your TypeScript types at runtime using the CTS (CommonTools Schema) system. This gives you runtime validation, self-documentation, and serialization support without having to write JSON Schema manually. You can express your desire for Cells vs readonly values directly in TypeScript types, and the system will fulfill the values by reflecting on the types as derived JSON Schema.
+Importantly, the framework automatically derives JSON Schema from your
+TypeScript types at runtime using the CTS (CommonTools Schema) system. This
+gives you runtime validation, self-documentation, and serialization support
+without having to write JSON Schema manually. You can express your desire for
+Cells vs readonly values directly in TypeScript types, and the system will
+fulfill the values by reflecting on the types as derived JSON Schema.
 
 ### Data Flow
 
@@ -91,11 +97,12 @@ respond to events:
 - `lift`: Declares a reactive node type that transforms data in the reactive
   graph
 
-    ```typescript
-    const transformData = lift(
-      ({ value, multiplier }: { value: number, multiplier: number }) => value * multiplier,
-    );
-    ```
+  ```typescript
+  const transformData = lift(
+    ({ value, multiplier }: { value: number; multiplier: number }) =>
+      value * multiplier,
+  );
+  ```
 
   - When instantiated, it inserts a reactive node in the graph:
 
@@ -241,7 +248,9 @@ logic.
    runtime validation, self-documentation, and compatibility with framework
    tooling.
 
-2. **Use `Cell<>` for Handler State**: When defining handler state types, use `Cell<>` for properties that need to be updated. This gives you direct access to the Cell methods like `.set()` and `.get()`.
+2. **Use `Cell<>` for Handler State**: When defining handler state types, use
+   `Cell<>` for properties that need to be updated. This gives you direct access
+   to the Cell methods like `.set()` and `.get()`.
 
 3. **Avoid All Direct Conditionals in Recipes**: Never use direct if statements,
    ternary operators, or any other conditionals inside a recipe function - they
@@ -352,15 +361,16 @@ logic.
 9. **Minimize Side Effects**: Side effects should be managed through handlers
    rather than directly in recipes.
 
-10. **Type Reuse**: Define types once and reuse them across recipes, handlers, and lifted functions to maintain consistency.
+10. **Type Reuse**: Define types once and reuse them across recipes, handlers,
+    and lifted functions to maintain consistency.
 
 ## Type Best Practices
 
 When defining types in the Recipe Framework, follow these guidelines for best
 results:
 
-1. **Define Types as Reusable Interfaces**: Declare types as interfaces or type aliases for reuse and
-   reference:
+1. **Define Types as Reusable Interfaces**: Declare types as interfaces or type
+   aliases for reuse and reference:
 
    ```typescript
    type User = {
@@ -370,7 +380,8 @@ results:
    };
    ```
 
-2. **Use Descriptive Type Names**: Always use clear, descriptive names that explain what the type represents:
+2. **Use Descriptive Type Names**: Always use clear, descriptive names that
+   explain what the type represents:
 
    ```typescript
    // DO THIS
@@ -384,7 +395,8 @@ results:
    type Config = { theme: string; size: number; alerts: boolean };
    ```
 
-3. **Use Default<> for Sensible Defaults**: Where possible, provide sensible default values using the CTS Default<> type:
+3. **Use Default<> for Sensible Defaults**: Where possible, provide sensible
+   default values using the CTS Default<> type:
 
    ```typescript
    type UserSettings = {
@@ -394,7 +406,8 @@ results:
    };
    ```
 
-4. **Compose Types Instead of Duplicating**: For complex objects, compose existing types:
+4. **Compose Types Instead of Duplicating**: For complex objects, compose
+   existing types:
 
    ```typescript
    type User = {
@@ -410,7 +423,8 @@ results:
    };
    ```
 
-5. **Document Types with Comments**: Add JSDoc comments to types for better self-documentation:
+5. **Document Types with Comments**: Add JSDoc comments to types for better
+   self-documentation:
 
    ```typescript
    /** User's primary email address used for notifications */
@@ -424,7 +438,8 @@ results:
    };
    ```
 
-6. **Use Cell<> for Reactive State**: In handler state types, use `Cell<>` for properties that need direct access to Cell methods:
+6. **Use Cell<> for Reactive State**: In handler state types, use `Cell<>` for
+   properties that need direct access to Cell methods:
 
    ```typescript
    type HandlerState = {
@@ -434,17 +449,19 @@ results:
    };
    ```
 
-7. **Make Optional vs Required Explicit**: Use TypeScript's optional properties (?) to clearly indicate what's required:
+7. **Make Optional vs Required Explicit**: Use TypeScript's optional properties
+   (?) to clearly indicate what's required:
 
    ```typescript
    type User = {
-     id: string;        // Required
-     name: string;      // Required
-     email?: string;    // Optional
+     id: string; // Required
+     name: string; // Required
+     email?: string; // Optional
    };
    ```
 
-8. **Use Type Composition**: Break down complex types into smaller, reusable parts:
+8. **Use Type Composition**: Break down complex types into smaller, reusable
+   parts:
 
    ```typescript
    type Address = {
@@ -468,7 +485,8 @@ results:
    };
    ```
 
-9. **Use Union Types for Enums**: Define enums with union types and const assertions:
+9. **Use Union Types for Enums**: Define enums with union types and const
+   assertions:
 
    ```typescript
    const StatusValues = ["pending", "active", "suspended", "deleted"] as const;
@@ -485,7 +503,8 @@ results:
 
 ### TypeScript to Runtime Schema
 
-The CTS framework automatically generates JSON Schema from your TypeScript types at runtime:
+The CTS framework automatically generates JSON Schema from your TypeScript types
+at runtime:
 
 ```typescript
 // Define TypeScript types
@@ -504,10 +523,14 @@ When working with handlers, it's important to understand the distinction:
 
 ```typescript
 // Regular state property (value type)
-{ count: number } // Handler receives the number directly (readonly)
+{
+  count: number;
+} // Handler receives the number directly (readonly)
 
 // Cell-typed property
-{ count: Cell<number> } // Handler receives Cell<number> for mutation
+{
+  count: Cell<number>;
+} // Handler receives Cell<number> for mutation
 ```
 
 With Cell-typed properties, the handler function receives actual Cell instances
@@ -530,7 +553,8 @@ effective data flow analysis. In this system:
 
 - Recipes are transparent to data flow analysis
 - Functions passed to `handler` or `lift` aren't transparent (they're "tainted")
-- TypeScript types provide clean abstractions that are automatically converted to runtime validation
+- TypeScript types provide clean abstractions that are automatically converted
+  to runtime validation
 - The `Cell<>` pattern maintains reactivity while allowing direct manipulation
 
 By following these principles, applications built with this framework can

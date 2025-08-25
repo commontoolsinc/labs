@@ -1,6 +1,6 @@
 import {
-  h,
   derive,
+  h,
   handler,
   JSONSchema,
   lift,

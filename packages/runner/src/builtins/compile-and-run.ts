@@ -165,7 +165,7 @@ export function compileAndRun(
           // transaction above might have closed by the time this is called. If
           // so, we create a new one to set the error.
           const status = tx.status();
-        const asyncTx = status.status === "ready" ? tx : runtime.edit();
+          const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
           // Extract structured errors if this is a CompilerError
           if (err instanceof CompilerError) {

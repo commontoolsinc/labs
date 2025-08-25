@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { Node, Tree } from "./types.ts";
-import { getNodePath, getNodeByPath } from "./node-path.ts";
+import { getNodeByPath, getNodePath } from "./node-path.ts";
 
 describe("CTOutliner Path-based Node Finding (CT-693)", () => {
   // Helper to create a test tree

@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { CTOutliner } from "./ct-outliner.ts";
-import { createMockTreeCell, waitForCellUpdate, waitForOutlinerUpdate } from "./test-utils.ts";
+import {
+  createMockTreeCell,
+  waitForCellUpdate,
+  waitForOutlinerUpdate,
+} from "./test-utils.ts";
 import { TreeOperations } from "./tree-operations.ts";
 import type { Tree } from "./types.ts";
 
@@ -27,15 +31,14 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       };
 
       const { outliner } = await setupOutliner(tree);
-      
+
       // Indent Item 2 (index 1)
       const result = await outliner.indentNodeByPath([1]);
       await waitForOutlinerUpdate(outliner);
-      
+
       // Check that the operation succeeded
       expect(result.success).toBe(true);
-      
-      
+
       // Verify structure
       expect(outliner.tree.root.children.length).toBe(2); // Item 1 and Item 3 at root
       expect(outliner.tree.root.children[0].body).toBe("Item 1");
@@ -56,7 +59,7 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       };
 
       const { outliner } = await setupOutliner(tree);
-      
+
       // Try to indent Item 1 (index 0) - should fail
       const result = await outliner.indentNodeByPath([0]);
       await waitForCellUpdate();
@@ -89,14 +92,13 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       };
 
       const { outliner } = await setupOutliner(tree);
-      
+
       // Outdent Item 1.1 (path [0, 0])
       const result = await outliner.outdentNodeByPath([0, 0]);
       await waitForCellUpdate();
 
       // Check that the operation succeeded
       expect(result.success).toBe(true);
-
 
       // Verify structure
       expect(outliner.tree.root.children.length).toBe(3); // Item 1, Item 1.1, Item 2
@@ -118,7 +120,7 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       };
 
       const { outliner } = await setupOutliner(tree);
-      
+
       // Try to outdent Item 1 (path [0]) - should fail
       const result = await outliner.outdentNodeByPath([0]);
       await waitForCellUpdate();
@@ -146,7 +148,7 @@ describe("CTOutliner Indentation Operations (CT-693)", () => {
       };
 
       const { outliner } = await setupOutliner(tree);
-      
+
       // Indent Item 2
       const indentResult = await outliner.indentNodeByPath([1]);
       await waitForCellUpdate();

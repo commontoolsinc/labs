@@ -80,6 +80,8 @@
     "singleQuote": false,
     "proseWrap": "always",
     "exclude": [
+      ".claude/",
+      "docs/",
       "packages/seeder/templates/",
       "packages/static/assets/",
       "packages/js-runtime/test/fixtures",

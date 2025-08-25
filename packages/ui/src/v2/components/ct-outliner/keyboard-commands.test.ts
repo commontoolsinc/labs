@@ -4,19 +4,19 @@ import {
   EditingKeyboardCommands,
   executeKeyboardCommand,
   executePathBasedKeyboardCommand,
-  handleTypingToEdit,
   handlePathBasedTypingToEdit,
+  handleTypingToEdit,
   KeyboardCommands,
   PathBasedKeyboardCommands,
 } from "./keyboard-commands.ts";
 import { CTOutliner } from "./ct-outliner.ts";
 import {
   createKeyboardContext,
-  createPathBasedKeyboardContext,
   createMockKeyboardEvent,
   createMockTextarea,
   createMockTreeCell,
   createNestedTestTree,
+  createPathBasedKeyboardContext,
   getAllVisibleNodePaths,
   setupMockOutliner,
   waitForCellUpdate,
@@ -44,10 +44,10 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       PathBasedKeyboardCommands.Enter.execute(context);
-      
+
       // Wait longer to make sure any async operations complete
       await waitForOutlinerUpdate(outliner);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       expect(outliner.tree.root.children.length).toBe(initialChildCount + 1);
     });
@@ -135,7 +135,7 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       PathBasedKeyboardCommands.Delete.execute(context);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
 
@@ -152,7 +152,7 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       PathBasedKeyboardCommands.Backspace.execute(context);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
 
@@ -186,13 +186,15 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       PathBasedKeyboardCommands.Tab.execute(context);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
 
       expect(outliner.tree.root.children.length).toBe(1);
       expect(outliner.tree.root.children[0].children.length).toBe(1);
-      expect(outliner.tree.root.children[0].children[0].body).toBe(secondNodeBody);
+      expect(outliner.tree.root.children[0].children[0].body).toBe(
+        secondNodeBody,
+      );
     });
 
     it("should handle Shift+Tab for outdentation", async () => {
@@ -220,7 +222,7 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       PathBasedKeyboardCommands.Tab.execute(context);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
 
@@ -241,9 +243,12 @@ describe("Keyboard Commands", () => {
 
       PathBasedKeyboardCommands.ArrowDown.execute(context);
 
-      // After ArrowDown, focused node path should be the second node  
+      // After ArrowDown, focused node path should be the second node
       const expectedSecondNodePath = [1];
-      const focusedNode = getNodeByPath(outliner.tree, outliner.focusedNodePath!);
+      const focusedNode = getNodeByPath(
+        outliner.tree,
+        outliner.focusedNodePath!,
+      );
       expect(focusedNode?.body).toBe(secondNodeBody);
       expect(outliner.focusedNodePath).toEqual(expectedSecondNodePath);
     });
@@ -258,13 +263,15 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       PathBasedKeyboardCommands["]"].execute(context);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
 
       expect(outliner.tree.root.children.length).toBe(1);
       expect(outliner.tree.root.children[0].children.length).toBe(1);
-      expect(outliner.tree.root.children[0].children[0].body).toBe(secondNodeBody);
+      expect(outliner.tree.root.children[0].children[0].body).toBe(
+        secondNodeBody,
+      );
     });
 
     it("should handle cmd/ctrl+[ for outdentation", async () => {
@@ -292,7 +299,7 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       PathBasedKeyboardCommands["["].execute(context);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
 
@@ -383,7 +390,7 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       const handled = executePathBasedKeyboardCommand("Enter", context);
-      
+
       // Wait for the outliner's Cell to update
       await waitForOutlinerUpdate(outliner);
 
@@ -442,14 +449,16 @@ describe("Keyboard Commands", () => {
       };
 
       const indentHandled = EditingKeyboardCommands["]"].execute(indentContext);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
 
       expect(indentHandled).toBe(true);
       expect(outliner.tree.root.children.length).toBe(1);
       expect(outliner.tree.root.children[0].children.length).toBe(1);
-      expect(outliner.tree.root.children[0].children[0].body).toBe(secondNodeBody);
+      expect(outliner.tree.root.children[0].children[0].body).toBe(
+        secondNodeBody,
+      );
 
       // Test outdent in edit mode
       const outdentEvent = createMockKeyboardEvent("[", { metaKey: true });
@@ -466,7 +475,7 @@ describe("Keyboard Commands", () => {
       const outdentHandled = EditingKeyboardCommands["["].execute(
         outdentContext,
       );
-      
+
       // Wait for async Cell operations to complete
       await waitForCellUpdate();
 
@@ -501,12 +510,12 @@ describe("Keyboard Commands", () => {
       };
 
       EditingKeyboardCommands["]"].execute(indentContext);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
-      
+
       // Wait for setTimeout to complete (used in indentNodeWithEditState)
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Should still be in edit mode after indent
       expect(outliner.testAPI.editingNode).toBeTruthy();
@@ -514,7 +523,7 @@ describe("Keyboard Commands", () => {
 
       // Get the current editing node reference after the Cell operation
       const currentEditingNode = outliner.testAPI.editingNode;
-      
+
       // Outdent while still in edit mode
       const outdentEvent = createMockKeyboardEvent("[", { metaKey: true });
       Object.defineProperty(outdentEvent, "target", { value: mockTextarea });
@@ -528,12 +537,12 @@ describe("Keyboard Commands", () => {
       };
 
       EditingKeyboardCommands["["].execute(outdentContext);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
-      
+
       // Wait for setTimeout to complete (used in outdentNodeWithEditState)
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Should still be in edit mode after outdent
       expect(outliner.testAPI.editingNode).toBeTruthy();
@@ -541,7 +550,7 @@ describe("Keyboard Commands", () => {
     });
 
     it.skip("should preserve cursor position and content during edit mode indentation", async () => {
-      // TODO(#ct-outliner): This test needs to be updated for the path-based API 
+      // TODO(#ct-outliner): This test needs to be updated for the path-based API
       // Currently uses outliner.startEditingWithInitialText() which doesn't exist in the new API
       await setupOutliner();
       const secondNode = outliner.tree.root.children[1];
@@ -568,17 +577,19 @@ describe("Keyboard Commands", () => {
       };
 
       EditingKeyboardCommands["]"].execute(indentContext);
-      
+
       // Wait for async Cell operations to complete
       await waitForOutlinerUpdate(outliner);
-      
+
       // Wait for setTimeout to complete (used in indentNodeWithEditState)
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Verify tree structure changed (node was indented)
       expect(outliner.tree.root.children.length).toBe(1);
       expect(outliner.tree.root.children[0].children.length).toBe(1);
-      expect(outliner.tree.root.children[0].children[0].body).toBe(secondNodeBody);
+      expect(outliner.tree.root.children[0].children[0].body).toBe(
+        secondNodeBody,
+      );
 
       // Verify editing state preserved
       expect(outliner.testAPI.editingNode).toBeTruthy();
@@ -595,7 +606,8 @@ describe("Keyboard Commands", () => {
       const context = createPathBasedKeyboardContext(event, outliner);
 
       // Should not crash
-      expect(() => PathBasedKeyboardCommands.Enter.execute(context)).not.toThrow();
+      expect(() => PathBasedKeyboardCommands.Enter.execute(context)).not
+        .toThrow();
     });
 
     it("should handle readonly mode correctly", async () => {

@@ -918,8 +918,16 @@ describe("determineTriggeredActions", () => {
 
       const result = determineTriggeredActions(
         dependencies,
-        { users: { "123": { profile: { name: "Alice" }, settings: { theme: "dark" } } } },
-        { users: { "123": { profile: { name: "Bob" }, settings: { theme: "dark" } } } },
+        {
+          users: {
+            "123": { profile: { name: "Alice" }, settings: { theme: "dark" } },
+          },
+        },
+        {
+          users: {
+            "123": { profile: { name: "Bob" }, settings: { theme: "dark" } },
+          },
+        },
         ["users", "123"],
       );
       expect(result).toEqual([action1]);

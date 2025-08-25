@@ -24,7 +24,10 @@ export function stringToPath(str: string): number[] {
 /**
  * Get the node at a given path
  */
-export function getNodeByPath(tree: Tree, path: number[]): OutlineTreeNode | null {
+export function getNodeByPath(
+  tree: Tree,
+  path: number[],
+): OutlineTreeNode | null {
   if (path.length === 0) {
     return tree.root;
   }
@@ -42,11 +45,16 @@ export function getNodeByPath(tree: Tree, path: number[]): OutlineTreeNode | nul
 /**
  * Get the path to a node as an array of indices from root.children
  */
-export function getNodePath(tree: Tree, targetNode: OutlineTreeNode | Cell<OutlineTreeNode>): number[] | null {
+export function getNodePath(
+  tree: Tree,
+  targetNode: OutlineTreeNode | Cell<OutlineTreeNode>,
+): number[] | null {
   // If it's a Cell, we can't reliably find its path in the tree without a tree Cell
   // This function needs to be redesigned to work with Cell-based paths
-  if ('equals' in targetNode) {
-    console.error("getNodePath: Cell-based path finding not properly implemented");
+  if ("equals" in targetNode) {
+    console.error(
+      "getNodePath: Cell-based path finding not properly implemented",
+    );
     return null;
   }
 
@@ -92,7 +100,11 @@ export function getNodePath(tree: Tree, targetNode: OutlineTreeNode | Cell<Outli
  * @param node The target node to get a Cell for
  * @returns Cell<Node> pointing to the node, or null if not found
  */
-export function getNodeCell(treeCell: Cell<Tree>, tree: Tree, node: OutlineTreeNode): Cell<OutlineTreeNode> | null {
+export function getNodeCell(
+  treeCell: Cell<Tree>,
+  tree: Tree,
+  node: OutlineTreeNode,
+): Cell<OutlineTreeNode> | null {
   const nodePath = getNodePath(tree, node);
   if (nodePath === null) return null;
 
@@ -119,7 +131,11 @@ export function getNodeCell(treeCell: Cell<Tree>, tree: Tree, node: OutlineTreeN
  * @param node The target node to get a body Cell for
  * @returns Cell<string> pointing to the node's body, or null if not found
  */
-export function getNodeBodyCell(treeCell: Cell<Tree>, tree: Tree, node: OutlineTreeNode): Cell<string> | null {
+export function getNodeBodyCell(
+  treeCell: Cell<Tree>,
+  tree: Tree,
+  node: OutlineTreeNode,
+): Cell<string> | null {
   const nodeCell = getNodeCell(treeCell, tree, node);
   return nodeCell ? nodeCell.key("body") as Cell<string> : null;
 }
@@ -130,7 +146,10 @@ export function getNodeBodyCell(treeCell: Cell<Tree>, tree: Tree, node: OutlineT
  * @param nodePath The path to the node as an array of indices
  * @returns Cell<string> pointing to the node's body, or null if not found
  */
-export function getNodeBodyCellByPath(treeCell: Cell<Tree>, nodePath: number[]): Cell<string> | null {
+export function getNodeBodyCellByPath(
+  treeCell: Cell<Tree>,
+  nodePath: number[],
+): Cell<string> | null {
   // Handle root node (empty path)
   if (nodePath.length === 0) {
     return treeCell.key("root").key("body") as Cell<string>;
@@ -159,7 +178,7 @@ export function getNodeChildrenCell(
   tree: Tree | null,
   node: OutlineTreeNode | Cell<OutlineTreeNode>,
 ): Cell<OutlineTreeNode[]> | null {
-  if ('equals' in node) {
+  if ("equals" in node) {
     // It's already a Cell
     return node.key("children") as Cell<OutlineTreeNode[]>;
   } else {
@@ -175,7 +194,10 @@ export function getNodeChildrenCell(
 /**
  * Get a Cell at a specific path, supporting both numeric indices and string keys
  */
-export function getNodeCellByPath(treeCell: Cell<Tree>, path: (number | string)[]): Cell<any> | null {
+export function getNodeCellByPath(
+  treeCell: Cell<Tree>,
+  path: (number | string)[],
+): Cell<any> | null {
   let cell: Cell<any> = treeCell.key("root");
 
   for (const segment of path) {

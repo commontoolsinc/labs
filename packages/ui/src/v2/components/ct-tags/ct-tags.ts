@@ -190,7 +190,7 @@ export class CTTags extends BaseElement {
 
   private handleTagClick(index: number, event: MouseEvent) {
     if (this.readonly) return;
-    
+
     event.preventDefault();
     this.editingIndex = index;
     this.originalTagValue = this.tags[index]; // Store original value
@@ -199,7 +199,7 @@ export class CTTags extends BaseElement {
     // Focus the input after render
     setTimeout(() => {
       const input = this.shadowRoot?.querySelector(
-        `#tag-input-${index}`
+        `#tag-input-${index}`,
       ) as HTMLInputElement;
       if (input) {
         input.focus();
@@ -210,7 +210,7 @@ export class CTTags extends BaseElement {
 
   private handleTagRemove(index: number, event: MouseEvent) {
     if (this.readonly) return;
-    
+
     event.stopPropagation();
     const newTags = [...this.tags];
     newTags.splice(index, 1);
@@ -264,21 +264,21 @@ export class CTTags extends BaseElement {
       this.tags = newTags;
       this.emit("ct-change", { tags: this.tags });
     }
-    
+
     this.editingIndex = null;
     this.requestUpdate();
   }
 
   private handleAddTagClick() {
     if (this.readonly) return;
-    
+
     this.showingNewInput = true;
     this.newTagValue = "";
     this.requestUpdate();
 
     setTimeout(() => {
       const input = this.shadowRoot?.querySelector(
-        "#new-tag-input"
+        "#new-tag-input",
       ) as HTMLInputElement;
       if (input) {
         input.focus();
@@ -327,17 +327,14 @@ export class CTTags extends BaseElement {
     return html`
       <div class="tags-container">
         ${this.tags.length === 0 && !this.showingNewInput
-          ? html`<span class="placeholder">No tags</span>`
-          : ""
-        }
-        
-        ${repeat(
+        ? html`
+          <span class="placeholder">No tags</span>
+        `
+        : ""} ${repeat(
           this.tags,
           (tag, index) => index,
-          (tag, index) => this.renderTag(tag, index)
-        )}
-
-        ${!this.readonly ? this.renderAddTag() : ""}
+          (tag, index) => this.renderTag(tag, index),
+        )} ${!this.readonly ? this.renderAddTag() : ""}
       </div>
     `;
   }
@@ -351,32 +348,30 @@ export class CTTags extends BaseElement {
         @click="${(e: MouseEvent) => this.handleTagClick(index, e)}"
       >
         ${isEditing
-          ? html`
-            <input
-              id="tag-input-${index}"
-              class="tag-input"
-              .value="${tag}"
-              @input="${(e: Event) => this.handleTagInput(index, e)}"
-              @keydown="${(e: KeyboardEvent) => this.handleTagKeyDown(index, e)}"
-              @blur="${() => this.handleTagBlur(index)}"
-            />
-          `
-          : html`
-            <span class="tag-text">${tag}</span>
-            ${!this.readonly
-              ? html`
-                <div
-                  class="tag-remove"
-                  @click="${(e: MouseEvent) => this.handleTagRemove(index, e)}"
-                  title="Remove tag"
-                >
-                  ×
-                </div>
-              `
-              : ""
-            }
-          `
-        }
+        ? html`
+          <input
+            id="tag-input-${index}"
+            class="tag-input"
+            .value="${tag}"
+            @input="${(e: Event) => this.handleTagInput(index, e)}"
+            @keydown="${(e: KeyboardEvent) => this.handleTagKeyDown(index, e)}"
+            @blur="${() => this.handleTagBlur(index)}"
+          />
+        `
+        : html`
+          <span class="tag-text">${tag}</span>
+          ${!this.readonly
+            ? html`
+              <div
+                class="tag-remove"
+                @click="${(e: MouseEvent) => this.handleTagRemove(index, e)}"
+                title="Remove tag"
+              >
+                ×
+              </div>
+            `
+            : ""}
+        `}
       </div>
     `;
   }
@@ -388,19 +383,20 @@ export class CTTags extends BaseElement {
         @click="${this.handleAddTagClick}"
       >
         ${this.showingNewInput
-          ? html`
-            <input
-              id="new-tag-input"
-              class="add-tag-input"
-              placeholder="New tag"
-              .value="${this.newTagValue}"
-              @input="${this.handleNewTagInput}"
-              @keydown="${this.handleNewTagKeyDown}"
-              @blur="${this.handleNewTagBlur}"
-            />
-          `
-          : html`+ Add tag`
-        }
+        ? html`
+          <input
+            id="new-tag-input"
+            class="add-tag-input"
+            placeholder="New tag"
+            .value="${this.newTagValue}"
+            @input="${this.handleNewTagInput}"
+            @keydown="${this.handleNewTagKeyDown}"
+            @blur="${this.handleNewTagBlur}"
+          />
+        `
+        : html`
+          + Add tag
+        `}
       </div>
     `;
   }

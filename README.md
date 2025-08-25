@@ -8,15 +8,16 @@ Radioactive experiments. Turn back! You will find no API stability here.
 
 There's a frontend, and a backend.
 
-All of the backend code lives within [Toolshed](./packages/toolshed), and is written in
-Deno2.
+All of the backend code lives within [Toolshed](./packages/toolshed), and is
+written in Deno2.
 
-All of the user-facing frontend code lives within [Shell](./packages/shell), and is
-written with Lit Web Components.
+All of the user-facing frontend code lives within [Shell](./packages/shell), and
+is written with Lit Web Components.
 
 ## Running the backend
 
-For a more detailed guide, see [./packages/toolshed/README.md](./packages/toolshed/README.md).
+For a more detailed guide, see
+[./packages/toolshed/README.md](./packages/toolshed/README.md).
 
 ```bash
 cd ./packages/toolshed

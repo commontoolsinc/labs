@@ -46,7 +46,6 @@ jobs:
             exit 1
           fi
 
-
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
         with:
@@ -57,7 +56,6 @@ jobs:
           echo "::group::Downloading Sentry CLI"
           deno run --allow-all npm:@sentry/cli --version
           echo "::endgroup::"
-
 
       - name: 📊 Create Toolshed server Sentry release
         run: |

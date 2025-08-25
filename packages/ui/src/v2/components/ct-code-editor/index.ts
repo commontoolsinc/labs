@@ -6,4 +6,3 @@ if (!customElements.get("ct-code-editor")) {
 
 export { CTCodeEditor, MimeType };
 export type { MimeType as MimeTypeType };
-

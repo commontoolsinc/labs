@@ -63,19 +63,27 @@ testComponents.forEach(({ name, file }) => {
       const featureStatus = await page.waitForSelector("#feature-status", {
         strategy: "pierce",
       });
-      const statusText = await featureStatus.evaluate((el: HTMLElement) => el.textContent);
+      const statusText = await featureStatus.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
       assertEquals(statusText?.trim(), "⚠ Feature is disabled");
     });
 
     it("should toggle to enabled content when checkbox is clicked", async () => {
       const page = shell.page();
 
-      const checkbox = await page.waitForSelector("ct-checkbox", { strategy: "pierce" });
+      const checkbox = await page.waitForSelector("ct-checkbox", {
+        strategy: "pierce",
+      });
       await checkbox.click();
       await sleep(500);
-      
-      const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
-      const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
+
+      const featureStatus = await page.$("#feature-status", {
+        strategy: "pierce",
+      });
+      const statusText = await featureStatus?.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
       assertEquals(statusText?.trim(), "✓ Feature is enabled!");
     });
 
@@ -87,9 +95,13 @@ testComponents.forEach(({ name, file }) => {
       });
       await checkbox?.click();
       await sleep(1000);
-      
-      const featureStatus = await page.$("#feature-status", { strategy: "pierce" });
-      const statusText = await featureStatus?.evaluate((el: HTMLElement) => el.textContent);
+
+      const featureStatus = await page.$("#feature-status", {
+        strategy: "pierce",
+      });
+      const statusText = await featureStatus?.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
       assertEquals(statusText?.trim(), "⚠ Feature is disabled");
     });
   });

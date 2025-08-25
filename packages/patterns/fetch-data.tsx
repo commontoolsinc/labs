@@ -2,6 +2,7 @@
 import {
   Cell,
   cell,
+  Default,
   derive,
   fetchData,
   h,
@@ -9,7 +10,6 @@ import {
   lift,
   NAME,
   recipe,
-  Default,
   schema,
   str,
   UI,
@@ -156,7 +156,9 @@ function parseUrl(url: string): { org: string; user: string } {
   return { org: "", user: "" };
 }
 
-export default recipe<{ repoUrl: Default<string, "https://github.com/vercel/next.js"> }>(
+export default recipe<
+  { repoUrl: Default<string, "https://github.com/vercel/next.js"> }
+>(
   "Github Fetcher Demo",
   (state) => {
     // lift() takes a pure function and 'lifts' it into the Cell domain, allowing it to be bound to reactive values

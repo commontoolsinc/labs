@@ -60,7 +60,9 @@ const runtime = new Runtime({
 const charmManager = new CharmManager(session, runtime);
 
 const verifier =
-  await (noVerify ? undefined : Verifier.initialize({ apiUrl, headless, identity }));
+  await (noVerify
+    ? undefined
+    : Verifier.initialize({ apiUrl, headless, identity }));
 const processor = new Processor({ name, model, cache, charmManager, verifier });
 
 let processed: ExecutedScenario[] | undefined;

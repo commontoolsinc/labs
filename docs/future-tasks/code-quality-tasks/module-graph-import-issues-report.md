@@ -18,7 +18,6 @@ guideline:
 
 ### Plugin Files
 
-
 **Example Fix**:
 
 ```typescript
@@ -41,7 +40,6 @@ export function createClock(): Clock { ... }
 
 The following files don't follow the import grouping convention (standard
 library → external → internal):
-
 
 ### `packages/builder/src/utils.ts`
 

@@ -23,11 +23,14 @@ describe("CTOutliner Component Integration Tests", () => {
       await setupOutliner();
       const initialCount = outliner.tree.root.children.length;
 
-      const result = await outliner.createNodeAfterPath(outliner.focusedNodePath!, { body: "" });
+      const result = await outliner.createNodeAfterPath(
+        outliner.focusedNodePath!,
+        { body: "" },
+      );
 
       expect(outliner.tree.root.children.length).toBe(initialCount + 1);
       expect(result.success).toBe(true);
-      const focusedNode = outliner.focusedNodePath 
+      const focusedNode = outliner.focusedNodePath
         ? getNodeByPath(outliner.tree, outliner.focusedNodePath)
         : null;
       expect(focusedNode?.body).toBe("");
@@ -40,14 +43,16 @@ describe("CTOutliner Component Integration Tests", () => {
       if (!parentNode) throw new Error("Parent node not found");
       const initialChildCount = parentNode.children.length;
 
-      const result = await outliner.createChildNodeAtPath(parentPath, { body: "" });
+      const result = await outliner.createChildNodeAtPath(parentPath, {
+        body: "",
+      });
 
       // Since tree is mutable, parentNode should have the new child
       const updatedParent = getNodeByPath(outliner.tree, parentPath);
       if (!updatedParent) throw new Error("Updated parent not found");
       expect(updatedParent.children.length).toBe(initialChildCount + 1);
       expect(result.success).toBe(true);
-      const focusedNode = outliner.focusedNodePath 
+      const focusedNode = outliner.focusedNodePath
         ? getNodeByPath(outliner.tree, outliner.focusedNodePath)
         : null;
       expect(focusedNode?.body).toBe("");
@@ -115,13 +120,13 @@ describe("CTOutliner Component Integration Tests", () => {
       const node = getNodeByPath(outliner.tree, focusedPath);
       if (!node) throw new Error("Focused node not found");
 
-      // Start editing with the node's body as initial content  
+      // Start editing with the node's body as initial content
       outliner.startEditingByPath(focusedPath, node.body);
 
       // First, check that editing mode is activated
       expect(outliner.testAPI.editingNodePath).toEqual(focusedPath);
       expect(outliner.testAPI.editingNode).toBe(node);
-      
+
       // Check that content is properly set
       expect(outliner.testAPI.editingContent).toBe(node.body);
     });
@@ -147,7 +152,9 @@ describe("CTOutliner Component Integration Tests", () => {
       const firstNodePath = [0];
 
       // Create a new node
-      const result = await outliner.createNodeAfterPath(firstNodePath, { body: "" });
+      const result = await outliner.createNodeAfterPath(firstNodePath, {
+        body: "",
+      });
       await waitForOutlinerUpdate(outliner);
 
       // Original nodes should still be present and identifiable by content
@@ -163,10 +170,12 @@ describe("CTOutliner Component Integration Tests", () => {
       const firstNode = getNodeByPath(outliner.tree, firstNodePath);
 
       // Create new node and verify focus is on new node
-      const result = await outliner.createNodeAfterPath(firstNodePath, { body: "" });
+      const result = await outliner.createNodeAfterPath(firstNodePath, {
+        body: "",
+      });
 
       expect(result.success).toBe(true);
-      const focusedNode = outliner.focusedNodePath 
+      const focusedNode = outliner.focusedNodePath
         ? getNodeByPath(outliner.tree, outliner.focusedNodePath)
         : null;
       expect(focusedNode?.body).toBe("");
@@ -184,7 +193,9 @@ describe("CTOutliner Component Integration Tests", () => {
       expect(typeof outliner.indentNodeByPath).toBe("function");
       expect(typeof outliner.outdentNodeByPath).toBe("function");
       expect(typeof outliner.startEditingByPath).toBe("function");
-      expect(typeof outliner.startEditingWithInitialTextByPath).toBe("function");
+      expect(typeof outliner.startEditingWithInitialTextByPath).toBe(
+        "function",
+      );
       expect(typeof outliner.setNodeCheckboxByPath).toBe("function");
       expect(typeof outliner.emitChange).toBe("function");
     });

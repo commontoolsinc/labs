@@ -34,6 +34,9 @@ jobs:
       - name: 🔎 Type check codebase
         run: deno task check
 
+      - name: 🔎 Check codebase formatting
+        run: deno fmt --check
+
       - name: 🔎 Check derived artifacts
         working-directory: packages/static
         run: |
@@ -54,36 +57,10 @@ jobs:
       - name: 🧪 Run parallel workspace tests
         run: deno task test
 
-  toolshed-tests:
-    name: "Toolshed Tests"
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: toolshed
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🦕 Setup Deno
-        uses: ./.github/actions/deno-setup
-
-      - name: 📝 Verify code formatting
-        working-directory: packages/toolshed
-        run: deno fmt --check
-
-      - name: 🧪 Run Toolshed integration tests
-        working-directory: packages/toolshed
-        run: deno test -A --env-file=.env.test
-        env:
-          ENV: test
-          PORT: 8000
-          LOG_LEVEL: silent
-
   build-binaries:
     name: "Build Binaries"
     runs-on: ubuntu-24.04-32-core
-    needs: ["workspace-checks-and-tests", "toolshed-tests"]
+    needs: ["workspace-checks-and-tests"]
     environment: ci
     permissions:
       id-token: write
