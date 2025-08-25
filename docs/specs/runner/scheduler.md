@@ -1,4 +1,4 @@
-Scheduler (Behavioral Spec)
+# Scheduler (Behavioral Spec)
 
 - Scope: Define reactive execution semantics based on read/write dependencies.
   Implementations may vary internally but must preserve dependency tracking,

@@ -1,4 +1,4 @@
-Cell Abstraction (Behavioral Spec)
+# Cell Abstraction (Behavioral Spec)
 
 - File: `packages/runner/src/cell.ts`
 - Purpose: A typed, reactive façade over a location in storage identified by a
@@ -101,7 +101,8 @@ Examples
     `cell.key('current').get().key('name').get()` returns the live name.
   - Write: `cell.key('current').get().key('name').withTx(tx).set('X')` writes to
     the referenced item’s `name`, not the alias. ASCII
-  ```
+
+  ```ts
   current (alias) -> Item#42
   Item#42.name = "Old"
         |
@@ -118,6 +119,7 @@ Examples
     for an element whose `slug` equals `'a'`; if found, updates that entity;
     else creates a new entity with a random id and sets the array element to a
     link to it.
+
   ```ts
   const tx = runtime.edit();
   list.withTx(tx).push({ [ID_FIELD]: "slug", slug: "a", title: "A" });

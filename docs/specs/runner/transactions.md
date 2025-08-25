@@ -1,4 +1,4 @@
-Transactions API (Behavioral Spec)
+# Transactions API (Behavioral Spec)
 
 - Scope: High-level contract between runner components and storage transactions,
   with emphasis on read/write recording for reactivity and atomic application of

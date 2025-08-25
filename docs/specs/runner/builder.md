@@ -1,4 +1,4 @@
-Builder (Behavioral Spec)
+# Builder (Behavioral Spec)
 
 - Scope: High-level recipe authoring model, opaque references, node
   instantiation, and how builder artifacts translate into executable graphs.
@@ -88,13 +88,14 @@ Examples
 
 - Recipe Extraction
   - Author code:
-    - `recipe({ argsSchema }, (input) => { const c = cell(...); return { out: compute(f)(input.x, c) }; })`
+    - `recipe({ argsSchema }, { resultSchema}, (input) => { const c = cell(...); return { out: lift(f)({ x: input.x, c}) }; })`
   - Builder behavior:
     1. Frame created; `input` is OpaqueRef with schema.
     2. `cell(...)` creates an OpaqueRef bound to frame; registered as internal
        cell.
-    3. `compute(...)(...)` constructs a NodeRef with inputs/outputs referencing
-       OpaqueRefs.
+    3. `lift(...)(...)` constructs a NodeRef with inputs/outputs referencing
+       OpaqueRefs, binding those to a function that will be called when inputs
+       change.
     4. After fn returns, traversal collects OpaqueRefs and NodeRefs; assigns
        paths: `input` -> `argument`, internal cell -> `internal/__#0`, output
        mapping -> `result`.
@@ -109,7 +110,8 @@ Examples
       Names and paths assigned as if those were internal nodes bound under the
       current frame.
 
-  Code
+  Code for built-ins:
+  
   ```ts
   const mapModule: Module = {
     type: "raw",

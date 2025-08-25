@@ -1,4 +1,4 @@
-Schema-Driven Reads (Behavioral Spec)
+# Schema-Driven Reads (Behavioral Spec)
 
 - Scope: Defines how schemas influence read shapes and identity, including
   `asCell`, `asStream`, `$ref` resolution, `anyOf` handling, defaults, array

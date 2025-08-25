@@ -1,4 +1,4 @@
-Runner Spec
+# Runner Spec
 
 - Scope: `packages/runner` core runtime behavior. Focus on Cell abstraction,
   data updating and links, schema-driven reads (asCell/asStream/anyOf), and the

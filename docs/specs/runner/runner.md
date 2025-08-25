@@ -1,4 +1,4 @@
-Runner (Behavioral Spec)
+# Runner (Behavioral Spec)
 
 - Scope: Execution engine for recipes and modules. Manages process cells,
   argument/default state, node instantiation, function caching, event handling,
@@ -135,6 +135,7 @@ Cross-Links
 Examples
 
 - Process Cell Lifecycle Code
+
   ```ts
   const tx = runtime.edit();
   const result = runtime.getCell(space, { name: "demo" }, {}, tx);
@@ -153,6 +154,7 @@ Examples
   runner.run(tx3, recipeFactoryR2, { y: 3 }, result);
   tx3.commit();
   ```
+
   1. First run:
      - Input: `run(tx, recipe R, arg A, resultCell)` where `A` is a literal.
      - Runner creates/uses a process cell `P` in the same space as `resultCell`
@@ -177,15 +179,14 @@ Examples
   - Runner -> Scheduler: schedule actions/handlers with (reads, writes)
   - Runner -> Caller: return resultCell
 
-  ASCII
-  ```
+  ```ascii
   Caller      Runner           Storage          Scheduler
     |           |                 |                 |
     | run(R,A)  |                 |                 |
     |---------> |                 |                 |
     |           | create P        |                 |
     |           |---------------> |                 |
-    |           | write fields    |                 |
+    |           | write fields     |                 |
     |           |---------------> |                 |
     |           | deps (reads/writes)               |
     |           |---------------------------------> |
@@ -196,6 +197,7 @@ Examples
   ```
 
 - JavaScript Node With Stream Input Code
+
   ```ts
   // Module N: (evt is a stream, foo is literal or link)
   const N: Module = {
@@ -205,6 +207,7 @@ Examples
     implementation: ({ evt, foo }) => ({ out: `${foo}:${evt.payload}` }),
   };
   ```
+
   - Context: node N has inputs `{ evt: <link to stream S>, foo: X }` and output
     `{ out: Y }`.
   - Runner detects `evt` resolves to a stream marker; registers handler H:
@@ -222,8 +225,7 @@ Examples
   - H -> Harness/Function: fn(argument)
   - H -> Storage: writes to bound outputs (possibly via sub-recipe)
 
-  ASCII
-  ```
+  ```ascii
   Storage (S)   Scheduler     Handler(H)      Storage
       |             |             |              |
       | event(E)    |             |              |
@@ -239,12 +241,14 @@ Examples
   ```
 
 - Nested Recipe Node Wiring Code
+
   ```ts
   const child = recipe(childArgSchema, (input) => ({ out: input.x }));
   const parent = recipe(parentArgSchema, (input) => ({
     nested: { $alias: { path: ["internal"] } },
   })); // runner instantiates child and stores link in `nested`
   ```
+  
   - Module type `recipe` with implementation Rchild; inputs `I` and outputs `O`.
     Runner:
     1. Unwraps Rchild and `I` relative to process cell P.

@@ -1,4 +1,4 @@
-Data Updating and Links (Behavioral Spec)
+# Data Updating and Links (Behavioral Spec)
 
 - Scope: Define observable behavior for normalization of inputs, interpretation
   of links and aliases, conversion to entities, diffing strategy, and
@@ -85,7 +85,8 @@ Examples
     `path: ['y']`.
   - Behavior: resolve data link content; traverse to path `['y']` if present;
     write the resulting JSON value at the destination. ASCII
-  ```
+
+  ```ts
   newValue = link(data:{ x: { y: 5 }}, path:['y'])
   -> resolve -> 5
   -> write destination := 5
@@ -98,7 +99,8 @@ Examples
   - Behavior: reuse the entity for `b` (diff its content), create a fresh entity
     for `a`, and set the array to links for both in order; truncate or extend as
     needed. ASCII
-  ```
+
+  ```ts
   current: [ Link(Entity b) ]
   new:     [ {slug:'a',v:1}, {slug:'b',v:2} ] w/ ID_FIELD='slug'
          -> [ Link(Entity a*), Link(Entity b) ] and diff(Entity b).v := 2
@@ -108,7 +110,8 @@ Examples
   - Input: current value is a write-redirect; new value is a primitive.
   - Behavior: resolve redirect to destination and write primitive there; do not
     overwrite redirect link at the source.
-  ```
+
+  ```ts
   src := { $alias: { path: ['dst'] } }
   set src := 7  =>  write dst := 7 (leave alias intact)
   ```
