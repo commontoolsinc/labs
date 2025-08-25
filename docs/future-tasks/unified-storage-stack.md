@@ -111,14 +111,14 @@ This plan should be entirely incremental and can be rolled out step by step.
     processing
   - Watch for the FIXME at line 84 about keying by doc+schema combination
 - [x] When connection is dropped, re-establish all schema queries again CT-442
-- [ ] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
+- [x] Replace all direct use of `DocImpl` with `Cell` (only `DocImpl` use inside
       `Cell`, scheduler (just `.updates()`) and storage.ts should remain for
       now) CT-446
   - [x] Add .setRaw and .getRaw to internal `Cell` interface and use the cell
         creation methods on `Runtime` and then almost all used of `DocImpl` can
         be replaced by cells and using `.[set|get]Raw` instead of
         `.[set|send|get]`
-- [ ] Change all places that expect `{ cell: DocImpl, … }` to just use the JSON
+- [x] Change all places that expect `{ cell: DocImpl, … }` to just use the JSON
       representation. At the same time, let's support the new syntax for links
       (@irakli has these in a RFC (CT-448), should be extracted, effectively
       `{ "@": { "link": { ... }}}`). This is because today `storage.ts`
@@ -133,25 +133,25 @@ This plan should be entirely incremental and can be rolled out step by step.
       `tx.read(entity, path)`, `tx.write(entity, path, value)` (and/or other
       mutation functions), etc., and `tx.commit()`, `tx.abort(reason?: Error)`
       and a few more (see below). CT-449
-- [ ] Implement a shim of the new TX API using `DocImpl`, etc. CT-485
-  - [ ] Wherever `log` get created, switch to new API. So at least
-    - [ ] scheduler
-    - [ ] Cell.sink
+- [x] Implement a shim of the new TX API using `DocImpl`, etc. CT-485
+  - [x] Wherever `log` get created, switch to new API. So at least
+    - [x] scheduler
+    - [x] Cell.sink
   - Need to call .commit() when done (TBD: Even on read-only?)
   - Change read/write
-    - [ ] `diffAndNormalize` and `applyChangeSet`
-    - [ ] remaining `Cell.*` (e.g. `getRaw`, `setRaw`)
-    - [ ] `QueryResultProxy`
+    - [x] `diffAndNormalize` and `applyChangeSet`
+    - [x] remaining `Cell.*` (e.g. `getRaw`, `setRaw`)
+    - [x] `QueryResultProxy`
   - [ ] Move ephemeral and frozen concept into Cell
-    - [ ] `Cell.freeze()` makes cell read-only
+    - [x] `Cell.freeze()` makes cell read-only
     - [ ] `Cell.ephemeral` whether cell is persisted
-- [ ] Switch all reading & writing over to this new TX API CT-486
+- [x] Switch all reading & writing over to this new TX API CT-486
 - [ ] Add a `VirtualCell` that is used in runner to construct inputs, which is
       read-only, has no id or space and isn't synced to storage. It should throw
       if used in any way that indicates it is being linked to or written to.
       CT-493
-- [ ] Add `Cell.sync` call that does what `Storage.syncCell` does today. CT-494
-  - [ ] In fact automatically start syncing already, as this will be the future
+- [x] Add `Cell.sync` call that does what `Storage.syncCell` does today. CT-494
+  - [x] In fact automatically start syncing already, as this will be the future
         behavior. This is just for await.
   - [ ] Add option to only await a locally cached version if available.
 - [ ] Add path-dependent listeners to memory: A helper on `Storage`, that given
@@ -164,8 +164,8 @@ This plan should be entirely incremental and can be rolled out step by step.
         will use to update the dependency graph. In fact scheduler will inside
         the callback do both this and adding the callback just before returning.
         It does so to not miss any updates.
-- [ ] Implement new TX over memory CT-487
-  - [ ] The user of the TX shall observe a consistent state during the lifetime
+- [x] Implement new TX over memory CT-487
+  - [x] The user of the TX shall observe a consistent state during the lifetime
         of the transaction. All its writes are only committed to the nursery
         after `tx.commit()` is called. If the transaction attempts to read a
         value that has changed since the start of the transaction, the
