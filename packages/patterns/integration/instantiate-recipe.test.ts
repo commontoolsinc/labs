@@ -72,10 +72,11 @@ describe("instantiate-recipe integration test", () => {
 
     await button.click();
 
-    // Reduced wait for navigation (was 2000ms)
-    await sleep(400);
+    // Wait for page to soft navigate
+    await page.waitForFunction((urlBefore) => {
+      return globalThis.location.href !== urlBefore;
+    }, { args: [urlBefore] });
 
-    // Check if we navigated to a new counter instance
     const urlAfter = await page.evaluate(() => globalThis.location.href);
     console.log("URL after clicking:", urlAfter);
 
@@ -93,7 +94,5 @@ describe("instantiate-recipe integration test", () => {
       counterResult,
       "Should find counter-result element after navigation",
     );
-
-    await sleep(200);
   });
 });
