@@ -41,9 +41,10 @@ The user provides an initial prompt describing what they want their recipe to do
 
 **Research existing patterns:**
 1. Search user's recipe repo: `find [recipe-path] -name "*.tsx" -type f | head -20`
-2. Look for similar recipes or reusable patterns
-3. Check existing space charms for potential data sources and targets
-4. Reference the recipe documentation files for patterns and components
+2. **Search patterns package:** Look in `packages/patterns` for related examples and reusable components
+3. Look for similar recipes or reusable patterns
+4. Check existing space charms for potential data sources and targets
+5. Reference the recipe documentation files for patterns and components
 
 ### STEP 3: Design and Plan
 
@@ -135,6 +136,7 @@ echo '[json-value]' | ./dist/ct charm set --identity [key] --api-url [url] --spa
 
 ## Notes for Claude
 
+- **Always search `packages/patterns` and the recipes repository first** - Look for related examples before writing new code
 - Start simple and iterate - build basic functionality first
 - Reference the recipe documentation files frequently
 - Test incrementally after each major change
