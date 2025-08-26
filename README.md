@@ -45,8 +45,7 @@ written in Deno2, that provides the distributed runtime and storage.
 Lit Web Components for interacting with CommonTools spaces.
 
 **CLI (CT Binary)**: Command-line interface for managing charms, linking
-recipes, and deploying to spaces. See
-[CT Usage Guide](./docs/common/CT.md).
+recipes, and deploying to spaces. See [CT Usage Guide](./docs/common/CT.md).
 
 **UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
 prefixed components for recipe UIs.
