@@ -12,13 +12,17 @@ Common Tools is a new distributed computing platform that provides a runtime and
 
 **Recipes** are reactive programs that can be linked together to create data and program networks. They're written in TypeScript/JSX and run in a secure sandbox environment. Recipes can:
 - Process and transform data
-- Render interactive UIs using `ct-` prefixed components  
+- Render interactive UIs using `ct-` prefixed components
 - React to changes from linked recipes
 - Connect to external APIs
 
 **Charms** are deployed instances of recipes running in CommonTools spaces. Charms can be linked together to create complex workflows where data flows automatically between connected components.
 
 **Spaces** are collaborative environments where charms live and interact. Users can run their own spaces or use hosted versions.
+
+## Quick Start (Development)
+
+Check out the repo, install `deno` and `claude` and then run `/onboarding` within Claude Code.
 
 ## Architecture
 
@@ -50,7 +54,7 @@ This repository includes many Claude Code commands in [`.claude/commands/`](./.c
 
 ### Dependencies & Integrations
 
-**Required**: 
+**Required**:
 - [Deno 2](https://docs.deno.com/runtime/getting_started/installation/) - Runtime for backend and tooling
 
 **Recommended Integrations**:

@@ -2,150 +2,133 @@
 
 This command provides an interactive tour of the Common Tools platform repository, helping new contributors understand where to find information and how to navigate the codebase effectively.
 
-## Tour Overview
+## Getting Started (Essential Foundation)
 
-This tour will guide you through key information sources in order:
+**Everyone starts here to get oriented:**
 
-1. **Platform Overview** - Main README and core concepts
-2. **Architecture Understanding** - Package structure and roles
-3. **Recipe Development** - Programming model and workflows  
-4. **Available Workflows** - Claude commands and automation
-5. **Development Setup** - Getting started with contributions
-6. **Integration Options** - Available tools and connections
-
-## Interactive Tour Script
-
-### STEP 1: Platform Overview
-
-**Read the main README together:**
-- Open and review `README.md`
-- Focus on "What is Common Tools?" section
+**Step 1: Platform Foundation**
+- Read `README.md` together to understand what Common Tools is
+- Focus on "What is Common Tools?" section for core concepts  
 - Review architecture overview of packages
-- Discuss development practices section
+- Understand development practices section
 
-**Ask user about their interest area:**
-- Recipe development and building applications?
-- Platform development and contributing to core?
-- Integration development and extending capabilities?
-
-### STEP 2: Architecture Understanding
-
-**Package exploration:**
+**Step 2: Repository Structure**
 - List packages: `ls packages/`
-- For each major package, open its README:
-  - `packages/toolshed/README.md` - Backend runtime
-  - `packages/shell/README.md` - Frontend interface  
-  - `packages/ui/README.md` - UI components
-  - `packages/patterns/README.md` - Examples and patterns
+- Get oriented with the monorepo layout  
+- Understand the relationship between packages
 
-**Visual repository structure:**
-- Show `packages/patterns/` contents for recipe examples
-- Point to recipe development folder (if provided)
-- Explain monorepo organization
-
-### STEP 3: Recipe Development Resources
-
-**Key documentation to bookmark:**
-- `.claude/commands/common/ct.md` - Essential CT binary usage
-- `.claude/commands/recipe-dev.md` - Recipe development workflow
-- `.claude/commands/imagine-recipe.md` - Creating new recipes
-
-**Recipe development files to find (in recipes folder if available):**
-- `RECIPES.md` - Core patterns and examples
-- `COMPONENTS.md` - Available UI components  
-- `HANDLERS.md` - Event handling patterns
-
-**Show patterns package:**
-- Browse `packages/patterns/` for examples
-- Identify reusable components and patterns
-
-### STEP 4: Available Claude Commands
-
-**Tour the commands directory:**
+**Step 3: Commands Overview**
 - List `.claude/commands/` contents
-- Read `.claude/commands/README.md` for overview
-- Group commands by category:
+- Read `.claude/commands/README.md` for workflow overview
+- Understand what automation and assistance is available
 
-**Recipe Development:**
-- `/recipe-dev`, `/imagine-recipe`, `/explore-recipe`
+## Choose Your Adventure
 
-**Setup and Infrastructure:**  
-- `/deps`, `/setup-space`, `/common/ct`
+After completing the foundation, ask the user what they're most curious about:
 
-**Workflow Management:**
-- `/linear`, `/fix-issue`, `/fix-pr`, `/review-code`
+### Path A: Recipe Development & Deployment
+*"I want to understand how to build applications with recipes"*
 
-**Research and Documentation:**
-- `/research`, `/maintain-docs`, `/search-wiki`
+**Journey through:**
+1. **Recipe concepts and examples**
+   - Explore `packages/patterns/` for hands-on examples
+   - Find recipe documentation files (`RECIPES.md`, `COMPONENTS.md`, `HANDLERS.md` in recipes folder)
+   
+2. **CT Binary and deployment workflow**
+   - Read `.claude/commands/common/ct.md` - The essential tool
+   - Understanding spaces, charms, and linking
+   
+3. **Development workflow commands**
+   - `/recipe-dev` - Working with existing recipes
+   - `/imagine-recipe` - Creating new recipes  
+   - `/explore-recipe` - Interactive testing with Playwright
+   
+4. **Hands-on next steps**
+   - Set up development environment
+   - Try `/setup-space` if needed
+   - Build first recipe with `/imagine-recipe`
 
-### STEP 5: Development Setup
+### Path B: Runtime & Execution Layer  
+*"I want to understand how the runtime works under the hood"*
 
-**Prerequisites check:**
-- Review `deps.md` for required tools
-- Point to installation guides for missing dependencies
+**Journey through:**
+1. **Core packages deep dive**
+   - Explore execution-related packages in `packages/`
+   - Understand sandbox execution and security model
+   
+2. **Recipe execution lifecycle**
+   - How recipes are compiled and run
+   - Reactive system and data flow
+   - Linking mechanism internals
+   
+3. **Development setup for runtime work**
+   - Review `CLAUDE.md` for contribution guidelines
+   - Understanding test suite and debugging approaches
+   - Build processes and development workflow
 
-**Repository guidelines:**
-- Read `CLAUDE.md` together for coding standards
-- Review CI/CD requirements and testing expectations
-- Understand formatting and contribution guidelines
+### Path C: Application Layer (Toolshed + Shell)
+*"I want to understand the hosted platform and user interfaces"*
 
-**Initial setup steps:**
-- How to build CT binary: `deno task build-binaries --cli-only`
-- How to run tests: `deno task test`
-- How to check types: `deno task check`
+**Journey through:**
+1. **Toolshed backend architecture**
+   - Read `packages/toolshed/README.md`
+   - Understanding distributed storage and runtime hosting
+   - API design and space management
+   
+2. **Shell frontend architecture**  
+   - Read `packages/shell/README.md`
+   - Lit Web Components and UI patterns
+   - How users interact with spaces and charms
+   
+3. **Integration points**
+   - How backend and frontend communicate
+   - API boundaries and data flow
+   - Development setup for full-stack work
+   
+4. **Development workflow**
+   - Running local backend: `cd packages/toolshed && deno task dev`
+   - Running local frontend: `cd packages/shell && deno task dev`
+   - Understanding the development loop
 
-### STEP 6: Integration Capabilities
+## Navigation Support
 
-**Read integration documentation:**
-- Review `deps.md` for available integrations
-- Understand Claude Code MCP setup options
-- Review GitHub workflow integrations
+**Throughout any path, users can access:**
+- **Available commands**: List `.claude/commands/` and read `.claude/commands/README.md`
+- **Integration setup**: Review `deps.md` for tools and MCP integrations  
+- **Development guidelines**: Reference `CLAUDE.md` for coding standards
+- **Research commands**: Use `/research` to dive deeper into specific areas
 
-**Available development tools:**
-- GitHub CLI for PR/issue workflows
-- Linear MCP for task management
-- Playwright MCP for browser automation
+## Adventure Branches
 
-### STEP 7: Next Steps Planning
+**Users can switch paths or dive deeper:**
+- From Recipe Development → explore Runtime internals
+- From Runtime → understand Application layer integration  
+- From Application layer → try Recipe development
+- Or combine multiple paths based on curiosity
 
-**Based on user's interests, point to appropriate starting points:**
+## Completion Indicators
 
-**For Recipe Development:**
-- Start with `/setup-space` if needed
-- Use `/imagine-recipe` for first recipe
-- Reference patterns in `packages/patterns/`
-
-**For Platform Development:**
-- Review individual package READMEs
-- Check `CLAUDE.md` coding guidelines
-- Look at existing issues for contribution opportunities
-
-**For Integration Work:**
-- Review current integrations in `deps.md`
-- Explore `.claude/commands/` for automation patterns
-
-## Tour Completion
-
-**Verify understanding of key locations:**
-- [ ] Main `README.md` for platform overview
-- [ ] `CLAUDE.md` for development guidelines
-- [ ] `.claude/commands/` directory for workflows
-- [ ] `packages/` structure and individual READMEs  
-- [ ] `deps.md` for integration setup
-- [ ] Recipe documentation files (if available)
-
-**Next action items:**
-- Choose an area of interest
-- Set up development environment
-- Pick first task or experiment
+**Each path concludes when the user can:**
+- Navigate to relevant information sources independently
+- Understand their chosen area's development workflow
+- Know what commands/tools to use for their interests
+- Have clear next steps for hands-on work
 
 ## Notes for Claude
 
-- **This is a guide, not information source** - Always read files with the user rather than explaining from memory
-- **Focus on discovery** - Help user find and understand information locations  
-- **Adapt based on interest** - Spend more time on areas relevant to the user
-- **Be interactive** - Ask questions and let user guide depth of exploration
-- **Reference files directly** - Use Read tool to show actual content
-- **Connect the dots** - Help user understand relationships between different parts
+**Critical: This is a guided discovery experience, not a lecture:**
 
-The goal is teaching navigation and information discovery, not information transfer.
+- **Read WITH the user, not FOR them** - Say "Let's read README.md together" then ask them to look at specific sections you both just saw
+- **Ask questions about what THEY see** - "What do you notice about the architecture section?" rather than explaining it
+- **Let them discover and react** - After reading files together, ask "What interests you most from what we just saw?"
+- **Guide, don't summarize** - Point to sections in files rather than repeating their content
+- **Follow their curiosity** - If they get excited about something, explore that direction
+- **Encourage exploration** - "What do you think that package does? Let's look at its README together"
+
+**Example flow:**
+1. "Let's read README.md together" → user and Claude both see the content
+2. "Looking at what we just read, what caught your attention most?"  
+3. User responds with interest → follow that thread
+4. "Great! Let's explore that by looking at [specific file/directory] together"
+
+**Key principle:** The user should feel like they're discovering things themselves with Claude as a helpful guide, not receiving a presentation.
