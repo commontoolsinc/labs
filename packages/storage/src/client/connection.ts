@@ -16,6 +16,7 @@ export class SpaceConnection {
     string,
     { resolve: (v: unknown) => void; reject: (e: unknown) => void }
   >();
+  #consumers = new Set<string>();
   // Hook for applying server docs (to be set by StorageClient)
   onServerDoc?: (
     doc: { docId: string; epoch: number; heads?: string[]; json: unknown },
@@ -135,8 +136,11 @@ export class SpaceConnection {
     await p.catch((e) => {
       throw e;
     }).finally(() => this.#pendingInitialSubs.delete(p));
-    // No server-side unsubscribe command defined; return a no-op for now
-    return () => {};
+    // Track consumer locally; return unsubscribe that removes local tracking.
+    this.#consumers.add(opts.consumerId);
+    return () => {
+      this.#consumers.delete(opts.consumerId);
+    };
   }
 
   synced(): Promise<void> {

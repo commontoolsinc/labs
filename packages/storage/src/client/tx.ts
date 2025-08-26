@@ -1,5 +1,6 @@
 import * as AM from "@automerge/automerge";
 import { createGenesisDoc } from "../store/genesis.ts";
+import { getAtPathWithPrefix as utilGetAtPathWithPrefix } from "./path.ts";
 import type { TxReceipt } from "../types.ts";
 
 export type TxStatus = "open" | "aborted" | "committed";
@@ -83,8 +84,21 @@ export class ClientTransaction {
         op: "read",
       });
     }
-    if (validPathOut) validPathOut.splice(0, validPathOut.length, ...[]);
-    return undefined;
+    // If this transaction has staged writes for the document, return the value
+    // from the staged Automerge doc (preview). Else undefined (caller may fall
+    // back to StorageClient.readView()). Fill validPathOut with the longest
+    // valid prefix found in the staged doc.
+    const st = this.#stagedByDoc.get(_docId);
+    if (!st) {
+      if (validPathOut) validPathOut.splice(0, validPathOut.length, ...[]);
+      return undefined;
+    }
+    const js = AM.toJS(st.pendingDoc) as unknown;
+    const { value, valid } = utilGetAtPathWithPrefix(js, _path);
+    if (validPathOut) {
+      validPathOut.splice(0, validPathOut.length, ...valid);
+    }
+    return value;
   }
 
   write(
@@ -112,13 +126,79 @@ export class ClientTransaction {
       };
       this.#stagedByDoc.set(docId, st);
     }
-    // For now, only support root path writes; apply mutate to whole doc for preview
-    st.pendingDoc = AM.change(st.pendingDoc, (d: any) => {
-      mutate(d);
+    // Navigate to the requested path inside the Automerge doc.
+    let ok = false;
+    let lastValid: string[] = [];
+    st.pendingDoc = AM.change(st.pendingDoc, (root: any) => {
+      if (path.length === 0) {
+        ok = true;
+        lastValid = [];
+        mutate(root);
+        return;
+      }
+      let cur: unknown = root;
+      const valid: string[] = [];
+      for (let i = 0; i < path.length; i++) {
+        const key = path[i]!;
+        if (cur == null || typeof cur !== "object") break;
+        // Automerge maps/arrays are proxied objects; treat numeric tokens as
+        // array indices when applicable.
+        const idx = Number.isInteger(Number(key)) ? Number(key) : undefined;
+        if (
+          Array.isArray(cur) && idx !== undefined && idx >= 0 &&
+          idx < cur.length
+        ) {
+          cur = (cur as unknown[])[idx];
+          valid.push(key);
+          continue;
+        }
+        const obj = cur as Record<string, unknown>;
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          cur = obj[key];
+          valid.push(key);
+          continue;
+        }
+        // Missing segment → stop
+        break;
+      }
+      lastValid = valid;
+      if (valid.length === path.length) {
+        ok = true;
+        // Re-traverse to obtain a fresh writable sub-proxy and call mutate
+        let sub: unknown = root;
+        for (const k of path) {
+          const idx2 = Number.isInteger(Number(k)) ? Number(k) : undefined;
+          if (Array.isArray(sub) && idx2 !== undefined) {
+            sub = (sub as unknown[])[idx2];
+          } else sub = (sub as Record<string, unknown>)[k];
+        }
+        mutate(sub);
+      }
     });
-    st.mutations.push(mutate as (d: any) => void);
+    if (validPathOut) {
+      validPathOut.splice(0, validPathOut.length, ...lastValid);
+    }
+    if (!ok) return false;
+    // Record mutation for commit time: a closure that applies the same write
+    // to an arbitrary Automerge doc (the server baseline copy).
+    const mfn = (doc: any) => {
+      if (path.length === 0) {
+        mutate(doc);
+        return;
+      }
+      let cur: unknown = doc;
+      for (const key of path) {
+        const idx = Number.isInteger(Number(key)) ? Number(key) : undefined;
+        if (Array.isArray(cur) && idx !== undefined) {
+          cur = (cur as unknown[])[idx];
+        } else {
+          cur = (cur as Record<string, unknown>)[key];
+        }
+      }
+      mutate(cur);
+    };
+    st.mutations.push(mfn);
     this.log.push({ space, docId, path: path.slice(), op: "write" });
-    if (validPathOut) validPathOut.splice(0, validPathOut.length, ...[]);
     return true;
   }
 
@@ -204,3 +284,5 @@ export class ClientTransaction {
     this.#stagedByDoc.clear();
   }
 }
+
+// removed local helper in favor of ./path.ts utilities

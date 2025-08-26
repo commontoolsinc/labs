@@ -796,7 +796,7 @@ Spec: `docs/specs/storage/20-client-library.md`.
 
 Implementation plan (phased):
 
-- [ ] Client core scaffolding
+- [x] Client core scaffolding
   - [ ] Create `packages/storage/src/client/` with modules:
     - `connection.ts`: per-space socket manager (hello/resume, acks, queue)
     - `store.ts`: per-space/doc server head + pending chain + composed view
@@ -805,15 +805,15 @@ Implementation plan (phased):
     - `tx.ts`: transaction object (read/write/log/commit/abort, single-space
       writes)
     - `index.ts`: public API (StorageClient, Transaction)
-  - [ ] Types: reuse `src/ws/protocol.ts`; add narrow client types
+  - [x] Types: reuse `src/ws/protocol.ts`; add narrow client types
 
-- [ ] Wire protocol integration
-  - [ ] Connect to `/api/storage/new/v2/:space/ws` (optional Authorization)
-  - [ ] Send `/storage/hello { clientId, sinceEpoch }` on connect/reconnect
-  - [ ] Implement `/storage/get` and `/storage/subscribe` with completion
+- [x] Wire protocol integration
+  - [x] Connect to `/api/storage/new/v2/:space/ws` (optional Authorization)
+  - [x] Send `/storage/hello { clientId, sinceEpoch }` on connect/reconnect
+  - [x] Implement `/storage/get` and `/storage/subscribe` with completion
         pairing
-  - [ ] Handle `Deliver { snapshot|delta }` and `Ack { epoch }`
-  - [ ] `subscribe(...)` returns a Promise that resolves after initial
+  - [x] Handle `Deliver { snapshot|delta }` and `Ack { epoch }`
+  - [x] `subscribe(...)` returns a Promise that resolves after initial
         `complete`
 
 - [ ] Client-side document store
@@ -824,22 +824,22 @@ Implementation plan (phased):
   - [ ] Associate a local pending-head marker with each tx's writes for reads
 
 - [ ] Transaction engine
-  - [ ] `read(space, docId, path, nolog=false, validPathOut?)` returns composed
+  - [x] `read(space, docId, path, nolog=false, validPathOut?)` returns composed
         view; fills `validPathOut` with longest valid prefix; `undefined` for
         invalid subpath
-  - [ ] `write(space, docId, path, mutate, validPathOut?)` returns boolean; on
+  - [x] `write(space, docId, path, mutate, validPathOut?)` returns boolean; on
         first write bind tx to a single space; stage Automerge change at `path`
   - [ ] `commit()`:
-    - [ ] If no writes: resolve ok; do not contact server (no tx id)
-    - [ ] If only writes: set `allowServerMerge = true`
-    - [ ] Build WSTxRequest with `baseHeads` from server head; send
+    - [x] If no writes: resolve ok; do not contact server (no tx id)
+    - [x] If only writes: set `allowServerMerge = true`
+    - [x] Build WSTxRequest with `baseHeads` from server head; send
           `/storage/tx`
     - [ ] On `ok`: advance server head/epoch, prune pending for this tx
     - [ ] On `conflict|rejected`: rollback pending for this tx and cascade
-  - [ ] `abort()` removes staged writes and invalidates the tx
+  - [x] `abort()` removes staged writes and invalidates the tx
   - [ ] Read-set tracking and invalidation (conservative doc-level policy)
   - [ ] Dependency tracking and cascade rejection when depended-upon tx rejects
-  - [ ] New doc genesis: use `createGenesisDoc`/`computeGenesisHead` for first
+  - [x] New doc genesis: use `createGenesisDoc`/`computeGenesisHead` for first
         write baseHeads
 
 - [ ] Scheduler notifications
