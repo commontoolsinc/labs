@@ -6,21 +6,22 @@ This command provides an interactive tour of the Common Tools platform repositor
 
 **Everyone starts here to get oriented:**
 
-**Step 1: Platform Foundation**
-- Read `README.md` together to understand what Common Tools is
-- Focus on "What is Common Tools?" section for core concepts  
-- Review architecture overview of packages
-- Understand development practices section
+**Step 1: What is Common Tools? (Start small)**
+- Read only the "What is Common Tools?" section from README.md
+- Quote the key description to the user
+- Ask: "What's your first reaction to this description?"
+- Wait for their response before proceeding
 
-**Step 2: Repository Structure**
-- List packages: `ls packages/`
-- Get oriented with the monorepo layout  
-- Understand the relationship between packages
+**Step 2: Follow their curiosity from Step 1**
+- If they're interested in "recipes" → show recipe-related architecture
+- If they're interested in "distributed" → show backend architecture  
+- If they're interested in "collaboration" → show spaces and charms
+- If they want to see the big picture → show full architecture section
 
-**Step 3: Commands Overview**
-- List `.claude/commands/` contents
-- Read `.claude/commands/README.md` for workflow overview
-- Understand what automation and assistance is available
+**Step 3: Practical next steps based on their interest**
+- Show only relevant commands/packages for what caught their attention
+- Ask what they'd like to explore next
+- Offer 2-3 focused options rather than everything
 
 ## Choose Your Adventure
 
@@ -116,19 +117,26 @@ After completing the foundation, ask the user what they're most curious about:
 
 ## Notes for Claude
 
-**Critical: This is a guided discovery experience, not a lecture:**
+**Critical: This is a guided discovery experience, not a fire-hose lecture:**
 
-- **Read WITH the user, not FOR them** - Say "Let's read README.md together" then ask them to look at specific sections you both just saw
-- **Ask questions about what THEY see** - "What do you notice about the architecture section?" rather than explaining it
-- **Let them discover and react** - After reading files together, ask "What interests you most from what we just saw?"
-- **Guide, don't summarize** - Point to sections in files rather than repeating their content
-- **Follow their curiosity** - If they get excited about something, explore that direction
-- **Encourage exploration** - "What do you think that package does? Let's look at its README together"
+- **Start tiny and build** - Don't read multiple files at once. Start with one small section
+- **Quote small chunks** - Show 2-3 sentences from files, not entire sections  
+- **Wait for their reaction** - After each quote, ask what they think and WAIT for response
+- **Follow their energy** - Only show more based on what sparked their curiosity
+- **Never charge ahead** - Resist the urge to show everything; be patient and responsive
+- **Let silence be OK** - Give them time to process and respond
 
 **Example flow:**
-1. "Let's read README.md together" → user and Claude both see the content
-2. "Looking at what we just read, what caught your attention most?"  
-3. User responds with interest → follow that thread
-4. "Great! Let's explore that by looking at [specific file/directory] together"
+1. Read just the "What is Common Tools?" section from README.md
+2. Quote the first paragraph: "Common Tools is a new distributed computing platform..."  
+3. Ask: "What's your first reaction to this?"
+4. Wait for user response
+5. Based on their response, show ONLY the next relevant small piece
+6. Repeat this cycle
+
+**What NOT to do:**
+- Don't read README.md + list packages + read commands README all at once
+- Don't summarize what you found after reading files
+- Don't offer 6 different paths; offer 2-3 based on their actual interest
 
 **Key principle:** The user should feel like they're discovering things themselves with Claude as a helpful guide, not receiving a presentation.
