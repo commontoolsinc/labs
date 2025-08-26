@@ -3,6 +3,7 @@ import { Engine } from "@commontools/runner";
 import { join } from "@std/path/join";
 import { getCompilerOptions } from "@commontools/js-runtime/typescript";
 import { StaticCache } from "@commontools/static";
+import { dirname } from "@std/path/dirname";
 
 export const init = new Command()
   .name("init")
@@ -75,6 +76,8 @@ function createTsConfig() {
 // containing types for the imported stdlib (`commontools`), the
 // implicitly loaded jsx-runtime (`react/jsx-runtime`) and the
 // environment types (`commontoolsenv`) loaded by the `tsconfig.json`.
+//
+// Also copies recipe documentation from docs/common to .ct-docs for reference.
 async function initWorkspace(cwd: string) {
   const cache = new StaticCache();
   const runtimeModuleTypes = await Engine.getRuntimeModuleTypes(
@@ -115,4 +118,31 @@ async function initWorkspace(cwd: string) {
     join(cwd, "tsconfig.json"),
     JSON.stringify(createTsConfig(), null, 2),
   );
+
+  // Copy recipe documentation files to .ct-docs folder
+  try {
+    const ctDocsPath = join(cwd, ".ct-docs");
+    await Deno.mkdir(ctDocsPath, { recursive: true });
+
+    // In compiled binary, docs are bundled and accessible relative to the binary location
+    const currentFilePath = import.meta.url;
+    const currentDir = dirname(new URL(currentFilePath).pathname);
+    const docsCommonPath = join(currentDir, "..", "..", "..", "docs", "common");
+    
+    // Copy each documentation file dynamically
+    try {
+      for await (const entry of Deno.readDir(docsCommonPath)) {
+        if (entry.isFile) {
+          const sourcePath = join(docsCommonPath, entry.name);
+          const targetPath = join(ctDocsPath, entry.name);
+          const content = await Deno.readTextFile(sourcePath);
+          await Deno.writeTextFile(targetPath, content);
+        }
+      }
+    } catch (dirError) {
+      console.warn("Warning: Could not read docs directory:", dirError.message);
+    }
+  } catch (error) {
+    console.warn("Warning: Could not copy recipe documentation:", error.message);
+  }
 }
