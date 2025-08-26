@@ -1,50 +1,69 @@
 # Common Tools Platform
 
-**Common Labs** - Radioactive experiments. Turn back! You will find no API stability here.
+**Common Labs** - Radioactive experiments. Turn back! You will find no API
+stability here.
 
 ![A loom, by Midjourney](./docs/images/loom.jpg)
 
 ## What is Common Tools?
 
-Common Tools is a new distributed computing platform that provides a runtime and storage mechanism with privacy features for collaboration. It enables users to understand and control every interaction in terms of information flow.
+Common Tools is a new distributed computing platform that provides a runtime and
+storage mechanism with privacy features for collaboration. It enables users to
+understand and control every interaction in terms of information flow.
 
 ### Core Concepts
 
-**Recipes** are reactive programs that can be linked together to create data and program networks. They're written in TypeScript/JSX and run in a secure sandbox environment. Recipes can:
+**Recipes** are reactive programs that can be linked together to create data and
+program networks. They're written in TypeScript/JSX and run in a secure sandbox
+environment. Recipes can:
+
 - Process and transform data
 - Render interactive UIs using `ct-` prefixed components
 - React to changes from linked recipes
 - Connect to external APIs
 
-**Charms** are deployed instances of recipes running in CommonTools spaces. Charms can be linked together to create complex workflows where data flows automatically between connected components.
+**Charms** are deployed instances of recipes running in CommonTools spaces.
+Charms can be linked together to create complex workflows where data flows
+automatically between connected components.
 
-**Spaces** are collaborative environments where charms live and interact. Users can run their own spaces or use hosted versions.
+**Spaces** are collaborative environments where charms live and interact. Users
+can run their own spaces or use hosted versions.
 
 ## Quick Start (Development)
 
-Check out the repo, install `deno` and `claude` and then run `/onboarding` within Claude Code.
+Check out the repo, install `deno` and `claude` and then run `/onboarding`
+within Claude Code.
 
 ## Architecture
 
 This is a multi-package monorepo with several key components:
 
-**Backend ([Toolshed](./packages/toolshed))**: The hosted platform backend, written in Deno2, that provides the distributed runtime and storage.
+**Backend ([Toolshed](./packages/toolshed))**: The hosted platform backend,
+written in Deno2, that provides the distributed runtime and storage.
 
-**Frontend ([Shell](./packages/shell))**: A web client interface written with Lit Web Components for interacting with CommonTools spaces.
+**Frontend ([Shell](./packages/shell))**: A web client interface written with
+Lit Web Components for interacting with CommonTools spaces.
 
-**CLI (CT Binary)**: Command-line interface for managing charms, linking recipes, and deploying to spaces. See [CT Usage Guide](./.claude/commands/common/ct.md).
+**CLI (CT Binary)**: Command-line interface for managing charms, linking
+recipes, and deploying to spaces. See
+[CT Usage Guide](./.claude/commands/common/ct.md).
 
-**UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-` prefixed components for recipe UIs.
+**UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
+prefixed components for recipe UIs.
 
-**Examples & Patterns ([packages/patterns](./packages/patterns))**: Example recipes and common patterns for building with CommonTools.
+**Examples & Patterns ([packages/patterns](./packages/patterns))**: Example
+recipes and common patterns for building with CommonTools.
 
-**Recipe Development**: Recipes can be developed using LLM assistance with commands like `/imagine-recipe`, `/recipe-dev`, and `/explore-recipe`.
+**Recipe Development**: Recipes can be developed using LLM assistance with
+commands like `/imagine-recipe`, `/recipe-dev`, and `/explore-recipe`.
 
 ## Development & Integrations
 
 ### Claude Code Commands
 
-This repository includes many Claude Code commands in [`.claude/commands/`](./.claude/commands/) for common workflows:
+This repository includes many Claude Code commands in
+[`.claude/commands/`](./.claude/commands/) for common workflows:
+
 - `/recipe-dev` - Work on existing recipes with LLM assistance
 - `/imagine-recipe` - Create new recipes from ideas
 - `/explore-recipe` - Test recipes interactively with Playwright
@@ -55,9 +74,12 @@ This repository includes many Claude Code commands in [`.claude/commands/`](./.c
 ### Dependencies & Integrations
 
 **Required**:
-- [Deno 2](https://docs.deno.com/runtime/getting_started/installation/) - Runtime for backend and tooling
+
+- [Deno 2](https://docs.deno.com/runtime/getting_started/installation/) -
+  Runtime for backend and tooling
 
 **Recommended Integrations**:
+
 - [GitHub CLI](https://github.com/cli/cli) - For PR and issue workflows
 - [Claude Code MCP integrations](./deps.md):
   - Linear Server MCP for task management
