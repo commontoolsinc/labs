@@ -7,6 +7,8 @@
 - API URL: `https://toolshed.saga-castor.ts.net/`
 - Space: Your choice (e.g., `2025-wiki`, `2024-07-15-claude-dev`)
 
+When gathering this information from the user, consider saving `.common.json` and reading it next time to shortcut the process.
+
 ```bash
 # READ data from charm
 ./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [your-space] --charm [charm-id] [path]
@@ -26,7 +28,7 @@ echo '[json-data]' | ./dist/ct charm call --identity claude.key --api-url https:
 
 **When to use each:**
 - **GET**: Read any data from charm
-- **SET**: Directly modify specific values (simple, fast)  
+- **SET**: Directly modify specific values (simple, fast)
 - **CALL**: Use charm's handlers (for complex operations, validation, side effects)
 - **LS**: Discover what charms exist in a space
 - **NEW**: Deploy a recipe as a new charm
@@ -38,7 +40,7 @@ echo '[json-data]' | ./dist/ct charm call --identity claude.key --api-url https:
 ./dist/ct charm get [params] --charm [id] items/0/name
 ./dist/ct charm get [params] --charm [id] config/database/host
 
-# Set specific values  
+# Set specific values
 echo '"New Title"' | ./dist/ct charm set [params] --charm [id] title
 echo 'true' | ./dist/ct charm set [params] --charm [id] items/0/done
 echo '{"host": "localhost"}' | ./dist/ct charm set [params] --charm [id] config/database
@@ -62,7 +64,7 @@ echo '{"key": "page", "value": "content"}' | ./dist/ct charm call [params] --cha
 - If missing: Run `./dist/ct id new > claude.key`
 
 **Recipe development setup:**
-- Navigate to your recipes repository 
+- Navigate to your recipes repository
 - Run `./dist/ct init` to set up TypeScript types for recipe development
 - This creates/updates tsconfig.json and provides proper type definitions
 
@@ -80,7 +82,7 @@ Set these to shorten commands:
 # Test recipe syntax
 ./dist/ct dev [recipe-path] --no-run
 
-# Test recipe execution  
+# Test recipe execution
 ./dist/ct dev [recipe-path]
 
 # Get recipe source from deployed charm
@@ -123,7 +125,7 @@ echo '[value]' | ./dist/ct charm set [params] --charm [id] [path] --input
 # Link charm output to another charm's input
 ./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] [source-charm]/[field] [target-charm]/[input-field]
 
-# Link well-known ID to charm input  
+# Link well-known ID to charm input
 ./dist/ct charm link --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space [space] [well-known-id] [target-charm]/[input-field]
 ```
 
