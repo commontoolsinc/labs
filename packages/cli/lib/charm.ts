@@ -15,13 +15,7 @@ import {
   CharmManager,
   extractUserCode,
 } from "@commontools/charm";
-import {
-  CharmsController,
-  getCharmInput,
-  getCharmResult,
-  setCharmInput,
-  setCharmResult,
-} from "@commontools/charm/ops";
+import { CharmsController } from "@commontools/charm/ops";
 import { join } from "@std/path";
 import { CliProgram } from "./dev.ts";
 import { ValidationError } from "@cliffy/command";
@@ -420,8 +414,8 @@ export async function inspectCharm(
   const id = charm.id;
   const name = charm.name();
   const recipeName = (await charm.getRecipeMeta()).recipeName;
-  const source = charm.getInput();
-  const result = charm.getResult();
+  const source = charm.input.get() as Readonly<Charm>;
+  const result = charm.result.get() as Readonly<Charm>;
   const readingFrom = charm.readingFrom().map((charm) => ({
     id: charm.id,
     name: charm.name(),
@@ -480,10 +474,12 @@ export async function getCellValue(
   options?: { input?: boolean },
 ): Promise<unknown> {
   const manager = await loadManager(config);
+  const charms = new CharmsController(manager);
+  const charm = await charms.get(config.charm);
   if (options?.input) {
-    return await getCharmInput(manager, config.charm, path);
+    return charm.input.get(path);
   } else {
-    return await getCharmResult(manager, config.charm, path);
+    return charm.result.get(path);
   }
 }
 
@@ -494,10 +490,12 @@ export async function setCellValue(
   options?: { input?: boolean },
 ): Promise<void> {
   const manager = await loadManager(config);
+  const charms = new CharmsController(manager);
+  const charm = await charms.get(config.charm);
   if (options?.input) {
-    await setCharmInput(manager, config.charm, path, value);
+    await charm.input.set(value, path);
   } else {
-    await setCharmResult(manager, config.charm, path, value);
+    await charm.result.set(value, path);
   }
 }
 

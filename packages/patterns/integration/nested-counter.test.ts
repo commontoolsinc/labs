@@ -1,10 +1,9 @@
 import { env, Page, waitFor } from "@commontools/integration";
-import { CharmsController } from "@commontools/charm/ops";
+import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import { getCharmResult, setCharmResult } from "@commontools/charm/ops";
 import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -16,6 +15,7 @@ describe("nested counter integration test", () => {
   let charmId: string;
   let identity: Identity;
   let cc: CharmsController;
+  let charm: CharmController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -24,7 +24,7 @@ describe("nested counter integration test", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const charm = await cc.create(
+    charm = await cc.create(
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
@@ -33,7 +33,6 @@ describe("nested counter integration test", () => {
         ),
       ),
     );
-    charmId = charm.id;
   });
 
   afterAll(async () => {
@@ -45,7 +44,7 @@ describe("nested counter integration test", () => {
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       spaceName: SPACE_NAME,
-      charmId,
+      charmId: charm.id,
       identity,
     });
 
@@ -61,8 +60,7 @@ describe("nested counter integration test", () => {
     assertEquals(initialText?.trim(), "Counter is the 0th number");
 
     // Verify via direct operations that the nested structure works
-    const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
-    assertEquals(value, 0);
+    assertEquals(charm.result.get(["value"]), 0);
   });
 
   it("should click the increment button and update the counter", async () => {
@@ -79,7 +77,7 @@ describe("nested counter integration test", () => {
 
     // Wait for charm result update
     await waitFor(async () => {
-      return (await getCharmResult(cc!.manager(), charmId, ["value"])) === 1;
+      return await charm.result.get(["value"]) === 1;
     });
     await waitForCounter(page, "Counter is the 1st number");
   });
@@ -89,17 +87,20 @@ describe("nested counter integration test", () => {
     const manager = cc!.manager();
 
     // Set value to 5 via direct operation
-    await setCharmResult(manager, charmId, ["value"], 5);
+    await charm.result.set(5, ["value"]);
 
     // Verify we can read the value back via operations
-    const updatedValue = await getCharmResult(manager, charmId, ["value"]);
-    assertEquals(updatedValue, 5, "Value should be 5 in backend");
+    assertEquals(
+      charm.result.get(["value"]),
+      5,
+      "Value should be 5 in backend",
+    );
 
     // Navigate to the charm to see if UI reflects the change
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       spaceName: SPACE_NAME,
-      charmId,
+      charmId: charm.id,
       identity,
     });
 

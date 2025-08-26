@@ -7,7 +7,7 @@ import {
   TYPE,
 } from "@commontools/runner";
 import { Charm, charmId, CharmManager, processSchema } from "../manager.ts";
-import { compileProgram } from "./utils.ts";
+import { CellPath, compileProgram, resolveCellPath } from "./utils.ts";
 import { injectUserCode } from "../iframe/static.ts";
 import {
   buildFullRecipe,
@@ -15,10 +15,66 @@ import {
   IFrameRecipe,
 } from "../iframe/recipe.ts";
 
+interface CharmCellIo {
+  get(path?: CellPath): unknown;
+  set(value: unknown, path?: CellPath): Promise<void>;
+}
+
+type CharmPropIoType = "result" | "input";
+
+class CharmPropIo implements CharmCellIo {
+  #cc: CharmController;
+  #type: CharmPropIoType;
+  constructor(cc: CharmController, type: CharmPropIoType) {
+    this.#cc = cc;
+    this.#type = type;
+  }
+
+  get(path?: CellPath) {
+    const targetCell = this.#getTargetCell();
+    return resolveCellPath(targetCell, path ?? []);
+  }
+
+  async set(value: unknown, path?: CellPath) {
+    const manager = this.#cc.manager();
+    const tx = manager.runtime.edit();
+    const targetCell = this.#getTargetCell();
+
+    // Build the path with transaction context
+    let txCell = targetCell.withTx(tx);
+    for (const segment of (path ?? [])) {
+      txCell = txCell.key(segment);
+    }
+
+    // Set the value
+    // FIXME: types
+    // Charm input is not a Charm
+    txCell.set(value as Charm);
+    const result = await tx.commit();
+    if (result.error) {
+      throw result.error;
+    }
+    await manager.runtime.idle();
+    await manager.synced();
+  }
+
+  #getTargetCell(): Cell<Charm> {
+    if (this.#type === "input") {
+      return this.#cc.manager().getArgument(this.#cc.getCell());
+    } else if (this.#type === "result") {
+      return this.#cc.getCell();
+    }
+    throw new Error(`Unknown property type "${this.#type}"`);
+  }
+}
+
 export class CharmController {
   #cell: Cell<Charm>;
   #manager: CharmManager;
   readonly id: string;
+
+  input: CharmCellIo;
+  result: CharmCellIo;
 
   constructor(manager: CharmManager, cell: Cell<Charm>) {
     const id = charmId(cell);
@@ -28,6 +84,8 @@ export class CharmController {
     this.id = id;
     this.#manager = manager;
     this.#cell = cell;
+    this.input = new CharmPropIo(this, "input");
+    this.result = new CharmPropIo(this, "result");
   }
 
   name(): string | undefined {
@@ -41,14 +99,6 @@ export class CharmController {
   async setInput(input: object): Promise<void> {
     const recipe = await this.getRecipe();
     await execute(this.#manager, this.id, recipe, input);
-  }
-
-  getInput() {
-    return this.#manager.getArgument(this.#cell).get();
-  }
-
-  getResult() {
-    return this.#cell.get();
   }
 
   async getRecipe(): Promise<Recipe> {
@@ -104,6 +154,10 @@ export class CharmController {
     return this.#manager.getReadByCharms(this.#cell).map((cell) =>
       new CharmController(this.#manager, cell)
     );
+  }
+
+  manager(): CharmManager {
+    return this.#manager;
   }
 }
 

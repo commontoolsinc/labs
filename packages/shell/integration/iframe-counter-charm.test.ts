@@ -20,7 +20,7 @@ import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
 import type { ElementHandle } from "@astral/astral";
 import { Identity } from "@commontools/identity";
-import { CharmsController } from "@commontools/charm/ops";
+import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { type XAppView } from "../src/views/AppView.ts";
 import { Charm } from "@commontools/charm";
 
@@ -80,7 +80,7 @@ async function getCharmResult(page: Page): Promise<Charm> {
     const charmController = activeCharmTask.value;
 
     // Get the result from the charm controller
-    const result = charmController.getResult();
+    const result = charmController.result.get() as Charm;
 
     return result;
   });
@@ -93,6 +93,7 @@ describe("shell iframe counter tests", () => {
   let charmId: string;
   let identity: Identity;
   let cc: CharmsController;
+  let charm: CharmController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -101,7 +102,7 @@ describe("shell iframe counter tests", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const charm = await cc.create(
+    charm = await cc.create(
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
@@ -109,7 +110,6 @@ describe("shell iframe counter tests", () => {
         ),
       ),
     );
-    charmId = charm.id;
   });
 
   afterAll(async () => {
@@ -121,7 +121,7 @@ describe("shell iframe counter tests", () => {
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       spaceName: SPACE_NAME,
-      charmId,
+      charmId: charm.id,
       identity,
     });
 
@@ -172,7 +172,7 @@ describe("shell iframe counter tests", () => {
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       spaceName: SPACE_NAME,
-      charmId,
+      charmId: charm.id,
       identity,
     });
 
