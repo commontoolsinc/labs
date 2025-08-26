@@ -128,7 +128,7 @@ async function initWorkspace(cwd: string) {
     const currentFilePath = import.meta.url;
     const currentDir = dirname(new URL(currentFilePath).pathname);
     const docsCommonPath = join(currentDir, "..", "..", "..", "docs", "common");
-    
+
     // Copy each documentation file dynamically
     try {
       for await (const entry of Deno.readDir(docsCommonPath)) {
@@ -140,9 +140,15 @@ async function initWorkspace(cwd: string) {
         }
       }
     } catch (dirError) {
-      console.warn("Warning: Could not read docs directory:", dirError instanceof Error ? dirError.message : String(dirError));
+      console.warn(
+        "Warning: Could not read docs directory:",
+        dirError instanceof Error ? dirError.message : String(dirError),
+      );
     }
   } catch (error) {
-    console.warn("Warning: Could not copy recipe documentation:", error instanceof Error ? error.message : String(error));
+    console.warn(
+      "Warning: Could not copy recipe documentation:",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
