@@ -1,224 +1,151 @@
 # Common Tools Repository Onboarding Tour
 
-This command provides an interactive tour of the Common Tools platform repository, helping new contributors understand the codebase architecture, key concepts, and development workflows.
+This command provides an interactive tour of the Common Tools platform repository, helping new contributors understand where to find information and how to navigate the codebase effectively.
 
 ## Tour Overview
 
-This tour will guide you through:
+This tour will guide you through key information sources in order:
 
-1. **Understanding Common Tools** - What the platform is and how it works
-2. **Repository Architecture** - Key packages and their roles  
-3. **Recipe Development** - The core programming model
-4. **Available Claude Commands** - Workflow automation and assistance
+1. **Platform Overview** - Main README and core concepts
+2. **Architecture Understanding** - Package structure and roles
+3. **Recipe Development** - Programming model and workflows  
+4. **Available Workflows** - Claude commands and automation
 5. **Development Setup** - Getting started with contributions
-6. **Integration Capabilities** - Available tools and connections
+6. **Integration Options** - Available tools and connections
 
 ## Interactive Tour Script
 
-### STEP 1: Understanding Common Tools Platform
+### STEP 1: Platform Overview
 
-**Explain the core concepts:**
+**Read the main README together:**
+- Open and review `README.md`
+- Focus on "What is Common Tools?" section
+- Review architecture overview of packages
+- Discuss development practices section
 
-Common Tools is a distributed computing platform where users create and connect reactive programs called **recipes**. These recipes run as **charms** in collaborative **spaces**.
+**Ask user about their interest area:**
+- Recipe development and building applications?
+- Platform development and contributing to core?
+- Integration development and extending capabilities?
 
-**Key concepts to understand:**
-- **Recipes**: Reactive TypeScript/JSX programs that process data and render UIs
-- **Charms**: Deployed instances of recipes running in spaces
-- **Spaces**: Collaborative environments where charms interact
-- **Linking**: How charms share data and create workflows
-- **CT Binary**: CLI tool for managing charms and deployments
+### STEP 2: Architecture Understanding
 
-**Show the user the main README:**
-- Read and explain `/README.md`
-- Highlight the "What is Common Tools?" section
-- Explain the architecture overview
+**Package exploration:**
+- List packages: `ls packages/`
+- For each major package, open its README:
+  - `packages/toolshed/README.md` - Backend runtime
+  - `packages/shell/README.md` - Frontend interface  
+  - `packages/ui/README.md` - UI components
+  - `packages/patterns/README.md` - Examples and patterns
 
-**Visual example from repository structure:**
-- Show `packages/patterns/` for recipe examples
-- Point to `packages/ui/` for available components
-- Reference `recipes/` folder (if provided) for user's recipe development
+**Visual repository structure:**
+- Show `packages/patterns/` contents for recipe examples
+- Point to recipe development folder (if provided)
+- Explain monorepo organization
 
-### STEP 2: Repository Architecture Deep Dive
+### STEP 3: Recipe Development Resources
 
-**Core packages explanation:**
+**Key documentation to bookmark:**
+- `.claude/commands/common/ct.md` - Essential CT binary usage
+- `.claude/commands/recipe-dev.md` - Recipe development workflow
+- `.claude/commands/imagine-recipe.md` - Creating new recipes
 
-**Backend - Toolshed (`./packages/toolshed/`):**
-- Distributed runtime and storage backend
-- Written in Deno2
-- Hosts spaces and manages charm execution
-- Development: `cd ./packages/toolshed && deno task dev`
+**Recipe development files to find (in recipes folder if available):**
+- `RECIPES.md` - Core patterns and examples
+- `COMPONENTS.md` - Available UI components  
+- `HANDLERS.md` - Event handling patterns
 
-**Frontend - Shell (`./packages/shell/`):**
-- Web interface for interacting with spaces
-- Built with Lit Web Components  
-- Development: `cd ./packages/shell && deno task dev`
-- Default: http://localhost:5173 → http://localhost:8000
+**Show patterns package:**
+- Browse `packages/patterns/` for examples
+- Identify reusable components and patterns
 
-**CLI - CT Binary:**
-- Command-line interface for charm management
-- Built with: `deno task build-binaries --cli-only`
-- Essential for recipe development and deployment
-- See detailed usage: [`.claude/commands/common/ct.md`](./.claude/commands/common/ct.md)
+### STEP 4: Available Claude Commands
 
-**UI Components (`./packages/ui/`):**
-- Custom VDOM layer and `ct-` prefixed components
-- Used by recipes for rendering interfaces
-- Provides consistent visual elements
+**Tour the commands directory:**
+- List `.claude/commands/` contents
+- Read `.claude/commands/README.md` for overview
+- Group commands by category:
 
-**Patterns & Examples (`./packages/patterns/`):**
-- Example recipes and reusable patterns
-- Reference implementations
-- Starting point for new recipe development
+**Recipe Development:**
+- `/recipe-dev`, `/imagine-recipe`, `/explore-recipe`
 
-### STEP 3: Recipe Development Understanding
+**Setup and Infrastructure:**  
+- `/deps`, `/setup-space`, `/common/ct`
 
-**What are recipes?**
-- Reactive programs written in TypeScript/JSX
-- Run in secure sandboxed environments
-- Can link to other recipes to create data flows
-- Render UIs using `ct-` prefixed components
-
-**Recipe development workflow:**
-1. **Create/modify** recipes using TypeScript/JSX
-2. **Deploy** as charms using CT binary
-3. **Link** charms together to create workflows  
-4. **Test** and iterate with browser interfaces
-
-**Key development files to reference:**
-- `RECIPES.md` (in recipes folder) - Core patterns and examples
-- `COMPONENTS.md` (in recipes folder) - Available UI components
-- `HANDLERS.md` (in recipes folder) - Event handling patterns
-
-**Recipe types and patterns:**
-- **Filter recipes**: Process collections, output filtered subsets
-- **Transformer recipes**: Convert data between formats
-- **Aggregator recipes**: Combine multiple inputs
-- **UI recipes**: Provide interactive interfaces
-- **Integration recipes**: Connect to external APIs
-
-### STEP 4: Available Claude Commands Overview
-
-**Show and explain the `.claude/commands/` directory structure:**
-
-**Recipe Development Commands:**
-- `/recipe-dev` - Interactive recipe development and modification
-- `/imagine-recipe` - Create new recipes from natural language descriptions
-- `/explore-recipe` - Test recipes with Playwright browser automation
-
-**Setup and Infrastructure:**
-- `/deps` - Dependency and integration setup guide
-- `/setup-space` - CommonTools space initialization
-- `/common/ct` - Essential CT binary usage patterns
-
-**Workflow and Task Management:**
-- `/linear` - Linear task management integration
-- `/fix-issue` - GitHub issue resolution workflow
-- `/fix-pr` - Pull request improvement workflow
-- `/review-code` - Code review assistance
+**Workflow Management:**
+- `/linear`, `/fix-issue`, `/fix-pr`, `/review-code`
 
 **Research and Documentation:**
-- `/research` - Codebase investigation and analysis
-- `/maintain-docs` - Documentation maintenance
-- `/search-wiki` - Knowledge base searching
+- `/research`, `/maintain-docs`, `/search-wiki`
 
-**Explain command usage pattern:**
-- Commands are invoked with `/command-name` in Claude Code
-- Each provides structured workflows for specific tasks
-- Commands can be chained and combined for complex workflows
+### STEP 5: Development Setup
 
-### STEP 5: Development Setup Walkthrough
+**Prerequisites check:**
+- Review `deps.md` for required tools
+- Point to installation guides for missing dependencies
 
-**Prerequisites verification:**
-1. **Check Deno 2 installation:** `deno --version`
-   - If missing: [Installation guide](https://docs.deno.com/runtime/getting_started/installation/)
+**Repository guidelines:**
+- Read `CLAUDE.md` together for coding standards
+- Review CI/CD requirements and testing expectations
+- Understand formatting and contribution guidelines
 
-2. **Verify GitHub CLI (optional but recommended):** `gh --version`
-   - If missing: [GitHub CLI installation](https://github.com/cli/cli)
-
-**Repository setup:**
-1. **Build CT binary:** `deno task build-binaries --cli-only`
-   - This takes a few minutes but is essential
-   - Verify: `./dist/ct --help`
-
-2. **Run tests:** `deno task test`
-   - Ensures repository is working correctly
-
-3. **Type checking:** `deno task check`
-   - Verifies TypeScript compilation
-
-**Recipe development setup (if user has recipes):**
-1. Navigate to recipes repository
-2. Run: `./dist/ct init` - Sets up TypeScript types
-3. This creates/updates tsconfig.json with proper CommonTools types
-
-**Identity and space setup:**
-- Create identity: `./dist/ct id new > claude.key`
-- API URL: `https://toolshed.saga-castor.ts.net/`
-- Choose space name for development work
+**Initial setup steps:**
+- How to build CT binary: `deno task build-binaries --cli-only`
+- How to run tests: `deno task test`
+- How to check types: `deno task check`
 
 ### STEP 6: Integration Capabilities
 
-**Explain available integrations from `deps.md`:**
+**Read integration documentation:**
+- Review `deps.md` for available integrations
+- Understand Claude Code MCP setup options
+- Review GitHub workflow integrations
 
-**Claude Code MCP Integrations:**
-- **Linear Server MCP**: Task and project management
-  - Setup: `claude mcp add --transport sse linear-server https://mcp.linear.app/sse`
-  - Usage: `/linear` command for workflow integration
-  
-- **Playwright MCP**: Browser automation for recipe testing
-  - Setup: `claude mcp add playwright npx '@playwright/mcp@latest'`
-  - Usage: Interactive testing in `/explore-recipe`, `/imagine-recipe`
+**Available development tools:**
+- GitHub CLI for PR/issue workflows
+- Linear MCP for task management
+- Playwright MCP for browser automation
 
-**Development workflow integrations:**
-- **GitHub CLI**: PR and issue management workflows
-- **Git**: Version control with CI/CD integration
-- **Deno**: Runtime, testing, and formatting tools
+### STEP 7: Next Steps Planning
 
-### STEP 7: Next Steps and Pathways
-
-**Based on user interest, suggest appropriate next steps:**
+**Based on user's interests, point to appropriate starting points:**
 
 **For Recipe Development:**
-- Use `/imagine-recipe` to create a first recipe
-- Explore `packages/patterns/` for examples
-- Reference recipe documentation files
-- Set up a development space with `/setup-space`
+- Start with `/setup-space` if needed
+- Use `/imagine-recipe` for first recipe
+- Reference patterns in `packages/patterns/`
 
 **For Platform Development:**
-- Explore individual package README files
-- Run backend: `cd packages/toolshed && deno task dev`
-- Run frontend: `cd packages/shell && deno task dev`
-- Review [CLAUDE.md](./CLAUDE.md) coding guidelines
+- Review individual package READMEs
+- Check `CLAUDE.md` coding guidelines
+- Look at existing issues for contribution opportunities
 
-**For Integration Development:**
-- Check current integrations in `deps.md`
-- Explore MCP capabilities with Claude Code
-- Consider new integration possibilities
+**For Integration Work:**
+- Review current integrations in `deps.md`
+- Explore `.claude/commands/` for automation patterns
 
-**For Research and Understanding:**
-- Use `/research` to investigate specific aspects
-- Read codebase documentation and inline comments
-- Explore existing patterns and implementations
+## Tour Completion
 
-## Tour Completion Checklist
+**Verify understanding of key locations:**
+- [ ] Main `README.md` for platform overview
+- [ ] `CLAUDE.md` for development guidelines
+- [ ] `.claude/commands/` directory for workflows
+- [ ] `packages/` structure and individual READMEs  
+- [ ] `deps.md` for integration setup
+- [ ] Recipe documentation files (if available)
 
-By the end of this tour, users should understand:
-
-- [ ] What Common Tools platform does and how it works
-- [ ] Repository structure and key packages
-- [ ] Recipe development concepts and workflows  
-- [ ] Available Claude commands and their purposes
-- [ ] How to set up development environment
-- [ ] Integration capabilities and setup
-- [ ] Next steps for their specific interests
+**Next action items:**
+- Choose an area of interest
+- Set up development environment
+- Pick first task or experiment
 
 ## Notes for Claude
 
-- **Adapt the tour** based on user's experience level and interests
-- **Reference actual files** in the repository when explaining concepts
-- **Show practical examples** from patterns and existing code
-- **Suggest hands-on activities** like building a first recipe
-- **Connect concepts** between different parts of the platform
-- **Be interactive** - ask questions and get user feedback throughout
+- **This is a guide, not information source** - Always read files with the user rather than explaining from memory
+- **Focus on discovery** - Help user find and understand information locations  
+- **Adapt based on interest** - Spend more time on areas relevant to the user
+- **Be interactive** - Ask questions and let user guide depth of exploration
+- **Reference files directly** - Use Read tool to show actual content
+- **Connect the dots** - Help user understand relationships between different parts
 
-This tour should take 15-30 minutes depending on depth and user questions. Focus on understanding rather than memorization - users can always reference documentation and commands later.
+The goal is teaching navigation and information discovery, not information transfer.
