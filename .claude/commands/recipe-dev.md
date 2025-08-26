@@ -6,7 +6,7 @@ This script guides Claude through recipe development with the `ct` utility after
 
 **Before starting recipe development:**
 - User should have already run the space setup script or have an existing space
-- Claude MUST read the common CT setup instructions in `.claude/commands/common/ct.md`
+- Claude MUST read the common CT setup instructions in `docs/common/CT.md`
 
 ## Script Flow for Claude
 
@@ -27,7 +27,7 @@ This script guides Claude through recipe development with the `ct` utility after
 ### STEP 1: Initial Setup and Context (ONLY if no config provided)
 
 **Read common setup instructions:**
-- First, read `.claude/commands/common/ct.md` for shared CT binary setup
+- First, read `docs/common/CT.md` for shared CT binary setup
 - Follow those instructions for:
   - CT binary check
   - Identity management
@@ -42,7 +42,7 @@ This script guides Claude through recipe development with the `ct` utility after
 
 ### STEP 2: Recipe Development Workflows
 
-Before working on recipes it is recommended to search for `COMPONENTS.md` and `RECIPES.md` files in the `recipes` folder provided by the user.
+Before working on recipes it is recommended to search for `COMPONENTS.md` and `RECIPES.md` files in the `docs/common` folder.
 
 Read `HANDLERS.md` when confused about event handler errors.
 

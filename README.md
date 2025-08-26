@@ -46,7 +46,7 @@ Lit Web Components for interacting with CommonTools spaces.
 
 **CLI (CT Binary)**: Command-line interface for managing charms, linking
 recipes, and deploying to spaces. See
-[CT Usage Guide](./.claude/commands/common/ct.md).
+[CT Usage Guide](./docs/common/CT.md).
 
 **UI Components ([packages/ui](./packages/ui))**: Custom VDOM layer and `ct-`
 prefixed components for recipe UIs.
@@ -55,7 +55,8 @@ prefixed components for recipe UIs.
 recipes and common patterns for building with CommonTools.
 
 **Recipe Development**: Recipes can be developed using LLM assistance with
-commands like `/imagine-recipe`, `/recipe-dev`, and `/explore-recipe`.
+commands like `/imagine-recipe`, `/recipe-dev`, and `/explore-recipe`. See
+[Recipe Documentation](./docs/common/) for patterns, components, and handlers.
 
 ## Development & Integrations
 

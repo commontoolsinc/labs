@@ -14,7 +14,7 @@ When you need to update the wiki, follow these steps:
 
 **Process:**
 
-0. **First, learn how to use ct:** Read .claude/commands/common/ct.md to understand how to use the CommonTools system.
+0. **First, learn how to use ct:** Read docs/common/CT.md to understand how to use the CommonTools system.
 
 1. Choose appropriate page key following naming conventions:
    - Solutions: `[problem-type]-solution` or `fix-[specific-issue]`

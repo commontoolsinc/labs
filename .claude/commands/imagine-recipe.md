@@ -6,10 +6,10 @@ This script guides Claude through creating new CommonTools recipes based on user
 
 **Before starting recipe imagination:**
 - User should have an existing space or have run the space setup script
-- Claude MUST read the common CT setup instructions in `.claude/commands/common/ct.md`
+- Claude MUST read the common CT setup instructions in `docs/common/CT.md`
 
 **Recipe Documentation Reference:**
-Before working on recipes, search for these documentation files in the user's `recipes` folder:
+Before working on recipes, search for these documentation files in the `docs/common` folder:
 - `RECIPES.md` - Core recipe development patterns and examples
 - `COMPONENTS.md` - Available UI components and usage patterns
 - `HANDLERS.md` - Event handler patterns and troubleshooting
@@ -21,7 +21,7 @@ The user provides an initial prompt describing what they want their recipe to do
 ### STEP 1: Initial Setup and Context
 
 **Read common setup instructions:**
-- First, read `.claude/commands/common/ct.md` for shared CT binary setup
+- First, read `docs/common/CT.md` for shared CT binary setup
 - Follow those instructions for CT binary check, identity management, environment setup
 - Collect required parameters (API URL, space name, recipe path, identity file)
 

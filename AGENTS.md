@@ -14,7 +14,7 @@ The instructions in this document apply to the entire repository.
 
 ### `ct` & Common Tools Framework
 
-Before ever calling `ct` you MUST read `.claude/commands/common/ct.md`.
+Before ever calling `ct` you MUST read `docs/common/CT.md`.
 
 ### Recipe Development
 
