@@ -9,87 +9,63 @@ This command provides an interactive tour of the Common Tools platform repositor
 **Step 1: What is Common Tools? (Start small)**
 - Read only the "What is Common Tools?" section from README.md
 - Quote the key description to the user
-- Ask: "What's your first reaction to this description?"
-- Wait for their response before proceeding
+- Immediately offer the four focused paths:
 
-**Step 2: Follow their curiosity from Step 1**
-- If they're interested in "recipes" → show recipe-related architecture
-- If they're interested in "distributed" → show backend architecture  
-- If they're interested in "collaboration" → show spaces and charms
-- If they want to see the big picture → show full architecture section
+"Now that you have the basic idea, what would you like to know more about:
 
-**Step 3: Practical next steps based on their interest**
-- Show only relevant commands/packages for what caught their attention
-- Ask what they'd like to explore next
-- Offer 2-3 focused options rather than everything
+- **Programs that run in this platform** (recipes, charms, UI components)
+- **The runtime that enables information flow analysis and storage** (runner, builder, storage)  
+- **The application layer that users access the platform through** (toolshed, shell, CLI)
+- **The LLM tooling layer** (Claude commands, subagents, and development workflows)
 
-## Choose Your Adventure
+Which of these interests you most?"
 
-After completing the foundation, ask the user what they're most curious about:
+**Step 2: Follow their choice with targeted exploration**
+Based on their choice, dive into only the relevant packages and concepts for that area
 
-### Path A: Recipe Development & Deployment
-*"I want to understand how to build applications with recipes"*
+## Deep Dive Paths
 
-**Journey through:**
-1. **Recipe concepts and examples**
-   - Explore `packages/patterns/` for hands-on examples
-   - Find recipe documentation files (`RECIPES.md`, `COMPONENTS.md`, `HANDLERS.md` in recipes folder)
-   
-2. **CT Binary and deployment workflow**
-   - Read `.claude/commands/common/ct.md` - The essential tool
-   - Understanding spaces, charms, and linking
-   
-3. **Development workflow commands**
-   - `/recipe-dev` - Working with existing recipes
-   - `/imagine-recipe` - Creating new recipes  
-   - `/explore-recipe` - Interactive testing with Playwright
-   
-4. **Hands-on next steps**
-   - Set up development environment
-   - Try `/setup-space` if needed
-   - Build first recipe with `/imagine-recipe`
+Based on the user's choice in Step 2, follow these focused exploration paths:
 
-### Path B: Runtime & Execution Layer  
-*"I want to understand how the runtime works under the hood"*
+### Path A: Programs That Run in the Platform
+*"I chose: Programs that run in this platform (recipes, charms, UI components)"*
 
-**Journey through:**
-1. **Core packages deep dive**
-   - Explore execution-related packages in `packages/`
-   - Understand sandbox execution and security model
-   
-2. **Recipe execution lifecycle**
-   - How recipes are compiled and run
-   - Reactive system and data flow
-   - Linking mechanism internals
-   
-3. **Development setup for runtime work**
-   - Review `CLAUDE.md` for contribution guidelines
-   - Understanding test suite and debugging approaches
-   - Build processes and development workflow
+**Explore in order:**
+1. **What are recipes?** - Quote relevant sections from README about reactive programs
+2. **Recipe examples** - Show a simple example from `packages/patterns/`
+3. **UI components** - Brief look at `packages/ui/` and `ct-` prefixed components
+4. **How recipes become charms** - Deployment and linking concepts
+5. **Development commands** - `/recipe-dev`, `/imagine-recipe`, `/explore-recipe`
 
-### Path C: Application Layer (Toolshed + Shell)
-*"I want to understand the hosted platform and user interfaces"*
+### Path B: Runtime That Enables Information Flow
+*"I chose: The runtime that enables information flow analysis and storage"*
 
-**Journey through:**
-1. **Toolshed backend architecture**
-   - Read `packages/toolshed/README.md`
-   - Understanding distributed storage and runtime hosting
-   - API design and space management
-   
-2. **Shell frontend architecture**  
-   - Read `packages/shell/README.md`
-   - Lit Web Components and UI patterns
-   - How users interact with spaces and charms
-   
-3. **Integration points**
-   - How backend and frontend communicate
-   - API boundaries and data flow
-   - Development setup for full-stack work
-   
-4. **Development workflow**
-   - Running local backend: `cd packages/toolshed && deno task dev`
-   - Running local frontend: `cd packages/shell && deno task dev`
-   - Understanding the development loop
+**Explore in order:**
+1. **Runtime architecture** - Quote architecture sections about distributed runtime
+2. **Core packages** - Look at runner, storage, and execution-related packages
+3. **Information flow concepts** - How data moves and is tracked
+4. **Security model** - Sandbox execution and privacy features
+5. **Development setup** - How to work on runtime components
+
+### Path C: Application Layer Users Access
+*"I chose: The application layer that users access the platform through"*
+
+**Explore in order:**
+1. **Toolshed backend** - Quote from `packages/toolshed/README.md` about hosted platform
+2. **Shell frontend** - Quote from `packages/shell/README.md` about user interface
+3. **CT CLI** - Overview from `.claude/commands/common/ct.md`
+4. **How they work together** - Integration points and data flow
+5. **Development workflow** - Running local development environment
+
+### Path D: LLM Tooling Layer
+*"I chose: The LLM tooling layer (Claude commands, subagents, and development workflows)"*
+
+**Explore in order:**
+1. **Commands overview** - Quote from `.claude/commands/README.md` about available workflows
+2. **Command categories** - Recipe development, workflow management, research, etc.
+3. **Integration setup** - Quote from `deps.md` about MCP integrations (Linear, Playwright)
+4. **Development assistance patterns** - How LLMs help with Common Tools development
+5. **Creating new commands** - How this onboarding command was built
 
 ## Navigation Support
 
@@ -137,6 +113,6 @@ After completing the foundation, ask the user what they're most curious about:
 **What NOT to do:**
 - Don't read README.md + list packages + read commands README all at once
 - Don't summarize what you found after reading files
-- Don't offer 6 different paths; offer 2-3 based on their actual interest
+- Don't offer too many paths; the four focused paths are sufficient based on their actual interest
 
 **Key principle:** The user should feel like they're discovering things themselves with Claude as a helpful guide, not receiving a presentation.
