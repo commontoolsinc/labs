@@ -7,9 +7,9 @@ stability here.
 
 ## What is Common Tools?
 
-Common Tools is a new distributed computing platform that provides a runtime and
-storage mechanism with privacy features for collaboration. It enables users to
-understand and control every interaction in terms of information flow.
+Common Tools is a nascent distributed computing platform that provides both a runtime and
+storage layer. The design allows instrumentation of all information flow in the system,
+enabling safe & private collaboration at scale.
 
 ### Core Concepts
 
