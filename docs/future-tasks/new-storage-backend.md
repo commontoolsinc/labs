@@ -832,7 +832,7 @@ Implementation plan (phased):
         invalid subpath
   - [x] `write(space, docId, path, mutate, validPathOut?)` returns boolean; on
         first write bind tx to a single space; stage Automerge change at `path`
-  - [ ] `commit()`:
+  - [x] `commit()`:
     - [x] If no writes: resolve ok; do not contact server (no tx id)
     - [x] If only writes: set `allowServerMerge = true`
     - [x] Build WSTxRequest with `baseHeads` from server head; send
@@ -840,8 +840,8 @@ Implementation plan (phased):
     - [x] On `ok`: advance server head/epoch, prune pending for this tx
     - [x] On `conflict|rejected`: rollback pending for this tx and cascade
   - [x] `abort()` removes staged writes and invalidates the tx
-  - [ ] Read-set tracking and invalidation (conservative doc-level policy)
-  - [ ] Dependency tracking and cascade rejection when depended-upon tx rejects
+  - [x] Read-set tracking and invalidation (conservative doc-level policy)
+  - [x] Dependency tracking and cascade rejection when depended-upon tx rejects
   - [x] New doc genesis: use `createGenesisDoc`/`computeGenesisHead` for first
         write baseHeads
 
@@ -855,7 +855,7 @@ Implementation plan (phased):
   - [ ] Unit tests (in `packages/storage/test/client/*`):
     - [ ] Store composition: server head + pending chain → composed view;
           incremental recomposition
-    - [ ] Path navigation: `read()`/`readView()` with `validPathOut`;
+    - [x] Path navigation: `read()`/`readView()` with `validPathOut`;
           `undefined` on invalid subpaths
     - [ ] Transaction read/write logging: entries include
           `{ space, docId, path, op }`
@@ -871,9 +871,9 @@ Implementation plan (phased):
           acceptable)
     - [ ] `synced()` resolution: resolves when all pending commits and initial
           subs (at call time) settle
-    - [ ] Unsubscribe: after unsubscribe, no further scheduler events for that
+    - [x] Unsubscribe: after unsubscribe, no further scheduler events for that
           subscription
-  - [ ] Integration tests (spin up `packages/storage/deno.ts`):
+  - [x] Integration tests (spin up `packages/storage/deno.ts`):
     - [x] Subscribe promise resolves after initial `complete`; subsequent
           `readView` reflects delivered state
     - [x] Get-only completes with no follow-up delivers; later txs must not
@@ -895,6 +895,6 @@ Implementation plan (phased):
 
 Acceptance:
 
-- [ ] Client passes unit and integration tests under `deno task test`
-- [ ] `deno task integration` (in `packages/storage`) passes
-- [ ] Works against dev server; scheduler callbacks match spec
+- [x] Client passes unit and integration tests under `deno task test`
+- [x] `deno task integration` (in `packages/storage`) passes
+- [x] Works against dev server; scheduler callbacks match spec

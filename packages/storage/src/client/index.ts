@@ -7,6 +7,7 @@ export class StorageClient {
   #spaces = new Map<string, import("./connection.ts").SpaceConnection>();
   #scheduler = new Scheduler();
   #inflightCommits = new Set<Promise<unknown>>();
+  #openTxs = new Set<import("./tx.ts").ClientTransaction>();
   constructor(opts: StorageClientOptions = {}) {
     const loc = (globalThis as { location?: { origin?: string } }).location;
     this.#baseUrl = opts.baseUrl ?? (loc?.origin ?? "http://localhost:8002");
@@ -34,6 +35,14 @@ export class StorageClient {
         store.applyServerDoc({ space: key, docId, epoch, heads, json });
         const after = store.readView(key, docId).json;
         this.#scheduler.emit({ space: key, docId, path: [], before, after });
+        // Conservative invalidation: notify all open transactions that read this doc
+        for (const tx of this.#openTxs) {
+          try {
+            tx.externalDocChanged(key, docId);
+          } catch {
+            // ignore
+          }
+        }
       };
       this.#spaces.set(key, sc);
     }
@@ -127,7 +136,37 @@ export class StorageClient {
         heads?: string[],
       ) => store.promotePendingToServer({ space, docId, id, epoch, heads }),
     } as const;
-    return new ClientTransaction(commitAdapter, baselineProvider, overlay);
+    const hooks = {
+      onOpen: (tx: import("./tx.ts").ClientTransaction) => {
+        this.#openTxs.add(tx);
+      },
+      onClose: (tx: import("./tx.ts").ClientTransaction) => {
+        this.#openTxs.delete(tx);
+      },
+      onCommitted: (
+        tx: import("./tx.ts").ClientTransaction,
+        info: { space: string; status: "ok" | "conflict" | "rejected" },
+      ) => {
+        if (info.status !== "ok") {
+          // Cascade rejection: any open tx that read a doc written by this tx becomes invalid
+          const writtenDocs = tx.getWriteDocs();
+          for (const other of this.#openTxs) {
+            if (other === tx) continue;
+            try {
+              other.dependencyRejected(info.space, writtenDocs);
+            } catch {
+              // ignore
+            }
+          }
+        }
+      },
+    } as const;
+    return new ClientTransaction(
+      commitAdapter,
+      baselineProvider,
+      overlay,
+      hooks,
+    );
   }
 
   async get(

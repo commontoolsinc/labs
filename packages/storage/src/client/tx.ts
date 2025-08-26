@@ -55,6 +55,16 @@ export class ClientTransaction {
   #commitAdapter: CommitAdapter | null = null;
   #baselineProvider: BaselineProvider | null = null;
   #overlay: OverlayFns | null = null;
+  #hooks:
+    | {
+      onOpen?: (tx: ClientTransaction) => void;
+      onClose?: (tx: ClientTransaction) => void;
+      onCommitted?: (
+        tx: ClientTransaction,
+        info: { space: string; status: "ok" | "conflict" | "rejected" },
+      ) => void;
+    }
+    | null = null;
   #stagedByDoc = new Map<
     string,
     {
@@ -65,15 +75,31 @@ export class ClientTransaction {
       mutations: Array<(d: any) => void>;
     }
   >();
+  #readDocs = new Set<string>();
+  #invalidReason: string | null = null;
 
   constructor(
     commitAdapter?: CommitAdapter,
     baselineProvider?: BaselineProvider,
     overlay?: OverlayFns,
+    hooks?: {
+      onOpen?: (tx: ClientTransaction) => void;
+      onClose?: (tx: ClientTransaction) => void;
+      onCommitted?: (
+        tx: ClientTransaction,
+        info: { space: string; status: "ok" | "conflict" | "rejected" },
+      ) => void;
+    },
   ) {
     this.#commitAdapter = commitAdapter ?? null;
     this.#baselineProvider = baselineProvider ?? null;
     this.#overlay = overlay ?? null;
+    this.#hooks = hooks ?? null;
+    try {
+      this.#hooks?.onOpen?.(this);
+    } catch {
+      // ignore
+    }
   }
 
   read(
@@ -92,6 +118,7 @@ export class ClientTransaction {
         op: "read",
       });
     }
+    this.#readDocs.add(_docId);
     // If this transaction has staged writes for the document, return the value
     // from the staged Automerge doc (preview). Else undefined (caller may fall
     // back to StorageClient.readView()). Fill validPathOut with the longest
@@ -214,8 +241,48 @@ export class ClientTransaction {
     { status: "ok" | "conflict" | "rejected"; receipt?: TxReceipt }
   > {
     if (this.#status !== "open") throw new Error("transaction closed");
+    if (this.#invalidReason) {
+      // Clear any optimistic overlays that may have been applied earlier
+      for (const st of this.#stagedByDoc.values()) {
+        this.#overlay?.clearPending?.(st.space, st.docId, "__invalid__");
+      }
+      this.#status = "committed";
+      try {
+        if (this.#writeSpace) {
+          this.#hooks?.onCommitted?.(this, {
+            space: this.#writeSpace,
+            status: "rejected",
+          });
+        }
+      } catch {
+        // ignore
+      } finally {
+        try {
+          this.#hooks?.onClose?.(this);
+        } catch {
+          // ignore
+        }
+      }
+      return { status: "rejected" };
+    }
     if (this.#stagedByDoc.size === 0) {
       this.#status = "committed";
+      try {
+        if (this.#writeSpace) {
+          this.#hooks?.onCommitted?.(this, {
+            space: this.#writeSpace,
+            status: "ok",
+          });
+        }
+      } catch {
+        // ignore
+      } finally {
+        try {
+          this.#hooks?.onClose?.(this);
+        } catch {
+          // ignore
+        }
+      }
       return { status: "ok" };
     }
     if (!this.#writeSpace) throw new Error("no write space bound");
@@ -300,6 +367,17 @@ export class ClientTransaction {
 
     this.#status = "committed";
     this.#stagedByDoc.clear();
+    try {
+      this.#hooks?.onCommitted?.(this, { space: this.#writeSpace, status });
+    } catch {
+      // ignore
+    } finally {
+      try {
+        this.#hooks?.onClose?.(this);
+      } catch {
+        // ignore
+      }
+    }
     return { status, receipt };
   }
 
@@ -307,6 +385,39 @@ export class ClientTransaction {
     if (this.#status !== "open") return;
     this.#status = "aborted";
     this.#stagedByDoc.clear();
+    try {
+      this.#hooks?.onClose?.(this);
+    } catch {
+      // ignore
+    }
+  }
+
+  // ---- Read-set tracking and invalidation hooks ----
+  externalDocChanged(space: string, docId: string): void {
+    if (this.#status !== "open") return;
+    if (this.#writeSpace && this.#writeSpace !== space) return;
+    if (this.#readDocs.has(docId)) {
+      this.#invalidReason = `external change to ${docId}`;
+    }
+  }
+
+  dependencyRejected(space: string, docIds: readonly string[]): void {
+    if (this.#status !== "open") return;
+    if (this.#writeSpace && this.#writeSpace !== space) return;
+    for (const d of docIds) {
+      if (this.#readDocs.has(d)) {
+        this.#invalidReason = `dependency rejected on ${d}`;
+        break;
+      }
+    }
+  }
+
+  getReadDocs(): ReadonlySet<string> {
+    return this.#readDocs;
+  }
+
+  getWriteDocs(): ReadonlyArray<string> {
+    return Array.from(this.#stagedByDoc.keys());
   }
 }
 
