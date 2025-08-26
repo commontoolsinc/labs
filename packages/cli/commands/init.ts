@@ -140,9 +140,9 @@ async function initWorkspace(cwd: string) {
         }
       }
     } catch (dirError) {
-      console.warn("Warning: Could not read docs directory:", dirError.message);
+      console.warn("Warning: Could not read docs directory:", dirError instanceof Error ? dirError.message : String(dirError));
     }
   } catch (error) {
-    console.warn("Warning: Could not copy recipe documentation:", error.message);
+    console.warn("Warning: Could not copy recipe documentation:", error instanceof Error ? error.message : String(error));
   }
 }
