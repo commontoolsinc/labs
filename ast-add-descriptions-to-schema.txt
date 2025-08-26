@@ -1,0 +1,136 @@
+Task: AST - Add descriptions to JSON Schema from JSDoc
+
+Objective
+- Populate JSON Schema `description` fields from TypeScript JSDoc comments on types and properties during schema generation (toSchema<T>(), handler, recipe).
+- Preserve explicit descriptions passed via options (they take precedence at the root).
+- Add careful handling for composition (intersections, extends, aliases), nested shapes, arrays, and edge cases.
+
+Comprehensive cases/considerations
+1) Root type descriptions
+   - interface Foo { ... }
+   - type Foo = { ... }
+   - Explicit options precedence: toSchema<Foo>({ description }) overrides root JSDoc
+   - Re-export/alias: type Foo = Bar; JSDoc may be on Bar
+2) Property descriptions
+   - Primitive properties with JSDoc
+   - Optional properties and union with undefined
+   - Wrappers: Cell<T>, Stream<T>, Default<T,V>
+   - Multi-line JSDoc; preserve newlines
+3) Nested shapes
+   - Nested object properties
+   - Arrays of objects (element object’s properties with JSDoc)
+   - Deeper nesting (array of objects containing arrays of objects)
+4) Type composition
+   - Intersections of object types with overlapping property names
+     - Same descriptions → keep one
+     - Conflicting descriptions → choose first non-empty, log warning, add $comment
+   - interface A extends B (inherit docs on properties/root where applicable)
+   - Aliases/re-exports: type X = Y; docs may be on Y
+5) Union types (property-level)
+   - Union of literals with JSDoc on the property: description applies to the property schema
+   - Union of object branches: do not attempt per-branch description merge
+6) Index signatures and mapped types
+   - String/number index signatures with JSDoc → attach description to additionalProperties if feasible; otherwise $comment
+   - Record<string, T> equivalent handling
+7) Conflicting/ambiguous documentation
+   - Multiple declarations/augmentations with different JSDoc
+   - Prefer first non-empty; add $comment and warn
+8) Formatting/markdown
+   - Preserve markdown formatting inside JSDoc; no stripping/escaping
+9) Recursive types
+   - Ensure property descriptions appear consistently even when using $ref
+10) Non-object properties
+   - JSDoc on array property applies to array itself (not items)
+
+V1 coverage decisions
+- Include in V1 tests and implementation:
+  - Root doc (interface and type), with precedence of explicit options
+  - Property docs (primitive, optional) and coexistence with Cell/Stream/Default
+  - Nested object and array-of-objects (one level deep)
+  - Intersections with overlapping property names
+    - Same doc → keep one
+    - Different docs → pick first non-empty, add $comment and logger warning
+  - Extends-based inheritance for properties’ docs
+  - Index signature (string) with doc → attach to additionalProperties; if ambiguous, add $comment
+  - Record<string, T> mapping treated like index signature
+  - Preserve markdown and multiline text as-is
+- Defer to V2 (document, not implement):
+  - Deeply nested arrays-of-objects-of-objects
+  - Union of object branches with per-branch doc propagation
+  - Cross-file complex augmentations; ensure current warning path is sufficient
+
+Initial failing tests already added
+- Consolidated into a single pair: descriptions-all.input.ts / descriptions-all.expected.ts covering:
+  - Root and precedence
+  - Properties (primitive/optional/wrappers)
+  - Nested array-of-objects
+  - Intersections (same vs conflicting docs → $comment + warn)
+  - Extends
+  - Index signature and Record
+  - Tag trimming at root
+
+Additional failing tests to add per V1 decisions
+- (Folded into descriptions-all.* as separate sections within the single file)
+
+Implementation plan (detailed)
+1) JSDoc extraction helpers (schema-generator.ts)
+   - create function extractDocFromSymbol(symbol, checker): string | undefined
+     - Use symbol.getDocumentationComment(checker) → ts.displayPartsToString()
+     - If empty, check first declaration’s JSDoc (when available) via declaration.symbol
+     - Normalize whitespace; trim; strip trailing/leading blank lines
+     - Remove lines that start with @ (tags), but preserve all other content; keep blank lines
+   - create function extractDocFromDeclarations(decls, checker): { text?: string; all: string[] }
+     - Collect unique non-empty doc strings from all declarations
+     - Return first non-empty as text and the list for conflict detection
+
+2) Root description (typeToJsonSchema)
+   - After computing rootSchema, attempt to obtain root type symbol (type.aliasSymbol || type.symbol || type.getSymbol?.()).
+   - Extract doc text; if present AND rootSchema has no description (it won’t), attach description.
+   - Precedence: schema.ts later merges options via { ...schema, ...optionsObj }, so an explicit description in options will override root description automatically (desired).
+
+3) Property descriptions (buildObjectSchema)
+   - For each property symbol:
+     - Extract doc across declarations: const { text, all } = extractDocFromDeclarations(prop.declarations ?? [], checker) falling back to extractDocFromSymbol(prop, checker).
+     - If text present: set properties[propName].description = text.
+     - If all contains >1 distinct non-empty strings: add properties[propName].$comment = "Consolidated property docs from intersection constituents" and logger.warn with short summary.
+
+4) Index signatures and mapped types (buildObjectSchema)
+   - Before/after building named properties, check:
+     - const stringIndex = checker.getIndexTypeOfType(type, IndexKind.String);
+     - const numberIndex = checker.getIndexTypeOfType(type, IndexKind.Number);
+   - If present, compute additionalProperties schema via typeToJsonSchemaHelper on the index type.
+   - For index signature JSDoc:
+     - Try to read from the type node when available (for interfaces) by inspecting members for index signatures and their JSDoc; otherwise fallback to a symbol-level doc.
+     - If a doc string is found, attach it to additionalProperties.description (avoid nonstandard $comment to satisfy JSONSchema type and linter).
+
+5) Intersections (already merged in prior fix)
+   - Our intersection merge path remains: buildObjectSchema runs on the merged type.
+   - For properties present in multiple constituents, the property symbol typically has multiple declarations; conflict handling from step 3 appends a parenthetical note to the description (e.g., "(Consolidated from intersection constituents)") and logs a warning.
+
+6) Tag trimming and multi-line preservation
+   - While extracting text, filter out lines starting with '@'. Do not alter remaining text; preserve blank lines and markdown.
+
+7) Logging
+   - Use existing schema-transformer logger. Warn on:
+     - Consolidated conflicting property docs (intersection)
+     - Index signature doc found and attached to $comment
+     - Unexpected checker errors during JSDoc extraction (non-fatal)
+
+8) Testing cadence
+   - We already have a single failing consolidated fixture; implement features incrementally:
+     a) Root + property descriptions
+     b) Nested array-of-objects
+     c) Extends
+     d) Intersections conflict note
+     e) Index signature / Record
+     f) Tag trimming on root
+   - Run full suite after each step; adjust only the descriptions-all pair.
+
+9) Safety and non-regression
+   - Only attach description/$comment when we have non-empty doc text.
+   - Do not modify schemas for types without JSDoc; existing tests without comments remain unchanged.
+   - For index signatures: only add additionalProperties when the type actually has an index signature (using checker API), matching TS semantics.
+
+Assumption corrections and notes
+- Ignore declaration-file docs: We now ignore JSDoc sourced from declaration files (e.g., lib.d.ts for built-ins like Map/Date) to avoid polluting schemas. Only user/project declarations contribute docs.
+- Intersection alias awareness (deferred here): Intersections expressed via named type aliases (e.g., `type AB = A & B`) require unwrapping the alias to ensure the intersection merge path runs. This work is part of CT-762 and not included in this branch; intersection-specific assertions were removed from the consolidated fixture accordingly.

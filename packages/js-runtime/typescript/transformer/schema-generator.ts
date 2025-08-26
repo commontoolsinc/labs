@@ -8,6 +8,85 @@ const logger = getLogger("schema-transformer", {
 });
 
 /**
+ * Extract plain-text JSDoc from a symbol. Filters out tag lines starting with '@'.
+ */
+function getSymbolDoc(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): string | undefined {
+  if (!symbol) return undefined;
+  let text = "";
+  try {
+    const parts = symbol.getDocumentationComment(checker);
+    // @ts-ignore - displayPartsToString is available on ts
+    text = ts.displayPartsToString(parts) || "";
+  } catch (_e) {
+    // ignore
+  }
+  if (!text) return undefined;
+  const lines = text.split(/\r?\n/).filter((l) => !l.trim().startsWith("@"));
+  const cleaned = lines.join("\n").trim();
+  return cleaned || undefined;
+}
+
+/**
+ * Extract JSDoc comments from a declaration node if available.
+ */
+function getDeclDocs(decl: ts.Declaration): string[] {
+  const docs: string[] = [];
+  const jsDocs = (decl as any).jsDoc as Array<ts.JSDoc> | undefined;
+  if (jsDocs && jsDocs.length > 0) {
+    for (const d of jsDocs) {
+      const comment = (d as any).comment;
+      let text = "";
+      if (typeof comment === "string") text = comment;
+      else if (Array.isArray(comment)) {
+        text = comment.map((
+          c,
+        ) => (typeof c === "string" ? c : (c as any).text ?? "")).join("");
+      }
+      if (text) {
+        const lines = String(text).split(/\r?\n/).filter((l) =>
+          !l.trim().startsWith("@")
+        );
+        const cleaned = lines.join("\n").trim();
+        if (cleaned) docs.push(cleaned);
+      }
+    }
+  }
+  return docs;
+}
+
+/**
+ * Extract merged doc from declarations and symbol.
+ */
+function extractDocFromSymbolAndDecls(
+  symbol: ts.Symbol | undefined,
+  checker: ts.TypeChecker,
+): { text?: string; all: string[] } {
+  const all: string[] = [];
+  if (symbol) {
+    const decls = symbol.declarations ?? [];
+    for (const decl of decls) {
+      const sf = decl.getSourceFile();
+      // Only consider docs from non-declaration files (user/project code)
+      if (!sf.isDeclarationFile) {
+        for (const s of getDeclDocs(decl)) if (!all.includes(s)) all.push(s);
+      }
+    }
+  }
+  // Only include symbol-level docs if symbol has any non-declaration-file declarations
+  const hasUserDecl = (symbol?.declarations ?? []).some((d) =>
+    !d.getSourceFile().isDeclarationFile
+  );
+  if (hasUserDecl) {
+    const symText = getSymbolDoc(symbol, checker);
+    if (symText && !all.includes(symText)) all.push(symText);
+  }
+  return { text: all[0], all };
+}
+
+/**
  * Get a stable, human-readable type name for definitions
  */
 function getStableTypeName(
@@ -238,10 +317,75 @@ function buildObjectSchema(
       emittedRefs,
     );
 
+    // Attach property description from JSDoc
+    try {
+      const { text, all } = extractDocFromSymbolAndDecls(prop, checker);
+      if (text) {
+        // If there are multiple distinct docs, append a consolidation note
+        if (all.filter((s) => s && s !== text).length > 0) {
+          propSchema.description =
+            `${text} (Consolidated from intersection constituents)`;
+          try {
+            logger.warn(() =>
+              `Consolidated docs for property '${propName}' from multiple declarations.`
+            );
+          } catch (_e) {}
+        } else {
+          propSchema.description = text;
+        }
+      }
+    } catch (_e) {
+      // ignore doc extraction errors
+    }
+
     properties[propName] = propSchema;
   }
 
   const schema: any = { type: "object", properties };
+
+  // Handle index signatures → additionalProperties with description
+  try {
+    const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
+    if (stringIndex) {
+      const apSchema = typeToJsonSchemaHelper(
+        stringIndex,
+        checker,
+        undefined,
+        depth + 1,
+        seenTypes,
+        cyclicTypes,
+        definitions,
+        definitionStack,
+        false,
+        inProgressNames,
+        emittedRefs,
+      );
+      // Attempt to read JSDoc from index signature declaration if available
+      const sym = type.getSymbol?.();
+      let indexDoc: string | undefined;
+      if (sym) {
+        for (const decl of sym.declarations ?? []) {
+          if (ts.isInterfaceDeclaration(decl) || ts.isTypeLiteralNode(decl)) {
+            for (const member of decl.members) {
+              if (ts.isIndexSignatureDeclaration(member)) {
+                const docs = getDeclDocs(member);
+                if (docs.length > 0) {
+                  indexDoc = docs[0];
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      if (indexDoc) {
+        apSchema.description = indexDoc;
+      }
+      schema.additionalProperties = apSchema;
+    }
+  } catch (_e) {
+    // Index signature extraction failed; continue without description
+  }
   if (required.length > 0) schema.required = required;
   return schema;
 }
@@ -956,6 +1100,26 @@ export function typeToJsonSchema(
     inProgressNames,
     emittedRefs,
   );
+
+  // Attach root description from JSDoc if available and none provided by options layer
+  try {
+    const sym = (type as any).aliasSymbol || type.getSymbol?.() ||
+      (type as any).symbol;
+    const hasUserDecl = (sym?.declarations ?? []).some((d: ts.Declaration) =>
+      !d.getSourceFile().isDeclarationFile
+    );
+    if (hasUserDecl) {
+      const { text } = extractDocFromSymbolAndDecls(sym, checker);
+      if (
+        text && rootSchema && typeof rootSchema === "object" &&
+        !("description" in rootSchema)
+      ) {
+        (rootSchema as any).description = text;
+      }
+    }
+  } catch (_e) {
+    // ignore
+  }
 
   // If the root type itself is cyclic by identity, return a top-level $ref with definitions
   if (cyclicTypes.has(type)) {
