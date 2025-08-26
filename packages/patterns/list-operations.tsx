@@ -2,16 +2,16 @@
 import {
   Cell,
   Default,
+  derive,
   h,
   handler,
+  ID,
+  lift,
   NAME,
-  derive,
-  str,
   Opaque,
   recipe,
-  lift,
+  str,
   toSchema,
-  ID,
   UI,
 } from "commontools";
 
@@ -26,13 +26,26 @@ interface ListInput {
 
 interface ListOutput extends ListInput {}
 
-const typeTest = handler((_, state: { a: Cell<Item[]>, b: readonly Item[], c: readonly Cell<Item>[], d: Cell<Cell<Item>[]> }) => {
-  const { a, b, c, d } = state;
-  console.log({ a, b, c, d })
-});
+const typeTest = handler(
+  (
+    _,
+    state: {
+      a: Cell<Item[]>;
+      b: readonly Item[];
+      c: readonly Cell<Item>[];
+      d: Cell<Cell<Item>[]>;
+    },
+  ) => {
+    const { a, b, c, d } = state;
+    console.log({ a, b, c, d });
+  },
+);
 
 const resetList = handler((_, state: { items: Cell<Item[]> }) => {
-  state.items.set([{ [ID]: Math.random(), title: "A" }, { [ID]: Math.random(), title: "B" }, { [ID]: Math.random(), title: "C" }, { [ID]: Math.random(), title: "D" }]);
+  state.items.set([{ [ID]: 1, title: "A" }, { [ID]: 2, title: "B" }, {
+    [ID]: 3,
+    title: "C",
+  }, { [ID]: 4, title: "D" }]);
 });
 
 const deleteFirstItem = handler((_, state: { items: Cell<Item[]> }) => {
@@ -50,12 +63,15 @@ const deleteAllItems = handler((_, state: { items: Cell<Item[]> }) => {
 
 const insertItemAtStart = handler((_, state: { items: Cell<Item[]> }) => {
   const currentItems = state.items.get();
-  state.items.set([{ [ID]: Math.random(), title: "New Start" }, ...currentItems]);
+  state.items.set([
+    { [ID]: Math.random(), title: "New Start" },
+    ...currentItems,
+  ]);
 });
 
 const insertItemAtEnd = handler((_, state: { items: Cell<Item[]> }) => {
   const currentItems = state.items.get();
-  state.items.set([...currentItems, { [ID]: Math.random(),title: "New End" }]);
+  state.items.set([...currentItems, { [ID]: Math.random(), title: "New End" }]);
 });
 
 const shuffleItems = handler((_, state: { items: Cell<Item[]> }) => {
@@ -64,32 +80,50 @@ const shuffleItems = handler((_, state: { items: Cell<Item[]> }) => {
   state.items.set(shuffled);
 });
 
-function printList(items: Item[]) {
-  return `${items.filter(item => item && item.title).map((item) => item.title).join(", ")} (${items.length})`;
-}
+const show = lift((items: Item[]) => {
+  return `${
+    items.filter((item) => item && item.title).map((item) => item.title).join(
+      ", ",
+    )
+  } (${items.length})`;
+});
 
 export default recipe<ListInput, ListOutput>(
   "list operations",
   ({ items }) => {
-
-    const lowerCase = derive(items, items => items.map((item) => item.title.toLowerCase()));
+    const lowerCase = derive(
+      items,
+      (items) => items.map((item) => item.title.toLowerCase()),
+    );
     // const lowerCase = items.map((item) => item.title.toLowerCase()); // fails with 'TypeError: item.title.toLowerCase is not a function'
 
     // We do not just have top-level support on Cell<T[]> for the major array operations.
     // However, performing them on a ProxyObject (such as within a derive, or calling .get() on a Cell in a handler) will work as expected.
     // caveat: behaviour is only guaranteed to be correct for all operations IF the items include an [ID] property.
-      // excluding the [ID] in this recipe leads to item alignment bugs when insertig or removing from items at the FRONT of an array
-    const itemsLessThanB = derive(items, (items) => items.filter((item) => item.title < "B"));
-    const extendedItems = derive(items, (items) => items.concat([{ [ID]: Math.random(), title: "E" }, { [ID]: Math.random(), title: "F" }]));
-    const combinedItems = derive(items, (items) => items.reduce((acc: string, item: Item) => acc += item.title, ''));
+    // excluding the [ID] in this recipe leads to item alignment bugs when insertig or removing from items at the FRONT of an array
+    const itemsLessThanB = derive(
+      items,
+      (items) => items.filter((item) => item.title < "B"),
+    );
+    const extendedItems = derive(
+      items,
+      (items) =>
+        items.concat([
+          { [ID]: 5, title: "E" },
+          { [ID]: 6, title: "F" },
+        ]),
+    );
+    const combinedItems = derive(
+      items,
+      (items) =>
+        items.reduce((acc: string, item: Item) => acc += item.title, ""),
+    );
 
-    // A good use of lift() is to avoid repeatedly writing derive() inline in the JSX
-    const show = lift(printList);
-
-    const x = typeTest({ a: items, b: items, c: items, d: items })
+    // Notice that you can bind the same cell to many types
+    const x = typeTest({ a: items, b: items, c: items, d: items });
 
     return {
-      [NAME]: 'List demo',
+      [NAME]: "List demo",
       [UI]: (
         <common-vstack gap="md">
           <ct-card>
@@ -141,7 +175,6 @@ export default recipe<ListInput, ListOutput>(
             >
               Shuffle Items
             </ct-button>
-
 
             <pre id="main-list">{show(items)}</pre>
             <pre id="lowercase-list">{lowerCase}</pre>
