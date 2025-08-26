@@ -1,10 +1,9 @@
 import { env, waitFor } from "@commontools/integration";
-import { CharmsController } from "@commontools/charm/ops";
+import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import { getCharmResult, setCharmResult } from "@commontools/charm/ops";
 import { Identity } from "@commontools/identity";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -13,9 +12,9 @@ describe("ct-render integration test", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  let charmId: string;
   let identity: Identity;
   let cc: CharmsController;
+  let charm: CharmController;
 
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
@@ -24,7 +23,7 @@ describe("ct-render integration test", () => {
       apiUrl: new URL(API_URL),
       identity: identity,
     });
-    const charm = await cc.create(
+    charm = await cc.create(
       await Deno.readTextFile(
         join(
           import.meta.dirname!,
@@ -33,7 +32,6 @@ describe("ct-render integration test", () => {
         ),
       ),
     );
-    charmId = charm.id;
   });
 
   afterAll(async () => {
@@ -45,7 +43,7 @@ describe("ct-render integration test", () => {
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       spaceName: SPACE_NAME,
-      charmId,
+      charmId: charm.id,
       identity,
     });
 
@@ -61,7 +59,7 @@ describe("ct-render integration test", () => {
     assertEquals(initialText?.trim(), "Counter is the 0th number");
 
     // Verify via direct operations that the ct-render structure works
-    const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
+    const value = charm.result.get(["value"]);
     assertEquals(value, 0);
   });
 
@@ -78,30 +76,28 @@ describe("ct-render integration test", () => {
     await buttons[1].click();
 
     await waitFor(async () => {
-      const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
-      return value === 1;
+      return await charm.result.get(["value"]) === 1;
     });
-
-    const value = await getCharmResult(cc!.manager(), charmId, ["value"]);
-    assertEquals(value, 1);
+    assertEquals(charm.result.get(["value"]), 1);
   });
 
   it("should update counter value via direct operations and verify UI", async () => {
     const page = shell.page();
-    const manager = cc!.manager();
 
-    // Set value to 5 via direct operation
-    await setCharmResult(manager, charmId, ["value"], 5);
+    await charm.result.set(5, ["value"]);
 
     // Verify we can read the value back via operations
-    const updatedValue = await getCharmResult(manager, charmId, ["value"]);
-    assertEquals(updatedValue, 5, "Value should be 5 in backend");
+    assertEquals(
+      charm.result.get(["value"]),
+      5,
+      "Value should be 5 in backend",
+    );
 
     // Navigate to the charm to see if UI reflects the change
     await shell.goto({
       frontendUrl: FRONTEND_URL,
       spaceName: SPACE_NAME,
-      charmId,
+      charmId: charm.id,
       identity,
     });
 

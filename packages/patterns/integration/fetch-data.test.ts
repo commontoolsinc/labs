@@ -1,11 +1,10 @@
 import { env } from "@commontools/integration";
 import { sleep } from "@commontools/utils/sleep";
-import { CharmsController } from "@commontools/charm/ops";
+import { CharmController, CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
 import { assert, assertEquals } from "@std/assert";
-import { getCharmInput, setCharmInput } from "@commontools/charm/ops";
 import { Identity } from "@commontools/identity";
 import { TEST_HTTP } from "./flags.ts";
 
@@ -23,6 +22,7 @@ describe("fetch data integration test", () => {
   let charmId: string;
   let identity: Identity;
   let cc: CharmsController;
+  let charm: CharmController;
 
   if (!ignore) {
     beforeAll(async () => {
@@ -32,7 +32,7 @@ describe("fetch data integration test", () => {
         apiUrl: new URL(API_URL),
         identity: identity,
       });
-      const charm = await cc.create(
+      charm = await cc.create(
         await Deno.readTextFile(
           join(
             import.meta.dirname!,
@@ -41,7 +41,6 @@ describe("fetch data integration test", () => {
           ),
         ),
       );
-      charmId = charm.id;
     });
 
     afterAll(async () => {
@@ -57,7 +56,7 @@ describe("fetch data integration test", () => {
       await shell.goto({
         frontendUrl: FRONTEND_URL,
         spaceName: SPACE_NAME,
-        charmId,
+        charmId: charm.id,
         identity,
       });
 
@@ -74,8 +73,7 @@ describe("fetch data integration test", () => {
       assertEquals(initialText?.trim(), "next.js");
 
       // Also verify via direct operations
-      const manager = cc.manager();
-      const repoUrl = await getCharmInput(manager, charmId, ["repoUrl"]);
+      const repoUrl = charm.input.get(["repoUrl"]);
       assertEquals(repoUrl, "https://github.com/vercel/next.js");
     },
   });
@@ -88,11 +86,9 @@ describe("fetch data integration test", () => {
       const manager = cc.manager();
 
       // Set new repo URL via direct operation
-      await setCharmInput(
-        manager,
-        charmId,
-        ["repoUrl"],
+      await charm.input.set(
         "https://github.com/commontoolsinc/labs",
+        ["repoUrl"],
       );
 
       await sleep(200);
@@ -101,7 +97,7 @@ describe("fetch data integration test", () => {
       await shell.goto({
         frontendUrl: FRONTEND_URL,
         spaceName: SPACE_NAME,
-        charmId,
+        charmId: charm.id,
         identity,
       });
 
@@ -119,7 +115,7 @@ describe("fetch data integration test", () => {
       assertEquals(updatedText?.trim(), "labs");
 
       // Also verify via direct operations
-      const repoUrl = await getCharmInput(manager, charmId, ["repoUrl"]);
+      const repoUrl = charm.input.get(["repoUrl"]);
       assertEquals(repoUrl, "https://github.com/commontoolsinc/labs");
     },
   });

@@ -3,7 +3,7 @@ import { sleep } from "@commontools/utils/sleep";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { join } from "@std/path";
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { Identity } from "@commontools/identity";
 import { CharmsController } from "@commontools/charm/ops";
 
