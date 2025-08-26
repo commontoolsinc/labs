@@ -22,5 +22,3 @@ const removeItem = handler({
     items.get();
 });
 export { removeItem };
-
-
