@@ -3,6 +3,7 @@ import {
   Cell,
   compileAndRun,
   Default,
+  derive,
   h,
   handler,
   ifElse,
@@ -30,43 +31,53 @@ const updateCode = handler<
 
 const visit = handler<
   { detail: { value: string } },
-  { code: string }
+  { result: any }
 >(
   (_, state) => {
-    const { result } = compileAndRun({
-      files: [{ name: "/main.tsx", contents: state.code }],
-      main: "/main.tsx",
-    });
+    console.log("result", state.result);
 
-    console.log("result", result);
-
-    return navigateTo(result);
+    return navigateTo(state.result);
   },
 );
 
 export default recipe<Input>(
   "Compiler",
   ({ code }) => {
-    const { error, errors } = compileAndRun({
+    const state = compileAndRun({
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
     });
+
+    // const x = derive(
+    //   state,
+    //   (state) => {
+    //     console.log("[x]", state);
+    //   },
+    // );
+
+    // const y = derive(
+    //   [state.pending, state.error, state.result],
+    //   ([pending, error, result]) => {
+    //     console.log("[y]", pending, error, result);
+    //   },
+    // );
 
     return {
       [NAME]: "My First Compiler",
       [UI]: (
         <div>
+          {ifElse(state.pending, <b>Loading...</b>, <span>Idle</span>)}
           <common-code-editor
             source={code}
             language="text/x.typescript"
             onChange={updateCode({ code })}
-            errors={errors}
+            errors={state.errors}
           />
           {ifElse(
-            error,
+            state.error,
             <b>fix the errors</b>,
             <common-button
-              onClick={visit({ code })}
+              onClick={visit({ result: state.result })}
             >
               Navigate To Charm
             </common-button>,
