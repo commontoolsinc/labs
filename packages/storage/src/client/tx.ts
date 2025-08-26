@@ -34,8 +34,16 @@ type OverlayFns = {
     docId: string,
     id: string,
     json: unknown,
+    baseHeads?: string[],
   ) => void;
   clearPending?: (space: string, docId: string, id: string) => void;
+  promotePendingToServer?: (
+    space: string,
+    docId: string,
+    id: string,
+    epoch?: number,
+    heads?: string[],
+  ) => void;
 };
 
 export class ClientTransaction {
@@ -215,7 +223,8 @@ export class ClientTransaction {
 
     const clientTxId = crypto.randomUUID();
 
-    // Apply optimistic overlays synchronously from staged pending docs
+    // Apply optimistic overlays immediately so subsequent reads reflect the
+    // optimistic view even before any awaited work in this method.
     if (this.#overlay?.applyPending) {
       for (const st of this.#stagedByDoc.values()) {
         try {
@@ -229,6 +238,7 @@ export class ClientTransaction {
 
     const writeOnly = this.log.every((l) => l.op === "write");
     const writes: CommitAdapterReq["writes"] = [];
+    const baseHeadsByDoc = new Map<string, string[]>();
     for (const st of this.#stagedByDoc.values()) {
       // Build on server baseline when available
       const provided = this.#baselineProvider
@@ -237,6 +247,7 @@ export class ClientTransaction {
       const baseDoc: AM.Doc<any> = provided ?? createGenesisDoc<any>(st.docId);
       let rolling = AM.clone(baseDoc);
       const baseHeadsSorted = [...AM.getHeads(baseDoc)].sort();
+      baseHeadsByDoc.set(st.docId, baseHeadsSorted);
       const changes: Uint8Array[] = [];
       for (const m of st.mutations) {
         rolling = AM.change(rolling, (d: any) => m(d));
@@ -266,10 +277,24 @@ export class ClientTransaction {
       ? "conflict"
       : "ok";
 
-    // Clear overlays on failure; keep on ok until server doc arrives
-    if (status !== "ok" && this.#overlay?.clearPending) {
-      for (const st of this.#stagedByDoc.values()) {
-        this.#overlay.clearPending(st.space, st.docId, clientTxId);
+    // Per-doc overlay resolution based on individual results
+    for (const st of this.#stagedByDoc.values()) {
+      const rr = receipt.results.find((r) => r.ref.docId === st.docId);
+      if (!rr) {
+        // No result? rollback conservatively
+        this.#overlay?.clearPending?.(st.space, st.docId, clientTxId);
+        continue;
+      }
+      if (rr.status === "ok") {
+        this.#overlay?.promotePendingToServer?.(
+          st.space,
+          st.docId,
+          clientTxId,
+          receipt.txId,
+          (rr.newHeads ?? []) as string[],
+        );
+      } else {
+        this.#overlay?.clearPending?.(st.space, st.docId, clientTxId);
       }
     }
 

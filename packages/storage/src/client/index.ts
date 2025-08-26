@@ -6,6 +6,7 @@ export class StorageClient {
   #token?: string | (() => Promise<string>);
   #spaces = new Map<string, import("./connection.ts").SpaceConnection>();
   #scheduler = new Scheduler();
+  #inflightCommits = new Set<Promise<unknown>>();
   constructor(opts: StorageClientOptions = {}) {
     const loc = (globalThis as { location?: { origin?: string } }).location;
     this.#baseUrl = opts.baseUrl ?? (loc?.origin ?? "http://localhost:8002");
@@ -68,11 +69,18 @@ export class StorageClient {
   async synced(space?: DID | string): Promise<void> {
     if (space) {
       const sc = await this.spaceConn(space);
-      return sc.synced();
+      await sc.synced();
+      if (this.#inflightCommits.size > 0) {
+        await Promise.allSettled(Array.from(this.#inflightCommits));
+      }
+      return;
     }
     await Promise.all(
       Array.from(this.#spaces.values()).map((sc) => sc.synced()),
     );
+    if (this.#inflightCommits.size > 0) {
+      await Promise.allSettled(Array.from(this.#inflightCommits));
+    }
   }
 
   async newTransaction() {
@@ -88,7 +96,13 @@ export class StorageClient {
       req: Parameters<import("./connection.ts").SpaceConnection["submitTx"]>[0],
     ) => {
       const sc = await this.spaceConn(space);
-      return await sc.submitTx(req as any);
+      const p = sc.submitTx(req as any);
+      this.#inflightCommits.add(p);
+      try {
+        return await p;
+      } finally {
+        this.#inflightCommits.delete(p);
+      }
     };
     const baselineProvider = async (space: string, docId: string) => {
       const sc = await this.spaceConn(space);
@@ -96,10 +110,22 @@ export class StorageClient {
       return d as any;
     };
     const overlay = {
-      applyPending: (space: string, docId: string, id: string, json: unknown) =>
-        store.applyPending({ space, docId, id, json }),
+      applyPending: (
+        space: string,
+        docId: string,
+        id: string,
+        json: unknown,
+        baseHeads?: string[],
+      ) => store.applyPending({ space, docId, id, json, baseHeads }),
       clearPending: (space: string, docId: string, id: string) =>
         store.clearPending({ space, docId, id }),
+      promotePendingToServer: (
+        space: string,
+        docId: string,
+        id: string,
+        epoch?: number,
+        heads?: string[],
+      ) => store.promotePendingToServer({ space, docId, id, epoch, heads }),
     } as const;
     return new ClientTransaction(commitAdapter, baselineProvider, overlay);
   }

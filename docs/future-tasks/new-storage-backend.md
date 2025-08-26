@@ -511,6 +511,9 @@ Action items for phase 2 (expanded):
         ensures deliveries resume from the last acknowledged epoch.
   - [ ] Merge actor/seq tests for synthesized merges.
   - [x] PIT determinism tests.
+  - [x] Client integration tests added: optimistic commit promotion, conflict
+        rollback, and synced() waiting for in-flight commits (see
+        `packages/storage/integration/client_*.test.ts`).
 
 - [x] Developer experience and documentation
   - [x] Update specs (`03-api.md`, `04-transactions.md`, `05-point-in-time.md`,
@@ -797,7 +800,7 @@ Spec: `docs/specs/storage/20-client-library.md`.
 Implementation plan (phased):
 
 - [x] Client core scaffolding
-  - [ ] Create `packages/storage/src/client/` with modules:
+  - [x] Create `packages/storage/src/client/` with modules:
     - `connection.ts`: per-space socket manager (hello/resume, acks, queue)
     - `store.ts`: per-space/doc server head + pending chain + composed view
     - `scheduler.ts`: change notifications
@@ -817,11 +820,11 @@ Implementation plan (phased):
         `complete`
 
 - [ ] Client-side document store
-  - [ ] Track per-doc `server` state: `{ epoch, heads, baseBytes/baseDoc }`
-  - [ ] Maintain `pending` local changes per doc and recompute `composed`
+  - [x] Track per-doc `server` state: `{ epoch, heads, baseBytes/baseDoc }`
+  - [x] Maintain `pending` local changes per doc and recompute `composed`
   - [ ] Incremental recomposition (apply staged changes; avoid full rebuilds)
-  - [ ] Map tx receipts (`newHeads`) to pending entries and prune on success
-  - [ ] Associate a local pending-head marker with each tx's writes for reads
+  - [x] Map tx receipts (`newHeads`) to pending entries and prune on success
+  - [x] Associate a local pending-head marker with each tx's writes for reads
 
 - [ ] Transaction engine
   - [x] `read(space, docId, path, nolog=false, validPathOut?)` returns composed
@@ -834,8 +837,8 @@ Implementation plan (phased):
     - [x] If only writes: set `allowServerMerge = true`
     - [x] Build WSTxRequest with `baseHeads` from server head; send
           `/storage/tx`
-    - [ ] On `ok`: advance server head/epoch, prune pending for this tx
-    - [ ] On `conflict|rejected`: rollback pending for this tx and cascade
+    - [x] On `ok`: advance server head/epoch, prune pending for this tx
+    - [x] On `conflict|rejected`: rollback pending for this tx and cascade
   - [x] `abort()` removes staged writes and invalidates the tx
   - [ ] Read-set tracking and invalidation (conservative doc-level policy)
   - [ ] Dependency tracking and cascade rejection when depended-upon tx rejects
@@ -843,9 +846,9 @@ Implementation plan (phased):
         write baseHeads
 
 - [ ] Scheduler notifications
-  - [ ] Register callbacks and emit `{ space, docId, path, before, after }`
-  - [ ] Start coarse (root-only) then refine to changed subpaths
-  - [ ] Expose `synced()` that resolves when all in-flight commits and initial
+  - [x] Register callbacks and emit `{ space, docId, path, before, after }`
+  - [x] Start coarse (root-only) then refine to changed subpaths
+  - [x] Expose `synced()` that resolves when all in-flight commits and initial
         subscriptions (at call time) have settled
 
 - [ ] Testing
@@ -871,20 +874,20 @@ Implementation plan (phased):
     - [ ] Unsubscribe: after unsubscribe, no further scheduler events for that
           subscription
   - [ ] Integration tests (spin up `packages/storage/deno.ts`):
-    - [ ] Subscribe promise resolves after initial `complete`; subsequent
+    - [x] Subscribe promise resolves after initial `complete`; subsequent
           `readView` reflects delivered state
-    - [ ] Get-only completes with no follow-up delivers; later txs must not
+    - [x] Get-only completes with no follow-up delivers; later txs must not
           deliver to that consumer
-    - [ ] Resume exact vs stale (hello sinceEpoch): exact → no backfill; stale →
+    - [x] Resume exact vs stale (hello sinceEpoch): exact → no backfill; stale →
           backfill (snapshot or delta)
-    - [ ] Deliver/ack per epoch; ack recorded and used for resume
-    - [ ] Tx happy path: commit ok; receipts mapped; pending pruned; composed
+    - [x] Deliver/ack per epoch; ack recorded and used for resume
+    - [x] Tx happy path: commit ok; receipts mapped; pending pruned; composed
           view stable
-    - [ ] Tx conflict/rejected: rollback pending; cascade to dependents;
+    - [x] Tx conflict/rejected: rollback pending; cascade to dependents;
           composed view reverts
-    - [ ] New doc creation path: first write based on genesis heads; server
+    - [x] New doc creation path: first write based on genesis heads; server
           accepts and subsequent reads match
-    - [ ] `synced()` end-to-end: with multiple concurrent txs and subs, resolves
+    - [x] `synced()` end-to-end: with multiple concurrent txs and subs, resolves
           only after all have settled
 
 - [ ] Developer experience

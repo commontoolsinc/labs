@@ -13,7 +13,7 @@ export class ClientStore {
   // space -> docId -> pending overlays (stack)
   #pending = new Map<
     string,
-    Map<string, Array<{ id: string; json: JsonValue }>>
+    Map<string, Array<{ id: string; json: JsonValue; baseHeads?: string[] }>>
   >();
 
   private ensureSpace(space: string): Map<string, DocState> {
@@ -27,7 +27,7 @@ export class ClientStore {
 
   private ensurePendingSpace(
     space: string,
-  ): Map<string, Array<{ id: string; json: JsonValue }>> {
+  ): Map<string, Array<{ id: string; json: JsonValue; baseHeads?: string[] }>> {
     let m = this.#pending.get(space);
     if (!m) {
       m = new Map();
@@ -58,12 +58,20 @@ export class ClientStore {
   }
 
   applyPending(
-    params: { space: string; docId: string; id: string; json: JsonValue },
+    params: {
+      space: string;
+      docId: string;
+      id: string;
+      json: JsonValue;
+      baseHeads?: string[];
+    },
   ): void {
     const { space, docId, id, json } = params;
     const pspace = this.ensurePendingSpace(space);
     const arr = pspace.get(docId) ?? [];
-    arr.push({ id, json });
+    const idx = arr.findIndex((e) => e.id === id);
+    if (idx >= 0) arr[idx] = { id, json, baseHeads: params.baseHeads };
+    else arr.push({ id, json, baseHeads: params.baseHeads });
     pspace.set(docId, arr);
   }
 
@@ -84,6 +92,42 @@ export class ClientStore {
     pspace.delete(docId);
   }
 
+  promotePendingToServer(
+    params: {
+      space: string;
+      docId: string;
+      id: string;
+      epoch?: number;
+      heads?: string[];
+    },
+  ): void {
+    const { space, docId, id, epoch, heads } = params;
+    const pspace = this.#pending.get(space);
+    const spaceMap = this.ensureSpace(space);
+    const doc = spaceMap.get(docId);
+    const arr = pspace?.get(docId) ?? [];
+    const entry = arr.find((e) => e.id === id);
+    if (!entry) return;
+    // Promote overlay JSON to server state and advance version markers if provided
+    const nextEpoch = Math.max(
+      doc?.serverEpoch ?? -1,
+      epoch ?? (doc?.serverEpoch ?? -1),
+    );
+    spaceMap.set(docId, {
+      serverEpoch: nextEpoch,
+      heads: heads ?? (doc?.heads ?? []),
+      branch: doc?.branch ?? "main",
+      json: entry.json,
+    });
+    // Remove this overlay entry
+    const filtered = arr.filter((e) => e.id !== id);
+    if (filtered.length > 0) {
+      pspace?.set(docId, filtered);
+    } else {
+      pspace?.delete(docId);
+    }
+  }
+
   readView(
     space: string,
     docId: string,
@@ -93,6 +137,7 @@ export class ClientStore {
     let json = st?.json;
     const pspace = this.#pending.get(space);
     const arr = pspace?.get(docId);
+    // Use top-of-stack optimistic view if present
     if (Array.isArray(arr) && arr.length > 0) {
       const top = arr[arr.length - 1];
       json = top?.json;
