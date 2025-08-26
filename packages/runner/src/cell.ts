@@ -1,6 +1,9 @@
 import { type Immutable, isObject, isRecord } from "@commontools/utils/types";
 import type { MemorySpace } from "@commontools/memory/interface";
 import { getTopFrame } from "./builder/recipe.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("ct823-cell", { enabled: true, level: "debug" });
 import {
   type Cell,
   ID,
@@ -506,6 +509,8 @@ export class RegularCell<T> implements Cell<T> {
   push(
     ...value: any[]
   ): void {
+    logger.debug("[CT823-CELL-PUSH] push() called with", value.length, "values");
+    
     if (!this.tx) throw new Error("Transaction required for push");
 
     // No await for the sync, just kicking this off, so we have the data to
@@ -522,6 +527,8 @@ export class RegularCell<T> implements Cell<T> {
     if (array !== undefined && !Array.isArray(array)) {
       throw new Error("Can't push into non-array value");
     }
+    
+    logger.debug("[CT823-CELL-PUSH] Current array length:", array?.length ?? 0);
 
     // If this is an object and it doesn't have an ID, add one.
     const valuesToWrite = value.map((val: any) =>
@@ -546,13 +553,20 @@ export class RegularCell<T> implements Cell<T> {
     }
 
     // Append the new values to the array.
-    diffAndUpdate(
-      this.runtime,
-      this.tx,
-      resolvedLink,
-      [...array, ...valuesToWrite],
-      cause,
-    );
+    logger.debug("[CT823-CELL-PUSH] Calling diffAndUpdate with", valuesToWrite.length, "new values");
+    try {
+      diffAndUpdate(
+        this.runtime,
+        this.tx,
+        resolvedLink,
+        [...array, ...valuesToWrite],
+        cause,
+      );
+      logger.debug("[CT823-CELL-PUSH] diffAndUpdate completed successfully");
+    } catch (error) {
+      logger.error("[CT823-CELL-PUSH] diffAndUpdate failed:", error);
+      throw error;
+    }
   }
 
   equals(other: any): boolean {

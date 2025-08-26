@@ -78,14 +78,25 @@ const sendMessage = handler<
   const text = event.detail?.message?.trim();
   if (!text) return;
 
+  console.log("[CT823-HANDLER] sendMessage handler called with text:", text);
+  
   // TESTING CT-823: Send 20 messages rapidly to trigger conflicts
   for (let i = 1; i <= 20; i++) {
-    messages.push({
-      author: user.get(),
+    const userValue = user.get();
+    console.log(`[CT823-USER-VALUE] Iteration ${i}: user.get() =`, userValue);
+    
+    const messageData = {
+      author: userValue,
       message: `${i}/${text}`, // Prefix with counter
       timestamp: Date.now(),
-    });
+    };
+    
+    console.log(`[CT823-HANDLER] Pushing message ${i}:`, messageData);
+    messages.push(messageData);
+    console.log(`[CT823-HANDLER] Message ${i} pushed successfully`);
   }
+  
+  console.log("[CT823-HANDLER] sendMessage handler completed");
 });
 
 // Handler to set/update the username (local-only field)

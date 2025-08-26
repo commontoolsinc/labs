@@ -1100,9 +1100,16 @@ export class Replica {
         result.error.name === "ConflictError" &&
         result.error.conflict.existsInHistory
       ) {
-        logger.info(() => ["Transaction failed (aready exists)", result.error]);
+        logger.info(() => ["[CT823-CONFLICT] Transaction failed (already exists)", result.error]);
       } else {
-        logger.error(() => ["Transaction failed", result.error]);
+        logger.error(() => ["[CT823-CONFLICT] Transaction failed", result.error]);
+        if (result.error.name === "ConflictError") {
+          logger.error(() => ["[CT823-CONFLICT] Conflict details:", {
+            expected: result.error.conflict.expected,
+            actual: result.error.conflict.actual,
+            existsInHistory: result.error.conflict.existsInHistory
+          }]);
+        }
       }
 
       // Checkout current state of facts so we can compute
@@ -1120,6 +1127,7 @@ export class Replica {
       }
 
       // Notify storage subscribers about the reverted transaction.
+      logger.debug(() => ["[CT823-CONFLICT] Reverting transaction, changes:", checkout.compare(this).length]);
       this.subscription.next({
         type: "revert",
         space: this.did(),

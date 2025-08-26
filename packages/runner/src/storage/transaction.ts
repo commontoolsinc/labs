@@ -26,7 +26,7 @@ import type {
 import * as Journal from "./transaction/journal.ts";
 
 const logger = getLogger("storage-transaction", {
-  enabled: false,
+  enabled: true,
   level: "debug",
 });
 
@@ -306,12 +306,15 @@ export const abort = (
 export const commit = async (
   transaction: StorageTransaction,
 ): Promise<Result<Unit, CommitError>> => {
+  logger.debug("[CT823-TRANSACTION] commit() called");
   const { error, ok: ready } = edit(transaction);
   if (error) {
+    logger.debug("[CT823-TRANSACTION] commit() failed - edit error:", error);
     return { error };
   } else {
     const { error, ok: archive } = ready.journal.close();
     if (error) {
+      logger.debug("[CT823-TRANSACTION] commit() failed - journal close error:", error);
       mutate(transaction, {
         status: "done",
         journal: ready.journal,
@@ -322,6 +325,8 @@ export const commit = async (
       const { writer, storage } = ready;
       const replica = writer ? storage.open(writer.did()).replica : null;
       const changes = replica ? archive.get(replica.did()) : null;
+      logger.debug("[CT823-TRANSACTION] Committing", changes?.length ?? 0, "changes to replica");
+      
       const promise = changes
         ? replica!.commit(changes, transaction)
         : Promise.resolve({ ok: {} });
@@ -333,6 +338,13 @@ export const commit = async (
       });
 
       const result = await promise;
+      
+      if (result.error) {
+        logger.error("[CT823-TRANSACTION] commit() failed with error:", result.error);
+      } else {
+        logger.debug("[CT823-TRANSACTION] commit() succeeded");
+      }
+      
       mutate(transaction, {
         status: "done",
         journal: ready.journal,
