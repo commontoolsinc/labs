@@ -160,7 +160,7 @@ export class Logger {
     this._disabled = options?.enabled === undefined ? false : !options.enabled;
 
     // Set logger-specific level if provided
-    this.level = options?.level;
+    this.level = options?.level ?? getEnvLevel();
   }
 
   /**
@@ -256,17 +256,20 @@ export class Logger {
 export const log = new Logger();
 
 /**
- * Initialize log level from environment variable if available
+ * We may want to initialize log level from environment variable if available
  */
-if (isDeno()) {
-  try {
-    const envLevel = Deno.env.get("LOG_LEVEL");
-    if (envLevel && envLevel in LOG_LEVELS) {
-      log.level = envLevel as LogLevel;
+function getEnvLevel() {
+  if (isDeno()) {
+    try {
+      const envLevel = Deno.env.get("LOG_LEVEL");
+      if (envLevel && envLevel in LOG_LEVELS) {
+        return envLevel as LogLevel;
+      }
+    } catch {
+      // Ignore permission errors - use default log level
     }
-  } catch {
-    // Ignore permission errors - use default log level
   }
+  return undefined;
 }
 
 /**
