@@ -11,12 +11,12 @@ import {
   serializeKeyPairRaw,
   TransferrableInsecureCryptoKeyPair,
 } from "@commontools/identity";
-import { afterAll, afterEach, beforeAll } from "@std/testing/bdd";
+import { afterAll, afterEach, beforeAll, beforeEach } from "@std/testing/bdd";
 import { AppState, deserialize } from "../shell/src/lib/app/mod.ts";
-import { PageErrorEvent } from "@astral/astral";
+import { waitFor } from "./utils.ts";
+import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 
 import "../shell/src/globals.ts";
-import { sleep } from "@commontools/utils/sleep";
 
 // Pass the key over the boundary. When the state is returned,
 // the key is serialized to Uint8Arrays, and then turned into regular arrays,
@@ -52,9 +52,11 @@ export class ShellIntegration {
   #browser?: Browser;
   #page?: Page;
   #exceptions: Array<string> = [];
+  #errorLogs: Array<string> = [];
 
   bindLifecycle() {
     beforeAll(this.#beforeAll);
+    beforeEach(this.#beforeEach);
     afterAll(this.#afterAll);
     afterEach(this.#afterEach);
   }
@@ -85,26 +87,38 @@ export class ShellIntegration {
   // the function returns successfully once state
   // has a matching `spaceName`, ignoring all other properties.
   async waitForState(
-    { identity, spaceName, charmId }: {
+    params: {
       spaceName?: string;
       charmId?: string;
       identity?: Identity;
     },
   ): Promise<AppState> {
-    this.checkIsOk();
-    const start = performance.now();
-    while ((performance.now() - start) < 30_000) {
-      const state = await this.state();
-      if (
-        state && (spaceName ? state.spaceName === spaceName : true) &&
-        (charmId ? state.activeCharmId === charmId : true) &&
-        (identity ? state.identity?.did() === identity.did() : true)
-      ) {
-        return state;
-      }
-      await sleep(500);
+    function stateMatches(
+      state: AppState | undefined,
+      params: Parameters<typeof ShellIntegration.prototype.waitForState>[0],
+    ): boolean {
+      return !!(
+        state &&
+        (params.spaceName ? state.spaceName === params.spaceName : true) &&
+        (params.charmId ? state.activeCharmId === params.charmId : true) &&
+        (params.identity
+          ? state.identity?.did() === params.identity.did()
+          : true)
+      );
     }
-    throw new Error("Timed out while waiting for state.");
+
+    this.checkIsOk();
+
+    await waitFor(async () => {
+      return stateMatches(await this.state(), params);
+    });
+    const state = await this.state();
+    // Unlikely to occur, but recheck state once more to ensure
+    // the state returned explicitly matches requirement.
+    if (!state || !(stateMatches(state, params))) {
+      throw new Error("State changed after matching requirements.");
+    }
+    return state;
   }
 
   // Navigates to the URL represented by `frontendUrl`,
@@ -136,7 +150,12 @@ export class ShellIntegration {
   #beforeAll = async () => {
     this.#browser = await Browser.launch({ headless: env.HEADLESS });
     this.#page = await this.#browser.newPage();
-    this.#page.addEventListener("console", pipeConsole);
+    this.#page.addEventListener("console", (e: ConsoleEvent) => {
+      if (e.detail.type === "error") {
+        this.#errorLogs.push(e.detail.text);
+      }
+      pipeConsole(e);
+    });
     this.#page.addEventListener("dialog", dismissDialogs);
     this.#page.addEventListener("pageerror", (e: PageErrorEvent) => {
       console.error("Browser Page Error:", e.detail.message);
@@ -144,15 +163,23 @@ export class ShellIntegration {
     });
   };
 
-  #afterAll = async () => {
-    await this.#page?.close();
-    await this.#browser?.close();
+  #beforeEach = () => {
+    this.#exceptions.length = 0;
+    this.#errorLogs.length = 0;
   };
 
   #afterEach = () => {
     if (this.#exceptions.length > 0) {
       throw new Error(`Exceptions recorded: \n${this.#exceptions.join("\n")}`);
     }
+    if (this.#errorLogs.length > 0) {
+      throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
+    }
+  };
+
+  #afterAll = async () => {
+    await this.#page?.close();
+    await this.#browser?.close();
   };
 
   private checkIsOk() {

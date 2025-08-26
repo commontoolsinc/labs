@@ -1,5 +1,4 @@
-import { env } from "@commontools/integration";
-import { sleep, waitFor } from "@commontools/utils/sleep";
+import { env, waitFor } from "@commontools/integration";
 import { CharmsController } from "@commontools/charm/ops";
 import { ShellIntegration } from "@commontools/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
