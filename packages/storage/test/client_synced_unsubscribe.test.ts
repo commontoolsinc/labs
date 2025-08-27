@@ -55,7 +55,8 @@ Deno.test({
             d.x = 1;
           });
           const c = AM.getLastLocalChange(after)!;
-          const changeB64 = btoa(String.fromCharCode(...c));
+          const { encodeBase64 } = await import("../src/codec/bytes.ts");
+          const changeB64 = encodeBase64(c);
           const msg = {
             invocation: {
               iss: "did:key:test",
