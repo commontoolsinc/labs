@@ -142,6 +142,9 @@ export function llm(
 
     const updatePartial = (text: string) => {
       if (thisRun != currentRun) return;
+      const status = tx.status();
+      if (status.status !== "ready") return;
+
       partialWithLog.set(text);
     };
 
