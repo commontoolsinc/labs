@@ -7,6 +7,9 @@ const logger = getLogger("schema-transformer", {
   level: "info",
 });
 
+// Maximum recursion depth to prevent stack overflow in cyclic type analysis
+const MAX_RECURSION_DEPTH = 200;
+
 /**
  * Extract plain-text JSDoc from a symbol. Filters out tag lines starting with '@'.
  */
@@ -21,7 +24,11 @@ function getSymbolDoc(
     // @ts-ignore - displayPartsToString is available on ts
     text = ts.displayPartsToString(parts) || "";
   } catch (_e) {
-    // ignore
+    try {
+      logger.debug(() => "Failed to extract symbol documentation; skipping");
+    } catch (_) {
+      // Swallow logging issues to remain safe
+    }
   }
   if (!text) return undefined;
   const lines = text.split(/\r?\n/).filter((l) => !l.trim().startsWith("@"));
@@ -34,16 +41,18 @@ function getSymbolDoc(
  */
 function getDeclDocs(decl: ts.Declaration): string[] {
   const docs: string[] = [];
+  // TODO: stronger typing when TS compiler API exposes JSDoc types properly
   const jsDocs = (decl as any).jsDoc as Array<ts.JSDoc> | undefined;
   if (jsDocs && jsDocs.length > 0) {
     for (const d of jsDocs) {
+      // TODO: stronger typing when TS compiler API exposes JSDoc comment types properly
       const comment = (d as any).comment;
       let text = "";
       if (typeof comment === "string") text = comment;
       else if (Array.isArray(comment)) {
         text = comment.map((
           c,
-        ) => (typeof c === "string" ? c : (c as any).text ?? "")).join("");
+        ) => (typeof c === "string" ? c : (c as any).text ?? "")).join(""); // TODO: stronger typing for JSDoc text nodes
       }
       if (text) {
         const lines = String(text).split(/\r?\n/).filter((l) =>
@@ -268,7 +277,7 @@ function buildObjectSchema(
   inProgressNames: Set<string>,
   emittedRefs: Set<string>,
 ): any {
-  if (depth > 200) {
+  if (depth > MAX_RECURSION_DEPTH) {
     // If we hit an extreme depth, prefer a $ref if possible, else a permissive object
     const namedKey = definitions ? getNamedTypeKey(type) : undefined;
     if (namedKey && definitions) {
@@ -335,7 +344,13 @@ function buildObjectSchema(
         }
       }
     } catch (_e) {
-      // ignore doc extraction errors
+      try {
+        logger.debug(() =>
+          "Failed to extract property documentation; skipping"
+        );
+      } catch (_) {
+        // Swallow logging issues to remain safe
+      }
     }
 
     properties[propName] = propSchema;
@@ -384,7 +399,13 @@ function buildObjectSchema(
       schema.additionalProperties = apSchema;
     }
   } catch (_e) {
-    // Index signature extraction failed; continue without description
+    try {
+      logger.debug(() =>
+        "Failed to extract index signature documentation; continuing without description"
+      );
+    } catch (_) {
+      // Swallow logging issues to remain safe
+    }
   }
   if (required.length > 0) schema.required = required;
   return schema;
@@ -406,7 +427,7 @@ function typeToJsonSchemaHelper(
   inProgressNames: Set<string> = new Set(),
   emittedRefs: Set<string> = new Set(),
 ): any {
-  if (depth > 200) {
+  if (depth > MAX_RECURSION_DEPTH) {
     const namedKey = definitions ? getNamedTypeKey(type) : undefined;
     if (namedKey && definitions) {
       if (!definitions[namedKey]) {
@@ -918,7 +939,7 @@ export function getCycles(
   depth: number = 0,
 ): Set<ts.Type> {
   // Depth guard to avoid stack overflow in pathological cases
-  if (depth > 200) return cycles;
+  if (depth > MAX_RECURSION_DEPTH) return cycles;
 
   // Skip primitive types - they can't have cycles
   if (
@@ -1071,6 +1092,13 @@ export function getCycles(
 /**
  * Convert a TypeScript type to JSONSchema
  * Handles recursive types with JSON Schema $ref/definitions
+ *
+ * JSDoc Support:
+ * - Root types: `/** Interface description *\/` appears as schema.description
+ * - Properties: `/** Property description *\/` appears in schema.properties[name].description
+ * - Tags (@deprecated, @example) are automatically filtered out
+ * - Explicit toSchema({ description: "..." }) overrides root JSDoc
+ * See descriptions-all.input.ts for comprehensive examples
  */
 export function typeToJsonSchema(
   type: ts.Type,
@@ -1118,7 +1146,13 @@ export function typeToJsonSchema(
       }
     }
   } catch (_e) {
-    // ignore
+    try {
+      logger.debug(() =>
+        "Failed to extract root type documentation; continuing without description"
+      );
+    } catch (_) {
+      // Swallow logging issues to remain safe
+    }
   }
 
   // If the root type itself is cyclic by identity, return a top-level $ref with definitions
