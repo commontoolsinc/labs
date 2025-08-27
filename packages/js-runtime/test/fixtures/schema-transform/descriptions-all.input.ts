@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { toSchema } from "commontools";
+import { toSchema, Cell, Stream, Default } from "commontools";
 
 // 1) Nested: Child/Doc with property docs and root doc
 interface ChildNode {
@@ -100,6 +100,50 @@ interface WithTags {
 }
 const schemaTags = toSchema<WithTags>();
 
-export { schemaDoc, schemaPrecedence, schemaDerived, schemaDict, schemaCounts, schemaTags };
 
+// 7) Wrappers on properties
+interface WrappedProps {
+  /** Titles in a cell */
+  titles: Cell<string[]>;
+  /** Count as stream */
+  count: Stream<number>;
+  /** Level with default */
+  level: Default<number, 3>;
+}
+const schemaWrapped = toSchema<WrappedProps>();
 
+// 8) Optional and undefined unions
+interface OptionalProps {
+  /** maybe label */
+  label?: string;
+  /** maybe flag */
+  flag: boolean | undefined;
+}
+const schemaOptional = toSchema<OptionalProps>();
+
+// 9) Root alias docs
+/** Root alias doc */
+interface BaseRoot {
+  /** id */
+  id: string;
+}
+type RootAlias = BaseRoot;
+const schemaRootAlias = toSchema<RootAlias>();
+
+// 10) Recursive with $ref
+interface Tree {
+  /** node name */
+  name: string;
+  /** Child nodes */
+  children: Tree[];
+}
+const schemaTree = toSchema<Tree>();
+
+// 11) Array property JSDoc applies to array, not items
+interface ArrayDocProps {
+  /** tags of the item */
+  tags: string[];
+}
+const schemaArrayDoc = toSchema<ArrayDocProps>();
+
+export { schemaDoc, schemaPrecedence, schemaDerived, schemaDict, schemaCounts, schemaTags, schemaWrapped, schemaOptional, schemaRootAlias, schemaTree, schemaArrayDoc };

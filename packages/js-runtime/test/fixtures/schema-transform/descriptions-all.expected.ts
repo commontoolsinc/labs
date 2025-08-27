@@ -1,5 +1,5 @@
 /// <cts-enable />
-import { JSONSchema } from "commontools";
+import { Cell, Stream, Default, JSONSchema } from "commontools";
 // 1) Nested: Child/Doc with property docs and root doc
 interface ChildNode {
     /** The main text content of the child node */
@@ -213,4 +213,124 @@ const schemaTags = {
     required: ["value"],
     description: "Summary line\n\nLonger details here."
 } as const satisfies JSONSchema;
-export { schemaDoc, schemaPrecedence, schemaDerived, schemaDict, schemaCounts, schemaTags };
+// 7) Wrappers on properties
+interface WrappedProps {
+    /** Titles in a cell */
+    titles: Cell<string[]>;
+    /** Count as stream */
+    count: Stream<number>;
+    /** Level with default */
+    level: Default<number, 3>;
+}
+const schemaWrapped = {
+    type: "object",
+    properties: {
+        titles: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            asCell: true,
+            description: "Titles in a cell"
+        },
+        count: {
+            type: "number",
+            asStream: true,
+            description: "Count as stream"
+        },
+        level: {
+            type: "number",
+            default: 3,
+            description: "Level with default"
+        }
+    },
+    required: ["titles", "count", "level"]
+} as const satisfies JSONSchema;
+// 8) Optional and undefined unions
+interface OptionalProps {
+    /** maybe label */
+    label?: string;
+    /** maybe flag */
+    flag: boolean | undefined;
+}
+const schemaOptional = {
+    type: "object",
+    properties: {
+        label: {
+            type: "string",
+            description: "maybe label"
+        },
+        flag: {
+            type: "boolean",
+            description: "maybe flag"
+        }
+    },
+    required: ["flag"]
+} as const satisfies JSONSchema;
+// 9) Root alias docs
+/** Root alias doc */
+interface BaseRoot {
+    /** id */
+    id: string;
+}
+type RootAlias = BaseRoot;
+const schemaRootAlias = {
+    type: "object",
+    properties: {
+        id: {
+            type: "string",
+            description: "id"
+        }
+    },
+    required: ["id"],
+    description: "Root alias doc"
+} as const satisfies JSONSchema;
+// 10) Recursive with $ref
+interface Tree {
+    /** node name */
+    name: string;
+    /** Child nodes */
+    children: Tree[];
+}
+const schemaTree = {
+    $ref: "#/definitions/Tree",
+    $schema: "http://json-schema.org/draft-07/schema#",
+    definitions: {
+        Tree: {
+            type: "object",
+            properties: {
+                name: {
+                    type: "string",
+                    description: "node name"
+                },
+                children: {
+                    type: "array",
+                    items: {
+                        $ref: "#/definitions/Tree"
+                    },
+                    description: "Child nodes"
+                }
+            },
+            required: ["name", "children"]
+        }
+    }
+} as const satisfies JSONSchema;
+// 11) Array property JSDoc applies to array, not items
+interface ArrayDocProps {
+    /** tags of the item */
+    tags: string[];
+}
+const schemaArrayDoc = {
+    type: "object",
+    properties: {
+        tags: {
+            type: "array",
+            items: {
+                type: "string"
+            },
+            description: "tags of the item"
+        }
+    },
+    required: ["tags"]
+} as const satisfies JSONSchema;
+export { schemaDoc, schemaPrecedence, schemaDerived, schemaDict, schemaCounts, schemaTags, schemaWrapped, schemaOptional, schemaRootAlias, schemaTree, schemaArrayDoc };

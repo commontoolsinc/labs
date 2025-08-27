@@ -158,12 +158,12 @@ Progress to date (V1)
     - `descriptions-tags-only.*`
 
 Review against plan: gaps and next steps
-- Gaps in test coverage (still to add for completeness):
-  - Wrappers coexistence: property docs where the property type is `Cell<T>`, `Stream<T>`, or `Default<T, V>` (verify docs still attach to the property schema and wrappers add metadata as expected).
-  - Optional properties and union with undefined: ensure property-level docs persist when optionality is expressed via `?` or `| undefined`.
-  - Root alias docs: `type Foo = Bar` where docs live on `Bar` (confirm root description is pulled when using `toSchema<Foo>()`).
-  - Recursive types with $ref: confirm descriptions appear consistently when properties are emitted via `$ref` definitions.
-  - Array property doc semantics: ensure JSDoc on an array-typed property applies to the array node itself (not items), which is the current intended behavior.
+- V1 gaps addressed:
+  - Wrappers coexistence verified (Cell ⇒ `asCell`, Stream ⇒ `asStream`, Default ⇒ `default`; property docs attached correctly).
+  - Optional and `| undefined` unions verified (required set correct; docs retained).
+  - Root alias docs verified (alias root `type X = Y` pulls doc from aliased type).
+  - Recursive types with `$ref` verified (docs appear inside definition schema; top-level uses `$ref`).
+  - Array property docs verified on array node (not items).
 
 - Implementation notes:
   - We removed use of non-standard `$comment` in emitted schemas in favor of descriptions and logger warnings, matching the JSONSchema type.
@@ -171,5 +171,5 @@ Review against plan: gaps and next steps
   - Logging is present for consolidated intersection docs; we do not emit extra schema fields for warnings.
 
 Proposed follow-ups (post-V1 hardening)
-- Add the missing focused fixtures listed above to close test gaps without re-introducing fixture proliferation (can be consolidated into a small number of additional sections if desired).
+- All V1 items are now covered by tests. Keep the focused fixtures for clarity while the consolidated stays green.
 - Consider a minimal doc conflict mode toggle in the future (e.g., strict/warn) if consumers want to customize consolidation behavior.
