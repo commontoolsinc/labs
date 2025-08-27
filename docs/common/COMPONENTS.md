@@ -55,15 +55,27 @@ type InputSchema = { rawValue: Cell<string> };
 type OutputSchema = { validatedValue: string | null };
 
 const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ rawValue }) => {
+  // Example 1: Using full event object 
   const handleChange = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>((e, { rawValue }) => {
     rawValue.set(e.detail.value);
+  });
+
+  // Example 2: Destructuring specific event properties (often cleaner)
+  const handleChangeDestructured = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>(({ detail }, { rawValue }) => {
+    rawValue.set(detail.value);
+  });
+
+  // Example 3: When event data isn't needed
+  const handleReset = handler<Record<string, never>, { rawValue: Cell<string> }>((_ , { rawValue }) => {
+    rawValue.set("");
   });
 
   const validatedValue = derive(rawValue, v => v.length > 0 ? v : null);
 
   return {
     [UI]: <div>
-      <ct-input $value={rawValue} />
+      <ct-input $value={rawValue} onChange={handleChange({ rawValue })} />
+      <ct-button onClick={handleReset({ rawValue })}>Reset</ct-button>
     </div>,
     validatedValue
   };
@@ -117,6 +129,8 @@ const addItem = handler<
 This example also demonstrates verbose specification of more complex types.
 
 ```tsx
+import { Default, OpaqueRef } from "commontools";
+
 type Charm = any;
 
 type OutlinerNode = {
