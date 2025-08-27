@@ -4,9 +4,16 @@ import type { BranchName, DocId } from "../types.ts";
 
 export type DID = `did:${string}:${string}`;
 
+/** Options for StorageClient. */
 export interface StorageClientOptions {
+  /** Base HTTP origin for the storage service (e.g., http://localhost:8002). */
   baseUrl?: string;
+  /**
+   * Reserved for future WS authentication. Not currently used because browser
+   * WebSocket constructors do not support custom headers.
+   */
   token?: string | (() => Promise<string>);
+  /** Optional client logging level. */
   logLevel?: "off" | "error" | "warn" | "info" | "debug";
 }
 
