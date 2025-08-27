@@ -5,8 +5,8 @@ import {
   Default,
   derive,
   h,
-  ifElse,
   handler,
+  ifElse,
   llm,
   NAME,
   recipe,
@@ -27,7 +27,7 @@ type LLMTestResult = {
 
 const askQuestion = handler<
   { detail: { message: string } },
-  { chat: Cell<Array<ChatMessage>>, response: string | undefined }
+  { chat: Cell<Array<ChatMessage>>; response: string | undefined }
 >((event, { chat, response }) => {
   if (response) {
     chat.push(response);
@@ -60,14 +60,14 @@ export default recipe<LLMTestInput, LLMTestResult>(
           </div>
 
           <ul>
-          {chat.map(msg => {
-            return <li>{msg}</li>;
-          })}
-          <li>{ifElse(llmResponse.pending, '...', llmResponse.result)}</li>
+            {chat.map((msg) => {
+              return <li>{msg}</li>;
+            })}
+            <li>{ifElse(llmResponse.pending, "...", llmResponse.result)}</li>
           </ul>
         </div>
       ),
-      chat
+      chat,
     };
   },
 );
