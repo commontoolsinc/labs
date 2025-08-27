@@ -84,11 +84,11 @@ export default recipe(model, model, (cell) => {
     });
 
     // Give the page time to fully load
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
 
     // Take a screenshot for debugging
     await page.screenshot("test-debug-1.png");
-    
+
     // Wait for compiler status to show "Idle"
     const statusElement = await page.waitForSelector("#compiler-status", {
       strategy: "pierce",
@@ -97,7 +97,9 @@ export default recipe(model, model, (cell) => {
 
     // Wait for the status to contain "Idle"
     await waitFor(async () => {
-      const statusText = await statusElement.evaluate((el: HTMLElement) => el.textContent);
+      const statusText = await statusElement.evaluate((el: HTMLElement) =>
+        el.textContent
+      );
       return statusText?.includes("Idle") || false;
     });
 
@@ -111,7 +113,7 @@ export default recipe(model, model, (cell) => {
     const codeValue = await compilerCharm.result.get(["code"]);
     assert(
       typeof codeValue === "string" && codeValue.includes("+ 1"),
-      "Default code should contain '+ 1' increment"
+      "Default code should contain '+ 1' increment",
     );
 
     // Click "Navigate To Charm" button to compile and navigate
@@ -133,5 +135,4 @@ export default recipe(model, model, (cell) => {
     await plusButton.click();
     console.log("✓ Increment button clicked successfully");
   });
-
 });
