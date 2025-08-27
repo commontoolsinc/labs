@@ -2,7 +2,7 @@
   "name": "@commontools/runner",
   "tasks": {
     "test": "deno test --allow-ffi --allow-env --allow-read test/*.test.ts",
-    "integration": "deno test -A ./integration/*.test.ts"
+    "integration": "LOG_LEVEL=warn deno test -A ./integration/*.test.ts"
   },
   "exports": {
     ".": "./src/index.ts",

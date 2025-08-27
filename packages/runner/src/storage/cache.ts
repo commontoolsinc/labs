@@ -123,7 +123,7 @@ export interface SyncStore<Model, Address>
   extends SyncPull<Model, Address>, SyncPush<Model> {
 }
 
-const logger = getLogger("storage.cache", { level: "info", enabled: true });
+const logger = getLogger("storage.cache");
 
 interface NotFoundError extends Error {
   name: "NotFound";
@@ -1102,7 +1102,7 @@ export class Replica {
       ) {
         logger.info(() => ["Transaction failed (aready exists)", result.error]);
       } else {
-        logger.error(() => ["Transaction failed", result.error]);
+        logger.warn(() => ["Transaction failed", result.error]);
       }
 
       // Checkout current state of facts so we can compute
