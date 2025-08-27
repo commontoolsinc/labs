@@ -1,8 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
+import { encodeBase64 } from "../src/codec/bytes.ts";
 
-async function b64(bytes: Uint8Array): Promise<string> {
-  const { encodeBase64 } = await import("../src/codec/bytes.ts");
+function b64(bytes: Uint8Array): string {
   return encodeBase64(bytes);
 }
 

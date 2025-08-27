@@ -11,9 +11,11 @@
  * 5. Test concludes after verifying the deliver structure, receiving the
  *    completion signal, and sending the ACK.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { createGenesisDoc } from "../src/store/genesis.ts";
+import { encodeBase64 } from "../src/codec/bytes.ts";
+import { encodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
   name: "WS v2: subscribe complete and deliver/ack via tx",
@@ -78,7 +80,6 @@ Deno.test({
           x.init = true;
         });
         const preChange = Automerge.getLastLocalChange(after)!;
-        const { encodeBase64 } = await import("../src/codec/bytes.ts");
         const preTx = {
           invocation: {
             iss: "did:key:test",

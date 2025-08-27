@@ -68,12 +68,7 @@ export const headsSimple = async (c: any) => {
   }
 };
 
-function decodeBase64(s: string): Uint8Array {
-  const bin = atob(s);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
+import { decodeBase64 } from "../../../../storage/src/codec/bytes.ts";
 
 export const tx: AppRouteHandler<typeof import("./new.routes.ts").tx> = async (
   c: any,

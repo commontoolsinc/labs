@@ -24,7 +24,7 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { createGenesisDoc } from "../src/store/genesis.ts";
-import { decodeBase64 } from "../src/codec/bytes.ts";
+import { decodeBase64, encodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
   name: "WS v2: get-only returns complete and no deliver",
@@ -84,7 +84,6 @@ Deno.test({
     };
     wsSeed.onopen = () => {
       const docId = "doc:s1";
-      const { encodeBase64 } = await import("../src/codec/bytes.ts");
       const base = createGenesisDoc<any>(docId);
       const after = Automerge.change(base, (x: any) => {
         x.seed = true;
@@ -176,7 +175,6 @@ Deno.test({
   const cur = Automerge.change(seededDoc as any, (x: any) => {
     x.bump = (x.bump || 0) + 1;
   });
-  const { encodeBase64: encodeB64 } = await import("../src/codec/bytes.ts");
   const nextChange = Automerge.getLastLocalChange(cur)!;
   const sendTx = {
     invocation: {
@@ -188,7 +186,7 @@ Deno.test({
         writes: [{
           ref: { docId: "doc:s1", branch: "main" },
           baseHeads: seedHeads,
-          changes: [{ bytes: encodeB64(nextChange) }],
+          changes: [{ bytes: encodeBase64(nextChange) }],
         }],
       },
       prf: [],
@@ -231,7 +229,6 @@ Deno.test({
         x.seed = true;
       });
       const c2 = Automerge.getLastLocalChange(after2)!;
-      const { encodeBase64 } = await import("../src/codec/bytes.ts");
       const changeB64_2 = encodeBase64(c2);
       s2.send(JSON.stringify({
         invocation: {

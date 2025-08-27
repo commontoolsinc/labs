@@ -21,7 +21,7 @@
 import { assert } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { createGenesisDoc } from "../src/store/genesis.ts";
-import { decodeBase64 } from "../src/codec/bytes.ts";
+import { decodeBase64, encodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
   name: "WS v2: multi-consumer subscribe delivers epoch-batched updates",
@@ -85,7 +85,6 @@ Deno.test({
             x.init = true;
           });
           seededS2 = init2;
-          const { encodeBase64 } = await import("../src/codec/bytes.ts");
           const changeB642 = encodeBase64(
             Automerge.getLastLocalChange(init2)!,
           );
@@ -119,7 +118,6 @@ Deno.test({
         x.init = true;
       });
       seededS1 = docInit;
-      const { encodeBase64 } = await import("../src/codec/bytes.ts");
       const changeB64 = encodeBase64(
         Automerge.getLastLocalChange(docInit)!,
       );
