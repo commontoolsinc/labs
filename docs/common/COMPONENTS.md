@@ -55,7 +55,7 @@ type InputSchema = { rawValue: Cell<string> };
 type OutputSchema = { validatedValue: string | null };
 
 const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ rawValue }) => {
-  // Example 1: Using full event object 
+  // Example 1: Using full event object
   const handleChange = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>((e, { rawValue }) => {
     rawValue.set(e.detail.value);
   });
@@ -129,7 +129,20 @@ const addItem = handler<
 This example also demonstrates verbose specification of more complex types.
 
 ```tsx
-import { Default, OpaqueRef } from "commontools";
+import {
+  h,
+  derive,
+  handler,
+  ifElse,
+  NAME,
+  recipe,
+  str,
+  UI,
+  OpaqueRef,
+  Cell,
+  Default,
+  Opaque,
+} from "commontools";
 
 type Charm = any;
 
