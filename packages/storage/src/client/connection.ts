@@ -6,6 +6,7 @@ import * as AM from "@automerge/automerge";
 export class SpaceConnection {
   readonly spaceId: DID | string;
   readonly baseUrl: string;
+  #token?: string | (() => Promise<string>);
   #socket: WebSocket | null = null;
   #helloSinceEpoch = 0;
   #amDocs = new Map<string, unknown>();
@@ -29,6 +30,7 @@ export class SpaceConnection {
     this.spaceId = spaceId;
     const loc = (globalThis as { location?: { origin?: string } }).location;
     this.baseUrl = opts.baseUrl ?? (loc?.origin ?? "http://localhost:8002");
+    this.#token = opts.token;
   }
 
   get isOpen(): boolean {
@@ -41,6 +43,16 @@ export class SpaceConnection {
       `/api/storage/new/v2/${encodeURIComponent(String(this.spaceId))}/ws`,
       this.baseUrl,
     );
+    try {
+      if (this.#token) {
+        const tok = typeof this.#token === "function"
+          ? await this.#token()
+          : this.#token;
+        if (tok) url.searchParams.set("token", tok);
+      }
+    } catch {
+      // ignore token provider failures
+    }
     this.#socket = new WebSocket(url.toString());
     await new Promise<void>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error("ws open timeout")), 5000);
