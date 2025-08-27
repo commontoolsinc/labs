@@ -36,8 +36,8 @@ import {
 } from "./reactive-dependencies.ts";
 
 const logger = getLogger("scheduler", {
-  enabled: false,
-  level: "debug",
+  enabled: true,
+  level: "info",  // CT823: Changed to info to reduce noise
 });
 
 // Re-export types that tests expect from scheduler
@@ -248,6 +248,12 @@ export class Scheduler implements IScheduler {
       };
 
       try {
+        // CT-823: Log action execution
+        logger.debug("[CT823-ACTION] Executing action", {
+          actionName: action.name || "anonymous",
+          timestamp: Date.now(),
+        });
+        
         Promise.resolve(action(tx))
           .then((actionResult) => {
             result = actionResult;
@@ -318,28 +324,52 @@ export class Scheduler implements IScheduler {
       next: (notification) => {
         const space = notification.space;
 
-        // Log notification details
-        logger.debug(() => [
-          `[NOTIFICATION] Type: ${notification.type}`,
-          `Space: ${space}`,
-          `Has source: ${
-            "source" in notification ? notification.source : "none"
-          }`,
-          `Changes: ${
-            "changes" in notification ? [...notification.changes].length : 0
-          }`,
-        ]);
+        // CT823: Commented out verbose notification logging
+        // logger.debug(() => [
+        //   `[NOTIFICATION] Type: ${notification.type}`,
+        //   `Space: ${space}`,
+        //   `Has source: ${
+        //     "source" in notification ? notification.source : "none"
+        //   }`,
+        //   `Changes: ${
+        //     "changes" in notification ? [...notification.changes].length : 0
+        //   }`,
+        // ]);
+        
+        // CT-823: Enhanced logging for incoming remote changes
+        if ("changes" in notification && "source" in notification && notification.source !== "local") {
+          logger.info("[CT823-REMOTE-UPDATE] Received remote changes", {
+            changeCount: [...notification.changes].length,
+            source: notification.source,
+            space: space,
+            timestamp: Date.now(),
+          });
+        }
 
         if ("changes" in notification) {
           let changeIndex = 0;
           for (const change of notification.changes) {
             changeIndex++;
-            logger.debug(() => [
-              `[CHANGE ${changeIndex}]`,
-              `Address: ${change.address.id}/${change.address.path.join("/")}`,
-              `Before: ${JSON.stringify(change.before)}`,
-              `After: ${JSON.stringify(change.after)}`,
-            ]);
+            // CT823: Commented out verbose change logging to reduce overhead
+            // logger.debug(() => [
+            //   `[CHANGE ${changeIndex}]`,
+            //   `Address: ${change.address.id}/${change.address.path.join("/")}`,
+            //   `Before: ${JSON.stringify(change.before)}`,
+            //   `After: ${JSON.stringify(change.after)}`,
+            // ]);
+            
+            // CT-823: Enhanced logging for array changes
+            if (Array.isArray(change.after) && "source" in notification && notification.source !== "local") {
+              logger.debug("[CT823-ARRAY-UPDATE] Remote array change detected", {
+                id: change.address.id,
+                path: change.address.path.join("/"),
+                beforeLength: Array.isArray(change.before) ? change.before.length : 0,
+                afterLength: change.after.length,
+                source: notification.source,
+                timestamp: Date.now(),
+              });
+            }
+            
             this.runtime.telemetry.submit({
               type: "cell.update",
               change: change,
@@ -370,6 +400,17 @@ export class Scheduler implements IScheduler {
               logger.debug(() => [
                 `[CHANGE ${changeIndex}] Triggered ${triggeredActions.length} actions`,
               ]);
+              
+              // CT-823: Log when remote changes trigger actions
+              if (triggeredActions.length > 0 && "source" in notification && notification.source !== "local") {
+                logger.info("[CT823-TRIGGERED-ACTIONS] Remote change triggered actions", {
+                  actionCount: triggeredActions.length,
+                  id: change.address.id,
+                  path: change.address.path.join("/"),
+                  source: notification.source,
+                  timestamp: Date.now(),
+                });
+              }
 
               for (const action of triggeredActions) {
                 logger.debug(() => [
@@ -457,6 +498,14 @@ export class Scheduler implements IScheduler {
       const tx = this.runtime.edit();
 
       try {
+        // CT-823: Log handler invocation details
+        logger.debug("[CT823-SCHEDULER] Invoking event handler", {
+          handlerType: typeof handler,
+          queueSize: this.eventQueue.length,
+          pendingSize: this.pending.size,
+          dirtySize: this.dirty.size,
+        });
+        
         this.runningPromise = Promise.resolve(
           this.runtime.harness.invoke(() => handler(tx)),
         ).then(() => finalize()).catch((error) => finalize(error));

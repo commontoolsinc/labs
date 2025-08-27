@@ -123,7 +123,7 @@ export interface SyncStore<Model, Address>
   extends SyncPull<Model, Address>, SyncPush<Model> {
 }
 
-const logger = getLogger("storage.cache", { level: "info", enabled: true });
+const logger = getLogger("storage.cache", { level: "debug", enabled: true });
 
 interface NotFoundError extends Error {
   name: "NotFound";
@@ -1105,9 +1105,9 @@ export class Replica {
         logger.error(() => ["[CT823-CONFLICT] Transaction failed", result.error]);
         if (result.error.name === "ConflictError") {
           logger.error(() => ["[CT823-CONFLICT] Conflict details:", {
-            expected: result.error.conflict.expected,
-            actual: result.error.conflict.actual,
-            existsInHistory: result.error.conflict.existsInHistory
+            expected: (result.error as any).conflict.expected,
+            actual: (result.error as any).conflict.actual,
+            existsInHistory: (result.error as any).conflict.existsInHistory
           }]);
         }
       }
@@ -1127,7 +1127,31 @@ export class Replica {
       }
 
       // Notify storage subscribers about the reverted transaction.
-      logger.debug(() => ["[CT823-CONFLICT] Reverting transaction, changes:", checkout.compare(this).length]);
+      const changes = checkout.compare(this);
+      const changeCount = [...changes].length;
+      logger.debug(() => ["[CT823-CONFLICT] Reverting transaction, changes:", changeCount]);
+      
+      // CT823: Log the actual facts being reverted
+      if (changeCount > 0) {
+        const changeArray = [...changes];
+        // Log the first change in detail to understand structure
+        if (changeArray.length > 0) {
+          const firstChange = changeArray[0];
+          logger.debug(() => ["[CT823-CONFLICT] First change structure:", {
+            hasAddress: !!firstChange.address,
+            addressType: firstChange.address?.type,
+            addressId: firstChange.address?.id,
+            beforeValue: typeof firstChange.before,
+            afterValue: typeof firstChange.after,
+          }]);
+        }
+        const addresses = changeArray.slice(0, 50).map(change => {
+          // Log both id and type to see what's being reverted
+          return `${change.address?.type || 'no-type'}:${change.address?.id || 'no-id'}`;
+        });
+        logger.debug(() => ["[CT823-CONFLICT] Facts being reverted (up to 50):", addresses]);
+      }
+      
       this.subscription.next({
         type: "revert",
         space: this.did(),

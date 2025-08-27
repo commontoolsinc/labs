@@ -325,7 +325,20 @@ export const commit = async (
       const { writer, storage } = ready;
       const replica = writer ? storage.open(writer.did()).replica : null;
       const changes = replica ? archive.get(replica.did()) : null;
-      logger.debug("[CT823-TRANSACTION] Committing", changes?.length ?? 0, "changes to replica");
+      const changeCount = changes ? (changes.claims.length + changes.facts.length) : 0;
+      
+      // CT823: Enhanced logging to show what's being committed
+      if (changes && changeCount > 0) {
+        const objectIds = changes.facts.map(f => f.of).slice(0, 5); // First 5 entity IDs
+        logger.debug("[CT823-TRANSACTION] Committing", changeCount, "changes to replica", {
+          claimCount: changes.claims.length,
+          factCount: changes.facts.length,
+          sampleObjectIds: objectIds,
+          timestamp: Date.now(),
+        });
+      } else {
+        logger.debug("[CT823-TRANSACTION] Committing", changeCount, "changes to replica");
+      }
       
       const promise = changes
         ? replica!.commit(changes, transaction)
@@ -339,10 +352,13 @@ export const commit = async (
 
       const result = await promise;
       
-      if (result.error) {
+      if ("error" in result && result.error) {
         logger.error("[CT823-TRANSACTION] commit() failed with error:", result.error);
       } else {
-        logger.debug("[CT823-TRANSACTION] commit() succeeded");
+        logger.debug("[CT823-TRANSACTION] commit() succeeded", {
+          transactionSize: changeCount,
+          timestamp: Date.now(),
+        });
       }
       
       mutate(transaction, {

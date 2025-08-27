@@ -25,7 +25,7 @@ import type {
 import { ignoreReadForScheduling } from "../scheduler.ts";
 
 const logger = getLogger("extended-storage-transaction", {
-  enabled: false,
+  enabled: false,  // CT823: Disabled to reduce logging overhead
   level: "debug",
 });
 
