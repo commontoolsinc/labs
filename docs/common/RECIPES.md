@@ -43,8 +43,7 @@ The framework uses a reactive programming model:
 
 - `cell`: Represents a reactive state container that can be updated and observed
 - `derive`: Creates a derived value that updates when its dependencies change
-- `lift`: Similar to derive, but lifts a regular function into the reactive
-  graph
+- `lift`: Similar to derive, but lifts a regular function to work on reactive values
   - `derive(param, function)` is an alias to `lift(function)(param)`
 - `handler`: Creates an event handler that always fires with up-to-date dependencies (possibly mutating them)
 
