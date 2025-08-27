@@ -15,7 +15,6 @@ import { assert } from "@std/assert";
 import * as Automerge from "@automerge/automerge";
 import { createGenesisDoc } from "../src/store/genesis.ts";
 import { encodeBase64 } from "../src/codec/bytes.ts";
-import { encodeBase64 } from "../src/codec/bytes.ts";
 
 Deno.test({
   name: "WS v2: subscribe complete and deliver/ack via tx",
