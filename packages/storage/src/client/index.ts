@@ -4,6 +4,20 @@ import { ClientStore } from "./store.ts";
 import { Scheduler } from "./scheduler.ts";
 import { ClientTransaction } from "./tx.ts";
 
+/**
+ * High-level client for the storage WS v2 service.
+ *
+ * Responsibilities:
+ * - Manage per-space WebSocket connections
+ * - Maintain a local composed view (server + optimistic overlays)
+ * - Provide a simple transaction API for optimistic commits
+ * - Emit change events for consumers (e.g., UI)
+ *
+ * Authentication: `token` in StorageClientOptions is reserved for future WS
+ * authentication. WebSocket constructors in browsers do not support custom
+ * headers; HTTP route auth is enforced separately. WS auth will be added once a
+ * compatible mechanism is defined.
+ */
 export class StorageClient {
   #baseUrl: string;
   #token?: string | (() => Promise<string>);
@@ -17,6 +31,7 @@ export class StorageClient {
     this.#token = opts.token;
   }
 
+  /** Open or reuse a connection to a space. */
   connect(_space: DID | string): Promise<void> {
     const key = String(_space);
     let sc = this.#spaces.get(key);
@@ -50,6 +65,7 @@ export class StorageClient {
     return sc.open();
   }
 
+  /** Disconnect from a space and close its WebSocket. */
   disconnect(_space: DID | string): Promise<void> {
     const key = String(_space);
     const sc = this.#spaces.get(key);
@@ -65,6 +81,7 @@ export class StorageClient {
     return this.#spaces.get(String(space))!;
   }
 
+  /** Subscribe to a document root/path and receive backfill + updates. */
   async subscribe(
     space: DID | string,
     opts: {
@@ -76,6 +93,7 @@ export class StorageClient {
     return sc.subscribe(opts);
   }
 
+  /** Wait until initial subscriptions (and in-flight commits) settle. */
   async synced(space?: DID | string): Promise<void> {
     if (space) {
       const sc = await this.spaceConn(space);
@@ -93,6 +111,7 @@ export class StorageClient {
     }
   }
 
+  /** Create a new client-side transaction with optimistic overlay support. */
   newTransaction() {
     const existing = clientStoreMap.get(this);
     const store = existing ?? new ClientStore();
@@ -167,6 +186,7 @@ export class StorageClient {
     );
   }
 
+  /** One-shot get: backfill for the query and return composed view. */
   async get(
     space: DID | string,
     opts: {
@@ -181,12 +201,14 @@ export class StorageClient {
     return v;
   }
 
+  /** Register a change listener; returns an unsubscribe function. */
   onChange(
     cb: (e: import("./scheduler.ts").SchedulerEvent) => void,
   ): () => void {
     return this.#scheduler.on(cb);
   }
 
+  /** Submit a transaction directly (without optimistic overlay handling). */
   async submitTx(
     space: DID | string,
     req: Parameters<import("./connection.ts").SpaceConnection["submitTx"]>[0],
@@ -195,6 +217,7 @@ export class StorageClient {
     return sc.submitTx(req as any);
   }
 
+  /** Read the composed view (server + pending overlay) for a document. */
   readView(
     space: DID | string,
     docId: string,

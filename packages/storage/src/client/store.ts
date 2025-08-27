@@ -7,6 +7,10 @@ export type DocState = {
   json: JsonValue;
 };
 
+/**
+ * ClientStore holds per-space document server state and a stack of optimistic
+ * overlays per document. readView composes server + top overlay for consumers.
+ */
 export class ClientStore {
   // space -> docId -> DocState
   #bySpace = new Map<string, Map<string, DocState>>();

@@ -46,6 +46,14 @@ type OverlayFns = {
   ) => void;
 };
 
+/**
+ * ClientTransaction captures staged writes, establishes read-sets for
+ * invalidation, and performs optimistic overlays prior to commit.
+ *
+ * Commit outcomes:
+ * - ok: overlays are promoted to server state
+ * - conflict/rejected: overlays are cleared and the transaction completes
+ */
 export class ClientTransaction {
   #status: TxStatus = "open";
   readonly log: Array<
