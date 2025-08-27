@@ -14,7 +14,7 @@ A recipe is the fundamental building block, defined using the `recipe()`
 function. It takes three parameters:
 
 - Input Types: Defines the input parameters and their types using TypeScript
-- Output Types: Defines the output structure using TypeScript  
+- Output Types: Defines the output structure using TypeScript
 - Implementation Function: A function that receives the inputs and returns
   outputs
 
@@ -46,6 +46,7 @@ The framework uses a reactive programming model:
 - `lift`: Similar to derive, but lifts a regular function into the reactive
   graph
   - `derive(param, function)` is an alias to `lift(function)(param)`
+- `handler`: Creates an event handler that always fires with up-to-date dependencies (possibly mutating them)
 
 ### Handlers vs Reactive Functions
 
@@ -237,7 +238,7 @@ logic.
 ## Best Practices
 
 1. **Use CTS TypeScript Types**: Define clear TypeScript interfaces for your
-   input and output schemas. This provides runtime validation, self-documentation, 
+   input and output schemas. This provides runtime validation, self-documentation,
    and compatibility with framework tooling through the CTS (Common Tools TypeScript) system.
 
 2. **Use `Cell<>` for Handler State**: When defining handler state types, use `Cell<>` for properties that need to be updated. This gives you direct access to the Cell methods like `.set()` and `.get()`.
