@@ -78,6 +78,7 @@ Deno.test({
           x.init = true;
         });
         const preChange = Automerge.getLastLocalChange(after)!;
+        const { encodeBase64 } = await import("../src/codec/bytes.ts");
         const preTx = {
           invocation: {
             iss: "did:key:test",
@@ -88,7 +89,7 @@ Deno.test({
               writes: [{
                 ref: { docId, branch: "main" },
                 baseHeads: Automerge.getHeads(base),
-                changes: [{ bytes: btoa(String.fromCharCode(...preChange)) }],
+                changes: [{ bytes: encodeBase64(preChange) }],
               }],
             },
             prf: [],
