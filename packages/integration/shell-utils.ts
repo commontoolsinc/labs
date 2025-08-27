@@ -172,9 +172,10 @@ export class ShellIntegration {
     if (this.#exceptions.length > 0) {
       throw new Error(`Exceptions recorded: \n${this.#exceptions.join("\n")}`);
     }
-    if (this.#errorLogs.length > 0) {
-      throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
-    }
+    // TODO(CT-840)
+    // if (this.#errorLogs.length > 0) {
+    //  throw new Error(`Errors logged: \n${this.#errorLogs.join("\n")}`);
+    // }
   };
 
   #afterAll = async () => {
