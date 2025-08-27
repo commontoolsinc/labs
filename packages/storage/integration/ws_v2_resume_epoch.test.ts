@@ -3,10 +3,9 @@ import * as Automerge from "@automerge/automerge";
 import { createGenesisDoc } from "../src/store/genesis.ts";
 
 // Helper: base64 encode bytes
-function b64(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s);
+async function b64(bytes: Uint8Array): Promise<string> {
+  const { encodeBase64 } = await import("../src/codec/bytes.ts");
+  return encodeBase64(bytes);
 }
 
 function waitOpen(ws: WebSocket): Promise<void> {

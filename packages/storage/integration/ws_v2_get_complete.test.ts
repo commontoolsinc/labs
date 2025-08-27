@@ -84,6 +84,7 @@ Deno.test({
     };
     wsSeed.onopen = () => {
       const docId = "doc:s1";
+      const { encodeBase64 } = await import("../src/codec/bytes.ts");
       const base = createGenesisDoc<any>(docId);
       const after = Automerge.change(base, (x: any) => {
         x.seed = true;
@@ -100,7 +101,7 @@ Deno.test({
             writes: [{
               ref: { docId, branch: "main" },
               baseHeads: Automerge.getHeads(base),
-              changes: [{ bytes: btoa(String.fromCharCode(...c1)) }],
+              changes: [{ bytes: encodeBase64(c1) }],
             }],
           },
           prf: [],
@@ -175,6 +176,7 @@ Deno.test({
   const cur = Automerge.change(seededDoc as any, (x: any) => {
     x.bump = (x.bump || 0) + 1;
   });
+  const { encodeBase64: encodeB64 } = await import("../src/codec/bytes.ts");
   const nextChange = Automerge.getLastLocalChange(cur)!;
   const sendTx = {
     invocation: {
@@ -186,7 +188,7 @@ Deno.test({
         writes: [{
           ref: { docId: "doc:s1", branch: "main" },
           baseHeads: seedHeads,
-          changes: [{ bytes: btoa(String.fromCharCode(...nextChange)) }],
+          changes: [{ bytes: encodeB64(nextChange) }],
         }],
       },
       prf: [],
@@ -229,7 +231,8 @@ Deno.test({
         x.seed = true;
       });
       const c2 = Automerge.getLastLocalChange(after2)!;
-      const changeB64_2 = btoa(String.fromCharCode(...c2));
+      const { encodeBase64 } = await import("../src/codec/bytes.ts");
+      const changeB64_2 = encodeBase64(c2);
       s2.send(JSON.stringify({
         invocation: {
           iss: "did:key:test",

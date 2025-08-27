@@ -85,8 +85,9 @@ Deno.test({
             x.init = true;
           });
           seededS2 = init2;
-          const changeB642 = btoa(
-            String.fromCharCode(...Automerge.getLastLocalChange(init2)!),
+          const { encodeBase64 } = await import("../src/codec/bytes.ts");
+          const changeB642 = encodeBase64(
+            Automerge.getLastLocalChange(init2)!,
           );
           wsSeed.send(JSON.stringify({
             invocation: {
@@ -118,8 +119,9 @@ Deno.test({
         x.init = true;
       });
       seededS1 = docInit;
-      const changeB64 = btoa(
-        String.fromCharCode(...Automerge.getLastLocalChange(docInit)!),
+      const { encodeBase64 } = await import("../src/codec/bytes.ts");
+      const changeB64 = encodeBase64(
+        Automerge.getLastLocalChange(docInit)!,
       );
       wsSeed.send(JSON.stringify({
         invocation: {
@@ -283,8 +285,9 @@ Deno.test({
   });
   const c2 = Automerge.getLastLocalChange(cur2)!;
 
-  const changeB64_s1 = btoa(String.fromCharCode(...c1));
-  const changeB64_s2 = btoa(String.fromCharCode(...c2));
+  const { encodeBase64: enc64 } = await import("../src/codec/bytes.ts");
+  const changeB64_s1 = enc64(c1);
+  const changeB64_s2 = enc64(c2);
   const tx1 = {
     invocation: {
       iss: "did:key:test",

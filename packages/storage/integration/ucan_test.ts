@@ -3,6 +3,7 @@ import { createTestApp } from "@/packages/toolshed/lib/create-app.ts";
 import storageNew from "@/packages/toolshed/routes/storage/new/new.index.ts";
 
 function b64url(data: string) {
+  // For small header/payload JSON strings, use built-in btoa but normalize URL safe.
   return btoa(data).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
