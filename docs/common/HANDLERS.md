@@ -67,6 +67,42 @@ const updateTitle = handler<
 
 Notice how handlers are bound to the cell from the input schema _in_ the VDOM declaration? That's partial application of the state, the rest of the state (the actual event) comes through as `e` in the handler. This way you can merge the discrete updates from events with the reactive cells that are always changing values.
 
+#### Event Parameter Patterns
+
+You can handle the event parameter in different ways depending on your needs:
+
+```typescript
+// Option 1: Destructure specific event properties (most common)
+const updateTitle = handler<
+  { detail: { value: string } }, 
+  { title: Cell<string> }
+>(
+  ({ detail }, { title }) => {
+    title.set(detail.value);
+  }
+);
+
+// Option 2: Use full event object when you need multiple properties
+const handleComplexEvent = handler<
+  { detail: { value: string }, target: HTMLElement, timestamp: number }, 
+  { data: Cell<any> }
+>(
+  (e, { data }) => {
+    // Access multiple event properties
+    console.log('Event timestamp:', e.timestamp);
+    console.log('Target element:', e.target);
+    data.set({ value: e.detail.value, element: e.target.tagName });
+  }
+);
+
+// Option 3: Use underscore when event data isn't needed
+const simpleIncrement = handler<Record<string, never>, { count: Cell<number> }>(
+  (_, { count }) => {
+    count.set(count.get() + 1);
+  }
+);
+```
+
 ## Handler Invocation Patterns
 
 ### State Passing
@@ -186,6 +222,50 @@ const toggleItem = handler<
 );
 ```
 
+#### Improving Event Typing
+
+While `Record<string, never>` works for simple handlers that don't use event data, better event typing improves development experience and catches errors:
+
+```typescript
+// Better: Define specific event interfaces when you need event data
+interface ClickEvent {
+  target: HTMLElement;
+  shiftKey?: boolean;
+  metaKey?: boolean;
+}
+
+interface CustomEvent<T = any> {
+  detail: T;
+  target: HTMLElement;
+}
+
+// Use specific types for better IntelliSense and error catching
+const handleItemClick = handler<
+  ClickEvent,
+  { items: Cell<Array<{ id: string, done: boolean }>> }
+>(
+  ({ target, shiftKey }, { items }) => {
+    const itemId = target.getAttribute('data-item-id');
+    if (itemId) {
+      // Type-safe access to event properties
+      const shouldSelectMultiple = shiftKey;
+      // ... handler logic
+    }
+  }
+);
+
+// For custom events with specific detail shapes
+const handleFormSubmit = handler<
+  CustomEvent<{ formData: Record<string, string> }>,
+  { submissions: Cell<any[]> }
+>(
+  ({ detail }, { submissions }) => {
+    // detail.formData is properly typed
+    submissions.push(detail.formData);
+  }
+);
+```
+
 ## Common Pitfalls
 
 ### 1. Type Mismatch
@@ -233,27 +313,20 @@ const handler = handler<Record<string, never>, any>(
 }
 ```
 
-## Testing Handlers
+## Debugging Handlers
 
-### Unit Testing Pattern
+### Console-based Debugging
 ```typescript
-// Test handler logic separately
-const testState = { items: [], currentPage: "test" };
-const testEvent = { detail: { value: "new content" } };
-
-// Call handler function directly
-handlerFunction(testEvent, testState);
-
-// Assert expected changes
-expect(testState.items).toHaveLength(1);
-```
-
-### Integration Testing
-```typescript
-// Test full handler including schemas
-const handler = createHandler(...);
-const testInvocation = { items: mockItems, currentPage: "test" };
-
-// Test that handler can be invoked without errors
-expect(() => handler(testInvocation)).not.toThrow();
+// In recipes, use console logging for debugging
+const addItem = handler<
+  { detail: { value: string } }, 
+  { items: Cell<any[]> }
+>(
+  ({ detail }, { items }) => {
+    console.log("Adding item:", detail.value);
+    console.log("Current items:", items.get());
+    items.push({ title: detail.value, done: false });
+    console.log("Updated items:", items.get());
+  }
+);
 ```
