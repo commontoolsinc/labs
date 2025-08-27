@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { ClientTransaction } from "../src/client/tx.ts";
 
 Deno.test(
   { name: "client: dependent tx rejects if source tx rejected" },
@@ -30,7 +31,6 @@ Deno.test(
       } as any;
     };
 
-    const { ClientTransaction } = await import("../src/client/tx.ts");
     const txA = new ClientTransaction(commitAdapterA, undefined, undefined, {
       onCommitted: (_tx, info) => {
         if (info.status !== "ok") rejections.push("A");

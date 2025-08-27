@@ -1,6 +1,6 @@
 import type { Database } from "@db/sqlite";
 import * as Automerge from "@automerge/automerge";
-import { hexToBytes } from "./bytes.ts";
+import { hexToBytes } from "../codec/bytes.ts";
 import { sha256Hex } from "./crypto.ts";
 
 export type CasKind = "am_change" | "am_snapshot" | "blob";

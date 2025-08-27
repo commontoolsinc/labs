@@ -2,6 +2,7 @@
 
 import { assert, assertEquals } from "@std/assert";
 import { delay } from "@std/async/delay";
+import { StorageClient } from "../src/client/index.ts";
 
 Deno.test({
   name: "integration: client genesis + optimistic commit reflects in readView",
@@ -37,7 +38,6 @@ Deno.test({
   }, 15000);
 
   const spaceDid = "did:key:client-tx-int2";
-  const { StorageClient } = await import("../src/client/index.ts");
 
   // First connection: create doc via client API (genesis write)
   {

@@ -1,5 +1,8 @@
 import type { DID, StorageClientOptions } from "./types.ts";
+import { SpaceConnection } from "./connection.ts";
+import { ClientStore } from "./store.ts";
 import { Scheduler } from "./scheduler.ts";
+import { ClientTransaction } from "./tx.ts";
 
 export class StorageClient {
   #baseUrl: string;
@@ -14,8 +17,7 @@ export class StorageClient {
     this.#token = opts.token;
   }
 
-  async connect(_space: DID | string): Promise<void> {
-    const { SpaceConnection } = await import("./connection.ts");
+  connect(_space: DID | string): Promise<void> {
     const key = String(_space);
     let sc = this.#spaces.get(key);
     if (!sc) {
@@ -24,7 +26,6 @@ export class StorageClient {
         token: this.#token,
       });
       // Bind store updater lazily on first creation
-      const { ClientStore } = await import("./store.ts");
       const store = clientStoreMap.get(this) ?? new ClientStore();
       clientStoreMap.set(this, store);
       sc.onServerDocConfirm = (docId: string) => {
@@ -92,10 +93,7 @@ export class StorageClient {
     }
   }
 
-  async newTransaction() {
-    const { ClientTransaction } = await import("./tx.ts");
-    // Ensure a store exists for overlays even if connect() hasn't been called yet
-    const { ClientStore } = await import("./store.ts");
+  newTransaction() {
     const existing = clientStoreMap.get(this);
     const store = existing ?? new ClientStore();
     if (!existing) clientStoreMap.set(this, store);
@@ -115,7 +113,7 @@ export class StorageClient {
     };
     const baselineProvider = async (space: string, docId: string) => {
       const sc = await this.spaceConn(space);
-      const d = await sc.getAutomergeDoc(docId);
+      const d = sc.getAutomergeDoc(docId);
       return d as any;
     };
     const overlay = {

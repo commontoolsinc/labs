@@ -1,8 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import * as AM from "@automerge/automerge";
+import { ClientTransaction } from "../src/client/tx.ts";
 
 Deno.test({ name: "client tx: single-space enforcement" }, async () => {
-  const { ClientTransaction } = await import("../src/client/tx.ts");
   const tx = new ClientTransaction();
   tx.write("space:A", "doc:x", [], (root: any) => (root.v = 1));
   let threw = false;
@@ -25,7 +25,6 @@ Deno.test({ name: "client tx: write-only sets allowServerMerge" }, async () => {
       conflicts: [],
     };
   };
-  const { ClientTransaction } = await import("../src/client/tx.ts");
   const tx = new ClientTransaction(commitAdapter);
   tx.write("space:A", "doc:x", [], (root: any) => (root.v = 1));
   await tx.commit();
@@ -53,7 +52,6 @@ Deno.test(
       } as any;
     };
     const baselineProvider = async () => null; // force no server baseline
-    const { ClientTransaction } = await import("../src/client/tx.ts");
     const tx = new ClientTransaction(commitAdapter, baselineProvider);
     tx.write("space:A", "doc:g", [], (root: any) => (root.v = 1));
     await tx.commit();

@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
 import { delay } from "@std/async/delay";
+import { StorageClient } from "../src/client/index.ts";
 
 function getFreePort(): number {
   const l = Deno.listen({ hostname: "127.0.0.1", port: 0 });
@@ -35,7 +36,6 @@ Deno.test({
   }).spawn();
   await delay(300);
 
-  const { StorageClient } = await import("../src/client/index.ts");
   const space = "did:key:client-synced-e2e";
   const c = new StorageClient({ baseUrl });
 

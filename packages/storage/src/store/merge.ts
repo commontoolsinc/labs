@@ -10,7 +10,7 @@ import * as Automerge from "@automerge/automerge";
 import { getEnvBoolean } from "../config.ts";
 import { getAutomergeBytesAtSeq } from "./pit.ts";
 import { createCas } from "./cas.ts";
-import { hexToBytes } from "./bytes.ts";
+import { hexToBytes } from "../codec/bytes.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
 import { decodeChangeHeader } from "./change.ts";
 

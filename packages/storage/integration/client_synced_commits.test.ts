@@ -1,5 +1,6 @@
 import { assert } from "@std/assert";
 import { delay } from "@std/async/delay";
+import { StorageClient } from "../src/client/index.ts";
 
 function getFreePort(): number {
   const l = Deno.listen({ hostname: "127.0.0.1", port: 0 });
@@ -37,7 +38,6 @@ Deno.test({
   }, 15000);
 
   const space = "did:key:client-synced-commits";
-  const { StorageClient } = await import("../src/client/index.ts");
   const c = new StorageClient({ baseUrl });
 
   // Seed the branch/doc first to avoid branch not found during subscribe

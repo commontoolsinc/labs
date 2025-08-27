@@ -1,10 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
+import { ClientTransaction } from "../src/client/tx.ts";
 
 Deno.test({
   name: "client tx: read() reflects staged write and validPathOut",
 }, async () => {
-  const { ClientTransaction } = await import("../src/client/tx.ts");
-
   const tx = new ClientTransaction();
   // No staged writes yet: read returns undefined, validPathOut empty
   {

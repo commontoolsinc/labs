@@ -13,7 +13,7 @@ import {
 import { createCas } from "./cas.ts";
 import { upsertJsonCache } from "./cache.ts";
 import { getLogger } from "@commontools/utils/logger";
-import { bytesToHex, hexToBytes } from "./bytes.ts";
+import { bytesToHex, hexToBytes } from "../codec/bytes.ts";
 import { createStubTx, getLastStubCrypto } from "./tx_chain.ts";
 import { updateHeads as updateHeadsShared } from "./heads.ts";
 import { synthesizeAndApplyMergeOnBranch } from "./merge.ts";

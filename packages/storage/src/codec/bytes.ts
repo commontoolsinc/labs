@@ -22,7 +22,6 @@ export function decodeBase64Url(s: string): Uint8Array {
   const pad = b64.length % 4;
   if (pad === 2) b64 += "==";
   else if (pad === 3) b64 += "=";
-  else if (pad !== 0 && pad !== 0) b64 += ""; // no-op for completeness
   return stdDecodeB64(b64);
 }
 

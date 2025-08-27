@@ -19,10 +19,8 @@ export function fromTokens(tokens: string[]): string {
   return "/" + tokens.map(esc).join("/");
 }
 
-// Path key for Maps/Sets
-export function keyPath(tokens: string[]): string {
-  return JSON.stringify(tokens);
-}
+// Path key for Maps/Sets - reuse canonical encoder
+export { keyPath } from "../path.ts";
 
 // Build child path (immutable)
 export function child(tokens: string[], seg: string): string[] {

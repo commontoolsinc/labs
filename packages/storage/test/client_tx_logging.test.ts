@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
+import { ClientTransaction } from "../src/client/tx.ts";
 
 Deno.test({ name: "client tx: read/write log entries" }, async () => {
-  const { ClientTransaction } = await import("../src/client/tx.ts");
   const tx = new ClientTransaction();
   // Default read uses nolog=true; read with logging enabled
   tx.read("did:key:space", "doc:log", ["a", "b"], false);

@@ -10,7 +10,7 @@ import {
   refer as referJson,
   toDigest as refToDigest,
 } from "merkle-reference/json";
-import { bytesToHex } from "./bytes.ts";
+import { bytesToHex } from "../codec/bytes.ts";
 import type { Database } from "@db/sqlite";
 import { getPrepared } from "./prepared.ts";
 import { getLogger } from "@commontools/utils/logger";

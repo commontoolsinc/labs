@@ -1,5 +1,8 @@
 import { assert, assertEquals } from "@std/assert";
 import { delay } from "@std/async/delay";
+import * as AM from "@automerge/automerge";
+import { createGenesisDoc } from "../src/store/genesis.ts";
+import { StorageClient } from "../src/client/index.ts";
 
 Deno.test({
   name:
@@ -47,8 +50,6 @@ Deno.test({
       };
       ws.onopen = () => {
         (async () => {
-          const AM = await import("@automerge/automerge");
-          const { createGenesisDoc } = await import("../src/store/genesis.ts");
           const base = createGenesisDoc<any>(docId);
           const after = AM.change(base, (d: any) => {
             d.x = 1;
@@ -82,7 +83,6 @@ Deno.test({
   await seed("doc:a");
   await seed("doc:b");
 
-  const { StorageClient } = await import("../src/client/index.ts");
   const c = new StorageClient({ baseUrl });
   const space = "did:key:client-synced";
 

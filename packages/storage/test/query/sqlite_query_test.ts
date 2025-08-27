@@ -6,6 +6,8 @@ import type { Database } from "@db/sqlite";
 import { compileSchema, IRPool } from "../../src/query/ir.ts";
 import { Evaluator, Provenance } from "../../src/query/eval.ts";
 import { SqliteStorageReader } from "../../src/query/sqlite_storage.ts";
+import { SubscriptionIndex } from "../../src/query/subs.ts";
+import { ChangeProcessor } from "../../src/query/change_processor.ts";
 
 Deno.test("schema compile with #/definitions and evaluation over SQLite", async () => {
   const tmpDir = await Deno.makeTempDir();
@@ -106,10 +108,6 @@ Deno.test("link topology change: adding new child triggers touch and provenance 
   const pool = new IRPool();
   const prov = new Provenance();
   const evalr = new Evaluator(pool, storage, prov);
-  const { SubscriptionIndex } = await import("../../src/query/subs.ts");
-  const { ChangeProcessor } = await import(
-    "../../src/query/change_processor.ts"
-  );
   const subs = new SubscriptionIndex();
   const proc = new ChangeProcessor(evalr, prov, subs);
 

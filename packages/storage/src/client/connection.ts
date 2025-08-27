@@ -1,6 +1,7 @@
 import type { DID, StorageClientOptions } from "./types.ts";
-import { encodeBase64 } from "../codec/bytes.ts";
+import { decodeBase64, encodeBase64 } from "../codec/bytes.ts";
 import { refer } from "merkle-reference/json";
+import * as AM from "@automerge/automerge";
 
 export class SpaceConnection {
   readonly spaceId: DID | string;
@@ -54,7 +55,6 @@ export class SpaceConnection {
     });
     this.#socket!.onmessage = (e) => {
       // fire-and-forget async handler
-      // deno-lint-ignore no-floating-promises
       this.#onMessage(e);
     };
     // Always send hello on open to register client and request backfill from sinceEpoch
@@ -150,7 +150,7 @@ export class SpaceConnection {
     return Promise.all(arr).then(() => undefined);
   }
 
-  async #onMessage(ev: MessageEvent): Promise<void> {
+  #onMessage(ev: MessageEvent): void {
     try {
       const m = JSON.parse(String(ev.data));
       if (m && m.type === "deliver" && typeof m.epoch === "number") {
@@ -173,13 +173,7 @@ export class SpaceConnection {
                 const bytesB64 = d.body as string;
                 const bytes = (() => {
                   try {
-                    // Use global atob for base64 decode to Uint8Array
-                    const bin = atob(bytesB64);
-                    const out = new Uint8Array(bin.length);
-                    for (let i = 0; i < bin.length; i++) {
-                      out[i] = bin.charCodeAt(i) & 0xff;
-                    }
-                    return out;
+                    return decodeBase64(bytesB64);
                   } catch {
                     return new Uint8Array();
                   }
@@ -187,7 +181,6 @@ export class SpaceConnection {
                 // Try Automerge load first; fallback to JSON.parse
                 let json: unknown;
                 try {
-                  const AM = await import("@automerge/automerge");
                   const doc = AM.load(bytes);
                   this.#amDocs.set(d.docId, doc);
                   json = AM.toJS(doc);
@@ -214,17 +207,14 @@ export class SpaceConnection {
                 const baseline = this.#amDocs.get(d.docId);
                 if (baseline) {
                   try {
-                    const AM = await import("@automerge/automerge");
-                    const changes = (Array.isArray(d.body) ? d.body : []).map(
-                      (b64: string) => {
-                        const bin = atob(b64);
-                        const out = new Uint8Array(bin.length);
-                        for (let i = 0; i < bin.length; i++) {
-                          out[i] = bin.charCodeAt(i) & 0xff;
+                    const changes = (Array.isArray(d.body) ? d.body : [])
+                      .map((b64: string) => {
+                        try {
+                          return decodeBase64(b64);
+                        } catch {
+                          return new Uint8Array();
                         }
-                        return out;
-                      },
-                    );
+                      });
                     const applied = AM.applyChanges(
                       baseline as any,
                       changes as any,
@@ -350,11 +340,10 @@ export class SpaceConnection {
     return res;
   }
 
-  async getAutomergeDoc(docId: string): Promise<unknown | null> {
+  getAutomergeDoc(docId: string): unknown | null {
     const cur = this.#amDocs.get(docId);
     if (!cur) return null;
     try {
-      const AM = await import("@automerge/automerge");
       // Clone to avoid mutating internal baseline
       return AM.clone(cur as any);
     } catch {

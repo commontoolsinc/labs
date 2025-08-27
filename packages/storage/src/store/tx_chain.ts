@@ -1,5 +1,5 @@
 import type { Database } from "@db/sqlite";
-import { bytesToHex } from "./bytes.ts";
+import { bytesToHex } from "../codec/bytes.ts";
 
 export function randomBytes(length: number): Uint8Array {
   const arr = new Uint8Array(length);
