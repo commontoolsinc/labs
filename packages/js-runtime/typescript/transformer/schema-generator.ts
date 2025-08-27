@@ -41,18 +41,18 @@ function getSymbolDoc(
  */
 function getDeclDocs(decl: ts.Declaration): string[] {
   const docs: string[] = [];
-  // TODO: stronger typing when TS compiler API exposes JSDoc types properly
+  // TODO(@gideon): stronger typing when TS compiler API exposes JSDoc types properly
   const jsDocs = (decl as any).jsDoc as Array<ts.JSDoc> | undefined;
   if (jsDocs && jsDocs.length > 0) {
     for (const d of jsDocs) {
-      // TODO: stronger typing when TS compiler API exposes JSDoc comment types properly
+      // TODO(@gideon): stronger typing when TS compiler API exposes JSDoc comment types properly
       const comment = (d as any).comment;
       let text = "";
       if (typeof comment === "string") text = comment;
       else if (Array.isArray(comment)) {
         text = comment.map((
           c,
-        ) => (typeof c === "string" ? c : (c as any).text ?? "")).join(""); // TODO: stronger typing for JSDoc text nodes
+        ) => (typeof c === "string" ? c : (c as any).text ?? "")).join(""); // TODO(@gideon): stronger typing for JSDoc text nodes
       }
       if (text) {
         const lines = String(text).split(/\r?\n/).filter((l) =>
@@ -338,7 +338,9 @@ function buildObjectSchema(
             logger.warn(() =>
               `Consolidated docs for property '${propName}' from multiple declarations.`
             );
-          } catch (_e) {}
+          } catch (_e) {
+            // Swallow logging issues to remain safe
+          }
         } else {
           propSchema.description = text;
         }
