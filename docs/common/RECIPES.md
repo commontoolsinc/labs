@@ -35,7 +35,7 @@ This TypeScript-first approach provides several benefits:
 - Integration with IDE tooling
 - Express Cell vs readonly value requirements directly in types
 
-Importantly, the framework automatically derives JSON Schema from your TypeScript types at runtime using the CTS (CommonTools Schema) system. This gives you runtime validation, self-documentation, and serialization support without having to write JSON Schema manually. You can express your desire for Cells vs readonly values directly in TypeScript types, and the system will fulfill the values by reflecting on the types as derived JSON Schema.
+Importantly, the framework automatically handles type validation and serialization using the CTS (Common Tools TypeScript) system. This gives you runtime validation, self-documentation, and serialization support. You can express your desire for Cells vs readonly values directly in TypeScript types, and the system will fulfill the values by reflecting on the types.
 
 ### Data Flow
 
@@ -62,7 +62,7 @@ respond to events:
 - Use `Cell<>` to indicate you want a reactive value (for mutation, usually):
 
   ```typescript
-  const updateCounter = handler<Record<string, never>, { count: Cell<number> }>(
+  const updateCounter = handler<never, { count: Cell<number> }>(
     (input, { count }) => {
       // Now count is a Cell<number> instance
       count.set(count.get() + 1);
@@ -236,10 +236,9 @@ logic.
 
 ## Best Practices
 
-1. **Use JSON Schema Over TypeScript Generics**: Prefer using JSON Schema for
-   type definitions rather than TypeScript generics. This provides better
-   runtime validation, self-documentation, and compatibility with framework
-   tooling.
+1. **Use CTS TypeScript Types**: Define clear TypeScript interfaces for your
+   input and output schemas. This provides runtime validation, self-documentation, 
+   and compatibility with framework tooling through the CTS (Common Tools TypeScript) system.
 
 2. **Use `Cell<>` for Handler State**: When defining handler state types, use `Cell<>` for properties that need to be updated. This gives you direct access to the Cell methods like `.set()` and `.get()`.
 
@@ -485,7 +484,7 @@ results:
 
 ### TypeScript to Runtime Schema
 
-The CTS framework automatically generates JSON Schema from your TypeScript types at runtime:
+The CTS framework automatically handles your TypeScript types at runtime:
 
 ```typescript
 // Define TypeScript types
@@ -494,7 +493,7 @@ type Person = {
   age?: number;
 };
 
-// The framework automatically derives JSON Schema from this TypeScript type
+// The framework automatically processes this TypeScript type
 // No manual schema definition needed - it's all handled by CTS reflection
 ```
 
@@ -652,7 +651,7 @@ export default recipe<Input, Output>(
     );
 
     // Handler for user interactions
-    const refreshData = handler<Record<string, never>, { processedData: Cell<ProcessedData[]> }>(
+    const refreshData = handler<never, { processedData: Cell<ProcessedData[]> }>(
       (_, state) => {
         // Update state based on user action
         // Note: Cannot call llm() directly here
