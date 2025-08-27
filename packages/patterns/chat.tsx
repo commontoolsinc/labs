@@ -40,6 +40,10 @@ const prefix = lift((idx: number) => {
   return idx % 2 === 0 ? 'User' : 'Assistant';
 });
 
+const clearChat = handler()((_: never, { chat }: { chat: Cell<Array<ChatMessage>> }) => {
+  chat.get().length = 0;
+});
+
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat }) => {
@@ -49,26 +53,30 @@ export default recipe<LLMTestInput, LLMTestResult>(
       messages: chat,
     });
 
-    // derive(llmResponse.result, (result) => {
-    //   console.log('[x]', result)
-    // });
+    derive(llmResponse.result, (result) => {
+      console.log('[x]', result)
+    });
 
-    // derive(llmResponse.partial, (result) => {
-    //   console.log('[y]', result)
-    // });
+    derive(llmResponse.partial, (result) => {
+      console.log('[y]', result)
+    });
 
     return {
       [NAME]: title,
       [UI]: (
         <div>
           <h2>{title}</h2>
+          <ct-button
+            onct-click={clearChat({ chat })}
+          >Clear Chat</ct-button>
+
           <ul>
             {chat.map((msg, idx) => {
               return <li key={msg}><strong>{prefix(idx)}:</strong>{" "}{msg}</li>;
             })}
             {derive(llmResponse.partial, (result) =>
               result
-                ? (<li><strong>{prefix(1)}:</strong>{" "}{result}</li>)
+                ? (<li><strong>Assistant:</strong>{" "}{result}</li>)
                 : null)}
           </ul>
 
