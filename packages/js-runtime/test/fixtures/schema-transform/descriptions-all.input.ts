@@ -33,7 +33,30 @@ interface HasDocs {
 }
 const schemaPrecedence = toSchema<HasDocs>({ description: "Explicit description" });
 
-// 3) Intersection tests (deferred to CT-762 branch with intersection support)
+// 3) Intersections: same vs conflicting property docs
+interface A {
+  /** Name doc */
+  name: string;
+}
+interface B {
+  /** Name doc */
+  name: string;
+  /** Age */
+  age: number;
+}
+type AB = A & B;
+const schemaAB = toSchema<AB>();
+
+interface C {
+  /** First name doc */
+  name: string;
+}
+interface D {
+  /** Second name doc */
+  name: string;
+}
+type CD = C & D;
+const schemaCD = toSchema<CD>();
 
 // 4) Extends-based inheritance of docs
 /** Base type */

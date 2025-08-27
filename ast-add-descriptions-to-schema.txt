@@ -134,3 +134,42 @@ Implementation plan (detailed)
 Assumption corrections and notes
 - Ignore declaration-file docs: We now ignore JSDoc sourced from declaration files (e.g., lib.d.ts for built-ins like Map/Date) to avoid polluting schemas. Only user/project declarations contribute docs.
 - Intersection alias awareness (deferred here): Intersections expressed via named type aliases (e.g., `type AB = A & B`) require unwrapping the alias to ensure the intersection merge path runs. This work is part of CT-762 and not included in this branch; intersection-specific assertions were removed from the consolidated fixture accordingly.
+
+Progress to date (V1)
+- Implemented JSDoc extraction and description attachment for:
+  - Root types (with explicit options precedence)
+  - Properties (including multiline preservation and tag trimming)
+  - Nested object and array-of-objects (one level)
+  - Intersections of object types with overlapping properties:
+    - Same doc preserved
+    - Conflicting docs: choose first non-empty, append "(Consolidated from intersection constituents)", and log a warning
+  - Extends-based inheritance: derived schemas include docs from base and derived members
+  - Index signatures and Record-like types: attach doc to additionalProperties.description
+  - Ignored JSDoc from declaration files (lib.d.ts) as planned
+
+- Tests
+  - Consolidated fixture `descriptions-all.*` now green and includes sections for: nested/root, precedence, intersections (same/conflicting), extends, index/record, and tags.
+  - Added focused fixtures to iterate and lock behavior:
+    - `descriptions-nested-only.*`
+    - `descriptions-precedence-only.*`
+    - `descriptions-intersection-only.*`
+    - `descriptions-extends-only.*`
+    - `descriptions-index-record-only.*`
+    - `descriptions-tags-only.*`
+
+Review against plan: gaps and next steps
+- Gaps in test coverage (still to add for completeness):
+  - Wrappers coexistence: property docs where the property type is `Cell<T>`, `Stream<T>`, or `Default<T, V>` (verify docs still attach to the property schema and wrappers add metadata as expected).
+  - Optional properties and union with undefined: ensure property-level docs persist when optionality is expressed via `?` or `| undefined`.
+  - Root alias docs: `type Foo = Bar` where docs live on `Bar` (confirm root description is pulled when using `toSchema<Foo>()`).
+  - Recursive types with $ref: confirm descriptions appear consistently when properties are emitted via `$ref` definitions.
+  - Array property doc semantics: ensure JSDoc on an array-typed property applies to the array node itself (not items), which is the current intended behavior.
+
+- Implementation notes:
+  - We removed use of non-standard `$comment` in emitted schemas in favor of descriptions and logger warnings, matching the JSONSchema type.
+  - Intersection alias awareness is exercised by `type AB = A & B` in tests and works end-to-end after upstream intersection fixes were merged.
+  - Logging is present for consolidated intersection docs; we do not emit extra schema fields for warnings.
+
+Proposed follow-ups (post-V1 hardening)
+- Add the missing focused fixtures listed above to close test gaps without re-introducing fixture proliferation (can be consolidated into a small number of additional sections if desired).
+- Consider a minimal doc conflict mode toggle in the future (e.g., strict/warn) if consumers want to customize consolidation behavior.
