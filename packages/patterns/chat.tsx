@@ -9,6 +9,7 @@ import {
   ifElse,
   llm,
   NAME,
+  lift,
   recipe,
   str,
   UI,
@@ -35,6 +36,10 @@ const askQuestion = handler<
   chat.push(event.detail.message);
 });
 
+const prefix = lift((idx: number) => {
+  return idx % 2 === 0 ? 'User' : 'Assistant';
+});
+
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat }) => {
@@ -44,11 +49,28 @@ export default recipe<LLMTestInput, LLMTestResult>(
       messages: chat,
     });
 
+    // derive(llmResponse.result, (result) => {
+    //   console.log('[x]', result)
+    // });
+
+    // derive(llmResponse.partial, (result) => {
+    //   console.log('[y]', result)
+    // });
+
     return {
       [NAME]: title,
       [UI]: (
         <div>
           <h2>{title}</h2>
+          <ul>
+            {chat.map((msg, idx) => {
+              return <li key={msg}><strong>{prefix(idx)}:</strong>{" "}{msg}</li>;
+            })}
+            {derive(llmResponse.partial, (result) =>
+              result
+                ? (<li><strong>{prefix(1)}:</strong>{" "}{result}</li>)
+                : null)}
+          </ul>
 
           <div>
             <ct-message-input
@@ -58,13 +80,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
               onct-send={askQuestion({ chat, response: llmResponse.result })}
             />
           </div>
-
-          <ul>
-            {chat.map((msg) => {
-              return <li>{msg}</li>;
-            })}
-            <li>{ifElse(llmResponse.pending, "...", llmResponse.result)}</li>
-          </ul>
         </div>
       ),
       chat,
