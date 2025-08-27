@@ -7,7 +7,7 @@ type InputSchema = { count: Cell<number> };
 type OutputSchema = { count: Cell<number> };
 
 const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ count }) => {
-  const handleClick = handler<Record<string, never>, { count: Cell<number> }>((e, { count }) => {
+  const handleClick = handler<never, { count: Cell<number> }>((e, { count }) => {
     count.set(count.get() + 1);
   });
 
@@ -66,7 +66,7 @@ const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ rawValue }) =>
   });
 
   // Example 3: When event data isn't needed
-  const handleReset = handler<Record<string, never>, { rawValue: Cell<string> }>((_ , { rawValue }) => {
+  const handleReset = handler<never, { rawValue: Cell<string> }>((_ , { rawValue }) => {
     rawValue.set("");
   });
 
