@@ -149,6 +149,8 @@ const P = Number(Deno.env.get("BENCH_CLIENT_PENDING") ?? 50);
 const N = Number(Deno.env.get("BENCH_CLIENT_CONFLICTS") ?? 90);
 const KEYS = Number(Deno.env.get("BENCH_CLIENT_KEYS") ?? 2000);
 
+// (no instrumentation helpers; keep benches quiet)
+
 Deno.bench({
   name: `client-tx: single doc, small commits (ok) [${ITER} commits]`,
   group: "client-tx",
@@ -161,7 +163,6 @@ Deno.bench({
     return Promise.resolve(server.getBaseline(docId));
   };
   const commitAdapter = async (_space: string, req: any) => {
-    // The ClientTransaction passes a structured request; align to subset we use
     return await server.submitTx(req as any);
   };
 
