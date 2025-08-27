@@ -30,7 +30,7 @@ const updateCode = handler<
 );
 
 const visit = handler<
-  {},
+  Record<string, never>,
   { result: any }
 >(
   (e, state) => {
@@ -46,20 +46,6 @@ export default recipe<Input>(
       files: [{ name: "/main.tsx", contents: code }],
       main: "/main.tsx",
     });
-
-    // const x = derive(
-    //   state,
-    //   (state) => {
-    //     console.log("[x]", state);
-    //   },
-    // );
-
-    // const y = derive(
-    //   [state.pending, state.error, state.result],
-    //   ([pending, error, result]) => {
-    //     console.log("[y]", pending, error, result);
-    //   },
-    // );
 
     return {
       [NAME]: "My First Compiler",
