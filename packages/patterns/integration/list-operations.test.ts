@@ -20,7 +20,9 @@ describe("list-operations simple test", () => {
   beforeAll(async () => {
     identity = await Identity.generate({ implementation: "noble" });
     // Use a unique space name to avoid conflicts between test runs
-    spaceName = `${SPACE_NAME}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    spaceName = `${SPACE_NAME}-${Date.now()}-${
+      Math.random().toString(36).slice(2)
+    }`;
     cc = await CharmsController.initialize({
       spaceName: spaceName,
       apiUrl: new URL(API_URL),
@@ -49,70 +51,110 @@ describe("list-operations simple test", () => {
       charmId: charm.id,
       identity,
     });
-    
+
     // Wait for the main list display to appear
     await page.waitForSelector("#main-list", { strategy: "pierce" });
-    
+
     // Click reset to populate with initial data
     const resetBtn = await page.$("#reset-demo", { strategy: "pierce" });
     assert(resetBtn, "Should find reset button");
     await resetBtn.click();
-    
+
     // Wait for the reset operation to complete by checking the text content
     const mainList = await page.$("#main-list", { strategy: "pierce" });
     assert(mainList, "Should find main list element");
-    
+
     await waitFor(async () => {
-      const initialText = await mainList!.evaluate((el: HTMLElement) => el.textContent || "");
+      const initialText = await mainList!.evaluate((el: HTMLElement) =>
+        el.textContent || ""
+      );
       return initialText === "A, B, C, D (4)";
     });
-    
+
     // Verify the list populated correctly
-    const initialText = await mainList!.evaluate((el: HTMLElement) => el.textContent || "");
-    assertEquals(initialText, "A, B, C, D (4)", "Should have A, B, C, D (4) after reset");
-    
+    const initialText = await mainList!.evaluate((el: HTMLElement) =>
+      el.textContent || ""
+    );
+    assertEquals(
+      initialText,
+      "A, B, C, D (4)",
+      "Should have A, B, C, D (4) after reset",
+    );
+
     // Test delete first item
-    const deleteFirstBtn = await page.$("#delete-first", { strategy: "pierce" });
+    const deleteFirstBtn = await page.$("#delete-first", {
+      strategy: "pierce",
+    });
     await deleteFirstBtn!.click();
-    
+
     // Wait for delete to complete
     await waitFor(async () => {
-      const currentMainList = await page.$("#main-list", { strategy: "pierce" });
-      const text = await currentMainList!.evaluate((el: HTMLElement) => el.textContent || "");
+      const currentMainList = await page.$("#main-list", {
+        strategy: "pierce",
+      });
+      const text = await currentMainList!.evaluate((el: HTMLElement) =>
+        el.textContent || ""
+      );
       return text === "B, C, D (3)";
     });
-    
+
     const currentMainList = await page.$("#main-list", { strategy: "pierce" });
-    const afterDeleteText = await currentMainList!.evaluate((el: HTMLElement) => el.textContent || "");
-    assertEquals(afterDeleteText, "B, C, D (3)", "Should have B, C, D (3) after deleting first");
-    
+    const afterDeleteText = await currentMainList!.evaluate((el: HTMLElement) =>
+      el.textContent || ""
+    );
+    assertEquals(
+      afterDeleteText,
+      "B, C, D (3)",
+      "Should have B, C, D (3) after deleting first",
+    );
+
     // Test insert at start
-    const insertStartBtn = await page.$("#insert-start", { strategy: "pierce" });
+    const insertStartBtn = await page.$("#insert-start", {
+      strategy: "pierce",
+    });
     await insertStartBtn!.click();
-    
+
     // Wait for insert to complete
     await waitFor(async () => {
       const insertMainList = await page.$("#main-list", { strategy: "pierce" });
-      const text = await insertMainList!.evaluate((el: HTMLElement) => el.textContent || "");
+      const text = await insertMainList!.evaluate((el: HTMLElement) =>
+        el.textContent || ""
+      );
       return text === "New Start, B, C, D (4)";
     });
-    
+
     const insertMainList = await page.$("#main-list", { strategy: "pierce" });
-    const afterInsertText = await insertMainList!.evaluate((el: HTMLElement) => el.textContent || "");
-    assertEquals(afterInsertText, "New Start, B, C, D (4)", "Should have New Start at beginning");
-    
+    const afterInsertText = await insertMainList!.evaluate((el: HTMLElement) =>
+      el.textContent || ""
+    );
+    assertEquals(
+      afterInsertText,
+      "New Start, B, C, D (4)",
+      "Should have New Start at beginning",
+    );
+
     // Test one more operation: delete-last to see if it works
     const deleteLastBtn = await page.$("#delete-last", { strategy: "pierce" });
     await deleteLastBtn!.click();
-    
+
     await waitFor(async () => {
-      const deleteLastMainList = await page.$("#main-list", { strategy: "pierce" });
-      const text = await deleteLastMainList!.evaluate((el: HTMLElement) => el.textContent || "");
+      const deleteLastMainList = await page.$("#main-list", {
+        strategy: "pierce",
+      });
+      const text = await deleteLastMainList!.evaluate((el: HTMLElement) =>
+        el.textContent || ""
+      );
       return text === "New Start, B, C (3)";
     });
-    
+
     const finalMainList = await page.$("#main-list", { strategy: "pierce" });
-    const finalText = await finalMainList!.evaluate((el: HTMLElement) => el.textContent || "");
-    assertEquals(finalText, "New Start, B, C (3)", "Should show New Start, B, C (3) after delete-last");
+    const finalText = await finalMainList!.evaluate((el: HTMLElement) =>
+      el.textContent || ""
+    );
+    assertEquals(
+      finalText,
+      "New Start, B, C (3)",
+      "Should show New Start, B, C (3) after delete-last",
+    );
   });
 });
