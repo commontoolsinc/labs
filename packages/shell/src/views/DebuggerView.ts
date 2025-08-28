@@ -1020,7 +1020,7 @@ export class XDebuggerView extends LitElement {
     const allEvents = this.isPaused
       ? this.pausedMarkers
       : this.telemetryMarkers;
-    const filteredCount = this.getFilteredEvents().length;
+    const filteredCount = this.visible ? this.getFilteredEvents().length : 0;
 
     return html`
       ${this.visible
