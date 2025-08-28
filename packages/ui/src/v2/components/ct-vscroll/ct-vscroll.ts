@@ -10,6 +10,7 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {boolean} show-scrollbar - Always show scrollbar
  * @attr {boolean} fade-edges - Show fade effect at edges
+ * @attr {boolean} snap-to-bottom - Automatically scroll to bottom when new content is added
  * @attr {string} padding - Padding inside scroll area
  * @attr {string} height - Fixed height of the container
  * @attr {string} max-height - Maximum height of the container
@@ -31,6 +32,7 @@ export class CTVScroll extends BaseElement {
       attribute: "show-scrollbar",
     },
     fadeEdges: { type: Boolean, reflect: true, attribute: "fade-edges" },
+    snapToBottom: { type: Boolean, reflect: true, attribute: "snap-to-bottom" },
     padding: { type: String },
     height: { type: String },
     maxHeight: { type: String, attribute: "max-height" },
@@ -154,6 +156,7 @@ export class CTVScroll extends BaseElement {
 
   declare showScrollbar: boolean;
   declare fadeEdges: boolean;
+  declare snapToBottom: boolean;
   declare padding: string;
   declare height: string;
   declare maxHeight: string;
@@ -161,11 +164,14 @@ export class CTVScroll extends BaseElement {
   declare _atEnd: boolean;
 
   private _scrollContainer: HTMLElement | null = null;
+  private _mutationObserver: MutationObserver | null = null;
+  private _wasAtBottom = true;
 
   constructor() {
     super();
     this.showScrollbar = false;
     this.fadeEdges = false;
+    this.snapToBottom = false;
     this.padding = "0";
     this.height = "";
     this.maxHeight = "";
@@ -200,6 +206,7 @@ export class CTVScroll extends BaseElement {
           this.handleScroll,
         );
       }
+      this.setupMutationObserver();
     });
   }
 
@@ -211,6 +218,7 @@ export class CTVScroll extends BaseElement {
         this.handleScroll,
       );
     }
+    this.cleanupMutationObserver();
   }
 
   private handleScroll = () => {
@@ -223,12 +231,17 @@ export class CTVScroll extends BaseElement {
   };
 
   private updateScrollState() {
-    if (!this.scrollContainer || !this.fadeEdges) return;
+    if (!this.scrollContainer) return;
 
     const { scrollTop, scrollHeight, clientHeight } = this
       .scrollContainer as HTMLElement;
     this._atStart = scrollTop <= 0;
     this._atEnd = scrollTop + clientHeight >= scrollHeight - 1;
+
+    // Track if user was at bottom for snapToBottom behavior
+    if (this.snapToBottom) {
+      this._wasAtBottom = this._atEnd;
+    }
   }
 
   override render() {
@@ -282,6 +295,46 @@ export class CTVScroll extends BaseElement {
         top: y,
         behavior: smooth ? "smooth" : "auto",
       });
+    }
+  }
+
+  /**
+   * Scroll to the bottom of the container
+   */
+  scrollToBottom(smooth: boolean = true) {
+    if (this.scrollContainer) {
+      const { scrollHeight } = this.scrollContainer as HTMLElement;
+      this.scrollToY(scrollHeight, smooth);
+    }
+  }
+
+  private setupMutationObserver() {
+    if (!this.snapToBottom) return;
+
+    this.cleanupMutationObserver();
+
+    this._mutationObserver = new MutationObserver(() => {
+      // Only auto-scroll if user was at bottom when content changed
+      if (this._wasAtBottom) {
+        // Use requestAnimationFrame to ensure DOM has updated
+        requestAnimationFrame(() => {
+          this.scrollToBottom();
+        });
+      }
+    });
+
+    // Observe changes to the slotted content
+    this._mutationObserver.observe(this, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }
+
+  private cleanupMutationObserver() {
+    if (this._mutationObserver) {
+      this._mutationObserver.disconnect();
+      this._mutationObserver = null;
     }
   }
 }
