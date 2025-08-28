@@ -340,8 +340,9 @@ export const subscribe = createRoute({
   request: {
     headers: z.object({
       // Connection header is a list of values that must include Upgrade
-      connection: z.string().regex(/(^|\s*,\s*)Upgrade(\s*,\s*|$)/),
-      upgrade: z.literal("websocket"),
+      connection: z.string().regex(/(^|\s*,\s*)Upgrade(\s*,\s*|$)/i),
+      // Upgrade header is a list of values that must include websocket (and possible version)
+      upgrade: z.string().regex(/(^|\s*,\s*)websocket(\/[^,]+)?(\s*,\s*|$)/i),
     }),
   },
   responses: {
