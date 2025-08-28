@@ -945,8 +945,8 @@ Acceptance:
 - [x] Shell wiring
   - [x] Use storage-factory when constructing the runtime
 
-- [ ] CLI wiring
-  - [ ] Use storage-factory in CLI commands; prefer `--url`/`API_URL` for
+- [x] CLI wiring
+  - [x] Use storage-factory in CLI commands; prefer `--url`/`API_URL` for
         `baseUrl`
 
 - [ ] Eventing and telemetry
