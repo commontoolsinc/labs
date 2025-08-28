@@ -120,7 +120,7 @@ export function fetchData(
     const thisRun = ++currentRun;
     const abort = new AbortController();
 
-    const cancel = fetch(url, { signal: abort.signal, ...options })
+    fetch(url, { signal: abort.signal, ...options })
       .then(processResponse)
       .then(async (data) => {
         if (thisRun !== currentRun) return;
