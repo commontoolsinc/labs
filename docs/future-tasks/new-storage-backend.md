@@ -912,9 +912,9 @@ Acceptance:
 
 - [ ] Create adapter scaffolding (runner)
   - [ ] `packages/runner/src/storage-new/address.ts`
-  - [ ] `packages/runner/src/storage-new/manager.ts`
-  - [ ] `packages/runner/src/storage-new/transaction.ts`
-  - [ ] `packages/runner/src/storage-new/provider.ts`
+  - [x] `packages/runner/src/storage-new/manager.ts`
+  - [x] `packages/runner/src/storage-new/transaction.ts`
+  - [x] `packages/runner/src/storage-new/provider.ts`
   - [ ] `packages/runner/src/storage-new/cache.ts`
 
 - [ ] Implement `IStorageManager` (adapter over `StorageClient`)
@@ -938,12 +938,12 @@ Acceptance:
   - [x] Do not implement `IStorageProvider.send`, `.sink`, or `.get` (unused)
 
 - [ ] Feature flag and factory
-  - [ ] `packages/runner/src/storage-factory.ts` selects manager by
+  - [ ] `packages/runner/src/storage/factory.ts` selects manager by
         `ENABLE_NEW_STORAGE ∈ {"1","true","on"}`
   - [ ] Configure client `baseUrl` from `API_URL`; respect `LOG_LEVEL`
 
-- [ ] Shell wiring
-  - [ ] Use storage-factory when constructing the runtime
+- [x] Shell wiring
+  - [x] Use storage-factory when constructing the runtime
 
 - [ ] CLI wiring
   - [ ] Use storage-factory in CLI commands; prefer `--url`/`API_URL` for
