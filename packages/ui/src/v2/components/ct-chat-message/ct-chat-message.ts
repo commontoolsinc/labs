@@ -62,7 +62,6 @@ export class CTChatMessage extends BaseElement {
         }
       }
 
-
       /* Streaming text effect - can be triggered by adding 'streaming' class */
       .message.streaming .message-content {
         animation: none;
@@ -70,7 +69,7 @@ export class CTChatMessage extends BaseElement {
       }
 
       .message.streaming .message-content::after {
-        content: '▊';
+        content: "▊";
         animation: blink 1s infinite;
         margin-left: 2px;
         color: currentColor;
@@ -113,7 +112,16 @@ export class CTChatMessage extends BaseElement {
         background-color: rgba(0, 0, 0, 0.1);
         padding: 0.125rem 0.25rem;
         border-radius: var(--ct-border-radius, 0.25rem);
-        font-family: var(--ct-font-mono, ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace);
+        font-family: var(
+          --ct-font-mono,
+          ui-monospace,
+          "Cascadia Code",
+          "Source Code Pro",
+          Menlo,
+          Consolas,
+          "DejaVu Sans Mono",
+          monospace
+        );
         font-size: 0.875em;
       }
 
@@ -174,18 +182,20 @@ export class CTChatMessage extends BaseElement {
 
   private _renderMarkdown(content: string): string {
     if (!content) return "";
-    
+
     // Configure marked for safer rendering
     marked.setOptions({
       breaks: true,
       gfm: true,
     });
-    
+
     return marked(content) as string;
   }
 
   override render() {
-    const messageClass = `message message-${this.role}${this.streaming ? ' streaming' : ''}`;
+    const messageClass = `message message-${this.role}${
+      this.streaming ? " streaming" : ""
+    }`;
     const renderedContent = this._renderMarkdown(this.content);
 
     return html`

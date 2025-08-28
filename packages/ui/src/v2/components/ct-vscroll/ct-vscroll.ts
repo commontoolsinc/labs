@@ -237,7 +237,7 @@ export class CTVScroll extends BaseElement {
       .scrollContainer as HTMLElement;
     this._atStart = scrollTop <= 0;
     this._atEnd = scrollTop + clientHeight >= scrollHeight - 1;
-    
+
     // Track if user was at bottom for snapToBottom behavior
     if (this.snapToBottom) {
       this._wasAtBottom = this._atEnd;
