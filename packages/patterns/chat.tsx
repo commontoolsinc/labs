@@ -7,15 +7,15 @@ import {
   h,
   handler,
   ifElse,
+  lift,
   llm,
   NAME,
-  lift,
   recipe,
   str,
   UI,
 } from "commontools";
 
-type ChatMessage = string;
+type ChatMessage = { role: string; content: string };
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
@@ -31,18 +31,20 @@ const askQuestion = handler<
   { chat: Cell<Array<ChatMessage>>; response: string | undefined }
 >((event, { chat, response }) => {
   if (response) {
-    chat.push(response);
+    chat.push({ role: "assistant", content: response });
   }
-  chat.push(event.detail.message);
+  chat.push({ role: "user", content: event.detail.message });
 });
 
 const prefix = lift((idx: number) => {
-  return idx % 2 === 0 ? 'User' : 'Assistant';
+  return idx % 2 === 0 ? "User" : "Assistant";
 });
 
-const clearChat = handler()((_: never, { chat }: { chat: Cell<Array<ChatMessage>> }) => {
-  chat.get().length = 0;
-});
+const clearChat = handler(
+  (_: never, { chat }: { chat: Cell<Array<ChatMessage>> }) => {
+    chat.set([]);
+  },
+);
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
@@ -50,15 +52,15 @@ export default recipe<LLMTestInput, LLMTestResult>(
     const llmResponse = llm({
       system:
         "You are a helpful assistant. Answer questions clearly and concisely.",
-      messages: chat,
+      messages: chat.map((c) => c.content),
     });
 
     derive(llmResponse.result, (result) => {
-      console.log('[x]', result)
+      console.log("[x]", result);
     });
 
     derive(llmResponse.partial, (result) => {
-      console.log('[y]', result)
+      console.log("[y]", result);
     });
 
     return {
@@ -68,15 +70,25 @@ export default recipe<LLMTestInput, LLMTestResult>(
           <h2>{title}</h2>
           <ct-button
             onct-click={clearChat({ chat })}
-          >Clear Chat</ct-button>
+          >
+            Clear Chat
+          </ct-button>
 
           <ul>
             {chat.map((msg, idx) => {
-              return <li key={msg}><strong>{prefix(idx)}:</strong>{" "}{msg}</li>;
+              return (
+                <li key={msg}>
+                  <strong>{msg.role}:</strong> {msg.content}
+                </li>
+              );
             })}
             {derive(llmResponse.partial, (result) =>
               result
-                ? (<li><strong>Assistant:</strong>{" "}{result}</li>)
+                ? (
+                  <li>
+                    <strong>Assistant:</strong> {result}
+                  </li>
+                )
                 : null)}
           </ul>
 
