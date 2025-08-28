@@ -66,31 +66,35 @@ export default recipe<LLMTestInput, LLMTestResult>(
             Clear Chat
           </ct-button>
 
-          <ul>
+          <ct-vscroll showScrollbar height="320px" fadeEdges snapToBottom>
             {chat.map((msg, idx) => {
               return (
-                <li key={idx}>
-                  <strong>{msg.role}:</strong> {msg.content}
-                </li>
+                <ct-chat-message
+                  key={idx}
+                  role={msg.role}
+                  content={msg.content}
+                />
               );
             })}
             {derive(llmResponse.pending, (pending) =>
               pending
                 ? (
-                  <li>
-                    <strong>assistant:</strong> ...
-                  </li>
+                  <ct-chat-message
+                    role="assistant"
+                    content="..."
+                  />
                 )
                 : null)}
             {derive(llmResponse.partial, (result) =>
               result
                 ? (
-                  <li>
-                    <strong>assistant:</strong> {result}
-                  </li>
+                  <ct-chat-message
+                    role="assistant"
+                    content={result}
+                  />
                 )
                 : null)}
-          </ul>
+          </ct-vscroll>
 
           <div>
             <ct-message-input

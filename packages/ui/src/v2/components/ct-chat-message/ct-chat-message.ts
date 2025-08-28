@@ -47,6 +47,42 @@ export class CTChatMessage extends BaseElement {
         word-wrap: break-word;
         position: relative;
         width: fit-content;
+        animation: messageSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        transform-origin: bottom;
+      }
+
+      @keyframes messageSlideIn {
+        0% {
+          opacity: 0;
+          transform: translateY(10px) scale(0.95);
+        }
+        100% {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+
+      /* Streaming text effect - can be triggered by adding 'streaming' class */
+      .message.streaming .message-content {
+        animation: none;
+        opacity: 1;
+      }
+
+      .message.streaming .message-content::after {
+        content: '▊';
+        animation: blink 1s infinite;
+        margin-left: 2px;
+        color: currentColor;
+      }
+
+      @keyframes blink {
+        0%, 50% {
+          opacity: 1;
+        }
+        51%, 100% {
+          opacity: 0;
+        }
       }
 
       .message-user {
@@ -61,6 +97,7 @@ export class CTChatMessage extends BaseElement {
 
       .message-content {
         line-height: 1.5;
+        animation: textFadeIn 0.4s ease-out 0.1s both;
       }
 
       /* Markdown styling */
@@ -121,15 +158,18 @@ export class CTChatMessage extends BaseElement {
   static override properties = {
     role: { type: String, reflect: true },
     content: { type: String },
+    streaming: { type: Boolean, reflect: true },
   };
 
   declare role: "user" | "assistant";
   declare content: string;
+  declare streaming: boolean;
 
   constructor() {
     super();
     this.role = "user";
     this.content = "";
+    this.streaming = false;
   }
 
   private _renderMarkdown(content: string): string {
@@ -145,7 +185,7 @@ export class CTChatMessage extends BaseElement {
   }
 
   override render() {
-    const messageClass = `message message-${this.role}`;
+    const messageClass = `message message-${this.role}${this.streaming ? ' streaming' : ''}`;
     const renderedContent = this._renderMarkdown(this.content);
 
     return html`
