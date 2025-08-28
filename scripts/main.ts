@@ -42,7 +42,7 @@ const {
   default: { quit: false },
 });
 
-const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
+const toolshedUrl = Deno.env.get("API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
 const OPERATOR_PASS = Deno.env.get("OPERATOR_PASS") ?? "common user";

@@ -3,8 +3,8 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { colors } from "@/routes/ai/llm/cli.ts";
 
-const API_URL = Deno.env.get("TOOLSHED_API_URL")
-  ? `${Deno.env.get("TOOLSHED_API_URL")}/api/ai/llm`
+const API_URL = Deno.env.get("API_URL")
+  ? `${Deno.env.get("API_URL")}/api/ai/llm`
   : "http://localhost:8000/api/ai/llm";
 const TEST_SYSTEM_PROMPT = "Be creative.";
 const TEST_PROMPT = `What's your favorite color?`;

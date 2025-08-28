@@ -23,7 +23,7 @@ const flags = parseArgs(Deno.args, {
   default: { the: "application/json", admin: false, raw: false, delete: false },
 });
 
-const toolshedUrl = Deno.env.get("TOOLSHED_API_URL") ??
+const toolshedUrl = Deno.env.get("API_URL") ??
   "http://localhost:8000/";
 
 const ANYONE = "common user";

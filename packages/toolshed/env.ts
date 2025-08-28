@@ -105,7 +105,7 @@ const EnvSchema = z.object({
   // ===========================================================================
 
   // URL of the toolshed API, for self-referring requests
-  TOOLSHED_API_URL: z.string().default("http://localhost:8000"),
+  API_URL: z.string().default("http://localhost:8000"),
 
   // DEPRECATED: Identity signer passphrase for storage authentication
   IDENTITY_PASSPHRASE: z.string().default("implicit trust"),

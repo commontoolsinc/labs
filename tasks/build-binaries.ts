@@ -245,7 +245,7 @@ async function buildCli(config: BuildConfig): Promise<void> {
   // friends
   // Globs don't work for compile(?)
   const envs = [
-    "TOOLSHED_API_URL",
+    "API_URL",
     "TSC_WATCHFILE",
     "TSC_NONPOLLING_WATCHER",
     "TSC_WATCHDIRECTORY",
