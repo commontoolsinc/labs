@@ -139,7 +139,7 @@ jobs:
           # Wrap in an if/else, we don't want the job to fail yet
           # until we can confidently expect passing results.
           if
-            TOOLSHED_API_URL=http://localhost:8000/ \
+            API_URL=http://localhost:8000/ \
             OPENAI_API_KEY=${{ secrets.CTTS_AI_LLM_OPENAI_API_KEY }} \
             deno task start --name ${{ env.target_sha }} $FLAGS ; then
             echo "All charms have been successfully verified!"

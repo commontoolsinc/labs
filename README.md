@@ -121,5 +121,5 @@ If you are not actively making updates to the backend, you can also point to the
 backend running in the cloud, by running the following command:
 
 ```shell
-TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
+API_URL=https://toolshed.saga-castor.ts.net/ deno task dev
 ```
