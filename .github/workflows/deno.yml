@@ -422,9 +422,66 @@ jobs:
     continue-on-error: true # Don't fail the workflow if tests fail
     steps:
       - name: 🧩 Run post-deploy Patterns integration tests against Toolshed (Staging)
+        id: run_tests
+        continue-on-error: true
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: /opt/ct/run-pattern-tests-against-toolshed.sh ${{ github.sha }} https://toolshed.saga-castor.ts.net https://toolshed.saga-castor.ts.net
+          command_timeout: 10m
+          script: |
+            /opt/ct/run-pattern-tests-against-toolshed.sh ${{ github.sha }} \
+              https://toolshed.saga-castor.ts.net \
+              https://toolshed.saga-castor.ts.net
+
+      - name: 📥 Retrieve test logs on failure
+        if: steps.run_tests.outcome == 'failure'
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          script: |
+            LOG_FILE="/tmp/patterns-test-${{ github.sha }}.log"
+            if [ -f "$LOG_FILE" ]; then
+              echo "📋 Test failed - showing last 500 lines..."
+              echo "========================================="
+              tail -n 500 "$LOG_FILE"
+              echo "========================================="
+              echo "Full logs will be available as artifact"
+            else
+              echo "⚠️ Log file not found at $LOG_FILE"
+            fi
+
+      - name: 📦 Download logs from bastion
+        if: always()
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.BASTION_HOST }}
+          username: bastion
+          key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
+          source: "/tmp/patterns-test-${{ github.sha }}.log"
+          target: "./test-logs"
+          strip_components: 1
+          rm: false
+
+      - name: 📤 Upload test logs as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patterns-test-logs-${{ github.sha }}
+          path: ./test-logs/patterns-test-${{ github.sha }}.log
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: 📊 Report test status
+        if: always()
+        run: |
+          if [ "${{ steps.run_tests.outcome }}" == "success" ]; then
+            echo "✅ Pattern integration tests PASSED"
+          else
+            echo "❌ Pattern integration tests FAILED"
+            echo "📥 Check the artifacts tab for full logs"
+          fi
+          exit ${{ steps.run_tests.outcome == 'success' && '0' || '1' }}
