@@ -15,7 +15,9 @@ export class NewStorageProvider implements IStorageProviderWithReplica {
     return this.delegate.replica;
   }
 
-  async send(batch: { uri: `${string}:${string}`; value: StorageValue<any> }[]) {
+  async send(
+    batch: { uri: `${string}:${string}`; value: StorageValue<any> }[],
+  ) {
     return await this.delegate.send(batch);
   }
 
@@ -43,5 +45,3 @@ export class NewStorageProvider implements IStorageProviderWithReplica {
     return this.delegate.getReplica();
   }
 }
-
-

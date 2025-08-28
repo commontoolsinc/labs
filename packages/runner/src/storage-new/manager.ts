@@ -1,8 +1,11 @@
 import type {
   IStorageManager,
   IStorageProviderWithReplica,
+  IStorageSubscription,
 } from "../storage/interface.ts";
 import type { MemorySpace } from "../storage.ts";
+import { StorageClient } from "../../../storage/src/client/index.ts";
+import { NewStorageProvider } from "./provider.ts";
 
 /**
  * Placeholder NewStorageManager adapter that will wrap the new storage client.
@@ -12,23 +15,36 @@ import type { MemorySpace } from "../storage.ts";
 export class NewStorageManager implements IStorageManager {
   id = "new-storage-adapter";
 
-  constructor(private readonly delegate: IStorageManager) {}
+  #client: StorageClient;
+  #delegate: IStorageManager;
+  #providers = new Map<string, IStorageProviderWithReplica>();
+
+  constructor(delegate: IStorageManager, opts?: { apiUrl?: URL }) {
+    this.#delegate = delegate;
+    this.#client = new StorageClient({ baseUrl: opts?.apiUrl?.toString() });
+  }
 
   open(space: MemorySpace): IStorageProviderWithReplica {
-    return this.delegate.open(space);
+    const key = String(space);
+    let p = this.#providers.get(key);
+    if (!p) {
+      // Temporary: wrap legacy provider; will switch to true adapter
+      p = new NewStorageProvider(this.#delegate.open(space));
+      this.#providers.set(key, p);
+    }
+    return p;
   }
 
   edit() {
-    return this.delegate.edit();
+    // Temporary: delegate transaction until new adapter is implemented
+    return this.#delegate.edit();
   }
 
-  subscribe(subscription: import("../storage/interface.ts").IStorageSubscription): void {
-    this.delegate.subscribe(subscription);
+  subscribe(subscription: IStorageSubscription): void {
+    this.#delegate.subscribe(subscription);
   }
 
   async synced(): Promise<void> {
-    await this.delegate.synced();
+    await this.#delegate.synced();
   }
 }
-
-

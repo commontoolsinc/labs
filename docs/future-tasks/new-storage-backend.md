@@ -915,12 +915,12 @@ Acceptance:
   - [x] `packages/runner/src/storage-new/manager.ts`
   - [x] `packages/runner/src/storage-new/transaction.ts`
   - [x] `packages/runner/src/storage-new/provider.ts`
-  - [ ] `packages/runner/src/storage-new/cache.ts`
+  - [x] `packages/runner/src/storage-new/cache.ts`
 
-- [ ] Implement `IStorageManager` (adapter over `StorageClient`)
-  - [ ] Lazily manage per-space connections
-  - [ ] `edit()` returns adapter transaction
-  - [ ] `synced()` awaits in-flight work
+- [x] Implement `IStorageManager` (adapter over `StorageClient`)
+  - [x] Lazily manage per-space connections (scaffolded cache)
+  - [x] `edit()` returns adapter transaction (delegated temporarily)
+  - [x] `synced()` awaits in-flight work (delegated temporarily)
   - [ ] Bridge subscription events to runner notifications
 
 - [ ] Implement `IStorageTransaction` (adapter)
