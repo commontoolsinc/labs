@@ -55,14 +55,6 @@ export default recipe<LLMTestInput, LLMTestResult>(
       messages: chat.map((c) => c.content),
     });
 
-    // derive(llmResponse.result, (result) => {
-    //   console.log("[x]", result);
-    // });
-
-    // derive(llmResponse.partial, (result) => {
-    //   console.log("[y]", result);
-    // });
-
     return {
       [NAME]: title,
       [UI]: (
@@ -77,7 +69,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
           <ul>
             {chat.map((msg, idx) => {
               return (
-                <li key={msg}>
+                <li key={idx}>
                   <strong>{msg.role}:</strong> {msg.content}
                 </li>
               );
