@@ -456,15 +456,15 @@ jobs:
 
       - name: 📦 Download logs from bastion
         if: always()
-        uses: appleboy/scp-action@master
+        uses: nicklasfrahm/scp-action@main
         with:
+          direction: download
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          source: "/tmp/patterns-test-${{ github.sha }}.log"
-          target: "."
-          strip_components: 2
-          rm: false
+          insecure_ignore_fingerprint: true
+          source: /tmp/patterns-test-${{ github.sha }}.log
+          target: patterns-test-${{ github.sha }}.log
 
       - name: 📤 Upload test logs as artifact
         if: always()
