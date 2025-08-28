@@ -55,13 +55,13 @@ export default recipe<LLMTestInput, LLMTestResult>(
       messages: chat.map((c) => c.content),
     });
 
-    derive(llmResponse.result, (result) => {
-      console.log("[x]", result);
-    });
+    // derive(llmResponse.result, (result) => {
+    //   console.log("[x]", result);
+    // });
 
-    derive(llmResponse.partial, (result) => {
-      console.log("[y]", result);
-    });
+    // derive(llmResponse.partial, (result) => {
+    //   console.log("[y]", result);
+    // });
 
     return {
       [NAME]: title,
@@ -82,11 +82,19 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 </li>
               );
             })}
+            {derive(llmResponse.pending, (pending) =>
+              pending
+                ? (
+                  <li>
+                    <strong>assistant:</strong> ...
+                  </li>
+                )
+                : null)}
             {derive(llmResponse.partial, (result) =>
               result
                 ? (
                   <li>
-                    <strong>Assistant:</strong> {result}
+                    <strong>assistant:</strong> {result}
                   </li>
                 )
                 : null)}
