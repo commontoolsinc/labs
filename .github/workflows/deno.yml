@@ -462,8 +462,8 @@ jobs:
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
           source: "/tmp/patterns-test-${{ github.sha }}.log"
-          target: "./test-logs"
-          strip_components: 1
+          target: "."
+          strip_components: 2
           rm: false
 
       - name: 📤 Upload test logs as artifact
@@ -471,7 +471,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: patterns-test-logs-${{ github.sha }}
-          path: ./test-logs/patterns-test-${{ github.sha }}.log
+          path: patterns-test-${{ github.sha }}.log
           retention-days: 7
           if-no-files-found: warn
 
