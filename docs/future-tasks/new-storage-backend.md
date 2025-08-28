@@ -898,3 +898,62 @@ Acceptance:
 - [x] Client passes unit and integration tests under `deno task test`
 - [x] `deno task integration` (in `packages/storage`) passes
 - [x] Works against dev server; scheduler callbacks match spec
+
+### Runner integration (flagged)
+
+- [ ] Goal: enable runner to use new storage when `ENABLE_NEW_STORAGE` is set;
+      otherwise keep current memory-backed behavior.
+
+- [ ] Address mapping (runner ↔ new storage)
+  - [ ] Map `MemorySpace` → space DID (pass-through if already a DID)
+  - [ ] Map runner `URI` → `docId` deterministically (e.g., `doc:<b64url(uri)>`)
+  - [ ] Keep JSON path tokens as-is
+  - [ ] Use branch `"main"` by default
+
+- [ ] Create adapter scaffolding (runner)
+  - [ ] `packages/runner/src/storage-new/address.ts`
+  - [ ] `packages/runner/src/storage-new/manager.ts`
+  - [ ] `packages/runner/src/storage-new/transaction.ts`
+  - [ ] `packages/runner/src/storage-new/provider.ts`
+  - [ ] `packages/runner/src/storage-new/cache.ts`
+
+- [ ] Implement `IStorageManager` (adapter over `StorageClient`)
+  - [ ] Lazily manage per-space connections
+  - [ ] `edit()` returns adapter transaction
+  - [ ] `synced()` awaits in-flight work
+  - [ ] Bridge subscription events to runner notifications
+
+- [ ] Implement `IStorageTransaction` (adapter)
+  - [ ] Maintain runner journal (reads/writes)
+  - [ ] `read()` from composed view; record invariants
+  - [ ] `write()` stages per-path changes; no network
+  - [ ] `commit()` batches by `(space, docId)` into one client tx; submit
+  - [ ] Map receipts to commit/revert notifications; handle conflicts/rollback
+  - [ ] `abort()` drops staged writes and finalizes status
+
+- [ ] Implement minimal `IStorageProviderWithReplica` (per-space)
+  - [ ] `replica.did()` returns space DID
+  - [ ] `replica.get(entry)` returns current `{ the, of, is }` via adapter cache
+  - [ ] `sync(uri, selector)`, `synced()`, `destroy()` lifecycle
+  - [x] Do not implement `IStorageProvider.send`, `.sink`, or `.get` (unused)
+
+- [ ] Feature flag and factory
+  - [ ] `packages/runner/src/storage-factory.ts` selects manager by
+        `ENABLE_NEW_STORAGE ∈ {"1","true","on"}`
+  - [ ] Configure client `baseUrl` from `API_URL`; respect `LOG_LEVEL`
+
+- [ ] Shell wiring
+  - [ ] Use storage-factory when constructing the runtime
+
+- [ ] CLI wiring
+  - [ ] Use storage-factory in CLI commands; prefer `--url`/`API_URL` for
+        `baseUrl`
+
+- [ ] Eventing and telemetry
+  - [ ] Bridge client events to runner subscription capability
+  - [ ] Mirror connection/push/pull/subscription state to `RuntimeTelemetry`
+
+- [ ] Testing
+  - [ ] Unit: address mapping and transaction batching
+  - [ ] Integration: run existing runner tests with `ENABLE_NEW_STORAGE=1`
+  - [ ] Reconnection parity (subscribe/get/ack) with storage client
