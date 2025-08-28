@@ -76,10 +76,15 @@ export default recipe<LLMTestInput, LLMTestResult>(
                   "...",
                 )}
               />,
-              <ct-chat-message
-                role="assistant"
-                content={llmResponse.result}
-              />,
+              derive(llmResponse.result, (result) =>
+                result
+                  ? (
+                    <ct-chat-message
+                      role="assistant"
+                      content={result}
+                    />
+                  )
+                  : null),
             )}
           </ct-vscroll>
 
