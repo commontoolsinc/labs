@@ -118,9 +118,12 @@ describe("Chat pattern test", () => {
       await sleep(100);
 
       // Click the send button by ID
-      const sendButton = await page.waitForSelector("#ct-message-input-send-button", {
-        strategy: "pierce",
-      });
+      const sendButton = await page.waitForSelector(
+        "#ct-message-input-send-button",
+        {
+          strategy: "pierce",
+        },
+      );
       assert(sendButton, "Should find send button");
       await sendButton.click();
 
@@ -139,7 +142,10 @@ describe("Chat pattern test", () => {
       const messageText = await userMessage.evaluate((el: HTMLElement) =>
         el.textContent
       );
-      assert(messageText?.includes(testMessage), "Should contain the user message");
+      assert(
+        messageText?.includes(testMessage),
+        "Should contain the user message",
+      );
       assert(messageText?.includes("user:"), "Should show user role prefix");
     },
   });
@@ -163,8 +169,14 @@ describe("Chat pattern test", () => {
         el.textContent
       );
       assert(responseText, "Should have response text");
-      assert(responseText.includes("assistant:"), "Should show assistant role prefix");
-      assert(responseText.trim().length > "assistant:".length, "Response should not be empty");
+      assert(
+        responseText.includes("assistant:"),
+        "Should show assistant role prefix",
+      );
+      assert(
+        responseText.trim().length > "assistant:".length,
+        "Response should not be empty",
+      );
 
       console.log("LLM Response:", responseText);
     },
@@ -198,9 +210,12 @@ describe("Chat pattern test", () => {
       await sleep(100);
 
       // Click the send button by ID
-      const sendButton = await page.waitForSelector("#ct-message-input-send-button", {
-        strategy: "pierce",
-      });
+      const sendButton = await page.waitForSelector(
+        "#ct-message-input-send-button",
+        {
+          strategy: "pierce",
+        },
+      );
       assert(sendButton, "Should find send button");
       await sendButton.click();
 
@@ -225,17 +240,23 @@ describe("Chat pattern test", () => {
       });
       const messages = await chatHistory.evaluate((ul: HTMLElement) => {
         const listItems = ul.querySelectorAll("li");
-        return Array.from(listItems).map(li => li.textContent?.trim() || "");
+        return Array.from(listItems).map((li) => li.textContent?.trim() || "");
       });
 
       // Should have at least 4 messages (user1, assistant1, user2, assistant2)
-      assert(messages.length >= 4, `Should have at least 4 messages, got ${messages.length}`);
-      
+      assert(
+        messages.length >= 4,
+        `Should have at least 4 messages, got ${messages.length}`,
+      );
+
       // Verify the second user message is present
-      const hasSecondUserMessage = messages.some(msg => 
+      const hasSecondUserMessage = messages.some((msg) =>
         msg.includes("user:") && msg.includes(secondMessage)
       );
-      assert(hasSecondUserMessage, "Should find second user message in chat history");
+      assert(
+        hasSecondUserMessage,
+        "Should find second user message in chat history",
+      );
 
       console.log("Chat history:", messages);
     },
@@ -251,9 +272,11 @@ describe("Chat pattern test", () => {
       const chatHistoryBefore = await page.waitForSelector("ul", {
         strategy: "pierce",
       });
-      const messagesBefore = await chatHistoryBefore.evaluate((ul: HTMLElement) => {
-        return ul.querySelectorAll("li").length;
-      });
+      const messagesBefore = await chatHistoryBefore.evaluate(
+        (ul: HTMLElement) => {
+          return ul.querySelectorAll("li").length;
+        },
+      );
       assert(messagesBefore > 0, "Should have messages before clearing");
 
       // Find and click the clear chat button
@@ -270,10 +293,16 @@ describe("Chat pattern test", () => {
       const chatHistoryAfter = await page.waitForSelector("ul", {
         strategy: "pierce",
       });
-      const messagesAfter = await chatHistoryAfter.evaluate((ul: HTMLElement) => {
-        return ul.querySelectorAll("li").length;
-      });
-      assertEquals(messagesAfter, 0, "Chat history should be empty after clearing");
+      const messagesAfter = await chatHistoryAfter.evaluate(
+        (ul: HTMLElement) => {
+          return ul.querySelectorAll("li").length;
+        },
+      );
+      assertEquals(
+        messagesAfter,
+        0,
+        "Chat history should be empty after clearing",
+      );
     },
   });
 });
