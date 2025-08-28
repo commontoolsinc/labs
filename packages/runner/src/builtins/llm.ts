@@ -142,6 +142,7 @@ export function llm(
 
     const updatePartial = (text: string) => {
       if (thisRun != currentRun) return;
+      // TODO(bf): we should consider an `asyncTx` pattern here akin to `stream-data.ts`
       const status = tx.status();
       if (status.status !== "ready") return;
 
