@@ -4,6 +4,7 @@ import type {
 } from "./interface.ts";
 import { StorageManager as RemoteStorageManager } from "./cache.ts";
 import { StorageManager as DenoStorageManager } from "./cache.deno.ts";
+import { NewStorageManager } from "../storage-new/manager.ts";
 
 /**
  * Returns true if ENABLE_NEW_STORAGE looks enabled in the environment.
@@ -33,7 +34,13 @@ export function openRemote(options: {
   /** Optional base API url for new storage (e.g., http://localhost:8002). */
   apiUrl?: URL;
 }): IStorageManager {
-  // TODO(new-storage): switch to new adapter when implemented
+  if (isNewStorageEnabled()) {
+    // For now, wrap the existing manager with a placeholder NewStorageManager
+    const legacy = (RemoteStorageManager as unknown as {
+      open: (o: typeof options) => IStorageManager;
+    }).open(options);
+    return new NewStorageManager(legacy);
+  }
   return (RemoteStorageManager as unknown as {
     open: (o: typeof options) => IStorageManager;
   }).open(options);
@@ -47,7 +54,12 @@ export function openRemote(options: {
 export function emulate(
   options: { as: unknown; id?: string },
 ): IStorageManager {
-  // TODO(new-storage): provide new adapter emulator if/when needed
+  if (isNewStorageEnabled()) {
+    const legacy = (DenoStorageManager as unknown as {
+      emulate: (o: { as: unknown; id?: string }) => IStorageManager;
+    }).emulate(options);
+    return new NewStorageManager(legacy);
+  }
   return (DenoStorageManager as unknown as {
     emulate: (o: { as: unknown; id?: string }) => IStorageManager;
   }).emulate(options);

@@ -937,8 +937,8 @@ Acceptance:
   - [ ] `sync(uri, selector)`, `synced()`, `destroy()` lifecycle
   - [x] Do not implement `IStorageProvider.send`, `.sink`, or `.get` (unused)
 
-- [ ] Feature flag and factory
-  - [ ] `packages/runner/src/storage/factory.ts` selects manager by
+- [x] Feature flag and factory
+  - [x] `packages/runner/src/storage/factory.ts` selects manager by
         `ENABLE_NEW_STORAGE ∈ {"1","true","on"}`
   - [ ] Configure client `baseUrl` from `API_URL`; respect `LOG_LEVEL`
 
