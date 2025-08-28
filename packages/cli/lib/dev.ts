@@ -4,14 +4,11 @@ import {
   type Source,
 } from "@commontools/js-runtime";
 import { Identity } from "@commontools/identity";
-import { Engine, Runtime } from "@commontools/runner";
+import { Engine, Runtime, storageFactory } from "@commontools/runner";
 import { basename, dirname, join } from "@std/path";
 
 async function createRuntime() {
-  const { StorageManager } = await import(
-    "@commontools/runner/storage/cache.deno"
-  );
-  const storageManager = StorageManager.emulate({
+  const storageManager = storageFactory.emulate({
     as: await Identity.fromPassphrase("builder"),
   });
   return new Runtime({ storageManager, blobbyServerUrl: import.meta.url });

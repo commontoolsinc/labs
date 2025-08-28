@@ -125,3 +125,4 @@ export {
 // Utility functions (split from utils.ts)
 export { createJsonSchema } from "./builder/json-utils.ts";
 export { deepEqual, getValueAtPath, setValueAtPath } from "./path-utils.ts";
+export { storageFactory } from "./storage/factory.ts";

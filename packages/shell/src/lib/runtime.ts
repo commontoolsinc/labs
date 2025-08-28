@@ -7,7 +7,7 @@ import {
 } from "@commontools/runner";
 import { charmId, CharmManager } from "@commontools/charm";
 import { CharmsController } from "@commontools/charm/ops";
-import { StorageManager } from "@commontools/runner/storage/cache";
+import { storageFactory } from "@commontools/runner";
 import { API_URL } from "./env.ts";
 import { navigate } from "./navigate.ts";
 import * as Inspector from "@commontools/runner/storage/inspector";
@@ -118,9 +118,10 @@ export class RuntimeInternals extends EventTarget {
 
     const telemetry = new RuntimeTelemetry();
     const runtime = new Runtime({
-      storageManager: StorageManager.open({
+      storageManager: storageFactory.openRemote({
         as: session.as,
         address: new URL("/api/storage/memory", url),
+        apiUrl: new URL(url),
       }),
       blobbyServerUrl: url,
       staticAssetServerUrl: staticAssetUrl,
