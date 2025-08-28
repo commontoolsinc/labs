@@ -118,8 +118,9 @@ export function fetchData(
     errorWithLog.set(undefined);
 
     const thisRun = ++currentRun;
+    const abort = new AbortController();
 
-    const cancel = fetch(url, options)
+    const cancel = fetch(url, { signal: abort.signal, ...options })
       .then(processResponse)
       .then(async (data) => {
         if (thisRun !== currentRun) return;
@@ -159,6 +160,6 @@ export function fetchData(
         // requestHash.setAtPath([], hash, log);
       });
     // Add our cancel to the cancel group
-    addCancel(cancel);
+    addCancel(() => abort.abort());
   };
 }
