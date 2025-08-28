@@ -23,15 +23,15 @@ phoenix.
     cd toolshed; deno task dev
     cd shell; deno task dev
 
-    TOOLSHED_API_URL=http://localhost:8000 deno task start --name blue42
+    API_URL=http://localhost:8000 deno task start --name blue42
 
 staging:
 
-    TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net deno task start --name blue42
+    API_URL=https://toolshed.saga-castor.ts.net deno task start --name blue42
 
 estuary:
 
-    TOOLSHED_API_URL=https://estuary.saga-castor.ts.net deno task start --name blue42
+    API_URL=https://estuary.saga-castor.ts.net deno task start --name blue42
 
 To run the seeder with a specific tag, use the `--tag` flag.
 

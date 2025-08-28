@@ -31,7 +31,7 @@ if (!noVerify && !Deno.env.get("OPENAI_API_KEY")) {
 }
 const headless = !(Deno.env.get("HEADLESS") === "false");
 const cache = !noCache;
-const apiUrl = Deno.env.get("TOOLSHED_API_URL") ??
+const apiUrl = Deno.env.get("API_URL") ??
   "https://toolshed.saga-castor.ts.net/";
 
 if (!name) {

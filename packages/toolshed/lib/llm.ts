@@ -6,7 +6,7 @@ import { LLMContent } from "@commontools/llm/types";
 // able to get it all wired up. Importing the route definition is fine for now.
 import type { GetModelsRouteQueryParams } from "@/routes/ai/llm/llm.routes.ts";
 
-const client = hc<AppType>(env.TOOLSHED_API_URL);
+const client = hc<AppType>(env.API_URL);
 
 export async function listAvailableModels({
   capability,

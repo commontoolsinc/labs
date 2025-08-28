@@ -27,7 +27,7 @@ export const indexHandler: AppRouteHandler<typeof index> = async (c) => {
   // calls to endpoints within the application.
 
   // Create a client that points to the server. The URL would change for production.
-  const client = hc<AppType>(env.TOOLSHED_API_URL);
+  const client = hc<AppType>(env.API_URL);
 
   // Call the health endpoint.
   const res = await client._health.$get();

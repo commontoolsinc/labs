@@ -28,13 +28,13 @@ const identity = await getIdentity(env.IDENTITY, env.OPERATOR_PASS);
 const runtime = new Runtime({
   storageManager: StorageManager.open({
     as: identity,
-    address: new URL("/api/storage/memory", env.TOOLSHED_API_URL),
+    address: new URL("/api/storage/memory", env.API_URL),
   }),
-  blobbyServerUrl: env.TOOLSHED_API_URL,
+  blobbyServerUrl: env.API_URL,
 });
 const service = new BackgroundCharmService({
   identity,
-  toolshedUrl: env.TOOLSHED_API_URL,
+  toolshedUrl: env.API_URL,
   runtime,
   workerTimeoutMs,
 });

@@ -82,12 +82,12 @@ This model enables:
 Start the service:
 
 ```sh
-TOOLSHED_API_URL=http://localhost:8000 OPERATOR_PASS=your-passphrase deno task start
+API_URL=http://localhost:8000 OPERATOR_PASS=your-passphrase deno task start
 ```
 
 ### Environment Variables
 
-- `TOOLSHED_API_URL`: URL to the toolshed API
+- `API_URL`: URL to the toolshed API
 - `OPERATOR_PASS`: Passphrase for the operator identity
 - `POLLING_INTERVAL_MS`: (Optional) Interval for job queue polling
 - `MAX_CONCURRENT_JOBS`: (Optional) Maximum concurrent jobs per space
