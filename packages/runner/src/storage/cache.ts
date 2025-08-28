@@ -1134,22 +1134,55 @@ export class Replica {
       // CT823: Log the actual facts being reverted
       if (changeCount > 0) {
         const changeArray = [...changes];
-        // Log the first change in detail to understand structure
-        if (changeArray.length > 0) {
-          const firstChange = changeArray[0];
-          logger.debug(() => ["[CT823-CONFLICT] First change structure:", {
-            hasAddress: !!firstChange.address,
-            addressType: firstChange.address?.type,
-            addressId: firstChange.address?.id,
-            beforeValue: typeof firstChange.before,
-            afterValue: typeof firstChange.after,
-          }]);
-        }
+        // Log the first few changes in detail to understand what they are
+        const detailedChanges = changeArray.slice(0, 3).map(change => {
+          // Try to identify what type of object this is based on its content
+          let objectType = 'unknown';
+          const beforeObj = change.before;
+          
+          if (beforeObj && typeof beforeObj === 'object') {
+            // Check for common patterns to identify object type
+            if ('message' in beforeObj && 'author' in beforeObj) {
+              objectType = 'message';
+            } else if ('type' in beforeObj && 'name' in beforeObj && 'props' in beforeObj) {
+              objectType = 'vnode/ui-element';
+            } else if ('cell' in beforeObj || 'path' in beforeObj) {
+              objectType = 'reactive-binding';
+            } else if ('list' in beforeObj || 'op' in beforeObj) {
+              objectType = 'operation/transform';
+            } else if ('value' in beforeObj && Object.keys(beforeObj).length === 1) {
+              objectType = 'cell-value';
+            }
+          }
+          
+          return {
+            id: change.address?.id,
+            type: change.address?.type,
+            objectType,
+            beforeKeys: beforeObj && typeof beforeObj === 'object' ? Object.keys(beforeObj).slice(0, 5) : null,
+            beforeSample: beforeObj && typeof beforeObj === 'object' ? 
+              JSON.stringify(beforeObj).substring(0, 100) : String(beforeObj)?.substring(0, 100),
+          };
+        });
+        
+        // CT823: BREAKPOINT - Detailed revert analysis
+        logger.log(() => [`[CT823-REVERT-BREAKPOINT] ====== SET BREAKPOINT HERE ======`]);
+        logger.log(() => [`[CT823-REVERT-BREAKPOINT] Reverting ${changeCount} changes at ${Date.now()}`]);
+        logger.log(() => [`[CT823-REVERT-BREAKPOINT] Full changes object available in debugger:`, changes]);
+        
+        // Log each detailed change for breakpoint inspection
+        detailedChanges.forEach((change, idx) => {
+          logger.log(() => [`[CT823-REVERT-DETAIL-${idx}]`, change]);
+        });
+        
+        logger.log(() => [`[CT823-REVERT-BREAKPOINT] ====== END BREAKPOINT ZONE ======`]);
+        
+        logger.debug(() => ["[CT823-CONFLICT] Sample objects being reverted:", detailedChanges]);
+        
         const addresses = changeArray.slice(0, 50).map(change => {
-          // Log both id and type to see what's being reverted
           return `${change.address?.type || 'no-type'}:${change.address?.id || 'no-id'}`;
         });
-        logger.debug(() => ["[CT823-CONFLICT] Facts being reverted (up to 50):", addresses]);
+        logger.debug(() => ["[CT823-CONFLICT] All reverted IDs (up to 50):", addresses]);
       }
       
       this.subscription.next({

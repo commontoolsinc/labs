@@ -211,9 +211,17 @@ export class Scheduler implements IScheduler {
       action,
     });
 
-    logger.debug(() => [
-      `[RUN] Starting action: ${action.name || "anonymous"}`,
-    ]);
+    // CT-823: Log detailed action information
+    logger.info(() => {
+      const actionStr = action.toString();
+      const preview = actionStr.length > 200 ? 
+        actionStr.substring(0, 200) + "..." : actionStr;
+      
+      return [
+        `[CT823-RUN] Starting action: ${action.name || "anonymous"}`,
+        `Function preview: ${preview}`,
+      ];
+    });
 
     if (this.runningPromise) await this.runningPromise;
 
@@ -413,12 +421,20 @@ export class Scheduler implements IScheduler {
               }
 
               for (const action of triggeredActions) {
-                logger.debug(() => [
-                  `[TRIGGERED] Action for ${spaceAndURI}/${
-                    change.address.path.join("/")
-                  }`,
-                  `Action name: ${action.name || "anonymous"}`,
-                ]);
+                // CT-823: Enhanced logging to identify actions
+                logger.info(() => {
+                  const actionStr = action.toString();
+                  const preview = actionStr.length > 150 ? 
+                    actionStr.substring(0, 150) + "..." : actionStr;
+                  
+                  return [
+                    `[CT823-TRIGGERED] Action for ${spaceAndURI}/${
+                      change.address.path.join("/")
+                    }`,
+                    `Action name: ${action.name || "anonymous"}`,
+                    `Function preview: ${preview}`,
+                  ];
+                });
                 this.dirty.add(
                   `${spaceAndURI}/${change.address.type}` as SpaceURIAndType,
                 );

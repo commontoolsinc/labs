@@ -1,6 +1,9 @@
 import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import type { URI } from "./sigil-types.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("uri-utils");
 
 /**
  * Convert an entity ID to URI format with "of:" prefix
@@ -11,7 +14,11 @@ export function toURI(value: unknown): URI {
     const parsed = JSON.parse(JSON.stringify(value)) as { "/": string };
 
     // Handle EntityId object
-    if (typeof parsed["/"] === "string") return `of:${parsed["/"]}`;
+    if (typeof parsed["/"] === "string") {
+      const uri = `of:${parsed["/"]}` as URI;
+      logger.info(() => [`[CT823-TO-URI] Converting EntityId to URI: ${uri}, timestamp: ${Date.now()}`]);
+      return uri;
+    }
   } else if (typeof value === "string") {
     // Already has prefix with colon
     if (value.includes(":")) {
@@ -23,7 +30,9 @@ export function toURI(value: unknown): URI {
       return value as URI;
     } else {
       // Add "of:" prefix
-      return `of:${value}`;
+      const uri = `of:${value}` as URI;
+      logger.info(() => [`[CT823-TO-URI] Adding of: prefix to string: ${uri}, timestamp: ${Date.now()}`]);
+      return uri;
     }
   }
 

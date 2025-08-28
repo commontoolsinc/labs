@@ -2,6 +2,7 @@ import { refer } from "merkle-reference/json";
 import { isRecord } from "@commontools/utils/types";
 import { URI } from "@commontools/memory/interface";
 import { isOpaqueRef } from "./builder/types.ts";
+import { getLogger } from "@commontools/utils/logger";
 import { createDoc, type DocImpl, isDoc } from "./doc.ts";
 import {
   getCellOrThrow,
@@ -11,6 +12,8 @@ import { isCell } from "./cell.ts";
 import { parseLink } from "./link-utils.ts";
 import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
 import { fromURI } from "./uri-utils.ts";
+
+const logger = getLogger("doc-map");
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -70,7 +73,14 @@ export function createRef(
     else return obj;
   }
 
-  return refer(traverse({ ...source, causal: cause }));
+  const entityId = refer(traverse({ ...source, causal: cause }));
+  
+  // CT823: Log ID creation with context
+  const idStr = JSON.stringify(entityId);
+  const sourcePreview = JSON.stringify(source).substring(0, 100);
+  logger.info(() => [`[CT823-CREATE-ID] Created entity ID: ${idStr}, source preview: ${sourcePreview}, cause: ${cause}, timestamp: ${Date.now()}`]);
+  
+  return entityId;
 }
 
 /**
