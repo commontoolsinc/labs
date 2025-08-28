@@ -26,18 +26,14 @@ type LLMTestResult = {
   chat: Default<Array<ChatMessage>, []>;
 };
 
-const askQuestion = handler<
+const sendMessage = handler<
   { detail: { message: string } },
-  { chat: Cell<Array<ChatMessage>>; response: string | undefined }
->((event, { chat, response }) => {
+  { chat: Cell<Array<ChatMessage>>; lastLlmResponse: string | undefined }
+>((event, { chat, lastLlmResponse: response }) => {
   if (response) {
     chat.push({ role: "assistant", content: response });
   }
   chat.push({ role: "user", content: event.detail.message });
-});
-
-const prefix = lift((idx: number) => {
-  return idx % 2 === 0 ? "User" : "Assistant";
 });
 
 const clearChat = handler(
@@ -60,40 +56,31 @@ export default recipe<LLMTestInput, LLMTestResult>(
       [UI]: (
         <div>
           <h2>{title}</h2>
-          <ct-button
-            onct-click={clearChat({ chat })}
-          >
-            Clear Chat
-          </ct-button>
 
           <ct-vscroll showScrollbar height="320px" fadeEdges snapToBottom>
-            {chat.map((msg, idx) => {
+            {chat.map((msg) => {
               return (
                 <ct-chat-message
-                  key={idx}
                   role={msg.role}
                   content={msg.content}
                 />
               );
             })}
-            {derive(llmResponse.pending, (pending) =>
-              pending
-                ? (
-                  <ct-chat-message
-                    role="assistant"
-                    content="..."
-                  />
-                )
-                : null)}
-            {derive(llmResponse.partial, (result) =>
-              result
-                ? (
-                  <ct-chat-message
-                    role="assistant"
-                    content={result}
-                  />
-                )
-                : null)}
+            {ifElse(
+              llmResponse.pending,
+              <ct-chat-message
+                role="assistant"
+                content={ifElse(
+                  llmResponse.partial,
+                  llmResponse.partial,
+                  "...",
+                )}
+              />,
+              <ct-chat-message
+                role="assistant"
+                content={llmResponse.result}
+              />,
+            )}
           </ct-vscroll>
 
           <div>
@@ -101,8 +88,17 @@ export default recipe<LLMTestInput, LLMTestResult>(
               name="Ask"
               placeholder="Ask the LLM a question..."
               appearance="rounded"
-              onct-send={askQuestion({ chat, response: llmResponse.result })}
+              onct-send={sendMessage({
+                chat,
+                lastLlmResponse: llmResponse.result,
+              })}
             />
+
+            <ct-button
+              onct-click={clearChat({ chat })}
+            >
+              Clear Chat
+            </ct-button>
           </div>
         </div>
       ),
