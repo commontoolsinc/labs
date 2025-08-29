@@ -66,7 +66,7 @@ export class SendMessageElement extends LitElement {
 
   override render() {
     return html`
-      <div class="unibox">
+      <div class="unibox" @click="${(e: Event) => e.stopPropagation()}">
         <common-input
           appearance="rounded"
           class="unibox-input"

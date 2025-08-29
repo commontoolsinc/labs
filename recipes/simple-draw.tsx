@@ -86,14 +86,25 @@ const handleCanvasClick = handler<
     `Canvas clicked at position: x=${event.detail.x}, y=${event.detail.y}`,
   );
 
-  // Create a new message at the clicked position
+  // Create a new message at the clicked position with empty text
   messages.push({
     author: user.get(),
-    message: "New note",
+    message: "",
     timestamp: Date.now(),
     x: event.detail.x,
     y: event.detail.y,
   });
+});
+
+const updateMessage = handler<
+  InputEventType,
+  {
+    messages: Cell<ChatMessage[]>;
+    index: number;
+  }
+>((event, { messages, index }) => {
+  const text = event.detail?.message ?? "";
+  messages.key(index).key("message").set(text);
 });
 
 const setUsername = handler<
@@ -162,22 +173,18 @@ export const UserSession = recipe<
                       <b>{m.author.name}</b>
                       <span>· {derive(m.timestamp, formatTime)}</span>
                     </div>
-                    <div style="font-size: 14px;">{m.message}</div>
+                    <common-send-message
+                      name="Save"
+                      placeholder="Type message..."
+                      value={m.message}
+                      appearance="rounded"
+                      onmessagesend={updateMessage({ messages, index })}
+                      style="margin-top: 5px;"
+                    />
                   </div>
                 );
               })}
             </ct-canvas>
-          </div>
-          <div>
-            <common-send-message
-              name="Send"
-              placeholder="Type your message..."
-              appearance="rounded"
-              onmessagesend={sendMessage({
-                messages,
-                user,
-              })}
-            />
           </div>
         </div>
       ),
