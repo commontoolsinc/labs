@@ -905,13 +905,13 @@ Acceptance:
       otherwise keep current memory-backed behavior.
 
 - [ ] Address mapping (runner ↔ new storage)
-  - [ ] Map `MemorySpace` → space DID (pass-through if already a DID)
-  - [ ] Map runner `URI` → `docId` deterministically (e.g., `doc:<b64url(uri)>`)
-  - [ ] Keep JSON path tokens as-is
-  - [ ] Use branch `"main"` by default
+  - [x] Map `MemorySpace` → space DID (pass-through if already a DID)
+  - [x] Map runner `URI` → `docId` deterministically (e.g., `doc:<b64url(uri)>`)
+  - [x] Keep JSON path tokens as-is
+  - [x] Use branch `"main"` by default
 
 - [ ] Create adapter scaffolding (runner)
-  - [ ] `packages/runner/src/storage-new/address.ts`
+  - [x] `packages/runner/src/storage-new/address.ts`
   - [x] `packages/runner/src/storage-new/manager.ts`
   - [x] `packages/runner/src/storage-new/transaction.ts`
   - [x] `packages/runner/src/storage-new/provider.ts`
@@ -941,7 +941,8 @@ Acceptance:
 - [x] Feature flag and factory
   - [x] `packages/runner/src/storage/factory.ts` selects manager by
         `ENABLE_NEW_STORAGE ∈ {"1","true","on"}`
-  - [ ] Configure client `baseUrl` from `API_URL`; respect `LOG_LEVEL`
+  - [x] Configure client `baseUrl` from `API_URL`
+  - [ ] Respect `LOG_LEVEL`
 
 - [x] Shell wiring
   - [x] Use storage-factory when constructing the runtime

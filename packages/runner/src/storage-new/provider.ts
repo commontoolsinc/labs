@@ -44,7 +44,10 @@ export class NewStorageProvider implements IStorageProviderWithReplica {
     return await this.#delegate.send(batch);
   }
 
-  async sync(uri: URI, selector?: SchemaPathSelector): Promise<Result<Unit, Error>> {
+  async sync(
+    uri: URI,
+    selector?: SchemaPathSelector,
+  ): Promise<Result<Unit, Error>> {
     const docId = docIdFromUri(uri);
     const path = selector?.path ? [...selector.path] : [];
     try {
@@ -76,6 +79,7 @@ export class NewStorageProvider implements IStorageProviderWithReplica {
   }
 
   getReplica() {
-    return this.#delegate.getReplica();
+    // Return the space DID for compatibility with runner expectations
+    return String(this.#space);
   }
 }

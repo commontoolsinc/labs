@@ -39,7 +39,16 @@ export function openRemote(options: {
     const legacy = (RemoteStorageManager as unknown as {
       open: (o: typeof options) => IStorageManager;
     }).open(options);
-    return new NewStorageManager(legacy, { apiUrl: options.apiUrl });
+    // Derive API URL from env if not provided
+    const apiUrl = (() => {
+      if (options.apiUrl) return options.apiUrl;
+      try {
+        const v = Deno.env.get("API_URL");
+        if (v) return new URL(v);
+      } catch {}
+      return undefined;
+    })();
+    return new NewStorageManager(legacy, { apiUrl });
   }
   return (RemoteStorageManager as unknown as {
     open: (o: typeof options) => IStorageManager;
