@@ -3,7 +3,9 @@ import {
   DEFAULT_MODEL_NAME,
   LLMClient,
   LLMGenerateObjectRequest,
+  LLMMessage,
   LLMRequest,
+  LLMToolCall,
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
@@ -102,15 +104,23 @@ export function llm(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, messages, stop, maxTokens, model } =
+    const { system, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], tx) ?? {};
+
+    const messagesCell = inputsCell.key("messages");
+    const messages = messagesCell.getAsQueryResult([], tx) ?? [];
+    const toolsCell = inputsCell.key("tools");
+
+    // Strip handlers from tool definitions to send them to the server
+    // We keep the handlers locally and execute them here
+    const toolsWithoutHandlers = Object.fromEntries(Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
+      const { handler, ...toolWithoutHandler } = tool;
+      return [name, toolWithoutHandler];
+    }));
 
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: (messages ?? []).map((content: string, index: number) => ({
-        role: index % 2 ? "assistant" : "user",
-        content,
-      })),
+      messages: messages ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -121,6 +131,7 @@ export function llm(
         context: "charm",
       },
       cache: true,
+      tools: toolsWithoutHandlers, // Pass through tools if provided
     };
 
     const hash = refer(llmParams).toString();
@@ -153,10 +164,58 @@ export function llm(
 
     resultPromise
       .then(async (llmResult) => {
-        const text = llmResult.content;
         if (thisRun !== currentRun) return;
 
-        //normalizeToCells(text, undefined, log);
+        let text = llmResult.content;
+          const tx = messagesCell.runtime.edit();
+          const newMessages: LLMMessage[] = [];
+
+          // Add assistant message with tool calls to conversation
+          newMessages.push({
+            role: "assistant",
+            content: llmResult.content,
+            toolCalls: llmResult.toolCalls,
+          });
+
+          // Execute each tool call in this iteration
+          for (const toolCall of llmResult.toolCalls || []) {
+            const toolDef = toolsCell.key(toolCall.name);
+            // if (!toolDef.key('handler').get()) {
+            //   console.warn(`No handler found for tool: ${toolCall.name}`);
+            //   newMessages.push({
+            //     role: "tool",
+            //     content: JSON.stringify({
+            //       error: `No handler for tool: ${toolCall.name}`,
+            //     }),
+            //     toolCallId: toolCall.id,
+            //   });
+            //   continue;
+            // }
+
+            try {
+              const result = await toolDef.key('handler').withTx(tx).send(toolCall.arguments);
+              newMessages.push({
+                role: "tool",
+                content: JSON.stringify(result),
+                toolCallId: toolCall.id,
+              });
+              console.log(`Tool ${toolCall.name} executed:`, result);
+            } catch (error) {
+              console.error(`Tool ${toolCall.name} failed:`, error);
+              newMessages.push({
+                role: "tool",
+                content: JSON.stringify({
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+                toolCallId: toolCall.id,
+              });
+            }
+
+          // Update messages in cell with new messages
+          messagesCell.withTx(tx).set([...(messagesCell.get() ?? []), ...newMessages]);
+          await tx.commit();
+        }
+
         await runtime.idle();
 
         // All this code runside outside the original action, and the

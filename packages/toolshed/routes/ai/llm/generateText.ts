@@ -1,11 +1,13 @@
-import { CoreMessage, streamText } from "ai";
+import { CoreMessage, stepCountIs, streamText, tool } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
-import { type LLMMessage, type LLMRequest } from "@commontools/llm/types";
+import { type LLMMessage, type LLMRequest, type LLMTool } from "@commontools/llm/types";
 import { findModel } from "./models.ts";
 
 import { provider as otelProvider } from "@/lib/otel.ts";
 
 import env from "@/env.ts";
+import z from "zod";
+import type { JSONSchema } from "@commontools/api";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -16,6 +18,65 @@ const JSON_SYSTEM_PROMPTS = {
   GROQ:
     "You must respond with pure, correct JSON only - no text descriptions, no ```json code blocks, and no formatting outside of valid JSON. Your entire response should be a valid JSON object that can be parsed directly by JSON.parse() with no additional processing.",
 };
+
+/**
+ * Convert JSONSchema to Zod schema for AI SDK tool definitions
+ * This is a basic implementation that covers common cases
+ */
+function convertJSONSchemaToZod(schema: JSONSchema): z.ZodSchema {
+  if (schema.type === "string") {
+    let zodString = z.string();
+    if (schema.description) {
+      zodString = zodString.describe(schema.description);
+    }
+    return zodString;
+  }
+  
+  if (schema.type === "number" || schema.type === "integer") {
+    let zodNumber = z.number();
+    if (schema.description) {
+      zodNumber = zodNumber.describe(schema.description);
+    }
+    return zodNumber;
+  }
+  
+  if (schema.type === "boolean") {
+    return z.boolean();
+  }
+  
+  if (schema.type === "array" && schema.items) {
+    const itemSchema = convertJSONSchemaToZod(schema.items as JSONSchema);
+    return z.array(itemSchema);
+  }
+  
+  if (schema.type === "object" && schema.properties) {
+    const shape: Record<string, z.ZodSchema> = {};
+    
+    for (const [key, propSchema] of Object.entries(schema.properties)) {
+      shape[key] = convertJSONSchemaToZod(propSchema as JSONSchema);
+    }
+    
+    let zodObject = z.object(shape);
+    
+    // Make optional fields optional
+    if (schema.required && Array.isArray(schema.required)) {
+      const optionalFields = Object.keys(schema.properties).filter(
+        key => !schema.required!.includes(key)
+      );
+      for (const field of optionalFields) {
+        if (shape[field]) {
+          shape[field] = shape[field].optional();
+        }
+      }
+      zodObject = z.object(shape);
+    }
+    
+    return zodObject;
+  }
+  
+  // Fallback for any other type
+  return z.any();
+}
 
 // Core generation logic separated from HTTP handling
 export interface GenerateTextParams extends LLMRequest {
@@ -156,8 +217,24 @@ export async function generateText(
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
     experimental_telemetry: { isEnabled: true },
-    maxTokens: params.maxTokens,
+    maxOutputTokens: params.maxTokens,
+    stopWhen: stepCountIs(8), // TODO(bf): low limit to prevent runaway process
   };
+
+  // Convert client-side tools to AI SDK format (without execute functions for client-side execution)
+  if (params.tools && Object.keys(params.tools).length > 0) {
+    const aiSdkTools: Record<string, any> = {};
+    
+    for (const [name, toolDef] of Object.entries(params.tools)) {
+      aiSdkTools[name] = tool({
+        description: toolDef.description,
+        inputSchema: convertJSONSchemaToZod(toolDef.inputSchema),
+        // NO execute function - this makes it client-side execution
+      });
+    }
+    
+    (streamParams as any).tools = aiSdkTools;
+  }
 
   // remove stopSequences if the model doesn't support them
   if (!modelConfig.capabilities.stopSequences) {
@@ -287,12 +364,37 @@ export async function generateText(
         );
       }
 
-      // Stream each chunk of generated text
-      for await (const delta of llmStream.textStream) {
-        result += delta;
-        controller.enqueue(
-          new TextEncoder().encode(JSON.stringify(delta) + "\n"),
-        );
+      // Stream each event from the full AI SDK stream
+      for await (const part of llmStream.fullStream) {
+        if (part.type === "text-delta") {
+          result += part.text;
+          // Send text delta event to client
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({
+              type: "text-delta",
+              textDelta: part.text,
+            }) + "\n"),
+          );
+        } else if (part.type === "tool-call") {
+          // Send tool call event to client
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({
+              type: "tool-call",
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              args: part.input,
+            }) + "\n"),
+          );
+        } else if (part.type === "tool-result") {
+          // Send tool result event to client
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({
+              type: "tool-result",
+              toolCallId: part.toolCallId,
+              result: part.output,
+            }) + "\n"),
+          );
+        }
       }
 
       // Only add stop token if not in JSON mode to avoid breaking JSON structure
@@ -317,6 +419,13 @@ export async function generateText(
       } else {
         messages[messages.length - 1].content = result;
       }
+
+      // Send finish event to client
+      controller.enqueue(
+        new TextEncoder().encode(JSON.stringify({
+          type: "finish",
+        }) + "\n"),
+      );
 
       // Call the onStreamComplete callback with all the data needed for caching
       if (params.onStreamComplete) {

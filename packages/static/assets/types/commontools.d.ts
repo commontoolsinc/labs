@@ -122,8 +122,34 @@ export type JSONSchema = {
         integrity?: string[];
     };
 };
+export interface BuiltInLLMTypedContent {
+    type: "text" | "image";
+    data: string;
+}
+export type BuiltInLLMContent = string | BuiltInLLMTypedContent[];
+export interface BuiltInLLMTool {
+    description: string;
+    inputSchema: JSONSchema;
+    handler?: (args: any) => any | Promise<any>;
+}
+export interface BuiltInLLMToolCall {
+    id: string;
+    name: string;
+    arguments: Record<string, any>;
+}
+export interface BuiltInLLMToolResult {
+    toolCallId: string;
+    result: any;
+    error?: string;
+}
+export type BuiltInLLMMessage = {
+    role: "user" | "assistant" | "tool";
+    content: BuiltInLLMContent;
+    toolCalls?: BuiltInLLMToolCall[];
+    toolCallId?: string;
+};
 export interface BuiltInLLMParams {
-    messages?: string[];
+    messages?: BuiltInLLMMessage[];
     model?: string;
     system?: string;
     stop?: string;
@@ -134,6 +160,15 @@ export interface BuiltInLLMParams {
      * This parameter is optional and defaults to undefined, which may result in standard behavior.
      */
     mode?: "json";
+    /**
+     * Tools that can be called by the LLM during generation.
+     * Each tool has a description, input schema, and handler function that runs client-side.
+     */
+    tools?: Record<string, {
+        description: string;
+        inputSchema: JSONSchema;
+        handler?: (args: any) => any | Promise<any>;
+    }>;
 }
 export interface BuiltInLLMState<T> {
     pending: boolean;
