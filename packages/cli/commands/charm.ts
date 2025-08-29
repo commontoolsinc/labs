@@ -11,6 +11,7 @@ import {
   inspectCharm,
   linkCharms,
   listCharms,
+  loadManager,
   MapFormat,
   newCharm,
   removeCharm,
@@ -19,6 +20,7 @@ import {
   setCharmRecipe,
   SpaceConfig,
 } from "../lib/charm.ts";
+import { CharmsController } from "@commontools/charm/ops";
 import { renderCharm } from "../lib/charm-render.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { decode } from "@commontools/utils/encoding";
@@ -100,6 +102,7 @@ export const charm = new Command()
     `Create a new charm, using ./main.tsx as source.`,
   )
   .arguments("<main:string>")
+  .option("--no-start", "Create the charm without starting it")
   .option(
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
@@ -110,9 +113,29 @@ export const charm = new Command()
         await newCharm(
           parseSpaceOptions(options),
           { mainPath: absPath(main), mainExport: options.mainExport },
+          { start: !(options as unknown as { noStart?: boolean }).noStart },
         ),
       ),
   )
+  /* charm step */
+  .command("step", "Run a single scheduling step: start → idle → synced → stop")
+  .usage(charmUsage)
+  .example(
+    `ct charm step ${EX_ID} ${EX_COMP_CHARM}`,
+    `Start, wait for idle+synced, then stop charm "${RAW_EX_COMP.charm!}".`,
+  )
+  .option("-c,--charm <charm:string>", "The target charm ID.")
+  .action(async (options) => {
+    const charmConfig = parseCharmOptions(options);
+    const manager = await loadManager(charmConfig);
+    const charms = new CharmsController(manager);
+    // Start in this transient runtime, wait, then stop and exit
+    await charms.start(charmConfig.charm);
+    await manager.runtime.idle();
+    await manager.synced();
+    await charms.stop(charmConfig.charm);
+    render(`Stepped charm ${charmConfig.charm}`);
+  })
   /* charm apply */
   .command("apply", "Pass in new inputs to the target charm")
   .usage(charmUsage)

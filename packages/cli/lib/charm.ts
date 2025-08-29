@@ -158,11 +158,12 @@ export async function listCharms(
 export async function newCharm(
   config: SpaceConfig,
   entry: EntryConfig,
+  options?: { start?: boolean },
 ): Promise<string> {
   const manager = await loadManager(config);
   const charms = new CharmsController(manager);
   const program = await getProgramFromFile(manager, entry);
-  const charm = await charms.create(program);
+  const charm = await charms.create(program, undefined, options);
   return charm.id;
 }
 
