@@ -23,6 +23,8 @@ interface ChatMessage {
   author: User;
   message: string;
   timestamp: number;
+  x: number;
+  y: number;
 }
 
 type MainRecipeInput = {
@@ -68,16 +70,30 @@ const sendMessage = handler<
     author: user.get(),
     message: text,
     timestamp: Date.now(),
+    x: Math.random() * 600,
+    y: Math.random() * 400,
   });
 });
 
 const handleCanvasClick = handler<
   { detail: { x: number; y: number } },
-  {}
->((event) => {
+  {
+    messages: Cell<ChatMessage[]>;
+    user: Cell<User>;
+  }
+>((event, { messages, user }) => {
   console.log(
     `Canvas clicked at position: x=${event.detail.x}, y=${event.detail.y}`,
   );
+
+  // Create a new message at the clicked position
+  messages.push({
+    author: user.get(),
+    message: "New note",
+    timestamp: Date.now(),
+    x: event.detail.x,
+    y: event.detail.y,
+  });
 });
 
 const setUsername = handler<
@@ -100,7 +116,7 @@ export const UserSession = recipe<
   "Canvas",
   ({ messages, user }) => {
     return {
-      [NAME]: str`Canvas v18-click` as any,
+      [NAME]: str`Canvas v19-random` as any,
       [UI]: (
         <div>
           <div
@@ -130,25 +146,26 @@ export const UserSession = recipe<
             <ct-canvas
               width="800"
               height="600"
-              onct-canvas-click={handleCanvasClick({})}
+              onct-canvas-click={handleCanvasClick({ messages, user })}
             >
-              {messages.map((m) => (
-                <div
-                  style={{
-                    padding: "10px",
-                    backgroundColor: "#ffffcc",
-                    border: "1px solid #ddd",
-                    borderRadius: "4px",
-                    maxWidth: "200px",
-                  }}
-                >
-                  <div style={{ fontSize: "12px", color: "#666" }}>
-                    <b>{m.author.name}</b>
-                    <span>· {derive(m.timestamp, formatTime)}</span>
+              {messages.map((m, index) => {
+                // Use stored coordinates or generate random ones as fallback
+                const x = m.x ?? Math.random() * 600;
+                const y = m.y ?? Math.random() * 400;
+
+                return (
+                  <div
+                    key={index}
+                    style={`position: absolute; left: ${x}px; top: ${y}px; padding: 10px; background-color: #ffffcc; border: 1px solid #ddd; border-radius: 4px; max-width: 200px;`}
+                  >
+                    <div style="font-size: 12px; color: #666;">
+                      <b>{m.author.name}</b>
+                      <span>· {derive(m.timestamp, formatTime)}</span>
+                    </div>
+                    <div style="font-size: 14px;">{m.message}</div>
                   </div>
-                  <div style={{ fontSize: "14px" }}>{m.message}</div>
-                </div>
-              ))}
+                );
+              })}
             </ct-canvas>
           </div>
           <div>

@@ -26,57 +26,6 @@ export class CtCanvas extends BaseElement {
     .canvas-container ::slotted(*) {
       position: absolute !important;
     }
-
-    /* Position each child at different locations */
-    .canvas-container ::slotted(*:nth-child(1)) {
-      left: 50px;
-      top: 50px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(2)) {
-      left: 250px;
-      top: 100px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(3)) {
-      left: 450px;
-      top: 50px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(4)) {
-      left: 100px;
-      top: 200px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(5)) {
-      left: 350px;
-      top: 250px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(6)) {
-      left: 550px;
-      top: 200px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(7)) {
-      left: 150px;
-      top: 350px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(8)) {
-      left: 400px;
-      top: 400px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(9)) {
-      left: 50px;
-      top: 450px;
-    }
-
-    .canvas-container ::slotted(*:nth-child(10)) {
-      left: 300px;
-      top: 500px;
-    }
   `;
 
   private handleCanvasClick(event: MouseEvent) {
