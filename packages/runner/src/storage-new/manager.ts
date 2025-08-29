@@ -18,9 +18,11 @@ export class NewStorageManager implements IStorageManager {
   #client: StorageClient;
   #delegate: IStorageManager;
   #providers = new Map<string, IStorageProviderWithReplica>();
+  #apiUrl?: URL;
 
   constructor(delegate: IStorageManager, opts?: { apiUrl?: URL }) {
     this.#delegate = delegate;
+    this.#apiUrl = opts?.apiUrl;
     this.#client = new StorageClient({ baseUrl: opts?.apiUrl?.toString() });
   }
 
@@ -29,7 +31,7 @@ export class NewStorageManager implements IStorageManager {
     let p = this.#providers.get(key);
     if (!p) {
       // Temporary: wrap legacy provider; will switch to true adapter
-      p = new NewStorageProvider(this.#delegate.open(space));
+      p = new NewStorageProvider(this.#client, space, this.#delegate.open(space));
       this.#providers.set(key, p);
     }
     return p;

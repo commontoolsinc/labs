@@ -36,5 +36,3 @@ export function getDocRef(
 ): { docId: string; path: string[] } {
   return { docId: docIdFromUri(address.id), path: pathFromAddress(address) };
 }
-
-

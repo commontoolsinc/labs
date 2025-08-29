@@ -24,5 +24,3 @@ export class DocCache {
     this.#map.delete(this.key(space, docId));
   }
 }
-
-

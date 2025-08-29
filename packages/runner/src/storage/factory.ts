@@ -39,7 +39,7 @@ export function openRemote(options: {
     const legacy = (RemoteStorageManager as unknown as {
       open: (o: typeof options) => IStorageManager;
     }).open(options);
-    return new NewStorageManager(legacy);
+    return new NewStorageManager(legacy, { apiUrl: options.apiUrl });
   }
   return (RemoteStorageManager as unknown as {
     open: (o: typeof options) => IStorageManager;

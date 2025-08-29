@@ -936,6 +936,7 @@ Acceptance:
   - [ ] `replica.get(entry)` returns current `{ the, of, is }` via adapter cache
   - [ ] `sync(uri, selector)`, `synced()`, `destroy()` lifecycle
   - [x] Do not implement `IStorageProvider.send`, `.sink`, or `.get` (unused)
+  - [x] `sync`/`synced` delegate to client; `destroy` disconnects space
 
 - [x] Feature flag and factory
   - [x] `packages/runner/src/storage/factory.ts` selects manager by
