@@ -10,7 +10,7 @@ import {
   BuiltInLLMParams,
   BuiltInLLMState,
 } from "@commontools/api";
-import { refer } from "merkle-reference";
+import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
