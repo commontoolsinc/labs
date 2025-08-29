@@ -104,12 +104,22 @@ export function llm(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, messages, stop, maxTokens, model, tools } =
+    const { system, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], tx) ?? {};
+
+    const messagesCell = inputsCell.key("messages");
+    const toolsCell = inputsCell.key("tools");
+
+    // Strip handlers from tool definitions to send them to the server
+    // We keep the handlers locally and execute them here
+    const toolsWithoutHandlers = Object.fromEntries(Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
+      const { handler, ...toolWithoutHandler } = tool;
+      return [name, toolWithoutHandler];
+    }));
 
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: messages ?? [],
+      messages: messagesCell.get() ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -120,7 +130,7 @@ export function llm(
         context: "charm",
       },
       cache: true,
-      tools: tools, // Pass through tools if provided
+      tools: toolsWithoutHandlers, // Pass through tools if provided
     };
 
     const hash = refer(llmParams).toString();
@@ -156,64 +166,53 @@ export function llm(
         if (thisRun !== currentRun) return;
 
         let text = llmResult.content;
-        let finalMessages: LLMMessage[] = [...(messages ?? [])];
+          const tx = messagesCell.runtime.edit();
+          const newMessages: LLMMessage[] = [];
 
-        // Handle tool calls if present
-        if (llmResult.toolCalls && llmResult.toolCalls.length > 0 && tools) {
           // Add assistant message with tool calls to conversation
-          finalMessages.push({
+          newMessages.push({
             role: "assistant",
-            content: text,
-            toolCalls: llmResult.toolCalls
+            content: llmResult.content,
+            toolCalls: llmResult.toolCalls,
           });
 
-          // Execute each tool call
+          // Execute each tool call in this iteration
           for (const toolCall of llmResult.toolCalls) {
-            const toolDef = tools[toolCall.name];
-            if (!toolDef?.handler) {
+            const toolDef = toolsCell.key(toolCall.name);
+            if (!toolDef.key('handler').get()) {
               console.warn(`No handler found for tool: ${toolCall.name}`);
-              // Add error result
-              finalMessages.push({
+              newMessages.push({
                 role: "tool",
-                content: JSON.stringify({ error: `No handler for tool: ${toolCall.name}` }),
-                toolCallId: toolCall.id
+                content: JSON.stringify({
+                  error: `No handler for tool: ${toolCall.name}`,
+                }),
+                toolCallId: toolCall.id,
               });
               continue;
             }
 
             try {
-              // Execute the tool handler
-              const result = await toolDef.handler(toolCall.arguments);
-              
-              // Add tool result to conversation
-              finalMessages.push({
+              const result = await toolDef.key('handler').withTx(tx).send(toolCall.arguments);
+              newMessages.push({
                 role: "tool",
                 content: JSON.stringify(result),
-                toolCallId: toolCall.id
+                toolCallId: toolCall.id,
               });
-              
-              console.log(`Tool ${toolCall.name} executed successfully:`, result);
+              console.log(`Tool ${toolCall.name} executed:`, result);
             } catch (error) {
-              console.error(`Tool ${toolCall.name} execution failed:`, error);
-              
-              // Add error result
-              finalMessages.push({
+              console.error(`Tool ${toolCall.name} failed:`, error);
+              newMessages.push({
                 role: "tool",
-                content: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
-                toolCallId: toolCall.id
+                content: JSON.stringify({
+                  error: error instanceof Error ? error.message : String(error),
+                }),
+                toolCallId: toolCall.id,
               });
             }
-          }
 
-          // Continue conversation with tool results by making another LLM call
-          const continuationParams: LLMRequest = {
-            ...llmParams,
-            messages: finalMessages
-          };
-
-          // Make continuation call
-          const continuationResult = await client.sendRequest(continuationParams, updatePartial);
-          text = continuationResult.content;
+          // Update messages in cell with new messages
+          messagesCell.withTx(tx).set([...(messagesCell.get() ?? []), ...newMessages]);
+          await tx.commit();
         }
 
         await runtime.idle();
