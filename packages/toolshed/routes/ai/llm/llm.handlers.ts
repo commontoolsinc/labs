@@ -247,6 +247,7 @@ export const submitFeedback: AppRouteHandler<FeedbackRoute> = async (c) => {
   }
 };
 
+
 /**
  * Handler for POST /generateObject endpoint
  * Generates structured JSON objects using specified LLM model

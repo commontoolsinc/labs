@@ -49,6 +49,14 @@ export default recipe<LLMTestInput, LLMTestResult>(
       system:
         "You are a helpful assistant. Answer questions clearly and concisely.",
       messages: chat.map((c) => c.content),
+      // Hypothetical tool definition
+      // tools: {
+      //   askQuestion: {
+      //     description:
+      //       "Ask the LLM a question. handler<{ detail: { message: string } }, { question: Cell<string> }>",
+      //     handler: askQuestion,
+      //   },
+      // },
     });
 
     return {

@@ -5,6 +5,7 @@ import {
   LLMMessage,
   LLMRequest,
   LLMResponse,
+  LLMToolResult,
 } from "./types.ts";
 
 type PartialCallback = (text: string) => void;
@@ -146,6 +147,7 @@ export class LLMClient {
 
     return { content: text, id };
   }
+
 }
 
 // FIXME(ja): we should either make message always a LLMMessage or update the types that

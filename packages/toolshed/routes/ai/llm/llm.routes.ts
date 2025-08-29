@@ -18,11 +18,17 @@ const TypedMessageSchema = toZod<LLMTypedContent>().with({
 });
 
 export const MessageSchema = toZod<LLMMessage>().with({
-  role: z.enum(["user", "assistant"]),
+  role: z.enum(["user", "assistant", "tool"]),
   content: z.union([
     z.string(),
     z.array(TypedMessageSchema),
   ]),
+  toolCalls: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    arguments: z.record(z.any()),
+  })).optional(),
+  toolCallId: z.string().optional(),
 });
 
 export type LLMResponseMessage = z.infer<typeof MessageSchema>;
@@ -39,6 +45,11 @@ export const LLMRequestSchema = toZod<LLMRequest>().with({
   mode: z.enum(["json"]).optional(),
   metadata: z.record(z.union([z.string(), z.any()])).optional(),
   cache: z.boolean().default(true).optional(),
+  tools: z.record(z.object({
+    description: z.string(),
+    inputSchema: z.record(z.any()),
+    handler: z.function().optional(),
+  })).optional(),
 });
 
 export const GenerateObjectRequestSchema = toZod<LLMGenerateObjectRequest>()
@@ -242,6 +253,7 @@ export const feedback = createRoute({
     },
   },
 });
+
 
 export const generateObject = createRoute({
   path: "/api/ai/llm/generateObject",
