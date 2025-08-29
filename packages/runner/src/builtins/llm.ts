@@ -4,6 +4,7 @@ import {
   LLMClient,
   LLMGenerateObjectRequest,
   LLMRequest,
+  LLMToolCall,
 } from "@commontools/llm";
 import {
   BuiltInGenerateObjectParams,
@@ -102,7 +103,7 @@ export function llm(
     const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
-    const { system, messages, stop, maxTokens, model } =
+    const { system, messages, stop, maxTokens, model, tools } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
     const llmParams: LLMRequest = {
@@ -121,6 +122,7 @@ export function llm(
         context: "charm",
       },
       cache: true,
+      tools: tools, // Pass through tools if provided
     };
 
     const hash = refer(llmParams).toString();
@@ -148,6 +150,11 @@ export function llm(
 
       partialWithLog.set(text);
     };
+
+    // Tool execution handler for client-side tools
+    // TODO: Implement proper tool call handling within the streaming response
+    // The AI SDK will stream tool calls, we need to parse them from the stream,
+    // execute the handlers, and include results in the conversation context
 
     const resultPromise = client.sendRequest(llmParams, updatePartial);
 

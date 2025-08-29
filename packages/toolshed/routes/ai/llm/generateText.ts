@@ -1,11 +1,13 @@
-import { CoreMessage, streamText } from "ai";
+import { CoreMessage, stepCountIs, streamText, tool } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
-import { type LLMMessage, type LLMRequest } from "@commontools/llm/types";
+import { type LLMMessage, type LLMRequest, type LLMTool } from "@commontools/llm/types";
 import { findModel } from "./models.ts";
 
 import { provider as otelProvider } from "@/lib/otel.ts";
 
 import env from "@/env.ts";
+import z from "zod";
+import type { JSONSchema } from "@commontools/api";
 
 // Constants for JSON mode
 const JSON_SYSTEM_PROMPTS = {
@@ -16,6 +18,65 @@ const JSON_SYSTEM_PROMPTS = {
   GROQ:
     "You must respond with pure, correct JSON only - no text descriptions, no ```json code blocks, and no formatting outside of valid JSON. Your entire response should be a valid JSON object that can be parsed directly by JSON.parse() with no additional processing.",
 };
+
+/**
+ * Convert JSONSchema to Zod schema for AI SDK tool definitions
+ * This is a basic implementation that covers common cases
+ */
+function convertJSONSchemaToZod(schema: JSONSchema): z.ZodSchema {
+  if (schema.type === "string") {
+    let zodString = z.string();
+    if (schema.description) {
+      zodString = zodString.describe(schema.description);
+    }
+    return zodString;
+  }
+  
+  if (schema.type === "number" || schema.type === "integer") {
+    let zodNumber = z.number();
+    if (schema.description) {
+      zodNumber = zodNumber.describe(schema.description);
+    }
+    return zodNumber;
+  }
+  
+  if (schema.type === "boolean") {
+    return z.boolean();
+  }
+  
+  if (schema.type === "array" && schema.items) {
+    const itemSchema = convertJSONSchemaToZod(schema.items as JSONSchema);
+    return z.array(itemSchema);
+  }
+  
+  if (schema.type === "object" && schema.properties) {
+    const shape: Record<string, z.ZodSchema> = {};
+    
+    for (const [key, propSchema] of Object.entries(schema.properties)) {
+      shape[key] = convertJSONSchemaToZod(propSchema as JSONSchema);
+    }
+    
+    let zodObject = z.object(shape);
+    
+    // Make optional fields optional
+    if (schema.required && Array.isArray(schema.required)) {
+      const optionalFields = Object.keys(schema.properties).filter(
+        key => !schema.required!.includes(key)
+      );
+      for (const field of optionalFields) {
+        if (shape[field]) {
+          shape[field] = shape[field].optional();
+        }
+      }
+      zodObject = z.object(shape);
+    }
+    
+    return zodObject;
+  }
+  
+  // Fallback for any other type
+  return z.any();
+}
 
 // Core generation logic separated from HTTP handling
 export interface GenerateTextParams extends LLMRequest {
@@ -157,7 +218,23 @@ export async function generateText(
     abortSignal: params.abortSignal,
     experimental_telemetry: { isEnabled: true },
     maxOutputTokens: params.maxTokens,
+    stopWhen: stepCountIs(8), // TODO(bf): low limit to prevent runaway process
   };
+
+  // Convert client-side tools to AI SDK format (without execute functions for client-side execution)
+  if (params.tools && Object.keys(params.tools).length > 0) {
+    const aiSdkTools: Record<string, any> = {};
+    
+    for (const [name, toolDef] of Object.entries(params.tools)) {
+      aiSdkTools[name] = tool({
+        description: toolDef.description,
+        inputSchema: convertJSONSchemaToZod(toolDef.inputSchema),
+        // NO execute function - this makes it client-side execution
+      });
+    }
+    
+    (streamParams as any).tools = aiSdkTools;
+  }
 
   // remove stopSequences if the model doesn't support them
   if (!modelConfig.capabilities.stopSequences) {
