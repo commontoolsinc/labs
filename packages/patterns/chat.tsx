@@ -25,16 +25,14 @@ type LLMTestResult = {
   chat: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const calculator = handler<{ expression: string }, {}>((args) => {
+const calculator = handler<{ expression: string }, { result: Cell<string> }>((args, state) => {
   try {
     // Simple calculator - only allow basic operations for security
     const sanitized = args.expression.replace(/[^0-9+\-*/().\s]/g, "");
     const result = Function(`"use strict"; return (${sanitized})`)();
-    return `${args.expression} = ${result}`;
+    state.result.set(`${args.expression} = ${result}`);
   } catch (error) {
-    return `Error calculating ${args.expression}: ${
-      (error as any)?.message || "<error>"
-    }`;
+    state.result.set(`Error calculating ${args.expression}: ${(error as any)?.message || "<error>"}`);
   }
 });
 
@@ -61,6 +59,8 @@ const clearChat = handler(
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat }) => {
+    const calculatorResult = cell<string>('');
+
     const llmResponse = llm({
       system:
         "You are a helpful assistant with access to a calculator. Use the calculator tool when users ask math questions.",
@@ -80,7 +80,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             },
             required: ["expression"],
           },
-          handler: calculator,
+          handler: calculator({ result: calculatorResult }),
         },
       },
     });
@@ -142,6 +142,8 @@ export default recipe<LLMTestInput, LLMTestResult>(
             >
               Clear Chat
             </ct-button>
+
+            <pre>{calculatorResult}</pre>
           </div>
         </div>
       ),

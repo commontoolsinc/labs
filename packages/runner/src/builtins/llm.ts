@@ -108,6 +108,7 @@ export function llm(
       inputsCell.getAsQueryResult([], tx) ?? {};
 
     const messagesCell = inputsCell.key("messages");
+    const messages = messagesCell.getAsQueryResult([], tx) ?? [];
     const toolsCell = inputsCell.key("tools");
 
     // Strip handlers from tool definitions to send them to the server
@@ -119,7 +120,7 @@ export function llm(
 
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: messagesCell.get() ?? [],
+      messages: messages ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -177,19 +178,19 @@ export function llm(
           });
 
           // Execute each tool call in this iteration
-          for (const toolCall of llmResult.toolCalls) {
+          for (const toolCall of llmResult.toolCalls || []) {
             const toolDef = toolsCell.key(toolCall.name);
-            if (!toolDef.key('handler').get()) {
-              console.warn(`No handler found for tool: ${toolCall.name}`);
-              newMessages.push({
-                role: "tool",
-                content: JSON.stringify({
-                  error: `No handler for tool: ${toolCall.name}`,
-                }),
-                toolCallId: toolCall.id,
-              });
-              continue;
-            }
+            // if (!toolDef.key('handler').get()) {
+            //   console.warn(`No handler found for tool: ${toolCall.name}`);
+            //   newMessages.push({
+            //     role: "tool",
+            //     content: JSON.stringify({
+            //       error: `No handler for tool: ${toolCall.name}`,
+            //     }),
+            //     toolCallId: toolCall.id,
+            //   });
+            //   continue;
+            // }
 
             try {
               const result = await toolDef.key('handler').withTx(tx).send(toolCall.arguments);
