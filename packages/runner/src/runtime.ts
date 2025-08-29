@@ -162,6 +162,18 @@ export interface IRuntime {
   ): Cell<T>;
 
   // Convenience methods that delegate to the runner
+  setup<T, R>(
+    tx: IExtendedStorageTransaction,
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  setup<T, R = any>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
   run<T, R>(
     tx: IExtendedStorageTransaction,
     recipeFactory: NodeFactory<T, R>,
@@ -179,6 +191,7 @@ export interface IRuntime {
     recipe: Recipe | Module,
     inputs?: any,
   ): any;
+  start<T = any>(resultCell: Cell<T>): void;
 }
 
 export interface IScheduler {
@@ -266,6 +279,19 @@ export interface IDocumentMap {
 export interface IRunner {
   readonly runtime: IRuntime;
 
+  setup<T, R>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  setup<T, R = any>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
     recipeFactory: NodeFactory<T, R>,
@@ -284,6 +310,7 @@ export interface IRunner {
     recipe: Recipe | Module,
     inputs?: any,
   ): any;
+  start<T = any>(resultCell: Cell<T>): void;
   stop<T>(resultCell: Cell<T>): void;
   stopAll(): void;
 }
@@ -547,6 +574,26 @@ export class Runtime implements IRuntime {
   }
 
   // Convenience methods that delegate to the runner
+  setup<T, R>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipeFactory: NodeFactory<T, R>,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  setup<T, R = any>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipe: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R>;
+  setup<T, R = any>(
+    tx: IExtendedStorageTransaction | undefined,
+    recipeOrModule: Recipe | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+  ): Cell<R> {
+    return this.runner.setup<T, R>(tx, recipeOrModule, argument, resultCell);
+  }
   run<T, R>(
     tx: IExtendedStorageTransaction | undefined,
     recipeFactory: NodeFactory<T, R>,
@@ -574,5 +621,9 @@ export class Runtime implements IRuntime {
     inputs?: any,
   ) {
     return this.runner.runSynced(resultCell, recipe, inputs);
+  }
+
+  start<T = any>(resultCell: Cell<T>): void {
+    return this.runner.start(resultCell);
   }
 }
