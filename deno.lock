@@ -2093,6 +2093,11 @@
           "npm:@opentelemetry/api@^1.9.0"
         ]
       },
+      "packages/schema-generator": {
+        "dependencies": [
+          "npm:typescript@*"
+        ]
+      },
       "packages/seeder": {
         "dependencies": [
           "npm:@ai-sdk/anthropic@^1.1.6",
