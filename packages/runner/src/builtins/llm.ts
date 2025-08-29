@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_NAME,
   LLMClient,
   LLMGenerateObjectRequest,
+  LLMMessage,
   LLMRequest,
   LLMToolCall,
 } from "@commontools/llm";
@@ -108,10 +109,7 @@ export function llm(
 
     const llmParams: LLMRequest = {
       system: system ?? "",
-      messages: (messages ?? []).map((content: string, index: number) => ({
-        role: index % 2 ? "assistant" : "user",
-        content,
-      })),
+      messages: messages ?? [],
       stop: stop ?? "",
       maxTokens: maxTokens ?? 4096,
       stream: true,
@@ -151,19 +149,73 @@ export function llm(
       partialWithLog.set(text);
     };
 
-    // Tool execution handler for client-side tools
-    // TODO: Implement proper tool call handling within the streaming response
-    // The AI SDK will stream tool calls, we need to parse them from the stream,
-    // execute the handlers, and include results in the conversation context
-
     const resultPromise = client.sendRequest(llmParams, updatePartial);
 
     resultPromise
       .then(async (llmResult) => {
-        const text = llmResult.content;
         if (thisRun !== currentRun) return;
 
-        //normalizeToCells(text, undefined, log);
+        let text = llmResult.content;
+        let finalMessages: LLMMessage[] = [...(messages ?? [])];
+
+        // Handle tool calls if present
+        if (llmResult.toolCalls && llmResult.toolCalls.length > 0 && tools) {
+          // Add assistant message with tool calls to conversation
+          finalMessages.push({
+            role: "assistant",
+            content: text,
+            toolCalls: llmResult.toolCalls
+          });
+
+          // Execute each tool call
+          for (const toolCall of llmResult.toolCalls) {
+            const toolDef = tools[toolCall.name];
+            if (!toolDef?.handler) {
+              console.warn(`No handler found for tool: ${toolCall.name}`);
+              // Add error result
+              finalMessages.push({
+                role: "tool",
+                content: JSON.stringify({ error: `No handler for tool: ${toolCall.name}` }),
+                toolCallId: toolCall.id
+              });
+              continue;
+            }
+
+            try {
+              // Execute the tool handler
+              const result = await toolDef.handler(toolCall.arguments);
+              
+              // Add tool result to conversation
+              finalMessages.push({
+                role: "tool",
+                content: JSON.stringify(result),
+                toolCallId: toolCall.id
+              });
+              
+              console.log(`Tool ${toolCall.name} executed successfully:`, result);
+            } catch (error) {
+              console.error(`Tool ${toolCall.name} execution failed:`, error);
+              
+              // Add error result
+              finalMessages.push({
+                role: "tool",
+                content: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+                toolCallId: toolCall.id
+              });
+            }
+          }
+
+          // Continue conversation with tool results by making another LLM call
+          const continuationParams: LLMRequest = {
+            ...llmParams,
+            messages: finalMessages
+          };
+
+          // Make continuation call
+          const continuationResult = await client.sendRequest(continuationParams, updatePartial);
+          text = continuationResult.content;
+        }
+
         await runtime.idle();
 
         // All this code runside outside the original action, and the
