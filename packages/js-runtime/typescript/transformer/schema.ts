@@ -4,7 +4,7 @@ import {
   hasCommonToolsImport,
   removeCommonToolsImport,
 } from "./imports.ts";
-import { typeToJsonSchema } from "./schema-generator.ts";
+import { createSchemaTransformerV2 } from "../../../schema-generator/src/index.ts";
 
 export interface SchemaTransformerOptions {
   logger?: (message: string) => void;
@@ -20,6 +20,8 @@ export function createSchemaTransformer(
 ): ts.TransformerFactory<ts.SourceFile> {
   const checker = program.getTypeChecker();
   const logger = options.logger;
+  // Use the new schema generator (plugin-compatible) implementation
+  const generateSchema = createSchemaTransformerV2();
 
   return (context: ts.TransformationContext) => {
     return (sourceFile: ts.SourceFile) => {
@@ -54,8 +56,8 @@ export function createSchemaTransformer(
             optionsObj = evaluateObjectLiteral(options, checker);
           }
 
-          // Generate JSONSchema from the type
-          const schema = typeToJsonSchema(type, checker, typeArg);
+          // Generate JSONSchema from the type using the new generator
+          const schema = generateSchema(type, checker, typeArg);
 
           // Merge with options
           const finalSchema = { ...schema, ...optionsObj };
