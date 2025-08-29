@@ -78,10 +78,11 @@ export type SpaceAndURI = `${MemorySpace}/${URI}`;
 export type SpaceURIAndType = `${MemorySpace}/${URI}/${MediaType}`;
 
 const MAX_ITERATIONS_PER_RUN = 100;
+const DEFAULT_RETRIES = 5;
 
 export class Scheduler implements IScheduler {
   private pending = new Set<Action>();
-  private eventQueue: ((tx: IExtendedStorageTransaction) => any)[] = [];
+  private eventQueue: { action: Action; retriesLeft: number }[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   private dirty = new Set<SpaceURIAndType>();
   private dependencies = new WeakMap<Action, ReactivityLog>();
@@ -279,13 +280,18 @@ export class Scheduler implements IScheduler {
     });
   }
 
-  queueEvent(eventLink: NormalizedFullLink, event: any): void {
+  queueEvent(
+    eventLink: NormalizedFullLink,
+    event: any,
+    retries: number = DEFAULT_RETRIES,
+  ): void {
     for (const [link, handler] of this.eventHandlers) {
       if (areNormalizedLinksSame(link, eventLink)) {
         this.queueExecution();
-        this.eventQueue.push((tx: IExtendedStorageTransaction) =>
-          handler(tx, event)
-        );
+        this.eventQueue.push({
+          action: (tx: IExtendedStorageTransaction) => handler(tx, event),
+          retriesLeft: retries,
+        });
       }
     }
   }
@@ -441,24 +447,37 @@ export class Scheduler implements IScheduler {
     if (this.runningPromise) await this.runningPromise;
 
     // Process next event from the event queue. Will mark more docs as dirty.
-    const handler = this.eventQueue.shift();
-    if (handler) {
+    const event = this.eventQueue.shift();
+    if (event) {
+      const { action, retriesLeft } = event;
       this.runtime.telemetry.submit({
         type: "scheduler.invocation",
-        handler,
+        handler: action,
       });
       const finalize = (error?: unknown) => {
         try {
-          if (error) this.handleError(error as Error, handler);
+          if (error) this.handleError(error as Error, action);
         } finally {
-          tx.commit();
+          tx.commit().then(({ error }) => {
+            // If the transaction failed, and we have retries left, queue the
+            // event again at the beginning of the queue. This isn't guaranteed
+            // to be the same order as the original event, but it's close
+            // enough, especially for a series of event that act on the same
+            // conflicting data.
+            if (error && retriesLeft > 0) {
+              this.eventQueue.unshift({ action, retriesLeft: retriesLeft - 1 });
+              // Ensure the re-queued event gets processed even if the scheduler
+              // finished this cycle before the commit completed.
+              this.queueExecution();
+            }
+          });
         }
       };
       const tx = this.runtime.edit();
 
       try {
         this.runningPromise = Promise.resolve(
-          this.runtime.harness.invoke(() => handler(tx)),
+          this.runtime.harness.invoke(() => action(tx)),
         ).then(() => finalize()).catch((error) => finalize(error));
         await this.runningPromise;
       } catch (error) {
