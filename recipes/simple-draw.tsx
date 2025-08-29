@@ -71,6 +71,15 @@ const sendMessage = handler<
   });
 });
 
+const handleCanvasClick = handler<
+  { detail: { x: number; y: number } },
+  {}
+>((event) => {
+  console.log(
+    `Canvas clicked at position: x=${event.detail.x}, y=${event.detail.y}`,
+  );
+});
+
 const setUsername = handler<
   InputEventType,
   {
@@ -91,7 +100,7 @@ export const UserSession = recipe<
   "Canvas",
   ({ messages, user }) => {
     return {
-      [NAME]: str`Canvas v15` as any,
+      [NAME]: str`Canvas v18-click` as any,
       [UI]: (
         <div>
           <div
@@ -118,7 +127,11 @@ export const UserSession = recipe<
           <hr />
           <div>
             <h3>Chat Messages</h3>
-            <ct-canvas width="800" height="600">
+            <ct-canvas
+              width="800"
+              height="600"
+              onct-canvas-click={handleCanvasClick({})}
+            >
               {messages.map((m) => (
                 <div
                   style={{
