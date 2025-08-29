@@ -156,7 +156,7 @@ export async function generateText(
     stopSequences: params.stop ? [params.stop] : undefined,
     abortSignal: params.abortSignal,
     experimental_telemetry: { isEnabled: true },
-    maxTokens: params.maxTokens,
+    maxOutputTokens: params.maxTokens,
   };
 
   // remove stopSequences if the model doesn't support them
