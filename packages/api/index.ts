@@ -226,7 +226,7 @@ export type JSONSchema = {
 
 // Built-in types
 export interface BuiltInLLMParams {
-  messages?: string[];
+  messages?: import("@commontools/llm").LLMMessage[];
   model?: string;
   system?: string;
   stop?: string;

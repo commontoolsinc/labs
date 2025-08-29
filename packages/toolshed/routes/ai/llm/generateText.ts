@@ -364,12 +364,37 @@ export async function generateText(
         );
       }
 
-      // Stream each chunk of generated text
-      for await (const delta of llmStream.textStream) {
-        result += delta;
-        controller.enqueue(
-          new TextEncoder().encode(JSON.stringify(delta) + "\n"),
-        );
+      // Stream each event from the full AI SDK stream
+      for await (const part of llmStream.fullStream) {
+        if (part.type === "text-delta") {
+          result += part.text;
+          // Send text delta event to client
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({
+              type: "text-delta",
+              textDelta: part.text,
+            }) + "\n"),
+          );
+        } else if (part.type === "tool-call") {
+          // Send tool call event to client
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({
+              type: "tool-call",
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              args: part.input,
+            }) + "\n"),
+          );
+        } else if (part.type === "tool-result") {
+          // Send tool result event to client
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({
+              type: "tool-result",
+              toolCallId: part.toolCallId,
+              result: part.output,
+            }) + "\n"),
+          );
+        }
       }
 
       // Only add stop token if not in JSON mode to avoid breaking JSON structure
@@ -394,6 +419,13 @@ export async function generateText(
       } else {
         messages[messages.length - 1].content = result;
       }
+
+      // Send finish event to client
+      controller.enqueue(
+        new TextEncoder().encode(JSON.stringify({
+          type: "finish",
+        }) + "\n"),
+      );
 
       // Call the onStreamComplete callback with all the data needed for caching
       if (params.onStreamComplete) {

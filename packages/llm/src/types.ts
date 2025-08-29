@@ -14,6 +14,10 @@ export type LLMResponse = {
   content: string;
   // The trace span ID
   id: string;
+  // Tool calls made during generation
+  toolCalls?: LLMToolCall[];
+  // Results of completed tool calls
+  toolResults?: LLMToolResult[];
 };
 
 export type ModelName = string;
