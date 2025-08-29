@@ -20,6 +20,7 @@ export * from "./components/ct-alert/index.ts";
 export * from "./components/ct-aspect-ratio/index.ts";
 export * from "./components/ct-badge/index.ts";
 export * from "./components/ct-button/index.ts";
+export * from "./components/ct-canvas/index.ts";
 export * from "./components/ct-card/index.ts";
 export * from "./components/ct-chat-message/index.ts";
 export * from "./components/ct-checkbox/index.ts";

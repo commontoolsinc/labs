@@ -78,7 +78,9 @@ const setUsername = handler<
   }
 >((event, { user }) => {
   const name = (event.detail?.message ?? "").trim();
-  user.key("name").set(name);
+  if (name) {
+    user.key("name").set(name);
+  }
 });
 
 // User Session Recipe - Individual instance with local state
@@ -89,24 +91,28 @@ export const UserSession = recipe<
   "Canvas",
   ({ messages, user }) => {
     return {
-      [NAME]: str`Canvas v6` as any,
+      [NAME]: str`Canvas v15` as any,
       [UI]: (
         <div>
-          <h2>Your Chat Session</h2>
-          <div>
-            <label>
-              Your username: {user.name}
-            </label>
-          </div>
-          <div>
-            <h4>Set your display name</h4>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              marginBottom: "10px",
+            }}
+          >
+            <label style={{ whiteSpace: "nowrap" }}>Your username:</label>
             <common-send-message
-              name="Set"
-              placeholder="Choose a display name"
+              inline="true"
+              name="Update"
+              value={user.name}
+              placeholder="Enter new name"
               appearance="rounded"
               onmessagesend={setUsername({
                 user,
               })}
+              style="flex: 1; max-width: 400px"
             />
           </div>
           <hr />
