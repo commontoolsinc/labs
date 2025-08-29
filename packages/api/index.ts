@@ -224,9 +224,40 @@ export type JSONSchema = {
   readonly ifc?: { classification?: string[]; integrity?: string[] };
 };
 
+export interface BuiltInLLMTypedContent {
+  type: "text" | "image";
+  data: string;
+}
+export type BuiltInLLMContent = string | BuiltInLLMTypedContent[];
+
+export interface BuiltInLLMTool {
+  description: string;
+  inputSchema: JSONSchema;
+  handler?: (args: any) => any | Promise<any>; // Client-side only
+}
+
+export interface BuiltInLLMToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+}
+
+export interface BuiltInLLMToolResult {
+  toolCallId: string;
+  result: any;
+  error?: string;
+}
+
+export type BuiltInLLMMessage = {
+  role: "user" | "assistant" | "tool";
+  content: BuiltInLLMContent;
+  toolCalls?: BuiltInLLMToolCall[];
+  toolCallId?: string; // for tool result messages
+};
+
 // Built-in types
 export interface BuiltInLLMParams {
-  messages?: import("@commontools/llm").LLMMessage[];
+  messages?: BuiltInLLMMessage[];
   model?: string;
   system?: string;
   stop?: string;
