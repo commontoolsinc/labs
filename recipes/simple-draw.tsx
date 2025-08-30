@@ -173,7 +173,6 @@ export const UserSession = recipe<
           </div>
           <hr />
           <div>
-            <h3>Chat Messages</h3>
             <ct-canvas
               width="800"
               height="600"
@@ -198,6 +197,7 @@ export const UserSession = recipe<
                       name="Save"
                       placeholder="Type message..."
                       value={m.message}
+                      keepValue="true"
                       appearance="rounded"
                       onmessagesend={updateMessage({ messages, index })}
                       style="margin-top: 5px;"
