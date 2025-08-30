@@ -27,6 +27,7 @@ interface ChatMessage {
   timestamp: number;
   x: number;
   y: number;
+  hidden?: boolean;
 }
 
 type MainRecipeInput = {
@@ -86,10 +87,6 @@ const handleCanvasClick = handler<
     user: Cell<User>;
   }
 >((event, { messages, user }) => {
-  console.log(
-    `Canvas clicked at position: x=${event.detail.x}, y=${event.detail.y}`,
-  );
-
   // Create a new message at the clicked position with empty text
   const currentMessages = messages.get();
   messages.push({
@@ -120,11 +117,19 @@ const updateMessagePosition = handler<
     index: number;
   }
 >((event, { messages, index }) => {
-  console.log(
-    `Updating message ${index} position to x=${event.detail.x}, y=${event.detail.y}`,
-  );
   messages.key(index).key("x").set(event.detail.x);
   messages.key(index).key("y").set(event.detail.y);
+});
+
+const deleteMessage = handler<
+  any,
+  {
+    messages: Cell<ChatMessage[]>;
+    index: number;
+  }
+>((event, { messages, index }) => {
+  // Set hidden flag instead of removing
+  messages.key(index).key("hidden").set(true);
 });
 
 const setUsername = handler<
@@ -184,24 +189,37 @@ export const UserSession = recipe<
                     key={index}
                     x={derive(m, (msg) => msg.x)}
                     y={derive(m, (msg) => msg.y)}
+                    hidden={ifElse(
+                      derive(m, (msg) => msg.hidden === true),
+                      "true",
+                      undefined,
+                    )}
                     onpositionchange={updateMessagePosition({
                       messages,
                       index,
                     })}
                   >
-                    <div style="font-size: 12px; color: #666;">
-                      <b>{m.author.name}</b>
-                      <span>· {derive(m.timestamp, formatTime)}</span>
+                    <div style="position: relative;">
+                      <ct-button
+                        onClick={deleteMessage({ messages, index })}
+                        style="position: absolute; right: -5px; top: -5px; background: #ff4444; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; min-width: 20px; min-height: 20px; padding: 0; font-size: 16px; line-height: 1;"
+                        title="Delete note"
+                      >
+                        ×
+                      </ct-button>
+                      <div style="font-size: 12px; color: #666;">
+                        <b>{m.author.name}</b>
+                        <span>· {derive(m.timestamp, formatTime)}</span>
+                      </div>
+                      <common-send-message
+                        name="Save"
+                        placeholder="Type message..."
+                        value={m.message}
+                        appearance="rounded"
+                        onmessagesend={updateMessage({ messages, index })}
+                        style="margin-top: 5px;"
+                      />
                     </div>
-                    <common-send-message
-                      name="Save"
-                      placeholder="Type message..."
-                      value={m.message}
-                      keepValue="true"
-                      appearance="rounded"
-                      onmessagesend={updateMessage({ messages, index })}
-                      style="margin-top: 5px;"
-                    />
                   </ct-draggable>
                 );
               })}
