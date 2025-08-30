@@ -11,7 +11,7 @@ export class CtDraggable extends BaseElement {
   y = 0;
 
   @property({ type: Boolean, reflect: true })
-  hidden = false;
+  override hidden = false;
 
   @state()
   private isDragging = false;
