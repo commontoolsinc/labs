@@ -39,7 +39,6 @@ export class CtDraggable extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    console.log(`[Draggable] Connected: x=${this.x}, y=${this.y}`);
     // Set initial position from props
     this.style.left = `${this.x}px`;
     this.style.top = `${this.y}px`;
@@ -50,7 +49,6 @@ export class CtDraggable extends BaseElement {
   }
 
   override disconnectedCallback() {
-    console.log(`[Draggable] Disconnected: x=${this.x}, y=${this.y}`);
     super.disconnectedCallback();
     document.removeEventListener("mousemove", this.handleMouseMove);
     document.removeEventListener("mouseup", this.handleMouseUp);
@@ -66,9 +64,6 @@ export class CtDraggable extends BaseElement {
       return;
     }
 
-    console.log(
-      `[Draggable] Mouse down - starting drag from x=${this.x}, y=${this.y}`,
-    );
     event.preventDefault();
     this.isDragging = true;
     this.dragStartX = this.x;
@@ -105,14 +100,8 @@ export class CtDraggable extends BaseElement {
     const newX = this.dragStartX + deltaX;
     const newY = this.dragStartY + deltaY;
 
-    console.log(
-      `[Draggable] Before emit - current props: x=${this.x}, y=${this.y}, new position: x=${newX}, y=${newY}`,
-    );
-
     // Emit position change event with new coordinates
     this.emit("positionchange", { x: newX, y: newY });
-
-    console.log(`[Draggable] After emit - props should update soon`);
   };
 
   override updated(changedProperties: Map<string, any>) {
@@ -121,9 +110,6 @@ export class CtDraggable extends BaseElement {
       !this.isDragging &&
       (changedProperties.has("x") || changedProperties.has("y"))
     ) {
-      console.log(
-        `[Draggable] Props updated: x=${this.x}, y=${this.y} - updating styles`,
-      );
       this.style.left = `${this.x}px`;
       this.style.top = `${this.y}px`;
     }

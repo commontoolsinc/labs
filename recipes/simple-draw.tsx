@@ -86,10 +86,6 @@ const handleCanvasClick = handler<
     user: Cell<User>;
   }
 >((event, { messages, user }) => {
-  console.log(
-    `Canvas clicked at position: x=${event.detail.x}, y=${event.detail.y}`,
-  );
-
   // Create a new message at the clicked position with empty text
   const currentMessages = messages.get();
   messages.push({
@@ -120,9 +116,6 @@ const updateMessagePosition = handler<
     index: number;
   }
 >((event, { messages, index }) => {
-  console.log(
-    `Updating message ${index} position to x=${event.detail.x}, y=${event.detail.y}`,
-  );
   messages.key(index).key("x").set(event.detail.x);
   messages.key(index).key("y").set(event.detail.y);
 });
@@ -197,7 +190,6 @@ export const UserSession = recipe<
                       name="Save"
                       placeholder="Type message..."
                       value={m.message}
-                      keepValue="true"
                       appearance="rounded"
                       onmessagesend={updateMessage({ messages, index })}
                       style="margin-top: 5px;"

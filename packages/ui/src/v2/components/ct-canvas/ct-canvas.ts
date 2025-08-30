@@ -35,7 +35,6 @@ export class CtCanvas extends BaseElement {
 
     // If clicking on a child element (not the canvas background), ignore it
     if (target !== container) {
-      console.log(`Canvas click ignored - clicked on child element`);
       return;
     }
 
@@ -44,8 +43,6 @@ export class CtCanvas extends BaseElement {
     // Calculate relative position within the canvas
     const x = Math.round(event.clientX - rect.left);
     const y = Math.round(event.clientY - rect.top);
-
-    console.log(`Canvas clicked at: x=${x}, y=${y}`);
 
     // Emit event using BaseElement's emit method
     this.emit("ct-canvas-click", { x, y });
