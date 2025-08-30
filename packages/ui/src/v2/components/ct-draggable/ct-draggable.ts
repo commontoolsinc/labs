@@ -10,6 +10,9 @@ export class CtDraggable extends BaseElement {
   @property({ type: Number })
   y = 0;
 
+  @property({ type: Boolean, reflect: true })
+  hidden = false;
+
   @state()
   private isDragging = false;
 
