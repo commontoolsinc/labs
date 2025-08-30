@@ -6,6 +6,7 @@ import {
   derive,
   h,
   handler,
+  ID,
   ifElse,
   NAME,
   navigateTo,
@@ -20,6 +21,7 @@ interface User {
 }
 
 interface ChatMessage {
+  [ID]: number;
   author: User;
   message: string;
   timestamp: number;
@@ -55,7 +57,7 @@ function formatTime(ts: number): string {
   });
 }
 
-// Handler to send a new chat message.
+// Handler to send a new chat message (not used anymore since we create messages by clicking)
 const sendMessage = handler<
   InputEventType,
   {
@@ -66,12 +68,14 @@ const sendMessage = handler<
   const text = event.detail?.message?.trim();
   if (!text) return;
 
+  const currentMessages = messages.get();
   messages.push({
+    [ID]: currentMessages.length,
     author: user.get(),
     message: text,
     timestamp: Date.now(),
-    x: Math.random() * 600,
-    y: Math.random() * 400,
+    x: 100, // Default position if this handler is ever used
+    y: 100,
   });
 });
 
@@ -87,7 +91,9 @@ const handleCanvasClick = handler<
   );
 
   // Create a new message at the clicked position with empty text
+  const currentMessages = messages.get();
   messages.push({
+    [ID]: currentMessages.length,
     author: user.get(),
     message: "",
     timestamp: Date.now(),
@@ -105,6 +111,20 @@ const updateMessage = handler<
 >((event, { messages, index }) => {
   const text = event.detail?.message ?? "";
   messages.key(index).key("message").set(text);
+});
+
+const updateMessagePosition = handler<
+  { detail: { x: number; y: number } },
+  {
+    messages: Cell<ChatMessage[]>;
+    index: number;
+  }
+>((event, { messages, index }) => {
+  console.log(
+    `Updating message ${index} position to x=${event.detail.x}, y=${event.detail.y}`,
+  );
+  messages.key(index).key("x").set(event.detail.x);
+  messages.key(index).key("y").set(event.detail.y);
 });
 
 const setUsername = handler<
@@ -160,14 +180,15 @@ export const UserSession = recipe<
               onct-canvas-click={handleCanvasClick({ messages, user })}
             >
               {messages.map((m, index) => {
-                // Use stored coordinates or generate random ones as fallback
-                const x = m.x ?? Math.random() * 600;
-                const y = m.y ?? Math.random() * 400;
-
                 return (
-                  <div
+                  <ct-draggable
                     key={index}
-                    style={`position: absolute; left: ${x}px; top: ${y}px; padding: 10px; background-color: #ffffcc; border: 1px solid #ddd; border-radius: 4px; max-width: 200px;`}
+                    x={derive(m, (msg) => msg.x)}
+                    y={derive(m, (msg) => msg.y)}
+                    onpositionchange={updateMessagePosition({
+                      messages,
+                      index,
+                    })}
                   >
                     <div style="font-size: 12px; color: #666;">
                       <b>{m.author.name}</b>
@@ -181,7 +202,7 @@ export const UserSession = recipe<
                       onmessagesend={updateMessage({ messages, index })}
                       style="margin-top: 5px;"
                     />
-                  </div>
+                  </ct-draggable>
                 );
               })}
             </ct-canvas>

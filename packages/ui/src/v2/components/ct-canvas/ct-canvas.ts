@@ -29,8 +29,16 @@ export class CtCanvas extends BaseElement {
   `;
 
   private handleCanvasClick(event: MouseEvent) {
-    // Get the canvas container element
+    // Check if the click is on the canvas itself, not a child element
+    const target = event.target as HTMLElement;
     const container = event.currentTarget as HTMLElement;
+
+    // If clicking on a child element (not the canvas background), ignore it
+    if (target !== container) {
+      console.log(`Canvas click ignored - clicked on child element`);
+      return;
+    }
+
     const rect = container.getBoundingClientRect();
 
     // Calculate relative position within the canvas
