@@ -25,32 +25,40 @@ type LLMTestResult = {
   chat: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const calculator = handler<{ expression: string }, { result: Cell<string> }>((args, state) => {
-  try {
-    // Simple calculator - only allow basic operations for security
-    const sanitized = args.expression.replace(/[^0-9+\-*/().\s]/g, "");
-    const result = Function(`"use strict"; return (${sanitized})`)();
-    state.result.set(`${args.expression} = ${result}`);
-  } catch (error) {
-    state.result.set(`Error calculating ${args.expression}: ${(error as any)?.message || "<error>"}`);
-  }
-});
+const calculator = handler<{ expression: string }, { result: Cell<string> }>(
+  (args, state) => {
+    try {
+      // Simple calculator - only allow basic operations for security
+      const sanitized = args.expression.replace(/[^0-9+\-*/().\s]/g, "");
+      const result = Function(`"use strict"; return (${sanitized})`)();
+      state.result.set(`${args.expression} = ${result}`);
+    } catch (error) {
+      state.result.set(
+        `Error calculating ${args.expression}: ${
+          (error as any)?.message || "<error>"
+        }`,
+      );
+    }
+  },
+);
 
 const sendMessage = handler<
   { detail: { message: string } },
   {
     chat: Cell<Array<BuiltInLLMMessage>>;
-    lastLlmResponse: Partial<BuiltInLLMMessage>;
   }
->((event, { chat, lastLlmResponse: response }) => {
-  if (response.content) {
-    chat.push({ role: "assistant", content: response.content as any });
-  }
+>((event, { chat }) => {
   chat.push({ role: "user", content: event.detail.message });
 });
 
 const clearChat = handler(
-  (_: never, { chat, llmResponse }: { chat: Cell<Array<BuiltInLLMMessage>>, llmResponse: { result: Cell<string | undefined> } }) => {
+  (
+    _: never,
+    { chat, llmResponse }: {
+      chat: Cell<Array<BuiltInLLMMessage>>;
+      llmResponse: { result: Cell<string | undefined> };
+    },
+  ) => {
     chat.set([]);
     llmResponse.result.set(undefined);
   },
@@ -59,7 +67,7 @@ const clearChat = handler(
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
   ({ title, chat }) => {
-    const calculatorResult = cell<string>('');
+    const calculatorResult = cell<string>("");
 
     const llmResponse = llm({
       system:
@@ -110,15 +118,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                   "...",
                 )}
               />,
-              derive(llmResponse.result, (result) =>
-                result
-                  ? (
-                    <ct-chat-message
-                      role="assistant"
-                      content={result}
-                    />
-                  )
-                  : null),
+              null
             )}
           </ct-vscroll>
 
@@ -130,15 +130,14 @@ export default recipe<LLMTestInput, LLMTestResult>(
               disabled={llmResponse.pending}
               onct-send={sendMessage({
                 chat,
-                lastLlmResponse: {
-                  role: "assistant",
-                  content: llmResponse.result,
-                },
               })}
             />
 
             <ct-button
-              onClick={clearChat({ chat, llmResponse: { result: llmResponse.result } })}
+              onClick={clearChat({
+                chat,
+                llmResponse: { result: llmResponse.result },
+              })}
             >
               Clear Chat
             </ct-button>

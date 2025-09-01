@@ -167,54 +167,55 @@ export function llm(
         if (thisRun !== currentRun) return;
 
         let text = llmResult.content;
-          const tx = messagesCell.runtime.edit();
-          const newMessages: LLMMessage[] = [];
+        const newTx = messagesCell.runtime.edit();
+        const newMessages: LLMMessage[] = [];
 
-          // Add assistant message with tool calls to conversation
-          newMessages.push({
-            role: "assistant",
-            content: llmResult.content,
-            toolCalls: llmResult.toolCalls,
-          });
+        // Add assistant message with tool calls to conversation
+        const assistantMessage: LLMMessage = {
+          role: "assistant",
+          content: llmResult.content,
+          toolCalls: llmResult.toolCalls,
+        };
 
-          // Execute each tool call in this iteration
-          for (const toolCall of llmResult.toolCalls || []) {
-            const toolDef = toolsCell.key(toolCall.name);
-            // if (!toolDef.key('handler').get()) {
-            //   console.warn(`No handler found for tool: ${toolCall.name}`);
-            //   newMessages.push({
-            //     role: "tool",
-            //     content: JSON.stringify({
-            //       error: `No handler for tool: ${toolCall.name}`,
-            //     }),
-            //     toolCallId: toolCall.id,
-            //   });
-            //   continue;
-            // }
+        // Execute each tool call and collect results
+        const toolResults: any[] = [];
+        for (const toolCall of llmResult.toolCalls || []) {
+          const toolDef = toolsCell.key(toolCall.name);
+          // if (!toolDef.key('handler').get()) {
+          //   console.warn(`No handler found for tool: ${toolCall.name}`);
+          //   toolResults.push({
+          //     id: toolCall.id,
+          //     error: `No handler for tool: ${toolCall.name}`,
+          //   });
+          //   continue;
+          // }
 
-            try {
-              const result = await toolDef.key('handler').withTx(tx).send(toolCall.arguments);
-              newMessages.push({
-                role: "tool",
-                content: JSON.stringify(result),
-                toolCallId: toolCall.id,
-              });
-              console.log(`Tool ${toolCall.name} executed:`, result);
-            } catch (error) {
-              console.error(`Tool ${toolCall.name} failed:`, error);
-              newMessages.push({
-                role: "tool",
-                content: JSON.stringify({
-                  error: error instanceof Error ? error.message : String(error),
-                }),
-                toolCallId: toolCall.id,
-              });
-            }
-
-          // Update messages in cell with new messages
-          messagesCell.withTx(tx).set([...(messagesCell.get() ?? []), ...newMessages]);
-          await tx.commit();
+          try {
+            const result = await toolDef.key('handler').withTx(newTx).send(toolCall.arguments);
+            toolResults.push({
+              id: toolCall.id,
+              result: result,
+            });
+            console.log(`Tool ${toolCall.name} executed:`, result);
+          } catch (error) {
+            console.error(`Tool ${toolCall.name} failed:`, error);
+            toolResults.push({
+              id: toolCall.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
+
+        // Update the assistant message to include tool results
+        if (toolResults.length > 0) {
+          assistantMessage.toolResults = toolResults;
+        }
+
+        newMessages.push(assistantMessage);
+
+        // Update messages in cell with new messages
+        messagesCell.withTx(newTx).set([...(messagesCell.get() ?? []), ...newMessages]);
+        await newTx.commit();
 
         await runtime.idle();
 

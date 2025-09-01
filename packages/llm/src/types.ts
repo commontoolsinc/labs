@@ -133,9 +133,10 @@ export function isLLMTool(input: unknown): input is LLMTool {
 
 export function isLLMMessage(input: unknown): input is LLMMessage {
   return isRecord(input) && !Array.isArray(input) &&
-    (input.role === "user" || input.role === "assistant" || input.role === "tool") &&
+    (input.role === "user" || input.role === "assistant" ||
+      input.role === "tool") &&
     isLLMContent(input.content) &&
-    (!("toolCalls" in input) || (Array.isArray(input.toolCalls) && 
+    (!("toolCalls" in input) || (Array.isArray(input.toolCalls) &&
       input.toolCalls.every((tc: unknown) => isLLMToolCall(tc)))) &&
     (!("toolCallId" in input) || typeof input.toolCallId === "string");
 }
@@ -152,6 +153,6 @@ export function isLLMRequest(input: unknown): input is LLMRequest {
     (!("stop" in input) || typeof input.stop === "string") &&
     (!("mode" in input) || input.mode === "json") &&
     (!("metadata" in input) || isLLMRequestMetadata(input.metadata)) &&
-    (!("tools" in input) || (isRecord(input.tools) && 
+    (!("tools" in input) || (isRecord(input.tools) &&
       Object.values(input.tools).every((tool: unknown) => isLLMTool(tool))));
 }

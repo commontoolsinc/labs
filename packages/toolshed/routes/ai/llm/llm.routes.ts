@@ -254,7 +254,6 @@ export const feedback = createRoute({
   },
 });
 
-
 export const generateObject = createRoute({
   path: "/api/ai/llm/generateObject",
   method: "post",

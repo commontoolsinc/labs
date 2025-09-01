@@ -132,7 +132,7 @@ export class LLMClient {
           if (line) {
             try {
               const event = JSON.parse(line);
-              
+
               // Handle different event types from AI SDK fullStream
               if (typeof event === "string") {
                 // Legacy text delta format
@@ -186,14 +186,13 @@ export class LLMClient {
       }
     }
 
-    return { 
-      content: text, 
+    return {
+      content: text,
       id,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       toolResults: toolResults.length > 0 ? toolResults : undefined,
     };
   }
-
 }
 
 // FIXME(ja): we should either make message always a LLMMessage or update the types that

@@ -1,6 +1,10 @@
 import { CoreMessage, stepCountIs, streamText, tool } from "ai";
 import { AttributeValue, trace } from "@opentelemetry/api";
-import { type LLMMessage, type LLMRequest, type LLMTool } from "@commontools/llm/types";
+import {
+  type LLMMessage,
+  type LLMRequest,
+  type LLMTool,
+} from "@commontools/llm/types";
 import { findModel } from "./models.ts";
 
 import { provider as otelProvider } from "@/lib/otel.ts";
@@ -31,7 +35,7 @@ function convertJSONSchemaToZod(schema: JSONSchema): z.ZodSchema {
     }
     return zodString;
   }
-  
+
   if (schema.type === "number" || schema.type === "integer") {
     let zodNumber = z.number();
     if (schema.description) {
@@ -39,29 +43,29 @@ function convertJSONSchemaToZod(schema: JSONSchema): z.ZodSchema {
     }
     return zodNumber;
   }
-  
+
   if (schema.type === "boolean") {
     return z.boolean();
   }
-  
+
   if (schema.type === "array" && schema.items) {
     const itemSchema = convertJSONSchemaToZod(schema.items as JSONSchema);
     return z.array(itemSchema);
   }
-  
+
   if (schema.type === "object" && schema.properties) {
     const shape: Record<string, z.ZodSchema> = {};
-    
+
     for (const [key, propSchema] of Object.entries(schema.properties)) {
       shape[key] = convertJSONSchemaToZod(propSchema as JSONSchema);
     }
-    
+
     let zodObject = z.object(shape);
-    
+
     // Make optional fields optional
     if (schema.required && Array.isArray(schema.required)) {
       const optionalFields = Object.keys(schema.properties).filter(
-        key => !schema.required!.includes(key)
+        (key) => !schema.required!.includes(key),
       );
       for (const field of optionalFields) {
         if (shape[field]) {
@@ -70,10 +74,10 @@ function convertJSONSchemaToZod(schema: JSONSchema): z.ZodSchema {
       }
       zodObject = z.object(shape);
     }
-    
+
     return zodObject;
   }
-  
+
   // Fallback for any other type
   return z.any();
 }
@@ -224,7 +228,7 @@ export async function generateText(
   // Convert client-side tools to AI SDK format (without execute functions for client-side execution)
   if (params.tools && Object.keys(params.tools).length > 0) {
     const aiSdkTools: Record<string, any> = {};
-    
+
     for (const [name, toolDef] of Object.entries(params.tools)) {
       aiSdkTools[name] = tool({
         description: toolDef.description,
@@ -232,7 +236,7 @@ export async function generateText(
         // NO execute function - this makes it client-side execution
       });
     }
-    
+
     (streamParams as any).tools = aiSdkTools;
   }
 
@@ -370,29 +374,35 @@ export async function generateText(
           result += part.text;
           // Send text delta event to client
           controller.enqueue(
-            new TextEncoder().encode(JSON.stringify({
-              type: "text-delta",
-              textDelta: part.text,
-            }) + "\n"),
+            new TextEncoder().encode(
+              JSON.stringify({
+                type: "text-delta",
+                textDelta: part.text,
+              }) + "\n",
+            ),
           );
         } else if (part.type === "tool-call") {
           // Send tool call event to client
           controller.enqueue(
-            new TextEncoder().encode(JSON.stringify({
-              type: "tool-call",
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              args: part.input,
-            }) + "\n"),
+            new TextEncoder().encode(
+              JSON.stringify({
+                type: "tool-call",
+                toolCallId: part.toolCallId,
+                toolName: part.toolName,
+                args: part.input,
+              }) + "\n",
+            ),
           );
         } else if (part.type === "tool-result") {
           // Send tool result event to client
           controller.enqueue(
-            new TextEncoder().encode(JSON.stringify({
-              type: "tool-result",
-              toolCallId: part.toolCallId,
-              result: part.output,
-            }) + "\n"),
+            new TextEncoder().encode(
+              JSON.stringify({
+                type: "tool-result",
+                toolCallId: part.toolCallId,
+                result: part.output,
+              }) + "\n",
+            ),
           );
         }
       }
@@ -422,9 +432,11 @@ export async function generateText(
 
       // Send finish event to client
       controller.enqueue(
-        new TextEncoder().encode(JSON.stringify({
-          type: "finish",
-        }) + "\n"),
+        new TextEncoder().encode(
+          JSON.stringify({
+            type: "finish",
+          }) + "\n",
+        ),
       );
 
       // Call the onStreamComplete callback with all the data needed for caching
