@@ -3,6 +3,23 @@ import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { marked } from "marked";
 import { BaseElement } from "../../core/base-element.ts";
 
+interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, any>;
+}
+
+interface ToolResult {
+  id: string;
+  result: string;
+}
+
+interface Tool {
+  name: string;
+  description?: string;
+  parameters?: Record<string, any>;
+}
+
 /**
  * CTChatMessage - Chat message component with markdown support
  *
@@ -10,6 +27,9 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @attr {string} role - The role of the message sender ("user" | "assistant")
  * @attr {string} content - The message content (supports markdown)
+ * @attr {object} tools - JSON string of tool definitions
+ * @attr {object} toolCalls - JSON string of tool calls
+ * @attr {object} toolResults - JSON string of tool results
  *
  * @example
  * <ct-chat-message
@@ -28,15 +48,21 @@ export class CTChatMessage extends BaseElement {
     css`
       :host {
         display: flex;
+        flex-direction: column;
         width: 100%;
         margin-bottom: var(--ct-spacing-2, 0.5rem);
       }
 
-      :host([role="user"]) {
+      .message-wrapper {
+        display: flex;
+        width: 100%;
+      }
+
+      :host([role="user"]) .message-wrapper {
         justify-content: flex-end;
       }
 
-      :host([role="assistant"]) {
+      :host([role="assistant"]) .message-wrapper {
         justify-content: flex-start;
       }
 
@@ -97,6 +123,69 @@ export class CTChatMessage extends BaseElement {
       .message-content {
         line-height: 1.5;
         animation: textFadeIn 0.4s ease-out 0.1s both;
+      }
+
+      /* Tool attachments */
+      .tool-attachments {
+        margin-top: var(--ct-spacing-2, 0.5rem);
+        display: flex;
+        flex-direction: column;
+        gap: var(--ct-spacing-2, 0.5rem);
+      }
+
+      :host([role="user"]) .tool-attachments {
+        align-items: flex-end;
+      }
+
+      :host([role="assistant"]) .tool-attachments {
+        align-items: flex-start;
+      }
+
+      .tool-item {
+        max-width: 70%;
+        padding: var(--ct-spacing-2, 0.5rem) var(--ct-spacing-3, 0.75rem);
+        border-radius: var(--ct-border-radius, 0.25rem);
+        border: 1px solid var(--ct-color-gray-200, #e5e7eb);
+        background-color: var(--ct-color-gray-50, #f9fafb);
+        font-size: 0.875rem;
+        color: var(--ct-color-gray-700, #374151);
+      }
+
+      .tool-call {
+        border-left: 3px solid var(--ct-color-blue-400, #60a5fa);
+      }
+
+      .tool-result {
+        border-left: 3px solid var(--ct-color-green-400, #4ade80);
+      }
+
+      .tool-header {
+        font-weight: 600;
+        margin-bottom: var(--ct-spacing-1, 0.25rem);
+        display: flex;
+        align-items: center;
+        gap: var(--ct-spacing-2, 0.5rem);
+      }
+
+      .tool-icon {
+        width: 16px;
+        height: 16px;
+        opacity: 0.7;
+      }
+
+      .tool-content {
+        font-family: var(
+          --ct-font-mono,
+          ui-monospace,
+          "Cascadia Code",
+          "Source Code Pro",
+          Menlo,
+          Consolas,
+          "DejaVu Sans Mono",
+          monospace
+        );
+        white-space: pre-wrap;
+        word-break: break-word;
       }
 
       /* Markdown styling */
@@ -167,17 +256,35 @@ export class CTChatMessage extends BaseElement {
     role: { type: String, reflect: true },
     content: { type: String },
     streaming: { type: Boolean, reflect: true },
+    tools: { type: String },
+    toolCalls: { type: String },
+    toolResults: { type: String },
   };
 
   declare role: "user" | "assistant";
   declare content: string;
   declare streaming: boolean;
+  declare tools: string;
+  declare toolCalls: string;
+  declare toolResults: string;
 
   constructor() {
     super();
     this.role = "user";
     this.content = "";
     this.streaming = false;
+    this.tools = "";
+    this.toolCalls = "";
+    this.toolResults = "";
+  }
+
+  private _parseJSON<T>(jsonString: string): T[] {
+    if (!jsonString) return [];
+    try {
+      return JSON.parse(jsonString);
+    } catch {
+      return [];
+    }
   }
 
   private _renderMarkdown(content: string): string {
@@ -192,6 +299,43 @@ export class CTChatMessage extends BaseElement {
     return marked(content) as string;
   }
 
+  private _renderToolAttachments() {
+    const toolCalls = this.toolCalls as ToolCall[];
+    const toolResults = this.toolResults as ToolResult[];
+    const tools = this.tools as { [id: string]: Tool };
+
+    if (!toolCalls && !toolResults || (toolCalls.length === 0 && toolResults.length === 0)) {
+      return null;
+    }
+
+    return html`
+      <div class="tool-attachments">
+        ${toolCalls.map(
+          (call) => html`
+            <div class="tool-item tool-call">
+              <div class="tool-header">
+                <span class="tool-icon">🔧</span>
+                <span>Tool Call: ${call.name}</span>
+              </div>
+              <pre class="tool-content">${JSON.stringify(call.arguments, null, 2)}</pre>
+            </div>
+          `
+        )}
+        ${toolResults.map(
+          (result) => html`
+            <div class="tool-item tool-result">
+              <div class="tool-header">
+                <span class="tool-icon">✓</span>
+                <span>Tool Result</span>
+              </div>
+              <pre class="tool-content">${result.result}</pre>
+            </div>
+          `
+        )}
+      </div>
+    `;
+  }
+
   override render() {
     const messageClass = `message message-${this.role}${
       this.streaming ? " streaming" : ""
@@ -199,11 +343,14 @@ export class CTChatMessage extends BaseElement {
     const renderedContent = this._renderMarkdown(this.content);
 
     return html`
-      <div class="${messageClass}">
-        <div class="message-content">
-          ${unsafeHTML(renderedContent)}
+      <div class="message-wrapper">
+        <div class="${messageClass}">
+          <div class="message-content">
+            ${unsafeHTML(renderedContent)}
+          </div>
         </div>
       </div>
+      ${this._renderToolAttachments()}
     `;
   }
 }

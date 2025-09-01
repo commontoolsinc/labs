@@ -25,19 +25,21 @@ type LLMTestResult = {
   chat: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const calculator = handler<{ expression: string }, { result: Cell<string> }>(
+const calculator = handler<{ expression: string, result: Cell<string> }, { result: Cell<string> }>(
   (args, state) => {
     try {
       // Simple calculator - only allow basic operations for security
       const sanitized = args.expression.replace(/[^0-9+\-*/().\s]/g, "");
       const result = Function(`"use strict"; return (${sanitized})`)();
+      args.result.set(`${args.expression} = ${result}`);
       state.result.set(`${args.expression} = ${result}`);
     } catch (error) {
-      state.result.set(
-        `Error calculating ${args.expression}: ${
-          (error as any)?.message || "<error>"
-        }`,
-      );
+      args.result.set(`Error calculating ${args.expression}: ${
+        (error as any)?.message || "<error>"
+      }`,);
+      state.result.set(`Error calculating ${args.expression}: ${
+        (error as any)?.message || "<error>"
+      }`,);
     }
   },
 );
@@ -56,10 +58,11 @@ const clearChat = handler(
     _: never,
     { chat, llmResponse }: {
       chat: Cell<Array<BuiltInLLMMessage>>;
-      llmResponse: { result: Cell<string | undefined> };
+      llmResponse: { result: Cell<string | undefined>, partial: Cell<string | undefined> };
     },
   ) => {
     chat.set([]);
+    llmResponse.partial.set(undefined);
     llmResponse.result.set(undefined);
   },
 );
@@ -69,29 +72,33 @@ export default recipe<LLMTestInput, LLMTestResult>(
   ({ title, chat }) => {
     const calculatorResult = cell<string>("");
 
+    const tools = {
+      calculator: {
+        description:
+          "Calculate the result of a mathematical expression. Supports +, -, *, /, and parentheses.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            expression: {
+              type: "string",
+              description:
+                "The mathematical expression to evaluate (e.g., '2 + 3 * 4')",
+            },
+          },
+          required: ["expression"],
+        },
+        handler: calculator({ result: calculatorResult }),
+      },
+    };
+
     const llmResponse = llm({
       system:
         "You are a helpful assistant with access to a calculator. Use the calculator tool when users ask math questions.",
       messages: chat,
-      tools: {
-        calculator: {
-          description:
-            "Calculate the result of a mathematical expression. Supports +, -, *, /, and parentheses.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              expression: {
-                type: "string",
-                description:
-                  "The mathematical expression to evaluate (e.g., '2 + 3 * 4')",
-              },
-            },
-            required: ["expression"],
-          },
-          handler: calculator({ result: calculatorResult }),
-        },
-      },
+      tools: tools as any,
     });
+
+    derive(chat, c => console.log('[CHAT]', c));
 
     return {
       [NAME]: title,
@@ -105,6 +112,9 @@ export default recipe<LLMTestInput, LLMTestResult>(
                 <ct-chat-message
                   role={msg.role}
                   content={msg.content}
+                  tools={tools}
+                  toolCalls={msg.toolCalls}
+                  toolResults={msg.toolResults}
                 />
               );
             })}
@@ -136,7 +146,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             <ct-button
               onClick={clearChat({
                 chat,
-                llmResponse: { result: llmResponse.result },
+                llmResponse: { result: llmResponse.result, partial: llmResponse.partial },
               })}
             >
               Clear Chat

@@ -181,22 +181,26 @@ export function llm(
         const toolResults: any[] = [];
         for (const toolCall of llmResult.toolCalls || []) {
           const toolDef = toolsCell.key(toolCall.name);
-          // if (!toolDef.key('handler').get()) {
-          //   console.warn(`No handler found for tool: ${toolCall.name}`);
-          //   toolResults.push({
-          //     id: toolCall.id,
-          //     error: `No handler for tool: ${toolCall.name}`,
-          //   });
-          //   continue;
-          // }
 
           try {
-            const result = await toolDef.key('handler').withTx(newTx).send(toolCall.arguments);
+            const result = runtime.getCell<any>(
+              parentCell.space,
+              {
+                toolResult: { [toolCall.id]: cause },
+              },
+              undefined,
+              newTx,
+            );
+
+            const handlerTx = runtime.edit();
+            toolDef.key('handler').withTx(handlerTx).send({...toolCall.arguments, result });
+            await handlerTx.commit();
+
             toolResults.push({
               id: toolCall.id,
-              result: result,
+              result,
             });
-            console.log(`Tool ${toolCall.name} executed:`, result);
+            console.log(`Tool ${toolCall.name} executed:`, result.getAsQueryResult());
           } catch (error) {
             console.error(`Tool ${toolCall.name} failed:`, error);
             toolResults.push({

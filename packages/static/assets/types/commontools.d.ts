@@ -146,7 +146,7 @@ export type BuiltInLLMMessage = {
     role: "user" | "assistant" | "tool";
     content: BuiltInLLMContent;
     toolCalls?: BuiltInLLMToolCall[];
-    toolCallId?: string;
+    toolResults?: BuiltInLLMToolResult[];
 };
 export interface BuiltInLLMParams {
     messages?: BuiltInLLMMessage[];

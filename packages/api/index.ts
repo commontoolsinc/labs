@@ -252,7 +252,7 @@ export type BuiltInLLMMessage = {
   role: "user" | "assistant" | "tool";
   content: BuiltInLLMContent;
   toolCalls?: BuiltInLLMToolCall[];
-  toolCallId?: string; // for tool result messages
+  toolResults?: BuiltInLLMToolResult[];
 };
 
 // Built-in types
