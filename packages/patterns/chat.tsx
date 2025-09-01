@@ -16,9 +16,14 @@ import {
   UI,
 } from "commontools";
 
+type ListItem = {
+  title: string;
+}
+
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
   chat: Default<Array<BuiltInLLMMessage>, []>;
+  list: Default<Array<ListItem>, []>;
 };
 
 type LLMTestResult = {
@@ -38,6 +43,19 @@ const calculator = handler<{ expression: string, result: Cell<string> }, { resul
         (error as any)?.message || "<error>"
       }`,);
       state.result.set(`Error calculating ${args.expression}: ${
+        (error as any)?.message || "<error>"
+      }`,);
+    }
+  },
+);
+
+const addListItem = handler<{ item: string, result: Cell<string> }, { list: Cell<ListItem[]> }>(
+  (args, state) => {
+    try {
+      state.list.push({ title: args.item });
+      args.result.set(`${state.list.get().length} items`);
+    } catch (error) {
+      args.result.set(`Error: ${
         (error as any)?.message || "<error>"
       }`,);
     }
@@ -69,7 +87,7 @@ const clearChat = handler(
 
 export default recipe<LLMTestInput, LLMTestResult>(
   "LLM Test",
-  ({ title, chat }) => {
+  ({ title, chat, list }) => {
     const calculatorResult = cell<string>("");
 
     const tools = {
@@ -89,11 +107,25 @@ export default recipe<LLMTestInput, LLMTestResult>(
         },
         handler: calculator({ result: calculatorResult }),
       },
+      addListItem: {
+        description: "Add an item to the list.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            item: {
+              type: "string",
+              description: "The item to add to the list.",
+            },
+          },
+          required: ["item"],
+        },
+        handler: addListItem({ list }),
+      },
     };
 
     const llmResponse = llm({
       system:
-        "You are a helpful assistant with access to a calculator. Use the calculator tool when users ask math questions.",
+        "You are a helpful assistant with some tools.",
       messages: chat,
       tools: tools as any,
     });
@@ -153,6 +185,8 @@ export default recipe<LLMTestInput, LLMTestResult>(
             </ct-button>
 
             <pre>{calculatorResult}</pre>
+
+            <ct-list $value={list} />
           </div>
         </div>
       ),
