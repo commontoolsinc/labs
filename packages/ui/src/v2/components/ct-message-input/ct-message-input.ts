@@ -126,6 +126,7 @@ export class CTMessageInput extends BaseElement {
           @ct-change="${this._handleInput}"
           @keydown="${this._handleKeyDown}"
           part="input"
+          timingStrategy="immediate"
         ></ct-input>
         <ct-button
           id="ct-message-input-send-button"
