@@ -43,9 +43,11 @@ import {
 import type {
   IExtendedStorageTransaction,
   IReadOptions,
+  MemoryAddressPathComponent,
 } from "./storage/interface.ts";
 import { fromURI } from "./uri-utils.ts";
 import { getEntityId } from "./doc-map.ts";
+import { arrayEqual } from "./path-utils.ts";
 
 /**
  * This is the regular Cell interface.
@@ -816,8 +818,13 @@ function subscribeToReferencedDocs<T>(
   let cleanup: Cancel | undefined = callback(value);
 
   tx.commit();
-
-  const cancel = runtime.scheduler.subscribe((tx) => {
+  if (isDebugLink(link)) {
+    console.log("In subscribeToReferencedDocs subscribe", link.path);
+    if (arrayEqual(link.path, ["0", "children", "0"])) {
+      console.trace();
+    }
+  }
+  const action = (tx: any) => {
     if (isCancel(cleanup)) cleanup();
 
     // Run once with tx to capture _this_ cell's read dependencies.
@@ -837,9 +844,15 @@ function subscribeToReferencedDocs<T>(
     // we add a retry? So far all sinks are read-only, so they get re-triggered
     // on changes already.
     extraTx.commit();
-  }, log);
+  };
+  action.link = link;
+  action.id = crypto.randomUUID();
+  const cancel = runtime.scheduler.subscribe(action, log);
 
   return () => {
+    if (isDebugLink(link)) {
+      console.log("In subscribeToReferencedDocs cleanup", link.path);
+    }
     cancel();
     if (isCancel(cleanup)) cleanup();
   };
@@ -912,4 +925,30 @@ export function isCell(value: any): value is Cell<any> {
  */
 export function isStream(value: any): value is Stream<any> {
   return value instanceof StreamCell;
+}
+
+const debugLinks = [
+  {
+    id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
+    path: ["0", "children", "0", "children", "0"],
+  },
+  // {
+  //   id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
+  //   path: ["0", "children", "0"],
+  // },
+  // {
+  //   id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
+  //   path: ["0", "children", "0", "props", "style"],
+  // },
+  // {
+  //   id: "of:baedreic5w4j3g3vyybd53q6a6dv5gfmumyv2mzgbswmkxxyhfp75wazxce",
+  //   path: ["0", "children", "0", "children"],
+  // },
+];
+export function isDebugLink(
+  { id, path }: { id?: string; path: readonly MemoryAddressPathComponent[] },
+) {
+  return debugLinks.some((value) =>
+    value.id === id && arrayEqual(value.path, path)
+  );
 }

@@ -18,6 +18,7 @@ import type {
 import {
   areNormalizedLinksSame,
   type NormalizedFullLink,
+  NormalizedLink,
 } from "./link-utils.ts";
 import type {
   IExtendedStorageTransaction,
@@ -34,6 +35,7 @@ import {
   sortAndCompactPaths,
   type SortedAndCompactPaths,
 } from "./reactive-dependencies.ts";
+import { isDebugLink } from "./cell.ts";
 
 const logger = getLogger("scheduler", {
   enabled: false,
@@ -84,7 +86,7 @@ export class Scheduler implements IScheduler {
   private eventQueue: ((tx: IExtendedStorageTransaction) => any)[] = [];
   private eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   private dirty = new Set<SpaceURIAndType>();
-  private dependencies = new WeakMap<Action, ReactivityLog>();
+  private dependencies = new Map<Action, ReactivityLog>();
   private cancels = new WeakMap<Action, Cancel>();
   private triggers = new Map<SpaceAndURI, Map<Action, SortedAndCompactPaths>>();
 
@@ -142,6 +144,16 @@ export class Scheduler implements IScheduler {
   }
 
   schedule(action: Action, log: ReactivityLog): Cancel {
+    console.log(
+      "called schedule",
+    );
+    if (isDebugAction(action)) {
+      console.log(
+        "called schedule",
+        (action as any).link.path,
+        (action as any).id,
+      );
+    }
     const reads = this.setDependencies(action, log);
     logger.debug(() => ["Scheduling action:", action, reads]);
     reads.forEach((addr) =>
@@ -151,17 +163,39 @@ export class Scheduler implements IScheduler {
     this.queueExecution();
     this.pending.add(action);
 
-    return () => this.unschedule(action);
+    return () => {
+      console.log("Calling unschedule from schedule's cancel");
+      this.unschedule(action);
+    };
   }
 
   unschedule(action: Action): void {
+    if (isDebugAction(action)) {
+      console.log(
+        "called unschedule",
+        (action as any).link.path,
+        (action as any).id,
+        this.dependencies.has(action),
+      );
+      console.trace();
+    }
     this.cancels.get(action)?.();
     this.cancels.delete(action);
-    this.dependencies.delete(action);
+    const deleted = this.dependencies.delete(action);
+    //console.log("unscheduled", deleted, this.dependencies.size);
     this.pending.delete(action);
   }
 
   subscribe(action: Action, log: ReactivityLog): Cancel {
+    if (isDebugAction(action)) {
+      console.log(
+        "called subscribe",
+        (action as any).link.path,
+        (action as any).id,
+        this.dependencies.has(action),
+      );
+      console.trace();
+    }
     const reads = this.setDependencies(action, log);
     const pathsByEntity = addressesToPathByEntity(reads);
 
@@ -224,6 +258,7 @@ export class Scheduler implements IScheduler {
       const finalizeAction = (error?: unknown) => {
         try {
           if (error) {
+            console.error(error);
             logger.error(() => [
               `[RUN] Action failed: ${action.name || "anonymous"}`,
               `Error: ${error}`,
@@ -241,8 +276,9 @@ export class Scheduler implements IScheduler {
             `Reads: ${log.reads.length}`,
             `Writes: ${log.writes.length}`,
           ]);
-
-          this.subscribe(action, log);
+          // TODO: maybe hook up this cancel --
+          // we clean up the triggers in execute, but need a proper unschedule
+          const cancel = this.subscribe(action, log);
           resolve(result);
         }
       };
@@ -408,7 +444,13 @@ export class Scheduler implements IScheduler {
   ): IMemorySpaceAddress[] {
     const reads = sortAndCompactPaths(log.reads);
     const writes = sortAndCompactPaths(log.writes);
+    const size = this.dependencies.size;
     this.dependencies.set(action, { reads, writes });
+    // console.log(
+    //   "scheduled",
+    //   size != this.dependencies.size,
+    //   this.dependencies.size,
+    // );
     return reads;
   }
 
@@ -471,22 +513,48 @@ export class Scheduler implements IScheduler {
       this.dependencies,
       this.dirty,
     );
+    const debugActionIds = this.dependencies.keys().filter((action) =>
+      isDebugAction(action)
+    ).map((action) => (action as any).id);
+    console.log("debugActionIds", [...debugActionIds]);
+    /// DEBUG
+    console.log(
+      "Dependencies",
+      this.dependencies,
+    );
+    // const counts = new Map<string, number>();
+    // for (const action of this.dependencies.keys()) {
+    //   const countKey = ("link" in action)
+    //     ? JSON.stringify(action.link)
+    //     : "undefined";
+    //   counts.set(countKey, (counts.get(countKey) ?? 0) + 1);
+    // }
+    // for (const countKey of [...counts.keys()]) {
+    //   if (counts.get(countKey) === 1) {
+    //     counts.delete(countKey);
+    //   }
+    // }
+    // const obj = [...counts.entries().map(([key, value]) => [value, key])];
+    // console.log("Counts", obj);
 
     // Clear pending and dirty sets, and cancel all listeners for docs on already
     // scheduled actions.
     this.pending.clear();
     this.dirty.clear();
 
-    logger.debug(() => [
+    logger.info(() => [
       `[EXECUTE] Canceling subscriptions for ${order.length} actions before execution`,
     ]);
 
     for (const fn of order) {
-      this.cancels.get(fn)?.();
+      // Cancel the subscription (gets re-established on run)
+      this.unschedule(fn);
+      //this.cancels.get(fn)?.();
     }
 
     // Now run all functions. This will create new listeners to mark docs dirty
     // and schedule the next run.
+    console.log("order.length", order.length);
     for (const fn of order) {
       this.loopCounter.set(fn, (this.loopCounter.get(fn) || 0) + 1);
       if (this.loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
@@ -497,6 +565,7 @@ export class Scheduler implements IScheduler {
           fn,
         );
       } else {
+        // we will run, which will call finalizeAction, which will re-establish the subscriptions
         await this.run(fn);
       }
     }
@@ -693,4 +762,8 @@ function getCharmMetadataFromFrame(): {
     JSON.stringify(resultCell?.entityId ?? {}),
   )["/"];
   return result;
+}
+
+function isDebugAction(action: Action): boolean {
+  return ("link" in action) && isDebugLink(action.link as NormalizedLink);
 }

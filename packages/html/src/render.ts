@@ -126,10 +126,14 @@ const bindChildren = (
     const cancel = effect(child, (childValue) => {
       let newRendered: { node: ChildNode; cancel: Cancel };
       if (isVNode(childValue)) {
+        console.log("renderChild is VNode", key);
         const [childElement, childCancel] = renderNode(childValue);
         newRendered = {
           node: childElement ?? document.createTextNode(""),
-          cancel: childCancel ?? (() => {}),
+          cancel: () => {
+            console.log("Cancel", key);
+            childCancel?.();
+          },
         };
       } else {
         if (childValue === null || childValue === undefined) {
@@ -145,9 +149,10 @@ const bindChildren = (
       }
 
       if (currentNode) {
+        // Call the old cancel
+        keyedChildren.get(key)?.cancel();
         // Replace the previous DOM node, if any
         currentNode.replaceWith(newRendered.node);
-        keyedChildren.get(key)?.cancel();
         // Update the mapping entry to capture any newly-rendered node.
         keyedChildren.set(key, {
           ...keyedChildren.get(key)!,
