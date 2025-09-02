@@ -140,7 +140,19 @@ export default recipe<LLMTestInput, LLMTestResult>(
       tools: tools as any,
     });
 
-    derive(chat, c => console.log('[CHAT]', c));
+    derive(chat, (c) => {
+      console.log("[CHAT] Messages:", c.length);
+      if (c.length > 0) {
+        const last = c[c.length - 1];
+        console.log(
+          "[CHAT] Last message:",
+          last.role,
+          typeof last.content === "string"
+            ? last.content.substring(0, 50) + "..."
+            : last.content,
+        );
+      }
+    });
 
     return {
       [NAME]: title,
