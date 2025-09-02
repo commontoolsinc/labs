@@ -7,7 +7,7 @@ type InputSchema = { count: Cell<number> };
 type OutputSchema = { count: Cell<number> };
 
 const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ count }) => {
-  const handleClick = handler<never, { count: Cell<number> }>((e, { count }) => {
+  const handleClick = handler<unknown, { count: Cell<number> }>((_event, { count }) => {
     count.set(count.get() + 1);
   });
 
@@ -18,7 +18,7 @@ const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ count }) => {
 });
 ```
 
-Notice how handlers are bound to the cell from the input schema _in_ the VDOM declaration? That's partial application of the state, the rest of the state (the actual event) comes through as `e` in the handler. This way you can merge the discrete updates from events with the reactive cells that are always changing values.
+Notice how handlers are bound to the cell from the input schema _in_ the VDOM declaration? That's partial application of the state, the rest of the state (the actual event) comes through as the (unused) `_event` in the handler. This way you can merge the discrete updates from events with the reactive cells that are always changing values.
 
 (For even more detail, see `HANDLERS.md`)
 
@@ -31,8 +31,9 @@ type InputSchema = { value: Cell<string> };
 type OutputSchema = { value: Cell<string> };
 
 const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ value }) => {
-  const handleChange = handler<{ detail: { value: string } }, { value: Cell<string> }>((e, { value }) => {
-    value.set(e.detail.value);
+  // Here we know the type of the event and can use the `detail` to get the value
+  const handleChange = handler<{ detail: { value: string } }, { value: Cell<string> }>((event, { value }) => {
+    value.set(event.detail.value);
   });
 
   return {
@@ -56,13 +57,14 @@ type OutputSchema = { validatedValue: string | null };
 
 const MyRecipe = recipe<InputSchema, OutputSchema>("MyRecipe", ({ rawValue }) => {
   // Example 1: Using full event object
-  const handleChange = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>((e, { rawValue }) => {
-    rawValue.set(e.detail.value);
+  // Here we destructure the event for convenience/brevity
+  const handleChange = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>(({ detail: { value } }, { rawValue }) => {
+    rawValue.set(value);
   });
 
   // Example 2: Destructuring specific event properties (often cleaner)
-  const handleChangeDestructured = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>(({ detail }, { rawValue }) => {
-    rawValue.set(detail.value);
+  const handleChangeDestructured = handler<{ detail: { value: string } }, { rawValue: Cell<string> }>(({ detail: { value } }, { rawValue }) => {
+    rawValue.set(value);
   });
 
   // Example 3: When event data isn't needed
@@ -108,8 +110,8 @@ This component bundles an input and a button to 'send a message' or 'add an item
 const addItem = handler<
   { detail: { message: string } },
   { list: { title: string; items: Cell<any[]> } }
->((event, { list }) => {
-  const item = event.detail?.message?.trim();
+>(({ detail: { message } }, { list }) => {
+  const item = message?.trim();
   if (item) list.items.push({ title: item });
 });
 
