@@ -10,7 +10,8 @@
     "@commontools/utils": "../utils/src/index.ts"
   },
   "tasks": {
-    "test": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,TSC_*,NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts",
+    "test": "deno test --no-check --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts",
+    "test:check": "deno test --allow-read --allow-write --allow-run --allow-env=API_URL,\"TSC_*\",NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV test/*.test.ts",
     "check": "deno check src/**/*.ts test/**/*.ts",
     "fmt": "deno fmt src/ test/",
     "lint": "deno lint src/ test/"
