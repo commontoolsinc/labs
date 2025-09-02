@@ -46,6 +46,8 @@ The framework uses a reactive programming model:
 - `lift`: Similar to derive, but lifts a regular function to work on reactive values
   - `derive(param, function)` is an alias to `lift(function)(param)`
 - `handler`: Creates an event handler that always fires with up-to-date dependencies (possibly mutating them)
+  - takes two parameters, an event and state (bound variables)
+  - e.g. `<ct-button onClick={myHandler({ counter })}>`
 
 ### Handlers vs Reactive Functions
 
