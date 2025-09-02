@@ -10,12 +10,12 @@ where recipes are autonomous modules that can import, process, and export data.
 
 ### Recipe
 
-A recipe is the fundamental building block, defined using the `recipe()`
-function. It takes three parameters:
+A recipe is the fundamental building block, defined using the `recipe<InputType, OutputType>('My Recipe', (input) => {})`
+function. It takes two types and two parameters:
 
-- Input Types: Defines the input parameters and their types using TypeScript
-- Output Types: Defines the output structure using TypeScript
-- Implementation Function: A function that receives the inputs and returns
+- Types: define Input and Output relationships for composition with other recipes
+  - Properties such as `[UI]` and `[NAME]` do not have to be explicitly included in the output type
+- Parameters: a descriptive name and a function that receives the inputs and returns
   outputs
 
 ### Types and Runtime Safety
