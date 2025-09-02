@@ -18,7 +18,7 @@ import {
 
 type ListItem = {
   title: string;
-}
+};
 
 type LLMTestInput = {
   title: Default<string, "LLM Test">;
@@ -30,7 +30,10 @@ type LLMTestResult = {
   chat: Default<Array<BuiltInLLMMessage>, []>;
 };
 
-const calculator = handler<{ expression: string, result: Cell<string> }, { result: Cell<string> }>(
+const calculator = handler<
+  { expression: string; result: Cell<string> },
+  { result: Cell<string> }
+>(
   (args, state) => {
     try {
       // Simple calculator - only allow basic operations for security
@@ -39,25 +42,30 @@ const calculator = handler<{ expression: string, result: Cell<string> }, { resul
       args.result.set(`${args.expression} = ${result}`);
       state.result.set(`${args.expression} = ${result}`);
     } catch (error) {
-      args.result.set(`Error calculating ${args.expression}: ${
-        (error as any)?.message || "<error>"
-      }`,);
-      state.result.set(`Error calculating ${args.expression}: ${
-        (error as any)?.message || "<error>"
-      }`,);
+      args.result.set(
+        `Error calculating ${args.expression}: ${
+          (error as any)?.message || "<error>"
+        }`,
+      );
+      state.result.set(
+        `Error calculating ${args.expression}: ${
+          (error as any)?.message || "<error>"
+        }`,
+      );
     }
   },
 );
 
-const addListItem = handler<{ item: string, result: Cell<string> }, { list: Cell<ListItem[]> }>(
+const addListItem = handler<
+  { item: string; result: Cell<string> },
+  { list: Cell<ListItem[]> }
+>(
   (args, state) => {
     try {
       state.list.push({ title: args.item });
       args.result.set(`${state.list.get().length} items`);
     } catch (error) {
-      args.result.set(`Error: ${
-        (error as any)?.message || "<error>"
-      }`,);
+      args.result.set(`Error: ${(error as any)?.message || "<error>"}`);
     }
   },
 );
@@ -76,7 +84,10 @@ const clearChat = handler(
     _: never,
     { chat, llmResponse }: {
       chat: Cell<Array<BuiltInLLMMessage>>;
-      llmResponse: { result: Cell<string | undefined>, partial: Cell<string | undefined> };
+      llmResponse: {
+        result: Cell<string | undefined>;
+        partial: Cell<string | undefined>;
+      };
     },
   ) => {
     chat.set([]);
@@ -124,8 +135,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
     };
 
     const llmResponse = llm({
-      system:
-        "You are a helpful assistant with some tools.",
+      system: "You are a helpful assistant with some tools.",
       messages: chat,
       tools: tools as any,
     });
@@ -160,7 +170,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
                   "...",
                 )}
               />,
-              null
+              null,
             )}
           </ct-vscroll>
 
@@ -178,7 +188,10 @@ export default recipe<LLMTestInput, LLMTestResult>(
             <ct-button
               onClick={clearChat({
                 chat,
-                llmResponse: { result: llmResponse.result, partial: llmResponse.partial },
+                llmResponse: {
+                  result: llmResponse.result,
+                  partial: llmResponse.partial,
+                },
               })}
             >
               Clear Chat

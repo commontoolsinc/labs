@@ -22,7 +22,6 @@ const JSON_SYSTEM_PROMPTS = {
     "You must respond with pure, correct JSON only - no text descriptions, no ```json code blocks, and no formatting outside of valid JSON. Your entire response should be a valid JSON object that can be parsed directly by JSON.parse() with no additional processing.",
 };
 
-
 // Core generation logic separated from HTTP handling
 export interface GenerateTextParams extends LLMRequest {
   abortSignal?: AbortSignal;

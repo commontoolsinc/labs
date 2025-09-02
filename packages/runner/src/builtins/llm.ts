@@ -60,7 +60,6 @@ export function llm(
   let isExecutingTools = false;
 
   return (tx: IExtendedStorageTransaction) => {
-    console.log('[LLM Action] Function called, run:', currentRun + 1);
     if (!cellsInitialized) {
       pending = runtime.getCell(
         parentCell.space,
@@ -112,20 +111,29 @@ export function llm(
     const messagesCell = inputsCell.key("messages");
     const messages = messagesCell.getAsQueryResult([], tx) ?? [];
     const toolsCell = inputsCell.key("tools");
-    
+
     // Debug logging to understand what's happening
-    console.log('[LLM] Messages received:', messages.length, 'messages');
+    console.log("[LLM] Messages received:", messages.length, "messages");
     if (messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
-      console.log('[LLM] Last message role:', lastMsg?.role, 'content length:', typeof lastMsg?.content === 'string' ? lastMsg.content.length : 'not string');
+      console.log(
+        "[LLM] Last message role:",
+        lastMsg?.role,
+        "content length:",
+        typeof lastMsg?.content === "string"
+          ? lastMsg.content.length
+          : "not string",
+      );
     }
 
     // Strip handlers from tool definitions to send them to the server
     // We keep the handlers locally and execute them here
-    const toolsWithoutHandlers = Object.fromEntries(Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
-      const { handler, ...toolWithoutHandler } = tool;
-      return [name, toolWithoutHandler];
-    }));
+    const toolsWithoutHandlers = Object.fromEntries(
+      Object.entries(toolsCell.get() ?? {}).map(([name, tool]) => {
+        const { handler, ...toolWithoutHandler } = tool;
+        return [name, toolWithoutHandler];
+      }),
+    );
 
     const llmParams: LLMRequest = {
       system: system ?? "",
@@ -164,10 +172,12 @@ export function llm(
     // If the last message is from the assistant, no LLM request needed
     const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.role === "assistant") {
-      console.log('[LLM] Last message is assistant, skipping LLM request');
+      console.log("[LLM] Last message is assistant, skipping LLM request");
       pendingWithLog.set(false);
       // Set the result to the last assistant message content
-      const content = typeof lastMessage.content === 'string' ? lastMessage.content : '';
+      const content = typeof lastMessage.content === "string"
+        ? lastMessage.content
+        : "";
       resultWithLog.set(content);
       partialWithLog.set(content);
       requestHashWithLog.set(hash);
@@ -175,7 +185,7 @@ export function llm(
     }
 
     // Only clear result/partial when we're about to make a new request
-    console.log('[LLM] Making new LLM request');
+    console.log("[LLM] Making new LLM request");
     resultWithLog.set(undefined);
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
@@ -227,15 +237,21 @@ export function llm(
               );
 
               const handlerTx = runtime.edit();
-              const handlerCell = toolDef.key('handler' as any);
-              handlerCell.withTx(handlerTx).send({...toolCall.arguments, result });
+              const handlerCell = toolDef.key("handler" as any);
+              handlerCell.withTx(handlerTx).send({
+                ...toolCall.arguments,
+                result,
+              });
               await handlerTx.commit();
 
               toolResults.push({
                 id: toolCall.id,
                 result,
               });
-              console.log(`Tool ${toolCall.name} executed:`, result.getAsQueryResult());
+              console.log(
+                `Tool ${toolCall.name} executed:`,
+                result.getAsQueryResult(),
+              );
             } catch (error) {
               console.error(`Tool ${toolCall.name} failed:`, error);
               toolResults.push({
@@ -250,7 +266,10 @@ export function llm(
           newMessages.push(assistantMessage);
 
           // Update messages in cell with new messages AFTER all tools complete
-          messagesCell.withTx(newTx).set([...(messagesCell.get() ?? []), ...newMessages]);
+          messagesCell.withTx(newTx).set([
+            ...(messagesCell.get() ?? []),
+            ...newMessages,
+          ]);
           await newTx.commit();
 
           // Clear the flag after tool execution is complete
@@ -262,7 +281,10 @@ export function llm(
             role: "assistant",
             content: llmResult.content,
           };
-          messagesCell.withTx(newTx).set([...(messagesCell.get() ?? []), assistantMessage]);
+          messagesCell.withTx(newTx).set([
+            ...(messagesCell.get() ?? []),
+            assistantMessage,
+          ]);
           await newTx.commit();
         }
 

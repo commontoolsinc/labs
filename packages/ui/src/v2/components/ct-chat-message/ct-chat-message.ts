@@ -304,25 +304,33 @@ export class CTChatMessage extends BaseElement {
     const toolResults = this.toolResults as ToolResult[];
     const tools = this.tools as { [id: string]: Tool };
 
-    if (!toolCalls && !toolResults || (toolCalls.length === 0 && toolResults.length === 0)) {
+    if (
+      !toolCalls && !toolResults ||
+      (toolCalls.length === 0 && toolResults.length === 0)
+    ) {
       return null;
     }
 
     return html`
       <div class="tool-attachments">
         ${toolCalls.map(
-          (call) => html`
+        (call) =>
+          html`
             <div class="tool-item tool-call">
               <div class="tool-header">
                 <span class="tool-icon">🔧</span>
                 <span>Tool Call: ${call.name}</span>
               </div>
-              <pre class="tool-content">${JSON.stringify(call.arguments, null, 2)}</pre>
+              <pre class="tool-content">${JSON.stringify(
+              call.arguments,
+              null,
+              2,
+            )}</pre>
             </div>
-          `
-        )}
-        ${toolResults.map(
-          (result) => html`
+          `,
+      )} ${toolResults.map(
+        (result) =>
+          html`
             <div class="tool-item tool-result">
               <div class="tool-header">
                 <span class="tool-icon">✓</span>
@@ -330,8 +338,8 @@ export class CTChatMessage extends BaseElement {
               </div>
               <pre class="tool-content">${result.result}</pre>
             </div>
-          `
-        )}
+          `,
+      )}
       </div>
     `;
   }

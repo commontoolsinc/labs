@@ -128,7 +128,9 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const shouldCache = payload.cache && !hasTools;
 
   if (payload.cache && hasTools) {
-    console.log("Caching disabled for request with tools to prevent incomplete cached responses");
+    console.log(
+      "Caching disabled for request with tools to prevent incomplete cached responses",
+    );
   }
 
   let cacheKey: string | undefined;
