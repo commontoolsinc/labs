@@ -122,11 +122,21 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
     payload.metadata.user = user;
   }
 
-  const cacheKey = await hashKey(
-    JSON.stringify(removeNonCacheableFields(payload)),
-  );
-  // First, check whether the request is cached, if so return the cached result
-  if (payload.cache) {
+  // Disable caching for requests with tools to prevent incomplete cached responses
+  // Tool calls are executed client-side, so server cache doesn't include tool results
+  const hasTools = payload.tools && Object.keys(payload.tools).length > 0;
+  const shouldCache = payload.cache && !hasTools;
+
+  if (payload.cache && hasTools) {
+    console.log("Caching disabled for request with tools to prevent incomplete cached responses");
+  }
+
+  let cacheKey: string | undefined;
+  if (shouldCache) {
+    cacheKey = await hashKey(
+      JSON.stringify(removeNonCacheableFields(payload)),
+    );
+    // First, check whether the request is cached, if so return the cached result
     const cachedResult = await loadFromCache(cacheKey);
     if (cachedResult) {
       const lastMessage =
@@ -138,7 +148,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const persistCache = async (
     messages: LLMMessage[],
   ) => {
-    if (!payload.cache) {
+    if (!shouldCache || !cacheKey) {
       return;
     }
     try {
