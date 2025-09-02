@@ -102,7 +102,7 @@ export const charm = new Command()
     `Create a new charm, using ./main.tsx as source.`,
   )
   .arguments("<main:string>")
-  .option("--no-start", "Create the charm without starting it")
+  .option("--start", "Start the charm after creation for one step")
   .option(
     "--main-export <export:string>",
     'Named export from entry for recipe definition. Defaults to "default".',
@@ -113,7 +113,7 @@ export const charm = new Command()
         await newCharm(
           parseSpaceOptions(options),
           { mainPath: absPath(main), mainExport: options.mainExport },
-          { start: !(options as unknown as { noStart?: boolean }).noStart },
+          { start: options.start },
         ),
       ),
   )
