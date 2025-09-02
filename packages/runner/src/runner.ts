@@ -83,7 +83,8 @@ export class Runner implements IRunner {
   ): Cell<R>;
 
   /**
-   * Configure charm without running it.
+   * Configure charm without running it. If the charm is already running and the
+   * recipe changes, it will stop the charm.
    */
   setup<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
