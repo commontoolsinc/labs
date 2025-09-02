@@ -83,7 +83,7 @@ export class Runner implements IRunner {
   ): Cell<R>;
 
   /**
-   * Internal setup that returns whether scheduling is required.
+   * Configure charm without running it.
    */
   setup<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
