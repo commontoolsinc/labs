@@ -1133,15 +1133,48 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle pushing objects that reference their containing array", async () => {
-    const addItemHandler = handler<
-      { detail: { message: string } },
-      { items: Array<{ title: string; items: any[] }> }
-    >((event, { items }) => {
-      const title = event.detail?.message?.trim();
-      if (title) {
-        items.push({ title, items });
-      }
-    }, { proxy: true });
+    const addItemHandler = handler(
+      // Event schema
+      {
+        type: "object",
+        properties: {
+          detail: {
+            type: "object",
+            properties: { message: { type: "string" } },
+            required: ["message"],
+          },
+        },
+        required: ["detail"],
+      },
+      // State schema with self-referential items via $defs
+      {
+        $defs: {
+          Items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                items: { $ref: "#/$defs/Items" },
+              },
+              required: ["title", "items"],
+            },
+            default: [],
+          },
+        },
+        type: "object",
+        properties: {
+          items: { $ref: "#/$defs/Items", asCell: true },
+        },
+        required: ["items"],
+      },
+      (event, { items }) => {
+        const title = event.detail?.message?.trim();
+        if (title) {
+          items.push({ title, items });
+        }
+      },
+    );
 
     const itemsRecipe = recipe<
       { items: Array<{ title: string; items: any[] }> }
