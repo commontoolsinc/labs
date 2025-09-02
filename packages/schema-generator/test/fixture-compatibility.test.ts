@@ -44,11 +44,12 @@ function createTestProgram(
 function getTypeFromCode(
   code: string,
   typeName: string,
-): { type: ts.Type; checker: ts.TypeChecker } {
+): { type: ts.Type; checker: ts.TypeChecker; typeNode?: ts.TypeNode } {
   const { program, checker, sourceFile } = createTestProgram(code);
 
   // Find the interface declaration
   let foundType: ts.Type | undefined;
+  let foundTypeNode: ts.TypeNode | undefined;
 
   ts.forEachChild(sourceFile, (node) => {
     if (ts.isInterfaceDeclaration(node) && node.name.text === typeName) {
@@ -58,6 +59,7 @@ function getTypeFromCode(
       }
     } else if (ts.isTypeAliasDeclaration(node) && node.name.text === typeName) {
       foundType = checker.getTypeFromTypeNode(node.type);
+      foundTypeNode = node.type;
     }
   });
 
@@ -65,7 +67,7 @@ function getTypeFromCode(
     throw new Error(`Type ${typeName} not found in code`);
   }
 
-  return { type: foundType, checker };
+  return { type: foundType, checker, typeNode: foundTypeNode };
 }
 
 describe("Fixture Compatibility", () => {
@@ -102,13 +104,14 @@ describe("Fixture Compatibility", () => {
       type TodoList = TodoItem[];
     `;
 
-    const { type, checker } = getTypeFromCode(code, "TodoList");
-    const schema = transformer(type, checker);
+    const { type, checker, typeNode } = getTypeFromCode(code, "TodoList");
+    const schema = transformer(type, checker, typeNode);
 
-    // For now, we expect this to fall back to object type since we don't have the typeNode
-    // This reveals a limitation of our current approach - we need the AST node for reliable array detection
-    expect(schema.type).toBe("object");
-    expect(schema.additionalProperties).toBe(true);
+    // Expect correct array detection with object items
+    expect(schema.type).toBe("array");
+    expect(schema.items?.type).toBe("object");
+    expect(schema.items?.properties?.title?.type).toBe("string");
+    expect(schema.items?.properties?.done?.type).toBe("boolean");
   });
 
   it("should generate compatible schema for root object with items array", () => {
@@ -131,11 +134,12 @@ describe("Fixture Compatibility", () => {
     // Verify the schema structure matches the expected output
     expect(schema.type).toBe("object");
     expect(schema.properties).toBeDefined();
-    expect(schema.properties?.items).toBeDefined();
-    // For now, we expect items to be treated as an object type since we don't have the typeNode
-    // This reveals a limitation of our current approach
-    expect(schema.properties?.items?.type).toBe("object");
-    expect(schema.properties?.items?.additionalProperties).toBe(true);
+    const items = schema.properties?.items as Record<string, any>;
+    expect(items).toBeDefined();
+    expect(items.type).toBe("array");
+    expect(items.items?.type).toBe("object");
+    expect(items.items?.properties?.title?.type).toBe("string");
+    expect(items.items?.properties?.done?.type).toBe("boolean");
     expect(schema.required).toEqual(["items"]);
   });
 });

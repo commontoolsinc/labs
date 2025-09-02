@@ -1,0 +1,15 @@
+{
+  "properties": {
+    "maybe": {
+      "default": null,
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string" }
+      ]
+    }
+  },
+  "required": [
+    "maybe"
+  ],
+  "type": "object"
+}

@@ -1,0 +1,24 @@
+{
+  "properties": {
+    "cellOfDefault": {
+      "asCell": true,
+      "default": "d",
+      "type": "string"
+    },
+    "defaultArray": {
+      "default": [
+        "a",
+        "b"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "cellOfDefault",
+    "defaultArray"
+  ],
+  "type": "object"
+}

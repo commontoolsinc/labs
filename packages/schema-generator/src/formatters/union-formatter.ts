@@ -15,6 +15,15 @@ export class UnionFormatter implements TypeFormatter {
   formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
     const union = type as ts.UnionType;
     const members = union.types ?? [] as ts.Type[];
+    try {
+      // deno-lint-ignore no-console
+      console.log(
+        "[DBG:UnionFormatter] handling union",
+        members.map((m) => (context.typeChecker as any).typeToString(m)),
+      );
+    } catch (_) {
+      // ignore debug failures
+    }
 
     // Filter out undefined from unions; schema handles optionality via required array
     const filtered = members.filter((m) =>
