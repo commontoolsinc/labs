@@ -65,6 +65,7 @@ export function llm(
   let requestHash: Cell<string | undefined>;
   let addMessage: Cell<BuiltInLLMMessage | undefined>;
   let isExecutingTools = false;
+  const messagesCell = inputsCell.key("messages");
 
   return (tx: IExtendedStorageTransaction) => {
     if (!cellsInitialized) {
@@ -114,8 +115,11 @@ export function llm(
       addMessage.setRaw({ $stream: true });
 
       const addMessageStreamLink = parseLink(addMessage);
-      const handler = (tx: IExtendedStorageTransaction, event: any) => {
-        debugger;
+      const handler = (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
+        messagesCell.withTx(tx).set([
+          ...(messagesCell.get() ?? []),
+          event
+        ]);
       };
 
       // parentCell.key("addMessage").withTx(tx).set({ $stream: true });
@@ -142,7 +146,7 @@ export function llm(
     const { system, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], tx) ?? {};
 
-    const messagesCell = inputsCell.key("messages");
+
     const messages = messagesCell.getAsQueryResult([], tx) ?? [];
     const toolsCell = inputsCell.key("tools");
 

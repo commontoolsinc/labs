@@ -78,7 +78,7 @@ const sendMessage = handler<
     addMessage: Stream<BuiltInLLMMessage>;
   }
 >((event, { chat, addMessage }) => {
-  chat.push({ role: "user", content: event.detail.message });
+  // chat.push({ role: "user", content: event.detail.message });
   addMessage.send({ role: "user", content: event.detail.message });
 });
 
