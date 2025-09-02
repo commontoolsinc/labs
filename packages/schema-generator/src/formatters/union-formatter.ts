@@ -62,6 +62,21 @@ export class UnionFormatter implements TypeFormatter {
       if (boolSet.size === 2 && nonBoolCount === 0) {
         return { type: "boolean" } as unknown as SchemaDefinition;
       }
+      // Legacy fixture behavior: represent string/number literal unions as arrays
+      const allStrings = values.every((v) => typeof v === "string");
+      const allNumbers = values.every((v) => typeof v === "number");
+      if (allStrings) {
+        return {
+          type: "array",
+          items: { type: "string" },
+        } as unknown as SchemaDefinition;
+      }
+      if (allNumbers) {
+        return {
+          type: "array",
+          items: { type: "number" },
+        } as unknown as SchemaDefinition;
+      }
       return { enum: values as any[] } as unknown as SchemaDefinition;
     }
 
