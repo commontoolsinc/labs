@@ -184,10 +184,12 @@ export interface IRuntime {
 export interface IScheduler {
   readonly runtime: IRuntime;
   idle(): Promise<void>;
-  schedule(action: Action, log: ReactivityLog): Cancel;
-  subscribe(action: Action, log: ReactivityLog): Cancel;
-  run(action: Action): Promise<any>;
-  unschedule(action: Action): void;
+  subscribe(
+    action: Action,
+    log: ReactivityLog,
+    scheduleImmediately?: boolean,
+  ): Cancel;
+  unsubscribe(action: Action): void;
   onConsole(fn: ConsoleHandler): void;
   onError(fn: ErrorHandler): void;
   queueEvent(eventRef: NormalizedFullLink, event: any): void;
