@@ -1,10 +1,8 @@
-import { recipe, OpaqueRef, toSchema, JSONSchema } from "commontools";
-
+import { recipe, OpaqueRef, JSONSchema } from "commontools";
 interface TodoItem {
-  title: string;
-  done: boolean;
+    title: string;
+    done: boolean;
 }
-
 export default recipe({
     type: "object",
     properties: {
@@ -26,15 +24,14 @@ export default recipe({
     },
     required: ["items"]
 } as const satisfies JSONSchema, ({ items }) => {
-  // This should NOT be transformed to items.get().map()
-  // because OpaqueRef has its own map method
-  const mapped = items.map((item) => item.title);
-  
-  // This should also work without transformation
-  const filtered = items.map((item, index) => ({
-    ...item,
-    position: index
-  }));
-  
-  return { mapped, filtered };
+    // This should NOT be transformed to items.get().map()
+    // because OpaqueRef has its own map method
+    const mapped = items.map((item) => item.title);
+    // This should also work without transformation
+    const filtered = items.map((item, index) => ({
+        title: item.title,
+        done: item.done,
+        position: index
+    }));
+    return { mapped, filtered };
 });
