@@ -96,7 +96,7 @@ export class LLMClient {
       return {
         content: data.content as string,
         id,
-        // TODO: Extract tool calls from cached response if present
+        // TODO(bf): Extract tool calls from cached response if present
       };
     }
     return await this.stream(response.body, id, callback, toolCallCallback);
@@ -114,8 +114,8 @@ export class LLMClient {
     let doneReading = false;
     let buffer = "";
     let text = "";
-    let toolCalls: LLMToolCall[] = [];
-    let toolResults: LLMToolResult[] = [];
+    const toolCalls: LLMToolCall[] = [];
+    const toolResults: LLMToolResult[] = [];
 
     while (!doneReading) {
       const { value, done } = await reader.read();

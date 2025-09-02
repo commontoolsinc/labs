@@ -194,7 +194,7 @@ export function llm(
       .then(async (llmResult) => {
         if (thisRun !== currentRun) return;
 
-        let text = llmResult.content;
+        const text = llmResult.content;
 
         // If there are tool calls, prevent re-entry and execute them atomically
         if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
