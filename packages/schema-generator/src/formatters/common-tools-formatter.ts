@@ -31,7 +31,14 @@ export class CommonToolsFormatter implements TypeFormatter {
           | string
           | undefined;
         if (name) {
-          return name === "Cell" || name === "Stream" || name === "Default";
+          const ok = name === "Cell" || name === "Stream" || name === "Default";
+          try {
+            if (ok && name === "Default") {
+              // deno-lint-ignore no-console
+              console.log("[DBG:CommonTools] supports Default type");
+            }
+          } catch {}
+          return ok;
         }
       }
     }
@@ -57,6 +64,10 @@ export class CommonToolsFormatter implements TypeFormatter {
       case "Stream":
         return this.formatStreamType(typeRef, checker, context);
       case "Default":
+        try {
+          // deno-lint-ignore no-console
+          console.log("[DBG:CommonTools] format Default<T,V>");
+        } catch {}
         return this.formatDefaultType(typeRef, checker, context);
       default:
         return { type: "object", additionalProperties: true };
@@ -68,6 +79,47 @@ export class CommonToolsFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
     context: FormatterContext,
   ): SchemaDefinition {
+    // Helper: if the context node is an alias like type CellArray<T> = Cell<T[]>,
+    // detect and return the element node substituted with the actual argument.
+    const getAliasArrayElementFromCell = (
+      node: ts.TypeNode | undefined,
+    ): ts.TypeNode | undefined => {
+      if (!node || !ts.isTypeReferenceNode(node)) return undefined;
+      // Walk alias chain up to a small depth to see if it resolves to Cell<T[]>
+      let current: ts.TypeNode | undefined = node;
+      let depth = 0;
+      while (current && ts.isTypeReferenceNode(current) && depth < 5) {
+        const sym = checker.getSymbolAtLocation(current.typeName);
+        const decl = sym?.declarations?.[0];
+        if (!decl || !ts.isTypeAliasDeclaration(decl)) break;
+        const aliased = decl.type;
+        if (ts.isTypeReferenceNode(aliased)) {
+          if (
+            ts.isIdentifier(aliased.typeName) &&
+            aliased.typeName.text === "Cell"
+          ) {
+            const inner = aliased.typeArguments?.[0];
+            if (inner && ts.isArrayTypeNode(inner)) {
+              // Found pattern Cell<T[]>; return the actual type argument from usage
+              return node.typeArguments?.[0];
+            }
+            return undefined;
+          }
+          // Follow the alias to the next reference
+          current = aliased;
+          depth++;
+          continue;
+        }
+        // Parenthesized or other wrappers: try to unwrap
+        if (ts.isParenthesizedTypeNode(aliased)) {
+          current = aliased.type as ts.TypeNode;
+          depth++;
+          continue;
+        }
+        break;
+      }
+      return undefined;
+    };
     // Get the typeNode from context (like the old system did)
     let innerTypeNode: ts.TypeNode | undefined;
     if (
@@ -83,6 +135,17 @@ export class CommonToolsFormatter implements TypeFormatter {
     const innerType = this.getTypeArgument(typeRef, 0) || typeRef;
 
     if (this.schemaGenerator) {
+      // Alias like type CellArray<T> = Cell<T[]>; synthesize array from alias mapping
+      const aliasElemNode = getAliasArrayElementFromCell(context.typeNode);
+      if (aliasElemNode) {
+        const elemType = checker.getTypeFromTypeNode(aliasElemNode);
+        const items = this.schemaGenerator.formatChildType(
+          elemType,
+          checker,
+          aliasElemNode,
+        );
+        return { type: "array", items, asCell: true } as SchemaDefinition;
+      }
       // Alias-aware array detection on the actual container argument
       const containerArg = (typeRef.typeArguments && typeRef.typeArguments[0])
         ? typeRef.typeArguments[0]
@@ -94,7 +157,11 @@ export class CommonToolsFormatter implements TypeFormatter {
           ((containerArg as ts.TypeReference).target?.symbol?.name ===
             "Default");
         if (!containerIsDefault) {
-          const elem = getArrayElementType(containerArg, checker, innerTypeNode);
+          const elem = getArrayElementType(
+            containerArg,
+            checker,
+            innerTypeNode,
+          );
           if (elem) {
             const items = this.schemaGenerator.formatChildType(
               elem,
@@ -289,7 +356,11 @@ export class CommonToolsFormatter implements TypeFormatter {
           ((containerArg as ts.TypeReference).target?.symbol?.name ===
             "Default");
         if (!containerIsDefault) {
-          const elem = getArrayElementType(containerArg, checker, innerTypeNode);
+          const elem = getArrayElementType(
+            containerArg,
+            checker,
+            innerTypeNode,
+          );
           if (elem) {
             const items = this.schemaGenerator.formatChildType(
               elem,
@@ -477,6 +548,17 @@ export class CommonToolsFormatter implements TypeFormatter {
       valueTypeNode = context.typeNode.typeArguments[0];
       defaultTypeNode = context.typeNode.typeArguments[1];
     }
+    try {
+      // deno-lint-ignore no-console
+      console.log(
+        "[DBG:CommonTools] Default<T,V> nodes",
+        {
+          hasValueNode: !!valueTypeNode,
+          isUnionNode:
+            !!(valueTypeNode && ts.isUnionTypeNode(valueTypeNode)),
+        },
+      );
+    } catch {}
 
     const inlineIfRef = (schema: SchemaDefinition): SchemaDefinition => {
       const ref = schema && (schema as any).$ref as string | undefined;
@@ -542,7 +624,39 @@ export class CommonToolsFormatter implements TypeFormatter {
       (valueSchema as any).default = extracted;
     }
 
-    // If the value type is a union with null, produce oneOf form consistently
+    // If the value type is a union with null, produce oneOf form consistently.
+    // Prefer syntax-driven detection first (valueTypeNode) to handle cases where
+    // the checker folds away `null` in minimal program environments.
+    if (this.schemaGenerator && valueTypeNode && ts.isUnionTypeNode(valueTypeNode)) {
+      const parts = valueTypeNode.types ?? [] as ts.TypeNode[];
+      try {
+        // deno-lint-ignore no-console
+        console.log(
+          "[DBG:CommonTools] union node parts",
+          parts.map((p) => ts.SyntaxKind[p.kind]),
+        );
+      } catch {}
+      const isNullNode = (p: ts.TypeNode) =>
+        p.kind === ts.SyntaxKind.NullKeyword ||
+        (ts.isLiteralTypeNode(p) && p.literal.kind === ts.SyntaxKind.NullKeyword);
+      const hasNullNode = parts.some(isNullNode);
+      const nonNullNodes = parts.filter((p) => !isNullNode(p));
+      if (hasNullNode && nonNullNodes.length === 1) {
+        const nn = nonNullNodes[0]!;
+        const nnType = context.typeChecker.getTypeFromTypeNode(nn);
+        const nnSchema = this.schemaGenerator.generateSchema(
+          nnType,
+          context.typeChecker,
+          nn,
+        );
+        const out: any = { oneOf: [{ type: "null" }, nnSchema] };
+        if ((valueSchema as any).default !== undefined) out.default = (valueSchema as any).default;
+        // deno-lint-ignore no-console
+        try { console.log("[DBG:CommonTools] Default<T|null,V> via node union", out); } catch {}
+        return out as SchemaDefinition;
+      }
+    }
+
     if ((valueType.flags & ts.TypeFlags.Union) !== 0 && this.schemaGenerator) {
       const union = valueType as ts.UnionType;
       const members = union.types ?? [] as ts.Type[];

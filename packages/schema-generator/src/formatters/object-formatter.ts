@@ -85,6 +85,27 @@ export class ObjectFormatter implements TypeFormatter {
         propTypeNode = propDecl.type;
       }
 
+      // Fast-path: if the property node is Array<T> or ReadonlyArray<T>, synthesize
+      // an array schema from the node to avoid reliance on lib type metadata.
+      if (
+        this.schemaGenerator && propTypeNode &&
+        ts.isTypeReferenceNode(propTypeNode) &&
+        ts.isIdentifier(propTypeNode.typeName) &&
+        (propTypeNode.typeName.text === "Array" ||
+          propTypeNode.typeName.text === "ReadonlyArray") &&
+        propTypeNode.typeArguments && propTypeNode.typeArguments.length > 0
+      ) {
+        const elemNode = propTypeNode.typeArguments[0]!;
+        const elemType = checker.getTypeFromTypeNode(elemNode);
+        const items = this.schemaGenerator.formatChildType(
+          elemType,
+          checker,
+          elemNode,
+        );
+        properties[propName] = { type: "array", items } as SchemaDefinition;
+        continue;
+      }
+
       // Get the actual property type and recursively delegate to the main schema generator
       const resolvedPropType = safeGetPropertyType(
         prop,
@@ -102,89 +123,16 @@ export class ObjectFormatter implements TypeFormatter {
         // Do not force $ref emission for named, non-cyclic types. Inline them
         // here and let the main generator handle cycles/$definitions.
 
-        // Otherwise delegate and inline. Special case Default<T,V>: unwrap T and attach default
-        let generated: SchemaDefinition;
-        const isDefault = propTypeNode &&
-          ts.isTypeReferenceNode(propTypeNode) &&
-          isDefaultTypeRef(propTypeNode, checker);
-        if (isDefault && propTypeNode && ts.isTypeReferenceNode(propTypeNode)) {
-          const valueNode = propTypeNode.typeArguments?.[0];
-          const defaultNode = propTypeNode.typeArguments?.[1];
-          if (valueNode) {
-            const innerType = checker.getTypeFromTypeNode(valueNode);
-            // Preserve array/object schemas by driving from the valueNode
-            if (ts.isArrayTypeNode(valueNode)) {
-              const elemNode = valueNode.elementType;
-              const elemType = checker.getTypeFromTypeNode(elemNode);
-              const items = this.schemaGenerator.formatChildType(
-                elemType,
-                checker,
-                elemNode,
-              );
-              generated = { type: "array", items } as SchemaDefinition;
-            } else {
-              generated = this.schemaGenerator.formatChildType(
-                innerType,
-                checker,
-                valueNode,
-              );
-            }
-            if (defaultNode) {
-              const extracted = extractValueFromTypeNode(defaultNode, checker);
-              if (extracted !== undefined) {
-                (generated as any).default = extracted;
-              }
-            }
-
-            // Union normalization for T | null / T | undefined
-            if (innerType.flags & ts.TypeFlags.Union) {
-              const union = innerType as ts.UnionType;
-              const members = union.types ?? [] as ts.Type[];
-              const hasNull = members.some((t) =>
-                (t.flags & ts.TypeFlags.Null) !== 0
-              );
-              const hasUndef = members.some((t) =>
-                (t.flags & ts.TypeFlags.Undefined) !== 0
-              );
-              const nonNull = members.filter((t) =>
-                (t.flags & ts.TypeFlags.Null) === 0
-              );
-              const nonUndef = members.filter((t) =>
-                (t.flags & ts.TypeFlags.Undefined) === 0
-              );
-              if (hasNull && nonNull.length === 1) {
-                const nonNullSchema = this.schemaGenerator.generateSchema(
-                  nonNull[0]!,
-                  checker,
-                  valueNode,
-                );
-                // Order null first to match fixtures
-                const out: any = { oneOf: [{ type: "null" }, nonNullSchema] };
-                if ((generated as any).default !== undefined) {
-                  out.default = (generated as any).default;
-                }
-                generated = out as SchemaDefinition;
-              } else if (hasUndef && nonUndef.length === 1) {
-                // Collapse to non-undefined member schema
-                generated = this.schemaGenerator.generateSchema(
-                  nonUndef[0]!,
-                  checker,
-                  valueNode,
-                );
-              }
-            }
-          } else {
-            generated = this.schemaGenerator.formatChildType(
-              resolvedPropType,
-              checker,
-              propTypeNode,
-            );
-          }
-        } else {
-          generated = this.schemaGenerator.formatChildType(
-            resolvedPropType,
-            checker,
-            propTypeNode,
+        const generated: SchemaDefinition = this.schemaGenerator.formatChildType(
+          resolvedPropType,
+          checker,
+          propTypeNode,
+        );
+        if (propName === "maybe") {
+          // deno-lint-ignore no-console
+          console.log(
+            "[DBG:ObjectFormatter] delegated 'maybe' to specific formatter",
+            generated,
           );
         }
         // If property is Cell<Default<T,V>> and default missing, attach it

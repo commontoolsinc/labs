@@ -120,16 +120,13 @@ describe("SchemaGenerator", () => {
   describe("error handling", () => {
     it("should handle unknown types gracefully", () => {
       const generator = new SchemaGenerator();
-      const { type, checker } = getTypeFromCode(
-        "type MyString = string;",
-        "MyString",
+      // Use a real TypeScript 'unknown' type which the engine doesn't
+      // specialize and should therefore fall back safely.
+      const { type, checker, typeNode } = getTypeFromCode(
+        "type T = unknown;",
+        "T",
       );
-
-      // Create a mock type that no formatter supports
-      // Use a completely different flags value that doesn't match any known type
-      const mockType = { ...type, flags: 0x10000000 } as unknown as ts.Type;
-
-      const schema = generator.generateSchema(mockType, checker);
+      const schema = generator.generateSchema(type, checker, typeNode);
       expect(schema.type).toBe("object");
       expect(schema.additionalProperties).toBe(true);
     });
