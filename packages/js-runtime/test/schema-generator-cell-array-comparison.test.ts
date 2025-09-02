@@ -12,7 +12,12 @@ import type { Cell } from "@commontools/api";
 describe("Schema Generator Cell Array Comparison", () => {
   it("should compare old vs new system for Cell<Array<{...}>>", () => {
     const code = `
-      // Use real Cell type from @commontools/api
+      // Minimal Cell<T> definition for test purposes
+      interface Cell<T> {
+        get(): T;
+        set(value: T): void;
+      }
+
       interface TestInterface {
         users: Cell<Array<{
           id: string;
@@ -48,7 +53,12 @@ describe("Schema Generator Cell Array Comparison", () => {
 
   it("should compare old vs new system for simple Cell<string>", () => {
     const code = `
-      // Use real Cell type from @commontools/api
+      // Minimal Cell<T> definition for test purposes
+      interface Cell<T> {
+        get(): T;
+        set(value: T): void;
+      }
+
       interface SimpleInterface {
         name: Cell<string>;
       }

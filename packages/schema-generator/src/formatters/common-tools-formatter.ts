@@ -94,7 +94,7 @@ export class CommonToolsFormatter implements TypeFormatter {
           ((containerArg as ts.TypeReference).target?.symbol?.name ===
             "Default");
         if (!containerIsDefault) {
-          const elem = getArrayElementType(containerArg, checker);
+          const elem = getArrayElementType(containerArg, checker, innerTypeNode);
           if (elem) {
             const items = this.schemaGenerator.formatChildType(
               elem,
@@ -215,7 +215,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         }
         return out as SchemaDefinition;
       }
-      const arrayElem = getArrayElementType(innerType, checker);
+      const arrayElem = getArrayElementType(innerType, checker, innerTypeNode);
       if (arrayElem) {
         const items = this.schemaGenerator.formatChildType(
           arrayElem,
@@ -289,7 +289,7 @@ export class CommonToolsFormatter implements TypeFormatter {
           ((containerArg as ts.TypeReference).target?.symbol?.name ===
             "Default");
         if (!containerIsDefault) {
-          const elem = getArrayElementType(containerArg, checker);
+          const elem = getArrayElementType(containerArg, checker, innerTypeNode);
           if (elem) {
             const items = this.schemaGenerator.formatChildType(
               elem,
@@ -407,7 +407,7 @@ export class CommonToolsFormatter implements TypeFormatter {
         );
         return { type: "array", items, asStream: true } as SchemaDefinition;
       }
-      const arrElem = getArrayElementType(innerType, checker);
+      const arrElem = getArrayElementType(innerType, checker, innerTypeNode);
       if (arrElem) {
         const items = this.schemaGenerator.formatChildType(
           arrElem,
@@ -502,7 +502,11 @@ export class CommonToolsFormatter implements TypeFormatter {
         valueSchema = { type: "array", items: inlineIfRef(itemsRaw) };
       } else {
         // If not an ArrayTypeNode, detect arrays via type analysis
-        const elemType = getArrayElementType(valueType, context.typeChecker);
+        const elemType = getArrayElementType(
+          valueType,
+          context.typeChecker,
+          valueTypeNode,
+        );
         if (elemType) {
           const itemsRaw = this.schemaGenerator.generateSchema(
             elemType,
