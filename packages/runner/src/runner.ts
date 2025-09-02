@@ -288,6 +288,30 @@ export class Runner implements IRunner {
       result = { ...result, [NAME]: previousResult[NAME] };
     }
     if (!deepEqual(result, previousResult)) {
+      // Check if result contains UI field with VNodes from map operation
+      if (isRecord(result) && result[UI]) {
+        logger.log(() => {
+          const cellJson = resultCell.toJSON();
+          const entityId = cellJson.cell ? cellJson.cell['/'] : 'no-cell';
+          
+          // Simple check: is the UI an array (from map) or single VNode?
+          let uiInfo = {
+            isArray: Array.isArray(result[UI]),
+            arrayLength: Array.isArray(result[UI]) ? result[UI].length : 0
+          };
+          
+          // BREAKPOINT: Good place to inspect result[UI] for VNode cells
+          // In debugger, you can examine result[UI] to see Cell references with entity IDs
+          
+          return [`[CT823-VNODE] Setting VNode result to cell ${entityId}:`, {
+            entityId: entityId,
+            hasUI: true,
+            uiType: typeof result[UI],
+            ...uiInfo,
+            timestamp: Date.now()
+          }];
+        });
+      }
       resultCell.withTx(tx).setRaw(result);
     }
 
@@ -936,12 +960,28 @@ export class Runner implements IRunner {
       processCell,
     );
 
+    // CT-823 Debug: Log what's being passed to getImmutableCell
+    if (module.ref === "map") {
+      console.log("[CT823-RUNNER] Creating inputsCell for map with mappedInputBindings:", {
+        processCell_entityId: processCell.entityId,
+        processCell_space: processCell.space,
+        mappedInputBindings_stringified: JSON.stringify(mappedInputBindings).substring(0, 500),
+      });
+    }
+    
     const inputsCell = this.runtime.getImmutableCell(
       processCell.space,
       mappedInputBindings,
       undefined,
       tx,
     );
+    
+    if (module.ref === "map") {
+      console.log("[CT823-RUNNER] Created inputsCell for map:", {
+        inputsCell_id: inputsCell.id,
+        inputsCell_entityId: inputsCell.entityId,
+      });
+    }
 
     const action = module.implementation(
       inputsCell,

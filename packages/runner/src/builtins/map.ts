@@ -4,6 +4,9 @@ import { type Action } from "../scheduler.ts";
 import { type AddCancel } from "../cancel.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { getLogger } from "@commontools/utils/logger";
+
+const logger = getLogger("[map3]");
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
@@ -59,6 +62,40 @@ export function map(
       );
       result.send([]);
       result.setSourceCell(parentCell);
+      
+      logger.log(() => {
+        const resultJson = result!.toJSON();
+        const resultEntityId = resultJson.cell ? resultJson.cell['/'] : 'no-cell';
+        
+        // Get parent entity ID from the map parameter used to create the result cell
+        // parentCell.entityId is an IPLD link object like { "/": "baedrei..." }
+        const parentEntityIdValue = parentCell.entityId;
+        let parentEntityIdStr = 'unknown';
+        if (typeof parentEntityIdValue === 'string') {
+          parentEntityIdStr = parentEntityIdValue;
+        } else if (parentEntityIdValue && typeof parentEntityIdValue === 'object' && '/' in parentEntityIdValue) {
+          parentEntityIdStr = (parentEntityIdValue as any)['/'];
+        } else if (parentEntityIdValue && typeof parentEntityIdValue === 'object') {
+          // Fallback: try to get from cell's JSON representation
+          const parentJson = parentCell.toJSON();
+          parentEntityIdStr = parentJson.cell ? parentJson.cell['/'] : JSON.stringify(parentEntityIdValue);
+        }
+        
+        // Log cause details
+        let causeStr = 'unknown';
+        try {
+          if (typeof cause === 'string') {
+            causeStr = cause;
+          } else if (cause && typeof cause === 'object') {
+            // Try to stringify key parts of the cause
+            causeStr = JSON.stringify(cause).substring(0, 200);
+          }
+        } catch (e) {
+          causeStr = 'error-serializing-cause';
+        }
+        
+        return [`[CT823-MAP-CONTAINER] Created map result container - containerEntityId: ${resultEntityId}, parentEntityId: ${parentEntityIdStr}, parentSpace: ${parentCell.space}, cause: ${causeStr}`];
+      });
       sendResult(tx, result);
     }
     const resultWithLog = result.withTx(tx);
@@ -99,13 +136,21 @@ export function map(
 
     const newArrayValue = resultWithLog.get().slice(0, initializedUpTo);
     // Add values that have been appended
+    logger.log(() => [`[CT823-MAP] Processing map: initializedUpTo=${initializedUpTo}, list.length=${list.length}`]);
     while (initializedUpTo < list.length) {
+      logger.log(() => [`[CT823-MAP] Creating result cell for index ${initializedUpTo}`]);
       const resultCell = runtime.getCell(
         parentCell.space,
         { result, index: initializedUpTo },
         undefined,
         tx,
       );
+      logger.log(() => {
+        const cellJson = resultCell.toJSON();
+        const entityId = cellJson.cell ? cellJson.cell['/'] : 'no-cell';
+        return [`[CT823-MAP] Result cell entity ID for index ${initializedUpTo}: ${entityId}`];
+      });
+      logger.log(() => [`[CT823-MAP] Running map recipe for index ${initializedUpTo}`]);
       runtime.runner.run(
         tx,
         opRecipe,
@@ -116,16 +161,45 @@ export function map(
         },
         resultCell,
       );
+      logger.log(() => {
+        const cellJson = resultCell.toJSON();
+        const entityId = cellJson.cell ? cellJson.cell['/'] : 'no-cell';
+        return [`[CT823-MAP] Recipe run complete for index ${initializedUpTo}, resultCell entityId: ${entityId}`];
+      });
       resultCell.getSourceCell()!.setSourceCell(parentCell);
       // Add cancel from runtime's runner
       addCancel(() => runtime.runner.stop(resultCell));
 
       // Send the result value to the result cell
+      logger.log(() => {
+        const cellJson = resultCell.toJSON();
+        const entityId = cellJson.cell ? cellJson.cell['/'] : 'no-cell';
+        
+        // Get parent entity ID as a string
+        // parentCell.entityId is an IPLD link object like { "/": "baedrei..." }
+        const parentEntityIdValue = parentCell.entityId;
+        let parentEntityIdStr = 'unknown';
+        if (typeof parentEntityIdValue === 'string') {
+          parentEntityIdStr = parentEntityIdValue;
+        } else if (parentEntityIdValue && typeof parentEntityIdValue === 'object' && '/' in parentEntityIdValue) {
+          parentEntityIdStr = (parentEntityIdValue as any)['/'];
+        } else if (parentEntityIdValue && typeof parentEntityIdValue === 'object') {
+          // Fallback: try to get from cell's JSON representation
+          const parentJson = parentCell.toJSON();
+          parentEntityIdStr = parentJson.cell ? parentJson.cell['/'] : JSON.stringify(parentEntityIdValue);
+        }
+        
+        // BREAKPOINT: This is where individual VNode cells get their entity IDs
+        // resultCell contains the VNode for each mapped element
+        
+        return [`[CT823-MAP-VNODE] Created result cell for index ${initializedUpTo} - childEntityId: ${entityId}, parentEntityId: ${parentEntityIdStr}, parentSpace: ${parentCell.space}`];
+      });
       resultWithLog.key(initializedUpTo).set(resultCell);
       newArrayValue.push(resultCell);
 
       initializedUpTo++;
     }
+    logger.log(() => [`[CT823-MAP] Map complete: processed ${initializedUpTo} elements`]);
 
     // Shorten the result if the list got shorter
     if (resultWithLog.get().length > list.length) {

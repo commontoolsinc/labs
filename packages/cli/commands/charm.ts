@@ -4,6 +4,7 @@ import {
   applyCharmInput,
   callCharmHandler,
   CharmConfig,
+  extractVNodeDetails,
   formatViewTree,
   generateSpaceMap,
   getCellValue,
@@ -180,6 +181,7 @@ export const charm = new Command()
   )
   .option("-c,--charm <charm:string>", "The target charm ID.")
   .option("--json", "Output raw JSON data")
+  .option("--vnodes", "Show detailed VNode structure")
   .action(async (options) => {
     const charmConfig = parseCharmOptions(options);
 
@@ -215,6 +217,17 @@ Recipe: ${charmData.recipeName || "<no recipe name>"}
       output += `\n${safeStringify(filteredResult)}`;
     } else {
       output += "\n<no result data>";
+    }
+
+    // Add VNode details if requested
+    if (options.vnodes && charmData.result?.$UI) {
+      output += "\n\n--- VNode Structure ---";
+      const vnodeDetails = extractVNodeDetails(charmData.result.$UI);
+      output += `\n${safeStringify(vnodeDetails)}`;
+      
+      // Also show a simplified tree view
+      output += "\n\n--- VNode Tree ---";
+      output += `\n${formatViewTree(charmData.result.$UI)}`;
     }
 
     output += "\n\n--- Reading From ---";

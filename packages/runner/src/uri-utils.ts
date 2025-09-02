@@ -3,7 +3,7 @@ import { isRecord } from "@commontools/utils/types";
 import type { URI } from "./sigil-types.ts";
 import { getLogger } from "@commontools/utils/logger";
 
-const logger = getLogger("uri-utils");
+const logger = getLogger("uri-utils", { level: "debug", enabled: false });
 
 /**
  * Convert an entity ID to URI format with "of:" prefix

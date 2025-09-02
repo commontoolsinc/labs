@@ -13,7 +13,7 @@ import { parseLink } from "./link-utils.ts";
 import type { IDocumentMap, IRuntime, MemorySpace } from "./runtime.ts";
 import { fromURI } from "./uri-utils.ts";
 
-const logger = getLogger("doc-map");
+const logger = getLogger("doc-map", { level: "debug", enabled: false });
 
 export type EntityId = {
   "/": string | Uint8Array;
@@ -74,12 +74,12 @@ export function createRef(
   }
 
   const entityId = refer(traverse({ ...source, causal: cause }));
-  
+
   // CT823: Log ID creation with context
   const idStr = JSON.stringify(entityId);
   const sourcePreview = JSON.stringify(source).substring(0, 100);
   logger.info(() => [`[CT823-CREATE-ID] Created entity ID: ${idStr}, source preview: ${sourcePreview}, cause: ${cause}, timestamp: ${Date.now()}`]);
-  
+
   return entityId;
 }
 
@@ -112,7 +112,7 @@ export function getEntityId(value: any): { "/": string } | undefined {
 export class DocumentMap implements IDocumentMap {
   private entityIdToDocMap = new Map<string, DocImpl<any>>();
 
-  constructor(readonly runtime: IRuntime) {}
+  constructor(readonly runtime: IRuntime) { }
 
   private _getDocKey(space: string, entityId: EntityId): string {
     return space + "/" + JSON.stringify(normalizeEntityId(entityId));
@@ -164,8 +164,8 @@ export class DocumentMap implements IDocumentMap {
       isRecord(value)
         ? (value as object)
         : value !== undefined
-        ? { value }
-        : {},
+          ? { value }
+          : {},
       cause,
     );
     const existing = this.getDocByEntityId<T>(space, entityId, false);

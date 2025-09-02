@@ -345,7 +345,7 @@ export class Scheduler implements IScheduler {
         // ]);
         
         // CT-823: Enhanced logging for incoming remote changes
-        if ("changes" in notification && "source" in notification && notification.source !== "local") {
+        if ("changes" in notification && "source" in notification && (notification as any).source !== "local") {
           logger.info("[CT823-REMOTE-UPDATE] Received remote changes", {
             changeCount: [...notification.changes].length,
             source: notification.source,
@@ -367,7 +367,7 @@ export class Scheduler implements IScheduler {
             // ]);
             
             // CT-823: Enhanced logging for array changes
-            if (Array.isArray(change.after) && "source" in notification && notification.source !== "local") {
+            if (Array.isArray(change.after) && "source" in notification && (notification as any).source !== "local") {
               logger.debug("[CT823-ARRAY-UPDATE] Remote array change detected", {
                 id: change.address.id,
                 path: change.address.path.join("/"),
@@ -410,7 +410,7 @@ export class Scheduler implements IScheduler {
               ]);
               
               // CT-823: Log when remote changes trigger actions
-              if (triggeredActions.length > 0 && "source" in notification && notification.source !== "local") {
+              if (triggeredActions.length > 0 && "source" in notification && (notification as any).source !== "local") {
                 logger.info("[CT823-TRIGGERED-ACTIONS] Remote change triggered actions", {
                   actionCount: triggeredActions.length,
                   id: change.address.id,

@@ -474,6 +474,96 @@ export function formatViewTree(view: unknown): string {
   return format(view, "", true);
 }
 
+// New function to extract detailed VNode information
+export function extractVNodeDetails(node: unknown, depth = 0, maxDepth = 10): any {
+  if (depth >= maxDepth) {
+    return { truncated: true, reason: "max depth reached" };
+  }
+
+  if (!node || typeof node !== "object") {
+    return node;
+  }
+
+  // Type guard for objects
+  const nodeObj = node as Record<string, any>;
+
+  // Check if this is a Cell reference (has a cell property with a "/" key)
+  if ("cell" in nodeObj && 
+      nodeObj.cell !== null && 
+      typeof nodeObj.cell === "object" && 
+      "/" in nodeObj.cell) {
+    const entityId = (nodeObj.cell as any)["/"];
+    return {
+      type: "cell",
+      entityId,
+      link: nodeObj.link || undefined,
+      space: nodeObj.space || undefined,
+    };
+  }
+
+  // Check if this is a VNode
+  if (isVNode(node)) {
+    const result: any = {
+      type: "vnode",
+      name: node.name,
+    };
+
+    // Add props if they exist and aren't empty
+    if (node.props && Object.keys(node.props).length > 0) {
+      result.props = {};
+      for (const [key, value] of Object.entries(node.props)) {
+        // Handle cell references in props
+        result.props[key] = extractVNodeDetails(value, depth + 1, maxDepth);
+      }
+    }
+
+    // Process children
+    if (node.children) {
+      const children = Array.isArray(node.children) ? node.children : [node.children];
+      result.children = children.map(child => 
+        extractVNodeDetails(child, depth + 1, maxDepth)
+      );
+    }
+
+    return result;
+  }
+
+  // Check if this is a map operation or other builtin
+  if ("type" in nodeObj && 
+      nodeObj.type === "ref" && 
+      "implementation" in nodeObj) {
+    const builtinNode = nodeObj as any;
+    return {
+      type: "builtin",
+      implementation: builtinNode.implementation,
+      inputs: builtinNode.inputs ? extractVNodeDetails(builtinNode.inputs, depth + 1, maxDepth) : undefined,
+      result: builtinNode.result ? extractVNodeDetails(builtinNode.result, depth + 1, maxDepth) : undefined,
+    };
+  }
+
+  // Handle arrays
+  if (Array.isArray(node)) {
+    return node.map(item => extractVNodeDetails(item, depth + 1, maxDepth));
+  }
+
+  // Handle plain objects
+  if (node.constructor === Object) {
+    const result: any = {};
+    for (const [key, value] of Object.entries(node)) {
+      // Skip large or circular references
+      if (key === "$UI" && depth > 0) {
+        result[key] = "<UI object>";
+      } else {
+        result[key] = extractVNodeDetails(value, depth + 1, maxDepth);
+      }
+    }
+    return result;
+  }
+
+  // Default to string representation
+  return String(node);
+}
+
 export async function getCellValue(
   config: CharmConfig,
   path: (string | number)[],

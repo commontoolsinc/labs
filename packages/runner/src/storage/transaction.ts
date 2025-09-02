@@ -306,15 +306,15 @@ export const abort = (
 export const commit = async (
   transaction: StorageTransaction,
 ): Promise<Result<Unit, CommitError>> => {
-  logger.debug("[CT823-TRANSACTION] commit() called");
+  // logger.debug("[CT823-TRANSACTION] commit() called");
   const { error, ok: ready } = edit(transaction);
   if (error) {
-    logger.debug("[CT823-TRANSACTION] commit() failed - edit error:", error);
+    // logger.debug("[CT823-TRANSACTION] commit() failed - edit error:", error);
     return { error };
   } else {
     const { error, ok: archive } = ready.journal.close();
     if (error) {
-      logger.debug("[CT823-TRANSACTION] commit() failed - journal close error:", error);
+      // logger.debug("[CT823-TRANSACTION] commit() failed - journal close error:", error);
       mutate(transaction, {
         status: "done",
         journal: ready.journal,
@@ -330,14 +330,14 @@ export const commit = async (
       // CT823: Enhanced logging to show what's being committed
       if (changes && changeCount > 0) {
         const objectIds = changes.facts.map(f => f.of).slice(0, 5); // First 5 entity IDs
-        logger.debug("[CT823-TRANSACTION] Committing", changeCount, "changes to replica", {
-          claimCount: changes.claims.length,
-          factCount: changes.facts.length,
-          sampleObjectIds: objectIds,
-          timestamp: Date.now(),
-        });
+        // logger.debug("[CT823-TRANSACTION] Committing", changeCount, "changes to replica", {
+        //   claimCount: changes.claims.length,
+        //   factCount: changes.facts.length,
+        //   sampleObjectIds: objectIds,
+        //   timestamp: Date.now(),
+        // });
       } else {
-        logger.debug("[CT823-TRANSACTION] Committing", changeCount, "changes to replica");
+        // logger.debug("[CT823-TRANSACTION] Committing", changeCount, "changes to replica");
       }
       
       const promise = changes
@@ -353,12 +353,12 @@ export const commit = async (
       const result = await promise;
       
       if ("error" in result && result.error) {
-        logger.error("[CT823-TRANSACTION] commit() failed with error:", result.error);
+        // logger.error("[CT823-TRANSACTION] commit() failed with error:", result.error);
       } else {
-        logger.debug("[CT823-TRANSACTION] commit() succeeded", {
-          transactionSize: changeCount,
-          timestamp: Date.now(),
-        });
+        // logger.debug("[CT823-TRANSACTION] commit() succeeded", {
+        //   transactionSize: changeCount,
+        //   timestamp: Date.now(),
+        // });
       }
       
       mutate(transaction, {

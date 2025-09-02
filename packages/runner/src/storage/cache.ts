@@ -225,19 +225,54 @@ class Heap implements SyncPush<Revision<State>> {
     merge: Merge<Revision<State>>,
     notifyFilter?: (state: Revision<State> | undefined) => boolean,
   ) {
+    // CT823: Track merge operation
+    let mergeCount = 0;
+    let updateCount = 0;
+    let deleteCount = 0;
+    
     const updated = new Set<string>();
     for (const entry of entries) {
+      mergeCount++;
       const address = { id: entry.of, type: entry.the };
       const key = toKey(address);
       const stored = this.store.get(key);
       const merged = merge(stored, entry);
+      
+      // CT823: Log first few merges for debugging
+      if (mergeCount <= 3) {
+        logger.debug(() => [
+          `[CT823-HEAP-MERGE-ITEM] Item ${mergeCount}:`,
+          {
+            id: entry.of,
+            type: entry.the,
+            hadStored: stored !== undefined,
+            mergeResult: merged !== undefined ? 'update' : 'delete'
+          }
+        ]);
+      }
+      
       if (merged === undefined) {
         this.store.delete(key);
         updated.add(key);
+        deleteCount++;
       } else if (stored !== merged) {
         this.store.set(key, merged);
         updated.add(key);
+        updateCount++;
       }
+    }
+    
+    // CT823: Log merge summary
+    if (mergeCount > 0) {
+      logger.info(() => [
+        `[CT823-HEAP-MERGE-SUMMARY] Merged ${mergeCount} items:`,
+        {
+          totalProcessed: mergeCount,
+          updated: updateCount,
+          deleted: deleteCount,
+          unchanged: mergeCount - updateCount - deleteCount
+        }
+      ]);
     }
 
     // Notify all the subscribers
@@ -1135,7 +1170,8 @@ export class Replica {
       if (changeCount > 0) {
         const changeArray = [...changes];
         // Log the first few changes in detail to understand what they are
-        const detailedChanges = changeArray.slice(0, 3).map(change => {
+        // Show first 3 changes in detail (or all if less than 3)
+        const detailedChanges = changeArray.slice(0, Math.min(3, changeArray.length)).map(change => {
           // Try to identify what type of object this is based on its content
           let objectType = 'unknown';
           const beforeObj = change.before;
@@ -1159,9 +1195,12 @@ export class Replica {
             id: change.address?.id,
             type: change.address?.type,
             objectType,
-            beforeKeys: beforeObj && typeof beforeObj === 'object' ? Object.keys(beforeObj).slice(0, 5) : null,
+            beforeKeys: beforeObj && typeof beforeObj === 'object' ? 
+              (Object.keys(beforeObj).length > 5 ? 
+                [...Object.keys(beforeObj).slice(0, 5), `... +${Object.keys(beforeObj).length - 5} more`] : 
+                Object.keys(beforeObj)) : null,
             beforeSample: beforeObj && typeof beforeObj === 'object' ? 
-              JSON.stringify(beforeObj).substring(0, 100) : String(beforeObj)?.substring(0, 100),
+              JSON.stringify(beforeObj) : String(beforeObj),
           };
         });
         
@@ -1177,12 +1216,15 @@ export class Replica {
         
         logger.log(() => [`[CT823-REVERT-BREAKPOINT] ====== END BREAKPOINT ZONE ======`]);
         
-        logger.debug(() => ["[CT823-CONFLICT] Sample objects being reverted:", detailedChanges]);
+        logger.debug(() => ["[CT823-CONFLICT] Sample objects being reverted:" + (changeArray.length > 3 ? ` (${changeArray.length} total, showing first 3)` : ""), detailedChanges]);
         
-        const addresses = changeArray.slice(0, 50).map(change => {
+        const allAddresses = changeArray.map(change => {
           return `${change.address?.type || 'no-type'}:${change.address?.id || 'no-id'}`;
         });
-        logger.debug(() => ["[CT823-CONFLICT] All reverted IDs (up to 50):", addresses]);
+        const addresses = allAddresses.length > 50 ? 
+          [...allAddresses.slice(0, 50), `... +${allAddresses.length - 50} more`] : 
+          allAddresses;
+        logger.debug(() => [`[CT823-CONFLICT] All reverted IDs${allAddresses.length > 50 ? ' (showing first 50)' : ''}:`, addresses]);
       }
       
       this.subscription.next({
@@ -1247,6 +1289,27 @@ export class Replica {
   }
 
   integrate(revisions: Revision<State>[]) {
+    // CT823: Log remote entities being integrated
+    logger.info(`[CT823-INTEGRATE] Integrating ${revisions.length} remote revisions`);
+    
+    // Log details of first few revisions for debugging
+    if (revisions.length > 0) {
+      const sample = revisions.slice(0, 3);
+      sample.forEach((rev, idx) => {
+        logger.debug(() => [
+          `[CT823-INTEGRATE-DETAIL] Revision ${idx}:`,
+          {
+            id: rev.of,
+            type: rev.the,
+            hasIs: 'is' in rev && rev.is !== undefined,
+            isType: 'is' in rev ? typeof rev.is : 'N/A',
+            cause: 'cause' in rev ? String(rev.cause) : 'unclaimed',
+            since: rev.since
+          }
+        ]);
+      });
+    }
+    
     // Store newer revisions into the heap.
     // It's possible to get the same fact (including cause) twice, but we
     // should have the same since on the second, so we can clear them from
@@ -1257,6 +1320,14 @@ export class Replica {
 
     // Remove "fresh" facts which we are about to merge into `heap`
     this.nursery.merge(current, Nursery.delete);
+    
+    // CT823: Log heap merge operation
+    logger.info(`[CT823-HEAP-MERGE] Merging ${revisions.length} revisions into heap`);
+    logger.debug(() => [
+      `[CT823-HEAP-MERGE] Resolved set size: ${resolved.size}`,
+      `Current facts: ${current.length}`
+    ]);
+    
     // We use put here instead of update, since we may have received new docs
     // that we weren't already tracking.
     this.heap.merge(
