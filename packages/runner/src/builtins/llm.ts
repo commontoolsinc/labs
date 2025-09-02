@@ -63,6 +63,7 @@ export function llm(
   let result: Cell<string | undefined>;
   let partial: Cell<string | undefined>;
   let requestHash: Cell<string | undefined>;
+  let addMessage: Cell<BuiltInLLMMessage | undefined>;
   let isExecutingTools = false;
 
   return (tx: IExtendedStorageTransaction) => {
@@ -102,17 +103,23 @@ export function llm(
         tx,
       );
 
-      const addMessageStreamLink = parseLink(parentCell.key("addMessage"));
+      addMessage = runtime.getCell<BuiltInLLMMessage | undefined>(
+        parentCell.space,
+        {
+          llm: { addMessage: cause },
+        },
+        undefined,
+        tx,
+      );
+      addMessage.setRaw({ $stream: true });
+
+      const addMessageStreamLink = parseLink(addMessage);
       const handler = (tx: IExtendedStorageTransaction, event: any) => {
         debugger;
       };
 
-      const wrappedHandler = Object.assign(handler, {
-        reads,
-        writes,
-        module,
-        recipe,
-      });
+      // parentCell.key("addMessage").withTx(tx).set({ $stream: true });
+
       addCancel(
         runtime.scheduler.addEventHandler(handler, addMessageStreamLink),
       );
@@ -122,7 +129,7 @@ export function llm(
         result,
         partial,
         requestHash,
-        addMessage: addMessageStreamLink,
+        addMessage,
       });
       cellsInitialized = true;
     }

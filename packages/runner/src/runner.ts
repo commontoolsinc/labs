@@ -789,6 +789,8 @@ export class Runner implements IRunner {
       processCell,
     );
 
+    console.log(module.argumentSchema);
+
     const reads = findAllWriteRedirectCells(inputs, processCell);
 
     const outputs = unwrapOneLevelAndBindtoDoc(outputBindings, processCell);
