@@ -54,10 +54,15 @@ export default recipe<LLMTestInput, LLMTestResult>(
     return {
       [NAME]: title,
       [UI]: (
-        <div>
-          <h2>{title}</h2>
+        <div style="display: flex; flex-direction: column; height: 100%;">
+          <h2 style="margin: 0 0 1rem 0; padding: 0 1rem;">{title}</h2>
 
-          <ct-vscroll showScrollbar height="320px" fadeEdges snapToBottom>
+          <ct-vscroll
+            showScrollbar
+            fadeEdges
+            snapToBottom
+            style="flex: 1; min-height: 0;"
+          >
             {chat.map((msg) => {
               return (
                 <ct-chat-message
@@ -88,7 +93,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             )}
           </ct-vscroll>
 
-          <div>
+          <div style="padding: 1rem; border-top: 1px solid #e0e0e0;">
             <ct-message-input
               name="Ask"
               placeholder="Ask the LLM a question..."

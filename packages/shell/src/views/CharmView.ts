@@ -9,12 +9,22 @@ export class XCharmView extends BaseView {
       display: flex;
       flex-direction: column;
       flex: 1;
+      height: 100%;
       min-height: 0; /* Important for flex children */
+    }
+
+    common-charm {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
 
     ct-render {
       flex: 1;
-      display: block;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
       height: 100%;
     }
   `;

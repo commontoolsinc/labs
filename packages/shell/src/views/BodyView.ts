@@ -7,9 +7,26 @@ import { CharmController } from "@commontools/charm/ops";
 export class XBodyView extends BaseView {
   static override styles = css`
     :host {
-      display: block;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
       padding: 1rem;
-      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    div {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0; /* Important for flex children */
+    }
+
+    x-charm-view,
+    x-space-view {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
   `;
 
