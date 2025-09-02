@@ -256,26 +256,26 @@ export class CTChatMessage extends BaseElement {
     role: { type: String, reflect: true },
     content: { type: String },
     streaming: { type: Boolean, reflect: true },
-    tools: { type: String },
-    toolCalls: { type: String },
-    toolResults: { type: String },
+    tools: { type: Object },
+    toolCalls: { type: Object },
+    toolResults: { type: Object },
   };
 
   declare role: "user" | "assistant";
   declare content: string;
   declare streaming: boolean;
-  declare tools: string;
-  declare toolCalls: string;
-  declare toolResults: string;
+  declare tools: { [id: string]: Tool };
+  declare toolCalls: ToolCall[];
+  declare toolResults: ToolResult[];
 
   constructor() {
     super();
     this.role = "user";
     this.content = "";
     this.streaming = false;
-    this.tools = "";
-    this.toolCalls = "";
-    this.toolResults = "";
+    this.tools = {};
+    this.toolCalls = [];
+    this.toolResults = [];
   }
 
   private _parseJSON<T>(jsonString: string): T[] {
@@ -300,9 +300,9 @@ export class CTChatMessage extends BaseElement {
   }
 
   private _renderToolAttachments() {
-    const toolCalls = this.toolCalls as ToolCall[];
-    const toolResults = this.toolResults as ToolResult[];
-    const tools = this.tools as { [id: string]: Tool };
+    const toolCalls = this.toolCalls;
+    const toolResults = this.toolResults;
+    const tools = this.tools;
 
     if (
       !toolCalls && !toolResults ||

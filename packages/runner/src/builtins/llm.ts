@@ -11,6 +11,7 @@ import {
   BuiltInLLMMessage,
   BuiltInLLMParams,
   BuiltInLLMState,
+  BuiltInLLMTool,
 } from "@commontools/api";
 import { refer } from "merkle-reference/json";
 import { type Cell } from "../cell.ts";
@@ -213,7 +214,9 @@ export function llm(
             // Execute each tool call and collect results
             const toolResults: any[] = [];
             for (const toolCall of llmResult.toolCalls) {
-              const toolDef = toolsCell.key(toolCall.name);
+              const toolDef = toolsCell.key(toolCall.name) as Cell<
+                BuiltInLLMTool
+              >;
 
               try {
                 const result = runtime.getCell<any>(
@@ -226,11 +229,11 @@ export function llm(
                 );
 
                 const handlerTx = runtime.edit();
-                const handlerCell = toolDef.key("handler" as any);
+                const handlerCell = toolDef.key("handler");
                 handlerCell.withTx(handlerTx).send({
                   ...toolCall.arguments,
                   result,
-                });
+                } as any); // TODO(bf): why any needed?
                 await handlerTx.commit();
 
                 toolResults.push({
