@@ -20,6 +20,10 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 
 const client = new LLMClient();
 
+// Default token limits
+const DEFAULT_LLM_MAX_TOKENS = 4096;
+const DEFAULT_GENERATE_OBJECT_MAX_TOKENS = 8192;
+
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 
@@ -112,20 +116,6 @@ export function llm(
     const messages = messagesCell.getAsQueryResult([], tx) ?? [];
     const toolsCell = inputsCell.key("tools");
 
-    // Debug logging to understand what's happening
-    console.log("[LLM] Messages received:", messages.length, "messages");
-    if (messages.length > 0) {
-      const lastMsg = messages[messages.length - 1];
-      console.log(
-        "[LLM] Last message role:",
-        lastMsg?.role,
-        "content length:",
-        typeof lastMsg?.content === "string"
-          ? lastMsg.content.length
-          : "not string",
-      );
-    }
-
     // Strip handlers from tool definitions to send them to the server
     // We keep the handlers locally and execute them here
     const toolsWithoutHandlers = Object.fromEntries(
@@ -139,7 +129,7 @@ export function llm(
       system: system ?? "",
       messages: messages ?? [],
       stop: stop ?? "",
-      maxTokens: maxTokens ?? 4096,
+      maxTokens: maxTokens ?? DEFAULT_LLM_MAX_TOKENS,
       stream: true,
       model: model ?? DEFAULT_MODEL_NAME,
       metadata: {
@@ -172,7 +162,6 @@ export function llm(
     // If the last message is from the assistant, no LLM request needed
     const lastMessage = messages[messages.length - 1];
     if (lastMessage && lastMessage.role === "assistant") {
-      console.log("[LLM] Last message is assistant, skipping LLM request");
       pendingWithLog.set(false);
       // Set the result to the last assistant message content
       const content = typeof lastMessage.content === "string"
@@ -185,7 +174,6 @@ export function llm(
     }
 
     // Only clear result/partial when we're about to make a new request
-    console.log("[LLM] Making new LLM request");
     resultWithLog.set(undefined);
     partialWithLog.set(undefined);
     pendingWithLog.set(true);
@@ -211,69 +199,67 @@ export function llm(
         if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
           isExecutingTools = true;
 
-          const newTx = messagesCell.runtime.edit();
-          const newMessages: BuiltInLLMMessage[] = [];
+          try {
+            const newTx = messagesCell.runtime.edit();
+            const newMessages: BuiltInLLMMessage[] = [];
 
-          // Add assistant message with tool calls to conversation
-          const assistantMessage: BuiltInLLMMessage = {
-            role: "assistant",
-            content: llmResult.content,
-            toolCalls: llmResult.toolCalls,
-          };
+            // Add assistant message with tool calls to conversation
+            const assistantMessage: BuiltInLLMMessage = {
+              role: "assistant",
+              content: llmResult.content,
+              toolCalls: llmResult.toolCalls,
+            };
 
-          // Execute each tool call and collect results
-          const toolResults: any[] = [];
-          for (const toolCall of llmResult.toolCalls) {
-            const toolDef = toolsCell.key(toolCall.name);
+            // Execute each tool call and collect results
+            const toolResults: any[] = [];
+            for (const toolCall of llmResult.toolCalls) {
+              const toolDef = toolsCell.key(toolCall.name);
 
-            try {
-              const result = runtime.getCell<any>(
-                parentCell.space,
-                {
-                  toolResult: { [toolCall.id]: cause },
-                },
-                undefined,
-                newTx,
-              );
+              try {
+                const result = runtime.getCell<any>(
+                  parentCell.space,
+                  {
+                    toolResult: { [toolCall.id]: cause },
+                  },
+                  undefined,
+                  newTx,
+                );
 
-              const handlerTx = runtime.edit();
-              const handlerCell = toolDef.key("handler" as any);
-              handlerCell.withTx(handlerTx).send({
-                ...toolCall.arguments,
-                result,
-              });
-              await handlerTx.commit();
+                const handlerTx = runtime.edit();
+                const handlerCell = toolDef.key("handler" as any);
+                handlerCell.withTx(handlerTx).send({
+                  ...toolCall.arguments,
+                  result,
+                });
+                await handlerTx.commit();
 
-              toolResults.push({
-                id: toolCall.id,
-                result,
-              });
-              console.log(
-                `Tool ${toolCall.name} executed:`,
-                result.getAsQueryResult(),
-              );
-            } catch (error) {
-              console.error(`Tool ${toolCall.name} failed:`, error);
-              toolResults.push({
-                id: toolCall.id,
-                error: error instanceof Error ? error.message : String(error),
-              });
+                toolResults.push({
+                  id: toolCall.id,
+                  result,
+                });
+              } catch (error) {
+                console.error(`Tool ${toolCall.name} failed:`, error);
+                toolResults.push({
+                  id: toolCall.id,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
             }
+
+            // Update the assistant message to include tool results
+            assistantMessage.toolResults = toolResults;
+            newMessages.push(assistantMessage);
+
+            // Update messages in cell with new messages AFTER all tools complete
+            messagesCell.withTx(newTx).set([
+              ...(messagesCell.get() ?? []),
+              ...newMessages,
+            ]);
+            await newTx.commit();
+          } finally {
+            // Always clear the flag, even if tool execution fails
+            isExecutingTools = false;
           }
-
-          // Update the assistant message to include tool results
-          assistantMessage.toolResults = toolResults;
-          newMessages.push(assistantMessage);
-
-          // Update messages in cell with new messages AFTER all tools complete
-          messagesCell.withTx(newTx).set([
-            ...(messagesCell.get() ?? []),
-            ...newMessages,
-          ]);
-          await newTx.commit();
-
-          // Clear the flag after tool execution is complete
-          isExecutingTools = false;
         } else {
           // No tool calls, just add the assistant message
           const newTx = messagesCell.runtime.edit();
@@ -429,7 +415,7 @@ export function generateObject<T extends Record<string, unknown>>(
 
     const generateObjectParams: LLMGenerateObjectRequest = {
       prompt,
-      maxTokens: maxTokens ?? 8192,
+      maxTokens: maxTokens ?? DEFAULT_GENERATE_OBJECT_MAX_TOKENS,
       schema: JSON.parse(JSON.stringify(schema)),
       model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
       metadata: {
