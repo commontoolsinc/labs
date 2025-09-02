@@ -92,6 +92,10 @@ class BuildConfig {
     return this.path("packages", "static", "assets", "types");
   }
 
+  docsCommonPath() {
+    return this.path("docs", "common");
+  }
+
   cliEntryPath() {
     return this.path("packages", "cli", "mod.ts");
   }
@@ -285,6 +289,8 @@ async function buildCli(config: BuildConfig): Promise<void> {
       "--allow-net", // for @db/sqlite lazy download
       "--include",
       config.staticTypesPath(),
+      "--include",
+      config.docsCommonPath(),
       config.cliEntryPath(),
     ],
     cwd: config.root,

@@ -93,6 +93,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               name="Ask"
               placeholder="Ask the LLM a question..."
               appearance="rounded"
+              disabled={llmResponse.pending}
               onct-send={sendMessage({
                 chat,
                 lastLlmResponse: llmResponse.result,
@@ -100,7 +101,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             />
 
             <ct-button
-              onct-click={clearChat({ chat })}
+              onClick={clearChat({ chat })}
             >
               Clear Chat
             </ct-button>

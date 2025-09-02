@@ -67,7 +67,8 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    await runtime.scheduler.run(adder);
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
     a.withTx(tx).send(2); // Simulate external change
@@ -109,13 +110,13 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    runtime.scheduler.schedule(adder, {
+    runtime.scheduler.subscribe(adder, {
       reads: [
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    });
+    }, true);
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2); // No log, simulate external change
@@ -157,7 +158,8 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    await runtime.scheduler.run(adder);
+    runtime.scheduler.subscribe(adder, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
 
@@ -168,7 +170,7 @@ describe("scheduler", () => {
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
 
-    runtime.scheduler.unschedule(adder);
+    runtime.scheduler.unsubscribe(adder);
     a.withTx(tx).send(3);
     tx.commit();
     tx = runtime.edit();
@@ -208,13 +210,13 @@ describe("scheduler", () => {
         a.withTx(tx).get() + b.withTx(tx).get(),
       );
     };
-    const cancel = runtime.scheduler.schedule(adder, {
+    const cancel = runtime.scheduler.subscribe(adder, {
       reads: [
         a.getAsNormalizedFullLink(),
         b.getAsNormalizedFullLink(),
       ],
       writes: [c.getAsNormalizedFullLink()],
-    });
+    }, true);
     expect(runCount).toBe(0);
     expect(c.get()).toBe(0);
     a.withTx(tx).send(2);
@@ -283,8 +285,10 @@ describe("scheduler", () => {
         c.withTx(tx).get() + d.withTx(tx).get(),
       );
     };
-    await runtime.scheduler.run(adder1);
-    await runtime.scheduler.run(adder2);
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, true);
+    await runtime.idle();
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(4);
@@ -368,9 +372,12 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    await runtime.scheduler.run(adder1);
-    await runtime.scheduler.run(adder2);
-    await runtime.scheduler.run(adder3);
+    runtime.scheduler.subscribe(adder1, { reads: [], writes: [] }, true);
+    await runtime.idle();
+    runtime.scheduler.subscribe(adder2, { reads: [], writes: [] }, true);
+    await runtime.idle();
+    runtime.scheduler.subscribe(adder3, { reads: [], writes: [] }, true);
+    await runtime.idle();
 
     await runtime.idle();
 
@@ -406,7 +413,8 @@ describe("scheduler", () => {
     const stopped = spy(stopper, "stop");
     runtime.scheduler.onError(() => stopper.stop());
 
-    await runtime.scheduler.run(inc);
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, true);
+    await runtime.idle();
     expect(counter.get()).toBe(1);
     await runtime.idle();
     expect(counter.get()).toBe(1);
@@ -423,7 +431,7 @@ describe("scheduler", () => {
   it("should immediately run actions that have no dependencies", async () => {
     let runs = 0;
     const inc: Action = () => runs++;
-    runtime.scheduler.schedule(inc, { reads: [], writes: [] });
+    runtime.scheduler.subscribe(inc, { reads: [], writes: [] }, true);
     await runtime.idle();
     expect(runs).toBe(1);
   });
@@ -469,7 +477,12 @@ describe("scheduler", () => {
     };
 
     // Run the action initially
-    await runtime.scheduler.run(ignoredReadAction);
+    runtime.scheduler.subscribe(
+      ignoredReadAction,
+      { reads: [], writes: [] },
+      true,
+    );
+    await runtime.idle();
     expect(actionRunCount).toBe(1);
     expect(lastReadValue).toEqual({ value: 1 });
     expect(resultCell.get()).toEqual({ count: 1, lastValue: { value: 1 } });
@@ -684,7 +697,8 @@ describe("event handling", () => {
       actionCount++;
       lastEventSeen = eventResultCell.withTx(tx).get();
     };
-    await runtime.scheduler.run(action);
+    runtime.scheduler.subscribe(action, { reads: [], writes: [] }, true);
+    await runtime.idle();
 
     runtime.scheduler.addEventHandler(
       eventHandler,

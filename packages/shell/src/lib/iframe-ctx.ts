@@ -118,13 +118,17 @@ export const setupIframe = (runtime: Runtime) =>
 
         // Remove * support after first call (legacy compatibility)
         if (key === "*") {
-          runtime.idle().then(() => runtime.scheduler.unschedule(action));
+          runtime.idle().then(() => runtime.scheduler.unsubscribe(action));
         }
       };
 
       // Schedule the action with appropriate reactivity log
       const reads = isCell(context) ? [context.getAsNormalizedFullLink()] : [];
-      const cancel = runtime.scheduler.schedule(action, { reads, writes: [] });
+      const cancel = runtime.scheduler.subscribe(
+        action,
+        { reads, writes: [] },
+        true,
+      );
       return { action, cancel };
     },
 
@@ -142,7 +146,7 @@ export const setupIframe = (runtime: Runtime) =>
       } else {
         // Fallback for direct action
         if (typeof receipt === "function") {
-          runtime.scheduler.unschedule(receipt as Action);
+          runtime.scheduler.unsubscribe(receipt as Action);
         } else {
           throw new Error("Invalid receipt.");
         }

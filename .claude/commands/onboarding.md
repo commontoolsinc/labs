@@ -14,7 +14,7 @@ This command provides an interactive tour of the Common Tools platform repositor
 "Now that you have the basic idea, what would you like to know more about:
 
 - **Programs that run in this platform** (recipes, charms, UI components)
-- **The runtime that enables information flow analysis and storage** (runner, builder, storage)  
+- **The runtime that enables information flow analysis and storage** (runner, builder, storage)
 - **The application layer that users access the platform through** (toolshed, shell, CLI)
 - **The LLM tooling layer** (Claude commands, subagents, and development workflows)
 
@@ -53,7 +53,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 **Explore in order:**
 1. **Toolshed backend** - Quote from `packages/toolshed/README.md` about hosted platform
 2. **Shell frontend** - Quote from `packages/shell/README.md` about user interface
-3. **CT CLI** - Overview from `.claude/commands/common/ct.md`
+3. **CT CLI** - Overview from `docs/common/CT.md`
 4. **How they work together** - Integration points and data flow
 5. **Development workflow** - Running local development environment
 
@@ -71,7 +71,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 
 **Throughout any path, users can access:**
 - **Available commands**: List `.claude/commands/` and read `.claude/commands/README.md`
-- **Integration setup**: Review `deps.md` for tools and MCP integrations  
+- **Integration setup**: Review `deps.md` for tools and MCP integrations
 - **Development guidelines**: Reference `CLAUDE.md` for coding standards
 - **Research commands**: Use `/research` to dive deeper into specific areas
 
@@ -79,7 +79,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 
 **Users can switch paths or dive deeper:**
 - From Recipe Development → explore Runtime internals
-- From Runtime → understand Application layer integration  
+- From Runtime → understand Application layer integration
 - From Application layer → try Recipe development
 - Or combine multiple paths based on curiosity
 
@@ -96,7 +96,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 **Critical: This is a guided discovery experience, not a fire-hose lecture:**
 
 - **Start tiny and build** - Don't read multiple files at once. Start with one small section
-- **Quote small chunks** - Show 2-3 sentences from files, not entire sections  
+- **Quote small chunks** - Show 2-3 sentences from files, not entire sections
 - **Wait for their reaction** - After each quote, ask what they think and WAIT for response
 - **Follow their energy** - Only show more based on what sparked their curiosity
 - **Never charge ahead** - Resist the urge to show everything; be patient and responsive
@@ -104,7 +104,7 @@ Based on the user's choice in Step 2, follow these focused exploration paths:
 
 **Example flow:**
 1. Read just the "What is Common Tools?" section from README.md
-2. Quote the first paragraph: "Common Tools is a new distributed computing platform..."  
+2. Quote the first paragraph: "Common Tools is a new distributed computing platform..."
 3. Ask: "What's your first reaction to this?"
 4. Wait for user response
 5. Based on their response, show ONLY the next relevant small piece

@@ -894,7 +894,11 @@ export class Runner implements IRunner {
         recipe,
       });
       addCancel(
-        this.runtime.scheduler.schedule(wrappedAction, { reads, writes }),
+        this.runtime.scheduler.subscribe(
+          wrappedAction,
+          { reads, writes },
+          true,
+        ),
       );
     }
   }
@@ -960,10 +964,11 @@ export class Runner implements IRunner {
     );
 
     addCancel(
-      this.runtime.scheduler.schedule(action, {
-        reads: inputCells,
-        writes: outputCells,
-      }),
+      this.runtime.scheduler.subscribe(
+        action,
+        { reads: inputCells, writes: outputCells },
+        true,
+      ),
     );
   }
 

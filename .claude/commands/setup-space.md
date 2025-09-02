@@ -7,7 +7,7 @@ This script guides Claude through setting up a complete space with the `ct` util
 ### STEP 1: Initial Setup Check and Preparation
 
 **Read common setup instructions:**
-- First, read `.claude/commands/common/ct.md` for shared CT binary setup and configuration
+- First, read `docs/common/CT.md` for shared CT binary setup and configuration
 - Follow those instructions for:
   - Checking if user is in the right directory (should be in `labs`)
   - CT binary check and build if needed
@@ -78,7 +78,7 @@ This script guides Claude through setting up a complete space with the `ct` util
 ### Error Handling
 
 **General error handling:**
-- Refer to error handling section in `.claude/commands/common/ct.md` for common issues
+- Refer to error handling section in `docs/common/CT.md` for common issues
 - Don't continue to dependent steps until current step works
 
 **Space setup specific errors:**
@@ -149,7 +149,7 @@ echo '[{"name": "Item 1"}, {"name": "Item 2"}]' | ./dist/ct charm set --identity
 ## Reference Information for Claude
 
 ### Key Commands and Linking Concepts:
-- See `.claude/commands/common/ct.md` for:
+- See `docs/common/CT.md` for:
   - Complete list of CT commands
   - Understanding linking syntax and concepts
   - Examples of charm-to-charm and well-known ID linking
@@ -164,7 +164,7 @@ echo '[{"name": "Item 1"}, {"name": "Item 2"}]' | ./dist/ct charm set --identity
 - Charms list in any space: `baedreiahv63wxwgaem4hzjkizl4qncfgvca7pj5cvdon7cukumfon3ioye`
 
 ### Space Setup Specific Notes:
-- See `.claude/commands/common/ct.md` for general troubleshooting
+- See `docs/common/CT.md` for general troubleshooting
 - Recipe files needed for initial setup:
   - simple-list.tsx
   - gmail.tsx
