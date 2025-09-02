@@ -115,10 +115,13 @@ export function llm(
       addMessage.setRaw({ $stream: true });
 
       const addMessageStreamLink = parseLink(addMessage);
-      const handler = (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
+      const handler = (
+        tx: IExtendedStorageTransaction,
+        event: BuiltInLLMMessage,
+      ) => {
         messagesCell.withTx(tx).set([
           ...(messagesCell.get() ?? []),
-          event
+          event,
         ]);
       };
 
@@ -145,7 +148,6 @@ export function llm(
 
     const { system, stop, maxTokens, model } =
       inputsCell.getAsQueryResult([], tx) ?? {};
-
 
     const messages = messagesCell.getAsQueryResult([], tx) ?? [];
     const toolsCell = inputsCell.key("tools");
