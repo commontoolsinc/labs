@@ -18,6 +18,7 @@ import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
 import type { IRuntime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import { parseLink } from "../link-utils.ts";
 
 const client = new LLMClient();
 
@@ -50,7 +51,7 @@ const DEFAULT_GENERATE_OBJECT_MAX_TOKENS = 8192;
 export function llm(
   inputsCell: Cell<BuiltInLLMParams>,
   sendResult: (tx: IExtendedStorageTransaction, result: any) => void,
-  _addCancel: (cancel: () => void) => void,
+  addCancel: (cancel: () => void) => void,
   cause: any,
   parentCell: Cell<any>,
   runtime: IRuntime, // Runtime will be injected by the registration function
@@ -101,7 +102,28 @@ export function llm(
         tx,
       );
 
-      sendResult(tx, { pending, result, partial, requestHash });
+      const addMessageStreamLink = parseLink(parentCell.key("addMessage"));
+      const handler = (tx: IExtendedStorageTransaction, event: any) => {
+        debugger;
+      };
+
+      const wrappedHandler = Object.assign(handler, {
+        reads,
+        writes,
+        module,
+        recipe,
+      });
+      addCancel(
+        runtime.scheduler.addEventHandler(handler, addMessageStreamLink),
+      );
+
+      sendResult(tx, {
+        pending,
+        result,
+        partial,
+        requestHash,
+        addMessage: addMessageStreamLink,
+      });
       cellsInitialized = true;
     }
     const thisRun = ++currentRun;

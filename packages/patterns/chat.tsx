@@ -13,6 +13,7 @@ import {
   NAME,
   recipe,
   str,
+  Stream,
   UI,
 } from "commontools";
 
@@ -74,9 +75,11 @@ const sendMessage = handler<
   { detail: { message: string } },
   {
     chat: Cell<Array<BuiltInLLMMessage>>;
+    addMessage: Stream<BuiltInLLMMessage>;
   }
->((event, { chat }) => {
+>((event, { chat, addMessage }) => {
   chat.push({ role: "user", content: event.detail.message });
+  addMessage.send({ role: "user", content: event.detail.message });
 });
 
 const clearChat = handler(
@@ -194,6 +197,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               disabled={llmResponse.pending}
               onct-send={sendMessage({
                 chat,
+                addMessage: llmResponse.addMessage,
               })}
             />
 

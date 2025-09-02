@@ -175,6 +175,7 @@ export interface BuiltInLLMState<T> {
     result?: T;
     partial?: string;
     error: unknown;
+    addMessage: Stream<BuiltInLLMMessage>;
 }
 export interface BuiltInGenerateObjectParams {
     model?: string;
