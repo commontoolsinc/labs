@@ -144,22 +144,9 @@ const data = {
 
 Recipes can include UI components using JSX syntax:
 
-- Common components like `common-input`, `common-hstack`, `common-vstack`
+- Common components like `ct-input`, `ct-hstack`, `ct-vstack`
 - Integration-specific components like `common-google-oauth`
-- Custom components can be created as needed
-
-#### JSX and TypeScript
-
-The Recipe Framework uses custom JSX elements that may generate TypeScript
-linter errors in the IDE. Common errors include:
-
-- `Property 'common-*' does not exist on type 'JSX.IntrinsicElements'`
-- Style-related type errors when using string styles
-- Event handler type mismatches
-
-These are expected in the development environment and don't affect runtime
-functionality. The framework's processor handles these custom elements correctly
-even though TypeScript doesn't recognize them.
+- Custom components can be created as needed via `const MyComponent = recipe(...)` `<MyComponent ... />`
 
 ### Built-in Functions
 
