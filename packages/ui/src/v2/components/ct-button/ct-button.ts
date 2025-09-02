@@ -14,10 +14,8 @@ import { BaseElement } from "../../core/base-element.ts";
  *
  * @slot - Default slot for button content
  *
- * @fires ct-click - Fired on click with detail: { variant, size }
- *
  * @example
- * <ct-button variant="primary" size="lg">Click Me</ct-button>
+ * <ct-button variant="primary" size="lg" @click=${() => console.log('Button clicked')}>Click Me</ct-button>
  */
 
 export type ButtonVariant =
@@ -220,12 +218,6 @@ export class CTButton extends BaseElement {
     if (this.type !== "button") {
       return;
     }
-
-    // Emit custom event
-    this.emit("ct-click", {
-      variant: this.variant,
-      size: this.size,
-    });
   }
 }
 

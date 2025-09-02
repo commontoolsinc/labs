@@ -100,7 +100,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
             />
 
             <ct-button
-              onct-click={clearChat({ chat })}
+              onClick={clearChat({ chat })}
             >
               Clear Chat
             </ct-button>
