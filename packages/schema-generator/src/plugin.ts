@@ -26,4 +26,3 @@ export type {
   SchemaDefinition,
   TypeFormatter,
 } from "./interface.ts";
-

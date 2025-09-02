@@ -4,8 +4,10 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
+import type { SchemaGenerator } from "../schema-generator.ts";
 
 export class ArrayFormatter implements TypeFormatter {
+  constructor(private schemaGenerator?: SchemaGenerator) {}
   supportsType(type: ts.Type, context: FormatterContext): boolean {
     // Check if this is an Array type
     if (type.symbol?.name === "Array") {
@@ -25,11 +27,25 @@ export class ArrayFormatter implements TypeFormatter {
   }
 
   formatType(type: ts.Type, context: FormatterContext): SchemaDefinition {
-    // Just return the basic array structure
-    // The element type will be handled recursively by the main generator
+    // Resolve element type via index signature when possible
+    try {
+      const elementType = context.typeChecker.getIndexTypeOfType(
+        type,
+        ts.IndexKind.Number,
+      );
+      if (elementType && this.schemaGenerator) {
+        const items = this.schemaGenerator.generateSchema(
+          elementType,
+          context.typeChecker,
+        );
+        return { type: "array", items };
+      }
+    } catch (_) {
+      // ignore
+    }
     return {
       type: "array",
-      items: { type: "object", additionalProperties: true }, // Placeholder
+      items: { type: "object", additionalProperties: true },
     };
   }
 }

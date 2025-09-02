@@ -30,6 +30,11 @@ export function getNamedTypeKey(
     const ref = type as unknown as ts.TypeReference;
     name = ref.target?.symbol?.name ?? name;
   }
+  // Fall back to alias symbol when present (type aliases)
+  if (!name) {
+    const aliasName = (type as any).aliasSymbol?.name as string | undefined;
+    if (aliasName) name = aliasName;
+  }
   if (!name || name === "__type") return undefined;
   // Avoid promoting wrappers/containers into definitions
   if (name === "Array" || name === "ReadonlyArray") return undefined;
@@ -47,6 +52,11 @@ export function getArrayElementType(
   type: ts.Type,
   checker: ts.TypeChecker,
 ): ts.Type | undefined {
+  // Only object-like types can be arrays. Prevent primitives like string
+  // from being treated as array-like due to numeric index access.
+  if ((type.flags & ts.TypeFlags.Object) === 0) {
+    return undefined;
+  }
   // Check ObjectFlags.Reference for Array/ReadonlyArray
   const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
 
@@ -68,23 +78,14 @@ export function getArrayElementType(
     return elementType;
   }
 
-  // Use numeric index type as fallback
+  // Use numeric index type as fallback (for tuples/array-like objects)
   try {
     const elementType = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
     if (elementType) {
       return elementType;
     }
-  } catch (error) {
-    // Stack overflow can happen with recursive types
-    // Don't log as it could cause another stack overflow
-    // Emit a lightweight breadcrumb without touching the error object
-    try {
-      console.warn(
-        "getArrayElementType: checker.getIndexTypeOfType threw; treating as non-array",
-      );
-    } catch (_e) {
-      // Swallow any logging issues to remain safe
-    }
+  } catch (_error) {
+    // Treat as non-array if checker throws during index type resolution
   }
 
   return undefined;
@@ -137,7 +138,17 @@ export function isDefaultTypeRef(
   if (!symbol) return false;
 
   const symbolName = symbol.getName();
-  return symbolName === "Default";
+  if (symbolName === "Default") return true;
+
+  // If this is an alias, resolve the alias target to see if it points to Default
+  const decl = symbol.declarations?.[0];
+  if (decl && ts.isTypeAliasDeclaration(decl)) {
+    const aliased = decl.type;
+    if (ts.isTypeReferenceNode(aliased) && ts.isIdentifier(aliased.typeName)) {
+      return aliased.typeName.text === "Default";
+    }
+  }
+  return false;
 }
 
 /**
@@ -153,6 +164,8 @@ export function extractValueFromTypeNode(
     if (ts.isNumericLiteral(lit)) return Number(lit.text);
     if (lit.kind === ts.SyntaxKind.TrueKeyword) return true;
     if (lit.kind === ts.SyntaxKind.FalseKeyword) return false;
+    if (lit.kind === ts.SyntaxKind.NullKeyword) return null;
+    if (lit.kind === ts.SyntaxKind.UndefinedKeyword) return undefined;
     return undefined;
   }
 
@@ -176,6 +189,18 @@ export function extractValueFromTypeNode(
     return node.elements.map((element: ts.TypeNode) =>
       extractValueFromTypeNode(element, checker)
     );
+  }
+
+  // For union defaults like null or undefined (Default<T|null, null>)
+  if (ts.isUnionTypeNode(node)) {
+    const nullType = node.types.find((t) =>
+      t.kind === ts.SyntaxKind.NullKeyword
+    );
+    const undefType = node.types.find((t) =>
+      t.kind === ts.SyntaxKind.UndefinedKeyword
+    );
+    if (nullType) return null;
+    if (undefType) return undefined;
   }
 
   return undefined;
