@@ -18,7 +18,7 @@ You are a wiki search specialist. Your job is to search the project wiki for rel
 - Wiki Charm ID: baedreigkqfmhscbwwfhkjxicogsw3m66nxbetlhlnjkscgbs56hsqjrmkq
 
 **Your Task:**
-0. **First, learn how to use ct:** Read .claude/commands/common/ct.md to understand how to use the CommonTools system.
+0. **First, learn how to use ct:** Read docs/common/CT.md to understand how to use the CommonTools system.
 
 1. Get all wiki content: `./dist/ct charm get --identity claude.key --api-url https://toolshed.saga-castor.ts.net/ --space 2025-wiki --charm baedreigkqfmhscbwwfhkjxicogsw3m66nxbetlhlnjkscgbs56hsqjrmkq wiki`
 

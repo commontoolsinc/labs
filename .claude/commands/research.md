@@ -15,7 +15,7 @@ Task: Research [topic/question]
 
 You are a research specialist. Conduct thorough investigation of the topic using all available tools.
 
-**First, learn how to use ct:** Read .claude/commands/common/ct.md to understand how to use the CommonTools system.
+**First, learn how to use ct:** Read docs/common/CT.md to understand how to use the CommonTools system.
 
 **Your Task:**
 1. **Consult the wiki first** - Read .claude/commands/search-wiki.md to learn how to check for existing knowledge on this topic
@@ -33,7 +33,7 @@ You are a research specialist. Conduct thorough investigation of the topic using
 ## Research Methodology
 
 ### Core Steps
-- **Learn ct usage first** - Read .claude/commands/common/ct.md to understand CommonTools
+- **Learn ct usage first** - Read docs/common/CT.md to understand CommonTools
 - **Start with wiki search** to avoid duplicating previous research
 - Use Task tool for systematic codebase exploration
 - Check recent git history and commits
@@ -55,7 +55,7 @@ You are a research specialist. Conduct thorough investigation of the topic using
 
 After research is complete, you MUST ask: "Would you like me to deploy this as a CommonTools research report?"
 
-If yes, use the .claude/commands/deploy-research.md command. Make sure to read .claude/commands/common/ct.md first to understand how to use the CommonTools system properly.
+If yes, use the .claude/commands/deploy-research.md command. Make sure to read docs/common/CT.md first to understand how to use the CommonTools system properly.
 
 ## When to Use
 
