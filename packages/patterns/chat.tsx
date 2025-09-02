@@ -93,6 +93,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               name="Ask"
               placeholder="Ask the LLM a question..."
               appearance="rounded"
+              disabled={llmResponse.pending}
               onct-send={sendMessage({
                 chat,
                 lastLlmResponse: llmResponse.result,
