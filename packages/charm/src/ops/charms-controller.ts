@@ -21,10 +21,17 @@ export class CharmsController {
   async create(
     program: RuntimeProgram | string,
     input?: object,
+    options?: { start?: boolean },
   ): Promise<CharmController> {
     this.disposeCheck();
     const recipe = await compileProgram(this.#manager, program);
-    const charm = await this.#manager.runPersistent(recipe, input);
+    const charm = await this.#manager.runPersistent(
+      recipe,
+      input,
+      undefined,
+      undefined,
+      { start: options?.start ?? true },
+    );
     await this.#manager.runtime.idle();
     await this.#manager.synced();
     return new CharmController(this.#manager, charm);
@@ -56,6 +63,16 @@ export class CharmsController {
       await this.#manager.synced();
     }
     return removed;
+  }
+
+  async start(charmId: string): Promise<void> {
+    this.disposeCheck();
+    await this.#manager.startCharm(charmId);
+  }
+
+  async stop(charmId: string): Promise<void> {
+    this.disposeCheck();
+    await this.#manager.stopCharm(charmId);
   }
 
   async dispose() {
