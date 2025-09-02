@@ -27,7 +27,8 @@ const sendMessage = handler<
   { detail: { message: string } },
   { messages: Cell<Array<BuiltInLLMMessage>> }
 >((event, { messages }) => {
-  messages.push({ role: "user", content: event.detail.message });
+  // reset the conversation every time
+  messages.set([{ role: "user", content: event.detail.message }]);
 });
 
 const clearMessages = handler<
@@ -81,6 +82,7 @@ export default recipe<LLMTestInput, LLMTestResult>(
               name="Ask"
               placeholder="Ask the LLM a question..."
               appearance="rounded"
+              disabled={llmResponse.pending}
               onct-send={sendMessage({ messages })}
             />
 
