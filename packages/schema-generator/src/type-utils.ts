@@ -51,7 +51,66 @@ export function getNamedTypeKey(
 export function getArrayElementType(
   type: ts.Type,
   checker: ts.TypeChecker,
+  typeNode?: ts.TypeNode,
 ): ts.Type | undefined {
+  // Node-first detection to handle aliases and missing lib types
+  if (typeNode) {
+    // Direct syntax T[]
+    if (ts.isArrayTypeNode(typeNode)) {
+      try {
+        return checker.getTypeFromTypeNode(typeNode.elementType);
+      } catch (_) {
+        // fall through
+      }
+    }
+
+    // Reference syntax Array<T> or alias to it
+    if (ts.isTypeReferenceNode(typeNode)) {
+      const tn = typeNode.typeName;
+      if (ts.isIdentifier(tn)) {
+        const id = tn.text;
+        // If the node itself is Array/ReadonlyArray, use its type argument
+        if (
+          (id === "Array" || id === "ReadonlyArray") &&
+          typeNode.typeArguments && typeNode.typeArguments.length > 0
+        ) {
+          try {
+            return checker.getTypeFromTypeNode(typeNode.typeArguments[0]!);
+          } catch (_) {
+            // fall through
+          }
+        }
+        // Resolve alias: if this is a type alias referring to Array<T> or T[]
+        const sym = checker.getSymbolAtLocation(tn);
+        const decl = sym?.declarations?.[0];
+        if (decl && ts.isTypeAliasDeclaration(decl)) {
+          const aliased = decl.type;
+          if (ts.isArrayTypeNode(aliased)) {
+            try {
+              return checker.getTypeFromTypeNode(aliased.elementType);
+            } catch (_) {
+              // ignore
+            }
+          }
+          if (ts.isTypeReferenceNode(aliased)) {
+            const name = aliased.typeName;
+            if (
+              ts.isIdentifier(name) &&
+              (name.text === "Array" || name.text === "ReadonlyArray") &&
+              aliased.typeArguments && aliased.typeArguments.length > 0
+            ) {
+              try {
+                return checker.getTypeFromTypeNode(aliased.typeArguments[0]!);
+              } catch (_) {
+                // ignore
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Only object-like types can be arrays. Prevent primitives like string
   // from being treated as array-like due to numeric index access.
   if ((type.flags & ts.TypeFlags.Object) === 0) {
