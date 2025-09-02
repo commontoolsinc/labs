@@ -7,6 +7,7 @@ import type { MemorySpace } from "../storage.ts";
 import * as SubscriptionManager from "../storage/subscription.ts";
 import { StorageClient } from "../../../storage/src/client/index.ts";
 import { NewStorageProvider } from "./provider.ts";
+import { NewStorageTransaction } from "./transaction.ts";
 
 /**
  * Placeholder NewStorageManager adapter that will wrap the new storage client.
@@ -87,8 +88,9 @@ export class NewStorageManager implements IStorageManager {
   }
 
   edit() {
-    // Temporary: delegate transaction until new adapter is implemented
-    return this.#delegate.edit();
+    // Wrap legacy transaction to allow incremental migration to client-backed
+    // adapter without changing behavior yet.
+    return new NewStorageTransaction(this.#delegate.edit(), this.#client);
   }
 
   subscribe(subscription: IStorageSubscription): void {
@@ -96,6 +98,8 @@ export class NewStorageManager implements IStorageManager {
   }
 
   async synced(): Promise<void> {
+    // Wait for both legacy delegate and new client to settle
     await this.#delegate.synced();
+    await this.#client.synced();
   }
 }
