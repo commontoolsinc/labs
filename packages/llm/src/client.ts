@@ -10,7 +10,6 @@ import {
 } from "./types.ts";
 
 type PartialCallback = (text: string) => void;
-type ToolCallCallback = (toolCall: LLMToolCall) => void;
 
 let llmApiUrl = typeof globalThis.location !== "undefined"
   ? globalThis.location.protocol + "//" + globalThis.location.host +
@@ -56,7 +55,6 @@ export class LLMClient {
   async sendRequest(
     request: LLMRequest,
     callback?: PartialCallback,
-    toolCallCallback?: ToolCallCallback,
   ): Promise<LLMResponse> {
     if (request.stream && !callback) {
       throw new Error(
@@ -99,14 +97,13 @@ export class LLMClient {
         // TODO(bf): Extract tool calls from cached response if present
       };
     }
-    return await this.stream(response.body, id, callback, toolCallCallback);
+    return await this.stream(response.body, id, callback);
   }
 
   private async stream(
     body: ReadableStream,
     id: string,
     callback?: PartialCallback,
-    toolCallCallback?: ToolCallCallback,
   ): Promise<LLMResponse> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
@@ -150,9 +147,6 @@ export class LLMClient {
                   arguments: event.args,
                 };
                 toolCalls.push(toolCall);
-                if (toolCallCallback) {
-                  toolCallCallback(toolCall);
-                }
               } else if (event.type === "tool-result") {
                 // Tool result event
                 const toolResult: LLMToolResult = {
