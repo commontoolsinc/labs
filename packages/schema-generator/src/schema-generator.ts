@@ -32,9 +32,9 @@ export class SchemaGenerator implements ISchemaGenerator {
     new CommonToolsFormatter(this), // Pass self-reference for recursive delegation
     new UnionFormatter(this),
     new IntersectionFormatter(this),
-    new PrimitiveFormatter(),
-    // Handle arrays before generic object handling to avoid misclassification
+    // Prefer array detection before primitives to avoid Any-flag misrouting
     new ArrayFormatter(this),
+    new PrimitiveFormatter(),
     new ObjectFormatter(this), // Pass self-reference for recursive delegation
     // TODO(#CT-841): Add more formatters here
   ];
@@ -265,103 +265,13 @@ export class SchemaGenerator implements ISchemaGenerator {
       return { type: "object", additionalProperties: true };
     }
 
-    // Check if this is an array type node first (most reliable way)
-    if (typeNode && ts.isArrayTypeNode(typeNode)) {
-      // Extract the element type and recursively generate its schema
-      const elementType = context.typeChecker.getTypeFromTypeNode(
-        typeNode.elementType,
-      );
-      if (elementType) {
-        const elementSchema = this.formatType(
-          elementType,
-          context,
-          typeNode.elementType,
-          depth + 1,
-          seenTypes,
-          cyclicTypes,
-          cyclicNames,
-          definitions,
-          definitionStack,
-          false,
-          inProgressNames,
-          emittedRefs,
-        );
-
-        return {
-          type: "array",
-          items: elementSchema,
-        };
-      }
-    }
+    // Defer array handling to ArrayFormatter with node-aware context
 
     // Try to find a formatter that supports this type
     for (const formatter of this.formatters) {
-      if (formatter.supportsType(type, context)) {
-        // Special handling for ArrayFormatter - we need to extract element type
-        if (formatter.constructor.name === "ArrayFormatter") {
-          // For Array<T> types, try to extract the type argument
-          if (type.flags & ts.TypeFlags.Object) {
-            const objectType = type as ts.ObjectType;
-            if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-              const typeRef = objectType as ts.TypeReference;
-              if (typeRef.typeArguments && typeRef.typeArguments.length > 0) {
-                // Extract the first type argument (Array<T> -> T)
-                const elementType = typeRef.typeArguments[0];
-                if (elementType) {
-                  const elementSchema = this.formatType(
-                    elementType,
-                    context,
-                    undefined,
-                    depth + 1,
-                    seenTypes,
-                    cyclicTypes,
-                    cyclicNames,
-                    definitions,
-                    definitionStack,
-                    false,
-                    inProgressNames,
-                    emittedRefs,
-                  );
-
-                  return {
-                    type: "array",
-                    items: elementSchema,
-                  };
-                }
-              }
-            }
-          }
-
-          // For T[] types, try to get the numeric index type
-          const indexType = context.typeChecker.getIndexTypeOfType(
-            type,
-            ts.IndexKind.Number,
-          );
-          if (indexType) {
-            const elementSchema = this.formatType(
-              indexType,
-              context,
-              undefined,
-              depth + 1,
-              seenTypes,
-              cyclicTypes,
-              cyclicNames,
-              definitions,
-              definitionStack,
-              false,
-              inProgressNames,
-              emittedRefs,
-            );
-
-            return {
-              type: "array",
-              items: elementSchema,
-            };
-          }
-        }
-
+      const updatedContext = typeNode ? { ...context, typeNode } : context;
+      if (formatter.supportsType(type, updatedContext)) {
         // Update context to include typeNode for formatters that need it
-        const updatedContext = typeNode ? { ...context, typeNode } : context;
         const result = formatter.formatType(type, updatedContext);
         // Do not promote non-cyclic named types into definitions by default.
         // Rely on cycle detection to introduce $ref/$definitions only when

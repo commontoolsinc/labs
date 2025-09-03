@@ -1,13 +1,13 @@
 {
   "properties": {
-    "stream": {
+    "v": {
       "asCell": true,
-      "asStream": true,
-      "type": "number"
+      "type": "string"
     }
   },
   "required": [
-    "stream"
+    "v"
   ],
   "type": "object"
 }
+

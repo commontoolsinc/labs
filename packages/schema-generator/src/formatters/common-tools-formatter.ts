@@ -4,11 +4,7 @@ import type {
   SchemaDefinition,
   TypeFormatter,
 } from "../interface.ts";
-import {
-  extractValueFromTypeNode,
-  getArrayElementType,
-  isDefaultTypeRef,
-} from "../type-utils.ts";
+import { extractValueFromTypeNode, getArrayElementInfo, isDefaultTypeRef } from "../type-utils.ts";
 
 /**
  * Formatter for Common Tools specific types (Cell<T>, Stream<T>, Default<T,V>)
@@ -16,33 +12,26 @@ import {
 export class CommonToolsFormatter implements TypeFormatter {
   constructor(private schemaGenerator?: any) {}
   supportsType(type: ts.Type, context: FormatterContext): boolean {
-    // Handle Common Tools wrapper types
-    if (type.flags & ts.TypeFlags.Object) {
-      const objectType = type as ts.ObjectType;
-
-      // Check for type references (Cell<T>, Stream<T>, Default<T,V>)
-      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-        const typeRef = objectType as ts.TypeReference;
-        const targetSymbol = typeRef.target?.symbol;
-        const aliasSymbol = (typeRef as any).aliasSymbol as
-          | ts.Symbol
-          | undefined;
-        const name = (targetSymbol?.name ?? (aliasSymbol as any)?.name) as
-          | string
-          | undefined;
-        if (name) {
-          const ok = name === "Cell" || name === "Stream" || name === "Default";
-          try {
-            if (ok && name === "Default") {
-              // deno-lint-ignore no-console
-              console.log("[DBG:CommonTools] supports Default type");
-            }
-          } catch {}
-          return ok;
-        }
+    // Prefer node-driven detection to handle aliases where Default<T,V> erases to T
+    const n = (context as any).typeNode as ts.TypeNode | undefined;
+    if (n && ts.isTypeReferenceNode(n)) {
+      const tn = n.typeName;
+      if (ts.isIdentifier(tn)) {
+        if (tn.text === "Cell" || tn.text === "Stream") return true;
       }
+      // Default<T,V> may be an alias; use helper to detect
+      if (isDefaultTypeRef(n, context.typeChecker)) return true;
     }
 
+    // Fallback: detect by type identity when wrappers are interfaces/classes
+    if (type.flags & ts.TypeFlags.Object) {
+      const objectType = type as ts.ObjectType;
+      if (objectType.objectFlags & ts.ObjectFlags.Reference) {
+        const typeRef = objectType as ts.TypeReference;
+        const name = typeRef.target?.symbol?.name;
+        if (name === "Cell" || name === "Stream" || name === "Default") return true;
+      }
+    }
     return false;
   }
 
@@ -51,6 +40,11 @@ export class CommonToolsFormatter implements TypeFormatter {
     const objectType = type as ts.ObjectType;
     const typeRef = objectType as ts.TypeReference;
     const symbol = typeRef.target?.symbol;
+    // If type erases but node indicates Default<T,V>, delegate to formatDefaultType
+    const n = (context as any).typeNode as ts.TypeNode | undefined;
+    if (!symbol && n && ts.isTypeReferenceNode(n) && isDefaultTypeRef(n, checker)) {
+      return this.formatDefaultType(typeRef, checker, context);
+    }
 
     if (!symbol) {
       return { type: "object", additionalProperties: true };
@@ -64,10 +58,6 @@ export class CommonToolsFormatter implements TypeFormatter {
       case "Stream":
         return this.formatStreamType(typeRef, checker, context);
       case "Default":
-        try {
-          // deno-lint-ignore no-console
-          console.log("[DBG:CommonTools] format Default<T,V>");
-        } catch {}
         return this.formatDefaultType(typeRef, checker, context);
       default:
         return { type: "object", additionalProperties: true };
@@ -79,6 +69,13 @@ export class CommonToolsFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
     context: FormatterContext,
   ): SchemaDefinition {
+    const isNamedTypeRef = (t: ts.Type, name: string): boolean =>
+      !!(t && (t.flags & ts.TypeFlags.Object) !== 0 &&
+        (((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0) &&
+        ((t as ts.TypeReference).target?.symbol?.name === name));
+
+    const getContainerArg = (ref: ts.TypeReference, idx = 0): ts.Type | undefined =>
+      (ref.typeArguments && ref.typeArguments.length > idx) ? ref.typeArguments[idx] : undefined;
     // Helper: if the context node is an alias like type CellArray<T> = Cell<T[]>,
     // detect and return the element node substituted with the actual argument.
     const getAliasArrayElementFromCell = (
@@ -147,149 +144,23 @@ export class CommonToolsFormatter implements TypeFormatter {
         return { type: "array", items, asCell: true } as SchemaDefinition;
       }
       // Alias-aware array detection on the actual container argument
-      const containerArg = (typeRef.typeArguments && typeRef.typeArguments[0])
-        ? typeRef.typeArguments[0]
-        : undefined;
-      if (containerArg && containerArg.flags & ts.TypeFlags.Object) {
-        const containerObj = containerArg as ts.ObjectType;
-        const containerIsDefault =
-          (containerObj.objectFlags & ts.ObjectFlags.Reference) !== 0 &&
-          ((containerArg as ts.TypeReference).target?.symbol?.name ===
-            "Default");
-        if (!containerIsDefault) {
-          const elem = getArrayElementType(
-            containerArg,
+      const containerArg = getContainerArg(typeRef, 0);
+      if (containerArg && !isNamedTypeRef(containerArg, "Default")) {
+        const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
+        if (info) {
+          const items = this.schemaGenerator.formatChildType(
+            info.elementType,
             checker,
-            innerTypeNode,
+            info.elementNode,
           );
-          if (elem) {
-            const items = this.schemaGenerator.formatChildType(
-              elem,
-              checker,
-            );
-            return { type: "array", items, asCell: true } as SchemaDefinition;
-          }
+          return { type: "array", items, asCell: true } as SchemaDefinition;
         }
       }
-      // Special-case: Cell<Default<T,V>> should preserve defaults from V
-      const isDefault = !!(
-        innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
-        isDefaultTypeRef(innerTypeNode, checker)
-      );
-      if (isDefault && innerTypeNode && ts.isTypeReferenceNode(innerTypeNode)) {
-        const innerRef = innerType as ts.TypeReference;
-        const args =
-          (innerRef as any).aliasTypeArguments as ts.Type[] | undefined ??
-            (innerRef as any).resolvedTypeArguments as ts.Type[] | undefined ??
-            innerRef.typeArguments;
-        const nodeArgs = innerTypeNode.typeArguments;
-        const valueType = args?.[0];
-        const defaultType = args?.[1];
-        const valueNode = nodeArgs?.[0];
-        const defaultNode = nodeArgs?.[1];
-        if (valueType) {
-          // If value is an array by node, synthesize array with items to avoid
-          // any formatter fallback losing element shapes.
-          let valueSchema: SchemaDefinition;
-          if (valueNode && ts.isArrayTypeNode(valueNode)) {
-            const elemNode = valueNode.elementType;
-            const elemType = context.typeChecker.getTypeFromTypeNode(elemNode);
-            const items = this.schemaGenerator.formatChildType(
-              elemType,
-              context.typeChecker,
-              elemNode,
-            );
-            // Build in fixture order: type, items, default, then wrapper flag
-            const out: any = { type: "array", items };
-            // Attach default now to keep ordering
-            if (defaultNode) {
-              const d = extractValueFromTypeNode(defaultNode, checker);
-              if (d !== undefined) out.default = d;
-            }
-            valueSchema = out as SchemaDefinition;
-          } else {
-            valueSchema = this.schemaGenerator.formatChildType(
-              valueType,
-              context.typeChecker,
-              valueNode,
-            );
-          }
-          if (defaultNode && !(valueSchema as any).default) {
-            const extracted = extractValueFromTypeNode(defaultNode, checker);
-            if (extracted !== undefined) {
-              (valueSchema as any).default = extracted;
-            }
-          }
-          // Guard: ensure default is preserved even if array synthesis path ran
-          if ((valueSchema as any).default === undefined && defaultNode) {
-            const d2 = extractValueFromTypeNode(defaultNode, checker);
-            if (d2 !== undefined) (valueSchema as any).default = d2;
-          }
+      // Default<T,V> is handled by its own formatter; delegate and add asCell at the end
 
-          // Nullable default handling (T | null)
-          if ((valueType.flags & ts.TypeFlags.Union) !== 0) {
-            const union = valueType as ts.UnionType;
-            const members = union.types ?? [] as ts.Type[];
-            const hasNull = members.some((t) =>
-              (t.flags & ts.TypeFlags.Null) !== 0
-            );
-            const nonNull = members.filter((t) =>
-              (t.flags & ts.TypeFlags.Null) === 0
-            );
-            if (hasNull && nonNull.length === 1) {
-              const nonNullSchema = this.schemaGenerator.generateSchema(
-                nonNull[0]!,
-                context.typeChecker,
-                valueNode,
-              );
-              const out: any = {
-                oneOf: [nonNullSchema, { type: "null" }],
-                asCell: true,
-              };
-              if ((valueSchema as any).default !== undefined) {
-                out.default = (valueSchema as any).default;
-              }
-              return out as SchemaDefinition;
-            }
-          }
-
-          return { ...valueSchema, asCell: true } as SchemaDefinition;
-        }
-      }
-
-      // Handle Cell<Array<T>> and Cell<T[]> based on node or checker
-      if (innerTypeNode && ts.isArrayTypeNode(innerTypeNode)) {
-        const elemNode = innerTypeNode.elementType;
-        const elemType = checker.getTypeFromTypeNode(elemNode);
-        const items = this.schemaGenerator.formatChildType(
-          elemType,
-          checker,
-          elemNode,
-        );
-        const out: any = { type: "array", items, asCell: true };
-        // Preserve default when Default<T[], V> is inside Cell
-        if (
-          innerTypeNode &&
-          ts.isTypeReferenceNode(innerTypeNode) &&
-          isDefaultTypeRef(innerTypeNode as ts.TypeReferenceNode, checker)
-        ) {
-          const defNode = (innerTypeNode as ts.TypeReferenceNode).typeArguments
-            ?.[1];
-          if (defNode) {
-            const d = extractValueFromTypeNode(defNode, checker);
-            if (d !== undefined) out.default = d;
-          }
-        }
-        return out as SchemaDefinition;
-      }
-      const arrayElem = getArrayElementType(innerType, checker, innerTypeNode);
-      if (arrayElem) {
-        const items = this.schemaGenerator.formatChildType(
-          arrayElem,
-          checker,
-        );
-        return { type: "array", items, asCell: true } as SchemaDefinition;
-      }
+      // Handle Cell<Array<T>> and Cell<T[]> using the shared helper
+      const arr = this.arrayItemsSchema(innerType, innerTypeNode, checker);
+      if (arr) return { ...arr, asCell: true } as SchemaDefinition;
 
       const nodeDrivenType = innerTypeNode
         ? context.typeChecker.getTypeFromTypeNode(innerTypeNode)
@@ -299,17 +170,6 @@ export class CommonToolsFormatter implements TypeFormatter {
         context.typeChecker,
         innerTypeNode,
       );
-      // Fallback: if inner node is Default<T,V>, attach default here too
-      if (
-        innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
-        isDefaultTypeRef(innerTypeNode, checker)
-      ) {
-        const defNode = innerTypeNode.typeArguments?.[1];
-        if (defNode) {
-          const d = extractValueFromTypeNode(defNode, checker);
-          if (d !== undefined) (innerSchema as any).default = d;
-        }
-      }
       return { ...innerSchema, asCell: true };
     } else {
       // Fallback for when schemaGenerator is not available
@@ -326,6 +186,13 @@ export class CommonToolsFormatter implements TypeFormatter {
     checker: ts.TypeChecker,
     context: FormatterContext,
   ): SchemaDefinition {
+    const isNamedTypeRef = (t: ts.Type, name: string): boolean =>
+      !!(t && (t.flags & ts.TypeFlags.Object) !== 0 &&
+        (((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0) &&
+        ((t as ts.TypeReference).target?.symbol?.name === name));
+
+    const getContainerArg = (ref: ts.TypeReference, idx = 0): ts.Type | undefined =>
+      (ref.typeArguments && ref.typeArguments.length > idx) ? ref.typeArguments[idx] : undefined;
     // Mirror Cell<T> robustness: resolve via alias/resolved arguments and carry node
     let innerTypeNode: ts.TypeNode | undefined;
     if (
@@ -339,114 +206,34 @@ export class CommonToolsFormatter implements TypeFormatter {
     // Do not unwrap Array<T> here; let downstream logic inspect array-ness
     const innerType = this.getTypeArgument(typeRef, 0) || typeRef;
 
-    if (this.schemaGenerator) {
-      const containerArg = (typeRef.typeArguments && typeRef.typeArguments[0])
-        ? typeRef.typeArguments[0]
-        : undefined;
-      const containerArgIsCell = !!(
-        containerArg && (containerArg.flags & ts.TypeFlags.Object) !== 0 &&
-        ((containerArg as ts.ObjectType).objectFlags &
-            ts.ObjectFlags.Reference) !== 0 &&
-        ((containerArg as ts.TypeReference).target?.symbol?.name === "Cell")
-      );
-      if (containerArg && containerArg.flags & ts.TypeFlags.Object) {
-        const containerObj = containerArg as ts.ObjectType;
-        const containerIsDefault =
-          (containerObj.objectFlags & ts.ObjectFlags.Reference) !== 0 &&
-          ((containerArg as ts.TypeReference).target?.symbol?.name ===
-            "Default");
-        if (!containerIsDefault) {
-          const elem = getArrayElementType(
-            containerArg,
+      if (this.schemaGenerator) {
+      const containerArg = getContainerArg(typeRef, 0);
+      const containerArgIsCell = !!(containerArg && isNamedTypeRef(containerArg, "Cell"));
+      if (containerArg && !isNamedTypeRef(containerArg, "Default")) {
+        const info = getArrayElementInfo(containerArg, checker, innerTypeNode);
+        if (info) {
+          const items = this.schemaGenerator.formatChildType(
+            info.elementType,
             checker,
-            innerTypeNode,
+            info.elementNode,
           );
-          if (elem) {
-            const items = this.schemaGenerator.formatChildType(
-              elem,
-              checker,
-            );
-            return { type: "array", items, asStream: true };
-          }
+          return { type: "array", items, asStream: true };
         }
       }
-      // Special-case: Stream<Default<T,V>>
-      const isDefault = !!(
-        innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
-        isDefaultTypeRef(innerTypeNode, checker)
-      );
-      if (isDefault && innerTypeNode && ts.isTypeReferenceNode(innerTypeNode)) {
-        const innerRef = innerType as ts.TypeReference;
-        const args =
-          (innerRef as any).aliasTypeArguments as ts.Type[] | undefined ??
-            (innerRef as any).resolvedTypeArguments as ts.Type[] | undefined ??
-            innerRef.typeArguments;
-        const nodeArgs = innerTypeNode.typeArguments;
-        const valueType = args?.[0];
-        const defaultType = args?.[1];
-        const valueNode = nodeArgs?.[0];
-        const defaultNode = nodeArgs?.[1];
-        if (valueType) {
-          let valueSchema: SchemaDefinition;
-          if (valueNode && ts.isArrayTypeNode(valueNode)) {
-            const elemNode = valueNode.elementType;
-            const elemType = context.typeChecker.getTypeFromTypeNode(elemNode);
-            const items = this.schemaGenerator.formatChildType(
-              elemType,
-              context.typeChecker,
-              elemNode,
-            );
-            valueSchema = { type: "array", items };
-          } else {
-            valueSchema = this.schemaGenerator.formatChildType(
-              valueType,
-              context.typeChecker,
-              valueNode,
-            );
-          }
-          let extracted: any = undefined;
-          if (defaultNode) {
-            extracted = extractValueFromTypeNode(defaultNode, checker);
-          }
-          if (extracted === undefined && defaultType) {
-            extracted = this.extractValueFromType(defaultType, checker);
-          }
-          if (extracted !== undefined) (valueSchema as any).default = extracted;
-
-          if ((valueType.flags & ts.TypeFlags.Union) !== 0) {
-            const union = valueType as ts.UnionType;
-            const members = union.types ?? [] as ts.Type[];
-            const hasNull = members.some((t) =>
-              (t.flags & ts.TypeFlags.Null) !== 0
-            );
-            const nonNull = members.filter((t) =>
-              (t.flags & ts.TypeFlags.Null) === 0
-            );
-            if (hasNull && nonNull.length === 1) {
-              const nonNullSchema = this.schemaGenerator.generateSchema(
-                nonNull[0]!,
-                context.typeChecker,
-                valueNode,
-              );
-              const out: any = {
-                oneOf: [nonNullSchema, { type: "null" }],
-                asStream: true,
-              };
-              if ((valueSchema as any).default !== undefined) {
-                out.default = (valueSchema as any).default;
-              }
-              return out as SchemaDefinition;
-            }
-          }
-
-          // If Stream< Cell<T> >, ensure both flags where fixtures expect it
+      // If Stream<Default<T,V>> is encountered, Default handles default/union. Just add flags.
+      if (innerTypeNode && ts.isTypeReferenceNode(innerTypeNode)) {
+        // If Stream< Cell<T> >, ensure both flags where fixtures expect it
           if (
-            valueNode && ts.isTypeReferenceNode(valueNode) &&
-            valueNode.typeName && ts.isIdentifier(valueNode.typeName) &&
-            valueNode.typeName.text === "Cell"
+            ts.isTypeReferenceNode(innerTypeNode) &&
+            innerTypeNode.typeName && ts.isIdentifier(innerTypeNode.typeName) &&
+            innerTypeNode.typeName.text === "Cell"
           ) {
             return {
-              ...valueSchema,
+              ...(this.schemaGenerator.formatChildType(
+                innerType,
+                context.typeChecker,
+                innerTypeNode,
+              ) as any),
               asCell: true,
               asStream: true,
             } as SchemaDefinition;
@@ -454,38 +241,32 @@ export class CommonToolsFormatter implements TypeFormatter {
           // Also detect alias-resolved Cell via type or container argument
           if (
             containerArgIsCell ||
-            (valueType && (valueType.flags & ts.TypeFlags.Object) !== 0 &&
-              ((valueType as ts.TypeReference).target?.symbol?.name === "Cell"))
+            (innerType && (innerType.flags & ts.TypeFlags.Object) !== 0 &&
+              ((innerType as ts.TypeReference).target?.symbol?.name === "Cell"))
           ) {
             return {
-              ...valueSchema,
+              ...(this.schemaGenerator.formatChildType(
+                innerType,
+                context.typeChecker,
+                innerTypeNode,
+              ) as any),
               asCell: true,
               asStream: true,
             } as SchemaDefinition;
           }
-          return { ...valueSchema, asStream: true } as SchemaDefinition;
-        }
+        return {
+          ...(this.schemaGenerator.formatChildType(
+            innerType,
+            context.typeChecker,
+            innerTypeNode,
+          ) as any),
+          asStream: true,
+        } as SchemaDefinition;
       }
 
       // Handle Stream<Array<T>> and Stream<T[]>
-      if (innerTypeNode && ts.isArrayTypeNode(innerTypeNode)) {
-        const elemNode = innerTypeNode.elementType;
-        const elemType = checker.getTypeFromTypeNode(elemNode);
-        const items = this.schemaGenerator.formatChildType(
-          elemType,
-          checker,
-          elemNode,
-        );
-        return { type: "array", items, asStream: true } as SchemaDefinition;
-      }
-      const arrElem = getArrayElementType(innerType, checker, innerTypeNode);
-      if (arrElem) {
-        const items = this.schemaGenerator.formatChildType(
-          arrElem,
-          checker,
-        );
-        return { type: "array", items, asStream: true } as SchemaDefinition;
-      }
+      const arr = this.arrayItemsSchema(innerType, innerTypeNode, checker);
+      if (arr) return { ...arr, asStream: true } as SchemaDefinition;
 
       const nodeDrivenType = innerTypeNode
         ? context.typeChecker.getTypeFromTypeNode(innerTypeNode)
@@ -495,17 +276,6 @@ export class CommonToolsFormatter implements TypeFormatter {
         context.typeChecker,
         innerTypeNode,
       );
-      // Fallback: if inner node is Default<T,V>, attach default here too
-      if (
-        innerTypeNode && ts.isTypeReferenceNode(innerTypeNode) &&
-        isDefaultTypeRef(innerTypeNode, checker)
-      ) {
-        const defNode = innerTypeNode.typeArguments?.[1];
-        if (defNode) {
-          const d = extractValueFromTypeNode(defNode, checker);
-          if (d !== undefined) (innerSchema as any).default = d;
-        }
-      }
       // If inner is Cell<T> ensure both flags (covers aliases where node isn't Cell)
       if (
         containerArgIsCell ||
@@ -519,6 +289,22 @@ export class CommonToolsFormatter implements TypeFormatter {
 
     const innerSchema = this.createSimpleInnerSchema(innerType, checker);
     return { ...innerSchema, asStream: true };
+  }
+
+  private arrayItemsSchema(
+    valueType: ts.Type,
+    valueNode: ts.TypeNode | undefined,
+    checker: ts.TypeChecker,
+  ): SchemaDefinition | undefined {
+    if (!this.schemaGenerator) return undefined;
+    const info = getArrayElementInfo(valueType, checker, valueNode);
+    if (!info) return undefined;
+    const items = this.schemaGenerator.formatChildType(
+      info.elementType,
+      checker,
+      info.elementNode,
+    );
+    return { type: "array", items } as SchemaDefinition;
   }
 
   private formatDefaultType(
@@ -548,17 +334,6 @@ export class CommonToolsFormatter implements TypeFormatter {
       valueTypeNode = context.typeNode.typeArguments[0];
       defaultTypeNode = context.typeNode.typeArguments[1];
     }
-    try {
-      // deno-lint-ignore no-console
-      console.log(
-        "[DBG:CommonTools] Default<T,V> nodes",
-        {
-          hasValueNode: !!valueTypeNode,
-          isUnionNode:
-            !!(valueTypeNode && ts.isUnionTypeNode(valueTypeNode)),
-        },
-      );
-    } catch {}
 
     const inlineIfRef = (schema: SchemaDefinition): SchemaDefinition => {
       const ref = schema && (schema as any).$ref as string | undefined;
@@ -584,15 +359,16 @@ export class CommonToolsFormatter implements TypeFormatter {
         valueSchema = { type: "array", items: inlineIfRef(itemsRaw) };
       } else {
         // If not an ArrayTypeNode, detect arrays via type analysis
-        const elemType = getArrayElementType(
+        const elemInfo = getArrayElementInfo(
           valueType,
           context.typeChecker,
           valueTypeNode,
         );
-        if (elemType) {
+        if (elemInfo) {
           const itemsRaw = this.schemaGenerator.generateSchema(
-            elemType,
+            elemInfo.elementType,
             context.typeChecker,
+            elemInfo.elementNode,
           );
           valueSchema = { type: "array", items: inlineIfRef(itemsRaw) };
         } else {
@@ -629,13 +405,6 @@ export class CommonToolsFormatter implements TypeFormatter {
     // the checker folds away `null` in minimal program environments.
     if (this.schemaGenerator && valueTypeNode && ts.isUnionTypeNode(valueTypeNode)) {
       const parts = valueTypeNode.types ?? [] as ts.TypeNode[];
-      try {
-        // deno-lint-ignore no-console
-        console.log(
-          "[DBG:CommonTools] union node parts",
-          parts.map((p) => ts.SyntaxKind[p.kind]),
-        );
-      } catch {}
       const isNullNode = (p: ts.TypeNode) =>
         p.kind === ts.SyntaxKind.NullKeyword ||
         (ts.isLiteralTypeNode(p) && p.literal.kind === ts.SyntaxKind.NullKeyword);
@@ -651,8 +420,6 @@ export class CommonToolsFormatter implements TypeFormatter {
         );
         const out: any = { oneOf: [{ type: "null" }, nnSchema] };
         if ((valueSchema as any).default !== undefined) out.default = (valueSchema as any).default;
-        // deno-lint-ignore no-console
-        try { console.log("[DBG:CommonTools] Default<T|null,V> via node union", out); } catch {}
         return out as SchemaDefinition;
       }
     }

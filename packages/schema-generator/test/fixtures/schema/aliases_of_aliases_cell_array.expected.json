@@ -1,15 +1,16 @@
 {
   "properties": {
-    "items": {
+    "values": {
+      "asCell": true,
       "items": {
-        "asCell": true,
-        "type": "string"
+        "type": "number"
       },
       "type": "array"
     }
   },
   "required": [
-    "items"
+    "values"
   ],
   "type": "object"
 }
+

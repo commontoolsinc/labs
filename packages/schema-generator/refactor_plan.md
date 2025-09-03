@@ -72,6 +72,15 @@ Move tests based on what they validate:
   - mutually‑recursive
   - type‑to‑schema (assert schema shape, not AST code transformation)
 
+Testing model in schema‑generator:
+
+- Prefer fixture‑based tests with full string comparison of canonical JSON:
+  `test/fixtures/schema/*.input.ts` (root type `SchemaRoot`) →
+  `*.expected.json`.
+- Keep focused unit tests for formatter behavior where useful.
+- We removed the temporary “golden snapshot” tests; fixtures now serve as the
+  primary stability checks.
+
 - Keep as transformer/E2E (stay with js‑runtime until moved to the new
   transformers package):
   - with‑options (compile‑time merge of object literal into schema)
@@ -217,4 +226,3 @@ Phase 3 (integration):
 Phase 4 (stabilize):
 - [ ] Root CI runs all packages via `deno task test`.
 - [ ] Align API types; drop `--no-check` in `schema-generator`.
-

@@ -1,15 +1,15 @@
 # Schema-Generator Test Harness Plan
 
-This plan describes how we will recover the validation strength of the old
-fixture-based tests (which compared entire emitted files) while keeping the new
-schema-generator tests maintainable and fast.
+This plan describes the final testing strategy for
+`@commontools/schema-generator`: schema fixtures with string comparison and a
+small set of semantic unit tests. We intentionally dropped the intermediate
+"golden snapshot" approach in favor of full-string fixtures, which better match
+the legacy validation strength while keeping things maintainable and fast.
 
 ## Goals
 
 - Strong guarantees that schema outputs remain stable and correct.
 - Fast, readable semantic tests for common patterns.
-- Golden deep-equality (“snapshot”) tests for complex structures to catch
-  regressions the old string comparisons would have caught.
 - Deterministic output checks: generation order does not flake.
 - Type-checked tests re-enabled once `@commontools/api` generics align.
 
@@ -24,36 +24,28 @@ schema-generator tests maintainable and fast.
     fixed order `[ {type: "null"}, other ]`.
   - Sort `definitions` keys deterministically.
 
-2) Golden snapshot harness
-- Add `test/golden/cases.ts`: registry of golden cases with fields:
-  - `name`: unique id
-  - `code`: TypeScript string under test
-  - `typeName`: the root symbol to generate
-  - `expectedPath`: JSON file path under `test/golden/expected/`
-- Add `test/golden/runner.test.ts`:
-  - For each case, generate a schema with `createSchemaTransformerV2()`.
-  - Canonicalize via `normalizeSchemaExtended`.
-  - If `Deno.env.get("UPDATE_GOLDENS") === "1"`, write the expected JSON.
-  - Else, read the expected JSON and deep-equal.
-  - Determinism: generate twice and deep-equal (canonicalized) to catch ordering
-    regressions.
+2) Schema fixtures (string compare)
+- Directory: `test/fixtures/schema`
+  - `*.input.ts`: defines the root type as `interface SchemaRoot { ... }`
+  - `*.expected.json`: pretty-printed, canonical JSON Schema for `SchemaRoot`
+- Runner: `test/fixtures-runner.test.ts`
+  - Parses the input, calls the generator for `SchemaRoot`, canonicalizes, and
+    compares the pretty-printed JSON (byte-for-byte) to `*.expected.json`.
+  - Determinism: generates twice and compares the strings to guard against
+    ordering flakes.
+  - `UPDATE_GOLDENS=1 deno task test` rewrites the expected JSONs.
 
-3) Golden coverage (initial set)
-Seed a representative set (expand over time):
-- Recursion & cycles:
-  - `recursion_basic` (Node { value, next?: Node })
-  - `recursion_children_array` (children?: Node[])
-- Wrappers & defaults:
-  - `wrappers_nested` (Cell<Default<string,'d'>>, Default<string[], ['a','b']>)
-  - `defaults_complex_array_object` (array-of-objects defaults; nested object
-    defaults)
-
-We will add additional goldens incrementally:
-- multi-hop circular (A→B→C→A), mutually-recursive (A↔B)
-- Cell<T[]>, array of Cell<T>, Stream<Cell<T>>, Default<T|null, null>, aliases
-  (CellArray<T> = Cell<T[]>) and nested aliasing
-- Intersection object merging, index signatures/additionalProperties, union
-  literal policy (enum vs array-of-items) once decided
+3) Fixture coverage
+Seed and expand an exhaustive set mirroring legacy
+`js-runtime/test/fixtures/schema-transform` scenarios:
+- Recursion & cycles: self-recursive, nested recursive, multi-hop circular,
+  mutually recursive
+- Wrappers: Cell<T>, Stream<T>, Default<T,V>, nested wrappers, alias chains,
+  arrays (Cell<T[]>, Array<Cell<T>>)
+- Defaults: primitives, arrays, nested arrays, objects, nullable
+- Aliases & sharing: alias-of-alias patterns; shared object types used in
+  multiple properties
+- Additional coverage as needed: intersections/merges, index signatures
 
 4) Semantic tests remain
 - Keep focused tests (properties, required, items, flags) for clarity and fast
@@ -67,16 +59,16 @@ We will add additional goldens incrementally:
 ## Execution Steps
 
 - Extend `test/utils.ts` with canonicalization helpers.
-- Add `test/golden/cases.ts` and `test/golden/runner.test.ts`.
-- Seed `test/golden/expected/*.json` for the initial set.
-- Run via `deno task test`. Update goldens with
-  `UPDATE_GOLDENS=1 deno task test` (writes expected JSONs).
-- Expand goldens and semantic tests iteratively to match legacy coverage.
+- Add `test/fixtures-runner.test.ts` and seed `test/fixtures/schema` with
+  `*.input.ts`/`*.expected.json` pairs.
+- Run via `deno task test`. Update fixtures with
+  `UPDATE_GOLDENS=1 deno task test`.
+- Expand fixtures and semantic tests to match legacy coverage.
 
 ## Notes
 
 - Code-generation-specific literal checks (emitted TS, import ordering, etc.)
   will live in the dedicated AST transformers package tests, not here.
-- Golden tests will compare canonical JSON objects, not file strings, to avoid
-  brittleness from harmless key ordering changes.
-
+- For schema-generator we intentionally compare strings of canonical JSON to
+  ensure we verify the exact serialized output shape that downstream tools and
+  developers see.

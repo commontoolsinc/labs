@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "stream": {
+      "asCell": true,
+      "asStream": true,
+      "type": "number"
+    }
+  },
+  "required": [
+    "stream"
+  ],
+  "type": "object"
+}
+
