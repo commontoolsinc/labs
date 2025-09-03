@@ -54,8 +54,6 @@ export function llmDialog(
   let previousCallHash: string | undefined = undefined;
   let cellsInitialized = false;
   let pending: Cell<boolean>;
-  let result: Cell<string | undefined>;
-  let partial: Cell<string | undefined>;
   let requestHash: Cell<string | undefined>;
   let addMessage: Cell<BuiltInLLMMessage | undefined>;
   let isExecutingTools = false;
@@ -134,8 +132,6 @@ export function llmDialog(
     }
     const thisRun = ++currentRun;
     const pendingWithLog = pending.withTx(tx);
-    const resultWithLog = result.withTx(tx);
-    const partialWithLog = partial.withTx(tx);
     const requestHashWithLog = requestHash.withTx(tx);
 
     const { system, stop, maxTokens, model } =
@@ -182,8 +178,6 @@ export function llmDialog(
 
     if (!Array.isArray(messages) || messages.length === 0) {
       pendingWithLog.set(false);
-      resultWithLog.set(undefined);
-      partialWithLog.set(undefined);
       return;
     }
 
@@ -195,24 +189,15 @@ export function llmDialog(
       const content = typeof lastMessage.content === "string"
         ? lastMessage.content
         : "";
-      resultWithLog.set(content);
-      partialWithLog.set(content);
       requestHashWithLog.set(hash);
       return;
     }
 
     // Only clear result/partial when we're about to make a new request
-    resultWithLog.set(undefined);
-    partialWithLog.set(undefined);
     pendingWithLog.set(true);
 
     const updatePartial = (text: string) => {
-      if (thisRun != currentRun) return;
-      // TODO(bf): we should consider an `asyncTx` pattern here akin to `stream-data.ts`
-      const status = tx.status();
-      if (status.status !== "ready") return;
-
-      partialWithLog.set(text);
+      // no-op, but we need a callback
     };
 
     const resultPromise = client.sendRequest(llmParams, updatePartial);
@@ -313,8 +298,6 @@ export function llmDialog(
         const asyncTx = status.status === "ready" ? tx : runtime.edit();
 
         pendingWithLog.withTx(asyncTx).set(false);
-        resultWithLog.withTx(asyncTx).set(text);
-        partialWithLog.withTx(asyncTx).set(text);
         requestHashWithLog.withTx(asyncTx).set(hash);
 
         if (asyncTx !== tx) asyncTx.commit();
